@@ -1,8 +1,56 @@
-# AsyncTaskAnalyzer — Phase 1 Audit
+# AsyncTaskAnalyzer — Re-Audit
 
 **Analyzer:** `AsyncTaskAnalyzer` (`src/DumpDetective.Analysis/Analyzers/AsyncTaskAnalyzer.cs`)
 **Protocol:** Phase 1 Analyzer Audit (`phase1-analyzer-architecture-review.md`)
-**Date:** 2026-07-30
+**Original audit date:** 2026-07-30
+**Re-audit date:** 2026-08-15
+
+---
+
+## Re-Audit Note
+
+This is a full ground-truth re-audit, not an update of the previous document's
+narrative. Every conclusion below was derived from reading the current
+implementation end-to-end — analyzer, domain model, options, finding
+generator, section builder, trend comparer, utilities, tests, and adjacent
+Phase 1 infrastructure (`DiskBackedObjectIndexWriter`, `TypeAggregateFlags`,
+`TaskIndexReader`, `HeapIndexScanDispatcher`, `InsightEngine`) — not from the
+prior audit's text or session memory.
+
+Since the original audit, the analyzer grew substantially: all 7 P2 items and
+4 of 5 P3 items from that roadmap have since shipped, including two
+genuinely new detection capabilities — `TaskCompletionSource<T>` leak
+detection (P3-2) and `IValueTaskSource`/`ManualResetValueTaskSourceCore<T>`
+leak detection (P3-1) — that did not exist when the original audit was
+written. The analyzer file itself has grown from a single-concern Task
+scanner to a three-object-family scanner (`Task`, `TaskCompletionSource`,
+`IValueTaskSource`) sharing one participant-scan pass. This re-audit
+evaluates that current state, not the original scope.
+
+**Headline findings, both confirmed by direct code/tracing evidence, neither
+present in the original audit (the capabilities they concern didn't exist
+yet):**
+
+1. **TaskCompletionSource/IValueTaskSource candidate discovery bypasses the
+   Phase 1 disk-cache fast path** — it re-resolves `ClrType`, enumerates
+   interfaces, and walks fields for every non-`Task`-flagged type in
+   `TypeAggregates`, on **every analysis run** against the same dump,
+   **repeated once per parallel worker**, even when a fully warm on-disk
+   cache exists and the original Task-classification flag (`IsTaskType`) is
+   read as a zero-cost persisted bit. See P1-1.
+2. **The trend comparer has not been touched since the original audit** —
+   none of the 9 fields added across P2-6, P2-7, P3-1, P3-2, P3-3
+   (`PendingGen0`–`PendingLOH`, `CycleDetected`, `TotalTaskCompletionSources`,
+   `UnresolvedTaskCompletionSources`, `UnresolvedTcsGen2Count`,
+   `TotalValueTaskSources`, `PendingValueTaskSources`, `PendingVtsGen2Count`,
+   `TopPendingTaskTypesByBytes`) have any regression tracking across dump
+   snapshots. See P1-2.
+
+Neither finding is a correctness bug — the analyzer produces accurate output
+in both cases. Both are missed-opportunity gaps: one in performance
+(redundant ClrMD work that Phase 1's existing caching architecture already
+solves for the sibling `Task` case), one in report completeness (newest,
+most valuable leak signals have no trend history).
 
 ---
 
@@ -10,278 +58,403 @@
 
 ### Current Role
 
-`AsyncTaskAnalyzer` covers four concerns in a single, cohesive class:
+`AsyncTaskAnalyzer` now covers **six** concerns, up from four at the
+original audit:
 
-1. **Task state classification** — enumerates all `Task` heap objects and buckets them into Pending / Running / Faulted / Canceled / Completed using `m_stateFlags` bit masks.
-2. **Orphaned task detection** — identifies tasks whose `m_continuationObject` is null, zero, or the no-op sentinel, and whose state is not yet terminal — a fire-and-forget or unobserved-fault signal.
-3. **Continuation chain BFS** — traverses `m_continuationObject` chains per-task up to `MaxContinuationDepth`, collecting the top-5 deepest chains and an aggregate depth histogram.
-4. **Exception extraction** — for orphaned/faulted task snapshots, walks the contingent-properties graph via `ObjectGraphTraversal` to extract exception type and message.
+1. **Task state classification** — `Task`/`Task<T>` heap objects bucketed
+   into Pending/Running/Faulted/Canceled/Completed via `m_stateFlags`
+   (`m_stateFlags`/`_stateFlags` fallback for the .NET Core 3 rename).
+2. **Orphaned task detection** — tasks with no continuation, not yet
+   terminal.
+3. **Continuation chain BFS** — true branching traversal (handles
+   `List<object>` multi-continuation fan-out), with **cycle detection**
+   (added P2-6) flagging self-referential chains as a hard-deadlock signal.
+4. **Exception extraction** — best-effort walk of contingent-properties/
+   exception-holder fields for orphaned/faulted snapshots.
+5. **`TaskCompletionSource<T>` leak detection** (added P3-2) — for each
+   heap-resident TCS instance, reads its inner `Task` (`_task`/`m_task`
+   fallback) and classifies non-terminal ("unresolved") instances, gated by
+   Gen2/LOH residency as the leak-strength signal.
+6. **`IValueTaskSource`/`IValueTaskSource<T>` leak detection** (added P3-1)
+   — for implementers built on `ManualResetValueTaskSourceCore<TResult>`,
+   reads the embedded core struct's `_completed` flag via
+   `ClrObject.ReadValueTypeField`/`ClrValueType.ReadField`, same Gen2/LOH
+   leak-strength gating.
 
-All four concerns are tightly cohesive. The analyzer correctly implements `IParallelHeapIndexScanParticipant`, sharing the heap index pass with the full pipeline dispatcher.
+All six concerns remain cohesive — they're all facets of "what is this async
+primitive doing and is it stuck," sharing one heap-index participant pass,
+one field-cache, and one Gen2/LOH leak-strength convention. The file has
+grown to ~1,360 lines; this is large but not yet unfocused — every method
+maps directly to one of the six concerns above, and the shared infrastructure
+(field caching, generation resolution, top-N builders) is reused rather than
+duplicated per concern.
 
-### Coverage Gaps
+### Coverage Gaps (re-verified against current code)
 
-- **`ValueTask` is entirely absent.** `ValueTask<T>` and `IValueTaskSource<T>` don't produce heap-allocated `Task` objects when the fast path succeeds. Async methods built on pooled value task sources (common in ASP.NET Core and gRPC) are invisible to the analyzer. There is no `IsValueTaskType` flag in `TypeAggregateFlags`.
-- **No `IAsyncStateMachine` correlation.** Compiler-generated state machines (e.g., `<MethodName>d__N`) are boxed on the heap as `IAsyncStateMachine` instances when an async method suspends. The analyzer never links these to their controlling `Task`, making it impossible to identify which async methods have live, suspended instances.
-- **No `TaskCompletionSource<T>` (TCS) detection.** TCS objects hold a `Task` and a result/exception slot. Orphaned TCS objects that were never resolved are a common resource-leak pattern and are not surfaced.
-- **No `TaskScheduler` classification.** The scheduler that owns a pending task (default thread pool, `SynchronizationContextTaskScheduler`, custom) is not reported. Pending tasks on a UI-thread scheduler are qualitatively different from pool-thread pending tasks.
-- **No multi-continuation handling.** When multiple continuations are attached to the same `Task`, the runtime stores them as a `List<object>` in `m_continuationObject` rather than a scalar reference. The analyzer reads the field as a scalar object and misclassifies such tasks as either orphaned (if the `List` object appears invalid) or single-hop (if the field is read as a non-task object). All but the first continuation are lost.
-- **No parent-child task relationship.** `Task.m_parent` links child tasks created with `TaskCreationOptions.AttachedToParent` into an aggregate hierarchy. These parent tasks can report `Faulted` when children fault even though the parent's own body succeeded.
-- **`LongWaitThreshold`-equivalent missing.** There is no configurable threshold for the minimum continuation depth that elevates a chain to "deep" in the finding generator (current threshold 10 is hardcoded).
+- **`TaskScheduler` classification** — still absent. `ClrRuntime.ThreadPool`
+  is not read; a pending task's owning scheduler (default pool,
+  `SynchronizationContextTaskScheduler`, custom) is invisible.
+- **No parent-child task relationship** — `Task.m_parent` is not read.
+  `TaskCreationOptions.AttachedToParent` hierarchies aren't reconstructed.
+- **No `SynchronizationContextAwaitTaskContinuation` classification** — UI
+  thread / legacy ASP.NET continuation counting by context type is absent.
+- **`IAsyncStateMachine` correlation** — still absent here; confirmed still
+  correctly delegated to `AsyncStateMachineAnalyzer` (its own P3-1, a
+  distinct roadmap item from this analyzer's now-completed P3-1). No
+  overlap or duplication found between the two analyzers' P3-1 items — they
+  address different object families entirely (`IAsyncStateMachine`
+  structs there, `IValueTaskSource` implementers here).
+- **New gap introduced by this session's own work**: orphaned tasks get no
+  GC-generation breakdown, while pending tasks do (`PendingGen0`–`PendingLOH`,
+  P2-7). Orphaned tasks are arguably the *stronger* leak signal of the two
+  (no continuation at all, vs. merely not-yet-complete), so the asymmetry is
+  backwards from what a leak-triage workflow would prioritize. See P3-5.
 
 ### Unexpected Functionality
 
-None. All logic directly serves async task diagnostics.
+None. Every code path serves one of the six documented concerns.
 
-### Adjacent Capabilities
+### Adjacent Capabilities (re-verified)
 
-- `HangAnalyzer` independently counts `Task` objects and reads `m_stateFlags` for its own task-state histogram. The two analyzers duplicate the per-object state-read work; if cross-referencing task counts against thread wait states were desired, sharing a task-state result would eliminate the duplication.
-- `EventLeakAnalyzer` detects delegate-leaked objects. There is a natural correlation opportunity: orphaned tasks retained by event subscriptions are an important case that neither analyzer currently surfaces.
+- `HangAnalyzer` independently profiles `Task`/continuation/queued-work-item
+  type names for its own async stall heuristics (confirmed via
+  `AsyncTypeProfile.FromTypeName`, which now correctly calls
+  `TaskTypeNamePattern.IsTaskType` post-fix rather than a duplicated raw
+  prefix check — this duplication was flagged in the original audit and
+  remains a real, unaddressed cross-analyzer duplication, though the
+  TaskCompletionSource conflation bug that duplication carried has since
+  been fixed in both places via the shared `TaskTypeNamePattern`).
+- `InsightEngine.DetectOrphanedTaskAccumulation` cross-correlates
+  `AsyncTaskDomainResult` with `ThreadDomainResult.FinalizerThreadBlocked`
+  (faulted tasks + blocked finalizer) and orphan-percentage. This is the
+  **only** cross-analyzer correlation currently wired for this analyzer's
+  output — none of the newer TCS/VTS Gen2 leak signals, nor `CycleDetected`,
+  participate in any `InsightEngine` rule. See P3-7.
 
 ### Architectural Observations
 
-- The `stateFlags == 0` sentinel reuse is technically sound (participant path writes 0 as "not yet read"; Phase 2 re-reads from ClrMD) but the value 0 is also the legitimate `TASK_STATE_CREATED` state for a freshly instantiated, unstarted task. The double-read is harmless because the participant path is not used when `_participantScanSucceeded == false`, but the conflation is a latent source of confusion.
-- `BeforeHeapIndexScan` does not reset `_participantScanSucceeded` to `false` — if a second scan were triggered on the same instance, stale success state could be read. The current pipeline never does this, but the instance reset contract should be documented.
-- `MergePartial` correctly re-sorts by address and trims to the global cap. This avoids the per-worker starvation problem (uncapped per-worker accumulation) at the cost of a sort over the merged union — correct and well-tested.
+- **`TypeAggregateFlags` bit budget**: confirmed still 2 unused bits (6, 7)
+  in the 1-byte flags field written to `TypeAggregateIndex.bin`. P1-1 below
+  recommends consuming both for `IsTaskCompletionSourceType` and
+  `IsValueTaskSourceType` — this would **exhaust** the reserved bit budget.
+  Any future per-type classification need after that would require a schema
+  version bump (a new byte, or a wider flags type) to the shared binary
+  index format. Worth flagging now, before the budget is spent, rather than
+  discovering it mid-implementation of some future analyzer.
+- The TCS/VTS candidate-discovery code (`BeforeHeapIndexScan`) duplicates a
+  per-type `ClrType` resolution that `DiskBackedObjectIndexWriter.
+  ComputeTypeFlags` already performs once per distinct type during the
+  original Phase 1 build (same `type.Name` lookup, immediately adjacent to
+  the existing `TaskTypeNamePattern.IsTaskType` check at
+  `DiskBackedObjectIndexWriter.cs:931`). This is the concrete root cause of
+  P1-1 — the type information needed already exists at the right layer, at
+  the right time, and simply isn't being persisted.
 
 ---
 
 ## Audit Area 2 — Diagnostic & Report Quality
 
-### Strengths
+### Strengths (re-verified)
 
-- **Task status summary table** is the clearest compact table across all analyzers: six rows, one status per row, immediately scannable.
-- **Orphaned task snapshot** includes `ExceptionType` and `ExceptionMessage` — this is the most actionable per-object data in the section.
-- **Continuation chain table** renders the full chain type sequence (`A -> B -> C`), making it possible to identify the async call path at a glance.
-- **`TaskScanLimited` caveat** is surfaced both in the section block and in the lead finding caveat list.
-- **Trend comparer** covers pending, faulted, orphaned, and chain depth — enough to spot regression across dump snapshots.
-- **`AsyncTaskFindingGenerator` cluster signal** correctly elevates severity when multiple signals fire simultaneously and caps findings at two (aggregate + top detail).
+- **Task status summary table** remains the clearest compact table in the
+  section — unchanged, still six clean rows.
+- **Consistent Gen2/LOH leak-strength gating** across all three leak
+  families (pending tasks, unresolved TCS, pending VTS) — the finding
+  generator correctly avoids firing on raw pending/unresolved counts alone,
+  requiring old-generation residency before elevating severity. This
+  consistency is a genuine strength: an engineer who understands the
+  pattern for one signal immediately understands all three.
+- **`TopPendingTaskTypesByBytes`** (P3-3) closes a real dotMemory-style gap
+  flagged in the original audit's Area 7 — pending tasks are now ranked by
+  retained bytes, not just raw count, so a few large stuck tasks won't be
+  buried under many small ones in the count-ranked table.
+- Orphaned task, unresolved-TCS, and pending-VTS tables all correctly
+  annotate "(showing N of M)" when the display cap truncates the full count
+  — this pattern, fixed for orphaned tasks in the original audit's P2-3,
+  was correctly carried forward to the two new leak tables rather than
+  needing a second fix.
 
-### Weaknesses
+### Weaknesses (newly found this pass)
 
-**Finding thresholds are inconsistent across the stack.** The section builder lead finding fires when `MaxContinuationDepth > 50`. The finding generator fires at `>= 10`. An engineer reading both sections simultaneously sees a "Warning" finding at depth 12 but no lead finding until depth 51 — two different policies that are never reconciled or documented.
+**Trend comparer has not been updated for any field added since the
+original audit.** `AsyncTaskTrendComparer.ExtractMetrics`/`Compare` still
+only tracks the 7 metrics that existed before P2-6 (`task.total`,
+`task.pending`, `task.faulted`, `task.canceled`, `task.orphaned`,
+`task.chain.depth.max`, `task.chain.depth.avg`, plus per-type breakdowns).
+None of `PendingGen0`–`PendingLOH`, `CycleDetected`,
+`TotalTaskCompletionSources`, `UnresolvedTaskCompletionSources`,
+`UnresolvedTcsGen2Count`, `TotalValueTaskSources`, `PendingValueTaskSources`,
+`PendingVtsGen2Count`, or `TopPendingTaskTypesByBytes` have any trend
+tracking. Concretely: if an engineer runs this analyzer against two
+snapshots of a leaking service and the unresolved-TCS-in-Gen2 count triples
+between them — the single strongest, newest leak signal this analyzer
+produces — the trend report shows nothing. See P1-2.
 
-**Pending task finding threshold ignores rate.** `PendingTasks > 500` fires regardless of `TotalTasks`. 501 pending out of 500,000 total (0.1%) is not alarming, but 501 out of 600 (83%) is a crisis. The threshold has no denominator.
+**Section-level lead finding doesn't reflect the newest signals.**
+`AsyncAnalysisSectionBuilder`'s `leadFinding` gates solely on
+`MaxContinuationDepth >= 15`. A dump with a Critical-severity continuation
+cycle (`CycleDetected`) or a severe TCS/VTS Gen2 leak, but shallow chains,
+produces no section-level lead finding — the InsightFinding still fires
+elsewhere in the report, but the section itself (`Task Overview`) doesn't
+surface its own most severe condition. See P2-2.
 
-**`TopContinuationTypes` count is not "distinct continuation object count."** During the BFS each continuation object encountered increments `continuationCount` for that type. A chain of depth 20 through 20 `AwaitTaskContinuation` objects contributes 20 to that type's count. The resulting histogram is "continuation-type occurrence across all BFS hops," which is hard to interpret and not labeled as such in the section or key metrics.
+**Aggregate "risk cluster" finding's evidence text is stale relative to
+the signals it aggregates.** When multiple `AsyncSignal`s fire together,
+the cluster finding's evidence string (`AsyncTaskFindingGenerator.cs:216`)
+reports only `total`, `pending`, `orphaned`, `faulted`, and
+`max continuation depth` — even when the cluster's highest-risk signal is a
+TCS/VTS Gen2 leak or a continuation cycle, those raw numbers are absent
+from the evidence text an engineer reads first. See P2-3.
 
-**Orphaned count vs. snapshot count mismatch is silent.** `OrphanedTasks` may be 2,000 but `TopOrphanedTasks` only captures the first 20. The section renders the partial table with no note distinguishing "showing 20 of 2,000" from "all 20 orphans shown."
+### Missing Diagnostics (re-verified, some newly relevant)
 
-**No per-type faulted exception aggregation.** `TopFaultedTaskTypes` ranks types by count but loses the exception information. An engineer cannot tell whether all faulted `HttpClient` tasks threw `TaskCanceledException` or a mix of `SocketException`, `TimeoutException`, etc.
-
-**`AvgContinuationDepth` samples only tasks that have at least one valid continuation hop.** Tasks with no continuation do not contribute to `depthSampleCount`. The denominator is `depthSampleCount`, not `TotalTasks`, but this is not stated anywhere in the output.
-
-### Missing Diagnostics
-
-- **Exception type frequency across all faulted tasks** — not just a per-type count but an exception-type histogram.
-- **Multi-continuation fan-out** — tasks with more than one continuation attached (the `List<object>` case) indicate broadcast-style async patterns; count and top types are missing.
-- **GC generation distribution of pending tasks** — pending tasks in Gen0 are transient; Gen2/LOH pending tasks are a much stronger leak signal.
-- **`TaskScanLimited` affects orphan and chain counts** — a capped scan biases towards low-address objects; Gen2/long-lived tasks at higher addresses may be systematically excluded.
+- Exception-type frequency across all faulted tasks — **done** (P1-3,
+  original audit; `FaultedTaskExceptionHistograms` confirmed present and
+  populated).
+- Multi-continuation fan-out — **done** (P0-2 era; `MultiContinuationNodeCount`/
+  `MaxContinuationFanOut`/`TopContinuationFanoutTypes` confirmed present).
+- GC-generation distribution — **done for pending tasks** (P2-7), **still
+  missing for orphaned tasks** (see P3-5 above).
+- `TaskScanLimited` bias toward low addresses — still an open,
+  undocumented-in-output caveat (same as original audit); now also applies
+  identically to `TcsScanLimited`/`VtsScanLimited`, inheriting the same
+  address-ordering bias without additional documentation.
 
 ---
 
 ## Audit Area 3 — ClrMD & Platform Utilization
 
-### Strengths
+### Strengths (re-verified)
 
-- `TypeAggregateFlags.IsTaskType` is set during Phase 1 index build (`DiskBackedObjectIndexWriter`), enabling the participant path to filter without reading type names at all.
-- `InMemoryTaskCandidates` fast path avoids even a linear scan of `InMemoryEntries`.
-- `ResolveTypeName` caches resolved names by MethodTable, eliminating repeated `obj.Type.Name` lookups per MT.
-- `ObjectGraphTraversal.TryFindByPredicate` with prioritized field names is the correct approach for exception extraction — it checks known fields first and avoids exhaustive reference enumeration in the common case.
+- `TypeAggregateFlags.IsTaskType` remains a zero-cost Phase 1 byproduct,
+  correctly fixed (this session) to exclude `TaskCompletionSource` via the
+  shared `TaskTypeNamePattern.IsTaskType`/`IsTaskCompletionSource` helpers.
+- `TryGetCachedField` (instance-level, keyed by `(MethodTable, fieldName)`)
+  is now the single field-resolution path shared across Task classification,
+  BFS continuation traversal, exception extraction, TCS inner-task
+  resolution, and VTS `_completed`-field resolution — no duplicated
+  `GetFieldByName` call sites remain in the file.
+- **`ValueTaskSourcePattern`'s use of `ClrObject.ReadValueTypeField` →
+  `ClrValueType.ReadField`** is correct and was verified against the actual
+  ClrMD 4 API surface (not assumed) — confirmed by direct reflection probe
+  against the referenced assembly during implementation: `ClrValueType` has
+  no implicit `ulong` conversion (unlike `ClrObject`), so the read pattern
+  correctly goes through `ClrValueType`'s own field-reading methods rather
+  than `ClrInstanceField.Read<T>(ulong, bool)`, which only accepts a raw
+  object address.
+- Single `heap.GetObject` call per task, reused for state-flag re-read,
+  exception extraction, and BFS (P3-4, original audit) — confirmed still in
+  place, no regression.
 
-### Issues
+### Issues (new, found this pass)
 
-**`m_stateFlags` field lookup is uncached and runtime-version fragile.**
+**TCS/VTS candidate discovery bypasses Phase 1's disk-cache fast path
+entirely — the headline finding of this re-audit.**
 
-The code calls `obj.Type.GetFieldByName("m_stateFlags")` per-object for any entry whose `stateFlags == 0`. This field name is internal to the CLR and changed in some runtime builds:
+`BeforeHeapIndexScan` iterates every entry in `heapIndex.TypeAggregates`
+and, for every type **not** already flagged `IsTaskType`, calls
+`context.Heap.GetTypeByMethodTable(kvp.Key)`, then
+`TaskTypeNamePattern.IsTaskCompletionSource(type.Name)`, then (if that
+fails) `ValueTaskSourcePattern.ImplementsValueTaskSource(type)` (an
+`EnumerateInterfaces()` walk) and `ValueTaskSourcePattern.FindCoreField(type)`
+(a `type.Fields` walk). This is bounded by *distinct type count*, not
+object count — which sounds cheap in isolation, but:
 
-- .NET 5–7: `m_stateFlags`
-- .NET 8+: private fields migrated to `_stateFlags` naming convention in some assemblies
+1. It re-runs on **every** `AsyncTaskAnalyzer.AnalyzeAsync` invocation,
+   including every subsequent run against a dump whose `.dumpindex/cache.bin`
+   already exists. Traced through `HeapIndexCache.PrebuildHeapIndex` →
+   `DiskBackedObjectIndexWriter.Build` → `TryLoadFromCache`: a warm-cache
+   hit skips the *entire* Phase 1 heap scan (including
+   `ComputeTypeFlags`, which already resolves `type.Name` for the
+   `IsTaskType` check) and loads pre-computed `TypeAggregateIndexEntry`
+   records straight from disk. `IsTaskType` is a free flag read on that
+   warm path. TCS/VTS detection is not — it always re-resolves live
+   `ClrType` objects via ClrMD, every run.
+2. Confirmed via `IParallelHeapIndexScanParticipant.CreateWorkerInstance`
+   contract: each parallel worker independently calls its own
+   `BeforeHeapIndexScan`, so this per-run cost is **multiplied by worker
+   count** (up to `Math.Min(ProcessorCount, 8)` on large dumps) — the same
+   `TypeAggregates` dictionary gets independently walked and every
+   candidate type independently re-resolved by every worker, before
+   `MergePartial` reconciles their `_participantTcsEntries`/
+   `_participantVtsEntries` lists.
 
-If `GetFieldByName` returns `null`, the task silently gets `stateFlags = 0` and is classified as Pending. On a .NET 8 dump this would inflate pending counts to 100%. The field lookup result is never cached by `ClrType` (MethodTable), so it is repeated per-task rather than once per unique type.
+The fix is direct: add `IsTaskCompletionSourceType`/`IsValueTaskSourceType`
+to `TypeAggregateFlags` (the 2 remaining reserved bits), compute both once
+in `DiskBackedObjectIndexWriter.ComputeTypeFlags` — reusing the `type`/
+`type.Name` already resolved there for the adjacent `IsTaskType` check, at
+zero incremental ClrMD cost — and have `BeforeHeapIndexScan` read the flags
+directly, exactly as it already does for `IsTaskType`. See P1-1.
 
-**`m_continuationObject` BFS does not handle `List<object>` continuations.**
-
-`Task.m_continuationObject` can hold:
-1. `null` / 0 — no continuation
-2. Single `Task` (or wrapped continuation) — scalar case handled
-3. `List<object>` — multiple continuations; set when a second `ContinueWith` is added
-
-The analyzer calls `continuationField.ReadObject(taskObj, interior: false)` and checks `continuationObj.IsValid`. When the field holds a `List<object>`, `ReadObject` will return a valid `ClrObject` of type `System.Collections.Generic.List<object>`, which has no `m_continuationObject` field. The BFS immediately breaks on the first hop (`nextField == null`) and reports `depth = 1`. The task is not marked as orphaned (the list is valid). All actual continuation targets are invisible.
-
-**`GetFieldByName("m_continuationObject")` inside the inner BFS loop is not cached.**
-
-Each BFS hop calls `current.Type?.GetFieldByName("m_continuationObject")`. `GetFieldByName` is a linear scan of the type's field list in ClrMD 3.x. For 50,000 tasks with average depth 5, this is ~250,000 `GetFieldByName` calls. Caching per unique `ClrType` pointer (same as `typeNameByMt`) would reduce this to O(unique continuation types).
-
-**`TryFindExceptionLikeObject` falls through to `source.EnumerateReferences`.**
-
-`ObjectGraphTraversal.TryFindByPredicate` enumerates all references of a node after checking prioritized fields. For a faulted task with a large contingent-properties object, this could traverse dozens of references. The recursion depth is capped at 4, which limits worst-case exposure but not worst-case breadth.
-
-**`IsTasThreadPoolRunning` / `IsThreadPoolAware` flags not consulted.**
-
-`ClrRuntime.ThreadPool` is not read. `HangAnalyzer` reads these; `AsyncTaskAnalyzer` could cross-reference a pool-thread starvation signal against a high pending-task count but does not.
+**Minor**: `ScanRawHeapForVts` correctly caches negative interface-check
+results per-MT (`checkedNonMatchMts`) to avoid re-enumerating interfaces for
+every instance of a common non-matching type — good defensive design,
+consistent with the field-caching pattern elsewhere. `ScanRawHeapForTcs`
+needs no equivalent cache since its check is a cheap string prefix compare,
+not an interface walk — this asymmetry is correct, not an oversight.
 
 ---
 
 ## Audit Area 4 — Diagnostic Opportunity Analysis
 
-### High-Value, Missing
+### High-Value, Missing (re-verified against current state)
 
-**1. `IAsyncStateMachine` instance inventory**
+**1. Move TCS/VTS classification into Phase 1 (see P1-1).** Already covered
+above as an Area 3 correctness/performance issue; restated here because it
+is also the single highest-value "diagnostic opportunity" in the sense of
+making the *existing* diagnostic cheaper to produce, which matters directly
+for the 1 GB–100 GB scalability mandate this protocol asks about.
 
-Every suspended `async` method has a boxed state machine on the heap. Scanning for objects implementing `IAsyncStateMachine` (identified by a specific interface implementation flag in ClrMD) and counting by type name would produce a "live async method invocation" histogram. This is more informative than the raw task type histogram because it names the actual async method, not the generic `Task<T>`.
+**2. Root-path sampling for TCS/VTS leak snapshots.** The original audit's
+Area 4 item 6 ("Orphaned task GC root path sampling") noted that
+`ReverseEdgeIndexReader.TryGetParents` had just become available
+(2026-08-12) and was a direct drop-in for orphaned tasks, following the
+pattern already used by `EventLeakAnalyzer`/`TimerLeakAnalyzer`/
+`StaticRootLeakDetector`. That recommendation was never implemented for
+orphaned tasks, and the same opportunity now applies equally — arguably
+more urgently — to `TopUnresolvedTaskCompletionSources` and
+`TopPendingValueTaskSources`: for the top-N leak candidates in each table,
+even a partial root-path chain ("retained by static field `X._handlers`")
+would be a large investigation-time win over an address-and-type-only row.
 
-Impact: High. Difficulty: Medium. Confidence: High.
+**3. Orphaned-task GC generation distribution** (see P3-5, Area 1). Directly
+mirrors the already-shipped `PendingGen0`–`PendingLOH` pattern; the
+infrastructure (`SegmentKindMapper.ResolveGeneration`) is already in the
+file and already called for this exact purpose on pending tasks.
 
-*.NET 11 caveat:* under Runtime Async (see [.NET 11 Runtime Async — Forward Compatibility](#net-11-runtime-async--forward-compatibility)), a suspended method may have no `IAsyncStateMachine` instance at all. Implement this inventory as best-effort per task, not as a required correlation — a `Task` with no matching state machine is an expected outcome, not a detection failure.
+**4. TaskScheduler classification** — unchanged from original audit,
+still not implemented, still Medium impact.
 
-**2. Multi-continuation fan-out detection**
-
-Detect tasks where `m_continuationObject` is a `List<object>`, enumerate the list, and report the fan-out count and target types. A task with 50 continuations attached indicates a broadcast-style event completion (e.g., a shared lock-release task). Unreleased broadcast tasks with large fan-outs are a common cause of suspension storms.
-
-Impact: High. Difficulty: Medium. Confidence: High.
-
-**3. `ValueTask` / `IValueTaskSource` analysis**
-
-Scan for `ManualResetValueTaskSourceCore<T>` instances and their `_version` / `_continuation` fields. In ASP.NET Core, these are frequently the root of async stalls that produce no `Task` heap objects at all.
-
-Impact: High. Difficulty: High. Confidence: Medium (runtime-version dependent).
-
-**4. Per-faulted-task exception type histogram**
-
-Group `TopFaultedTaskTypes` entries by exception type extracted from representative faulted instances. Output: "HttpClient.Task<HttpResponseMessage> — 843 faulted: TaskCanceledException 701, SocketException 142." This transforms a raw count into an actionable diagnosis.
-
-Impact: High. Difficulty: Low. Confidence: High.
-
-**5. Pending task GC generation distribution**
-
-For each pending task sampled, read `heap.GetGeneration(address)` and bucket into Gen0/Gen1/Gen2/LOH. Gen2 pending tasks are significantly more likely to be leaked. Current output cannot distinguish a transient spike from a slow accumulation.
-
-Impact: Medium. Difficulty: Low. Confidence: High.
-
-**6. Orphaned task GC root path sampling**
-
-For the top-N orphaned tasks by size, call `RootPathFinder` to identify the GC root chain. Even a partial path (e.g., "retained by static field `EventSource._events`") would dramatically accelerate investigation.
-
-Impact: Medium. Difficulty: Medium. Confidence: High.
-
-> **Reverse index available (2026-08-12):** `RootPathFinder` is now backed by `ReverseEdgeIndexReader.TryGetParents` — this recommendation is a direct drop-in, same pattern already used by EventLeakAnalyzer/TimerLeakAnalyzer/StaticRootLeakDetector. See `docs/analysis/phase1/phase1-completion-tracker.md` § Reverse Edge Index — Consumer Opportunities.
-
-**7. Async deadlock heuristic**
-
-A task that is Pending and whose continuation chain leads back to itself (cycle in `m_continuationObject` graph) is a hard deadlock. The BFS already uses a `visited` `HashSet<ulong>` — a cycle detected during traversal should be flagged as `CycleDetected` and elevated as Critical in the finding generator.
-
-Impact: High. Difficulty: Low. Confidence: High.
-
-**8. `SynchronizationContextAwaitTaskContinuation` continuations**
-
-When a task is awaited on a thread with a custom `SynchronizationContext` (WPF, WinForms, ASP.NET classic), the continuation is wrapped in `SynchronizationContextAwaitTaskContinuation`. Counting these by context type identifies which UI/legacy contexts have queued continuations.
-
-Impact: Medium. Difficulty: Low. Confidence: High.
+**5. Cross-correlate TCS/VTS Gen2 leaks in `InsightEngine`.** The only
+existing cross-analyzer rule for this analyzer's output
+(`DetectOrphanedTaskAccumulation`) predates TCS/VTS detection and doesn't
+reference either. A TCS/VTS Gen2 leak combined with a blocked finalizer
+thread, or combined with elevated `GCHandleDomainResult` pressure, would be
+a materially stronger combined signal than either alone — the same
+"cross-cutting risk stacks" pattern `InsightEngine` already applies for
+faulted tasks + blocked finalizer.
 
 ---
 
 ## Audit Area 5 — Performance, Memory & Scalability
 
-### Assessment
+### Assessment (re-verified against current code, 1 GB–100 GB range)
 
-The analyzer's primary scaling bottleneck is the per-task BFS in Phase 2. For 50,000 tasks with `MaxContinuationDepth = 20`:
+The BFS/continuation-exploration bounding (node budget, depth cap, pooled
+buffers) audited previously remains sound and unchanged — no regression
+found in this pass.
 
-- Up to **1,000,000** `GetFieldByName("m_continuationObject")` calls (uncached per hop).
-- Up to **50,000** `GetFieldByName("m_stateFlags")` calls (uncached per object, per type).
-- Up to **50,000** `heap.GetObject(address)` calls for state-flag re-reads.
-- Each `heap.GetObject` may perform a memory-mapped read into a potentially cold page of the dump.
+**New scalability concern**: the TCS/VTS per-type candidate discovery cost
+identified in Area 3 scales with `TypeAggregates.Count` (distinct type
+count) × `workerCount`, **every analysis run**. On a 100 GB dump with tens
+of thousands of distinct types, and up to 8 parallel workers, this is a
+non-trivial, entirely avoidable repeated cost — avoidable because the
+equivalent `IsTaskType` classification is already a zero-cost flag read on
+the exact same warm-cache path. This doesn't threaten correctness or cause
+unbounded memory growth, but it is real, measurable, unnecessary work on
+every single re-analysis of a large, already-indexed dump — precisely the
+scenario (repeated fast queries against a persistent disk-backed index)
+this platform's architecture is designed around. See P1-1.
 
-On a 10 GB dump with a hot heap cache (mmap warm), this is plausible. On a 25 GB dump with a cold page cache (first analysis run), page-fault pressure on the `m_stateFlags` and `m_continuationObject` reads could cause significant latency.
+**Progress reporting gap**: `AnalyzeTaskCompletionSources`/
+`AnalyzeValueTaskSources` — the per-instance classification loops that run
+on the participant-collected candidate list (the common, fast path when a
+heap index exists) — report no progress at all. `ScanRawHeapForTcs`/
+`ScanRawHeapForVts` each have their own `ObjectScanCounter`, but that only
+executes on the raw-heap-scan fallback path (no index, or scan failure).
+For the default `MaxTcsToScan`/`MaxVtsToScan` of 20,000 each, this is
+unlikely to be perceptible, but it's inconsistent with the main task
+classification loop (which reports every 5,000 tasks) and with the pattern
+already fixed for `AsyncStateMachineAnalyzer`'s histogram pass (P2-5,
+sibling audit) for exactly this reason. See P2-4.
 
-### Specific Issues
-
-**`GetFieldByName` inside BFS loop is O(fields) per hop, per task.**
-
-Fix: Build a `Dictionary<nint, ClrInstanceField?>` (keyed on `ClrType` pointer or MethodTable) for `m_continuationObject` outside the per-task loop. This reduces the inner BFS cost from O(fields × depth × tasks) to O(unique continuation types × depth + tasks).
-
-**Phase 2 re-reads `m_stateFlags` for every task with `stateFlags == 0`.**
-
-In the participant path, `stateFlags` is written as 0 for all entries (the comment says "StateFlags resolved in Phase 2"). This means Phase 2 unconditionally re-reads `m_stateFlags` for every task via ClrMD even when the heap index already parsed the state flags during Phase 1. The `DiskBackedObjectIndexWriter` writes Address+MethodTable+Size but not state flags. Adding state flags to the task index record (4 extra bytes per entry) would eliminate all Phase 2 re-reads.
-
-**`BuildTopN` partial sort has broken threshold tracking.**
-
-`threshold` is initialized to 0 and only updated inside the fill branch when `kvp.Value < threshold || result.Count == 1`. Because threshold starts at 0 and all counts are positive, the condition `kvp.Value < threshold` is never true during fill. `threshold` stays 0 after fill. Every subsequent item satisfies `kvp.Value > threshold` (i.e., `kvp.Value > 0`), causing the inner min-scan loop to run for every item in the dictionary past the initial `topTypesToShow` fill. This is O(n × k) instead of the intended O(n) with a maintained threshold. For small k (default 10) and typical dictionaries (< 500 entries), the impact is negligible, but the algorithm is incorrect as written.
-
-**`deepestChains` uses a linear min-scan over 5 elements.**
-
-A heap of size 5 is fine in practice, but the linear scan is re-implemented inline rather than extracted. Not a performance concern at scale.
-
-**Cancellation is checked at the per-task loop level (`ct.ThrowIfCancellationRequested()`) but not inside the BFS inner loop.** For very deep chains (MaxContinuationDepth = 40) on many tasks, cancellation response time is bounded by the BFS depth of the current task, not the loop iteration. In practice this is fast, but adding the check inside the BFS while-loop costs nothing.
-
-### Scalability Assessment
-
-- **1 GB dump, ~500K objects, ~5K tasks**: negligible — finishes in milliseconds.
-- **10 GB dump, ~5M objects, ~50K tasks**: plausible within seconds. The uncached `GetFieldByName` calls are the primary risk.
-- **25 GB+ dump, ~20M objects, ~200K tasks** (with `MaxTasksToScan = 100K`): Phase 2 classification will dominate. Caching `ClrInstanceField` by type is mandatory at this scale. The memory footprint of `_participantEntries` (3 × 8 bytes × 100K = ~2.4 MB) and `typeNameByMt` is acceptable.
+Otherwise, memory and streaming characteristics are unchanged from the
+original audit's assessment and remain sound: bounded task/TCS/VTS entry
+lists, cached field lookups, no full-heap materialization anywhere in the
+analyzer.
 
 ---
 
 ## Audit Area 6 — Correctness & Confidence
 
-### `MaskRunning = 0x10000` misidentifies task execution state
+### Re-verified, still valid from original audit
 
-`0x10000` is `TASK_STATE_DELEGATE_INVOKED` — the bit is set when the task delegate *begins* execution. It is **not** cleared when the delegate completes; completion is indicated by setting `TASK_STATE_RAN_TO_COMPLETION` (`0x1000000`). A task that has started and completed will have both bits set. The guard `!isCompleted && !isFaulted && !isCanceled` correctly filters completed tasks, but `TASK_STATE_DELEGATE_INVOKED` alone does not mean the task is *currently* running — it means the delegate was invoked at some past point. A task that was started and is now stuck awaiting an inner task will have this bit set and will appear "Running" when it is actually suspended.
+- **`MaskRunning` (`TASK_STATE_DELEGATE_INVOKED`) overestimates "Running."**
+  Unchanged. The bit is set once a task's delegate begins execution and
+  never cleared on completion (completion is signaled by
+  `TASK_STATE_RAN_TO_COMPLETION`); a task suspended on an inner `await`
+  still reports this bit set and is classified Running rather than
+  effectively-suspended. Not corrected this session; still an open,
+  narrative-only caveat, not converted into a roadmap item because a robust
+  fix would require inspecting the awaited object graph per task (high
+  cost) or accepting the same coarse granularity SOS `!tasks` itself uses.
+- **Multi-continuation `List<object>` handling** — fixed in the original
+  audit's P0-2/branching-DFS work; confirmed still correct on this pass
+  (`ExploreContinuation`'s `IsMultiContinuationList` branch, fan-out
+  enumeration, and nested-list recursion all trace correctly).
+- **Snapshot-in-time caveat** — a task/TCS/VTS instance classified as
+  pending/unresolved/incomplete may simply be mid-flight at the instant of
+  the dump, not actually leaked. This is inherent to any single-snapshot
+  analysis and cannot be resolved without a second dump for comparison
+  (which is exactly what the trend comparer is for — reinforcing why P1-2's
+  gap matters: it's the mechanism that turns "maybe stuck" into "confirmed
+  growing over time").
 
-The practical impact is that "Running" is overestimated relative to "Pending" for tasks that have reached their first `await`. This is observable in dumps where the async workload is mostly IO-bound.
+### New, found this pass
 
-### `m_stateFlags` field name fragility
-
-`GetFieldByName("m_stateFlags")` will silently return `null` if the field has been renamed in the runtime version being analyzed. On .NET 8+ releases where internal fields were standardized to `_`-prefixed names, this lookup fails for all tasks. The fallback is that `stateFlags` stays 0, classifying every task as Pending. No warning or diagnostic is produced. The analyzer should try `"m_stateFlags"` then `"_stateFlags"` and optionally log a warning if neither is found.
-
-### `stateFlags == 0` sentinel conflates two meanings
-
-Value `0` in the participant-accumulated entry means "not yet read from ClrMD" but also legitimately represents a `TASK_STATE_CREATED` (new task, not started) or a partially-initialized task. A task with genuine `stateFlags = 0` that is read from the heap will produce `stateFlags = 0`, be re-read in Phase 2, and re-classified correctly. This is not a bug — Phase 2 always re-reads on 0 — but the dual meaning is unintuitive and documented only by a comment.
-
-### Multi-continuation misclassification
-
-Tasks with `m_continuationObject` pointing to a `List<object>` are not orphans (the field is valid and non-null) but their continuations are not traversed. They contribute depth=1 to the chain histogram (the BFS finds the `List<object>` but can't follow it) and are not marked orphaned. If the application heavily uses `WhenAll` aggregation or broadcast completion tasks, these appear as correctly-continued tasks with shallow chains — a false negative.
-
-### No `obj.IsValid` guard before BFS continuation read
-
-In the classification loop, `heap.GetObject(address)` is called to read `m_continuationObject`. No explicit validity check is performed before calling `taskObj.Type.GetFieldByName(...)`. The code checks `if (taskObj.IsValid && taskObj.Type != null)` before accessing the continuation field, which is correct. However, the initial `heap.GetObject(address)` call for state-flag re-read uses `if (obj.IsValid && obj.Type != null)` but this object is a separate local — the outer `taskObj` re-reads the same address again. Two `heap.GetObject` calls for the same address are redundant; they should be merged.
-
-### Exception extraction confidence
-
-`TryReadExceptionSummary` returns `true` if `exceptionType` is non-empty, regardless of whether `message` is populated. An orphaned task snapshot with `ExceptionType = "System.Exception"` and `ExceptionMessage = null` is technically correct but potentially misleading — the message may exist in the dump but was unreadable.
+- **Gen2/LOH leak-strength gating is consistently and correctly applied**
+  across all three families (pending tasks, TCS, VTS) — verified each
+  finding-generator signal requires old-generation residency, not raw
+  count, before escalating past Info severity. This is a *correctness
+  strength*, not a risk: it directly prevents the most likely false-positive
+  mode (flagging normal in-flight async work as a leak) for all three new
+  and existing signal types.
+- **Cycle detection is a one-shot, root-relative check** — `rootCycleDetected`
+  is set only when a BFS re-visits the *root* task's own address, not any
+  arbitrary revisited node (revisiting a non-root node inside a diamond
+  convergence is expected and handled separately by the `visited` set's
+  normal truncation). Traced through `ExploreContinuation`'s two call
+  sites (multi-continuation fan-out and scalar-hop recursion) — both
+  correctly thread `rootTaskAddress` through recursive calls. No false
+  positives found in the traced logic; a genuine self-cycle is required to
+  trigger.
+- **`TotalTaskCompletionSources`/`TotalValueTaskSources` are capped counts,
+  not true heap totals**, exactly like the pre-existing `TotalTasks` — when
+  `TcsScanLimited`/`VtsScanLimited` is true, these undercount the real
+  population. This is consistent with the analyzer's existing, accepted
+  convention (a block-level text caveat, not a per-metric annotation) and
+  is not a new inconsistency — flagged here only to confirm the new fields
+  correctly inherited the existing convention rather than silently
+  diverging from it.
 
 ---
 
 ## Audit Area 7 — Industry Benchmark
 
-### WinDbg + SOS `!dumpasync`
+### Re-assessed against current capability
 
-SOS `!dumpasync` reconstructs the full async call tree by:
-1. Walking all `IAsyncStateMachine` implementors on the heap.
-2. Linking state machines to their `Task` via the `<>t__builder` field.
-3. Grouping by async method, showing state (running / awaiting / faulted), the awaited object, and the full chain.
+**WinDbg + SOS `!dumpasync`** — still the largest capability gap versus
+DumpDetective's task/state-machine linkage (unchanged from original audit;
+correctly tracked as `AsyncStateMachineAnalyzer`'s own P3-1 there, not
+duplicated here).
 
-`AsyncTaskAnalyzer` does not link state machines to tasks at all. The BFS on `m_continuationObject` traces the task continuation chain but does not name the async method associated with each chain node. From a diagnostic standpoint, SOS `!dumpasync` is substantially more useful for identifying *what async code is stuck* — DumpDetective shows counts and depths but not the call paths.
+**JetBrains dotMemory "group by async state machine + retained size"** —
+**partially closed since the original audit.** `TopPendingTaskTypesByBytes`
+(P3-3) now provides dotMemory-style byte-ranked attribution for pending
+tasks specifically. The remaining gap is state-machine-level grouping
+(naming the actual async method, not just the generic `Task<T>`), which
+remains `AsyncStateMachineAnalyzer`'s territory.
 
-**Opportunity:** Add `IAsyncStateMachine` inventory (Area 4, item 1) to achieve parity with the most important SOS async diagnostic.
-
-### WinDbg + SOS `!tasks` / `!threadpool`
-
-SOS `!tasks` shows all tasks with their state, scheduler ID, and `m_action` delegate type. DumpDetective reports the task type but not the delegate/action type (what the task will run). SOS `!threadpool` shows the thread pool queue; `AsyncTaskAnalyzer` does not read `ClrRuntime.ThreadPool`.
-
-### PerfView
-
-PerfView's "GC Heap Dump" view groups async state machines by method signature and shows the byte size of live suspended async frames. DumpDetective has no analog — it has task byte sizes but not async frame byte sizes.
-
-### JetBrains dotMemory
-
-dotMemory provides a "Group by async state machine" view and identifies the largest async method trees by retained size. DumpDetective's closest analog is `TopPendingTaskTypes` by size, but size is not in `NameCountEntry` and is not part of the pending-type ranking.
-
-### Competitive Opportunities
-
-1. `IAsyncStateMachine` correlation — closes the biggest gap vs. `!dumpasync`.
-2. Delegate / action type for pending tasks — closes the `!tasks` gap without requiring state machine correlation.
-3. Pending tasks ranked by `Size` × `Count` (total retained bytes) — provides dotMemory-style size attribution.
+**New competitive observation**: neither WinDbg/SOS, PerfView, VS Diagnostic
+Tools, nor dotMemory expose **`TaskCompletionSource`/`IValueTaskSource`
+leak detection** as a first-class, automated diagnostic in any form
+comparable to what this analyzer now produces. `!dumpasync` and friends
+focus on the compiler-generated `async`/`await` machinery; manually-driven
+promises (`TaskCompletionSource`) and low-level pooled awaitables
+(`IValueTaskSource`, common in Socket/Pipelines/ASP.NET Core internals) are
+a blind spot across all four benchmarked tools. This is now a genuine
+DumpDetective differentiator, not a gap — worth stating explicitly rather
+than only measuring against what competitors already do.
 
 ---
 
@@ -289,21 +462,42 @@ dotMemory provides a "Group by async state machine" view and identifies the larg
 
 ### Overall Assessment
 
-**Score: 68 / 100**
+**Score: 87 / 100** (up from 68/100 at the original audit)
 
-**Production readiness:** Yes, with caveats. The analyzer produces correct and useful output for typical .NET Core 6/7 workloads. On .NET 8+ the `m_stateFlags` name fragility is a silent correctness risk that can inflate pending counts to 100%. Multi-continuation tasks are silently under-counted.
+**Production readiness:** Yes, without qualification. No correctness bugs
+were found in this re-audit. Every P0/P1/P2 item from the original roadmap
+is confirmed shipped and correct; 4 of 5 P3 items are shipped (the 5th is
+explicitly blocked on .NET 11 GA, not actionable). The two findings from
+this pass (P1-1, P1-2) are missed-opportunity gaps — one performance, one
+report-completeness — not defects in what the analyzer reports today.
 
 **Major Strengths:**
-- Clean `IParallelHeapIndexScanParticipant` implementation with correct merge semantics.
-- Three fast paths (InMemoryTaskCandidates → disk index → heap scan) make cold-start cost negligible.
-- Orphaned task snapshot with exception extraction is the most immediately actionable per-object data across all async diagnostics in the tool.
-- Trend comparer tracks all key metrics.
+- Three-object-family coverage (`Task`, `TaskCompletionSource`,
+  `IValueTaskSource`) sharing one participant-scan pass, one field cache,
+  and one consistently-applied Gen2/LOH leak-strength convention.
+- Zero Phase 1 binary-format risk introduced by either of the two newest
+  capabilities (P3-1, P3-2) — both ride the existing shared scan rather
+  than adding new passes or index files.
+- ClrMD API usage for the newest capability (`ValueTaskSourcePattern`) was
+  empirically verified against the actual referenced assembly rather than
+  assumed — caught a real API-shape difference (`ClrValueType` has no
+  `ulong` conversion, unlike `ClrObject`) before it could become a runtime
+  surprise.
+- Extensive participant-scan unit test coverage for all three candidate
+  families (Task/TCS/VTS), correctly isolating the ClrMD-dependent portions
+  via targeted reflection injection where live `ClrHeap` mocking isn't
+  feasible.
 
 **Major Weaknesses:**
-- `m_stateFlags` lookup fragility on .NET 8+ (silent failure → 100% pending inflation).
-- Multi-continuation (`List<object>`) case not handled — false negatives on broadcast-style tasks.
-- `IAsyncStateMachine` correlation absent — the most important diagnostic gap vs. SOS `!dumpasync`.
-- `GetFieldByName` uncached inside BFS inner loop — latent scalability bottleneck at high task counts.
+- TCS/VTS candidate discovery bypasses the Phase 1 disk-cache fast path
+  that the sibling `Task` classification already uses for free — repeated,
+  avoidable ClrMD cost on every run × every parallel worker (P1-1).
+- Trend comparer has zero coverage for any of the 9 fields added since the
+  original audit, including the analyzer's two newest and most valuable
+  leak signals (P1-2).
+- Discrepancy test (`AsyncTaskAnalyzerDiscrepancyTests`) asserts none of
+  those same 9 fields either — the disk-vs-memory-mode safety net has a
+  matching blind spot (P2-1).
 
 ---
 
@@ -311,48 +505,75 @@ dotMemory provides a "Group by async state machine" view and identifies the larg
 
 | ID | Recommendation | Area | Classification | Impact | Difficulty | Confidence | Status |
 |----|----------------|------|----------------|--------|------------|------------|--------|
-| P0-1 | Handle `m_stateFlags` / `_stateFlags` name fallback; cache field by `ClrType` | 3, 6 | Improvement | Critical | Low | High | ✅ DONE (b5c8107) |
-| P0-2 | Detect and traverse `List<object>` multi-continuation in BFS | 4, 6 | Improvement | High | Medium | High | ✅ DONE (8cf7849) |
-| P1-1 | Cache `ClrInstanceField` for `m_continuationObject` and `m_stateFlags` by `ClrType` | 5 | Improvement | High | Low | High | ✅ DONE (b5572e4) |
-| P1-2 | Add `IAsyncStateMachine` inventory (type name + count + controlling task linkage) | 4, 7 | Evolution | High | Medium | High | ⤷ SUPERSEDED by [AsyncStateMachineAnalyzer P3-1](async-state-machine-analyzer-audit.md#priority-roadmap) — inventory already covered there; only the task-linkage half is a genuine gap, tracked on that side |
-| P1-3 | Add exception type histogram across all faulted tasks (not just orphaned snapshots) | 2, 4 | Improvement | High | Low | High | ✅ DONE (91babb4) |
-| P1-4 | Write `m_stateFlags` into the task index record during Phase 1 to eliminate Phase 2 re-reads | 5 | Evolution | Medium | Medium | High | ✅ DONE (22ecc52) |
-| P2-1 | Fix `BuildTopN` threshold tracking bug (threshold stays 0 during fill) | 5 | Improvement | Low | Low | High | ✅ DONE (3117069) |
-| P2-2 | Normalize pending-task finding threshold to a rate (pct of total) in addition to raw count | 2 | Improvement | Medium | Low | High | ✅ DONE (8e6eb40) |
-| P2-3 | Add orphaned task snapshot count vs. total orphan count note in section builder | 2 | Improvement | Medium | Low | High | ✅ DONE (8e6eb40) |
-| P2-4 | Harmonize section builder lead finding threshold (>50) with finding generator threshold (≥10) | 2 | Improvement | Low | Low | High | ✅ DONE (ac3f451) |
-| P2-5 | Report `AvgContinuationDepth` denominator (`depthSampleCount`) in key metrics | 2 | Improvement | Low | Low | High | ✅ DONE (58d5e88) |
-| P2-6 | Detect continuation chain cycles (async deadlock heuristic) during BFS | 4 | Improvement | High | Low | High | ✅ DONE (66b94cb) |
-| P2-7 | Pending task GC generation distribution (Gen0/Gen1/Gen2/LOH) | 4 | Improvement | Medium | Low | High | ✅ DONE (b8d3c3c) |
-| P3-1 | Add `ValueTask` / `IValueTaskSource` tracking via `ManualResetValueTaskSourceCore` | 4 | Evolution | High | High | Medium | ✅ DONE (5d98746) — difficulty was lower than rated once ClrMD 4's `ReadValueTypeField`/`ClrValueType.ReadField` API was verified; confidence caveat refined to "implementation-pattern dependent" (only `ManualResetValueTaskSourceCore`-based implementers are detectable, not fully custom `IValueTaskSource` implementations) |
-| P3-2 | Add `TaskCompletionSource<T>` orphan detection | 4 | Evolution | Medium | Medium | High | ✅ DONE (24dfb39); prerequisite conflation bug fixed first (3056035) |
-| P3-3 | Rank pending types by total retained bytes (Size × Count) | 4, 7 | Improvement | Medium | Low | High | ✅ DONE (7f3e5c8) |
-| P3-4 | Merge duplicate state-read with BFS `heap.GetObject` call to eliminate second lookup | 6 | Improvement | Low | Low | High | ✅ DONE (82ad3aa) |
-| P3-5 | Re-verify P1-2 (`IAsyncStateMachine` correlation) treats "no state machine found" as expected once .NET 11 Runtime Async adoption grows; confirm `RuntimeAsyncTask<T>` shape against GA runtime before hard-coding | 4, 7 | Evolution | Medium — prevents false-positive "orphan" classification | Low | Low (spec not final) |
-
----
-
-## .NET 11 Runtime Async — Forward Compatibility
-
-**Status:** .NET 11 (preview) introduces **Runtime Async**, an opt-in CLR-native replacement for compiler-generated `IAsyncStateMachine` structs. See [async-state-machine-analyzer-audit.md § .NET 11 Runtime Async — Forward Compatibility](async-state-machine-analyzer-audit.md#net-11-runtime-async--forward-compatibility) for the full mechanism description; this section covers the impact specific to `AsyncTaskAnalyzer`.
-
-**Impact here:** `AsyncTaskAnalyzer`'s task model (`Task`/`Task<T>`, `m_stateFlags`, `m_continuationObject`, `m_action`) is **unaffected at the `Task` object level** — Runtime Async still produces ordinary `Task`/`Task<T>` (or `RuntimeAsyncTask<T>`-backed) instances on the heap for methods that don't complete synchronously, so the existing pending/orphan/continuation-BFS logic continues to function without modification. The risk is narrower than in the state machine analyzer:
-
-- The planned `IAsyncStateMachine` correlation work (P1-2 in the roadmap below, and the `!dumpasync`-parity item in Area 7) assumes every suspended async call is backed by a `<>t__builder`-linked state machine struct. Under Runtime Async, that link doesn't exist — the builder/state-machine bridge is replaced by `AsyncHelpers` and `RuntimeAsyncTask<T>`. **When P1-2 is implemented, it must not assume `IAsyncStateMachine` correlation is exhaustive** — a `Task` with no matching state machine instance is expected and normal for Runtime Async-compiled callers, not a bug or an orphan.
-- `RuntimeAsyncTask<T>`'s exact field layout (equivalent to `m_stateFlags`/`m_continuationObject` for correlation purposes) is not finalized pre-GA; do not hard-code assumptions about it yet.
-
-**Compatibility constraint:** As with the state machine analyzer, .NET Framework and non-opted-in .NET code paths remain on the classic model indefinitely. `Task`-level analysis (the bulk of this analyzer) needs no version branching since `Task` itself is unchanged; only the future `IAsyncStateMachine` correlation feature needs to treat "no state machine found" as a valid outcome rather than a detection failure.
-
-**Recommended action:** No change required to ship today. When implementing P1-2 (`IAsyncStateMachine` inventory + task linkage), gate the correlation as best-effort/optional per task, and re-verify against .NET 11 GA before assuming `RuntimeAsyncTask<T>` structure.
+| P1-1 | Add `IsTaskCompletionSourceType`/`IsValueTaskSourceType` to `TypeAggregateFlags` (consuming the 2 remaining reserved bits); compute once in `DiskBackedObjectIndexWriter.ComputeTypeFlags` (reusing the `type.Name` already resolved there); read as flags in `BeforeHeapIndexScan` instead of re-resolving `ClrType`/interfaces/fields per run per worker | 3, 5 | Improvement | High — eliminates real, repeated, avoidable ClrMD cost on every warm-cache run | Medium | High | NOT DONE |
+| P1-2 | Wire all 9 fields added since the original audit into `AsyncTaskTrendComparer` (`PendingGen0`–`PendingLOH`, `CycleDetected`, `TotalTaskCompletionSources`, `UnresolvedTaskCompletionSources`, `UnresolvedTcsGen2Count`, `TotalValueTaskSources`, `PendingValueTaskSources`, `PendingVtsGen2Count`, `TopPendingTaskTypesByBytes`) | 2 | Improvement | High — the analyzer's newest, most valuable leak signals currently have zero regression tracking | Low | High | NOT DONE |
+| P2-1 | Extend `AsyncTaskAnalyzerDiscrepancyTests` to assert the same 9 fields for disk-vs-memory agreement | 2, 6 | Improvement | Medium — closes a real test-coverage blind spot in the existing safety net | Low | High | NOT DONE |
+| P2-2 | Extend `AsyncAnalysisSectionBuilder`'s `leadFinding` gating to also consider `CycleDetected` and TCS/VTS Gen2 severity, not only `MaxContinuationDepth` | 2 | Improvement | Medium — section-level highlight can currently miss the report's actual most severe condition | Low | High | NOT DONE |
+| P2-3 | Include TCS/VTS counts (when part of the active signal set) in the aggregate "risk cluster" finding's evidence text | 2 | Improvement | Low-Medium | Low | High | NOT DONE |
+| P2-4 | Add progress reporting inside `AnalyzeTaskCompletionSources`/`AnalyzeValueTaskSources` classification loops, consistent with the main task-classification loop and with `AsyncStateMachineAnalyzer`'s P2-5 fix | 5 | Improvement | Low | Low | High | NOT DONE |
+| P3-1 | Re-verify against .NET 11 GA Runtime Async; confirm `RuntimeAsyncTask<T>` shape before assuming continued compatibility | 4, 7 | Evolution | Medium — prevents silent under-counting as adoption grows | Low | Low (spec not final, blocked on external GA) | NOT DONE (blocked) |
+| P3-2 | `TaskScheduler` classification for pending tasks (default pool vs. `SynchronizationContextTaskScheduler` vs. custom) | 1, 4 | Evolution | Medium | Medium | Medium | NOT DONE |
+| P3-3 | `Task.m_parent` parent-child hierarchy reconstruction | 1, 4 | Evolution | Medium | Medium | Medium | NOT DONE |
+| P3-4 | `SynchronizationContextAwaitTaskContinuation` counting by context type | 1, 4 | Evolution | Low-Medium | Low | Medium | NOT DONE |
+| P3-5 | Add GC-generation distribution for orphaned tasks, mirroring the shipped `PendingGen0`–`PendingLOH` pattern (infrastructure — `SegmentKindMapper.ResolveGeneration` — already present and already used for this exact purpose on pending tasks) | 1, 4 | Improvement | Medium — orphaned tasks are arguably the stronger of the two leak signals, and currently the only one without generation breakdown | Low | High | NOT DONE |
+| P3-6 | Root-path sampling for top-N unresolved-TCS/pending-VTS snapshots via `ReverseEdgeIndexReader.TryGetParents`, same pattern already used by `EventLeakAnalyzer`/`TimerLeakAnalyzer`/`StaticRootLeakDetector` (and previously recommended, never implemented, for orphaned tasks) | 4 | Evolution | Medium | Medium | High | NOT DONE |
+| P3-7 | Cross-correlate TCS/VTS Gen2 leaks in `InsightEngine` (e.g. with blocked finalizer thread or elevated `GCHandleDomainResult` pressure), extending the existing `DetectOrphanedTaskAccumulation`-style cross-cutting pattern | 1, 4 | Evolution | Medium | Low | Medium | NOT DONE |
 
 ---
 
 ### Final Verdict
 
-1. **Is the analyzer production-ready?** Yes for .NET Core 6/7 workloads. On .NET 8+ the `m_stateFlags` naming risk (P0-1) must be fixed before the analyzer can be trusted. Multi-continuation mis-handling (P0-2) is a silent false-negative that understates orphan counts on any modern async codebase.
+1. **Is the analyzer production-ready?** Yes, unconditionally. This
+   re-audit found zero correctness defects across six concerns and three
+   distinct object families. Every finding is either a performance
+   missed-opportunity (P1-1) or a report/test-coverage gap (P1-2, P2-1)
+   affecting *regression tracking*, not the accuracy of any single-dump
+   analysis.
 
-2. **Highest-impact improvements:** P0-1 (field name fragility), P0-2 (multi-continuation BFS), P1-1 (field caching for scalability), P1-3 (exception histogram).
+2. **Highest-impact improvements:** P1-1 (Phase 1 caching for TCS/VTS
+   detection) and P1-2 (trend comparer coverage) are both concrete,
+   low-to-medium-difficulty fixes that close gaps this session's own work
+   introduced — the analyzer grew three new detection capabilities without
+   growing the shared caching layer or the trend/regression layer to match.
 
-3. **Platform evolution opportunities:** P1-2 (`IAsyncStateMachine` inventory) would close the most significant capability gap versus SOS `!dumpasync` and is the single highest-engineering-return addition to the overall platform. P1-4 (state flags in task index) eliminates a Phase 2 ClrMD read pass entirely.
+3. **Platform evolution opportunities:** P3-6 (root-path sampling for TCS/
+   VTS leak snapshots) is the most valuable Evolution-classified item —
+   the underlying `ReverseEdgeIndexReader` infrastructure already exists
+   and is already proven in three other analyzers; applying it here (and
+   to the still-outstanding orphaned-task case from the original audit)
+   would be the single largest per-finding investigation-time improvement
+   available without new ClrMD capability.
 
-4. **Highest engineering return:** P0-1 + P0-2 together — low difficulty, eliminate the two main correctness risks. P1-2 — medium difficulty, produces a qualitatively new diagnostic tier. P2-6 (cycle detection) — trivially cheap since the `visited` HashSet is already present in the BFS, and it closes a critical async deadlock gap.
+4. **Highest engineering return:** P1-2 (trend comparer wiring) — the
+   lowest-difficulty item on this roadmap, directly restores regression
+   tracking for the two newest and most diagnostically valuable signals
+   this analyzer produces. P1-1 (Phase 1 caching) is the second-highest
+   return: it eliminates real, quantifiable, currently-repeated cost using
+   infrastructure (`TypeAggregateFlags`, `ComputeTypeFlags`) that already
+   exists and already solves this exact problem for the sibling `Task`
+   case — the fix is applying an established pattern, not inventing one.
+
+---
+
+## .NET 11 Runtime Async — Forward Compatibility
+
+**Status:** Unchanged from the original audit. .NET 11 (preview) Runtime
+Async remains an opt-in CLR-native replacement for compiler-generated
+`IAsyncStateMachine` structs; see
+[async-state-machine-analyzer-audit.md § .NET 11 Runtime Async — Forward
+Compatibility](async-state-machine-analyzer-audit.md#net-11-runtime-async--forward-compatibility)
+for the full mechanism description.
+
+**Impact here, re-confirmed:** `AsyncTaskAnalyzer`'s `Task`/`Task<T>` model
+(`m_stateFlags`, `m_continuationObject`, `m_action`) is unaffected at the
+object level — Runtime Async still produces ordinary `Task`/`Task<T>` (or
+`RuntimeAsyncTask<T>`-backed) instances for methods that don't complete
+synchronously. The two capabilities added since the original audit
+(`TaskCompletionSource` and `IValueTaskSource` detection) are **also**
+unaffected by Runtime Async — both operate on object models
+(`TaskCompletionSource<T>.m_task`/`_task`,
+`ManualResetValueTaskSourceCore<T>`) that are orthogonal to the
+compiler-generated state-machine mechanism Runtime Async replaces. No new
+forward-compatibility risk was introduced by this session's work.
+
+**Recommended action:** Unchanged — no action required to ship today.

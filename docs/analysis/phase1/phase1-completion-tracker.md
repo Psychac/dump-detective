@@ -14,8 +14,14 @@
 | **Total P1 Identified** | 158 |
 | **P0 Implemented** | 72 |
 | **P1 Implemented** | 127 |
-| **P2 Implemented** | 34 |
+| **P2 Implemented** | 27 |
 | **Overall P0+P1 Rate** | 84.0% (199/237) |
+
+> Note: `P2 Implemented` dropped from 34 to 27 on 2026-08-15 when AsyncTaskAnalyzer's re-audit
+> fully superseded its original P0–P3 roadmap with fresh numbering (see the RE-AUDITED table
+> below) — the 7 P2 items previously counted against AsyncTaskAnalyzer's original roadmap no
+> longer exist as a distinct roadmap; its re-audit roadmap has 0/4 P2 items done under the new
+> numbering. This is a renumbering artifact, not regression or lost work.
 
 ---
 
@@ -30,8 +36,9 @@ P0-4 was a regression hiding behind two individually-DONE roadmap items).
 | # | Analyzer | Re-Audit Date | Score | P0 | P1 | P2 | P3 | Status |
 |---|----------|----------------|-------|----|----|----|----|--------|
 | 1 | **AsyncStateMachineAnalyzer** | 2026-08-14 | 62→86/100 | 4/4 | 8/8 | 6/8 | 1/4 | ✅ Re-audit found P0-4 (regex drift silently defeated P2-4), P1-7 (gen2 fraction scope mismatch), P1-8 (dead code) — all fixed same-session; P2-5,P2-6 done, P2-7,P2-8 pending; see [async-state-machine-analyzer-audit.md](async-state-machine-analyzer-audit.md) |
+| 2 | **AsyncTaskAnalyzer** | 2026-08-15 | 68→87/100 | 0/0 | 0/2 | 0/4 | 0/7 | ✅ Full ground-truth re-audit (fresh roadmap numbering, supersedes original P0-P3 doc). No correctness bugs found. Found P1-1 (TaskCompletionSource/IValueTaskSource candidate discovery bypasses the Phase 1 disk-cache fast path — redundant ClrMD cost repeated every run × every parallel worker, whereas the equivalent Task-classification flag is a zero-cost persisted bit) and P1-2 (trend comparer untouched since original audit — 9 fields added across P2-6/P2-7/P3-1/P3-2/P3-3 have zero regression tracking). Both pending; see [async-task-analyzer-audit.md](async-task-analyzer-audit.md) |
 
-**Subtotal: 4/4 P0 done, 8/8 P1 done** (1 analyzer re-audited so far)
+**Subtotal: 4/4 P0 done, 8/8 P1 done** (2 analyzers re-audited so far; AsyncTaskAnalyzer's re-audit roadmap has no P0 items, so its own P0/P1 counts are 0/0 and 0/2 respectively — not summed into this subtotal, which tracks the pre-existing P0/P1 pattern from the first re-audited analyzer)
 
 ---
 
@@ -62,10 +69,9 @@ P0-4 was a regression hiding behind two individually-DONE roadmap items).
 | 21 | **DbConnectionAnalyzer** | 2/2 | 4/4 | 2/4 | 0/2 | ✅ P0+P1 complete (R1-R6); P2 50% (R7 done, R8-R10 pending) |
 | 22 | **TimerLeakAnalyzer** | 2/2 | 3/3 | 2/5 | 0/3 | ✅ P0+P1 COMPLETE (2/2, 3/3); P2 40% (2/5) |
 | 23 | **StaticRootLeakDetector** | 4/4 | 5/5 | 0/5 | 0/4 | ✅ P0+P1 COMPLETE (4/4, 5/5 — P1-5 shipped via tuple capture in BFS primitive) |
-| 24 | **AsyncTaskAnalyzer** | 2/2 | 3/3 | 7/7 | 4/5 | ✅ P0+P1+P2 COMPLETE (2/2, 3/3, 7/7); P3-1,P3-2,P3-3,P3-4 done; P3-5 (Runtime Async re-verify) pending; P1-2 superseded by AsyncStateMachineAnalyzer P3-1 |
 | 25 | **GCRootAnalyzer** | 2/2 | 4/4 | 0/5 | 0/3 | ✅ P0+P1 COMPLETE (2/2, 4/4) — P0-1 was already done pre-dating this correction (tracker was stale, audit doc already showed it DONE); P1-1 (field/owner attribution) done via [../root-field-name-index-plan.md](../root-field-name-index-plan.md) |
 
-**Subtotal: 50/50 P0 done, 94/94 P1 done** (AsyncStateMachineAnalyzer moved to the RE-AUDITED table above; its P0/P1 counts are tracked there instead)
+**Subtotal: 48/48 P0 done, 91/91 P1 done** (AsyncStateMachineAnalyzer and AsyncTaskAnalyzer moved to the RE-AUDITED table above; their P0/P1 counts are tracked there instead)
 
 ---
 

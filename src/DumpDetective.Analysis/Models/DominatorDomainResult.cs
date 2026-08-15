@@ -45,7 +45,13 @@ internal sealed record DominatorDomainResult(
     /// Used to calculate retention pressure ratio (retained / total).
     /// Zero if heap was too large to enumerate entirely.
     /// </summary>
-    ulong TotalHeapBytes = 0) : AnalyzerDomainResult;
+    ulong TotalHeapBytes = 0,
+    /// <summary>
+    /// Distribution of incoming-reference counts across all scanned objects, bucketed into
+    /// ranges (e.g. "0 – 10", "200+"). Lets engineers see whether retention is driven by a few
+    /// extreme hubs vs. a broad population of moderately-referenced objects.
+    /// </summary>
+    IReadOnlyList<FanInBucket>? FanInHistogram = null) : AnalyzerDomainResult;
 
 internal sealed record HighlyReferencedObjectSnapshot(ulong Address, string TypeName, ulong Size, int IncomingReferences, ulong EstimatedRetainedBytes = 0, Evidence? Evidence = null);
 

@@ -16,6 +16,36 @@ public sealed class DominatorAnalyzer : IAnalyzer
     public string Category => "Memory";
     public int Order => 110;
 
+    // Fan-in (incoming-reference-count) histogram bucket boundaries (minCount inclusive, maxCount exclusive).
+    private static readonly (int Min, int Max, string Label)[] s_fanInBuckets =
+    [
+        (0,   10,           "0 – 10"),
+        (10,  50,           "10 – 50"),
+        (50,  200,          "50 – 200"),
+        (200, int.MaxValue, "≥ 200"),
+    ];
+
+    private static void AddToFanInHistogram(int[] fanInCounts, int incomingReferences)
+    {
+        for (int b = 0; b < s_fanInBuckets.Length; b++)
+        {
+            if (incomingReferences >= s_fanInBuckets[b].Min && incomingReferences < s_fanInBuckets[b].Max)
+            {
+                fanInCounts[b]++;
+                return;
+            }
+        }
+    }
+
+    private static List<FanInBucket> BuildFanInHistogram(int[] fanInCounts)
+    {
+        var result = new List<FanInBucket>(s_fanInBuckets.Length);
+        for (int b = 0; b < s_fanInBuckets.Length; b++)
+            if (fanInCounts[b] > 0)
+                result.Add(new FanInBucket(s_fanInBuckets[b].Label, fanInCounts[b]));
+        return result;
+    }
+
     /// <summary>
     /// Builds the "highly referenced object" leak signal, preferring the disk-backed
     /// reverse-edge index (built during Phase 1 — see
@@ -60,10 +90,12 @@ public sealed class DominatorAnalyzer : IAnalyzer
         var scanCounter = new ObjectScanCounter("scanning reverse index", progress);
         int highlyReferencedCount = 0;
         var topHeap = new PriorityQueue<(ulong Address, int Count), int>(topN + 1);
+        int[] fanInCounts = new int[s_fanInBuckets.Length];
 
         reverseIndex.EnumerateChildCounts((child, count, _) =>
         {
             scanCounter.Tick();
+            AddToFanInHistogram(fanInCounts, count);
 
             if (count <= threshold)
                 return;
@@ -96,7 +128,7 @@ public sealed class DominatorAnalyzer : IAnalyzer
         // no per-object ClrMD work to budget via MaxLeakScanObjects, since the whole pass is
         // sequential index reads, not live heap resolution — so the scan is exhaustive over
         // every recorded child, by construction, never capped.
-        return new LeakSignals(highlyReferencedCount, SkippedReferenceAddresses: 0, results, ObjectScanCapped: false);
+        return new LeakSignals(highlyReferencedCount, SkippedReferenceAddresses: 0, results, ObjectScanCapped: false, FanInHistogram: BuildFanInHistogram(fanInCounts));
     }
 
     private static DominatorDomainResult Analyze(
@@ -116,7 +148,7 @@ public sealed class DominatorAnalyzer : IAnalyzer
         }
 
         if (typeStats.Count == 0)
-            return new DominatorDomainResult(0, 0, 0, Array.Empty<TypeSnapshot>(), MaxTopDominatorTypesToShow: options.TopHighlyReferencedObjectsToShow, TotalHeapBytes: totalHeapBytes);
+            return new DominatorDomainResult(0, 0, 0, Array.Empty<TypeSnapshot>(), MaxTopDominatorTypesToShow: options.TopHighlyReferencedObjectsToShow, TotalHeapBytes: totalHeapBytes, FanInHistogram: signals.FanInHistogram);
 
         IReadOnlyDictionary<ulong, TypeAggregateIndexEntry>? aggregates = null;
         if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
@@ -177,7 +209,8 @@ public sealed class DominatorAnalyzer : IAnalyzer
                 TopRetentionTypes = topRetentionTypes,
                 TopHighlyReferencedTotalBytes = topHighlyReferencedTotalBytes,
                 MaxTopDominatorTypesToShow = options.TopHighlyReferencedObjectsToShow,
-                TotalHeapBytes = totalHeapBytes
+                TotalHeapBytes = totalHeapBytes,
+                FanInHistogram = signals.FanInHistogram
             };
         }
 
@@ -267,7 +300,8 @@ public sealed class DominatorAnalyzer : IAnalyzer
             TopRetentionTypes: topRetentionTypes,
             TopHighlyReferencedTotalBytes: topHighlyReferencedTotalBytes,
             MaxTopDominatorTypesToShow: options.TopHighlyReferencedObjectsToShow,
-            TotalHeapBytes: totalHeapBytes);
+            TotalHeapBytes: totalHeapBytes,
+            FanInHistogram: signals.FanInHistogram);
     }
 
     // No-index fallback: the pipeline dispatcher only calls BeforeHeapIndexScan/OnHeapEntry when
@@ -311,13 +345,14 @@ public sealed class DominatorAnalyzer : IAnalyzer
         progress?.Report(new(scanCounter.Scanned, "building leak signals"));
 
         IReadOnlyList<HighlyReferencedObjectSnapshot> topHighlyReferencedObjects = ExtractHighlyReferencedObjects(heap, cache, referenceCount, options);
-        int highlyReferencedCount = CountHighlyReferencedObjects(referenceCount, options);
+        int highlyReferencedCount = CountHighlyReferencedObjects(referenceCount, options, out List<FanInBucket> fanInHistogram);
 
         return new LeakSignals(
             highlyReferencedCount,
             skippedReferenceAddresses,
             topHighlyReferencedObjects,
-            objectScanCapped);
+            objectScanCapped,
+            FanInHistogram: fanInHistogram);
     }
 
     private static IEnumerable<HeapEntry> EnumerateLeakEntries(ClrHeap heap, IHeapAnalysisCache? cache)
@@ -343,16 +378,20 @@ public sealed class DominatorAnalyzer : IAnalyzer
         }
     }
 
-    private static int CountHighlyReferencedObjects(Dictionary<ulong, int> referenceCount, RetentionOptions options)
+    private static int CountHighlyReferencedObjects(Dictionary<ulong, int> referenceCount, RetentionOptions options, out List<FanInBucket> fanInHistogram)
     {
         // OPT-#8: Replace LINQ .Count(predicate) with a plain foreach to avoid boxed IEnumerator allocation.
+        // Fan-in histogram is built in the same pass to avoid a second full-dictionary iteration.
         int threshold = options.HighReferenceThreshold;
         int count = 0;
+        int[] fanInCounts = new int[s_fanInBuckets.Length];
         foreach (KeyValuePair<ulong, int> kvp in referenceCount)
         {
             if (kvp.Value > threshold)
                 count++;
+            AddToFanInHistogram(fanInCounts, kvp.Value);
         }
+        fanInHistogram = BuildFanInHistogram(fanInCounts);
         return count;
     }
 
@@ -649,7 +688,8 @@ public sealed class DominatorAnalyzer : IAnalyzer
         long SkippedReferenceAddresses,
         IReadOnlyList<HighlyReferencedObjectSnapshot> TopHighlyReferencedObjects,
         bool ObjectScanCapped = false,
-        bool ReferenceCountingSkipped = false);
+        bool ReferenceCountingSkipped = false,
+        IReadOnlyList<FanInBucket>? FanInHistogram = null);
 
     private struct RetentionTypeAccumulator
     {

@@ -96,6 +96,20 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
                 d.TopRetentionTypes.Take(d.MaxTopDominatorTypesToShow).Select(t => R(new object?[] { t.TypeName, t.ObjectCount, t.TotalBytes, t.TotalIncomingReferences, t.MaxIncomingReferences, t.EstimatedRetainedBytes > 0 ? t.EstimatedRetainedBytes : null, RatioValue(t.EstimatedRetainedBytes, t.TotalBytes) })).ToArray()));
         }
 
+        if (d.FanInHistogram is { Count: > 0 } fanInHistogram)
+        {
+            long totalFanIn = 0;
+            for (int i = 0; i < fanInHistogram.Count; i++) totalFanIn += fanInHistogram[i].ObjectCount;
+
+            compactTables.Add(STCompact(
+                "Incoming-reference (fan-in) distribution",
+                new[] { CH("Incoming Refs Range"), CH("Objects","number"), CH("% of Objects", "number", "percent") },
+                fanInHistogram.Select(b => R(
+                    b.ReferenceCountRange,
+                    b.ObjectCount,
+                    totalFanIn == 0 ? 0.0 : b.ObjectCount * 100.0 / totalFanIn)).ToArray()));
+        }
+
         if (caveats.Count > 0)
             blocks.Add(T("Caveats: " + string.Join(" ", caveats)));
 

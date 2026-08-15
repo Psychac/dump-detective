@@ -30,3 +30,8 @@ public sealed record LohTypeProfile(string TypeName, int ObjectCount, ulong Tota
 /// <param name="ObjectCount">Total number of objects whose shallow size falls in this bucket.</param>
 /// <param name="TotalBytes">Sum of shallow sizes of all objects in this bucket.</param>
 public sealed record SizeBucketEntry(string RangeLabel, long ObjectCount, ulong TotalBytes);
+
+/// <summary>One bucket in the incoming-reference-count (fan-in) histogram for dominator analysis.</summary>
+/// <param name="ReferenceCountRange">Human-readable incoming-reference-count range, e.g. "10 – 50".</param>
+/// <param name="ObjectCount">Number of objects whose incoming-reference count falls within this range.</param>
+public sealed record FanInBucket(string ReferenceCountRange, long ObjectCount);

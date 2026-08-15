@@ -243,8 +243,8 @@ DumpDetective's generation distribution analysis is on par with or better than S
 | P2-4 | Replace full `metrics.Sort` + scan-limit pattern with partial sort for `FullScan` strategy | 5 | Medium — reduces wasted sort work on large type sets | Medium | High | ✓ DONE (commit 8a2e14e) |
 | P2-5 | Embed top long-lived type name in `InsightFinding.Evidence`; suppress finding at `Low` pressure | 2 | Medium — reduces noise, improves actionability | Low | High | ✓ DONE (commit 52263dc) |
 | P2-6 | Document pressure score thresholds in section builder (footnote or legend) | 2 | Medium — without scale context the numeric score is uninterpretable | Low | High | ✓ DONE (commit 1122f2b) |
-| P3-1 | Surface `AllocationProfile.Steady` at type level or remove from `TypeAllocationProfile.Profile` enum | 1 | Low — cleanup | Low | High | Improvement |
-| P3-2 | Add runtime guard (exception or assertion) when `HeapIndexBuildResult` is absent at analysis time | 1 | Low — improves debuggability when factory order regresses | Low | High | Improvement |
+| P3-1 | Surface `AllocationProfile.Steady` at type level or remove from `TypeAllocationProfile.Profile` enum | 1 | Low — cleanup | Low | High | ✓ DONE (commit c6db98d) |
+| P3-2 | Add runtime guard (exception or assertion) when `HeapIndexBuildResult` is absent at analysis time | 1 | Low — improves debuggability when factory order regresses | Low | High | ✓ DONE (commit c6db98d) |
 | P3-3 | LOH size-band distribution (85KB–1MB, 1MB–10MB, >10MB) — requires Phase 1 index extension | 4 | High (future) | High | Medium | Evolution |
 | P3-4 | Finalizable type detection via `TypeAggregateFlags` or a new Phase 1 flag | 4 | High (future) | High | Medium | Evolution |
 | P3-5 | Dominator tree / retention tree analysis | 7 | Critical competitive gap | Very High | High | Evolution |

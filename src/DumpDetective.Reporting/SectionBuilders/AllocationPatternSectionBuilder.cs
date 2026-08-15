@@ -51,6 +51,7 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
         }));
 
         blocks.Add(T("Allocation-site precision is ETW-dependent; these signals summarize heap pressure from the dump state only."));
+        blocks.Add(T("GC Pressure Score scale: 0–20 = Low, 20–45 = Moderate, 45–70 = High, >70 = Critical. Factors include Gen2 object count%, inverted Gen0 count% (high Gen0 dominance reduces pressure), and LOH size% contribution."));
 
         compactTables.Add(STCompact(
             "Classification summary",

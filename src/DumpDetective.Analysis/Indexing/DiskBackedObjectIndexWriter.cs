@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Analysis.Indexing.ForwardIndex;
 using DumpDetective.Analysis.Indexing.ReverseIndex;
 using DumpDetective.Analysis.Indexing.Satellite;
 using DumpDetective.Core.Enums;
@@ -40,6 +41,14 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     // on-demand forward-ref enumeration, same as before this index existed.
     private static readonly bool SkipReverseIndexBuild =
         Environment.GetEnvironmentVariable("DD_SKIP_REVERSE_INDEX_BUILD") == "1";
+
+    // Escape hatch for the forward-reference index (see
+    // docs/analysis/phase1-redesigns/dominator-tree-lengauer-tarjan.md §D5): set
+    // DD_SKIP_FORWARD_INDEX_BUILD=1 to skip it. Consumers (currently: the dominator-tree
+    // reachability walk) fall back to a live ClrMD walk, same graceful-degradation contract as
+    // every other optional satellite section.
+    private static readonly bool SkipForwardIndexBuild =
+        Environment.GetEnvironmentVariable("DD_SKIP_FORWARD_INDEX_BUILD") == "1";
 
     // Escape hatch for the SegmentIndex satellite section (see
     // docs/cache/cache-architecture.md): set DD_SKIP_SEGMENT_INDEX_BUILD=1 to skip it for
@@ -153,6 +162,16 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             ? null
             : new ReverseEdgeExtractor(reverseIndexBucketCount, indexDir);
 
+        // Forward-reference index (§D5): extracted in the SAME per-object foreach below that
+        // already enumerates obj.EnumerateReferences(carefully: true) for the reverse index — no
+        // additional ClrMD reads, just a second batched write of the same already-enumerated
+        // references, keyed by parent instead of child. Reuses the reverse index's bucket-count
+        // formula (dump-size-based, not edge-count-based, so it applies equally well here).
+        int forwardIndexBucketCount = ForwardIndexConstants.CalculateBucketCount(new FileInfo(dumpPath).Length);
+        ForwardEdgeExtractor? forwardEdgeExtractor = SkipForwardIndexBuild
+            ? null
+            : new ForwardEdgeExtractor(forwardIndexBucketCount, indexDir);
+
         // heap.Segments is lazily resolved by ClrMD on first access — reported separately from
         // "preparing heap scan" above so a profiling run can attribute time to this specific
         // DAC-side segment-list resolution rather than lumping it in with the setup around it.
@@ -190,7 +209,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             0,
             segments.Length,
             parallelOptions,
-            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64), ModuleIdCache: new Dictionary<ulong, int>(capacity: 64), StringDedup: new Dictionary<ulong, StringDedupEntry>(capacity: 64), LengthSamples: new List<int>(), LengthBuckets: new Dictionary<string, int>(StringComparer.Ordinal), EdgeBucketBuffers: reverseEdgeExtractor is null ? null : new List<(ulong Child, ulong Parent)>?[reverseIndexBucketCount], TaskStateFlagsFieldCache: new Dictionary<ulong, ClrInstanceField?>(capacity: 8)),
+            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64), ModuleIdCache: new Dictionary<ulong, int>(capacity: 64), StringDedup: new Dictionary<ulong, StringDedupEntry>(capacity: 64), LengthSamples: new List<int>(), LengthBuckets: new Dictionary<string, int>(StringComparer.Ordinal), EdgeBucketBuffers: reverseEdgeExtractor is null ? null : new List<(ulong Child, ulong Parent)>?[reverseIndexBucketCount], ForwardEdgeBucketBuffers: forwardEdgeExtractor is null ? null : new List<(ulong Parent, ulong Child)>?[forwardIndexBucketCount], TaskStateFlagsFieldCache: new Dictionary<ulong, ClrInstanceField?>(capacity: 8)),
             (segIdx, _, state) =>
             {
                 ClrSegment segment = segments[segIdx];
@@ -276,26 +295,48 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                     // millions of edges, the fixed cost of the per-bucket lock (not the dictionary
                     // work it guards) dominates, so amortizing it across EdgeBatchSize edges at a
                     // time is the difference that matters.
-                    if (reverseEdgeExtractor is not null)
+                    if (reverseEdgeExtractor is not null || forwardEdgeExtractor is not null)
                     {
-                        var edgeBuffers = state.EdgeBucketBuffers!;
+                        var edgeBuffers = state.EdgeBucketBuffers;
+                        var forwardEdgeBuffers = state.ForwardEdgeBucketBuffers;
                         foreach (ClrObject reference in obj.EnumerateReferences(carefully: true))
                         {
                             if (!reference.IsValid)
                                 continue;
 
                             ulong child = reference.Address;
-                            int bucketIdx = (int)ReverseIndexConstants.ChildBucketHash(child, reverseIndexBucketCount);
-                            List<(ulong Child, ulong Parent)>? bucketBuf = edgeBuffers[bucketIdx];
-                            if (bucketBuf is null)
+
+                            if (reverseEdgeExtractor is not null)
                             {
-                                bucketBuf = new List<(ulong Child, ulong Parent)>(EdgeBatchSize);
-                                edgeBuffers[bucketIdx] = bucketBuf;
+                                int bucketIdx = (int)ReverseIndexConstants.ChildBucketHash(child, reverseIndexBucketCount);
+                                List<(ulong Child, ulong Parent)>? bucketBuf = edgeBuffers![bucketIdx];
+                                if (bucketBuf is null)
+                                {
+                                    bucketBuf = new List<(ulong Child, ulong Parent)>(EdgeBatchSize);
+                                    edgeBuffers[bucketIdx] = bucketBuf;
+                                }
+
+                                bucketBuf.Add((child, obj.Address));
+                                if (bucketBuf.Count >= EdgeBatchSize)
+                                    reverseEdgeExtractor.RecordEdgesBatch(bucketIdx, bucketBuf);
                             }
 
-                            bucketBuf.Add((child, obj.Address));
-                            if (bucketBuf.Count >= EdgeBatchSize)
-                                reverseEdgeExtractor.RecordEdgesBatch(bucketIdx, bucketBuf);
+                            // §D5: the exact same enumerated reference, batched a second time keyed
+                            // by parent instead of child — no additional ClrMD read.
+                            if (forwardEdgeExtractor is not null)
+                            {
+                                int fwdBucketIdx = (int)ForwardIndexConstants.ParentBucketHash(obj.Address, forwardIndexBucketCount);
+                                List<(ulong Parent, ulong Child)>? fwdBucketBuf = forwardEdgeBuffers![fwdBucketIdx];
+                                if (fwdBucketBuf is null)
+                                {
+                                    fwdBucketBuf = new List<(ulong Parent, ulong Child)>(EdgeBatchSize);
+                                    forwardEdgeBuffers[fwdBucketIdx] = fwdBucketBuf;
+                                }
+
+                                fwdBucketBuf.Add((obj.Address, child));
+                                if (fwdBucketBuf.Count >= EdgeBatchSize)
+                                    forwardEdgeExtractor.RecordEdgesBatch(fwdBucketIdx, fwdBucketBuf);
+                            }
                         }
                     }
 
@@ -443,6 +484,17 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                     }
                 }
 
+                if (forwardEdgeExtractor is not null)
+                {
+                    var forwardEdgeBuffers = state.ForwardEdgeBucketBuffers!;
+                    for (int b = 0; b < forwardEdgeBuffers.Length; b++)
+                    {
+                        List<(ulong Parent, ulong Child)>? fwdBucketBuf = forwardEdgeBuffers[b];
+                        if (fwdBucketBuf is { Count: > 0 })
+                            forwardEdgeExtractor.RecordEdgesBatch(b, fwdBucketBuf);
+                    }
+                }
+
                 lock (masterBuilder)
                 {
                     masterBuilder.Merge(state.Builder);
@@ -498,6 +550,11 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             {
                 try { reverseEdgeExtractor.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { /* best-effort */ }
                 DeleteReverseIndexScratchFiles(indexDir, reverseIndexBucketCount);
+            }
+            if (forwardEdgeExtractor is not null)
+            {
+                try { forwardEdgeExtractor.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { /* best-effort */ }
+                DeleteForwardIndexScratchFiles(indexDir, forwardIndexBucketCount);
             }
             throw;
         }
@@ -712,6 +769,18 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                 satelliteWarnings.Add(reverseIndexWarning);
         }
 
+        // Forward-reference index (§D5, Phase B + C) — flush, sort and merge the buckets extracted
+        // during the heap scan above, same shape as the reverse index just above but keyed by
+        // parent and uncapped.
+        if (forwardEdgeExtractor is not null)
+        {
+            string? forwardIndexWarning = WriteForwardIndexSections(
+                containerWriter, indexDir, forwardIndexBucketCount, forwardEdgeExtractor,
+                cancellationToken, progress, stopwatch);
+            if (forwardIndexWarning is not null)
+                satelliteWarnings.Add(forwardIndexWarning);
+        }
+
         // Extract aggregates once so they can be passed both to HeapIndexBuildResult and to
         // TypeAggregateIndexWriter without calling masterBuilder.Build() twice.
         var typeAggregates = masterBuilder.Build();
@@ -910,6 +979,37 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         }
     }
 
+    private static string? WriteForwardIndexSections(
+        CacheContainerWriter containerWriter,
+        string indexDir,
+        int bucketCount,
+        ForwardEdgeExtractor extractor,
+        CancellationToken cancellationToken,
+        IProgress<AnalyzerProgressReport>? progress,
+        Stopwatch stopwatch)
+    {
+        try
+        {
+            progress?.Report(new(0, "collecting forward-index statistics", Detail: null, Elapsed: stopwatch.Elapsed));
+            ForwardEdgeExtractionStats stats = extractor.GetStatistics();
+
+            extractor.DisposeAsync(progress).AsTask().GetAwaiter().GetResult();
+
+            var sorter = new ForwardEdgeSorter();
+            sorter.SortBucketsAsync(indexDir, bucketCount, cancellationToken, progress)
+                .GetAwaiter().GetResult();
+
+            ForwardEdgeContainerWriter.Write(containerWriter, indexDir, bucketCount, stats, progress);
+            return null;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            DeleteForwardIndexScratchFiles(indexDir, bucketCount);
+            return $"ForwardIndex: {ex.GetType().Name}: {ex.Message}";
+        }
+    }
+
     // ── Type classification helpers ────────────────────────────────────────────
 
     private static string CreatePreview(string value)
@@ -1066,6 +1166,16 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             try { File.Delete(Path.Combine(indexDir, $"reverse_edges_bucket_{i}{ReverseIndexConstants.TemporaryScratchSuffix}")); } catch { /* best-effort */ }
             try { File.Delete(Path.Combine(indexDir, $"reverse_edges_bucket_{i}{ReverseIndexConstants.SortedDataSuffix}")); } catch { /* best-effort */ }
             try { File.Delete(Path.Combine(indexDir, $"reverse_edges_bucket_{i}{ReverseIndexConstants.DirectorySuffix}")); } catch { /* best-effort */ }
+        }
+    }
+
+    private static void DeleteForwardIndexScratchFiles(string indexDir, int bucketCount)
+    {
+        for (int i = 0; i < bucketCount; i++)
+        {
+            try { File.Delete(Path.Combine(indexDir, $"forward_edges_bucket_{i}{ForwardIndexConstants.TemporaryScratchSuffix}")); } catch { /* best-effort */ }
+            try { File.Delete(Path.Combine(indexDir, $"forward_edges_bucket_{i}{ForwardIndexConstants.SortedDataSuffix}")); } catch { /* best-effort */ }
+            try { File.Delete(Path.Combine(indexDir, $"forward_edges_bucket_{i}{ForwardIndexConstants.DirectorySuffix}")); } catch { /* best-effort */ }
         }
     }
 

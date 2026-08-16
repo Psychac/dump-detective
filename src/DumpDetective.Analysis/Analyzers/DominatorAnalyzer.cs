@@ -1,12 +1,16 @@
+using System.Diagnostics;
+
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Traversal;
+using DumpDetective.Analysis.Traversal.Dominator;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
 
 using Microsoft.Diagnostics.Runtime;
+using Microsoft.Extensions.Logging;
 
 namespace DumpDetective.Analysis.Analyzers;
 
@@ -15,6 +19,19 @@ public sealed class DominatorAnalyzer : IAnalyzer
     public string Name => "Dominator Analysis";
     public string Category => "Memory";
     public int Order => 110;
+
+    // §D6: the measured structural-cost ratio (25GB-dump spike) used to translate
+    // RetentionOptions.ExactDominatorTreeMemoryBudgetBytes into a node-count cap.
+    private const long ExactDominatorTreeBytesPerNode = 76;
+
+    private readonly ILogger<DominatorAnalyzer>? _logger;
+
+    public DominatorAnalyzer() { }
+
+    public DominatorAnalyzer(ILogger<DominatorAnalyzer>? logger)
+    {
+        _logger = logger;
+    }
 
     // Fan-in (incoming-reference-count) histogram bucket boundaries (minCount inclusive, maxCount exclusive).
     private static readonly (int Min, int Max, string Label)[] s_fanInBuckets =
@@ -74,7 +91,111 @@ public sealed class DominatorAnalyzer : IAnalyzer
 
         AnalyzerDomainResult result = Analyze(context.Heap, context.Cache, options, signals, cancellationToken).Stamp(this);
 
+        // §D9-gated exact Lengauer-Tarjan computation. Always logs a comparison against the
+        // heuristic above; on success also attaches an exact per-type retained-bytes lookup that
+        // §Report integration (DominatorSectionBuilder) uses to replace the Gen2/LOH sub-table's
+        // heuristic column — everything else about `result` (including the main dominator-suspects
+        // and highly-referenced-objects tables) is untouched, matching the design doc's stated
+        // report-integration scope. A cap-exceeded or exception outcome leaves `result` exactly as
+        // the heuristic built it, same safety property "ship dark" (Phase 5) established.
+        if (options.EnableExactDominatorTree && result is DominatorDomainResult heuristicResult)
+        {
+            IReadOnlyDictionary<string, ulong>? exactByType = TryComputeExactDominatorTree(context.Heap, context.Cache, options, heuristicResult, cancellationToken);
+            if (exactByType is not null)
+                result = heuristicResult with { ExactRetainedBytesByTypeName = exactByType };
+        }
+
         return ValueTask.FromResult(result);
+    }
+
+    private IReadOnlyDictionary<string, ulong>? TryComputeExactDominatorTree(
+        ClrHeap heap,
+        IHeapAnalysisCache cache,
+        RetentionOptions options,
+        DominatorDomainResult heuristicResult,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            int nodeCap = (int)Math.Clamp(options.ExactDominatorTreeMemoryBudgetBytes / ExactDominatorTreeBytesPerNode, 1, int.MaxValue - 1);
+
+            ReachableGraph? graph = ReachableGraphBuilder.Build(heap, cache, nodeCap, cancellationToken);
+            if (graph is null)
+            {
+                _logger?.LogInformation(
+                    "Exact dominator tree skipped: reachable population exceeded the {NodeCap:N0}-node cap (budget {BudgetBytes:N0} bytes) after {ElapsedMs:N0} ms.",
+                    nodeCap, options.ExactDominatorTreeMemoryBudgetBytes, stopwatch.ElapsedMilliseconds);
+                return null;
+            }
+
+            DominatorTreeComputeResult tree = DominatorTreeComputer.Compute(graph, cancellationToken);
+            stopwatch.Stop();
+
+            // tree.Idom has length VirtualRoot+1 (LT's array includes the virtual root's own slot),
+            // but tree.RetainedBytes only covers the real (reduced-id) nodes 0..VirtualRoot-1 — stop
+            // one short to avoid indexing RetainedBytes with the virtual root's own id.
+            ulong exactTotalRetainedBytes = 0;
+            for (int i = 0; i < tree.VirtualRoot; i++)
+            {
+                if (tree.Idom[i] == tree.VirtualRoot)
+                    exactTotalRetainedBytes += tree.RetainedBytes[i];
+            }
+
+            // §Report integration: exact retained bytes per reachable node, aggregated by
+            // MethodTable in one O(N) pass — a folded leaf (§D8) has no dominator-tree id of its
+            // own, but as a leaf its own subtree is just itself, so its retained bytes are simply
+            // its shallow size. This makes the per-type total exact over *every* reachable node of
+            // that type, not just the ones that happened to survive folding.
+            var retainedByMethodTable = new Dictionary<ulong, ulong>();
+            for (int oldId = 0; oldId < graph.NodeCount; oldId++)
+            {
+                int newId = tree.LeafFold.OldToNewId[oldId];
+                ulong nodeRetained = newId >= 0 ? tree.RetainedBytes[newId] : graph.ShallowSizes[oldId];
+                ulong methodTable = graph.MethodTables[oldId];
+                retainedByMethodTable[methodTable] = retainedByMethodTable.TryGetValue(methodTable, out ulong existing)
+                    ? existing + nodeRetained
+                    : nodeRetained;
+            }
+
+            // Only resolve type names the report will actually display (the Gen2/LOH sub-table's
+            // candidates, already computed by the heuristic pass above) — resolving every unique
+            // MethodTable's name would be wasted work for types the report never shows.
+            Dictionary<string, ulong>? exactByTypeName = null;
+            foreach (TypeSnapshot candidate in heuristicResult.TopDominatorTypes)
+            {
+                ClrObject sample = heap.GetObject(candidate.SampleAddress);
+                if (!sample.IsValid || sample.Type is null)
+                    continue;
+
+                if (retainedByMethodTable.TryGetValue(sample.Type.MethodTable, out ulong exactRetained))
+                {
+                    exactByTypeName ??= new Dictionary<string, ulong>(StringComparer.Ordinal);
+                    exactByTypeName[candidate.TypeName] = exactRetained;
+                }
+            }
+
+            _logger?.LogInformation(
+                "Exact dominator tree computed in {ElapsedMs:N0} ms: {NodeCount:N0} reachable nodes " +
+                "(cap {NodeCap:N0}), {FoldedCount:N0} leaves folded (§D8), total retained bytes at " +
+                "GC roots {ExactTotalRetainedBytes:N0} vs. heuristic top-K estimate {HeuristicTotalRetainedBytes:N0}.",
+                stopwatch.ElapsedMilliseconds, graph.NodeCount, nodeCap,
+                graph.NodeCount - tree.LeafFold.ReducedNodeCount,
+                exactTotalRetainedBytes, heuristicResult.TotalEstimatedRetainedBytes);
+
+            return exactByTypeName;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex,
+                "Exact dominator tree computation failed after {ElapsedMs:N0} ms; heuristic result is unaffected.",
+                stopwatch.ElapsedMilliseconds);
+            return null;
+        }
     }
 
     private static LeakSignals BuildLeakSignalsFromReverseIndex(

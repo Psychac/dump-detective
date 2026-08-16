@@ -28,6 +28,7 @@ namespace DumpDetective.Analysis.Cache
         private readonly StatisticsCache _statisticsCache;
         private readonly RootSetCache _rootSetCache;
         private readonly ReverseIndexCache _reverseIndexCache;
+        private readonly ForwardIndexCache _forwardIndexCache;
 
         public long ObjectScanCount => Interlocked.Read(ref _objectScanCount);
         public long CacheHits => Interlocked.Read(ref _cacheHits);
@@ -61,6 +62,11 @@ namespace DumpDetective.Analysis.Cache
                 _heapIndexCache.TryGetHeapIndex(out var h);
                 return h;
             });
+            _forwardIndexCache = new ForwardIndexCache(() =>
+            {
+                _heapIndexCache.TryGetHeapIndex(out var h);
+                return h;
+            });
         }
 
         public IEnumerable<CacheMetrics> GetCacheMetrics()
@@ -72,6 +78,7 @@ namespace DumpDetective.Analysis.Cache
             yield return _methodTableCache.GetMetrics();
             yield return _typeMetadataCache.GetMetrics();
             yield return _reverseIndexCache.GetMetrics();
+            yield return _forwardIndexCache.GetMetrics();
         }
 
         public HeapCacheHealth GetHealth()
@@ -308,6 +315,11 @@ namespace DumpDetective.Analysis.Cache
             return _reverseIndexCache.TryGetProvider();
         }
 
+        public IForwardReferenceProvider? TryGetForwardIndexProvider()
+        {
+            return _forwardIndexCache.TryGetProvider();
+        }
+
         private void ReportProgress(string phase, long totalScans)
         {
             if (_progress is null || totalScans % ProgressReportEveryScans != 0)
@@ -319,6 +331,7 @@ namespace DumpDetective.Analysis.Cache
         public void Dispose()
         {
             _reverseIndexCache.Dispose();
+            _forwardIndexCache.Dispose();
             _heapIndexCache.Dispose();
         }
     }

@@ -90,16 +90,31 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
                 .ToArray();
             if (gen2LohTypes.Length > 0)
             {
+                // §Report integration (dominator-tree-lengauer-tarjan.md §Architecture "Output
+                // model"): use the exact Lengauer-Tarjan retained-bytes total for a type when the
+                // exact path succeeded for this run; otherwise fall back to the existing bounded-BFS
+                // estimate unchanged. Only this sub-table's "Retained" column is affected — the main
+                // dominator-suspects and highly-referenced-objects tables above/below are untouched.
+                bool anyExact = d.ExactRetainedBytesByTypeName is { Count: > 0 };
+                if (anyExact)
+                    blocks.Add(T("Gen2/LOH retained bytes below are exact (Lengauer-Tarjan dominator tree) for this run."));
+
                 compactTables.Add(STCompact(
                     "Gen2 / LOH dominator suspects",
                     new[] { CH("Type"), CH("Objects","number"), CH("Gen2","number"), CH("Gen2 %", "number", "percent"), CH("LOH","bytes"), CH("Retained","bytes") },
-                    gen2LohTypes.Select(type => R(
-                        type.TypeName,
-                        type.Count,
-                        type.Gen2Count > 0 ? type.Gen2Count : null,
-                        type.Count == 0 ? 0.0 : type.Gen2Count * 100.0 / type.Count,
-                        type.LohBytes > 0 ? type.LohBytes : null,
-                        type.EstimatedRetainedBytes > 0 ? type.EstimatedRetainedBytes : null)).ToArray()));
+                    gen2LohTypes.Select(type =>
+                    {
+                        ulong retained = d.ExactRetainedBytesByTypeName is { } exact && exact.TryGetValue(type.TypeName, out ulong exactRetained)
+                            ? exactRetained
+                            : type.EstimatedRetainedBytes;
+                        return R(
+                            type.TypeName,
+                            type.Count,
+                            type.Gen2Count > 0 ? type.Gen2Count : null,
+                            type.Count == 0 ? 0.0 : type.Gen2Count * 100.0 / type.Count,
+                            type.LohBytes > 0 ? type.LohBytes : null,
+                            retained > 0 ? retained : null);
+                    }).ToArray()));
             }
         }
 

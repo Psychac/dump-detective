@@ -48,4 +48,12 @@ public interface IHeapAnalysisCache
     /// pre-v4 cache, or missing sections). See <see cref="IBackwardReferenceProvider"/>.
     /// </summary>
     IBackwardReferenceProvider? TryGetReverseIndexProvider();
+
+    /// <summary>
+    /// Returns the shared "what does this object point at?" provider backed by the disk-backed
+    /// forward-reference index, or <c>null</c> when unavailable (in-memory mode, skipped build via
+    /// <c>DD_SKIP_FORWARD_INDEX_BUILD=1</c>, or missing sections). See
+    /// docs/analysis/phase1-redesigns/dominator-tree-lengauer-tarjan.md §D5.
+    /// </summary>
+    IForwardReferenceProvider? TryGetForwardIndexProvider();
 }

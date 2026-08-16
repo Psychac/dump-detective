@@ -45,6 +45,27 @@ public sealed class RetentionOptions
     /// </summary>
     public int RootPathLargeFanoutThreshold { get; init; } = 100;
 
+    /// <summary>
+    /// §D9 (docs/analysis/phase1-redesigns/dominator-tree-lengauer-tarjan.md): enables the exact
+    /// Lengauer-Tarjan dominator-tree computation, protected by <see cref="ExactDominatorTreeMemoryBudgetBytes"/>'s
+    /// mid-walk cap (§D6). Deliberately <b>not</b> branched per <see cref="AnalysisProfile"/> in
+    /// <see cref="Preset"/> below — the profile system is expected to be simplified/consolidated
+    /// later, and this flag is meant to stay independent of whatever shape it ends up in.
+    /// Default <c>true</c>: exact mode is attempted by default, falling back to the existing
+    /// top-K heuristic if the reachable population exceeds the memory budget.
+    /// </summary>
+    public bool EnableExactDominatorTree { get; init; } = true;
+
+    /// <summary>
+    /// §D6: the memory budget the exact dominator-tree computation's transient working set is
+    /// allowed, translated to a node-count cap at runtime via the measured structural-cost ratio
+    /// (~76 bytes/node, from the 25GB-dump spike measurement — see the design doc's Measured
+    /// Numbers). Default 6GB → a cap of roughly 85M reachable nodes, a modest (~1.5x) extrapolation
+    /// past the 58.34M nodes actually tested, not a large unvalidated leap. Revisit once §D8's
+    /// leaf-folding improves the ratio, or once a real dump larger than 25GB is tested.
+    /// </summary>
+    public long ExactDominatorTreeMemoryBudgetBytes { get; init; } = 6L * 1024 * 1024 * 1024;
+
     public static RetentionOptions Preset(AnalysisProfile profile) => profile switch
     {
         AnalysisProfile.Fast => new RetentionOptions

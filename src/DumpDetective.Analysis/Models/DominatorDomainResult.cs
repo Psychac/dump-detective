@@ -51,7 +51,17 @@ internal sealed record DominatorDomainResult(
     /// ranges (e.g. "0 – 10", "200+"). Lets engineers see whether retention is driven by a few
     /// extreme hubs vs. a broad population of moderately-referenced objects.
     /// </summary>
-    IReadOnlyList<FanInBucket>? FanInHistogram = null) : AnalyzerDomainResult;
+    IReadOnlyList<FanInBucket>? FanInHistogram = null,
+    /// <summary>
+    /// §Report integration (docs/analysis/phase1-redesigns/dominator-tree-lengauer-tarjan.md
+    /// §Architecture "Output model"): exact retained bytes per type name, from the Lengauer-Tarjan
+    /// dominator tree, keyed by <see cref="TypeSnapshot.TypeName"/>. Null when the exact path wasn't
+    /// attempted (§D9 <c>EnableExactDominatorTree</c> off), exceeded its node cap (§D6), or threw —
+    /// in every one of those cases the report falls back to <see cref="TypeSnapshot.EstimatedRetainedBytes"/>
+    /// unchanged. Only covers the type names already present in <see cref="TopDominatorTypes"/> (the
+    /// report never displays more than that), not every reachable type.
+    /// </summary>
+    IReadOnlyDictionary<string, ulong>? ExactRetainedBytesByTypeName = null) : AnalyzerDomainResult;
 
 internal sealed record HighlyReferencedObjectSnapshot(ulong Address, string TypeName, ulong Size, int IncomingReferences, ulong EstimatedRetainedBytes = 0, Evidence? Evidence = null);
 

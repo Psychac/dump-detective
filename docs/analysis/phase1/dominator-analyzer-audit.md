@@ -11,6 +11,17 @@
 >
 > **P0 Completion**: ✅ All 3 P0 items implemented (2026-08-09)
 > **P1 Completion**: ✅ All 5 P1 items implemented (P1-1 BFS exclusivity, P1-2 gen2Count surface, P1-3 Take option, P1-4 remove HeuristicOnly, P1-5 root path limits)
+> **P3 "Investigate Lengauer-Tarjan dominator tree" — ✅ RETIRED (2026-08-16)**: implemented, validated
+> end-to-end against real 3GB/25GB dumps, and wired into the report (Gen2/LOH sub-table's "Retained"
+> column now uses exact bytes when the exact path succeeds). Scope ended up broader than this item's
+> original "Gen2+LOH subgraph" framing — the exact tree covers the whole reachable heap, with
+> generation used only as a report filter (see the design doc's D1). Gated behind
+> `RetentionOptions.EnableExactDominatorTree` (default on), capped by a memory budget, and falls back
+> to this analyzer's existing BFS heuristic on cap-exceeded or failure. See
+> [dominator-tree-lengauer-tarjan.md](../phase1-redesigns/dominator-tree-lengauer-tarjan.md) (design)
+> and [dominator-tree-implementation-plan.md](../phase1-redesigns/dominator-tree-implementation-plan.md)
+> (phase-by-phase build log with real measurements). Persisting the computed tree across runs (D7)
+> remains deliberately deferred — see that design doc's Open Question 5.
 
 ---
 
@@ -423,7 +434,7 @@ output is treated as authoritative.
 | P2 | Add Gen2/LOH dominator sub-table to section builder | Medium — immediately actionable for GC investigations | Medium | High | Improvement | ✅ DONE |
 | P2 | Export `dominator.type.retained.bytes` per type in `DominatorTrendComparer` | Medium — enables retained-size regression tracking | Low | High | Improvement | ✅ DONE |
 | P3 | Address reference-count admission ordering bias (e.g., reservoir sampling, or two-pass min-heap admission) | Medium — systematic bias on large heaps | High | Medium | Improvement |
-| P3 | Investigate Lengauer-Tarjan dominator tree over Gen2+LOH subgraph | Very High — true retained bytes, competitive with dotMemory | Very High | High | Evolution |
+| P3 | Investigate Lengauer-Tarjan dominator tree over Gen2+LOH subgraph | Very High — true retained bytes, competitive with dotMemory | Very High | High | Evolution | ✅ DONE — see [dominator-tree-lengauer-tarjan.md](../phase1-redesigns/dominator-tree-lengauer-tarjan.md) / [dominator-tree-implementation-plan.md](../phase1-redesigns/dominator-tree-implementation-plan.md) |
 | P3 | Dominator chain detection (A → B → C with cumulative retained bytes) | High — root cause identification | High | Medium | Evolution |
 | P3 | Cross-type retained-overlap metric ("shared subgraph size") | Medium — explains why exclusive retained bytes are 0 for co-dominating types | High | Medium | Evolution |
 | P3 | Cap or disk-spill per-worker `_referenceCount` in parallel mode (see design sketch follow-up) | Medium — bounds K × 20 MB peak RSS at high parallelism | Medium | Medium | Improvement |

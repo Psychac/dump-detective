@@ -21,9 +21,9 @@ namespace BenchmarkSuite1
     {
         static void Main(string[] args)
         {
-            if (args.Length == 2 && args[0] == "--single-index-run")
+            if (args.Length is 2 or 3 && args[0] == "--single-index-run")
             {
-                RunSingleIndexBuild(args[1]);
+                RunSingleIndexBuild(args[1], args.Length == 3 ? args[2] : null);
                 return;
             }
 
@@ -47,13 +47,27 @@ namespace BenchmarkSuite1
         // One-shot (no warmup, no repeated iterations) baseline measurement of the disk-backed
         // Phase 1 index build, for dumps large enough that BenchmarkDotNet's multi-iteration jobs
         // are too costly to run repeatedly.
-        private static void RunSingleIndexBuild(string dumpPath)
+        // cacheDir, when supplied, redirects the index build to a scratch location instead of the
+        // dump-colocated cache.bin — used by the §D5 incremental-build-cost measurement
+        // (docs/analysis/phase1-redesigns/dominator-tree-lengauer-tarjan.md) to force a fresh build
+        // without touching a real, already-populated cache.bin next to the dump. DD_SKIP_FORWARD_INDEX_BUILD
+        // is read once into a static readonly field at type load, so comparing with/without requires
+        // two separate process invocations (set the env var before launching, not mid-run).
+        private static void RunSingleIndexBuild(string dumpPath, string? cacheDir)
         {
             if (!File.Exists(dumpPath))
                 throw new InvalidOperationException($"Dump file not found: {dumpPath}");
 
             var fileInfo = new FileInfo(dumpPath);
             Console.WriteLine($"Dump: {dumpPath} ({fileInfo.Length / (1024.0 * 1024 * 1024):F2} GB)");
+            Console.WriteLine($"DD_SKIP_FORWARD_INDEX_BUILD={Environment.GetEnvironmentVariable("DD_SKIP_FORWARD_INDEX_BUILD") ?? "(unset)"}");
+
+            if (!string.IsNullOrEmpty(cacheDir))
+            {
+                Directory.CreateDirectory(cacheDir);
+                DumpIndexPaths.ResolveCacheDirectory(dumpPath, cacheDir);
+                Console.WriteLine($"Cache dir (redirected): {cacheDir}");
+            }
 
             using DataTarget dataTarget = DataTarget.LoadDump(dumpPath);
             ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();

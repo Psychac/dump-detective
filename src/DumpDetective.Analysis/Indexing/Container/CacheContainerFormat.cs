@@ -51,6 +51,30 @@ internal enum CacheSectionId
     /// optional satellite section already has.
     /// </summary>
     SegmentIndex = 17,
+    /// <summary>
+    /// Concatenated sorted-group payloads (<c>.dat</c>) from every forward-edge bucket, back to
+    /// back in bucket order — mirrors <see cref="ReverseEdgeBuckets"/> but keyed by parent
+    /// address instead of child, and uncapped (out-degree has no hub-fanout problem the way
+    /// in-degree does — see docs/analysis/phase1-redesigns/dominator-tree-lengauer-tarjan.md §D3).
+    /// Added without a <see cref="CacheFileHeader.CurrentFormatVersion"/> bump, following
+    /// <see cref="SegmentIndex"/>'s precedent: purely additive, always-optional.
+    /// </summary>
+    ForwardEdgeBuckets = 18,
+    /// <summary>Directory-index payloads (<c>.idx</c>) for <see cref="ForwardEdgeBuckets"/>, mirroring <see cref="ReverseEdgeDirectories"/>.</summary>
+    ForwardEdgeDirectories = 19,
+    /// <summary>JSON <see cref="Indexing.ForwardIndex.ForwardIndexMetadata"/>: bucket count and per-bucket offsets/lengths into the two sections above.</summary>
+    ForwardEdgeMetadata = 20,
+    /// <summary>
+    /// Columnar <c>ulong[]</c> of reachable-node addresses, sorted, one per node in the computed
+    /// exact dominator tree (§D7 — docs/analysis/phase1-redesigns/dominator-tree-lengauer-tarjan.md).
+    /// NOT YET WIRED into the main build: <see cref="Container.CacheContainerWriter"/> is write-once
+    /// (always creates a new file), so persisting this section — computed by `DominatorAnalyzer` in
+    /// Phase 2, after Phase 1's container write already finished — requires either a full container
+    /// rewrite or a design change, still unresolved. See the design doc's Open Questions.
+    /// </summary>
+    DominatorReachableAddresses = 21,
+    /// <summary>Columnar <c>ulong[]</c> of each node's immediate-dominator address, aligned with <see cref="DominatorReachableAddresses"/>.</summary>
+    DominatorImmediateDominatorAddresses = 22,
 }
 
 /// <summary>

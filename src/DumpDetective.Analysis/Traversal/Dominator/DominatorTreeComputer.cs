@@ -48,26 +48,38 @@ internal static class DominatorTreeComputer
         // allocation, avoiding the IEnumerator<int>/yield-return allocation LengauerTarjan's DFS
         // and semidominator loop would otherwise incur once per node (tens of millions of small
         // objects at real-dump scale — see design doc's Measured Numbers).
+        // Built directly from the reduced FORWARD CSR plus per-node in-degrees. Previously LeafFolder
+        // materialised a reduced reverse CSR and this loop copied it wholesale, adding one slot per root
+        // — a third full E'-sized copy of the edge set (~61 MB on a 3.3GB dump, ~440 MB on a 25.6GB one)
+        // that existed only to gain those slots. Same counting-sort shape, one array and one pass fewer.
         var extRevOffsets = new int[n + 1];
         for (int i = 0; i < n; i++)
-        {
-            int realCount = fold.ReducedRevOffsets[i + 1] - fold.ReducedRevOffsets[i];
-            extRevOffsets[i + 1] = extRevOffsets[i] + realCount + (isRootNewId[i] ? 1 : 0);
-        }
+            extRevOffsets[i + 1] = extRevOffsets[i] + fold.ReducedInDegree[i] + (isRootNewId[i] ? 1 : 0);
 
         var extRevTargets = new int[extRevOffsets[n]];
         var extRevCursor = (int[])extRevOffsets.Clone();
+
+        // Real predecessors first, then the virtual root appended per rooted node. Slot order within a
+        // predecessor list is irrelevant to LT — the semidominator loop takes a minimum over the whole
+        // list — but keeping the previous layout means the existing dominator-tree tests remain a
+        // byte-for-byte regression check on this rewrite.
+        for (int newFrom = 0; newFrom < n; newFrom++)
+        {
+            for (int e = fold.ReducedFwdOffsets[newFrom]; e < fold.ReducedFwdOffsets[newFrom + 1]; e++)
+            {
+                int newTo = fold.ReducedFwdTargets[e];
+                extRevTargets[extRevCursor[newTo]++] = newFrom;
+            }
+        }
+
         for (int i = 0; i < n; i++)
         {
-            for (int e = fold.ReducedRevOffsets[i]; e < fold.ReducedRevOffsets[i + 1]; e++)
-                extRevTargets[extRevCursor[i]++] = fold.ReducedRevTargets[e];
             if (isRootNewId[i])
                 extRevTargets[extRevCursor[i]++] = virtualRoot;
         }
 
-        // extRevTargets is now a superset of the reduced reverse CSR, and LT queries only the extended
-        // copy. Drop the original so two E'-sized reverse arrays don't coexist for the rest of the run.
-        fold.ReleaseReducedReverseArrays();
+        // In-degrees have no reader past this point.
+        fold.ReleaseReducedInDegree();
 
         ReadOnlySpan<int> Successors(int id)
         {

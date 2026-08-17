@@ -1,3 +1,5 @@
+using System.Linq;
+
 using DumpDetective.Analysis.Traversal.Dominator;
 using DumpDetective.Core.Enums;
 
@@ -126,8 +128,7 @@ public class LeafFolderReleaseTests
         actual.NewToOldId.Should().Equal(expected.NewToOldId);
         actual.ReducedFwdOffsets.Should().Equal(expected.ReducedFwdOffsets);
         actual.ReducedFwdTargets.Should().Equal(expected.ReducedFwdTargets);
-        actual.ReducedRevOffsets.Should().Equal(expected.ReducedRevOffsets);
-        actual.ReducedRevTargets.Should().Equal(expected.ReducedRevTargets);
+        actual.ReducedInDegree.Should().Equal(expected.ReducedInDegree);
         actual.FoldedBytesByNewId.Should().Equal(expected.FoldedBytesByNewId,
             "folded-leaf bytes are attributed through the reverse CSR, which is released partway through");
     }
@@ -181,19 +182,18 @@ public class LeafFolderReleaseTests
     }
 
     [Fact]
-    public void ReleaseReducedReverseArrays_DropsOnlyTheReverseCsr()
+    public void ReleaseReducedInDegree_DropsOnlyTheInDegrees()
     {
         (ReachableGraphWalkResult walk, ulong[] sizes) = BuildWalk();
         LeafFoldResult fold = LeafFolder.Fold(
             walk.NodeCount, walk.OutDegree, walk.InDegree,
             walk.FwdOffsets, walk.FwdTargets, walk.RevOffsets, walk.RevTargets, sizes, walk.IsRoot);
 
-        fold.ReducedRevTargets.Should().NotBeEmpty();
+        fold.ReducedInDegree.Should().NotBeEmpty();
 
-        fold.ReleaseReducedReverseArrays();
+        fold.ReleaseReducedInDegree();
 
-        fold.ReducedRevOffsets.Should().BeEmpty();
-        fold.ReducedRevTargets.Should().BeEmpty();
+        fold.ReducedInDegree.Should().BeEmpty();
         // Lengauer-Tarjan reads the forward arrays for its whole run and the caller reads the id maps
         // during the retained-bytes rollup — dropping either would corrupt the tree, not just waste time.
         fold.ReducedFwdTargets.Should().NotBeEmpty();
@@ -201,5 +201,29 @@ public class LeafFolderReleaseTests
         fold.OldToNewId.Should().NotBeEmpty();
         fold.NewToOldId.Should().NotBeEmpty();
         fold.FoldedBytesByNewId.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void Fold_ReducedInDegree_MatchesTheReducedForwardCsr()
+    {
+        // The extended reverse CSR DominatorTreeComputer builds is sized entirely from these counts, so
+        // if they disagreed with the forward CSR the extended array would be mis-sized and either
+        // overflow or leave gaps. Fold no longer materialises a reverse CSR to cross-check against, so
+        // this invariant is asserted directly.
+        (ReachableGraphWalkResult walk, ulong[] sizes) = BuildWalk();
+        LeafFoldResult fold = LeafFolder.Fold(
+            walk.NodeCount, walk.OutDegree, walk.InDegree,
+            walk.FwdOffsets, walk.FwdTargets, walk.RevOffsets, walk.RevTargets, sizes, walk.IsRoot);
+
+        var recounted = new int[fold.ReducedNodeCount];
+        for (int from = 0; from < fold.ReducedNodeCount; from++)
+        {
+            for (int e = fold.ReducedFwdOffsets[from]; e < fold.ReducedFwdOffsets[from + 1]; e++)
+                recounted[fold.ReducedFwdTargets[e]]++;
+        }
+
+        fold.ReducedInDegree.Should().Equal(recounted);
+        fold.ReducedInDegree.Sum().Should().Be(fold.ReducedFwdTargets.Length,
+            "every reduced edge contributes exactly one in-degree");
     }
 }

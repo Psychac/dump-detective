@@ -1,18 +1,6 @@
 namespace DumpDetective.Analysis.Traversal.Dominator;
 
 /// <summary>
-/// §D8: excludes single-parent leaves (out-degree 0, in-degree 1 — "foldable") from the node set
-/// fed to Lengauer-Tarjan, folding each one's shallow size into its sole parent's accumulator
-/// instead of giving it a full node/LT-array slot. Purely graph-structural — no
-/// <c>MethodTableHasOutgoingRefs</c>/type-metadata lookup needed, just the degree arrays
-/// <see cref="ReachableGraphWalker"/> already builds. Nodes with out-degree 0 and in-degree &gt;1
-/// (shared leaves) are never folded — determining their <c>idom</c> is exactly what LT's
-/// semidominator computation exists to do, and no local rule can substitute for it.
-///
-/// Operates on plain arrays (no <c>ReachableGraph</c>/ClrHeap dependency), so it's directly
-/// unit-testable with hand-built graphs, same pattern as <c>LengauerTarjanTests</c>.
-/// </summary>
-/// <summary>
 /// <see cref="LeafFolder.Fold"/>'s inputs, behind a holder that can drop each group the moment Fold
 /// stops reading it. Fold allocates a complete reduced CSR (2 x E' ints) while the original CSR
 /// (2 x E ints) is still reachable, and that overlap is the peak of the whole exact-tree path —
@@ -110,6 +98,19 @@ internal sealed class ArrayFoldInputs : IFoldInputs
     }
 }
 
+/// <summary>
+/// §D8: excludes single-parent leaves (out-degree 0, in-degree 1 — "foldable") from the node set
+/// fed to Lengauer-Tarjan, folding each one's shallow size into its sole parent's accumulator
+/// instead of giving it a full node/LT-array slot. Purely graph-structural — no
+/// <c>MethodTableHasOutgoingRefs</c>/type-metadata lookup needed, just the degree arrays
+/// <see cref="ReachableGraphWalker"/> already builds. Nodes with out-degree 0 and in-degree &gt;1
+/// (shared leaves) are never folded — determining their <c>idom</c> is exactly what LT's
+/// semidominator computation exists to do, and no local rule can substitute for it.
+///
+/// Reads its inputs through <see cref="IFoldInputs"/> rather than as loose arrays, so it can hand each
+/// group back at the point it stops needing it; still unit-testable with hand-built graphs via
+/// <see cref="ArrayFoldInputs"/> and the convenience overload, same pattern as <c>LengauerTarjanTests</c>.
+/// </summary>
 internal static class LeafFolder
 {
     /// <summary>
@@ -264,8 +265,8 @@ internal static class LeafFolder
             }
         }
 
-        // Original forward CSR fully consumed. This is the release that matters most: it happens
-        // immediately before reducedRevTargets (another E'-sized array) is allocated below.
+        // Original forward CSR fully consumed — the release that matters most, since it hands back
+        // 4(N+1)+4E bytes right at the peak.
         bool probe = Environment.GetEnvironmentVariable("DD_PERF_DOMINATOR_PEAK") == "1";
         long liveBeforeRelease = probe ? CompactAndMeasure() : 0;
 
@@ -283,8 +284,8 @@ internal static class LeafFolder
                 $"holder={inputs.GetType().Name})");
         }
 
-        // Gated peak-live probe. This is the structural peak of the whole exact-tree path: the reduced
-        // forward CSR is fully built and the equally-large reduced reverse CSR is about to be allocated.
+        // Gated peak-live probe at the structural peak of the whole exact-tree path: the reduced
+        // forward CSR is fully built and every original input has just been released.
         // Forces a full collection so the figure is actual *live* bytes rather than heap size inflated
         // by uncollected garbage — which is the only way to see the effect of releasing inputs early,
         // since that changes reachability, not allocation totals. Expensive by design, hence the gate.
@@ -300,35 +301,24 @@ internal static class LeafFolder
             GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
 
             Console.Error.WriteLine(
-                $"[PERF] LeafFolder peak-live before reduced reverse CSR: " +
+                $"[PERF] LeafFolder peak-live at reduced-CSR completion: " +
                 $"{GC.GetTotalMemory(forceFullCollection: false) / (1024.0 * 1024):N1} MB live " +
                 $"(N={nodeCount:N0}, N'={reducedNodeCount:N0}, E'={reducedEdgeCount:N0}, " +
                 $"holder={inputs.GetType().Name})");
         }
 
-        var reducedRevOffsets = new int[reducedNodeCount + 1];
-        for (int newId = 0; newId < reducedNodeCount; newId++)
-            reducedRevOffsets[newId + 1] = reducedRevOffsets[newId] + reducedInDegree[newId];
-
-        var reducedRevTargets = new int[reducedEdgeCount];
-        var revCursor = (int[])reducedRevOffsets.Clone();
-        for (int newFrom = 0; newFrom < reducedNodeCount; newFrom++)
-        {
-            for (int e = reducedFwdOffsets[newFrom]; e < reducedFwdOffsets[newFrom + 1]; e++)
-            {
-                int newTo = reducedFwdTargets[e];
-                reducedRevTargets[revCursor[newTo]++] = newFrom;
-            }
-        }
-
+        // No reduced *reverse* CSR is built here. It used to be, and its only consumer immediately
+        // copied it into a virtual-root-extended version — a third full E'-sized copy of the edge set
+        // whose sole purpose was to gain one extra slot per GC root. Emitting the in-degrees instead
+        // lets DominatorTreeComputer build the extended CSR directly in a single counting-sort pass,
+        // dropping both an E'-sized array and a full pass over it.
         return new LeafFoldResult(
             reducedNodeCount,
             oldToNewId,
             newToOldId,
             reducedFwdOffsets,
             reducedFwdTargets,
-            reducedRevOffsets,
-            reducedRevTargets,
+            reducedInDegree,
             foldedBytesByNewId);
     }
 }
@@ -343,8 +333,15 @@ internal sealed class LeafFoldResult
     public int[] NewToOldId { get; }
     public int[] ReducedFwdOffsets { get; }
     public int[] ReducedFwdTargets { get; }
-    public int[] ReducedRevOffsets { get; private set; }
-    public int[] ReducedRevTargets { get; private set; }
+
+    /// <summary>
+    /// Incoming-edge count per reduced node — enough for <see cref="DominatorTreeComputer"/> to build the
+    /// virtual-root-extended reverse CSR in one counting-sort pass over the reduced forward CSR. Emitted
+    /// instead of a materialised reduced reverse CSR, which was an E'-sized array whose only consumer
+    /// immediately copied it into that extended form.
+    /// </summary>
+    public int[] ReducedInDegree { get; private set; }
+
     /// <summary>
     /// Extra shallow-size bytes folded into each surviving node from its foldable-leaf children,
     /// indexed by new id — add to the node's own subtree sum during the retained-bytes rollup.
@@ -352,19 +349,13 @@ internal sealed class LeafFoldResult
     public ulong[] FoldedBytesByNewId { get; }
 
     /// <summary>
-    /// Drops the reduced reverse CSR once <see cref="DominatorTreeComputer"/> has folded it into the
-    /// virtual-root-extended copy Lengauer-Tarjan actually queries. Nothing reads
-    /// <see cref="ReducedRevOffsets"/>/<see cref="ReducedRevTargets"/> after that point, but this object
-    /// stays rooted for the whole computation (LT reads the *forward* arrays throughout, and the caller
-    /// reads the id maps), so without this the E'-sized reverse arrays sit alive and unused alongside
-    /// the extended copy of themselves. Replaces with <see cref="Array.Empty{T}"/> rather than nulling
-    /// so the properties stay non-nullable, matching <c>ReachableGraph</c>'s pattern.
+    /// Drops <see cref="ReducedInDegree"/> once the extended reverse CSR is built. Only N'-sized rather
+    /// than E'-sized, but this object stays rooted for the whole computation (LT reads the forward arrays
+    /// throughout, and the caller reads the id maps during the rollup), so an unused array here survives
+    /// to the end of the run. Replaces with <see cref="Array.Empty{T}"/> rather than nulling so the
+    /// property stays non-nullable, matching <c>ReachableGraph</c>'s pattern.
     /// </summary>
-    internal void ReleaseReducedReverseArrays()
-    {
-        ReducedRevOffsets = Array.Empty<int>();
-        ReducedRevTargets = Array.Empty<int>();
-    }
+    internal void ReleaseReducedInDegree() => ReducedInDegree = Array.Empty<int>();
 
     public LeafFoldResult(
         int reducedNodeCount,
@@ -372,8 +363,7 @@ internal sealed class LeafFoldResult
         int[] newToOldId,
         int[] reducedFwdOffsets,
         int[] reducedFwdTargets,
-        int[] reducedRevOffsets,
-        int[] reducedRevTargets,
+        int[] reducedInDegree,
         ulong[] foldedBytesByNewId)
     {
         ReducedNodeCount = reducedNodeCount;
@@ -381,8 +371,7 @@ internal sealed class LeafFoldResult
         NewToOldId = newToOldId;
         ReducedFwdOffsets = reducedFwdOffsets;
         ReducedFwdTargets = reducedFwdTargets;
-        ReducedRevOffsets = reducedRevOffsets;
-        ReducedRevTargets = reducedRevTargets;
+        ReducedInDegree = reducedInDegree;
         FoldedBytesByNewId = foldedBytesByNewId;
     }
 }

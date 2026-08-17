@@ -488,6 +488,34 @@ ceiling more cheaply than raising the budget does.
 the reduced reverse CSR into the virtual-root-extended copy LT actually queries, after which the original
 is dead but stays rooted through the result object for the whole run.
 
+#### 5.1b Also removed: the reduced reverse CSR nobody needed
+
+`LeafFolder` built a reduced reverse CSR whose **only** consumer immediately copied it into a
+virtual-root-extended version, gaining one extra slot per GC root. A third full E'-sized copy of the edge
+set existed purely for those slots.
+
+`Fold` now emits `ReducedInDegree` (N'-sized) instead, and `DominatorTreeComputer` builds the extended CSR
+directly from the reduced *forward* CSR in a single counting-sort pass — the same shape as before, one
+array and one full pass fewer. Slot layout is preserved exactly (real predecessors, then the virtual root),
+which keeps the existing dominator-tree tests a byte-for-byte regression check on the rewrite rather than
+merely a smoke test.
+
+| | Predicted | Measured |
+|---|---:|---:|
+| `reducedRevOffsets` 4N' + `reducedRevTargets` 4E' + `revCursor` 4N' | 93.1 MB | **93.1 MB** |
+
+Allocation for the exact path: 2,003,773,536 → **1,906,197,568 bytes**. Peak live falls by the same
+amount, because the removed arrays were simultaneously live with the extended copy of themselves.
+`ReleaseReducedInDegree()` drops the remaining N'-sized array once the extended CSR is built.
+
+On the 25.6 GB dump the same expression is **~690 MB** (8 x 31.21M + 4 x 109.9M), bringing item 5's two
+parts to roughly **2.7 GB** of combined peak-live reduction at that scale.
+
+One coverage note: with no reverse CSR materialised, `ReducedInDegree` no longer has a sibling array to be
+implicitly cross-checked against, and the extended CSR is sized entirely from those counts — a
+disagreement would mis-size it and either overflow or leave gaps. That invariant is now asserted directly
+(`Fold_ReducedInDegree_MatchesTheReducedForwardCsr` recounts in-degrees from the forward CSR).
+
 #### Measuring this at all required LOH compaction
 
 The first probe reported identical numbers for both arms even before the design flaw was understood,
@@ -730,10 +758,10 @@ decision, not a drive-by. Tracked in § 8.
    from the stage model and the design doc's original figures, not re-run since the allocation fixes and
    the new budget model. It is the one dump that exercises the parts of § 5 that matter most, and the
    budget was raised specifically so it stays on the exact path.
-5. ~~Lower peak live by releasing Fold's inputs early.~~ **DONE — see § 5.1.** Peak live at the
-   structural peak dropped **2,183.5 MB → 1,949.0 MB (-234.5 MB, -10.7%)** on the 3.3 GB dump, scaling to
-   ~2.0 GB on the 25.6 GB dump. Still open on the same theme: `extRevTargets` is a third full copy of the
-   reverse edge array, now released immediately after it is built but still allocated in the first place.
+5. ~~Lower peak live: release Fold's inputs early, and stop building the redundant reverse CSR.~~
+   **DONE — see § 5.1 and § 5.1b.** Peak live at the structural peak dropped **2,183.5 MB → 1,949.0 MB**
+   (-234.5 MB) and a further **93.1 MB** of allocation and peak went with the removed intermediate CSR
+   (2,003,773,536 → 1,906,197,568 bytes allocated). Roughly **2.7 GB** combined at 25.6 GB-dump scale.
 6. **`ChunkedBuffer.ToArray()` second copies (~87 MB)** — the CSR build could consume the chunks
    directly rather than materializing a flat copy while the chunks are still rooted.
 7. **`GenerationTag : byte` (~20 MB)** — 8-member enum currently costing 4 bytes/node.

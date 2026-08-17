@@ -35,44 +35,40 @@ internal class ReverseEdgeSorter
     {
         var stopwatch = Stopwatch.StartNew();
         long completed = 0;
+        var results = new BucketSortResult[bucketCount];
 
-        var sortTasks = Enumerable.Range(0, bucketCount)
-            .Select(i => SortBucketAsync(cacheDir, i, bucketCount, truncatedChildrenPerBucket?[i], ct, progress, stopwatch, result =>
+        // Bounded concurrency: each bucket loads up to MaxBucketSize (600MB) of raw edges fully
+        // into memory to sort. The previous Task.WhenAll ran every bucket simultaneously with no
+        // cap — on a dump with many buckets that's an unbounded multiple of 600MB resident at
+        // once. Capping at a small fixed degree of parallelism bounds peak transient memory to a
+        // predictable ceiling regardless of bucket count, mirroring
+        // DiskBackedObjectIndexWriter's own segment-parallelism cap.
+        int maxParallelism = Math.Min(Environment.ProcessorCount, 4);
+
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, bucketCount),
+            new ParallelOptions { MaxDegreeOfParallelism = maxParallelism, CancellationToken = ct },
+            async (i, token) =>
             {
+                BucketSortResult result = await Task.Run(
+                    () => SortBucketCore(cacheDir, i, bucketCount, truncatedChildrenPerBucket?[i], progress, stopwatch), token);
+                results[i] = result;
+
                 long done = Interlocked.Increment(ref completed);
                 long totalMb = (result.DataFileSize + result.DirectoryFileSize) / (1024 * 1024);
                 progress?.Report(new AnalyzerProgressReport(0, "sorting reverse-index buckets",
                     Detail: $"{done}/{bucketCount} buckets done (bucket {i + 1}: {result.EdgeCount:N0} edges, {totalMb:N0} MB, {result.ElapsedMs / 1000.0:F1}s)",
                     Elapsed: stopwatch.Elapsed));
-            }))
-            .ToArray();
-
-        var results = await Task.WhenAll(sortTasks);
+            });
 
         return new ReverseIndexSortResult
         {
             BucketDataSizes = results.Select(r => r.DataFileSize).ToList(),
             BucketDirectorySizes = results.Select(r => r.DirectoryFileSize).ToList(),
             BucketElapsedMs = results.Select(r => r.ElapsedMs).ToList(),
-            TotalElapsedMs = results.Max(r => r.ElapsedMs),
-            PeakMemoryMb = results.Max(r => r.PeakMemoryMb),
+            TotalElapsedMs = results.Length == 0 ? 0 : results.Max(r => r.ElapsedMs),
+            PeakMemoryMb = results.Length == 0 ? 0 : results.Max(r => r.PeakMemoryMb),
         };
-    }
-
-    private async Task<BucketSortResult> SortBucketAsync(
-        string cacheDir,
-        int bucketIdx,
-        int bucketCount,
-        IReadOnlySet<ulong>? truncatedChildren,
-        CancellationToken ct,
-        IProgress<AnalyzerProgressReport>? progress,
-        Stopwatch stopwatch,
-        Action<BucketSortResult> onCompleted)
-    {
-        BucketSortResult result = await Task.Run(
-            () => SortBucketCore(cacheDir, bucketIdx, bucketCount, truncatedChildren, progress, stopwatch), ct);
-        onCompleted(result);
-        return result;
     }
 
     private BucketSortResult SortBucketCore(
@@ -147,28 +143,30 @@ internal class ReverseEdgeSorter
             {
                 var child = children[i];
                 var groupStartOffset = currentOffset;
-                var parents = new List<ulong>();
 
-                // Collect all parents for this child
+                // The arrays are already sorted by child (B2 above), so every parent for this
+                // child is already a contiguous run [i, groupEnd) in `parentAddrs` — no need to
+                // copy it into a fresh List<ulong> first (that would allocate one list per unique
+                // child; with millions of unique children in a large bucket, that's millions of
+                // small heap objects for data that's already sitting right where we need it).
+                int groupStart = i;
                 while (i < children.Length && children[i] == child)
-                {
-                    parents.Add(parentAddrs[i]);
                     i++;
-                }
+                int groupCount = i - groupStart;
 
                 // Write group: [child:8][count:4][truncated:1][pad:3][parents:8*count]
-                bool truncated = parents.Count > ReverseIndexConstants.MaxParentsPerChild
+                bool truncated = groupCount > ReverseIndexConstants.MaxParentsPerChild
                     || (truncatedChildren?.Contains(child) ?? false);
 
                 bw.Write(child);
-                bw.Write(parents.Count);
+                bw.Write(groupCount);
                 bw.Write(truncated);
                 bw.Write(pad3);
 
-                foreach (var parent in parents)
-                    bw.Write(parent);
+                for (int k = groupStart; k < groupStart + groupCount; k++)
+                    bw.Write(parentAddrs[k]);
 
-                currentOffset += 16 + (8L * parents.Count); // 8(child) + 4(count) + 1(truncated) + 3(pad) + 8*count(parents)
+                currentOffset += 16 + (8L * groupCount); // 8(child) + 4(count) + 1(truncated) + 3(pad) + 8*count(parents)
 
                 // Add directory entry
                 dirEntries.Add((child, groupStartOffset));

@@ -1,6 +1,16 @@
 namespace DumpDetective.Analysis.Traversal;
 
 /// <summary>
+/// Neighbor lookup for <see cref="LengauerTarjan"/> — returns a <see cref="ReadOnlySpan{T}"/> over
+/// whatever backing array the caller already owns (typically a CSR target-array slice), so
+/// <c>foreach</c> over the result compiles to a plain indexed loop with no <c>IEnumerator&lt;T&gt;</c>
+/// allocation. A regular (non-generic) delegate can carry a <c>ref struct</c> return type like
+/// <see cref="ReadOnlySpan{T}"/> without issue — only generic delegates such as <c>Func&lt;,&gt;</c>
+/// can't.
+/// </summary>
+internal delegate ReadOnlySpan<int> NeighborsFunc(int id);
+
+/// <summary>
 /// Classic iterative Lengauer-Tarjan dominator-tree algorithm (the "simple", O(E log V) path-
 /// compression variant — not the Sparse Evaluation Graph optimization, unnecessary at the node
 /// counts this project targets; see
@@ -8,10 +18,9 @@ namespace DumpDetective.Analysis.Traversal;
 /// <c>int</c> node ids with injected successor/predecessor functions — deliberately heap-agnostic
 /// (no <c>ClrObject</c>/<c>ClrHeap</c> dependency) so it is unit-testable with small hand-built
 /// graphs, matching the pattern established by <see cref="BidirectionalGraphSearch"/>. The
-/// production caller (not yet wired — see the design doc's rollout plan) supplies successors from
-/// the packed CSR forward array and predecessors from the packed CSR reverse array built by the
-/// single-pass reachability walk (<c>tools/DominatorSpike ... packed1</c>), not by re-walking
-/// <c>ClrObject</c> fields here.
+/// production caller supplies successors from the packed CSR forward array and predecessors from
+/// the packed CSR reverse array built by the single-pass reachability walk — see
+/// <see cref="Dominator.DominatorTreeComputer"/>.
 /// </summary>
 internal static class LengauerTarjan
 {
@@ -35,8 +44,8 @@ internal static class LengauerTarjan
     public static int[] ComputeImmediateDominators(
         int nodeCount,
         int root,
-        Func<int, IEnumerable<int>> successors,
-        Func<int, IEnumerable<int>> predecessors)
+        NeighborsFunc successors,
+        NeighborsFunc predecessors)
     {
         var idomByNode = new int[nodeCount];
         Array.Fill(idomByNode, -1);
@@ -54,32 +63,48 @@ internal static class LengauerTarjan
         var dfsParentByDfs = new int[nodeCount];
 
         int n = 0;
-        var dfsStack = new Stack<(int Node, IEnumerator<int> Successors)>();
+        // Explicit (node, cursor) stack instead of (node, IEnumerator<int>) — re-deriving the
+        // ReadOnlySpan<int> from `successors(node)` on each step is just an offset/length lookup
+        // (no allocation), unlike an IEnumerator<int> which needs a heap object to carry its
+        // resumable state. A ReadOnlySpan itself can't be stored in a Stack<T> (ref struct), so the
+        // cursor position is all that needs to persist.
+        var stackNode = new int[nodeCount + 1];
+        var stackCursor = new int[nodeCount + 1];
+        int sp = 0;
 
         dfsNumByNode[root] = n;
         vertexByDfs[n] = root;
         dfsParentByDfs[n] = -1;
         n++;
-        dfsStack.Push((root, successors(root).GetEnumerator()));
+        stackNode[sp] = root;
+        stackCursor[sp] = 0;
+        sp++;
 
-        while (dfsStack.Count > 0)
+        while (sp > 0)
         {
-            (int node, IEnumerator<int> iter) = dfsStack.Peek();
-            if (iter.MoveNext())
+            int node = stackNode[sp - 1];
+            ReadOnlySpan<int> neighbors = successors(node);
+            int cursor = stackCursor[sp - 1];
+
+            if (cursor < neighbors.Length)
             {
-                int child = iter.Current;
+                int child = neighbors[cursor];
+                stackCursor[sp - 1] = cursor + 1;
+
                 if (dfsNumByNode[child] == -1)
                 {
                     dfsNumByNode[child] = n;
                     vertexByDfs[n] = child;
                     dfsParentByDfs[n] = dfsNumByNode[node];
                     n++;
-                    dfsStack.Push((child, successors(child).GetEnumerator()));
+                    stackNode[sp] = child;
+                    stackCursor[sp] = 0;
+                    sp++;
                 }
             }
             else
             {
-                dfsStack.Pop();
+                sp--;
             }
         }
 
@@ -138,8 +163,10 @@ internal static class LengauerTarjan
             int w = vertexByDfs[wDfs];
             int wParentDfs = dfsParentByDfs[wDfs];
 
-            foreach (int v in predecessors(w))
+            ReadOnlySpan<int> preds = predecessors(w);
+            for (int p = 0; p < preds.Length; p++)
             {
+                int v = preds[p];
                 int vDfs = dfsNumByNode[v];
                 if (vDfs == -1)
                     continue; // predecessor not reachable from root — irrelevant to dominance here

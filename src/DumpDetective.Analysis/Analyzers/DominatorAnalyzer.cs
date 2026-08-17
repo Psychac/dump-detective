@@ -1,6 +1,7 @@
 using System.Diagnostics;
 
 using DumpDetective.Analysis.Cache;
+using DumpDetective.Analysis.Diagnostics;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Traversal;
 using DumpDetective.Analysis.Traversal.Dominator;
@@ -83,13 +84,20 @@ public sealed class DominatorAnalyzer : IAnalyzer
 
         RetentionOptions options = context.AnalysisOptions.MemoryLeak;
         ExecutionPolicy policy = context.AnalysisOptions.ExecutionPolicy;
+        bool diag = context.Diagnostics.EnableMemoryDiagnostics;
+
+        if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: entry", Console.Out);
 
         IBackwardReferenceProvider? reverseIndex = context.Cache.TryGetReverseIndexProvider();
         LeakSignals signals = reverseIndex is not null
             ? BuildLeakSignalsFromReverseIndex(context.Heap, context.Cache, reverseIndex, options, context.Progress)
             : AnalyzeObjectsPass(context.Heap, context.Cache, options, policy, context.Progress);
 
+        if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: leak signals built", Console.Out);
+
         AnalyzerDomainResult result = Analyze(context.Heap, context.Cache, options, signals, cancellationToken).Stamp(this);
+
+        if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: heuristic pass done", Console.Out);
 
         // §D9-gated exact Lengauer-Tarjan computation. Always logs a comparison against the
         // heuristic above; on success also attaches an exact per-type retained-bytes lookup that
@@ -100,10 +108,12 @@ public sealed class DominatorAnalyzer : IAnalyzer
         // the heuristic built it, same safety property "ship dark" (Phase 5) established.
         if (options.EnableExactDominatorTree && result is DominatorDomainResult heuristicResult)
         {
-            IReadOnlyDictionary<string, ulong>? exactByType = TryComputeExactDominatorTree(context.Heap, context.Cache, options, heuristicResult, cancellationToken);
+            IReadOnlyDictionary<string, ulong>? exactByType = TryComputeExactDominatorTree(context.Heap, context.Cache, options, heuristicResult, diag, cancellationToken);
             if (exactByType is not null)
                 result = heuristicResult with { ExactRetainedBytesByTypeName = exactByType };
         }
+
+        if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: exact path done", Console.Out);
 
         return ValueTask.FromResult(result);
     }
@@ -113,6 +123,7 @@ public sealed class DominatorAnalyzer : IAnalyzer
         IHeapAnalysisCache cache,
         RetentionOptions options,
         DominatorDomainResult heuristicResult,
+        bool diag,
         CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -129,8 +140,12 @@ public sealed class DominatorAnalyzer : IAnalyzer
                 return null;
             }
 
+            if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: reachable graph built", Console.Out);
+
             DominatorTreeComputeResult tree = DominatorTreeComputer.Compute(graph, cancellationToken);
             stopwatch.Stop();
+
+            if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: LT tree computed (fold+idom+rollup)", Console.Out);
 
             // tree.Idom has length VirtualRoot+1 (LT's array includes the virtual root's own slot),
             // but tree.RetainedBytes only covers the real (reduced-id) nodes 0..VirtualRoot-1 — stop
@@ -174,6 +189,8 @@ public sealed class DominatorAnalyzer : IAnalyzer
                     exactByTypeName[candidate.TypeName] = exactRetained;
                 }
             }
+
+            if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: per-type exact rollup done", Console.Out);
 
             _logger?.LogInformation(
                 "Exact dominator tree computed in {ElapsedMs:N0} ms: {NodeCount:N0} reachable nodes " +

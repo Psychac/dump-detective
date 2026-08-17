@@ -22,19 +22,31 @@ internal sealed class ForwardEdgeSorter
     {
         var stopwatch = Stopwatch.StartNew();
         long completed = 0;
+        var results = new BucketSortResult[bucketCount];
 
-        var sortTasks = Enumerable.Range(0, bucketCount)
-            .Select(i => SortBucketAsync(cacheDir, i, bucketCount, ct, progress, stopwatch, result =>
+        // Bounded concurrency: each bucket loads up to MaxBucketSize (600MB) of raw edges fully
+        // into memory to sort. The previous Task.WhenAll ran every bucket simultaneously with no
+        // cap — on a dump with many buckets that's an unbounded multiple of 600MB resident at
+        // once. Capping at a small fixed degree of parallelism bounds peak transient memory to a
+        // predictable ceiling regardless of bucket count, mirroring
+        // DiskBackedObjectIndexWriter's own segment-parallelism cap.
+        int maxParallelism = Math.Min(Environment.ProcessorCount, 4);
+
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, bucketCount),
+            new ParallelOptions { MaxDegreeOfParallelism = maxParallelism, CancellationToken = ct },
+            async (i, token) =>
             {
+                BucketSortResult result = await Task.Run(
+                    () => SortBucketCore(cacheDir, i, bucketCount, progress, stopwatch), token);
+                results[i] = result;
+
                 long done = Interlocked.Increment(ref completed);
                 long totalMb = (result.DataFileSize + result.DirectoryFileSize) / (1024 * 1024);
                 progress?.Report(new AnalyzerProgressReport(0, "sorting forward-index buckets",
                     Detail: $"{done}/{bucketCount} buckets done (bucket {i + 1}: {result.EdgeCount:N0} edges, {totalMb:N0} MB, {result.ElapsedMs / 1000.0:F1}s)",
                     Elapsed: stopwatch.Elapsed));
-            }))
-            .ToArray();
-
-        var results = await Task.WhenAll(sortTasks);
+            });
 
         return new ForwardIndexSortResult
         {
@@ -43,21 +55,6 @@ internal sealed class ForwardEdgeSorter
             TotalElapsedMs = results.Length == 0 ? 0 : results.Max(r => r.ElapsedMs),
             PeakMemoryMb = results.Length == 0 ? 0 : results.Max(r => r.PeakMemoryMb),
         };
-    }
-
-    private async Task<BucketSortResult> SortBucketAsync(
-        string cacheDir,
-        int bucketIdx,
-        int bucketCount,
-        CancellationToken ct,
-        IProgress<AnalyzerProgressReport>? progress,
-        Stopwatch stopwatch,
-        Action<BucketSortResult> onCompleted)
-    {
-        BucketSortResult result = await Task.Run(
-            () => SortBucketCore(cacheDir, bucketIdx, bucketCount, progress, stopwatch), ct);
-        onCompleted(result);
-        return result;
     }
 
     private BucketSortResult SortBucketCore(
@@ -118,22 +115,26 @@ internal sealed class ForwardEdgeSorter
             {
                 ulong parent = parents[i];
                 long groupStartOffset = currentOffset;
-                var groupChildren = new List<ulong>();
 
+                // The arrays are already sorted by parent (Array.Sort above), so every child of
+                // this parent is already a contiguous run [groupStart, i) in `children` — no need
+                // to copy it into a fresh List<ulong> first (that would allocate one list per
+                // unique parent; with potentially millions of unique parents in a large bucket,
+                // that's millions of small heap objects for data that's already sitting right
+                // where we need it).
+                int groupStart = i;
                 while (i < parents.Length && parents[i] == parent)
-                {
-                    groupChildren.Add(children[i]);
                     i++;
-                }
+                int groupCount = i - groupStart;
 
                 // [parent:8][count:4][children:8*count] — no truncated flag/padding, this index
                 // is never capped (§ForwardIndexConstants).
                 bw.Write(parent);
-                bw.Write(groupChildren.Count);
-                foreach (ulong child in groupChildren)
-                    bw.Write(child);
+                bw.Write(groupCount);
+                for (int k = groupStart; k < groupStart + groupCount; k++)
+                    bw.Write(children[k]);
 
-                currentOffset += 12 + (8L * groupChildren.Count);
+                currentOffset += 12 + (8L * groupCount);
                 dirEntries.Add((parent, groupStartOffset));
 
                 if (progress is not null && i - lastWriteProgressReportEdge >= 2_000_000)

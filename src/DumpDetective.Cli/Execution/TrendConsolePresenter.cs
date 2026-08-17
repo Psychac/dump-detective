@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 using DumpDetective.Cli.Console;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Services;
@@ -105,8 +107,7 @@ internal static class TrendConsolePresenter
 
     public static void PrintMemorySummary(
         IReadOnlyList<TrendDumpExecution> executions,
-        IReadOnlyList<(string StageName, AnalyzerMemoryStats Stats)> trendStageMemoryStats,
-        IReadOnlyList<AnalyzerRunResult>? allRuns = null)
+        IReadOnlyList<(string StageName, AnalyzerMemoryStats Stats)> trendStageMemoryStats)
     {
         var allStageRows = new List<(string StageName, AnalyzerMemoryStats Stats)>();
         foreach (TrendDumpExecution execution in executions)
@@ -157,25 +158,14 @@ internal static class TrendConsolePresenter
         long baseline = allStageRows.Count > 0
             ? allStageRows[0].Stats.WorkingSetBefore
             : executions.SelectMany(e => e.Runs).FirstOrDefault(r => r.MemoryStats is not null)?.MemoryStats?.WorkingSetBefore ?? 0;
-        long peakFromStages = allStageRows.Count > 0 ? allStageRows.Max(e => e.Stats.WorkingSetAfter) : 0;
-        long peakFromAnalyzers = 0;
-        if (allRuns is not null)
-        {
-            foreach (var r in allRuns)
-            {
-                if (r.MemoryStats is null) continue;
-                if (r.MemoryStats.WorkingSetAfter > peakFromAnalyzers) peakFromAnalyzers = r.MemoryStats.WorkingSetAfter;
-            }
-        }
-        else
-        {
-            foreach (var r in executions.SelectMany(e => e.Runs))
-            {
-                if (r.MemoryStats is null) continue;
-                if (r.MemoryStats.WorkingSetAfter > peakFromAnalyzers) peakFromAnalyzers = r.MemoryStats.WorkingSetAfter;
-            }
-        }
-        long peak = Math.Max(peakFromStages, peakFromAnalyzers);
+
+        // Process.PeakWorkingSet64 is the OS-tracked historical maximum for this process's whole
+        // lifetime, continuously updated by the kernel — see SingleDumpConsolePresenter.PrintMemorySummary
+        // for why the previous "max of WorkingSetAfter across stage/analyzer checkpoints" approach
+        // silently missed spikes that rose and fell within a single analyzer's run.
+        Process currentProcess = Process.GetCurrentProcess();
+        currentProcess.Refresh();
+        long peak = currentProcess.PeakWorkingSet64;
 
         if (peak > 0)
             ConsoleUx.MemoryTableFooter(peak, baseline);

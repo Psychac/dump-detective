@@ -12,23 +12,33 @@ public class LengauerTarjanTests
     /// Builds forward/backward neighbor functions from a dense-int-id edge list (parent -> child),
     /// mirroring <see cref="BidirectionalGraphSearchTests"/>'s helper. Backward is the exact
     /// inverse — matching the design doc's requirement that LT's predecessor function be
-    /// true/uncapped, never a fanout-truncated index.
+    /// true/uncapped, never a fanout-truncated index. Returns arrays (captured by the closures
+    /// below) rather than <c>List&lt;int&gt;[]</c> directly, matching <see cref="NeighborsFunc"/>'s
+    /// allocation-free <see cref="ReadOnlySpan{T}"/> contract.
     /// </summary>
-    private static (Func<int, IEnumerable<int>> Successors, Func<int, IEnumerable<int>> Predecessors) BuildGraph(
+    private static (NeighborsFunc Successors, NeighborsFunc Predecessors) BuildGraph(
         int nodeCount, params (int Parent, int Child)[] edges)
     {
-        var forward = new List<int>[nodeCount];
-        var backward = new List<int>[nodeCount];
+        var forwardLists = new List<int>[nodeCount];
+        var backwardLists = new List<int>[nodeCount];
         for (int i = 0; i < nodeCount; i++)
         {
-            forward[i] = new List<int>();
-            backward[i] = new List<int>();
+            forwardLists[i] = new List<int>();
+            backwardLists[i] = new List<int>();
         }
 
         foreach ((int parent, int child) in edges)
         {
-            forward[parent].Add(child);
-            backward[child].Add(parent);
+            forwardLists[parent].Add(child);
+            backwardLists[child].Add(parent);
+        }
+
+        var forward = new int[nodeCount][];
+        var backward = new int[nodeCount][];
+        for (int i = 0; i < nodeCount; i++)
+        {
+            forward[i] = forwardLists[i].ToArray();
+            backward[i] = backwardLists[i].ToArray();
         }
 
         return (n => forward[n], n => backward[n]);

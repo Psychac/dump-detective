@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 using DumpDetective.Analysis.Insight;
 using DumpDetective.Cli.Console;
 using DumpDetective.Core.Models;
@@ -31,7 +33,6 @@ internal static class SingleDumpConsolePresenter
         // ── Analyzer table ───────────────────────────────────────────────────
         bool printedAnyAnalyzerRow = false;
         long firstRunWorkingSetBefore = 0;
-        long peakFromAnalyzers = 0;
 
         foreach (AnalyzerRunResult run in runs)
         {
@@ -47,7 +48,6 @@ internal static class SingleDumpConsolePresenter
 
             AnalyzerMemoryStats s = run.MemoryStats;
             ConsoleUx.MemoryTableRow(run.AnalyzerName, s.WorkingSetDelta, s.WorkingSetAfter, s.ManagedHeapDelta);
-            if (s.WorkingSetAfter > peakFromAnalyzers) peakFromAnalyzers = s.WorkingSetAfter;
         }
 
         // ── Process peak across all measured scopes ──────────────────────────
@@ -55,8 +55,17 @@ internal static class SingleDumpConsolePresenter
             ? stageStats[0].Stats.WorkingSetBefore
             : (printedAnyAnalyzerRow ? firstRunWorkingSetBefore : 0);
 
-        long peakFromStages = stageStats.Count > 0 ? stageStats.Max(s => s.Stats.WorkingSetAfter) : 0;
-        long peak = Math.Max(peakFromStages, peakFromAnalyzers);
+        // Process.PeakWorkingSet64 is the OS-tracked historical maximum for this process's whole
+        // lifetime, continuously updated by the kernel — not just whatever value happened to be
+        // current at a stage/analyzer *boundary*. The previous "max of WorkingSetAfter across
+        // stage/analyzer checkpoints" approach only ever sampled a handful of points (5 stages,
+        // ~30 analyzers), so it silently missed any spike that rose and fell *within* a single
+        // analyzer's run — exactly the case observed with DominatorAnalyzer's reverse-index scan,
+        // where the true mid-run peak was measurably higher than the value recorded once that
+        // analyzer finished.
+        Process currentProcess = Process.GetCurrentProcess();
+        currentProcess.Refresh();
+        long peak = currentProcess.PeakWorkingSet64;
 
         if (peak > 0)
             ConsoleUx.MemoryTableFooter(peak, baseline);

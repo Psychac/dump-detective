@@ -15,12 +15,12 @@ internal sealed class ReachableGraph
     public ulong[] ShallowSizes { get; }       // id -> ShallowSize
     public GenerationTag[] GenerationTags { get; } // id -> report-filter tag (§D1 — never graph membership)
     public bool[] IsRoot { get; }
-    public int[] OutDegree { get; }
-    public int[] InDegree { get; }
-    public int[] FwdOffsets { get; }
-    public int[] FwdTargets { get; }
-    public int[] RevOffsets { get; }
-    public int[] RevTargets { get; }
+    public int[] OutDegree { get; private set; }
+    public int[] InDegree { get; private set; }
+    public int[] FwdOffsets { get; private set; }
+    public int[] FwdTargets { get; private set; }
+    public int[] RevOffsets { get; private set; }
+    public int[] RevTargets { get; private set; }
 
     public ReachableGraph(
         ReachableGraphWalkResult walkResult,
@@ -40,5 +40,25 @@ internal sealed class ReachableGraph
         MethodTables = methodTables;
         ShallowSizes = shallowSizes;
         GenerationTags = generationTags;
+    }
+
+    /// <summary>
+    /// Drops the raw edge/degree arrays once <see cref="LeafFolder.Fold"/> has consumed them to
+    /// build the reduced CSR — nothing downstream of that point (the LT computation, the
+    /// retained-bytes rollup, or the report's per-type aggregation) reads these again, but the
+    /// `ReachableGraph` object itself typically stays rooted for the rest of the exact-tree
+    /// computation (its `Addresses`/`MethodTables`/`ShallowSizes` are still needed). Without this,
+    /// these arrays — sized to the full edge count `E`, not the node count — sit alive and unused
+    /// for the whole computation. Replaces with <see cref="Array.Empty{T}"/> rather than
+    /// nulling so the properties stay non-nullable for existing callers.
+    /// </summary>
+    internal void ReleaseEdgeAndDegreeArrays()
+    {
+        OutDegree = Array.Empty<int>();
+        InDegree = Array.Empty<int>();
+        FwdOffsets = Array.Empty<int>();
+        FwdTargets = Array.Empty<int>();
+        RevOffsets = Array.Empty<int>();
+        RevTargets = Array.Empty<int>();
     }
 }

@@ -24,11 +24,14 @@ internal static class ReachableGraphWalker
         CancellationToken cancellationToken)
     {
         var idMap = new DenseIdMap();
-        var addresses = new List<ulong>(capacity: 1 << 16);
-        var outDegree = new List<int>(capacity: 1 << 16);
-        var isRoot = new List<bool>(capacity: 1 << 16);
-        var edgeFrom = new List<int>(capacity: 1 << 18);
-        var edgeTo = new List<int>(capacity: 1 << 18);
+        // ChunkedBuffer, not List<T> (§D4/§D6): at 25GB-dump scale (E ≈ 137M edges) a List<T>'s
+        // double-and-copy growth would transiently hold up to ~2x the final size, with the old and
+        // new backing arrays both alive during the copy — see the design doc's Measured Numbers.
+        var addresses = new ChunkedBuffer<ulong>();
+        var outDegree = new ChunkedBuffer<int>();
+        var isRoot = new ChunkedBuffer<bool>();
+        var edgeFrom = new ChunkedBuffer<int>();
+        var edgeTo = new ChunkedBuffer<int>();
         var frontier = new Queue<int>();
 
         (int id, bool isNew) GetOrAddId(ulong addr)

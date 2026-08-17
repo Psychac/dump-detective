@@ -17,10 +17,17 @@ internal static class DominatorTreeComputer
             graph.FwdOffsets, graph.FwdTargets, graph.RevOffsets, graph.RevTargets,
             graph.ShallowSizes, graph.IsRoot);
 
+        // The raw edge/degree arrays (sized to E, not N — the largest arrays on `graph`) are fully
+        // consumed by Fold() above; nothing below this line, nor the caller's later per-type
+        // rollup, reads them again. `graph` itself stays alive for the rest of this computation
+        // (Addresses/MethodTables/ShallowSizes/IsRoot are still needed), so without this the arrays
+        // would sit alive-but-unused for the whole exact-tree computation.
+        graph.ReleaseEdgeAndDegreeArrays();
+
         int n = fold.ReducedNodeCount;
         int virtualRoot = n; // one past the reduced id space — never a real node
 
-        var rootNewIds = new List<int>();
+        var rootNewIdsList = new List<int>();
         var isRootNewId = new bool[n];
         for (int oldId = 0; oldId < graph.NodeCount; oldId++)
         {
@@ -29,19 +36,45 @@ internal static class DominatorTreeComputer
 
             // Roots are guaranteed to survive folding (LeafFolder excludes them regardless of degree).
             int newId = fold.OldToNewId[oldId];
-            rootNewIds.Add(newId);
+            rootNewIdsList.Add(newId);
             isRootNewId[newId] = true;
         }
+        int[] rootNewIds = rootNewIdsList.ToArray();
 
-        IEnumerable<int> Successors(int id)
+        // Bake the virtual root's edges directly into an extended reverse CSR (each root gets one
+        // extra predecessor: the virtual root) instead of special-casing it per call — lets
+        // Predecessors(id) return a single contiguous ReadOnlySpan<int> slice with no per-call
+        // allocation, avoiding the IEnumerator<int>/yield-return allocation LengauerTarjan's DFS
+        // and semidominator loop would otherwise incur once per node (tens of millions of small
+        // objects at real-dump scale — see design doc's Measured Numbers).
+        var extRevOffsets = new int[n + 1];
+        for (int i = 0; i < n; i++)
+        {
+            int realCount = fold.ReducedRevOffsets[i + 1] - fold.ReducedRevOffsets[i];
+            extRevOffsets[i + 1] = extRevOffsets[i] + realCount + (isRootNewId[i] ? 1 : 0);
+        }
+
+        var extRevTargets = new int[extRevOffsets[n]];
+        var extRevCursor = (int[])extRevOffsets.Clone();
+        for (int i = 0; i < n; i++)
+        {
+            for (int e = fold.ReducedRevOffsets[i]; e < fold.ReducedRevOffsets[i + 1]; e++)
+                extRevTargets[extRevCursor[i]++] = fold.ReducedRevTargets[e];
+            if (isRootNewId[i])
+                extRevTargets[extRevCursor[i]++] = virtualRoot;
+        }
+
+        ReadOnlySpan<int> Successors(int id)
         {
             if (id == virtualRoot)
                 return rootNewIds;
 
-            return EnumerateRange(fold.ReducedFwdTargets, fold.ReducedFwdOffsets[id], fold.ReducedFwdOffsets[id + 1]);
+            return new ReadOnlySpan<int>(fold.ReducedFwdTargets, fold.ReducedFwdOffsets[id], fold.ReducedFwdOffsets[id + 1] - fold.ReducedFwdOffsets[id]);
         }
 
-        IEnumerable<int> Predecessors(int id) => PredecessorsCore(id, fold, isRootNewId, virtualRoot);
+        // virtualRoot itself is never queried for predecessors (the main semidominator loop only
+        // ever visits real reduced-id nodes), so extRevOffsets doesn't need an entry for it.
+        ReadOnlySpan<int> Predecessors(int id) => new ReadOnlySpan<int>(extRevTargets, extRevOffsets[id], extRevOffsets[id + 1] - extRevOffsets[id]);
 
         cancellationToken.ThrowIfCancellationRequested();
         int[] idom = LengauerTarjan.ComputeImmediateDominators(n + 1, virtualRoot, Successors, Predecessors);
@@ -51,12 +84,24 @@ internal static class DominatorTreeComputer
         for (int newId = 0; newId < n; newId++)
             shallow[newId] = graph.ShallowSizes[fold.NewToOldId[newId]] + fold.FoldedBytesByNewId[newId];
 
-        // Build the dominator tree's child lists (index n = virtualRoot's own children).
-        var domChildren = new List<int>[n + 1];
-        for (int i = 0; i <= n; i++)
-            domChildren[i] = new List<int>();
+        // Build the dominator tree's child adjacency as CSR (offsets+targets) via counting sort —
+        // same pattern LeafFolder/ReachableGraphWalker already use — instead of a List<int> per
+        // node. A `List<int>[n + 1]` here would allocate one heap object (list + backing array)
+        // per dominator-tree node: at 58M-node scale that's tens of millions of small objects for
+        // no reason, since every node has exactly one parent (`idom[v]`) and the full child count
+        // per parent is known after a single counting pass.
+        var childCount = new int[n + 1]; // index n = virtualRoot's own child count
         for (int v = 0; v < n; v++)
-            domChildren[idom[v]].Add(v);
+            childCount[idom[v]]++;
+
+        var childOffsets = new int[n + 2];
+        for (int i = 0; i <= n; i++)
+            childOffsets[i + 1] = childOffsets[i] + childCount[i];
+
+        var childTargets = new int[n];
+        var childCursor = (int[])childOffsets.Clone();
+        for (int v = 0; v < n; v++)
+            childTargets[childCursor[idom[v]]++] = v;
 
         // Preorder traversal from the virtual root (iterative, no recursion — safe at 58M-node scale).
         var preorder = new List<int>(n + 1);
@@ -68,8 +113,9 @@ internal static class DominatorTreeComputer
             cancellationToken.ThrowIfCancellationRequested();
             int u = stack.Pop();
             preorder.Add(u);
-            foreach (int c in domChildren[u])
+            for (int e = childOffsets[u]; e < childOffsets[u + 1]; e++)
             {
+                int c = childTargets[e];
                 depth[c] = u == virtualRoot ? 0 : depth[u] + 1;
                 stack.Push(c);
             }
@@ -94,21 +140,6 @@ internal static class DominatorTreeComputer
         }
 
         return new DominatorTreeComputeResult(fold, idom, retained, depth, virtualRoot);
-    }
-
-    private static IEnumerable<int> EnumerateRange(int[] array, int start, int end)
-    {
-        for (int i = start; i < end; i++)
-            yield return array[i];
-    }
-
-    private static IEnumerable<int> PredecessorsCore(int id, LeafFoldResult fold, bool[] isRootNewId, int virtualRoot)
-    {
-        for (int e = fold.ReducedRevOffsets[id]; e < fold.ReducedRevOffsets[id + 1]; e++)
-            yield return fold.ReducedRevTargets[e];
-
-        if (isRootNewId[id])
-            yield return virtualRoot;
     }
 }
 

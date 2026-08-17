@@ -193,7 +193,7 @@ internal sealed class TrendOrchestrationService(
             }
 
             if (resolved.Diagnostics.EnableMemoryDiagnostics)
-                TrendConsolePresenter.PrintMemorySummary(trendExecutions, trendStageMemoryStats, allRuns);
+                TrendConsolePresenter.PrintMemorySummary(trendExecutions, trendStageMemoryStats);
 
             stageStopwatch.Stop();
             writeOutputElapsed = stageStopwatch.Elapsed;

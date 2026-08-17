@@ -1,4 +1,21 @@
+using DumpDetective.Analysis.Cache;
+using DumpDetective.Core.Abstractions;
+
 namespace DumpDetective.Analysis.Traversal.Dominator;
+
+/// <summary>
+/// Successor lookup for <see cref="ReachableGraphWalker"/>: writes <paramref name="address"/>'s child
+/// addresses into <paramref name="buffer"/>, growing it if the node has more children than it
+/// currently holds, and returns how many were written.
+///
+/// A plain delegate rather than a <c>Func&lt;ulong, IEnumerable&lt;ulong&gt;&gt;</c> so it can take the
+/// buffer by <c>ref</c> — same reasoning as <see cref="LengauerTarjan"/>'s <c>NeighborsFunc</c>. The
+/// walk calls this once per reachable node (millions of times) and copies the children into its CSR
+/// immediately, so returning a fresh collection per node was pure garbage: ~235MB on a 3.3GB dump.
+/// One buffer now serves the entire walk. See
+/// docs/analysis/phase1-redesigns/dominator-tree-memory-profile.md § 7.
+/// </summary>
+internal delegate int SuccessorsFunc(ulong address, ref ulong[] buffer);
 
 /// <summary>
 /// Core reachability walk + CSR build (design doc §D2, §D4, §D6) — deliberately heap-agnostic
@@ -19,10 +36,15 @@ internal static class ReachableGraphWalker
 {
     public static ReachableGraphWalkResult Walk(
         IReadOnlyList<ulong> rootAddresses,
-        Func<ulong, IEnumerable<ulong>> successors,
-        int nodeCap,
-        CancellationToken cancellationToken)
+        SuccessorsFunc successors,
+        ExactDominatorTreeBudget budget,
+        CancellationToken cancellationToken,
+        IProgress<AnalyzerProgressReport>? progress = null)
     {
+        // Frontier BFS is the dominant cost on real dumps (millions of nodes) — without a tick
+        // here the console progress line sits frozen on whatever phase preceded this call for the
+        // whole walk, which reads as "stuck" even though the walk is actively making progress.
+        var scanCounter = new ObjectScanCounter("computing exact dominator tree (tracing heap graph)", progress);
         var idMap = new DenseIdMap();
         // ChunkedBuffer, not List<T> (§D4/§D6): at 25GB-dump scale (E ≈ 137M edges) a List<T>'s
         // double-and-copy growth would transiently hold up to ~2x the final size, with the old and
@@ -33,6 +55,8 @@ internal static class ReachableGraphWalker
         var edgeFrom = new ChunkedBuffer<int>();
         var edgeTo = new ChunkedBuffer<int>();
         var frontier = new Queue<int>();
+        // One buffer for the whole walk — see SuccessorsFunc. Grows to the largest out-degree seen.
+        var childBuffer = new ulong[64];
 
         (int id, bool isNew) GetOrAddId(ulong addr)
         {
@@ -58,10 +82,18 @@ internal static class ReachableGraphWalker
                 frontier.Enqueue(id);
         }
 
-        // §D6: cap enforced mid-walk (reachable count isn't known until the walk completes) — abort
-        // and discard partial state the moment the frontier would exceed nodeCap.
-        if (nodeCap > 0 && addresses.Count > nodeCap)
+        // §D6: budget enforced mid-walk (neither the reachable count nor the edge count is known until
+        // the walk completes) — abort and discard partial state the moment the projected peak would
+        // exceed it. Both terms matter: a dense graph can blow the budget on edges while its node count
+        // still looks comfortable, which the old node-only cap could not see.
+        if (budget.IsExceededBy(addresses.Count, edgeFrom.Count))
             return ReachableGraphWalkResult.Capped();
+
+        // Edges accumulate between node discoveries, so a purely discovery-driven check can overshoot
+        // across a high-out-degree tail. Re-check every few million edges to bound that overshoot
+        // without paying two multiplies on every single edge in the hot loop.
+        const int EdgeCheckInterval = 4_000_000;
+        long nextEdgeCheck = EdgeCheckInterval;
 
         while (frontier.Count > 0)
         {
@@ -69,9 +101,12 @@ internal static class ReachableGraphWalker
 
             int id = frontier.Dequeue();
             ulong address = addresses[id];
+            scanCounter.Tick();
 
-            foreach (ulong childAddr in successors(address))
+            int childCount = successors(address, ref childBuffer);
+            for (int c = 0; c < childCount; c++)
             {
+                ulong childAddr = childBuffer[c];
                 if (childAddr == 0)
                     continue;
 
@@ -82,13 +117,23 @@ internal static class ReachableGraphWalker
 
                 if (isNew)
                 {
-                    if (nodeCap > 0 && addresses.Count > nodeCap)
+                    if (budget.IsExceededBy(addresses.Count, edgeFrom.Count))
                         return ReachableGraphWalkResult.Capped();
 
                     frontier.Enqueue(childId);
                 }
             }
+
+            if (edgeFrom.Count >= nextEdgeCheck)
+            {
+                if (budget.IsExceededBy(addresses.Count, edgeFrom.Count))
+                    return ReachableGraphWalkResult.Capped();
+
+                nextEdgeCheck = edgeFrom.Count + EdgeCheckInterval;
+            }
         }
+
+        scanCounter.Complete();
 
         int nodeCount = addresses.Count;
         long edgeCount = edgeFrom.Count;

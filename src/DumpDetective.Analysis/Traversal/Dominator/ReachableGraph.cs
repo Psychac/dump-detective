@@ -10,6 +10,12 @@ namespace DumpDetective.Analysis.Traversal.Dominator;
 internal sealed class ReachableGraph
 {
     public int NodeCount { get; }
+    /// <summary>
+    /// Edge count captured at construction so it survives <see cref="ReleaseEdgeAndDegreeArrays"/> —
+    /// the exact-tree path's memory cost is dominated by the per-edge arrays (§D6), so the budget
+    /// model can't be validated without knowing E, and after the release `FwdTargets.Length` is 0.
+    /// </summary>
+    public long EdgeCount { get; }
     public ulong[] Addresses { get; }          // id -> Address
     public ulong[] MethodTables { get; }       // id -> MethodTable
     public ulong[] ShallowSizes { get; }       // id -> ShallowSize
@@ -29,6 +35,7 @@ internal sealed class ReachableGraph
         GenerationTag[] generationTags)
     {
         NodeCount = walkResult.NodeCount;
+        EdgeCount = walkResult.FwdTargets.Length;
         Addresses = walkResult.Addresses;
         IsRoot = walkResult.IsRoot;
         OutDegree = walkResult.OutDegree;

@@ -8,25 +8,15 @@ namespace DumpDetective.Tests.Unit.Traversal.Dominator;
 
 public class LeafFolderTests
 {
-    private static Func<ulong, IEnumerable<ulong>> BuildSuccessors(params (ulong Parent, ulong Child)[] edges)
-    {
-        var forward = new Dictionary<ulong, List<ulong>>();
-        foreach ((ulong parent, ulong child) in edges)
-        {
-            if (!forward.TryGetValue(parent, out List<ulong>? children))
-                forward[parent] = children = new List<ulong>();
-            children.Add(child);
-        }
-
-        return addr => forward.TryGetValue(addr, out List<ulong>? c) ? c : Array.Empty<ulong>();
-    }
+    private static SuccessorsFunc BuildSuccessors(params (ulong Parent, ulong Child)[] edges) =>
+        SyntheticSuccessors.Build(edges);
 
     [Fact]
     public void Fold_SingleParentLeaf_ExcludedAndBytesFoldedIntoParent()
     {
         // root(1) -> a(2) -> leaf(3)   [leaf: out=0, in=1 -> foldable]
         var successors = BuildSuccessors((0x1UL, 0x2UL), (0x2UL, 0x3UL));
-        ReachableGraphWalkResult walk = ReachableGraphWalker.Walk([0x1UL], successors, nodeCap: 0, CancellationToken.None);
+        ReachableGraphWalkResult walk = ReachableGraphWalker.Walk([0x1UL], successors, ExactDominatorTreeBudget.Unlimited, CancellationToken.None);
 
         int rootId = Array.IndexOf(walk.Addresses, 0x1UL);
         int aId = Array.IndexOf(walk.Addresses, 0x2UL);
@@ -57,7 +47,7 @@ public class LeafFolderTests
         // shared: out=0, in=2 -> NOT foldable (needs real LT to determine its idom).
         var successors = BuildSuccessors(
             (0x1UL, 0x2UL), (0x1UL, 0x3UL), (0x2UL, 0x4UL), (0x3UL, 0x4UL));
-        ReachableGraphWalkResult walk = ReachableGraphWalker.Walk([0x1UL], successors, nodeCap: 0, CancellationToken.None);
+        ReachableGraphWalkResult walk = ReachableGraphWalker.Walk([0x1UL], successors, ExactDominatorTreeBudget.Unlimited, CancellationToken.None);
 
         var shallowSizes = new ulong[walk.NodeCount];
         LeafFoldResult fold = LeafFolder.Fold(
@@ -77,7 +67,7 @@ public class LeafFolderTests
         // bare chain tail, which would also be foldable).
         var successors = BuildSuccessors(
             (0x1UL, 0x2UL), (0x2UL, 0x3UL), (0x2UL, 0x4UL), (0x3UL, 0x5UL));
-        ReachableGraphWalkResult walk = ReachableGraphWalker.Walk([0x1UL], successors, nodeCap: 0, CancellationToken.None);
+        ReachableGraphWalkResult walk = ReachableGraphWalker.Walk([0x1UL], successors, ExactDominatorTreeBudget.Unlimited, CancellationToken.None);
 
         var shallowSizes = new ulong[walk.NodeCount];
         LeafFoldResult fold = LeafFolder.Fold(
@@ -118,7 +108,7 @@ public class LeafFolderTests
         // is not applicable — test the "all internal, no leaves" case: a 3-cycle has no out-degree-0
         // node at all.
         var successors = BuildSuccessors((0x1UL, 0x2UL), (0x2UL, 0x3UL), (0x3UL, 0x1UL));
-        ReachableGraphWalkResult walk = ReachableGraphWalker.Walk([0x1UL], successors, nodeCap: 0, CancellationToken.None);
+        ReachableGraphWalkResult walk = ReachableGraphWalker.Walk([0x1UL], successors, ExactDominatorTreeBudget.Unlimited, CancellationToken.None);
 
         var shallowSizes = new ulong[walk.NodeCount];
         LeafFoldResult fold = LeafFolder.Fold(

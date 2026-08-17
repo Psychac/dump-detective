@@ -9,25 +9,15 @@ namespace DumpDetective.Tests.Unit.Traversal.Dominator;
 
 public class DominatorTreeComputerTests
 {
-    private static Func<ulong, IEnumerable<ulong>> BuildSuccessors(params (ulong Parent, ulong Child)[] edges)
-    {
-        var forward = new Dictionary<ulong, List<ulong>>();
-        foreach ((ulong parent, ulong child) in edges)
-        {
-            if (!forward.TryGetValue(parent, out List<ulong>? children))
-                forward[parent] = children = new List<ulong>();
-            children.Add(child);
-        }
-
-        return addr => forward.TryGetValue(addr, out List<ulong>? c) ? c : Array.Empty<ulong>();
-    }
+    private static SuccessorsFunc BuildSuccessors(params (ulong Parent, ulong Child)[] edges) =>
+        SyntheticSuccessors.Build(edges);
 
     private static ReachableGraph BuildGraph(
         IReadOnlyList<ulong> rootAddresses,
-        Func<ulong, IEnumerable<ulong>> successors,
+        SuccessorsFunc successors,
         Dictionary<ulong, ulong> shallowSizesByAddress)
     {
-        ReachableGraphWalkResult walk = ReachableGraphWalker.Walk(rootAddresses, successors, nodeCap: 0, CancellationToken.None);
+        ReachableGraphWalkResult walk = ReachableGraphWalker.Walk(rootAddresses, successors, ExactDominatorTreeBudget.Unlimited, CancellationToken.None);
         walk.CapExceeded.Should().BeFalse();
 
         var methodTables = new ulong[walk.NodeCount];

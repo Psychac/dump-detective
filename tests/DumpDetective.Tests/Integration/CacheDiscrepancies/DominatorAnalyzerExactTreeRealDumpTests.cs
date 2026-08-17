@@ -72,13 +72,26 @@ public sealed class DominatorAnalyzerExactTreeRealDumpTests(ITestOutputHelper ou
             };
 
             long memoryBefore = GC.GetTotalMemory(forceFullCollection: false);
+            long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            long wsBefore = Environment.WorkingSet;
             var analyzerStopwatch = Stopwatch.StartNew();
             AnalyzerDomainResult result = analyzer.AnalyzeAsync(context, CancellationToken.None).AsTask().GetAwaiter().GetResult();
             analyzerStopwatch.Stop();
             long memoryAfter = GC.GetTotalMemory(forceFullCollection: false);
+            long allocatedAfter = GC.GetAllocatedBytesForCurrentThread();
 
             output.WriteLine($"DominatorAnalyzer.AnalyzeAsync total (heuristic + exact-path attempt): {analyzerStopwatch.ElapsedMilliseconds:N0} ms");
-            output.WriteLine($"Managed memory delta during analyzer run: {(memoryAfter - memoryBefore):N0} bytes");
+            // GC.GetTotalMemory deltas are reported for comparison only: they measure net *heap size*
+            // change, so a gen2 collection during this run makes them read low (even negative) while
+            // the process working set climbs. Allocated-bytes and peak-WS are the honest numbers.
+            output.WriteLine($"Managed heap-size delta (misleading — see comment): {(memoryAfter - memoryBefore):N0} bytes");
+            output.WriteLine($"Total bytes ALLOCATED during analyzer run:        {(allocatedAfter - allocatedBefore):N0} bytes");
+            output.WriteLine($"Working set {wsBefore:N0} -> {Environment.WorkingSet:N0} bytes");
+            // GenerationInfo layout is gen0, gen1, gen2, LOH, POH — index 3 is the LOH. It matters
+            // here because ChunkedBuffer's 64K-element chunks are 256KB (int) / 512KB (ulong), well
+            // over the 85KB LOH threshold, so every chunk of every accumulator lands on the LOH.
+            GCMemoryInfo gcInfo = GC.GetGCMemoryInfo();
+            output.WriteLine($"Gen2 collections: {GC.CollectionCount(2):N0}, LOH size at exit: {gcInfo.GenerationInfo[3].SizeAfterBytes:N0} bytes");
 
             Assert.NotNull(result);
 

@@ -125,6 +125,27 @@ internal sealed unsafe class ForwardEdgeIndexReader : IDisposable
         }
     }
 
+    /// <summary>
+    /// Allocation-free <see cref="TryGetChildren"/> for callers that consume the children immediately
+    /// — see <see cref="Core.Abstractions.IForwardReferenceProvider.GetChildren"/>. Reuses
+    /// <paramref name="buffer"/> across calls, growing it only when a parent has more children than
+    /// it currently holds, so a whole-graph walk allocates a handful of buffers instead of one array
+    /// per node.
+    /// </summary>
+    public int GetChildren(ulong parent, ref ulong[] buffer)
+    {
+        int bucketIdx = (int)ForwardIndexConstants.ParentBucketHash(parent, _bucketCount);
+        ForwardIndexBucketLocation loc = _bucketLocations[bucketIdx];
+
+        lock (_bucketLocks[bucketIdx])
+        {
+            if (!TryFindInDirectory(loc, parent, out long dataOffsetInBucket))
+                return 0;
+
+            return ReadGroupInto(loc.DataOffset + dataOffsetInBucket, ref buffer);
+        }
+    }
+
     private bool TryFindInDirectory(ForwardIndexBucketLocation loc, ulong parent, out long dataOffsetInBucket)
     {
         dataOffsetInBucket = -1;
@@ -168,6 +189,26 @@ internal sealed unsafe class ForwardEdgeIndexReader : IDisposable
             result[i] = ReadUInt64(_bucketsPtr, childrenStart + i * sizeof(ulong));
 
         children = result;
+    }
+
+    /// <summary>
+    /// <see cref="ReadGroup"/> without the per-call array: copies straight from the mapped view into
+    /// <paramref name="buffer"/>, resizing only when the group doesn't fit.
+    /// </summary>
+    private int ReadGroupInto(long absoluteDataOffset, ref ulong[] buffer)
+    {
+        int count = ReadInt32(_bucketsPtr, absoluteDataOffset + 8);
+        if (count == 0)
+            return 0;
+
+        if (buffer.Length < count)
+            buffer = new ulong[count];
+
+        long childrenStart = absoluteDataOffset + GroupHeaderSize;
+        for (int i = 0; i < count; i++)
+            buffer[i] = ReadUInt64(_bucketsPtr, childrenStart + i * sizeof(ulong));
+
+        return count;
     }
 
     private static ulong ReadUInt64(byte* basePtr, long offset) => Unsafe.ReadUnaligned<ulong>(basePtr + offset);

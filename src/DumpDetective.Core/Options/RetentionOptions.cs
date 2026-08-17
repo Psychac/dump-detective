@@ -57,14 +57,31 @@ public sealed class RetentionOptions
     public bool EnableExactDominatorTree { get; init; } = true;
 
     /// <summary>
-    /// §D6: the memory budget the exact dominator-tree computation's transient working set is
-    /// allowed, translated to a node-count cap at runtime via the measured structural-cost ratio
-    /// (~76 bytes/node, from the 25GB-dump spike measurement — see the design doc's Measured
-    /// Numbers). Default 6GB → a cap of roughly 85M reachable nodes, a modest (~1.5x) extrapolation
-    /// past the 58.34M nodes actually tested, not a large unvalidated leap. Revisit once §D8's
-    /// leaf-folding improves the ratio, or once a real dump larger than 25GB is tested.
+    /// §D6: the peak transient working set the exact dominator-tree computation is allowed. Enforced
+    /// mid-walk against a two-term cost model — <c>150 bytes/node + 12 bytes/edge</c>, assuming zero
+    /// D8 leaf folding — rather than a flat node cap, because per-node cost varies with both fold rate
+    /// and graph density (see <c>ExactDominatorTreeBudget</c> for the measurements).
+    ///
+    /// <para><b>Default 20GB.</b> Sizing rationale, against the two measured reference dumps:</para>
+    /// <list type="bullet">
+    ///   <item>3.3GB dump (6.69M nodes / 17.37M edges): projects 1.13GB, real peak 0.87GB.</item>
+    ///   <item>25.6GB dump (58.34M nodes / 137.03M edges): projects 9.68GB — <b>48% of budget</b>, so it
+    ///         runs with comfortable margin. Real peak 6.42GB.</item>
+    ///   <item>Headroom: admits roughly <b>119M reachable nodes</b> at an average out-degree of 2.5,
+    ///         about 2x the largest dump measured. Real peak at that ceiling would be ~13GB, since the
+    ///         model's no-folding assumption overshoots actual usage by ~1.5x.</item>
+    /// </list>
+    ///
+    /// <para>The estimate is deliberately an upper bound: the fold rate isn't knowable until the walk
+    /// completes, and both reference dumps land near 66% of their projection. Lower this on
+    /// memory-constrained machines — over budget, the analyzer falls back to the top-K heuristic and
+    /// says so in its log, it does not fail.</para>
+    ///
+    /// <para>A hard structural ceiling sits well above this default: the CSR target arrays are
+    /// <c>int[]</c>, so the 2GB single-object limit caps the graph at ~537M edges (~215M nodes at
+    /// out-degree 2.5) regardless of budget.</para>
     /// </summary>
-    public long ExactDominatorTreeMemoryBudgetBytes { get; init; } = 6L * 1024 * 1024 * 1024;
+    public long ExactDominatorTreeMemoryBudgetBytes { get; init; } = 20L * 1024 * 1024 * 1024;
 
     public static RetentionOptions Preset(AnalysisProfile profile) => profile switch
     {

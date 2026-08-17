@@ -120,7 +120,25 @@ internal static class LengauerTarjan
         var label = new int[n];
         var ancestor = new int[n];
         var idomByDfs = new int[n];
-        var buckets = new List<int>?[n]; // buckets[semiDfsNum] -> child dfs numbers awaiting idom resolution
+
+        // buckets[semiDfsNum] -> the dfs numbers awaiting idom resolution, held as an intrusive
+        // singly-linked list threaded through two int arrays rather than an array of List<int>.
+        // Every node is pushed into exactly one bucket (once, in the main loop below), so the
+        // List<int> form allocated up to `n` small objects — ~330MB of tiny objects at n ≈ 4.6M on a
+        // 3GB dump, plus the cost of the GC tracing that many live references on every gen2. This
+        // form allocates exactly two int arrays up front and never touches the GC again. Because
+        // each dfs number is pushed at most once, bucketNext needs no initialization: its slot is
+        // always written at push time before it can be read.
+        var bucketHead = new int[n];
+        var bucketNext = new int[n];
+        Array.Fill(bucketHead, -1);
+
+        // Reusable ancestor-chain buffer for Compress. Compress runs once per edge examined in the
+        // semidominator loop (E ≈ 17M on a 3GB dump); allocating a `new Stack<int>()` per call was
+        // measured as ~1.5GB of pure garbage — the single largest contributor to the exact path's
+        // allocation profile. Chain length is bounded by DFS-tree depth and the buffer is shared
+        // across every call, so this allocates once and only grows for an unusually deep chain.
+        var compressPath = new int[64];
 
         for (int i = 0; i < n; i++)
         {
@@ -140,17 +158,21 @@ internal static class LengauerTarjan
 
         void Compress(int v)
         {
-            var path = new Stack<int>();
+            int pathLength = 0;
             int cur = v;
             while (ancestor[cur] != -1 && ancestor[ancestor[cur]] != -1)
             {
-                path.Push(cur);
+                if (pathLength == compressPath.Length)
+                    Array.Resize(ref compressPath, compressPath.Length * 2);
+
+                compressPath[pathLength++] = cur;
                 cur = ancestor[cur];
             }
 
-            while (path.Count > 0)
+            // Unwind in reverse push order — identical traversal to the Stack<int> pop loop.
+            for (int i = pathLength - 1; i >= 0; i--)
             {
-                int node = path.Pop();
+                int node = compressPath[i];
                 int anc = ancestor[node];
                 if (semi[label[anc]] < semi[label[node]])
                     label[node] = label[anc];
@@ -176,19 +198,16 @@ internal static class LengauerTarjan
                     semi[wDfs] = semi[uDfs];
             }
 
-            (buckets[semi[wDfs]] ??= new List<int>()).Add(wDfs);
+            bucketNext[wDfs] = bucketHead[semi[wDfs]];
+            bucketHead[semi[wDfs]] = wDfs;
             ancestor[wDfs] = wParentDfs;
 
-            List<int>? parentBucket = buckets[wParentDfs];
-            if (parentBucket is not null)
+            for (int vDfs = bucketHead[wParentDfs]; vDfs != -1; vDfs = bucketNext[vDfs])
             {
-                foreach (int vDfs in parentBucket)
-                {
-                    int uDfs = Eval(vDfs);
-                    idomByDfs[vDfs] = semi[uDfs] < semi[vDfs] ? uDfs : wParentDfs;
-                }
-                parentBucket.Clear();
+                int uDfs = Eval(vDfs);
+                idomByDfs[vDfs] = semi[uDfs] < semi[vDfs] ? uDfs : wParentDfs;
             }
+            bucketHead[wParentDfs] = -1;
         }
 
         // idomByDfs[i] currently holds a DFS number (either uDfs or wParentDfs from the main loop

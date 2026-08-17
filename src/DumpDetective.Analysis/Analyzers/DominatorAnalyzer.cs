@@ -21,9 +21,16 @@ public sealed class DominatorAnalyzer : IAnalyzer
     public string Category => "Memory";
     public int Order => 110;
 
-    // §D6: the measured structural-cost ratio (25GB-dump spike) used to translate
-    // RetentionOptions.ExactDominatorTreeMemoryBudgetBytes into a node-count cap.
-    private const long ExactDominatorTreeBytesPerNode = 76;
+    // §D6: cost model translating RetentionOptions.ExactDominatorTreeMemoryBudgetBytes into a
+    // mid-walk abort threshold. Two-term (nodes + edges), because no single per-node constant can
+    // price this correctly — see ExactDominatorTreeBudget for the measurement showing per-node cost
+    // *falling* as the D8 fold rate rises (140 B/node on the 3.3GB dump at 32% folding, 118 B/node on
+    // the 25.6GB dump at 46%).
+    //
+    // Two earlier single-constant attempts both misfired: 76 (derived from the D4 walk stage alone)
+    // admitted ~85M nodes against a 6GB budget for a population needing ~18GB, and a corrected 220
+    // over-priced the large dump so badly it rejected the 25.6GB/58.34M-node graph that had already
+    // been measured completing successfully.
 
     private readonly ILogger<DominatorAnalyzer>? _logger;
 
@@ -108,7 +115,7 @@ public sealed class DominatorAnalyzer : IAnalyzer
         // the heuristic built it, same safety property "ship dark" (Phase 5) established.
         if (options.EnableExactDominatorTree && result is DominatorDomainResult heuristicResult)
         {
-            IReadOnlyDictionary<string, ulong>? exactByType = TryComputeExactDominatorTree(context.Heap, context.Cache, options, heuristicResult, diag, cancellationToken);
+            IReadOnlyDictionary<string, ulong>? exactByType = TryComputeExactDominatorTree(context.Heap, context.Cache, options, heuristicResult, diag, cancellationToken, context.Progress);
             if (exactByType is not null)
                 result = heuristicResult with { ExactRetainedBytesByTypeName = exactByType };
         }
@@ -124,24 +131,40 @@ public sealed class DominatorAnalyzer : IAnalyzer
         RetentionOptions options,
         DominatorDomainResult heuristicResult,
         bool diag,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IProgress<AnalyzerProgressReport>? progress = null)
     {
         var stopwatch = Stopwatch.StartNew();
+        // Total bytes *allocated* on this thread, not heap size — GC.GetTotalMemory deltas across
+        // this path are meaningless (a gen2 collection triggered by our own allocations reclaims
+        // preceding analyzers' garbage, so the delta can come out negative while the process working
+        // set grows by >1GB). This counter only ever increases, so it attributes honestly.
+        long allocatedAtEntry = GC.GetAllocatedBytesForCurrentThread();
         try
         {
-            int nodeCap = (int)Math.Clamp(options.ExactDominatorTreeMemoryBudgetBytes / ExactDominatorTreeBytesPerNode, 1, int.MaxValue - 1);
+            var budget = new ExactDominatorTreeBudget(options.ExactDominatorTreeMemoryBudgetBytes);
 
-            ReachableGraph? graph = ReachableGraphBuilder.Build(heap, cache, nodeCap, cancellationToken);
+            ReachableGraph? graph = ReachableGraphBuilder.Build(heap, cache, budget, cancellationToken, progress);
             if (graph is null)
             {
                 _logger?.LogInformation(
-                    "Exact dominator tree skipped: reachable population exceeded the {NodeCap:N0}-node cap (budget {BudgetBytes:N0} bytes) after {ElapsedMs:N0} ms.",
-                    nodeCap, options.ExactDominatorTreeMemoryBudgetBytes, stopwatch.ElapsedMilliseconds);
+                    "Exact dominator tree skipped: projected peak memory exceeded the {BudgetBytes:N0}-byte budget " +
+                    "after {ElapsedMs:N0} ms (model: {BytesPerNode} bytes/node + {BytesPerEdge} bytes/edge, assuming no " +
+                    "leaf folding — roughly {MaxNodes:N0} nodes at an average out-degree of 2.5). " +
+                    "Raise RetentionOptions.ExactDominatorTreeMemoryBudgetBytes to analyze a graph this large.",
+                    options.ExactDominatorTreeMemoryBudgetBytes, stopwatch.ElapsedMilliseconds,
+                    budget.BytesPerNode, budget.BytesPerEdge, budget.MaxNodesAtDensity(2.5));
                 return null;
             }
 
             if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: reachable graph built", Console.Out);
 
+            // §D2/§D8/§Architecture: the LT computation itself has no natural per-item tick point
+            // (it's a handful of O(N+E) array passes, not a loop over external heap data), so the
+            // best we can do without over-instrumenting it is a phase-label report marking entry —
+            // otherwise the console progress line would still show "resolving node metadata" (the
+            // graph build's last phase) for the whole LT run, which reads as stuck.
+            progress?.Report(new AnalyzerProgressReport(graph.NodeCount, "computing exact dominator tree (Lengauer-Tarjan)"));
             DominatorTreeComputeResult tree = DominatorTreeComputer.Compute(graph, cancellationToken);
             stopwatch.Stop();
 
@@ -162,6 +185,7 @@ public sealed class DominatorAnalyzer : IAnalyzer
             // own, but as a leaf its own subtree is just itself, so its retained bytes are simply
             // its shallow size. This makes the per-type total exact over *every* reachable node of
             // that type, not just the ones that happened to survive folding.
+            progress?.Report(new AnalyzerProgressReport(graph.NodeCount, "computing exact dominator tree (per-type rollup)"));
             var retainedByMethodTable = new Dictionary<ulong, ulong>();
             for (int oldId = 0; oldId < graph.NodeCount; oldId++)
             {
@@ -192,13 +216,20 @@ public sealed class DominatorAnalyzer : IAnalyzer
 
             if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: per-type exact rollup done", Console.Out);
 
+            long allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedAtEntry;
+            long foldedCount = graph.NodeCount - tree.LeafFold.ReducedNodeCount;
             _logger?.LogInformation(
-                "Exact dominator tree computed in {ElapsedMs:N0} ms: {NodeCount:N0} reachable nodes " +
-                "(cap {NodeCap:N0}), {FoldedCount:N0} leaves folded (§D8), total retained bytes at " +
-                "GC roots {ExactTotalRetainedBytes:N0} vs. heuristic top-K estimate {HeuristicTotalRetainedBytes:N0}.",
-                stopwatch.ElapsedMilliseconds, graph.NodeCount, nodeCap,
-                graph.NodeCount - tree.LeafFold.ReducedNodeCount,
-                exactTotalRetainedBytes, heuristicResult.TotalEstimatedRetainedBytes);
+                "Exact dominator tree computed in {ElapsedMs:N0} ms: {NodeCount:N0} reachable nodes, " +
+                "{EdgeCount:N0} edges (out-degree {OutDegree:N2}), {FoldedCount:N0} leaves folded (§D8, " +
+                "{FoldedPercent:N1}%), total retained bytes at GC roots {ExactTotalRetainedBytes:N0} vs. heuristic " +
+                "top-K estimate {HeuristicTotalRetainedBytes:N0}. Allocated {AllocatedBytes:N0} bytes; §D6 budget " +
+                "projected {ProjectedBytes:N0} of {BudgetBytes:N0} allowed.",
+                stopwatch.ElapsedMilliseconds, graph.NodeCount, graph.EdgeCount,
+                (double)graph.EdgeCount / Math.Max(1, graph.NodeCount),
+                foldedCount, 100.0 * foldedCount / Math.Max(1, graph.NodeCount),
+                exactTotalRetainedBytes, heuristicResult.TotalEstimatedRetainedBytes,
+                allocatedBytes, budget.EstimateBytes(graph.NodeCount, graph.EdgeCount),
+                options.ExactDominatorTreeMemoryBudgetBytes);
 
             return exactByTypeName;
         }

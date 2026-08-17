@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Cache;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Enums;
 
@@ -14,15 +15,16 @@ namespace DumpDetective.Analysis.Traversal.Dominator;
 internal static class ReachableGraphBuilder
 {
     /// <summary>
-    /// Builds the reachable graph, or returns <c>null</c> if the reachable population exceeded
-    /// <paramref name="nodeCap"/> (§D6) — callers fall back to the existing top-K heuristic in
-    /// that case, exactly like every other capped structure in this codebase.
+    /// Builds the reachable graph, or returns <c>null</c> if the reachable population's projected peak
+    /// memory exceeded <paramref name="budget"/> (§D6) — callers fall back to the existing top-K
+    /// heuristic in that case, exactly like every other capped structure in this codebase.
     /// </summary>
     public static ReachableGraph? Build(
         ClrHeap heap,
         IHeapAnalysisCache cache,
-        int nodeCap,
-        CancellationToken cancellationToken)
+        ExactDominatorTreeBudget budget,
+        CancellationToken cancellationToken,
+        IProgress<AnalyzerProgressReport>? progress = null)
     {
         IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
         var rootAddresses = new List<ulong>(roots.Count);
@@ -32,9 +34,9 @@ internal static class ReachableGraphBuilder
                 rootAddresses.Add(address);
         }
 
-        Func<ulong, IEnumerable<ulong>> successors = BuildSuccessorsFunction(heap, cache);
+        SuccessorsFunc successors = BuildSuccessorsFunction(heap, cache);
 
-        ReachableGraphWalkResult walkResult = ReachableGraphWalker.Walk(rootAddresses, successors, nodeCap, cancellationToken);
+        ReachableGraphWalkResult walkResult = ReachableGraphWalker.Walk(rootAddresses, successors, budget, cancellationToken, progress);
         if (walkResult.CapExceeded)
             return null;
 
@@ -42,9 +44,14 @@ internal static class ReachableGraphBuilder
         var shallowSizes = new ulong[walkResult.NodeCount];
         var generationTags = new GenerationTag[walkResult.NodeCount];
 
+        // Per-node metadata resolution below is a second full O(N) pass over the reachable
+        // population (ClrMD segment/type lookups) — on its own it's easily long enough to look
+        // "stuck" without a tick of its own, distinct from the BFS walk's counter above.
+        var scanCounter = new ObjectScanCounter("computing exact dominator tree (resolving node metadata)", progress);
         for (int id = 0; id < walkResult.NodeCount; id++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            scanCounter.Tick();
 
             ulong address = walkResult.Addresses[id];
             if (cache.TryGetObjectMetadata(heap, address, out ulong methodTable, out ulong size))
@@ -55,6 +62,7 @@ internal static class ReachableGraphBuilder
 
             generationTags[id] = ResolveGenerationTag(heap, address);
         }
+        scanCounter.Complete();
 
         return new ReachableGraph(walkResult, methodTables, shallowSizes, generationTags);
     }
@@ -64,33 +72,39 @@ internal static class ReachableGraphBuilder
     /// a live scoped walk (§D4) otherwise — same graceful-degradation contract every other optional
     /// satellite index in this codebase already has.
     /// </summary>
-    private static Func<ulong, IEnumerable<ulong>> BuildSuccessorsFunction(ClrHeap heap, IHeapAnalysisCache cache)
+    private static SuccessorsFunc BuildSuccessorsFunction(ClrHeap heap, IHeapAnalysisCache cache)
     {
         IForwardReferenceProvider? forwardIndex = cache.TryGetForwardIndexProvider();
         if (forwardIndex is not null)
-        {
-            return parent => forwardIndex.TryGetChildren(parent, out IReadOnlyList<ulong> children)
-                ? children
-                : Array.Empty<ulong>();
-        }
+            return (ulong parent, ref ulong[] buffer) => forwardIndex.GetChildren(parent, ref buffer);
 
-        return parent => LiveSuccessors(heap, parent);
+        return (ulong parent, ref ulong[] buffer) => LiveSuccessorsInto(heap, parent, ref buffer);
     }
 
     // §D4 fallback: the same ClrObject.EnumerateReferences(carefully: true) API this codebase's own
     // correct traversal (ObjectGraphTraversal.TryFindByPredicate) already uses — walks struct-typed
-    // array elements and nested struct fields a manual field/array walk would miss.
-    private static IEnumerable<ulong> LiveSuccessors(ClrHeap heap, ulong address)
+    // array elements and nested struct fields a manual field/array walk would miss. Fills the
+    // walker's shared buffer rather than yielding, so the fallback path allocates no more per node
+    // than the indexed path does (a `yield return` iterator is itself a per-call heap object).
+    private static int LiveSuccessorsInto(ClrHeap heap, ulong address, ref ulong[] buffer)
     {
         ClrObject obj = heap.GetObject(address);
         if (!obj.IsValid || obj.Type is null)
-            yield break;
+            return 0;
 
+        int count = 0;
         foreach (ClrObject child in obj.EnumerateReferences(carefully: true))
         {
-            if (child.IsValid && child.Address != 0)
-                yield return child.Address;
+            if (!child.IsValid || child.Address == 0)
+                continue;
+
+            if (count == buffer.Length)
+                Array.Resize(ref buffer, buffer.Length * 2);
+
+            buffer[count++] = child.Address;
         }
+
+        return count;
     }
 
     private static GenerationTag ResolveGenerationTag(ClrHeap heap, ulong address)

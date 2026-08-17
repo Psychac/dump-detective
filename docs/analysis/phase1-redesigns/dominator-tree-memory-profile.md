@@ -38,8 +38,9 @@ a broken counter and isn't.
 6. **Phase 1's cost was wrong twice, and is now measured** (§ 6). The old "600 MB x 4 buckets = 2.4 GB"
    claim was arithmetic coincidence, and worse, *every* prior measurement of this stage was a **cache
    hit** that never ran the heap scan. A forced rebuild allocates **10.5 GB**, of which **78.4% is the
-   parallel heap scan at 620 B/object** (ClrMD churn) — the bucket sorters are ~11% each. The one
-   genuinely avoidable *resident* buffer is `segBuf`, measured at **448-512 MB peak concurrent**.
+   parallel heap scan at 620 B/object** (ClrMD churn) — the bucket sorters are ~11% each.
+   **`segBuf` is now fixed**: a whole-segment staging buffer measured at 512 MB peak resident, replaced
+   by chunk-streaming at **12.5 MB** (-97.6%), which also removed 940 MB of allocation as a side effect.
 7. **"Allocated" is a flow, not a level, and it is easy to misread.** 10.5 GB allocated against +2.6 GB
    working set is not a contradiction: gen0 recycled the same ~9 MB nursery 950 times. The console
    legend now says so explicitly, because this was misread in review.
@@ -493,25 +494,56 @@ look like. The number is large because it is a rate integrated over time, and th
 "Allocated" for that reason — see § 1 on why the honest metric is also the easiest one to misread as
 "memory used."
 
-### `segBuf`: the one genuinely avoidable resident buffer
+### FIXED: `segBuf` — 512 MB → 12.5 MB peak resident
 
-Separate axis from the above — this is **peak live**, not allocation.
-[`DiskBackedObjectIndexWriter`](../../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs)
-rents a per-worker `HeapEntry[]` holding **every object in the segment**, written in the scan loop and
-read only in the columnar serialize loop that follows it — strictly sequentially, same order, no sort
-or reordering in between. It is a pure pass-through staging buffer.
+Separate axis from the allocation numbers above — this one was **peak live**.
 
-Measured on the 3.3 GB dump: **8 segments, DOP 4, peak concurrent 448-512 MB** across runs (worker
-overlap is timing-dependent), largest single buffer **128 MB**, **8 pool-doubling copies**. `HeapEntry`
-is 32 bytes (3x `ulong` + `sbyte`, padded).
+`DiskBackedObjectIndexWriter` rented a per-worker `HeapEntry[]` holding **every object in the segment**,
+written in the scan loop and read back only in the columnar serialize loop that followed it — strictly
+sequentially, same order, no sort or reordering in between. A pure pass-through staging buffer.
 
-Three properties make it worse than the headline figure: the initial rent caps at 1M entries (32 MB)
-and then **grows by doubling with a full copy**; `ArrayPool` **retains the largest buffers for process
-lifetime**, so the working set never returns; and it scales with objects-per-segment x DOP, so a
-25.6 GB dump at DOP 8 would be multiples of this.
+Measured before: **8 segments, DOP 4, peak concurrent 448-512 MB** across runs (worker overlap is
+timing-dependent), largest single buffer **128 MB**, **8 pool-doubling copies**. `HeapEntry` is 32 bytes
+(3x `ulong` + `sbyte`, padded). Three properties made it worse than the headline: the initial rent
+capped at 1M entries (32 MB) then **grew by doubling with a full copy**; `ArrayPool` **retains the
+largest buffers for process lifetime**; and it scaled with objects-per-segment x DOP, so a 25.6 GB dump
+at DOP 8 would have been multiples of it.
 
-The fix is to write into the columnar chunk buffers during the scan and flush when a chunk fills,
-removing the buffer and the doubling copies entirely. Contained to one method. Tracked in § 8.
+Replaced by
+[`SegmentColumnWriter`](../../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs),
+which streams each entry straight into the segment's four columnar scratch files, buffering one
+fixed-size chunk per column. `using`-scoped so the trailing partial chunk is flushed and buffers/streams
+are released even if the scan throws, and streams are created on **first flush** rather than in the
+constructor — a segment yielding no entries must still produce no scratch files, because
+`ConcatenateScratchFiles` skips missing per-segment files.
+
+| | Before | After |
+|---|---:|---:|
+| Peak concurrent staging buffer | **512.0 MB** | **12.5 MB** (-97.6%) |
+| Largest single buffer | 128 MB | 1 MB/column (131,072 entries) |
+| Pool-doubling copies | 8 | 0 (gone by construction) |
+| Index build allocated (inside `Build`) | 8.45 GB | **7.51 GB** (-940 MB) |
+| — of which parallel heap scan | 6,785.5 MB | 5,824.1 MB (-961 MB) |
+| Bytes allocated per object | 620 | **551** |
+| Stage allocated (incl. shared scans) | 10.5 GB | 9.6 GB |
+| gen2 collections | 21 | 11 |
+
+The ~940 MB *allocation* drop was not predicted — the rationale was purely about peak resident. It comes
+from the pool rents themselves: 8 initial rents of up to 128 MB plus 8 doubling copies were real
+allocations, not just resident bytes.
+
+> **One number that did not improve:** the stage's working-set delta read **+2.8 GB after vs +2.6 GB
+> before**. Working set at this granularity is dominated by ClrMD's mapped dump pages and GC segment
+> retention, and moves run to run; a 512 MB buffer removal is not cleanly visible in it. The
+> peak-resident win is asserted on the direct measurement of the buffer itself (balanced accounting,
+> `leaked-live 0 B`), not on process working set. Claiming a WS win here would be the same mistake as
+> § 1.
+
+Correctness: all four index-integrity discrepancy suites pass against the real dump —
+`SegmentAddressContiguityDiscrepancyTests`, `SegmentIndexBuildDiscrepancyTests`,
+`ObjectAddressLookupDiscrepancyTests`, `HeapAnalysisCacheObjectMetadataDiscrepancyTests`. Those compare
+disk-mode against memory-mode entry-by-entry, so a reordering or dropped-entry bug in the new write path
+would fail them.
 
 ### Checked and *not* worth pursuing
 
@@ -606,9 +638,10 @@ decision, not a drive-by. Tracked in § 8.
    620 B/object over 14.6M objects (§ 6). Dominated by ClrMD `EnumerateReferences(carefully: true)`
    churn, one call per object. This is a throughput/GC-pressure problem rather than a footprint one, but
    it is by far the largest allocation source anywhere in the pipeline.
-3. **Eliminate `segBuf`** (§ 6) — measured **448-512 MB peak concurrent** resident on the 3.3 GB dump,
-   scaling with objects-per-segment x DOP, and entirely avoidable: it is a pass-through staging buffer
-   read back in the same order it was written. Also removes 8 pool-doubling copies.
+3. **Fix the flaky unit test** `RetainedSizeCandidateSelectorTests.SelectAndCompute_RespectsMaxCandidatesToWalk_RankedByShallowSizeDescending`
+   — fails roughly 1 run in 10 with "Did not expect smallAddr to be 0UL". Confirmed **pre-existing**
+   (reproduced at the commit before the `segBuf` work, same rate, in a clean worktree), so it is not a
+   regression — but a suite that fails 10% of the time erodes the signal every other item here depends on.
 4. **Re-measure the 25.6 GB dump end-to-end.** Everything about it in this doc is analytic — derived
    from the stage model and the design doc's original figures, not re-run since the allocation fixes and
    the new budget model. It is the one dump that exercises the parts of § 5 that matter most, and the

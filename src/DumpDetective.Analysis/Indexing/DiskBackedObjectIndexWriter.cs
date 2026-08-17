@@ -28,10 +28,6 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     // amortizes the per-bucket lock over this many edges instead of taking it once per edge.
     private const int EdgeBatchSize = 2048;
 
-    // Actual managed size of a HeapEntry (3x ulong + sbyte, padded), not the sum of its fields —
-    // used to account for the per-worker segBuf staging buffer's real footprint.
-    private static readonly int SegBufEntryBytes = System.Runtime.CompilerServices.Unsafe.SizeOf<HeapEntry>();
-
     // TEMPORARY perf A/B toggle (see docs/cache/backlog.md, GC-root enumeration option 2):
     // set DD_SKIP_ROOT_INDEX_BUILD=1 to skip the eager Roots section write during Phase 1
     // and let RootSetCache's live-heap fallback build roots on demand in Phase 2 instead.
@@ -199,10 +195,6 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         using var containerWriter = new CacheContainerWriter(containerPath, dumpPath, progress);
         Stream stream = containerWriter.Stream;
 
-        // §segBuf accounting: the per-worker HeapEntry staging buffer is the largest single
-        // allocation in the scan and scales with objects-per-segment x DOP, so its peak needs to be
-        // observable rather than inferred. Updated once per segment (rent/grow/return), never
-        // per-object. Reported via DD_PERF_INDEX_MEMORY=1.
         // Sub-phase allocation checkpoints (DD_PERF_INDEX_MEMORY=1). The stage total is ~10.5GB on a
         // 3.3GB dump, and attributing that to a phase is impossible from the outside — the whole
         // reason the previous "it's the bucket sorters" guess went unchallenged.
@@ -215,33 +207,23 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             allocMark = now;
         }
 
-        long segBufLiveBytes = 0;
-        long segBufPeakBytes = 0;
-        long segBufLargestSingleBytes = 0;
-        long segBufGrowCount = 0;
+        // Peak concurrent bytes held by the per-worker columnar chunk buffers. Tracked on the same
+        // footing as the whole-segment HeapEntry[] staging buffer it replaced (measured at 512 MB peak
+        // on this dump) so the two are directly comparable in the log rather than one being measured
+        // and the other asserted. Updated twice per segment, never per-object.
+        long columnBufferLiveBytes = 0;
+        long columnBufferPeakBytes = 0;
 
-        void TrackSegBufDelta(long deltaBytes)
+        void TrackColumnBufferDelta(long deltaBytes)
         {
-            long live = Interlocked.Add(ref segBufLiveBytes, deltaBytes);
-            long observedPeak = Interlocked.Read(ref segBufPeakBytes);
+            long live = Interlocked.Add(ref columnBufferLiveBytes, deltaBytes);
+            long observedPeak = Interlocked.Read(ref columnBufferPeakBytes);
             while (live > observedPeak)
             {
-                long prior = Interlocked.CompareExchange(ref segBufPeakBytes, live, observedPeak);
+                long prior = Interlocked.CompareExchange(ref columnBufferPeakBytes, live, observedPeak);
                 if (prior == observedPeak)
                     break;
                 observedPeak = prior;
-            }
-        }
-
-        void TrackSegBufLargest(long bytes)
-        {
-            long observed = Interlocked.Read(ref segBufLargestSingleBytes);
-            while (bytes > observed)
-            {
-                long prior = Interlocked.CompareExchange(ref segBufLargestSingleBytes, bytes, observed);
-                if (prior == observed)
-                    break;
-                observed = prior;
             }
         }
 
@@ -274,18 +256,14 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                                || segment.Kind == GCSegmentKind.Pinned;
                 ulong segStart = isLohOrPoh ? segment.Start : 0;
 
-                // Use minimum .NET object size (24 bytes on x64) as the upper-bound estimate so the
-                // initial rent is guaranteed to hold all objects without resizing in the common case.
-                // Capped at 1_000_000 entries (~24 MB) to keep each ArrayPool loan reasonable;
-                // segments with more objects than the cap grow via pool doubling below — old buffers
-                // are returned to the pool rather than discarded as GC garbage, eliminating the
-                // ~800 MB of HeapEntry[] backing-array churn observed in profiling.
-                const int MaxInitialRent = 1_000_000;
-                int initCapacity = (int)Math.Min(Math.Max((long)segment.Length / 24, 64), MaxInitialRent);
-                HeapEntry[] segBuf = ArrayPool<HeapEntry>.Shared.Rent(initCapacity);
-                TrackSegBufDelta((long)segBuf.Length * SegBufEntryBytes);
-                TrackSegBufLargest((long)segBuf.Length * SegBufEntryBytes);
-                int segCount = 0;
+                // Entries stream straight into this segment's columnar scratch files as they're
+                // scanned — see SegmentColumnWriter for what this replaced and why. `using` scopes
+                // disposal to the whole segment body, so the trailing partial chunk is flushed by
+                // Complete() below and buffers/streams are released even if the scan throws.
+                using var columnWriter = new SegmentColumnWriter(
+                    segAddrScratchFiles[segIdx], segMtScratchFiles[segIdx],
+                    segSizeScratchFiles[segIdx], segGenScratchFiles[segIdx],
+                    serialChunkEntries, writeBuffer, TrackColumnBufferDelta);
 
                 foreach (ClrObject obj in segment.EnumerateObjects())
                 {
@@ -294,18 +272,6 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                     ulong mt = obj.Type.MethodTable;
                     if (mt == 0)
                         continue;
-
-                    if (segCount == segBuf.Length)
-                    {
-                        // Grow via pool: return old buffer, rent one twice as large.
-                        HeapEntry[] bigger = ArrayPool<HeapEntry>.Shared.Rent(segBuf.Length * 2);
-                        segBuf.AsSpan(0, segCount).CopyTo(bigger);
-                        ArrayPool<HeapEntry>.Shared.Return(segBuf, clearArray: false);
-                        TrackSegBufDelta((long)(bigger.Length - segBuf.Length) * SegBufEntryBytes);
-                        TrackSegBufLargest((long)bigger.Length * SegBufEntryBytes);
-                        Interlocked.Increment(ref segBufGrowCount);
-                        segBuf = bigger;
-                    }
 
                     // Compute type flags + module id + shape once per unique MT. moduleRegistry.GetOrAdd
                     // takes a lock, so it must be reached at most once per unique MT globally — never
@@ -337,7 +303,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 
                     int objGen = isEphemeral ? ResolveObjectGeneration(segment, obj.Address) : segGen;
                     var entry = new HeapEntry(obj.Address, mt, obj.Size, (sbyte)objGen);
-                    segBuf[segCount++] = entry;
+                    columnWriter.Add(entry);
                     state.Builder.Add(entry, moduleId, flags, objGen);
 
                     // Reverse-reference index (Phase A): record every outgoing edge for this
@@ -461,67 +427,14 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         progress.Report(new(count, "indexing heap", Detail: null, Elapsed: stopwatch.Elapsed));
                 }
 
-                // Record this segment's final object count for the SegmentIndex satellite section
-                // (written after the parallel scan below). Each segIdx is written by exactly one
-                // worker, so no lock is needed.
-                segRecordCounts[segIdx] = segCount;
-
-                // Serialize segment entries to this segment's own columnar scratch files in
-                // fixed-size chunks — no shared-stream lock, so segments make independent
-                // progress. Scratch files are concatenated in segment order after the scan
-                // completes, one column at a time.
-                if (segCount > 0)
-                {
-                    byte[] addrBuf = ArrayPool<byte>.Shared.Rent(serialChunkEntries * ColumnSize);
-                    byte[] mtBuf = ArrayPool<byte>.Shared.Rent(serialChunkEntries * ColumnSize);
-                    byte[] sizeBuf = ArrayPool<byte>.Shared.Rent(serialChunkEntries * ColumnSize);
-                    byte[] genBuf = ArrayPool<byte>.Shared.Rent(serialChunkEntries * GenColumnSize);
-                    try
-                    {
-                        using FileStream addrStream = new(segAddrScratchFiles[segIdx], FileMode.Create, FileAccess.Write,
-                            FileShare.None, bufferSize: writeBuffer, FileOptions.SequentialScan);
-                        using FileStream mtStream = new(segMtScratchFiles[segIdx], FileMode.Create, FileAccess.Write,
-                            FileShare.None, bufferSize: writeBuffer, FileOptions.SequentialScan);
-                        using FileStream sizeStream = new(segSizeScratchFiles[segIdx], FileMode.Create, FileAccess.Write,
-                            FileShare.None, bufferSize: writeBuffer, FileOptions.SequentialScan);
-                        using FileStream genStream = new(segGenScratchFiles[segIdx], FileMode.Create, FileAccess.Write,
-                            FileShare.None, bufferSize: writeBuffer, FileOptions.SequentialScan);
-                        int srcIdx = 0;
-                        while (srcIdx < segCount)
-                        {
-                            int chunkEntries = Math.Min(serialChunkEntries, segCount - srcIdx);
-                            int chunkBytes = chunkEntries * ColumnSize;
-                            for (int ci = 0; ci < chunkEntries; ci++)
-                            {
-                                int off = ci * ColumnSize;
-                                ref HeapEntry e = ref segBuf[srcIdx + ci];
-                                BinaryPrimitives.WriteUInt64LittleEndian(addrBuf.AsSpan(off), e.Address);
-                                BinaryPrimitives.WriteUInt64LittleEndian(mtBuf.AsSpan(off), e.MethodTable);
-                                BinaryPrimitives.WriteUInt64LittleEndian(sizeBuf.AsSpan(off), e.Size);
-                                genBuf[ci] = unchecked((byte)e.Generation);
-                            }
-                            addrStream.Write(addrBuf, 0, chunkBytes);
-                            mtStream.Write(mtBuf, 0, chunkBytes);
-                            sizeStream.Write(sizeBuf, 0, chunkBytes);
-                            genStream.Write(genBuf, 0, chunkEntries * GenColumnSize);
-                            srcIdx += chunkEntries;
-                        }
-                    }
-                    finally
-                    {
-                        ArrayPool<byte>.Shared.Return(addrBuf);
-                        ArrayPool<byte>.Shared.Return(mtBuf);
-                        ArrayPool<byte>.Shared.Return(sizeBuf);
-                        ArrayPool<byte>.Shared.Return(genBuf);
-                        ArrayPool<HeapEntry>.Shared.Return(segBuf, clearArray: false);
-                        TrackSegBufDelta(-(long)segBuf.Length * SegBufEntryBytes);
-                    }
-                }
-                else
-                {
-                    ArrayPool<HeapEntry>.Shared.Return(segBuf, clearArray: false);
-                    TrackSegBufDelta(-(long)segBuf.Length * SegBufEntryBytes);
-                }
+                // Flush the trailing partial chunk, then record this segment's final object count for
+                // the SegmentIndex satellite section (written after the parallel scan below). Each
+                // segIdx is written by exactly one worker, so no lock is needed. Entries were already
+                // streamed to this segment's own scratch files during the scan — no shared-stream
+                // lock, so segments make independent progress, and the files are concatenated in
+                // segment order after the scan completes, one column at a time.
+                columnWriter.Complete();
+                segRecordCounts[segIdx] = columnWriter.EntryCount;
 
                 return state;
             },
@@ -621,11 +534,10 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         if (Environment.GetEnvironmentVariable("DD_PERF_INDEX_MEMORY") == "1")
         {
             Console.Error.WriteLine(
-                $"[PERF] IndexScan segBuf: {segments.Length} segments, DOP={maxSegmentParallelism}, " +
-                $"{objectCount:N0} objects, {SegBufEntryBytes}B/entry — peak concurrent " +
-                $"{segBufPeakBytes / (1024.0 * 1024):N1} MB, largest single buffer " +
-                $"{segBufLargestSingleBytes / (1024.0 * 1024):N1} MB, {segBufGrowCount:N0} pool-doubling copies, " +
-                $"leaked-live {segBufLiveBytes:N0} B");
+                $"[PERF] IndexScan columnar buffers: {segments.Length} segments, DOP={maxSegmentParallelism}, " +
+                $"{objectCount:N0} objects — peak concurrent {columnBufferPeakBytes / (1024.0 * 1024):N1} MB " +
+                $"(chunk {serialChunkEntries:N0} entries/column), leaked-live {columnBufferLiveBytes:N0} B. " +
+                $"Replaced a whole-segment HeapEntry[] staging buffer measured at 512.0 MB peak.");
         }
 
         // Concatenate the per-segment scratch files into the three columnar sections, one
@@ -1098,6 +1010,117 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         {
             DeleteForwardIndexScratchFiles(indexDir, bucketCount);
             return $"ForwardIndex: {ex.GetType().Name}: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Streams one segment's scanned entries straight into that segment's four columnar scratch
+    /// files, buffering a single fixed-size chunk per column.
+    ///
+    /// <para>Replaces a whole-segment <c>HeapEntry[]</c> staging buffer that held every object in the
+    /// segment purely so the serialize loop could read it back afterwards — in the same order it was
+    /// written, with no sort in between. That buffer was measured at <b>512 MB peak concurrent</b> on a
+    /// 3.3GB dump (8 segments, DOP 4, largest single buffer 128 MB) and scaled with
+    /// objects-per-segment x DOP, so it grew with dump size. Chunk buffers are a few MB per worker
+    /// regardless. It also removes the pool-doubling growth path, which copied the entire accumulated
+    /// buffer on each of 8 observed doublings.</para>
+    ///
+    /// <para>See docs/analysis/phase1-redesigns/dominator-tree-memory-profile.md § 6.</para>
+    /// </summary>
+    private sealed class SegmentColumnWriter : IDisposable
+    {
+        private readonly string _addrPath, _mtPath, _sizePath, _genPath;
+        private readonly int _chunkEntries;
+        private readonly int _fileBufferSize;
+        private readonly Action<long>? _trackBufferBytes;
+        private readonly byte[] _addrBuf, _mtBuf, _sizeBuf, _genBuf;
+
+        private FileStream? _addrStream, _mtStream, _sizeStream, _genStream;
+        private int _chunkCount;
+        private bool _disposed;
+
+        /// <summary>Entries accepted so far — feeds the SegmentIndex satellite's per-segment count.</summary>
+        public long EntryCount { get; private set; }
+
+        public SegmentColumnWriter(
+            string addrPath, string mtPath, string sizePath, string genPath,
+            int chunkEntries, int fileBufferSize, Action<long>? trackBufferBytes = null)
+        {
+            _addrPath = addrPath;
+            _mtPath = mtPath;
+            _sizePath = sizePath;
+            _genPath = genPath;
+            _chunkEntries = chunkEntries;
+            _fileBufferSize = fileBufferSize;
+            _trackBufferBytes = trackBufferBytes;
+
+            _addrBuf = ArrayPool<byte>.Shared.Rent(chunkEntries * ColumnSize);
+            _mtBuf = ArrayPool<byte>.Shared.Rent(chunkEntries * ColumnSize);
+            _sizeBuf = ArrayPool<byte>.Shared.Rent(chunkEntries * ColumnSize);
+            _genBuf = ArrayPool<byte>.Shared.Rent(chunkEntries * GenColumnSize);
+            _trackBufferBytes?.Invoke(BufferBytes);
+        }
+
+        private long BufferBytes => (long)_addrBuf.Length + _mtBuf.Length + _sizeBuf.Length + _genBuf.Length;
+
+        public void Add(in HeapEntry entry)
+        {
+            int off = _chunkCount * ColumnSize;
+            BinaryPrimitives.WriteUInt64LittleEndian(_addrBuf.AsSpan(off), entry.Address);
+            BinaryPrimitives.WriteUInt64LittleEndian(_mtBuf.AsSpan(off), entry.MethodTable);
+            BinaryPrimitives.WriteUInt64LittleEndian(_sizeBuf.AsSpan(off), entry.Size);
+            _genBuf[_chunkCount] = unchecked((byte)entry.Generation);
+
+            _chunkCount++;
+            EntryCount++;
+
+            if (_chunkCount == _chunkEntries)
+                Flush();
+        }
+
+        /// <summary>Writes the trailing partial chunk. Must be called before disposal.</summary>
+        public void Complete() => Flush();
+
+        private void Flush()
+        {
+            if (_chunkCount == 0)
+                return;
+
+            // Streams are created on first flush rather than in the constructor, so a segment that
+            // yields no entries still produces no scratch files — ConcatenateScratchFiles skips
+            // missing per-segment files, and creating empty ones would change that contract.
+            _addrStream ??= CreateStream(_addrPath);
+            _mtStream ??= CreateStream(_mtPath);
+            _sizeStream ??= CreateStream(_sizePath);
+            _genStream ??= CreateStream(_genPath);
+
+            _addrStream.Write(_addrBuf, 0, _chunkCount * ColumnSize);
+            _mtStream.Write(_mtBuf, 0, _chunkCount * ColumnSize);
+            _sizeStream.Write(_sizeBuf, 0, _chunkCount * ColumnSize);
+            _genStream.Write(_genBuf, 0, _chunkCount * GenColumnSize);
+
+            _chunkCount = 0;
+        }
+
+        private FileStream CreateStream(string path) => new(
+            path, FileMode.Create, FileAccess.Write, FileShare.None, _fileBufferSize, FileOptions.SequentialScan);
+
+        public void Dispose()
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+
+            _addrStream?.Dispose();
+            _mtStream?.Dispose();
+            _sizeStream?.Dispose();
+            _genStream?.Dispose();
+
+            _trackBufferBytes?.Invoke(-BufferBytes);
+            ArrayPool<byte>.Shared.Return(_addrBuf);
+            ArrayPool<byte>.Shared.Return(_mtBuf);
+            ArrayPool<byte>.Shared.Return(_sizeBuf);
+            ArrayPool<byte>.Shared.Return(_genBuf);
         }
     }
 

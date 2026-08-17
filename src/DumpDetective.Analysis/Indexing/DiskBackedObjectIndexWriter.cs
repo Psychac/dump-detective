@@ -28,6 +28,10 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     // amortizes the per-bucket lock over this many edges instead of taking it once per edge.
     private const int EdgeBatchSize = 2048;
 
+    // Actual managed size of a HeapEntry (3x ulong + sbyte, padded), not the sum of its fields —
+    // used to account for the per-worker segBuf staging buffer's real footprint.
+    private static readonly int SegBufEntryBytes = System.Runtime.CompilerServices.Unsafe.SizeOf<HeapEntry>();
+
     // TEMPORARY perf A/B toggle (see docs/cache/backlog.md, GC-root enumeration option 2):
     // set DD_SKIP_ROOT_INDEX_BUILD=1 to skip the eager Roots section write during Phase 1
     // and let RootSetCache's live-heap fallback build roots on demand in Phase 2 instead.
@@ -195,6 +199,52 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         using var containerWriter = new CacheContainerWriter(containerPath, dumpPath, progress);
         Stream stream = containerWriter.Stream;
 
+        // §segBuf accounting: the per-worker HeapEntry staging buffer is the largest single
+        // allocation in the scan and scales with objects-per-segment x DOP, so its peak needs to be
+        // observable rather than inferred. Updated once per segment (rent/grow/return), never
+        // per-object. Reported via DD_PERF_INDEX_MEMORY=1.
+        // Sub-phase allocation checkpoints (DD_PERF_INDEX_MEMORY=1). The stage total is ~10.5GB on a
+        // 3.3GB dump, and attributing that to a phase is impossible from the outside — the whole
+        // reason the previous "it's the bucket sorters" guess went unchallenged.
+        var allocCheckpoints = new List<(string Phase, long Bytes)>();
+        long allocMark = GC.GetTotalAllocatedBytes(precise: false);
+        void MarkAlloc(string phase)
+        {
+            long now = GC.GetTotalAllocatedBytes(precise: false);
+            allocCheckpoints.Add((phase, now - allocMark));
+            allocMark = now;
+        }
+
+        long segBufLiveBytes = 0;
+        long segBufPeakBytes = 0;
+        long segBufLargestSingleBytes = 0;
+        long segBufGrowCount = 0;
+
+        void TrackSegBufDelta(long deltaBytes)
+        {
+            long live = Interlocked.Add(ref segBufLiveBytes, deltaBytes);
+            long observedPeak = Interlocked.Read(ref segBufPeakBytes);
+            while (live > observedPeak)
+            {
+                long prior = Interlocked.CompareExchange(ref segBufPeakBytes, live, observedPeak);
+                if (prior == observedPeak)
+                    break;
+                observedPeak = prior;
+            }
+        }
+
+        void TrackSegBufLargest(long bytes)
+        {
+            long observed = Interlocked.Read(ref segBufLargestSingleBytes);
+            while (bytes > observed)
+            {
+                long prior = Interlocked.CompareExchange(ref segBufLargestSingleBytes, bytes, observed);
+                if (prior == observed)
+                    break;
+                observed = prior;
+            }
+        }
+
         var parallelOptions = new ParallelOptions
         {
             CancellationToken = cancellationToken,
@@ -233,6 +283,8 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                 const int MaxInitialRent = 1_000_000;
                 int initCapacity = (int)Math.Min(Math.Max((long)segment.Length / 24, 64), MaxInitialRent);
                 HeapEntry[] segBuf = ArrayPool<HeapEntry>.Shared.Rent(initCapacity);
+                TrackSegBufDelta((long)segBuf.Length * SegBufEntryBytes);
+                TrackSegBufLargest((long)segBuf.Length * SegBufEntryBytes);
                 int segCount = 0;
 
                 foreach (ClrObject obj in segment.EnumerateObjects())
@@ -249,6 +301,9 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         HeapEntry[] bigger = ArrayPool<HeapEntry>.Shared.Rent(segBuf.Length * 2);
                         segBuf.AsSpan(0, segCount).CopyTo(bigger);
                         ArrayPool<HeapEntry>.Shared.Return(segBuf, clearArray: false);
+                        TrackSegBufDelta((long)(bigger.Length - segBuf.Length) * SegBufEntryBytes);
+                        TrackSegBufLargest((long)bigger.Length * SegBufEntryBytes);
+                        Interlocked.Increment(ref segBufGrowCount);
                         segBuf = bigger;
                     }
 
@@ -459,11 +514,13 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         ArrayPool<byte>.Shared.Return(sizeBuf);
                         ArrayPool<byte>.Shared.Return(genBuf);
                         ArrayPool<HeapEntry>.Shared.Return(segBuf, clearArray: false);
+                        TrackSegBufDelta(-(long)segBuf.Length * SegBufEntryBytes);
                     }
                 }
                 else
                 {
                     ArrayPool<HeapEntry>.Shared.Return(segBuf, clearArray: false);
+                    TrackSegBufDelta(-(long)segBuf.Length * SegBufEntryBytes);
                 }
 
                 return state;
@@ -559,6 +616,18 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             throw;
         }
 
+        MarkAlloc("parallel heap scan (incl. edge extraction)");
+
+        if (Environment.GetEnvironmentVariable("DD_PERF_INDEX_MEMORY") == "1")
+        {
+            Console.Error.WriteLine(
+                $"[PERF] IndexScan segBuf: {segments.Length} segments, DOP={maxSegmentParallelism}, " +
+                $"{objectCount:N0} objects, {SegBufEntryBytes}B/entry — peak concurrent " +
+                $"{segBufPeakBytes / (1024.0 * 1024):N1} MB, largest single buffer " +
+                $"{segBufLargestSingleBytes / (1024.0 * 1024):N1} MB, {segBufGrowCount:N0} pool-doubling copies, " +
+                $"leaked-live {segBufLiveBytes:N0} B");
+        }
+
         // Concatenate the per-segment scratch files into the three columnar sections, one
         // column at a time, in segment order — this is what makes disk-mode entry order
         // deterministic and match memory-mode's segment-ordered output, and keeps each
@@ -578,6 +647,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 
         containerWriter.BeginSection(CacheSectionId.ObjectGenerations);
         uint genChecksum = ConcatenateScratchFiles(stream, segGenScratchFiles, writeBuffer);
+        MarkAlloc("columnar scratch concatenation");
         containerWriter.EndSection(objectCount, genChecksum);
 
         // Capture the main heap scan elapsed time for HeapIndexBuildResult before satellite writes.
@@ -762,6 +832,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // can take a while on many buckets) show a growing elapsed like the satellite sections.
         if (reverseEdgeExtractor is not null)
         {
+            MarkAlloc("satellite sections");
             string? reverseIndexWarning = WriteReverseIndexSections(
                 containerWriter, indexDir, reverseIndexBucketCount, reverseEdgeExtractor,
                 cancellationToken, progress, stopwatch);
@@ -774,6 +845,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // parent and uncapped.
         if (forwardEdgeExtractor is not null)
         {
+            MarkAlloc("reverse index (sort + write)");
             string? forwardIndexWarning = WriteForwardIndexSections(
                 containerWriter, indexDir, forwardIndexBucketCount, forwardEdgeExtractor,
                 cancellationToken, progress, stopwatch);
@@ -803,6 +875,25 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         }
 
         containerWriter.Finish();
+
+        MarkAlloc("forward index (sort + write) + TypeAggregates");
+
+        if (Environment.GetEnvironmentVariable("DD_PERF_INDEX_MEMORY") == "1")
+        {
+            long checkpointSum = 0;
+            foreach ((string phase, long bytes) in allocCheckpoints)
+                checkpointSum += bytes;
+
+            Console.Error.WriteLine($"[PERF] IndexBuild allocation by phase (total {checkpointSum / (1024.0 * 1024 * 1024):N2} GB, " +
+                $"{(objectCount == 0 ? 0 : checkpointSum / objectCount):N0} B/object over {objectCount:N0} objects):");
+            foreach ((string phase, long bytes) in allocCheckpoints)
+            {
+                Console.Error.WriteLine($"[PERF]   {phase,-46} {bytes / (1024.0 * 1024):N1} MB" +
+                    $"  ({(checkpointSum == 0 ? 0 : 100.0 * bytes / checkpointSum):N1}%)");
+            }
+            Console.Error.WriteLine($"[PERF]   gen0={GC.CollectionCount(0):N0} gen1={GC.CollectionCount(1):N0} gen2={GC.CollectionCount(2):N0}" +
+                $"  managed-heap-now={GC.GetTotalMemory(false) / (1024.0 * 1024):N1} MB");
+        }
 
         // Stopped only now — HeapIndexBuildResult.Elapsed (what the CLI's "Scan + Index heap"
         // checkmark displays) must cover the whole build, not just the core columnar scan

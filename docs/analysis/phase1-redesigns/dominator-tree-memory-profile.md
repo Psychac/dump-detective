@@ -35,9 +35,15 @@ a broken counter and isn't.
 5. **Default budget raised 6 GB → 20 GB — big dumps are explicitly *not* excluded.** The 25.6 GB dump
    projects 9.68 GB (48% of budget); the ceiling is ~119M reachable nodes, about 2x the largest dump
    measured.
-6. **The Phase 1 `+2.4 GB` is by design and sitting exactly on its ceiling:** `ForwardEdgeSorter` runs
-   4 buckets concurrently, each loading up to 600 MB fully into memory. 4 × 600 MB = 2.4 GB.
-7. **The table itself is now fixed** (§ 7) — `Allocated` replaces `Managed Δ`, and both edge sorters'
+6. **Phase 1's cost was wrong twice, and is now measured** (§ 6). The old "600 MB x 4 buckets = 2.4 GB"
+   claim was arithmetic coincidence, and worse, *every* prior measurement of this stage was a **cache
+   hit** that never ran the heap scan. A forced rebuild allocates **10.5 GB**, of which **78.4% is the
+   parallel heap scan at 620 B/object** (ClrMD churn) — the bucket sorters are ~11% each. The one
+   genuinely avoidable *resident* buffer is `segBuf`, measured at **448-512 MB peak concurrent**.
+7. **"Allocated" is a flow, not a level, and it is easy to misread.** 10.5 GB allocated against +2.6 GB
+   working set is not a contradiction: gen0 recycled the same ~9 MB nursery 950 times. The console
+   legend now says so explicitly, because this was misread in review.
+8. **The table itself is now fixed** (§ 7) — `Allocated` replaces `Managed Δ`, and both edge sorters'
    fake `PeakMemoryMb` is replaced with an exact figure. This immediately surfaced a second problem
    nobody was looking for: GC Root Analysis allocates 22 MB but grows the working set by 337 MB.
 
@@ -424,27 +430,107 @@ wall before the budget. Lifting it needs either chunked CSR arrays or `gcAllowVe
 
 ---
 
-## 6. Phase 1 build stage: the `+2.4 GB` is by design
+## 6. Phase 1 index build — measured, after two wrong guesses
 
-Not a leak, and not the dominator tree — [`ForwardEdgeSorter`](../../../src/DumpDetective.Analysis/Indexing/ForwardIndex/ForwardEdgeSorter.cs):
+> ⚠️ **This section previously claimed the stage's cost was `MaxBucketSize` 600 MB x parallelism 4 =
+> 2.4 GB, "matching the observed +2.4 GB exactly." That was numerology and it was wrong twice over.**
+> Both errors are recorded here rather than quietly deleted, because they are the same failure mode
+> § 1 and § 5 are about: a plausible arithmetic coincidence accepted in place of a measurement.
 
-- `MaxBucketSize = 600 MB` per bucket.
-- `SortBucketCore` loads the whole bucket file into **two full `ulong[]`** (`parents` + `children`) to
-  `Array.Sort` them — i.e. bucket-file-size bytes resident, per bucket.
-- `maxParallelism = Math.Min(Environment.ProcessorCount, 4)`.
+### Error 1: the arithmetic was a coincidence
 
-**4 × 600 MB = 2.4 GB**, matching the observed `Scan + Index heap  +2.4 GB` exactly. The bound is
-intentional and documented in that file (it replaced an unbounded `Task.WhenAll`), but the ceiling is
-set high enough that it dominates the whole Phase 1 stage.
+`CalculateBucketCount` is `ceil(dumpMB / 500)`, so bucket **count scales with dump size** and per-bucket
+file size stays roughly constant — ~74 MB on the 3.3 GB dump (7 buckets), ~58 MB on a 25.6 GB dump
+(53 buckets). Four concurrent sorts hold ~300 MB, not 2.4 GB. `MaxBucketSize = 600 MB` is a guard
+against hash skew that is never approached in normal operation. Two numbers agreeing to one decimal
+place was chance.
 
-Secondary costs in the same method:
+### Error 2: every prior measurement of this stage was a cache hit
 
-- `dirEntries` is a `List<(ulong, long)>` with one entry per unique parent, grown by doubling — for a
-  bucket with millions of unique parents that is a multi-hundred-MB list with a transient 2x spike
-  during growth, per concurrent bucket.
-- Edges are read with a per-edge `BinaryReader.ReadUInt64()` loop: at up to 37.5M edges per bucket
-  that is 75M virtual calls. A pooled `byte[]` read plus `BinaryPrimitives` would remove the call
-  overhead entirely without changing the format.
+`DiskBackedObjectIndexWriter.Build` opens with a fast path: if `cache.bin` carries a valid
+`TypeAggregates` section it returns immediately, skipping the heap scan entirely. The cache lives in
+`<dump>.dumpindex/`, and every earlier run in this investigation hit it. **The "3.3 GB allocated /
++2.4 GB WS" figures attributed to the index build were from runs that never built an index.** They were
+measuring `TryLoadFromCache` deserializing a 1.36 GB `cache.bin`, plus the shared scans.
+
+A forced rebuild (move `cache.bin` aside) allocates **10.5 GB** for the stage — 3.2x the number
+previously quoted.
+
+### Measured attribution
+
+`DD_PERF_INDEX_MEMORY=1` now emits per-phase allocation from inside `Build`:
+
+```
+[PERF] IndexBuild allocation by phase (total 8.45 GB, 620 B/object over 14,620,162 objects):
+[PERF]   parallel heap scan (incl. edge extraction)     6,785.5 MB  (78.4%)
+[PERF]   columnar scratch concatenation                     0.1 MB  ( 0.0%)
+[PERF]   satellite sections                                 9.0 MB  ( 0.1%)
+[PERF]   reverse index (sort + write)                     891.8 MB  (10.3%)
+[PERF]   forward index (sort + write) + TypeAggregates     966.3 MB  (11.2%)
+[PERF]   gen0=950 gen1=320 gen2=21  managed-heap-now=3,000.8 MB
+```
+
+**The bucket sorters are ~11% each, not the dominant cost. 78.4% is the parallel heap scan, at 620
+bytes allocated per object** — that is ClrMD churn from ~14.6M `EnumerateReferences(carefully: true)`
+calls and per-object type/segment work, not any buffer this codebase owns.
+
+The 8.45 GB accounted here versus 10.5 GB for the whole stage leaves ~2 GB outside `Build`: the
+`TryLoadFromCache` probe, `heap.Segments` first access, context construction, and `RunSharedScans`.
+
+### Why 10 GB is a real number, and what it is not
+
+It is **cumulative allocation over ~40 seconds**, not memory held. Three independent cross-checks:
+
+| Check | Value | Verdict |
+|---|---:|---|
+| Bytes per gen0 collection (8.45 GB / 950) | 9.1 MB | a normal gen0 budget — the collection count independently confirms the byte count |
+| Allocation rate (8.45 GB / ~40 s) | 216 MB/s | unremarkable for .NET; gen0 rates above 1 GB/s are routine |
+| Working-set growth for the stage | +2.6 GB | nothing is *using* 10 GB |
+| Managed heap at end of build | 3.0 GB | " |
+
+Sustained high allocation with low retention is exactly what a streaming, disk-backed indexer should
+look like. The number is large because it is a rate integrated over time, and the column is labelled
+"Allocated" for that reason — see § 1 on why the honest metric is also the easiest one to misread as
+"memory used."
+
+### `segBuf`: the one genuinely avoidable resident buffer
+
+Separate axis from the above — this is **peak live**, not allocation.
+[`DiskBackedObjectIndexWriter`](../../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs)
+rents a per-worker `HeapEntry[]` holding **every object in the segment**, written in the scan loop and
+read only in the columnar serialize loop that follows it — strictly sequentially, same order, no sort
+or reordering in between. It is a pure pass-through staging buffer.
+
+Measured on the 3.3 GB dump: **8 segments, DOP 4, peak concurrent 448-512 MB** across runs (worker
+overlap is timing-dependent), largest single buffer **128 MB**, **8 pool-doubling copies**. `HeapEntry`
+is 32 bytes (3x `ulong` + `sbyte`, padded).
+
+Three properties make it worse than the headline figure: the initial rent caps at 1M entries (32 MB)
+and then **grows by doubling with a full copy**; `ArrayPool` **retains the largest buffers for process
+lifetime**, so the working set never returns; and it scales with objects-per-segment x DOP, so a
+25.6 GB dump at DOP 8 would be multiples of this.
+
+The fix is to write into the columnar chunk buffers during the scan and flush when a chunk fills,
+removing the buffer and the doubling copies entirely. Contained to one method. Tracked in § 8.
+
+### Checked and *not* worth pursuing
+
+Recorded so nobody re-derives them:
+
+- **Per-worker x per-bucket edge buffers.** `EdgeBatchSize` is 2048, so `DOP x buckets x 2 x 2048 x 16 B`
+  = 1.8 MB on the 3.3 GB dump, 27 MB on a 25.6 GB dump. Negligible.
+- **Forward and reverse index builds are sequential**, not concurrent (both
+  `.GetAwaiter().GetResult()` in `Build`), so their peak is `max`, not sum. Worth confirming because
+  overlap would have doubled everything.
+- **The two `ulong[]` per bucket sort** are already at the theoretical minimum for an in-memory sort of
+  16-byte records. Going below needs external merge sort, and the bucket partitioning already *is*
+  that.
+- **`ForwardEdgeExtractor`/`ReverseEdgeExtractor` stream straight to disk**, bounded by 64 KB
+  `FileStream` buffers. Correct as written.
+
+Remaining minor item in the sorters: `dirEntries` is a `List<(ulong, long)>` with one entry per unique
+key, grown by doubling, so it carries a transient 2x spike. Distinct keys can be counted in one cheap
+pass over the already-sorted array and the list sized exactly. Tens of MB; free.
 
 ---
 
@@ -516,26 +602,29 @@ decision, not a drive-by. Tracked in § 8.
 1. **Investigate GC Root Analysis's 22 MB-allocated / +337 MB-working-set profile** (§ 7). Newly
    visible, and the shape is unlike anything else in the table: essentially all native/mapped growth.
    Worth knowing whether that is unavoidable ClrMD page-faulting or a structure being retained.
-2. **Phase 1 index build allocates 3.3 GB** — the largest single line in the whole pipeline, now that
-   the table shows it. Concrete leads in § 6: lower the `MaxBucketSize × parallelism` product, pre-size
-   or stream `dirEntries`, and replace the per-edge `BinaryReader.ReadUInt64()` loop (75M virtual calls
-   per large bucket) with pooled buffer reads.
-3. **Re-measure the 25.6 GB dump end-to-end.** Everything about it in this doc is analytic — derived
+2. **Reduce per-object allocation in the parallel heap scan** — 78.4% of the index build's 10.5 GB, at
+   620 B/object over 14.6M objects (§ 6). Dominated by ClrMD `EnumerateReferences(carefully: true)`
+   churn, one call per object. This is a throughput/GC-pressure problem rather than a footprint one, but
+   it is by far the largest allocation source anywhere in the pipeline.
+3. **Eliminate `segBuf`** (§ 6) — measured **448-512 MB peak concurrent** resident on the 3.3 GB dump,
+   scaling with objects-per-segment x DOP, and entirely avoidable: it is a pass-through staging buffer
+   read back in the same order it was written. Also removes 8 pool-doubling copies.
+4. **Re-measure the 25.6 GB dump end-to-end.** Everything about it in this doc is analytic — derived
    from the stage model and the design doc's original figures, not re-run since the allocation fixes and
    the new budget model. It is the one dump that exercises the parts of § 5 that matter most, and the
    budget was raised specifically so it stays on the exact path.
-4. **Lower peak live, which raises the effective ceiling more cheaply than raising the budget.** The
+5. **Lower peak live, which raises the effective ceiling more cheaply than raising the budget.** The
    two largest structural wins are both already identified in § 3.2: `LeafFolder` builds the reduced CSR
    while the original is still alive (~320 MB of overlap on the small dump, ~2 GB on the large one), and
    `extRevTargets` is a third full copy of the reverse edge array existing only to append virtual-root
    edges. Fixing either lets bigger graphs fit the same budget.
-5. **`ChunkedBuffer.ToArray()` second copies (~87 MB)** — the CSR build could consume the chunks
+6. **`ChunkedBuffer.ToArray()` second copies (~87 MB)** — the CSR build could consume the chunks
    directly rather than materializing a flat copy while the chunks are still rooted.
-6. **`GenerationTag : byte` (~20 MB)** — 8-member enum currently costing 4 bytes/node.
-7. **`DenseIdMap` pre-sizing (~216 MB churn).** Guard this one: pre-sizing from total heap object
+7. **`GenerationTag : byte` (~20 MB)** — 8-member enum currently costing 4 bytes/node.
+8. **`DenseIdMap` pre-sizing (~216 MB churn).** Guard this one: pre-sizing from total heap object
    count over-allocates badly when much of the heap is unreachable garbage, which is the normal case
    in a crash dump. Only worth doing with a reachability-aware estimate.
-8. **Allocated bytes in the serialized report appendix** — `AnalyzerMemoryDiagnosticRecord` still
+9. **Allocated bytes in the serialized report appendix** — `AnalyzerMemoryDiagnosticRecord` still
    carries working-set/managed-heap absolutes only (§ 7, "Deliberately not changed"). Adding an
    allocated column is a JSON schema change needing a version bump per
    [schema-versioning.md](../../schema-versioning.md).

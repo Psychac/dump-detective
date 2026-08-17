@@ -351,9 +351,15 @@ internal static class ConsoleUx
             AnsiConsole.MarkupLine(
                 $"{IndentAnalyzer}[grey]Peak process working set:[/]  [bold white]{Escape(peakStr)}[/]" +
                 $"  [grey](Δ from baseline: {Escape(deltaStr)})[/]");
+            // Spelled out because "Allocated" reads as "memory used" and it isn't: on a real index
+            // build this column shows 10 GB for a stage whose working set grows 2.6 GB, because gen0
+            // recycles the same few MB hundreds of times. Reviewers have misread it exactly that way.
             AnsiConsole.MarkupLine(
-                $"{IndentAnalyzer}[grey]Allocated = total bytes allocated (cost). " +
-                $"WS Δ = process growth; can be negative when the GC returns pages.[/]");
+                $"{IndentAnalyzer}[grey]Allocated = cumulative bytes allocated over the whole stage, " +
+                $"not memory held — the GC recycles it continuously, so this can far exceed installed RAM.[/]");
+            AnsiConsole.MarkupLine(
+                $"{IndentAnalyzer}[grey]WS Δ = actual process growth (this is the RAM figure); " +
+                $"negative means the GC returned pages to the OS.[/]");
         });
     }
 

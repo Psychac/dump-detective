@@ -7,7 +7,7 @@ namespace DumpDetective.Analysis.Traversal.Dominator;
 /// of <see cref="ReachableGraphBuilder.Build"/>, input to <see cref="LeafFolder"/> and eventually
 /// Lengauer-Tarjan.
 /// </summary>
-internal sealed class ReachableGraph
+internal sealed class ReachableGraph : IFoldInputs
 {
     public int NodeCount { get; }
     /// <summary>
@@ -61,10 +61,33 @@ internal sealed class ReachableGraph
     /// </summary>
     internal void ReleaseEdgeAndDegreeArrays()
     {
+        ReleaseDegreeArrays();
+        ReleaseForwardEdgeArrays();
+        ReleaseReverseEdgeArrays();
+    }
+
+    /// <summary>
+    /// <see cref="IFoldInputs"/>: called by <see cref="LeafFolder.Fold"/> partway through, so the
+    /// reduced CSR it allocates can reuse this memory instead of stacking on top of it. Each is
+    /// idempotent — <see cref="ReleaseEdgeAndDegreeArrays"/> still runs afterwards as a safety net for
+    /// callers that pass no releaser.
+    /// </summary>
+    public void ReleaseDegreeArrays()
+    {
         OutDegree = Array.Empty<int>();
         InDegree = Array.Empty<int>();
+    }
+
+    /// <inheritdoc cref="ReleaseDegreeArrays"/>
+    public void ReleaseForwardEdgeArrays()
+    {
         FwdOffsets = Array.Empty<int>();
         FwdTargets = Array.Empty<int>();
+    }
+
+    /// <inheritdoc cref="ReleaseDegreeArrays"/>
+    public void ReleaseReverseEdgeArrays()
+    {
         RevOffsets = Array.Empty<int>();
         RevTargets = Array.Empty<int>();
     }

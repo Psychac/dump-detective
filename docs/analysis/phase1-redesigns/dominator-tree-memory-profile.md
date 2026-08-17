@@ -423,6 +423,90 @@ Both sizing claims are pinned by
 regression is silent at runtime (the analyzer just quietly downgrades to the heuristic), which is
 exactly why it needs to fail loudly in CI instead.
 
+### 5.1 FIXED: releasing Fold's inputs early — and why the obvious version freed nothing
+
+`LeafFolder.Fold` builds a complete reduced CSR (2 x E' ints) while the original CSR (2 x E ints) is
+still reachable through the caller. `ReleaseEdgeAndDegreeArrays()` only ran *after* Fold returned, so the
+two coexisted at the peak of the whole exact-tree path.
+
+Input lifetimes inside Fold are actually much shorter than that, and strictly ordered:
+
+| Input | Last read | Bytes |
+|---|---|---:|
+| `outDegree`, `inDegree` | foldable-leaf scan | 8N |
+| `revOffsets`, `revTargets` | folded-bytes attribution | 4(N+1) + 4E |
+| `fwdOffsets`, `fwdTargets` | reduced forward CSR fill | 4(N+1) + 4E |
+
+The forward CSR's release point matters most: it lands immediately before `reducedRevTargets` — another
+E'-sized array — is allocated.
+
+#### The first attempt freed exactly 0 bytes
+
+The natural implementation kept Fold's ten array parameters and added release callbacks the caller wired
+to `ReachableGraph`, with Fold also assigning `Array.Empty` to its own parameters. Measured with a
+compacting gen2 collection either side of the release:
+
+```
+LeafFolder forward-CSR release: live 2,183.5 MB -> 2,183.5 MB (freed 0.0 MB;
+  arrays were 4x(N+1)+4xE = 91.8 MB, releaser=on)
+```
+
+**Zero.** On x64 most of ten arguments are passed in the caller's outgoing-argument stack slots. Those
+slots stay GC-reachable for the duration of the call, and nothing the callee assigns can clear them —
+the callee's parameter may be enregistered while the incoming stack home still holds the reference.
+Clearing the caller's field and the callee's local left a third reference nobody could reach.
+
+Generalisable lesson: **"drop the reference" only works if you can reach every reference.** An
+argument-passing convention is a reference holder.
+
+#### Fixing it: one holder instead of ten parameters
+
+`Fold(IFoldInputs inputs)` — arrays reached through a holder, read into a phase-local, then *both* the
+holder's field and the local cleared. Two references, both reachable from inside Fold.
+`ReachableGraph` implements `IFoldInputs` directly (it already had every member), so in production the
+holder *is* the graph and there is no second owner. `ArrayFoldInputs` plus a convenience overload keeps
+`LeafFolder` testable with hand-built arrays, which is what the parameter list existed to provide.
+
+```
+LeafFolder forward-CSR release: live 2,040.8 MB -> 1,949.0 MB (freed 91.8 MB;
+  arrays were 4x(N+1)+4xE = 91.8 MB, holder=ReachableGraph)
+```
+
+91.8 MB freed against 91.8 MB predicted — exact.
+
+| | Array params + callbacks | Holder |
+|---|---:|---:|
+| Freed at forward-CSR release | 0.0 MB | **91.8 MB** |
+| Peak live at structural peak | 2,183.5 MB | **1,949.0 MB** |
+| Reduction vs. no early release | — | **-234.5 MB (-10.7%)** |
+
+The 234.5 MB is all three groups (8N + 2x[4(N+1) + 4E]). On the 25.6 GB dump the same expression is
+**~2.0 GB** (933 MB of node arrays + 1,096 MB of edge arrays), which is why this raises the effective
+ceiling more cheaply than raising the budget does.
+
+`LeafFoldResult.ReleaseReducedReverseArrays()` was added in the same pass: `DominatorTreeComputer` folds
+the reduced reverse CSR into the virtual-root-extended copy LT actually queries, after which the original
+is dead but stays rooted through the result object for the whole run.
+
+#### Measuring this at all required LOH compaction
+
+The first probe reported identical numbers for both arms even before the design flaw was understood,
+because it used `GC.GetTotalMemory(forceFullCollection: true)`. Every array here is far over the 85 KB
+LOH threshold, and **the LOH is swept, not compacted, by default** — freed bytes remain counted as
+free-list space. Only `GCLargeObjectHeapCompactionMode.CompactOnce` plus a compacting
+`GC.Collect` reports true live bytes. A release-shaped change alters *reachability*, not allocation
+totals, so it is invisible to every metric except a compacted live-bytes reading. Both probes are
+retained behind `DD_PERF_DOMINATOR_PEAK=1`.
+
+Correctness: the real-dump exact tree still reports `total retained bytes at GC roots = 1,018,915,128`,
+unchanged. `LeafFolderReleaseTests` pins the release order (load-bearing: the forward CSR must outlive
+the reverse one, since the reduced reverse CSR is derived from the reduced forward one) and asserts
+output equality against a non-releasing run with every released array **poisoned to -999**, so a
+read-after-release corrupts the result rather than passing by luck. That test was mutation-checked —
+moving one release a step earlier fails 2 of 4 cases.
+
+---
+
 ### Hard ceiling that remains, well above the default
 
 The CSR target arrays are `int[]`, so the 2 GB single-object limit caps any graph at **~537M edges**
@@ -646,11 +730,10 @@ decision, not a drive-by. Tracked in § 8.
    from the stage model and the design doc's original figures, not re-run since the allocation fixes and
    the new budget model. It is the one dump that exercises the parts of § 5 that matter most, and the
    budget was raised specifically so it stays on the exact path.
-5. **Lower peak live, which raises the effective ceiling more cheaply than raising the budget.** The
-   two largest structural wins are both already identified in § 3.2: `LeafFolder` builds the reduced CSR
-   while the original is still alive (~320 MB of overlap on the small dump, ~2 GB on the large one), and
-   `extRevTargets` is a third full copy of the reverse edge array existing only to append virtual-root
-   edges. Fixing either lets bigger graphs fit the same budget.
+5. ~~Lower peak live by releasing Fold's inputs early.~~ **DONE — see § 5.1.** Peak live at the
+   structural peak dropped **2,183.5 MB → 1,949.0 MB (-234.5 MB, -10.7%)** on the 3.3 GB dump, scaling to
+   ~2.0 GB on the 25.6 GB dump. Still open on the same theme: `extRevTargets` is a third full copy of the
+   reverse edge array, now released immediately after it is built but still allocated in the first place.
 6. **`ChunkedBuffer.ToArray()` second copies (~87 MB)** — the CSR build could consume the chunks
    directly rather than materializing a flat copy while the chunks are still rooted.
 7. **`GenerationTag : byte` (~20 MB)** — 8-member enum currently costing 4 bytes/node.

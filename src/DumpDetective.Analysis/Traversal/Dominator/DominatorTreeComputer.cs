@@ -12,16 +12,17 @@ internal static class DominatorTreeComputer
 {
     public static DominatorTreeComputeResult Compute(ReachableGraph graph, CancellationToken cancellationToken)
     {
-        LeafFoldResult fold = LeafFolder.Fold(
-            graph.NodeCount, graph.OutDegree, graph.InDegree,
-            graph.FwdOffsets, graph.FwdTargets, graph.RevOffsets, graph.RevTargets,
-            graph.ShallowSizes, graph.IsRoot);
+        // `graph` is passed as the input holder (it implements IFoldInputs) so Fold can drop each input
+        // group the moment it stops reading it, rather than holding all of them until it returns. Fold
+        // allocates a full reduced CSR while the original is still reachable, and that overlap was the
+        // peak of this whole path — see IFoldInputs for why a holder is required rather than the
+        // array-parameter signature this replaced.
+        LeafFoldResult fold = LeafFolder.Fold(graph);
 
-        // The raw edge/degree arrays (sized to E, not N — the largest arrays on `graph`) are fully
-        // consumed by Fold() above; nothing below this line, nor the caller's later per-type
-        // rollup, reads them again. `graph` itself stays alive for the rest of this computation
-        // (Addresses/MethodTables/ShallowSizes/IsRoot are still needed), so without this the arrays
-        // would sit alive-but-unused for the whole exact-tree computation.
+        // Safety net: idempotent, and covers the release points Fold didn't reach if it returned early.
+        // `graph` itself stays alive for the rest of this computation (Addresses/MethodTables/
+        // ShallowSizes/IsRoot are still needed), so the arrays must be dropped explicitly rather than
+        // waiting for `graph` to go out of scope.
         graph.ReleaseEdgeAndDegreeArrays();
 
         int n = fold.ReducedNodeCount;
@@ -63,6 +64,10 @@ internal static class DominatorTreeComputer
             if (isRootNewId[i])
                 extRevTargets[extRevCursor[i]++] = virtualRoot;
         }
+
+        // extRevTargets is now a superset of the reduced reverse CSR, and LT queries only the extended
+        // copy. Drop the original so two E'-sized reverse arrays don't coexist for the rest of the run.
+        fold.ReleaseReducedReverseArrays();
 
         ReadOnlySpan<int> Successors(int id)
         {

@@ -27,7 +27,7 @@ internal static class SingleDumpConsolePresenter
         {
             ConsoleUx.MemoryStageTableHeader();
             foreach ((string name, AnalyzerMemoryStats s) in stageStats)
-                ConsoleUx.MemoryTableRow(name, s.WorkingSetDelta, s.WorkingSetAfter, s.ManagedHeapDelta);
+                ConsoleUx.MemoryTableRow(name, s.AllocatedDelta, s.WorkingSetDelta, s.WorkingSetAfter);
         }
 
         // ── Analyzer table ───────────────────────────────────────────────────
@@ -47,7 +47,7 @@ internal static class SingleDumpConsolePresenter
             }
 
             AnalyzerMemoryStats s = run.MemoryStats;
-            ConsoleUx.MemoryTableRow(run.AnalyzerName, s.WorkingSetDelta, s.WorkingSetAfter, s.ManagedHeapDelta);
+            ConsoleUx.MemoryTableRow(run.AnalyzerName, s.AllocatedDelta, s.WorkingSetDelta, s.WorkingSetAfter);
         }
 
         // ── Process peak across all measured scopes ──────────────────────────

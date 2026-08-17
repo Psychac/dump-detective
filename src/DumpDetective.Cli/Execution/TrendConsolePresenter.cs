@@ -128,7 +128,7 @@ internal static class TrendConsolePresenter
             ConsoleUx.Info($"Memory diagnostics for dump: {Path.GetFileName(execution.DumpPath)}");
             ConsoleUx.MemoryStageTableHeader();
             foreach ((string stageName, AnalyzerMemoryStats stats) in dumpStageRows)
-                ConsoleUx.MemoryTableRow(stageName, stats.WorkingSetDelta, stats.WorkingSetAfter, stats.ManagedHeapDelta);
+                ConsoleUx.MemoryTableRow(stageName, stats.AllocatedDelta, stats.WorkingSetDelta, stats.WorkingSetAfter);
         }
 
         if (trendStageMemoryStats.Count > 0)
@@ -136,7 +136,7 @@ internal static class TrendConsolePresenter
             ConsoleUx.Info("Memory diagnostics for trend pipeline:");
             ConsoleUx.MemoryStageTableHeader();
             foreach ((string stageName, AnalyzerMemoryStats stats) in trendStageMemoryStats)
-                ConsoleUx.MemoryTableRow(stageName, stats.WorkingSetDelta, stats.WorkingSetAfter, stats.ManagedHeapDelta);
+                ConsoleUx.MemoryTableRow(stageName, stats.AllocatedDelta, stats.WorkingSetDelta, stats.WorkingSetAfter);
         }
 
         foreach (TrendDumpExecution execution in executions)
@@ -151,7 +151,7 @@ internal static class TrendConsolePresenter
             foreach (AnalyzerRunResult run in dumpRuns)
             {
                 AnalyzerMemoryStats s = run.MemoryStats!;
-                ConsoleUx.MemoryTableRow(run.AnalyzerName, s.WorkingSetDelta, s.WorkingSetAfter, s.ManagedHeapDelta);
+                ConsoleUx.MemoryTableRow(run.AnalyzerName, s.AllocatedDelta, s.WorkingSetDelta, s.WorkingSetAfter);
             }
         }
 

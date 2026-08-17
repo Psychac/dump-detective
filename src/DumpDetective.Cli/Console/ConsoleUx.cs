@@ -302,26 +302,38 @@ internal static class ConsoleUx
 
     private static void PrintMemoryColumnHeader_NoLock()
     {
-        AnsiConsole.MarkupLine($"{IndentAnalyzer}[grey]{"Name",-42}  {"WS Δ",10}  {"WS After",10}  {"Managed Δ",10}[/]");
+        AnsiConsole.MarkupLine($"{IndentAnalyzer}[grey]{"Name",-42}  {"Allocated",10}  {"WS Δ",10}  {"WS After",10}[/]");
         AnsiConsole.MarkupLine($"{IndentAnalyzer}[grey]{new string('─', 42)}  {new string('─', 10)}  {new string('─', 10)}  {new string('─', 10)}[/]");
     }
 
     /// <summary>
-    /// Prints one row for an analyzer in the memory table.
-    /// <paramref name="wsDelta"/> and <paramref name="managedDelta"/> are raw byte values (signed).
+    /// Prints one row for an analyzer in the memory table. All values are raw bytes.
+    ///
+    /// <para><paramref name="allocated"/> leads because it's the only column that attributes cost
+    /// honestly — it's monotonic, so unlike the managed-heap delta this column used to show, it can't
+    /// be distorted by a collection that happens to reclaim an *earlier* analyzer's garbage mid-run.
+    /// See docs/analysis/phase1-redesigns/dominator-tree-memory-profile.md § 1.</para>
     /// </summary>
-    public static void MemoryTableRow(string analyzerName, long wsDelta, long wsAfter, long managedDelta)
+    public static void MemoryTableRow(string analyzerName, long allocated, long wsDelta, long wsAfter)
     {
+        string allocatedStr = FormatBytes((ulong)Math.Max(0, allocated));
         string wsDeltaStr = FormatSignedBytes(wsDelta);
         string wsAfterStr = FormatBytes((ulong)Math.Max(0, wsAfter));
-        string managedStr = FormatSignedBytes(managedDelta);
-        string deltaColor = wsDelta > 50 * 1024 * 1024 ? "yellow" : wsDelta > 200 * 1024 * 1024 ? "red" : "grey";
+
+        // Ordered largest-threshold-first: the original was written the other way round, so the `red`
+        // branch was unreachable and everything over 50MB rendered yellow.
+        string allocColor = allocated > 1024L * 1024 * 1024 ? "red"
+            : allocated > 256L * 1024 * 1024 ? "yellow"
+            : "grey";
+        string wsColor = wsDelta > 200L * 1024 * 1024 ? "red"
+            : wsDelta > 50L * 1024 * 1024 ? "yellow"
+            : "grey";
 
         Safe(() => AnsiConsole.MarkupLine(
             $"{IndentAnalyzer}[white]{Escape(analyzerName),-42}[/]" +
-            $"  [{deltaColor}]{Escape(wsDeltaStr),10}[/]" +
-            $"  [grey]{Escape(wsAfterStr),10}[/]" +
-            $"  [grey]{Escape(managedStr),10}[/]"));
+            $"  [{allocColor}]{Escape(allocatedStr),10}[/]" +
+            $"  [{wsColor}]{Escape(wsDeltaStr),10}[/]" +
+            $"  [grey]{Escape(wsAfterStr),10}[/]"));
     }
 
     /// <summary>
@@ -339,6 +351,9 @@ internal static class ConsoleUx
             AnsiConsole.MarkupLine(
                 $"{IndentAnalyzer}[grey]Peak process working set:[/]  [bold white]{Escape(peakStr)}[/]" +
                 $"  [grey](Δ from baseline: {Escape(deltaStr)})[/]");
+            AnsiConsole.MarkupLine(
+                $"{IndentAnalyzer}[grey]Allocated = total bytes allocated (cost). " +
+                $"WS Δ = process growth; can be negative when the GC returns pages.[/]");
         });
     }
 

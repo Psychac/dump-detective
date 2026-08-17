@@ -33,6 +33,7 @@ internal sealed class PerDumpExecutionService(
         currentProcess.Refresh();
         long wsBeforeLoad = currentProcess.WorkingSet64;
         long managedBeforeLoad = GC.GetTotalMemory(false);
+        long allocBeforeLoad = GC.GetTotalAllocatedBytes(precise: false);
 
         progress?.Report(new AnalyzerProgressReport(0, "loading dump", Detail: null, Elapsed: stopwatch.Elapsed));
         using DumpLoadContext loadContext = await _dumpLoader.LoadAsync(dumpPath, cancellationToken);
@@ -41,6 +42,7 @@ internal sealed class PerDumpExecutionService(
         currentProcess.Refresh();
         long wsAfterLoad = currentProcess.WorkingSet64;
         long managedAfterLoad = GC.GetTotalMemory(false);
+        long allocAfterLoad = GC.GetTotalAllocatedBytes(precise: false);
 
         DumpIndexPaths.ResolveCacheDirectory(
             dumpPath,
@@ -73,12 +75,14 @@ internal sealed class PerDumpExecutionService(
         currentProcess.Refresh();
         long wsAfterIndex = currentProcess.WorkingSet64;
         long managedAfterIndex = GC.GetTotalMemory(false);
+        long allocAfterIndex = GC.GetTotalAllocatedBytes(precise: false);
 
         IReadOnlyList<AnalyzerRunResult> runs = await _analyzerExecutionService.ExecuteAsync(pipeline, context, cancellationToken);
 
         currentProcess.Refresh();
         long wsAfterAnalyze = currentProcess.WorkingSet64;
         long managedAfterAnalyze = GC.GetTotalMemory(false);
+        long allocAfterAnalyze = GC.GetTotalAllocatedBytes(precise: false);
 
         runs = AnalyzerFilterService.BuildSkippedByFilterResults(allAnalyzers, activeAnalyzers)
             .Concat(runs)
@@ -100,9 +104,9 @@ internal sealed class PerDumpExecutionService(
             stopwatch.Elapsed,
             new List<(string StageName, AnalyzerMemoryStats Stats)>
             {
-                ("Load dump", new AnalyzerMemoryStats(wsBeforeLoad, wsAfterLoad, managedBeforeLoad, managedAfterLoad)),
-                ("Scan + Index heap", new AnalyzerMemoryStats(wsAfterLoad, wsAfterIndex, managedAfterLoad, managedAfterIndex)),
-                ("Run analyzers", new AnalyzerMemoryStats(wsAfterIndex, wsAfterAnalyze, managedAfterIndex, managedAfterAnalyze))
+                ("Load dump", new AnalyzerMemoryStats(wsBeforeLoad, wsAfterLoad, managedBeforeLoad, managedAfterLoad, allocBeforeLoad, allocAfterLoad)),
+                ("Scan + Index heap", new AnalyzerMemoryStats(wsAfterLoad, wsAfterIndex, managedAfterLoad, managedAfterIndex, allocAfterLoad, allocAfterIndex)),
+                ("Run analyzers", new AnalyzerMemoryStats(wsAfterIndex, wsAfterAnalyze, managedAfterIndex, managedAfterAnalyze, allocAfterIndex, allocAfterAnalyze))
             });
     }
 }

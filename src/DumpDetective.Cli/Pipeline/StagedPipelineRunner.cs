@@ -26,12 +26,13 @@ internal sealed class StagedPipelineRunner
             Stopwatch sw = Stopwatch.StartNew();
             ConsoleUx.StageStart(i + 1, total, stage.Name);
 
-            long wsBefore = 0, managedBefore = 0;
+            long wsBefore = 0, managedBefore = 0, allocatedBefore = 0;
             if (trackMemory)
             {
                 _currentProcess.Refresh();
                 wsBefore = _currentProcess.WorkingSet64;
                 managedBefore = GC.GetTotalMemory(false);
+                allocatedBefore = GC.GetTotalAllocatedBytes(precise: false);
             }
 
             await stage.ExecuteAsync(state, cancellationToken);
@@ -44,7 +45,9 @@ internal sealed class StagedPipelineRunner
                     WorkingSetBefore: wsBefore,
                     WorkingSetAfter: _currentProcess.WorkingSet64,
                     ManagedHeapBefore: managedBefore,
-                    ManagedHeapAfter: GC.GetTotalMemory(false))));
+                    ManagedHeapAfter: GC.GetTotalMemory(false),
+                    AllocatedBefore: allocatedBefore,
+                    AllocatedAfter: GC.GetTotalAllocatedBytes(precise: false))));
             }
 
             ConsoleUx.StageComplete(i + 1, total, stage.Name, sw.Elapsed);

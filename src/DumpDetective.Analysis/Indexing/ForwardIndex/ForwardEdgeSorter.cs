@@ -53,7 +53,7 @@ internal sealed class ForwardEdgeSorter
             BucketDataSizes = results.Select(r => r.DataFileSize).ToList(),
             BucketDirectorySizes = results.Select(r => r.DirectoryFileSize).ToList(),
             TotalElapsedMs = results.Length == 0 ? 0 : results.Max(r => r.ElapsedMs),
-            PeakMemoryMb = results.Length == 0 ? 0 : results.Max(r => r.PeakMemoryMb),
+            PeakSortArrayBytes = results.Length == 0 ? 0 : results.Max(r => r.SortArrayBytes),
         };
     }
 
@@ -173,7 +173,14 @@ internal sealed class ForwardEdgeSorter
             DirectoryFileSize = new FileInfo(dirFile).Length,
             EdgeCount = edgeCount,
             ElapsedMs = (int)sw.ElapsedMilliseconds,
-            PeakMemoryMb = (int)(GC.GetTotalMemory(false) / (1024 * 1024)),
+            // Exactly the two ulong[edgeCount] arrays this method holds to sort the bucket. Replaces
+            // a GC.GetTotalMemory(false) sample taken here, which was labelled a "peak" but was
+            // neither a peak (one instant, after the arrays may already be collectible) nor
+            // attributable (whole-process heap size, including every other bucket running
+            // concurrently). This number is the one that actually sets the concurrency ceiling:
+            // MaxDegreeOfParallelism * MaxBucketSize. See
+            // docs/analysis/phase1-redesigns/dominator-tree-memory-profile.md § 6.
+            SortArrayBytes = edgeCount * 2 * sizeof(ulong),
         };
     }
 }
@@ -183,7 +190,9 @@ internal sealed class ForwardIndexSortResult
     public List<long> BucketDataSizes { get; set; } = new();
     public List<long> BucketDirectorySizes { get; set; } = new();
     public int TotalElapsedMs { get; set; }
-    public int PeakMemoryMb { get; set; }
+    /// <summary>Peak of each bucket's <c>SortArrayBytes</c> — the resident cost of the single
+    /// largest bucket sort, not of the run as a whole (buckets run concurrently).</summary>
+    public long PeakSortArrayBytes { get; set; }
 }
 
 internal sealed class BucketSortResult
@@ -193,5 +202,6 @@ internal sealed class BucketSortResult
     public long DirectoryFileSize { get; set; }
     public long EdgeCount { get; set; }
     public int ElapsedMs { get; set; }
-    public int PeakMemoryMb { get; set; }
+    /// <summary>Bytes held by this bucket's two sort arrays — exact, not sampled.</summary>
+    public long SortArrayBytes { get; set; }
 }

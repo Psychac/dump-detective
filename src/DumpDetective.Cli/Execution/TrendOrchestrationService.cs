@@ -100,7 +100,9 @@ internal sealed class TrendOrchestrationService(
                 WorkingSetBefore: currentProcess.WorkingSet64,
                 WorkingSetAfter: currentProcess.WorkingSet64,
                 ManagedHeapBefore: GC.GetTotalMemory(false),
-                ManagedHeapAfter: GC.GetTotalMemory(false));
+                ManagedHeapAfter: GC.GetTotalMemory(false),
+                AllocatedBefore: GC.GetTotalAllocatedBytes(precise: false),
+                AllocatedAfter: GC.GetTotalAllocatedBytes(precise: false));
         }
 
         AnalysisSnapshot[] snapshots = trendExecutions
@@ -143,7 +145,9 @@ internal sealed class TrendOrchestrationService(
                 WorkingSetBefore: buildReportMemoryBefore.WorkingSetBefore,
                 WorkingSetAfter: currentProcess.WorkingSet64,
                 ManagedHeapBefore: buildReportMemoryBefore.ManagedHeapBefore,
-                ManagedHeapAfter: GC.GetTotalMemory(false))));
+                ManagedHeapAfter: GC.GetTotalMemory(false),
+                AllocatedBefore: buildReportMemoryBefore.AllocatedBefore,
+                AllocatedAfter: GC.GetTotalAllocatedBytes(precise: false))));
         }
 
         stageStopwatch.Stop();
@@ -160,7 +164,9 @@ internal sealed class TrendOrchestrationService(
                 WorkingSetBefore: currentProcess.WorkingSet64,
                 WorkingSetAfter: currentProcess.WorkingSet64,
                 ManagedHeapBefore: GC.GetTotalMemory(false),
-                ManagedHeapAfter: GC.GetTotalMemory(false));
+                ManagedHeapAfter: GC.GetTotalMemory(false),
+                AllocatedBefore: GC.GetTotalAllocatedBytes(precise: false),
+                AllocatedAfter: GC.GetTotalAllocatedBytes(precise: false));
         }
         try
         {
@@ -189,7 +195,9 @@ internal sealed class TrendOrchestrationService(
                     WorkingSetBefore: writeOutputMemoryStats.WorkingSetBefore,
                     WorkingSetAfter: currentProcess.WorkingSet64,
                     ManagedHeapBefore: writeOutputMemoryStats.ManagedHeapBefore,
-                    ManagedHeapAfter: GC.GetTotalMemory(false))));
+                    ManagedHeapAfter: GC.GetTotalMemory(false),
+                    AllocatedBefore: writeOutputMemoryStats.AllocatedBefore,
+                    AllocatedAfter: GC.GetTotalAllocatedBytes(precise: false))));
             }
 
             if (resolved.Diagnostics.EnableMemoryDiagnostics)

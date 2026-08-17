@@ -79,20 +79,24 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
                 continue;
 
             AnalyzerMemoryStats stats = run.MemoryStats;
+            // "Allocated" leads and the old "MH Delta" column is gone: a managed-heap delta is a net
+            // heap-SIZE change, so an allocation-heavy analyzer whose work triggers a gen2 collection
+            // reports a negative number while costing gigabytes. Allocated bytes is monotonic and
+            // attributes correctly. See docs/analysis/phase1-redesigns/dominator-tree-memory-profile.md § 1.
             memoryRows.Add(Row(
                 Cell(run.AnalyzerName),
+                Cell(FormatHelper.FormatBytes((ulong)Math.Max(0, stats.AllocatedDelta)), stats.AllocatedDelta),
                 Cell(FormatHelper.FormatBytes((ulong)Math.Max(0, stats.WorkingSetBefore)), stats.WorkingSetBefore),
                 Cell(FormatHelper.FormatBytes((ulong)Math.Max(0, stats.WorkingSetAfter)), stats.WorkingSetAfter),
                 Cell(FormatHelper.FormatBytes((ulong)Math.Max(0, stats.WorkingSetDelta)), stats.WorkingSetDelta),
                 Cell(FormatHelper.FormatBytes((ulong)Math.Max(0, stats.ManagedHeapBefore)), stats.ManagedHeapBefore),
-                Cell(FormatHelper.FormatBytes((ulong)Math.Max(0, stats.ManagedHeapAfter)), stats.ManagedHeapAfter),
-                Cell(FormatHelper.FormatBytes((ulong)Math.Max(0, stats.ManagedHeapDelta)), stats.ManagedHeapDelta)));
+                Cell(FormatHelper.FormatBytes((ulong)Math.Max(0, stats.ManagedHeapAfter)), stats.ManagedHeapAfter)));
         }
 
         if (memoryRows.Count > 0)
         {
             compactTables.Add(STCompact("Analyzer memory impact",
-                new[] { CH("Analyzer"), CH("WS Before","bytes"), CH("WS After","bytes"), CH("WS Delta","bytes"), CH("MH Before","bytes"), CH("MH After","bytes"), CH("MH Delta","bytes") },
+                new[] { CH("Analyzer"), CH("Allocated","bytes"), CH("WS Before","bytes"), CH("WS After","bytes"), CH("WS Delta","bytes"), CH("MH Before","bytes"), CH("MH After","bytes") },
                 memoryRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

@@ -1,16 +1,41 @@
 namespace DumpDetective.Core.Models;
 
 /// <summary>
-/// Lightweight memory snapshot captured before and after a single analyzer run.
+/// Lightweight memory snapshot captured before and after a single analyzer run (or any timed scope).
 /// All values are sampled without forcing a GC collection to keep overhead minimal.
+///
+/// <para><b>Which number answers which question:</b> use <see cref="AllocatedDelta"/> for "how much
+/// memory did this cost" and <see cref="WorkingSetDelta"/> for "how much did this grow the process."
+/// Do not use <see cref="ManagedHeapDelta"/> for either — see its own remarks.</para>
 /// </summary>
 internal sealed record AnalyzerMemoryStats(
     long WorkingSetBefore,
     long WorkingSetAfter,
     long ManagedHeapBefore,
-    long ManagedHeapAfter)
+    long ManagedHeapAfter,
+    long AllocatedBefore,
+    long AllocatedAfter)
 {
     public long WorkingSetDelta => WorkingSetAfter - WorkingSetBefore;
+
+    /// <summary>
+    /// Total bytes allocated during the scope, from <c>GC.GetTotalAllocatedBytes</c>. Monotonic —
+    /// collections never reduce it — so it attributes work to the code that performed it regardless of
+    /// when the GC happens to run. This is the honest "what did this cost" metric.
+    /// </summary>
+    public long AllocatedDelta => AllocatedAfter - AllocatedBefore;
+
+    /// <summary>
+    /// ⚠️ <b>Net managed heap SIZE change, not memory used.</b> Almost never the number you want, and
+    /// actively misleading for anything allocation-heavy: a scope's own allocations trigger gen2/LOH
+    /// collections that reclaim *earlier* work's garbage, so this reads low or negative while the
+    /// process commits hundreds of MB. Measured on a real dump, one analyzer reported -686 MB here
+    /// while allocating 2.7 GB and growing the working set by 1.3 GB.
+    ///
+    /// Kept only because <see cref="ManagedHeapBefore"/>/<see cref="ManagedHeapAfter"/> are useful as
+    /// absolute heap-size readings. Prefer <see cref="AllocatedDelta"/>. See
+    /// docs/analysis/phase1-redesigns/dominator-tree-memory-profile.md § 1.
+    /// </summary>
     public long ManagedHeapDelta => ManagedHeapAfter - ManagedHeapBefore;
 }
 

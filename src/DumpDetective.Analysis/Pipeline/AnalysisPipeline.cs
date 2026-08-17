@@ -160,14 +160,20 @@ internal sealed class AnalysisPipeline(
                 cacheWithProgress.SetProgress(context.Progress);
 
             AnalyzerMemoryStats? memoryStats = null;
-            long wsBefore = 0, managedBefore = 0;
+            long wsBefore = 0, managedBefore = 0, allocatedBefore = 0;
             bool trackWorkingSet = context.Diagnostics.EnableMemoryDiagnostics || AnalyzerCollectionPolicyEvaluator.HasCollectionPolicy(context.Diagnostics);
             if (trackWorkingSet)
             {
                 _currentProcess.Refresh();
                 wsBefore = _currentProcess.WorkingSet64;
                 if (context.Diagnostics.EnableMemoryDiagnostics)
+                {
                     managedBefore = GC.GetTotalMemory(false);
+                    // Process-wide, not GetAllocatedBytesForCurrentThread: an analyzer may fan out to
+                    // pool threads (see IAnalyzer.IsThreadSafe), and per-thread counters would miss
+                    // everything those threads allocate. Reads a counter, so it's effectively free.
+                    allocatedBefore = GC.GetTotalAllocatedBytes(precise: false);
+                }
             }
 
             try
@@ -199,7 +205,9 @@ internal sealed class AnalysisPipeline(
                         WorkingSetBefore: wsBefore,
                         WorkingSetAfter: wsAfter,
                         ManagedHeapBefore: managedBefore,
-                        ManagedHeapAfter: GC.GetTotalMemory(false));
+                        ManagedHeapAfter: GC.GetTotalMemory(false),
+                        AllocatedBefore: allocatedBefore,
+                        AllocatedAfter: GC.GetTotalAllocatedBytes(precise: false));
                 }
 
                 AnalyzerRunResult success = new(

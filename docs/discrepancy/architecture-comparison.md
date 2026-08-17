@@ -113,3 +113,64 @@ Not everything favors the other tool. This repo's `docs/performance-checklist.md
   cache file — a legitimate design tradeoff (their approach is simpler and reusable across many
   query types; this repo's is more memory-conservative by construction) worth being explicit about
   rather than treating as strictly worse.
+
+## 8. Retained-memory computation: exact dominator tree (ours) vs. BFS heuristic (theirs) — but their report reads clearer
+
+**Algorithm: we're ahead, confirmed by source on both sides.** This branch has a real
+Lengauer-Tarjan dominator-tree computation (`LengauerTarjan.cs`, `DominatorTreeComputer.cs`,
+`DominatorTreeIndexWriter`/`Reader.cs`) wired into `DominatorAnalyzer`, producing exact retained
+bytes for the Gen2/LOH sub-table when the exact path succeeds
+(`RetentionOptions.EnableExactDominatorTree`, default on; falls back to the pre-existing bounded-BFS
+heuristic on cap-exceeded or failure — see
+[dominator-tree-lengauer-tarjan.md](../phase1-redesigns/dominator-tree-lengauer-tarjan.md) and
+[dominator-tree-implementation-plan.md](../phase1-redesigns/dominator-tree-implementation-plan.md)).
+A whole-repo text search (`grep -rli "dominator\|idom\|lengauer"`) across every `.cs` file in
+`Rohit_DumpDetective` returns zero matches — they have no equivalent. Their "retained size" is
+computed by `BfsIndexCache.ComputeRetained`/`BfsIndexBuilder.ComputeRetainedForFields`, a BFS
+approximation over their 3-pass BFS index whose own return type — `(long Size, bool Estimated)` —
+documents that it's a known-approximate estimate, not an exact dominance computation.
+
+**Report clarity for "what's keeping this object alive": they're ahead, also confirmed by source.**
+Reading `MemoryLeakReport.cs` (their `memory-leak` command) directly shows a deliberately narrated,
+step-numbered report ("Step 1 — dumpheap -stat" → "Step 2 — Suspect Types" → "Step 3 —
+Accumulation Pattern Checks" → "Step 4 — GC Root Chains"), where every section opens with an
+explicit `sink.Explain(what, why, bullets, action)` block teaching the reader what the numbers mean
+and what to do next. Critically, `RenderRootChains` renders each suspect type's actual retention
+chain as literal ASCII art inline in the report (box-drawing characters `┌─`/`│`/`└►` confirmed
+directly in `RenderRootChains`; example below is illustrative of the shape, not a literal quoted
+sample):
+
+```
+┌─ Instance  0x00007f3a2c1b4020  (48 B)
+│   → List<CacheEntry>
+│   → Dictionary<string, CacheEntry>
+└► ROOT  static field 'AppCache._entries' on Program
+```
+
+— chains are grouped/deduped by identical shape with an explicit `×N instances — same chain`
+multiplicity marker, capped to the top 3 unique shapes per type, and the terminal ROOT step is
+always labeled with its `RootKind` (HandleTable / thread stack / static field) inline, not in a
+separate table.
+
+**Our `DominatorSectionBuilder` does not do this today, and it isn't for lack of underlying data.**
+We confirmed (via source, not assumption) that:
+- `DominatorSectionBuilder`'s "Top dominator suspects" and "Gen2/LOH dominator suspects" tables
+  render only `$"0x{type.SampleAddress:X}"` — a bare hex address, no chain, no root kind, no
+  narrative.
+- The typed data to do better already exists elsewhere in this codebase:
+  `RootPathFinding` (`GCRootDomainResult.cs:22`) already carries `RootKind` and `PathTypeNames`,
+  and `GCRootIntelligenceSectionBuilder` already assembles them into a first-class, serializable
+  `RootPathGroup`/`RootPath` slot (`AnalyzerDetailSection.RootPathGroups`) — but only for the
+  separate GC-root section, never linked from or reused by the dominator section. This is the same
+  cross-reference gap Audit Area 1 of
+  [dominator-analyzer-audit.md](../analysis/phase1/dominator-analyzer-audit.md) already flagged
+  ("an engineer diagnosing 'why is this object alive?' must consult three separate sections with no
+  cross-reference").
+- One structural caveat worth being precise about: `RootPathFinding.PathTypeNames` is documented in
+  its own source comment as "forward BFS from target outward (owned subgraph), not root-to-target
+  chain" — i.e. even where this data is used today, it isn't yet the same root→target chain shape
+  their report renders. Porting their narrative-chain approach into the dominator section is more
+  than a rendering change; see the audit doc's updated recommendations for the concrete scope.
+
+See [dominator-analyzer-audit.md](../analysis/phase1/dominator-analyzer-audit.md) for the specific,
+source-verified improvement proposals this generated.

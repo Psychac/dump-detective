@@ -28,11 +28,13 @@ as fact. ClrMD version and AOT settings were confirmed directly against both rep
 | [capability-comparison.md](capability-comparison.md) | Command surface, analyzer/consumer coverage, output formats, caching UX, plugin system |
 | [architecture-comparison.md](architecture-comparison.md) | Index/cache strategy, ClrMD version, execution model, report model, AOT |
 | [performance-comparison.md](performance-comparison.md) | The other tool's published benchmarks, our current lack of equivalent numbers, and concrete hypotheses for the reported gap |
+| [analyzer-command-analysis-comparison.md](analyzer-command-analysis-comparison.md) | Per-analyzer deep dive: what each analyzer/command *computes*, algorithm vs. algorithm (corrected 33-analyzer/66-command counts, full mapping table, deep-dived pairs, follow-up worklist) |
+| [analyzer-command-report-comparison.md](analyzer-command-report-comparison.md) | Per-analyzer deep dive: how each analyzer/command *presents* its findings — architectural report-primitive gaps (structured `Explain`, inline chain rendering) that apply across all analyzers at once |
 | [roadmap.md](roadmap.md) | Prioritized list of gaps worth closing, ordered by leverage |
 
 ## Headline findings
 
-1. **Confirmed, not hypothesized: this tool's 31 analyzers run strictly sequentially; the other
+1. **Confirmed, not hypothesized: this tool's 33 analyzers run strictly sequentially; the other
    tool runs its full command set 8-way parallel with LPT scheduling.** `AnalysisPipeline.RunAnalyzerBatchAsync`
    is a plain `foreach`/`await` loop — `IAnalyzer.IsThreadSafe` exists on the interface but has zero
    callers anywhere in the codebase (confirmed via a code-graph `uses`-edge query), meaning
@@ -45,10 +47,14 @@ as fact. ClrMD version and AOT settings were confirmed directly against both rep
    or ClrMD version — see [performance-comparison.md](performance-comparison.md) § Hypothesis 0 and
    [roadmap.md](roadmap.md) item 1.
 2. **The other tool covers two input types we don't touch at all: `.nettrace`/`.etl` trace
-   analysis (11 trace commands, all confirmed to exist as real analyzer classes via the code graph)
-   and cross-source trace+dump correlation (`ITraceDumpCorrelationRule`/`CorrelationEngine`,
-   confirmed the same way).** This is not a "do it better" gap, it's a "doesn't exist here" gap —
-   see [capability-comparison.md](capability-comparison.md).
+   analysis and cross-source trace+dump correlation
+   (`ITraceDumpCorrelationRule`/`CorrelationEngine`, confirmed via the code graph).** Corrected count
+   (superseding the earlier "11 trace commands" estimate, which was README-sourced): listing
+   `Commands/Trace/` directly shows **27 real trace analyzer commands** (plus 3 support files —
+   `ITraceSubAnalyzer.cs`, `TraceEventTypesSection.cs`, `TraceOpener.cs`, not analyzers themselves).
+   This is not a "do it better" gap, it's a "doesn't exist here" gap — see
+   [capability-comparison.md](capability-comparison.md) and
+   [analyzer-command-analysis-comparison.md](analyzer-command-analysis-comparison.md) § Trace side.
 3. **The other tool ships a persistent, reusable on-disk cache (`load`/`close` commands, `.bfs.idx`
    BFS index built via a confirmed 3-pass `BfsIndexBuilder`) that is *explicitly* opt-in and
    measured at ~5x speedup across repeat runs.** We build a disk-backed index too (`cache.bin`), but
@@ -63,7 +69,22 @@ as fact. ClrMD version and AOT settings were confirmed directly against both rep
    Until we run our own `analyze` against a similarly-sized dump — after fixing item 1 above, so the
    number isn't dominated by a scheduling bug — "theirs is faster" stays directionally credible but
    unquantified on our side.
-6. **Where we're ahead:** analyzer breadth on a single heap pass for memory-dump-only analysis (31
+6. **Per-analyzer deep dive (new): analysis-side and report-side gaps don't always point the same
+   direction.** For the two pairs deep-dived so far (Dominator retained-size, Leak-Candidate
+   classification), this tool's *algorithm* is ahead in both cases (real Lengauer-Tarjan dominator
+   tree vs. their BFS approximation; an 8-class `LeakClass` taxonomy with per-class remediation
+   advice vs. their 5 hard-coded pattern checks) — but its *report presentation* is behind in both
+   cases, for one shared, architectural reason: their `IRenderSink.Explain(what, why, bullets,
+   action)` is a first-class, polymorphic-serializable primitive every one of their ~66 commands can
+   use, and their inline box-drawn root-chain rendering is used the same way; this repo's
+   `SectionBlock` model has no structured-narrative equivalent and its equivalent chain data
+   (`RootPathGroup`) is confined to one section builder, not reused by the two others that reference
+   it only by cross-pointer. See
+   [analyzer-command-analysis-comparison.md](analyzer-command-analysis-comparison.md) and
+   [analyzer-command-report-comparison.md](analyzer-command-report-comparison.md) for the full
+   mapping (33 analyzers vs. ~66 commands), the two deep-dived pairs, and a prioritized worklist for
+   the rest.
+7. **Where we're ahead:** analyzer breadth on a single heap pass for memory-dump-only analysis (31
    analyzers spanning memory/GC/threads/async/infra-resource-leaks with a formal `Evidence`/
    confidence model — see `docs/analysis/phase-0/phase0-deliverable-9-industry-benchmark.md` for the
    pre-existing tool-vs-tool comparison this builds on), and a stricter architectural discipline

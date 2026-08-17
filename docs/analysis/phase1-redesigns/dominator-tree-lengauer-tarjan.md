@@ -21,6 +21,12 @@ All numbers below are measured with [tools/DominatorSpike](../../../tools/Domina
 two real dumps (3.27GB, 25.63GB), single-threaded, foreground, one dump at a time, unless a
 paragraph says otherwise.
 
+**Companion docs:**
+[dominator-tree-implementation-plan.md](dominator-tree-implementation-plan.md) (phasing) and
+[dominator-tree-memory-profile.md](dominator-tree-memory-profile.md) (where the exact path's memory
+actually goes, the `GC.GetTotalMemory` measurement trap that misled two entries in this doc, and the
+D6 constant correction — **read that one before trusting any memory figure here**).
+
 ---
 
 ## Decisions
@@ -115,12 +121,29 @@ heuristic, report `DominatorTreeMode.HeuristicFallback(reason: ...)`. Under cap:
 already used elsewhere in `DominatorDomainResult`.
 
 `Cap` itself is derived from a memory budget, not picked as a raw node count — a fixed ceiling
-doesn't scale sensibly across dump sizes. Measured **~76 bytes/node** (4.14GB structural total ÷
-58.34M nodes, 25GB dump — the conservative structural-sum figure, not the smaller
-`GC.GetTotalMemory` number, since live GC measurements can undercount). A 6GB budget → `Cap ≈ 85M`
-nodes, a modest (~1.5x) extrapolation past the 58.34M nodes actually tested. Whether 6GB is the
-right budget is a policy call, not a technical one — still open. The ratio should improve once D8
-ships.
+doesn't scale sensibly across dump sizes.
+
+> ⚠️ **Superseded — the bytes-per-node constant described below is gone entirely.** The ~76 figure was
+> derived as "4.14GB structural total ÷ 58.34M nodes, 25GB dump" and called *conservative*, but that
+> 4.14GB is the **D4 walk-stage structural sum only** — it omits D8's reduced CSR (built while the
+> original is still live), the virtual-root-extended reverse CSR, LT's ~12 working arrays, the
+> retained-bytes rollup arrays, and all churn. A floor presented as a ceiling: at 76, a 6GB budget
+> admitted `Cap ≈ 85M` nodes for a population needing ~18GB.
+>
+> Correcting the constant to 220 then failed the *other* way, rejecting the 58.34M-node graph this very
+> doc records completing successfully in 218.49s. The root cause is that **per-node cost isn't
+> constant** — it *falls* as the D8 fold rate rises (140 B/node at 32% folding, 118 B/node at 46%), so
+> no single value prices both dumps.
+>
+> **Now a two-term model — `150 bytes/node + 12 bytes/edge`** — enforced mid-walk on both terms, so a
+> dense graph can no longer slip through on a comfortable-looking node count. **Default budget raised
+> 6GB → 20GB**, at which the 25.6GB dump projects 9.68GB (48% of budget) and the ceiling sits near
+> ~119M reachable nodes, ~2x the largest dump measured. Full derivation, per-stage accounting and the
+> validation tests: [dominator-tree-memory-profile.md § 5](dominator-tree-memory-profile.md#5-fixed-the-budget-model-twice).
+
+Whether 20GB is the right budget remains a policy call, not a technical one. The ratio improved with D8
+as predicted — the larger dump's higher fold rate is exactly why it costs less per node than the
+smaller one.
 
 **D7 — Persist the computed tree too, not just the input graph.** Reversed from an earlier draft,
 which argued against this ("only valid for one snapshot, no reuse case"). That doesn't hold up: this
@@ -313,7 +336,25 @@ address didn't resolve to a live object at report time — falls back silently, 
 | Leaves folded (D8) at Phase 6 runtime | 2,115,540 (31.6%) | 27,100,729 (46.5%) |
 | Exact total retained bytes at GC roots vs. heuristic top-K estimate | 1.02GB vs. 6.9MB | 11.0GB vs. 3.0MB |
 | `DominatorAnalyzer.AnalyzeAsync` total (heuristic pass + exact-path attempt) | 16.00s | 244.87s |
-| Managed memory delta during the analyzer run | 0 (net negative, GC reclaimed) | ~1.95GB (well under the 6GB D6 budget) |
+| ~~Managed memory delta during the analyzer run~~ | ~~0 (net negative, GC reclaimed)~~ | ~~~1.95GB (well under the 6GB D6 budget)~~ |
+| **Exact path, bytes allocated** (replaces the row above) | **2.00GB (300 B/node)**, down from 3.18GB (475 B/node) before the allocation fixes | not re-measured |
+| **Exact path, peak live** (analytic, stage-by-stage) | **~1.0GB (~150 B/node)** | not re-measured |
+
+> ⚠️ **The struck-through row was a measurement artifact, not a finding.** "0 (net negative, GC
+> reclaimed)" is a `GC.GetTotalMemory` before/after delta — net *heap size*, not allocation. It goes
+> negative because the exact path's own allocations trigger gen2/LOH collections that reclaim
+> *preceding* analyzers' garbage, while the process commits >1GB of pages that .NET never decommits.
+> The same run measures -835MB by that metric and **+2.68GB** by
+> `GC.GetAllocatedBytesForCurrentThread`. Use allocated-bytes for cost and peak WS for OOM risk; see
+> [dominator-tree-memory-profile.md § 1](dominator-tree-memory-profile.md#1-the-measurement-trap).
+>
+> The `Structural memory (D4, analytic sum)` row above is also **walk-stage only** and should not be
+> read as the exact path's total — that misreading is what produced D6's unsafe 76 B/node constant.
+
+**Wall-clock caveat for every timing row in this table:** the same unchanged work measured between
+9.9s and 27.3s across runs in a single session on the 3GB dump, depending on OS page-cache state for
+the dump file. Allocated bytes, by contrast, was stable to within 0.001%. Don't read small timing
+deltas here as regressions or improvements without controlling for cache state.
 
 **Wall-clock split**: ~69% bookkeeping (`HashSet`/`Dictionary`/`Queue` overhead), ~31% unavoidable
 ClrMD I/O — isolated via a zero-bookkeeping ablation (383,537 vs. 117,750 nodes/sec on the 25GB
@@ -345,9 +386,15 @@ for the `CacheContainerWriter` append-integration work.
 
 ## Open Questions
 
-1. **D6's memory budget.** Is 6GB the right transient-footprint budget for this analyzer on the
+1. **D6's memory budget.** Is 20GB the right transient-footprint budget for this analyzer on the
    machines this actually runs on? A risk-tolerance call, not something further measurement resolves
-   on its own.
+   on its own. **Now a much better-posed question**: the budget is enforced against a validated
+   two-term model (`150 B/node + 12 B/edge`) instead of a single constant that was wrong in both
+   directions, so the number means something. At 20GB the 25.6GB dump fits at 48% of budget and the
+   ceiling is ~119M reachable nodes (~2x anything measured); real peak at that ceiling would be ~13GB.
+   The deliberate policy is that **large dumps are not excluded from the exact path** — constrained
+   machines should lower the budget rather than have the model lie. See
+   [dominator-tree-memory-profile.md § 5](dominator-tree-memory-profile.md#5-fixed-the-budget-model-twice).
 2. **D8 extended to the id-map/address structures.** Confirmed savings are LT-array-only (28
    bytes/node). Extending the same fold to D2's larger structures (~45 bytes/node, same ~46.5%
    population) needs id renumbering — a real complexity increase over "id assigned once, stable" —

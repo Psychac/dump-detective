@@ -44,9 +44,17 @@ current responsibilities are:
 4. **Root-path evidence population** — feeds highly-referenced objects through `RootPathFinder` to
    produce a single root chain per object.
 
-The name "Dominator Analysis" is aspirational: no Lengauer-Tarjan dominator tree is computed. The
+**2026-08-17 update**: the paragraph below described the analyzer as of the original 2026-07-29
+audit date. As of the P3 item retired 2026-08-16, this is no longer accurate — a real
+Lengauer-Tarjan dominator tree (`LengauerTarjan.cs`, `DominatorTreeComputer.cs`) is now wired in and
+produces exact retained bytes for the Gen2/LOH sub-table when the exact path succeeds (see the audit
+header). Left here for history; see [Audit Area 8](#audit-area-8—report-clarity-vs-comparable-tools-added-2026-08-17)
+below for what's still missing now that the exact-bytes number exists but isn't presented as clearly
+as it could be.
+
+~~The name "Dominator Analysis" is aspirational: no Lengauer-Tarjan dominator tree is computed. The
 `HeuristicOnly` flag is hard-coded to `true` at every result-creation site, and the section builder
-acknowledges this in its confidence caveat.
+acknowledges this in its confidence caveat.~~
 
 ### Coverage Assessment
 
@@ -357,7 +365,7 @@ requires proportionally more RAM (larger reference-count dictionaries across wor
 
 | Capability | WinDbg + SOS | PerfView | VS Memory Profiler | dotMemory | DumpDetective |
 |---|---|---|---|---|---|
-| True dominator tree | `!gcroot` + manual | GC Heap Graph | ✓ Full | ✓ Full | ✗ BFS heuristic only |
+| True dominator tree | `!gcroot` + manual | GC Heap Graph | ✓ Full | ✓ Full | ✓ Full (Lengauer-Tarjan, exact — see 2026-08-17 update above) |
 | Per-type retained bytes | ✗ Manual | Partial | ✓ | ✓ | ✓ (bounded) |
 | Root path to GC root | `!gcroot` | ✗ | ✓ | ✓ | ✓ (for top hotspots) |
 | Gen2 / LOH dominator focus | Manual | Partial | ✓ | ✓ | ✗ Not surfaced |
@@ -367,6 +375,11 @@ requires proportionally more RAM (larger reference-count dictionaries across wor
 
 ### Competitive Observations
 
+- **2026-08-17**: the exact Lengauer-Tarjan gap described below is closed (see the audit header and
+  Audit Area 8). The remaining gap vs. dotMemory/VS Memory Profiler is presentation of the
+  "Dominated Memory" grouping concept (last bullet below), not the underlying algorithm — and,
+  separately, a report-clarity gap vs. a less sophisticated sibling tool's narrative chain rendering
+  (Audit Area 8).
 - **dotMemory and VS Memory Profiler** implement Lengauer-Tarjan and present accurate per-type
   retained bytes with no BFS cap. The absence of a true dominator tree is the most significant
   gap vs. these tools.
@@ -386,6 +399,73 @@ requires proportionally more RAM (larger reference-count dictionaries across wor
    be an Evolution-class platform addition, not purely an analyzer improvement.
 2. Add GC generation annotation to every type row in the dominator table.
 3. Expose the fan-in distribution histogram as a chart-ready data structure in the result.
+
+---
+
+## Audit Area 8 — Report clarity vs. comparable tools (added 2026-08-17)
+
+Prompted by a direct comparison against a sibling tool's `memory-leak` command
+(`MemoryLeakReport.cs`) — a competitor whose author reports its "what's keeping this alive" output
+reads more clearly than this analyzer's, even though this tool now computes *more accurate* retained
+bytes (exact Lengauer-Tarjan vs. their BFS approximation). The gap is presentation, not algorithm,
+and every recommendation below was checked against this codebase's actual source before being
+written — none of it requires inventing new data:
+
+1. **The dominator-suspects tables show a bare hex address; no chain, no root kind, no narrative.**
+   `DominatorSectionBuilder`'s "Top dominator suspects" and "Gen2/LOH dominator suspects" tables
+   render `type.SampleAddress` as `$"0x{type.SampleAddress:X}"` and nothing else. The other tool's
+   equivalent (`RenderRootChains`) renders, inline, an actual box-drawing chain from the sample
+   instance to its GC root, with the terminal step explicitly labeled `ROOT` and its kind (static
+   field / thread stack / handle). This is the single highest-leverage change: an engineer looking
+   at "why is `CacheEntry[]` retained?" currently has to leave the Dominator Analysis section, find
+   the sample address, and cross-reference it against a *different* analyzer's output (GC Root
+   Intelligence) with no automatic link between the two. Recommendation: for each row in the
+   Gen2/LOH dominator sub-table (already the most actionable table — this is deliberate scoping, not
+   "do it everywhere"), populate a short root-chain summary using the same `RootPathFinder`
+   machinery `GCRootIntelligenceSectionBuilder` already uses, and add it either as a new column
+   (short form: `RootKind → ... → TypeName`, capped to ~4 hops) or as a `SectionBlock` narrative
+   line per top-N row (long form, matching the other tool's per-suspect chain block). Note the scope
+   caveat already recorded in [architecture-comparison.md](../../discrepancy/architecture-comparison.md)
+   §8: `RootPathFinding.PathTypeNames` today is a forward BFS from target outward (the target's
+   *owned* subgraph), not a root→target chain — producing an actual root-to-target chain for the
+   dominator table's sample address requires either running `RootPathFinder` against that address
+   directly (it's designed for exactly this — see `PopulateEvidence`'s existing use for highly-referenced
+   objects) or reusing the reverse-direction search it already performs there. This is a moderate,
+   not a small, change — treat as its own P2/P3 item, not folded into a quick columns tweak.
+
+2. **No narrative synthesis of what a retained/shallow ratio means.** The other tool explicitly
+   states, in prose, next to its retained-size table: "Retained >> Own → the object holds
+   references to large external graphs... Retained ≈ Own → the object is self-contained; its own
+   data IS the leak." This section builder already computes the ratio (`RatioValue`,
+   rendered as a permille column) but never explains what a high vs. low ratio *means* to the
+   reader — it's a number with no interpretation attached, unlike the AsyncStateMachine analyzer's
+   own "state value interpretation guidance" pattern (see
+   [project_p16-async-state-machine-state-guidance.md] design precedent in this repo's own history).
+   Recommendation: add one or two `T(...)` narrative blocks — reusing the existing `BuildConfidenceBand`/`T`
+   helper pattern already in this file — interpreting the ratio thresholds already implicit in the
+   Gen2/LOH sub-table, at negligible implementation cost (no new data, just prose keyed off numbers
+   already computed).
+
+3. **No step-by-step framing connecting this section to the rest of the report.** The other tool's
+   report reads as a guided investigation ("Step 2 → Step 3 → Step 4"), explicitly pointing the
+   reader at the next command/section to run. This analyzer's section is one of many
+   `AnalyzerDetailSection`s assembled in `SortOrder`-based sequence with no equivalent "what to look
+   at next" pointer. This is a report-assembly-level pattern, not specific to this analyzer — if
+   adopted, it should be a shared `SectionBlock` convention (e.g. a standard "Next steps" block type)
+   rather than something `DominatorSectionBuilder` invents alone, so it's proposed here as a
+   candidate for the shared reporting layer, not a per-analyzer fix.
+
+4. **Chain deduplication by shape is a good, cheap idea worth adopting regardless of item 1's
+   scope.** The other tool groups identical chains by `string.Join("|", chain.Select(s => s.Line))`
+   and shows `×N instances — same chain` instead of repeating the same chain N times. If/when item 1
+   is implemented, this dedup-by-shape technique should be applied from the start — showing the same
+   3-hop chain 40 times for 40 near-identical cache-entry instances would be worse than the current
+   bare-hex-address baseline, not better.
+
+None of items 1–4 change the underlying computation (the exact-vs-BFS retained-bytes correctness
+work from the original P3 item is done); they're entirely about making an already-more-accurate
+number easier to act on, which is precisely where this analyzer currently loses to a less accurate
+competitor.
 
 ---
 
@@ -438,6 +518,10 @@ output is treated as authoritative.
 | P3 | Dominator chain detection (A → B → C with cumulative retained bytes) | High — root cause identification | High | Medium | Evolution |
 | P3 | Cross-type retained-overlap metric ("shared subgraph size") | Medium — explains why exclusive retained bytes are 0 for co-dominating types | High | Medium | Evolution |
 | P3 | Cap or disk-spill per-worker `_referenceCount` in parallel mode (see design sketch follow-up) | Medium — bounds K × 20 MB peak RSS at high parallelism | Medium | Medium | Improvement |
+| P2 | Render an inline root-chain summary (kind + capped hop list) per row in the Gen2/LOH dominator sub-table, reusing `RootPathFinder`/`RootPathGroup` already used by `GCRootIntelligenceSectionBuilder` | High — closes the report-clarity gap vs. comparable tools (Audit Area 8 item 1); today an engineer must cross-reference a separate section by hand | Medium — `PathTypeNames` is target-outward today, not root-to-target; needs a direct `RootPathFinder` call against the sample address, not just reuse of existing evidence | Medium | Improvement |
+| P2 | Add narrative interpretation text for the retained/shallow ratio (e.g. "retained >> shallow → holds an external graph" vs. "retained ≈ shallow → self-contained") next to the Gen2/LOH sub-table | Medium — turns an uninterpreted number into an actionable read, negligible cost (no new data) | Trivial | High | Improvement |
+| P3 | Dedup rendered root chains by identical shape with a "×N instances — same chain" marker, once item 1 above exists | Medium — prevents the improved chain rendering from becoming noisier than today's bare-address baseline at scale | Low (once item 1 lands) | High | Improvement |
+| P3 | Shared "Next steps" `SectionBlock` convention pointing from this section to `GCRootAnalyzer`/`ReferenceChainAnalyzer` output, matching the other tool's step-numbered investigation flow | Medium — reporting-layer change, not analyzer-specific; benefits every analyzer's section, not just this one | Medium | Medium | Evolution |
 
 ### Final Verdict
 
@@ -450,10 +534,12 @@ output is treated as authoritative.
    divergence (P1, low effort, high correctness impact), surface `gen2Count` in output (P1,
    immediately actionable diagnostic value).
 
-3. **Platform evolution opportunities** — A true Lengauer-Tarjan dominator tree over the Gen2+LOH
-   subgraph would move DumpDetective to feature parity with dotMemory and VS Memory Profiler on
-   the most important diagnostic question ("which type is responsible for this memory?"). This is
-   the single highest-return long-term investment.
+3. **Platform evolution opportunities** — Done: a true Lengauer-Tarjan dominator tree over the
+   reachable heap now moves DumpDetective to feature parity with dotMemory and VS Memory Profiler on
+   "which type is responsible for this memory?" (see the audit header and Audit Area 8). The
+   remaining highest-return investment is presentation, not algorithm: rendering the exact retained
+   bytes this analyzer now computes as an inline root-chain narrative (Audit Area 8 item 1) is what
+   would move the *report*, not just the number, to parity with — and past — comparable tools.
 
 4. **Highest engineering return** — P0 and P1 items together require one day of work and address
    the most misleading and confusing aspects of the current output. The P2 items

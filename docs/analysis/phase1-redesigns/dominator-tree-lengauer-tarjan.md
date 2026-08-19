@@ -145,6 +145,11 @@ Whether 20GB is the right budget remains a policy call, not a technical one. The
 as predicted — the larger dump's higher fold rate is exactly why it costs less per node than the
 smaller one.
 
+**Superseded by [dominator-tree-phase1-integration.md](dominator-tree-phase1-integration.md):** the
+append blocker below is dissolved, not solved — the tree build moves into Phase 1's index-build job
+itself (before the container closes) instead of running in Phase 2. See that doc before acting on
+anything below this note.
+
 **D7 — Persist the computed tree too, not just the input graph.** Reversed from an earlier draft,
 which argued against this ("only valid for one snapshot, no reuse case"). That doesn't hold up: this
 project's cache-hit fast-path philosophy exists precisely because the *same dump* commonly gets

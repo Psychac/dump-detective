@@ -45,7 +45,17 @@ internal static class ReachableGraphWalker
         // here the console progress line sits frozen on whatever phase preceded this call for the
         // whole walk, which reads as "stuck" even though the walk is actively making progress.
         var scanCounter = new ObjectScanCounter("computing exact dominator tree (tracing heap graph)", progress);
-        var idMap = new DenseIdMap();
+        // Dictionary<ulong,int>, not DenseIdMap (§7.3 item 2's 25GB verification round,
+        // docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §8): DenseIdMap's
+        // custom 13-bytes/slot open-addressed table was designed to save memory over Dictionary's
+        // ~28-32 bytes/entry, but measured 2.6x slower wall-clock at 25GB scale (240,985 ms vs. a
+        // HashSet-based walker's 91,528 ms for the same node/edge count) despite no peak-memory win
+        // in either the 3.3GB or 25GB measurement — the memory-saving premise never paid off, and
+        // Dictionary's more mature implementation (and this walker's own smaller footprint gap for
+        // the same reason) is both safer and faster. See §7.3 item 2's full history before touching
+        // this again — that confound (this measurement partly overlapped a period of genuine system
+        // memory pressure on the test machine) is documented there, not fully resolved.
+        var idMap = new Dictionary<ulong, int>();
         // ChunkedBuffer, not List<T> (§D4/§D6): at 25GB-dump scale (E ≈ 137M edges) a List<T>'s
         // double-and-copy growth would transiently hold up to ~2x the final size, with the old and
         // new backing arrays both alive during the copy — see the design doc's Measured Numbers.

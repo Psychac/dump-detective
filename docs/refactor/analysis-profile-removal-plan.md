@@ -1378,6 +1378,13 @@ It also settles part of D5 empirically: the split works, and the renderer is the
 
 ### 9.27 Memory — **GREEN**
 
+> **Cross-reference before executing the `TopTypesCount` move (Category 1) or touching the four
+> weight knobs (Category 5):** [analyzer-pipeline-stages-and-leadfinding-dedup.md](./analyzer-pipeline-stages-and-leadfinding-dedup.md#stage-1-purity-audit--analyzer-domain-results-are-not-pure-data-either)
+> argues the Category 5 "keep" verdict below should be revisited once the cap is gone — `TopTypes`
+> is built from a weighted multi-criteria quota merge that exists to squeeze the "most interesting"
+> types into a small display budget; once the analyzer emits the complete type table anyway (Category
+> 1's own design), that budget-driven merge logic may no longer need to live in the analyzer at all.
+
 [MemoryAnalysisOptions.cs](../../src/DumpDetective.Core/Options/MemoryAnalysisOptions.cs)
 
 | Knob | Default | Category | Action |
@@ -1421,6 +1428,14 @@ than a fresh ClrMD walk; verify which it does before assuming the cost is free. 
 ---
 
 ### 9.29 AsyncTask — **GREEN**
+
+> **Cross-reference before executing the four `Top*ToShow` moves (Category 1) below:**
+> [analyzer-pipeline-stages-and-leadfinding-dedup.md](./analyzer-pipeline-stages-and-leadfinding-dedup.md#stage-1-purity-audit--analyzer-domain-results-are-not-pure-data-either)
+> flags `AsyncTaskDomainResult` as having 8 separately-capped `Top*` lists that likely slice the same
+> underlying task population by different states. While removing these four caps, check whether they
+> (and the other 4 uncapped `Top*` lists on the same result) should collapse into one raw per-task-type
+> table instead of staying as separately-maintained lists — cheaper to do in the same edit than as a
+> follow-up pass.
 
 [AsyncTaskAnalysisOptions.cs](../../src/DumpDetective.Core/Options/AsyncTaskAnalysisOptions.cs)
 

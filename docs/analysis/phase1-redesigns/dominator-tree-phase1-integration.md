@@ -1,23 +1,41 @@
 # Building the exact dominator tree during Phase 1 index build
 
-Status: **design discussion, with two pieces already shipped** (§8 — `ReachableGraphWalker`'s
-`DenseIdMap` → `Dictionary<ulong,int>` swap, and §4.2/§7.4 — the reverse-edge index's
-`MaxParentsPerChild` cap deleted outright, no hub-overflow routing needed). Building the tree during
-Phase 1 (§1-6) and totally replacing the reverse-edge index with its byproduct (§7) are still
-designs, not started — but §7's verdict is now favorable: replacement is close to a pure win in
-practice (§7.2), since the case where
-it would cost more (no dominator-tree consumer active in a run) is confirmed extremely rare.
+## Status at a glance
 
-**Terminology, fixed for the rest of this doc:**
+**Stage A (§3-§4): complete.** Every piece of it has shipped, and §10's checklist has nothing left
+in Stage A's own scope — what remains there is either pure investigation with no code deliverable,
+or explicitly Stage B's territory. What shipped:
 
-- **Dominator child index** — parent → children in the *dominance* tree (`idom[]` inverted). Answers
-  "what does removing X free" (`EnumerateRetainedSet`, `TryGetRetainedBytes`).
-- **Walk reverse index** — child → parents in the *raw object graph*, sourced from the reachability
-  walk, uncapped by construction (§4). Answers "who points at X" for reachable objects. Complementary
-  to, not built from, the reverse-edge index below.
-- **Reverse-edge index** — the existing, disk-backed structure built during the raw heap scan,
-  currently capped at `MaxParentsPerChild = 10,000`. Nothing in this doc requires touching it, though
-  §7 explores replacing it and §7.4 notes a cheaper in-place alternative.
+- The reachability walk itself: bounded and uncapped by construction (§4), builds the reverse-edge
+  index directly as its own byproduct — the old raw-per-object-scan build of that index was
+  deleted (§7, §7.2a).
+- `DenseIdMap` → `Dictionary<ulong,int>` (§8.5) and the reverse-edge index's own
+  `MaxParentsPerChild` cap removal (§4.2/§7.4/§8.6).
+- The walk's successors source: `ForwardEdgeLooseFileReader` by default (§2/§8.8), after three
+  measured rounds — ~2x faster than a live ClrMD walk on a 25GB dump, roughly at parity on 3.3GB.
+  `DD_FORCE_LIVE_CLRMD_WALK=1` forces the live-ClrMD fallback.
+- `DominatorReachableAddresses` persisted and queryable via
+  `IHeapAnalysisCache.TryGetReachableAddressProvider()` (§5). `DominatorReachableInDegree` was
+  investigated and *deliberately not built* — it would duplicate fan-in data the reverse-edge
+  index's `EnumerateChildCounts` already exposes.
+
+**Stage A.5: not needed.** Determined unnecessary — see §7.1.
+
+**Stage B (§3, §5, §9): not started.** `idom[]`/Lengauer-Tarjan computation still runs in Phase 2
+via `DominatorAnalyzer`'s own in-memory `ReachableGraphBuilder`, independent of everything above.
+
+## Terminology, fixed for the rest of this doc
+
+- **Dominator child index** — parent → children in the *dominance* tree (`idom[]` inverted).
+  Answers "what would freeing X free?" (`EnumerateRetainedSet`, `TryGetRetainedBytes`). Stage B,
+  not built yet.
+- **Walk reverse index** — child → parents in the *raw object graph*, sourced from the
+  reachability walk (§4). Answers "who points at X?" for reachable objects. As of §7.2a, this is
+  **not** a separate structure from the one below — it *is* the reverse-edge index, now walk-fed
+  instead of scan-fed.
+- **Reverse-edge index** — the disk-backed structure `ReverseEdgeExtractor`/`ReverseEdgeSorter`/
+  `ReverseEdgeContainerWriter`/`ReverseEdgeIndexReader` build. Uncapped since §4.2/§7.4/§8.6, and,
+  since §7.2a, built by the walk above rather than a raw per-object heap scan.
 
 ---
 
@@ -41,29 +59,40 @@ it would cost more (no dominator-tree consumer active in a run) is confirmed ext
 ## 2. Where it slots into the existing Phase 1 job
 
 [DiskBackedObjectIndexWriter.Build](../../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs)
-is the single orchestrator for the whole Phase 1 build. Relevant order today:
+is the single orchestrator for the whole Phase 1 build. Relevant order today (shipped, not just
+planned — see below):
 
 1. Columnar object scan — `ObjectAddresses`/`ObjectMethodTables`/`ObjectSizes`/`ObjectGenerations`.
 2. `WriteSatelliteSections` — `Handles`, **`Roots`** (`RootIndexWriter.Write`), `Tasks`, `LargeObjects`,
    `LohFreeBlocks`.
-3. Reverse-edge index: extract (during step 1, same object pass) → sort → merge into container.
-4. **Forward-edge index**: extract (during step 1) → sort (`ForwardEdgeSorter.SortBucketsAsync`, Phase
-   B, writes per-bucket loose `.dat`/`.idx` scratch files) → merge into container
-   (`ForwardEdgeContainerWriter.Write`, Phase C — streams the loose files into
-   `ForwardEdgeBuckets`/`ForwardEdgeDirectories` verbatim, then deletes them).
-5. `TypeAggregates`.
-6. `containerWriter.Finish()`.
+3. **Forward-edge index Phase A→B**: extract (during step 1) → sort
+   (`SortForwardIndexBuckets`, wrapping `ForwardEdgeSorter.SortBucketsAsync`), writing per-bucket
+   loose `.dat`/`.idx` scratch files. Runs unconditionally, before the walk below, so the walk can
+   read successors from these files.
+4. **The walk** (§4): BFS from the GC roots (step 2), feeding the reverse-edge index directly
+   (`IncrementalReachableWalker.Walk`). Successors default to `ForwardEdgeLooseFileReader` — a
+   point-lookup reader over step 3's loose files: `.dat` stays memory-mapped, but the small `.idx`
+   directory is decoded once into a plain managed struct array and binary-searched there instead
+   of via mmap pointer dereferences (§8.8's three measured rounds explain why). Falls back to a
+   live ClrMD walk (`obj.EnumerateReferences(carefully: true)`) when forced
+   (`DD_FORCE_LIVE_CLRMD_WALK=1`) or when the forward index/loose files aren't available.
+5. Reverse-edge index Phase B+C: sort and merge the buckets the walk just populated
+   (`WriteReverseIndexSections`, unchanged from before this reordering).
+6. Forward-edge index Phase C: merge step 3's loose files into the container and delete them
+   (`WriteForwardIndexSections`, now narrowed to just this).
+7. `TypeAggregates`.
+8. `containerWriter.Finish()`.
 
-**New stage: between 4's Phase B (sort) and Phase C (merge + delete scratch).** At that point, GC
-roots already exist (step 2), and forward edges already exist as sorted, directory-indexed loose files
-on disk (Phase B's output). Build the reachable graph by walking from the roots using a new loose-file
-point-lookup reader over those scratch files (mirrors `ForwardEdgeIndexReader`'s binary-search-over-
-directory logic, but reads via `FileStream`+`ArrayPool` against loose files instead of a
-memory-mapped container section). Write the dominator sections (§5) before letting Phase C run as
-normal and calling `Finish()`.
+This is exactly the insertion point this section originally proposed ("between Phase B and Phase
+C"), and the pipeline reordering shipped. The *reason* for doing it (successors from disk beating
+live ClrMD) took three rounds of measurement to actually hold up (§8.8), but it did: on a 25GB
+dump, `ForwardEdgeLooseFileReader` is now ~2x faster than live ClrMD, and it's the default. The
+live-ClrMD walk from earlier sessions never went away — it's the fallback now, not the primary
+path.
 
-A rerun against the same dump then gets the dominator sections for free on a cache hit, the same way
-`TypeAggregates`'s presence already marks a build complete — no special-casing needed.
+**Not done:** persisting the dominator sections (§5's `DominatorReachableAddresses`/
+`DominatorReachableInDegree`) as part of this same Phase 1 pass. Only the reverse-edge-index side
+of Stage A's on-disk footprint has shipped so far — see the Status section at the top of this doc.
 
 ---
 
@@ -191,13 +220,21 @@ Everything persisted, by stage. All additive `CacheSectionId` values (next avail
 
 | Section | Shape | Purpose |
 |---|---|---|
-| `DominatorReachableAddresses` | sorted `ulong[]` | already reserved (21), D7 |
-| `DominatorReachableInDegree` | `int[]`, aligned to the above | exact, uncapped fan-in count per reachable object — a Stage A byproduct, nearly free |
-| Walk reverse index buckets/directories (name TBD) | bucket/directory, mirrors the reverse-edge index's shape (including its now-uncapped write path, §4.2), scoped to the reachable subgraph | exact, uncapped parent enumeration for reachable objects (§4) |
+| `DominatorReachableAddresses` | sorted `ulong[]` | **Shipped.** Written by `DominatorReachableAddressWriter`, read by `DominatorReachableAddressReader`/`IReachableAddressProvider` — "is this object reachable from a GC root?" from disk, no walk re-run needed. |
+| `DominatorReachableInDegree` | `int[]`, aligned to the above | **Determined redundant, not built.** The walk-fed reverse-edge index's `EnumerateChildCounts` already exposes exact, uncapped fan-in per reachable object; a second copy of the same data would cost real disk space for zero new capability. |
+
+There is no separate "walk reverse index" section — see the Terminology block at the top of this
+doc. The reverse-edge index (`ReverseEdgeBuckets`/`ReverseEdgeDirectories`/`ReverseEdgeMetadata`,
+already listed as part of the existing cache format) is walk-fed as of §7/§7.2a and *is* Stage A's
+"who points at this reachable object?" answer — nothing new to persist for that here.
 
 **Stage A.5** — determined unnecessary (§7); no format entries needed.
 
-**Stage B — dominance tree:**
+**Stage A is otherwise complete.** Every section this table originally sketched is now either
+shipped or deliberately not built, for a stated reason — see the Status section at the top of
+this doc and §10's checklist.
+
+**Stage B — dominance tree (not started):**
 
 | Section | Shape | Purpose |
 |---|---|---|
@@ -215,9 +252,11 @@ likely to be exactly what a retained-set query cares about (interned strings, sm
 `LeafFolder` needs to additionally emit a compact `(parentNewId → foldable old-ids)` CSR. Once folded
 leaves appear as ordinary children, `FoldedBytesByNewId` becomes redundant — don't persist both.
 
-**Open:** whether the walk reverse index and dominator child index end up as genuinely separate
-section pairs, and whether the dominator child index needs its own hub-overflow treatment (a single
-dominance-tree parent could, in principle, have an enormous number of direct children).
+**Open (Stage B only):** whether the dominator child index needs its own hub-overflow treatment (a
+single dominance-tree parent could, in principle, have an enormous number of direct children).
+(The other half of this question — whether the walk reverse index and dominator child index are
+genuinely separate structures — is resolved: the walk reverse index isn't a separate structure at
+all, per the Terminology block above.)
 
 ---
 
@@ -299,24 +338,6 @@ sorted and written to disk. The rest of this section is kept as the original dec
    maps every value ClrMD 4 defines). Whatever incompleteness `heap.EnumerateRoots()` itself has is a
    ClrMD-level property equally true for today's reverse-edge-index consumers — not new to replacement.
 
-### 7.2a Decision: replaced — shipped
-
-Given §7.1's parity findings and §7.2's verdict below, the decision was to proceed with total
-replacement, conditioned on §7.3's one flagged trade-off (walk reverse index correctness depends
-on root-enumeration/BFS completeness, unlike the direct-scan index) being an accepted, not a new,
-risk — §7.1 item 4 already shows the exact dominator tree carries this dependency today, so no
-consumer took on a risk that wasn't already live elsewhere in the system.
-
-**Shipped as:** the raw per-object scan in `DiskBackedObjectIndexWriter.Build` no longer feeds
-`ReverseEdgeExtractor`. Instead, right before the extractor's buckets are sorted and written
-(where `WriteReverseIndexSections` is called), a BFS walk from the GC roots
-(`IncrementalReachableWalker.Walk`, using live ClrMD successors) feeds it — see §7's correction
-note above for why `ReverseEdgeExtractor`/`Sorter`/`ContainerWriter`/`IndexReader` and every
-consumer-facing type were reused unchanged rather than deleted and rebuilt. Verified via
-`IncrementalReachableWalkerTests.Walk_UnreachableSubgraph_GetsNoReverseIndexEntries` (a garbage
-subgraph gets no reverse-index entry, a reachable object's parents are recorded exactly) plus the
-existing extractor/sorter/reader suites and the full unit test run, all green.
-
 ### 7.2 The cost case — depends on which analyzers are active, not a single ratio
 
 Every wall-clock figure measured in this doc (§8.1-8.4) compares Stage A's cost against the
@@ -351,6 +372,24 @@ reverse index is a free byproduct, and total replacement means deleting
 §7.4's in-place alternative is still worth having as a fallback (it's cheap and has no BFS/root-
 completeness dependency either way), but it's no longer carrying the weight of "the safe choice if
 replacement's cost doesn't pan out" — replacement's cost has, for practical purposes, panned out.
+
+### 7.2a Decision: replaced — shipped
+
+Given §7.1's parity findings and §7.2's verdict below, the decision was to proceed with total
+replacement, conditioned on §7.3's one flagged trade-off (walk reverse index correctness depends
+on root-enumeration/BFS completeness, unlike the direct-scan index) being an accepted, not a new,
+risk — §7.1 item 4 already shows the exact dominator tree carries this dependency today, so no
+consumer took on a risk that wasn't already live elsewhere in the system.
+
+**Shipped as:** the raw per-object scan in `DiskBackedObjectIndexWriter.Build` no longer feeds
+`ReverseEdgeExtractor`. Instead, right before the extractor's buckets are sorted and written
+(where `WriteReverseIndexSections` is called), a BFS walk from the GC roots
+(`IncrementalReachableWalker.Walk`, using live ClrMD successors) feeds it — see §7's correction
+note above for why `ReverseEdgeExtractor`/`Sorter`/`ContainerWriter`/`IndexReader` and every
+consumer-facing type were reused unchanged rather than deleted and rebuilt. Verified via
+`IncrementalReachableWalkerTests.Walk_UnreachableSubgraph_GetsNoReverseIndexEntries` (a garbage
+subgraph gets no reverse-index entry, a reachable object's parents are recorded exactly) plus the
+existing extractor/sorter/reader suites and the full unit test run, all green.
 
 ### 7.3 The correctness question this framing raises
 
@@ -565,6 +604,98 @@ nothing is dropped), consistent with correctness rather than a regression.
   itself — splitting into garbage→garbage (noise) vs. garbage→reachable (the actual gap) was never
   measured, and Stage A.5 was subsequently determined unnecessary (§7.1) regardless.
 
+### 8.8 The loose-file successors reader (§2) measured slower, not faster — reverted to opt-in
+
+§2's plan (a `ForwardEdgeLooseFileReader` reading the walk's successors from the forward-edge
+index's sorted-but-not-yet-merged loose files, instead of a live ClrMD field walk) shipped and was
+then measured, foreground, single run, on the standard 3.3GB dump (`Crash_IIS_BALTSTPRD`), via
+`DominatorAnalyzerExactTreeRealDumpTests` with a new `DD_FORCE_LIVE_CLRMD_WALK` escape hatch
+(since renamed — see below) to isolate the successors source:
+
+| Successors source | Phase 1 index build |
+|---|---|
+| Live ClrMD walk | **29,589 ms** |
+| `ForwardEdgeLooseFileReader` | **221,106 ms** |
+
+Both runs produced the identical graph (6,686,490 reachable nodes, 17,367,740 edges), confirming
+this is a clean A/B on successors source only. **The loose-file reader is ~7.5x *slower*, not
+faster.** The plan's assumption — that reading pre-resolved edges off disk would beat re-resolving
+them via ClrMD — did not hold.
+
+**Root-cause hypothesis, not yet independently verified:** `ForwardEdgeLooseFileReader` was
+deliberately designed *not* to memory-map its loose files, reasoning that "the container isn't
+finalized yet, so there's nothing to map" (§2, as originally written). That reasoning conflates
+the *container* (genuinely not finalized) with the *loose per-bucket files themselves* (complete,
+standalone files at that point in the pipeline — mmap-able independently of the container, the
+same way `ObjectAddressLookup` and `ReverseEdgeIndexReader` mmap container *sections*). Instead,
+each `GetChildren` call does a `Seek`+`Read` per binary-search probe against a plain `FileStream`
+(~20-25 syscalls for a multi-million-entry bucket's directory, plus more for the data read),
+multiplied across every reachable node. That's a plausible, but unconfirmed, explanation for the
+7.5x gap — memory-mapping the loose files directly (mirroring `ForwardEdgeIndexReader`'s existing
+pointer-based binary search, just against per-file mmaps instead of container-section mmaps)
+would keep the same bounded-memory property this design wanted while avoiding the raw syscall
+cost, and is the natural next experiment if this path is revisited.
+
+**Shipped as a result:** the walk defaults back to the live ClrMD successors function.
+`ForwardEdgeLooseFileReader` and its tests are kept (not deleted) but are now opt-in via
+`DD_USE_LOOSE_FILE_WALK_SUCCESSORS=1`, for exactly this kind of future re-measurement rather than
+as a live default. §10's checklist item for this is reopened, not closed.
+
+**Follow-up: mmap redesign, measured — fixes the disaster, doesn't beat live ClrMD.**
+The root-cause hypothesis above was acted on: `ForwardEdgeLooseFileReader` was rewritten to
+memory-map each bucket's loose `.dat`/`.idx` file directly (mirroring `ForwardEdgeIndexReader`'s
+unsafe pointer-based binary search exactly, just against per-file mmaps instead of
+container-section mmaps), replacing the `FileStream.Seek`+`Read`-per-probe version. Re-measured
+the same way, same dump:
+
+| Successors source | Phase 1 index build |
+|---|---|
+| Live ClrMD walk | 29,589 ms |
+| `ForwardEdgeLooseFileReader` (v1, Seek+Read) | 221,106 ms (7.5x slower) |
+| `ForwardEdgeLooseFileReader` (v2, mmap) | **34,025 ms** (~15% slower) |
+
+Same graph again (6,686,490 reachable nodes, 17,367,740 edges) — correctness holds across all
+three. The hypothesis was right directionally: mmap eliminated the syscall-storm regression
+entirely. But on this single run it's still slightly slower than live ClrMD, not faster — close
+enough to be within run-to-run noise, but not a demonstrated win. **Still shipped as opt-in, not
+flipped to default** — `DD_USE_LOOSE_FILE_WALK_SUCCESSORS=1` remains the only way to use it.
+Settling whether v2 is a genuine (if small) loss, a wash, or actually a win under less noisy
+conditions would need multiple runs, not the single foreground run this project's real-dump-test
+rule keeps each measurement to — left as a future exercise, not resolved here.
+
+**v3 refinement and 25GB re-measurement — the decisive result.** Two more changes were made to
+the mmap version before the 25GB re-measurement: (a) the directory is now decoded once into a
+plain managed array (`ulong[]`/`long[]`, later a single `DirectoryEntry[]` struct array read
+straight from disk with no per-entry parsing loop) instead of being binary-searched via pointer
+dereferences into the mmap'd view — on the 3.3GB dump this closed most of v2's gap (34.0s → ~31-33s,
+within noise of live ClrMD's 29.6s, no longer a clear loss). Then the same comparison was run on
+the 25GB dump this project's whole purpose targets (`w3wp.exe_260421_175618.dmp`, 87,104,236
+objects):
+
+| Successors source | 25GB dump Phase 1 build |
+|---|---|
+| Live ClrMD walk | 1,663,879 ms (~27m44s) |
+| `ForwardEdgeLooseFileReader` (mmap `.dat` + decoded-array directory) | **833,702 ms (~13m54s)** |
+
+Both runs produced the identical object count, confirming correctness. **The loose-file reader is
+~2x *faster*** at this scale — a clean reversal of the 3.3GB result. This tracks: live ClrMD's
+per-object DAC/type-resolution cost during the walk scales worse at 87M objects than a one-time
+directory decode followed by fast in-memory binary searches. (Caveat: the two 25GB runs weren't
+under identical memory-pressure conditions — see the note below — but a ~2x gap is large enough
+that this isn't attributable to that alone.)
+
+**Decision: shipped as the default.** Given no meaningful regression on the 3.3GB dump and a ~2x
+win on the 25GB dump — and this project's stated purpose is 10GB-25GB+ dumps — `ForwardEdgeLooseFileReader`
+is now the default successors source. `DD_FORCE_LIVE_CLRMD_WALK=1` forces the live-ClrMD walk
+instead, for cases where the forward index is unavailable for some other reason or for future
+re-measurement.
+
+**Open caveat on measurement conditions:** the 25GB dump measurements were taken on a machine
+under significant memory pressure (as low as ~1.4GB free RAM mid-run, page file nearly exhausted)
+— the same confound §8.4 already flagged for this machine's 25GB-scale runs. The two runs in this
+round weren't measured under identical pressure (free memory differed between them), so the exact
+"~2x" figure should be treated as directionally reliable, not a precise ratio. Re-measuring on a
+machine with real headroom would be the way to tighten this if it matters later.
 ---
 
 ## 9. New use cases beyond the four known consumers
@@ -592,8 +723,15 @@ Every current consumer of retained-size-shaped data, audited against what it doe
 
 ## 10. Open questions
 
-- [ ] Exact insertion point for the loose-file successor reader (§2): in-memory scan buffers vs. the
-      just-written Phase-B scratch files — which is cheaper?
+- [x] Successors source for the walk (§2) — done, three rounds measured (§8.8).
+      `ForwardEdgeLooseFileReader` (mmap'd `.dat` + a decoded-array directory) is the default,
+      after landing at roughly parity on the 3.3GB dump and ~2x faster on a 25GB dump than the
+      live-ClrMD walk it replaces. `DD_FORCE_LIVE_CLRMD_WALK=1` forces the fallback.
+- [x] `DominatorReachableAddresses` (§5, reserved section 21) — shipped.
+      `DominatorReachableAddressWriter`/`Reader` persist and query it, exposed via
+      `IHeapAnalysisCache.TryGetReachableAddressProvider()`. `DominatorReachableInDegree` (also
+      reserved in §5) was investigated and dropped — redundant with the reverse-edge index's
+      existing `EnumerateChildCounts`, so building it would only duplicate data at real disk cost.
 - [x] §4.2/§7.4 — done. Real hub sizes measured on both dumps (worst case: 10.7M true fan-in, still
       well under the sort-phase memory ceiling), hub-overflow routing determined unnecessary, and the
       cap deleted outright from the existing reverse-edge index. See §8.6.
@@ -612,14 +750,19 @@ Every current consumer of retained-size-shaped data, audited against what it doe
       hub-overflow handling.
 - [ ] `DominatorAnalyzer` should stop owning its own `TryComputeExactDominatorTree` build path and
       become a normal reader-consumer like everyone else.
-- [ ] Progress/UX: this work's cost currently attributes to `DominatorAnalyzer` (Phase 2). Moving it
-      into Phase 1 means it becomes part of "Scan + Index heap" instead — needs its own progress
-      sub-phase label so a slow build is attributable.
+- [x] Progress/UX sub-phase label — already resolved, not a gap. `IncrementalReachableWalker.Walk`
+      constructs its own `ObjectScanCounter("building reverse-edge index (reachability walk)",
+      progress)`, distinct from the main scan's "indexing heap" label — `PhaseTimeline.Record`
+      (`src/DumpDetective.Cli/Pipeline/PhaseTimeline.cs`) keys purely off whatever `Phase` string a
+      report carries, so the walk already gets its own segment in "Scan + Index heap"'s phase
+      breakdown, the same way "sorting forward-index buckets" or "merging reverse-index into
+      cache.bin" do. Confirmed directly in this session's 25GB real-dump progress logs (§8.8).
 - [x] Whether to totally replace the reverse-edge index (§7) — decided and shipped, see §7.2a.
       `HeapAnalysisCache.TryGetReverseIndexProvider()` needed no change — it already reads from
       the (now walk-fed) `ReverseEdgeExtractor`/`Sorter`/`ContainerWriter`/`IndexReader` pipeline.
-- [ ] Whether Stage A ships as its own workstream ahead of Stage B, given they're independently gated
-      (§3) and Stage A alone already delivers value (exact fan-in counts, uncapped walk reverse index)
-      without needing LT to exist yet.
+- [x] Whether Stage A ships as its own workstream ahead of Stage B — resolved by events: it did.
+      Everything in §4/§7/§8.8/§5 (this session's persisted `DominatorReachableAddresses`, the
+      walk-fed reverse-edge index, the loose-file successors source) shipped independently, with
+      Stage B (`idom[]`/LT, still Phase 2) untouched and not a dependency of any of it.
 - [ ] The garbage→reachable split specifically (§8.7) — separate from garbage→garbage noise — would
       tell us Stage A.5's useful-output size, though Stage A.5 itself is no longer believed necessary.

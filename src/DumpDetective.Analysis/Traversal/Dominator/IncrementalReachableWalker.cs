@@ -30,7 +30,14 @@ internal static class IncrementalReachableWalker
 {
     /// <param name="NodeCount">Reachable nodes visited.</param>
     /// <param name="EdgeCount">Forward edges discovered and streamed to <see cref="ReverseEdgeExtractor"/>.</param>
-    public readonly record struct Result(int NodeCount, long EdgeCount);
+    /// <param name="ReachableAddresses">
+    /// Every visited node's address, sorted ascending — the walk's <c>HashSet&lt;ulong&gt;</c>
+    /// visited-tracking already holds this for the walk's duration; returning it costs one sort,
+    /// not new peak memory. Persisted as the <c>DominatorReachableAddresses</c> section (see
+    /// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §5) by
+    /// <c>DominatorReachableAddressWriter</c>.
+    /// </param>
+    public readonly record struct Result(int NodeCount, long EdgeCount, ulong[] ReachableAddresses);
 
     public static Result Walk(
         IReadOnlyList<ulong> rootAddresses,
@@ -85,6 +92,10 @@ internal static class IncrementalReachableWalker
         }
 
         scanCounter.Complete();
-        return new Result(nodeCount, edgeCount);
+
+        ulong[] reachableAddresses = visited.ToArray();
+        Array.Sort(reachableAddresses);
+
+        return new Result(nodeCount, edgeCount, reachableAddresses);
     }
 }

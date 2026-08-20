@@ -56,4 +56,13 @@ public interface IHeapAnalysisCache
     /// docs/analysis/phase1-redesigns/dominator-tree-lengauer-tarjan.md §D5.
     /// </summary>
     IForwardReferenceProvider? TryGetForwardIndexProvider();
+
+    /// <summary>
+    /// Returns the shared "is this object reachable from a GC root?" provider backed by the
+    /// disk-backed <c>DominatorReachableAddresses</c> section, or <c>null</c> when unavailable
+    /// (in-memory mode, the reverse-edge index build was skipped so Stage A's walk never ran, or
+    /// the section is missing). See
+    /// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §5.
+    /// </summary>
+    IReachableAddressProvider? TryGetReachableAddressProvider();
 }

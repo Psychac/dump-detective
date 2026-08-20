@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Analysis.Indexing.Dominator;
 using DumpDetective.Analysis.Indexing.ForwardIndex;
 using DumpDetective.Analysis.Indexing.ReverseIndex;
 using DumpDetective.Analysis.Indexing.Satellite;
@@ -50,6 +51,17 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     // every other optional satellite section.
     private static readonly bool SkipForwardIndexBuild =
         Environment.GetEnvironmentVariable("DD_SKIP_FORWARD_INDEX_BUILD") == "1";
+
+    // Stage A's walk successors source defaults to ForwardEdgeLooseFileReader (see
+    // docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §2/§8.8): after three
+    // rounds of measurement, the final version (mmap'd .dat + an in-memory decoded directory,
+    // binary-searched as a struct array) measured ~2x FASTER than a live ClrMD walk on a 25GB
+    // real dump (833.7s vs. 1,663.9s Phase 1 build time) — the scale this project's whole purpose
+    // targets — while being roughly at parity (not a meaningful regression) on a 3.3GB dump. Set
+    // DD_FORCE_LIVE_CLRMD_WALK=1 to force the live-ClrMD walk instead (e.g. if the forward index
+    // is unavailable for some other reason, or for future re-measurement).
+    private static readonly bool ForceLiveClrMdWalk =
+        Environment.GetEnvironmentVariable("DD_FORCE_LIVE_CLRMD_WALK") == "1";
 
     // Escape hatch for the SegmentIndex satellite section (see
     // docs/cache/cache-architecture.md): set DD_SKIP_SEGMENT_INDEX_BUILD=1 to skip it for
@@ -711,12 +723,27 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             try { containerWriter.AbortSection(); } catch { /* no section was open */ }
         }
 
+        // Forward-reference index (§D5): flush, sort raw buckets into loose .dat/.idx scratch
+        // files (Phase B) — run before the reachability walk below so the walk can read successors
+        // from these files instead of a live ClrMD walk (§2, dominator-tree-phase1-integration.md).
+        // Merging them into the container (Phase C) happens after the walk, once the loose files
+        // are no longer needed as a successors source.
+        ForwardEdgeExtractionStats? forwardIndexStats = null;
+        if (forwardEdgeExtractor is not null)
+        {
+            MarkAlloc("satellite sections");
+            (forwardIndexStats, string? forwardSortWarning) = SortForwardIndexBuckets(
+                indexDir, forwardIndexBucketCount, forwardEdgeExtractor, cancellationToken, progress, stopwatch);
+            if (forwardSortWarning is not null)
+                satelliteWarnings.Add(forwardSortWarning);
+        }
+
         // Reverse-reference index (Phase B + C) — flush, sort and merge the buckets extracted
         // during the heap scan above. Kept before stopwatch.Stop() so its progress reports (sort
         // can take a while on many buckets) show a growing elapsed like the satellite sections.
         if (reverseEdgeExtractor is not null)
         {
-            MarkAlloc("satellite sections");
+            MarkAlloc("reachability walk");
 
             // §7 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): the
             // reverse-edge index is now populated by a BFS walk from the GC roots instead of the
@@ -734,32 +761,61 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                     walkRootAddresses.Add(rootObjectAddress);
             }
 
-            // Live ClrMD successors, same pattern as ReachableGraphBuilder.LiveSuccessorsInto —
-            // the just-written forward-edge index isn't safely re-readable mid-build, so a live
-            // per-object walk is the correct edge source here, not a shortcut.
-            SuccessorsFunc walkSuccessors = (ulong address, ref ulong[] buffer) =>
+            // §2/§8.8: ForwardEdgeLooseFileReader is the default (measured ~2x faster on a 25GB
+            // real dump — see the field comment on ForceLiveClrMdWalk above). Falls back to live
+            // ClrMD when forced, when the forward index was skipped, its sort failed, or the
+            // loose files otherwise can't be opened — never a hard failure, same contract every
+            // other optional satellite index in this codebase already has.
+            ForwardEdgeLooseFileReader? looseForwardReader = null;
+            SuccessorsFunc walkSuccessors;
+            if (!ForceLiveClrMdWalk
+                && forwardIndexStats is not null
+                && ForwardEdgeLooseFileReader.TryOpen(indexDir, forwardIndexBucketCount, out looseForwardReader))
             {
-                ClrObject walkObj = heap.GetObject(address);
-                if (!walkObj.IsValid || walkObj.Type is null)
-                    return 0;
-
-                int count = 0;
-                foreach (ClrObject child in walkObj.EnumerateReferences(carefully: true))
+                walkSuccessors = looseForwardReader!.GetChildren;
+            }
+            else
+            {
+                walkSuccessors = (ulong address, ref ulong[] buffer) =>
                 {
-                    if (!child.IsValid || child.Address == 0)
-                        continue;
+                    ClrObject walkObj = heap.GetObject(address);
+                    if (!walkObj.IsValid || walkObj.Type is null)
+                        return 0;
 
-                    if (count == buffer.Length)
-                        Array.Resize(ref buffer, buffer.Length * 2);
+                    int count = 0;
+                    foreach (ClrObject child in walkObj.EnumerateReferences(carefully: true))
+                    {
+                        if (!child.IsValid || child.Address == 0)
+                            continue;
 
-                    buffer[count++] = child.Address;
-                }
+                        if (count == buffer.Length)
+                            Array.Resize(ref buffer, buffer.Length * 2);
 
-                return count;
-            };
+                        buffer[count++] = child.Address;
+                    }
 
-            IncrementalReachableWalker.Walk(walkRootAddresses, walkSuccessors, reverseEdgeExtractor, cancellationToken, progress);
+                    return count;
+                };
+            }
 
+            IncrementalReachableWalker.Result walkResult;
+            try
+            {
+                walkResult = IncrementalReachableWalker.Walk(walkRootAddresses, walkSuccessors, reverseEdgeExtractor, cancellationToken, progress);
+            }
+            finally
+            {
+                looseForwardReader?.Dispose();
+            }
+
+            // §5 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): persist
+            // the walk's reachable-address set so "is this object reachable?" is answerable from
+            // disk without re-running the walk. DominatorReachableInDegree (also reserved in that
+            // section) is deliberately not persisted — it would duplicate the exact fan-in counts
+            // the reverse-edge index above already exposes via EnumerateChildCounts.
+            DominatorReachableAddressWriter.Write(containerWriter, walkResult.ReachableAddresses);
+
+            MarkAlloc("reverse index (sort + write)");
             string? reverseIndexWarning = WriteReverseIndexSections(
                 containerWriter, indexDir, reverseIndexBucketCount, reverseEdgeExtractor,
                 cancellationToken, progress, stopwatch);
@@ -767,15 +823,12 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                 satelliteWarnings.Add(reverseIndexWarning);
         }
 
-        // Forward-reference index (§D5, Phase B + C) — flush, sort and merge the buckets extracted
-        // during the heap scan above, same shape as the reverse index just above but keyed by
-        // parent and uncapped.
-        if (forwardEdgeExtractor is not null)
+        // Forward-reference index Phase C: merge the loose files Phase B already sorted into the
+        // container, then delete them. Only runs if Phase B above actually succeeded.
+        if (forwardIndexStats is not null)
         {
-            MarkAlloc("reverse index (sort + write)");
             string? forwardIndexWarning = WriteForwardIndexSections(
-                containerWriter, indexDir, forwardIndexBucketCount, forwardEdgeExtractor,
-                cancellationToken, progress, stopwatch);
+                containerWriter, indexDir, forwardIndexBucketCount, forwardIndexStats, progress);
             if (forwardIndexWarning is not null)
                 satelliteWarnings.Add(forwardIndexWarning);
         }
@@ -994,8 +1047,16 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         }
     }
 
-    private static string? WriteForwardIndexSections(
-        CacheContainerWriter containerWriter,
+    /// <summary>
+    /// Forward-edge index Phase A→B only: flush/dispose the extractor, then sort its raw buckets
+    /// into loose, directory-indexed <c>.dat</c>/<c>.idx</c> scratch files. Split out from the old
+    /// single-call <c>WriteForwardIndexSections</c> so Stage A's reachability walk can run between
+    /// this and <see cref="WriteForwardIndexSections"/>'s merge, reading successors from these
+    /// loose files via <see cref="ForwardIndex.ForwardEdgeLooseFileReader"/> instead of a live
+    /// ClrMD walk — see
+    /// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §2.
+    /// </summary>
+    private static (ForwardEdgeExtractionStats? Stats, string? Error) SortForwardIndexBuckets(
         string indexDir,
         int bucketCount,
         ForwardEdgeExtractor extractor,
@@ -1014,6 +1075,31 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             sorter.SortBucketsAsync(indexDir, bucketCount, cancellationToken, progress)
                 .GetAwaiter().GetResult();
 
+            return (stats, null);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            DeleteForwardIndexScratchFiles(indexDir, bucketCount);
+            return (null, $"ForwardIndex: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Forward-edge index Phase C only: merges the loose <c>.dat</c>/<c>.idx</c> files
+    /// <see cref="SortForwardIndexBuckets"/> already produced into the container, then deletes
+    /// them. Callers must only invoke this after a successful <see cref="SortForwardIndexBuckets"/>
+    /// call — <paramref name="stats"/> is that call's output.
+    /// </summary>
+    private static string? WriteForwardIndexSections(
+        CacheContainerWriter containerWriter,
+        string indexDir,
+        int bucketCount,
+        ForwardEdgeExtractionStats stats,
+        IProgress<AnalyzerProgressReport>? progress)
+    {
+        try
+        {
             ForwardEdgeContainerWriter.Write(containerWriter, indexDir, bucketCount, stats, progress);
             return null;
         }

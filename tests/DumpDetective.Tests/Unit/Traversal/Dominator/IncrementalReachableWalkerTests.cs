@@ -1,4 +1,5 @@
 using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Analysis.Indexing.ForwardIndex;
 using DumpDetective.Analysis.Indexing.ReverseIndex;
 using DumpDetective.Analysis.Traversal.Dominator;
 
@@ -50,6 +51,7 @@ public sealed class IncrementalReachableWalkerTests : IDisposable
 
         result.NodeCount.Should().Be(4);
         result.EdgeCount.Should().Be(4);
+        result.ReachableAddresses.Should().Equal([0x10UL, 0x20UL, 0x30UL, 0x40UL]);
     }
 
     [Fact]
@@ -70,6 +72,7 @@ public sealed class IncrementalReachableWalkerTests : IDisposable
 
         result.NodeCount.Should().Be(3);
         result.EdgeCount.Should().Be(2);
+        result.ReachableAddresses.Should().Equal([0x1UL, 0x2UL, 0x3UL]);
     }
 
     [Fact]
@@ -159,5 +162,47 @@ public sealed class IncrementalReachableWalkerTests : IDisposable
                 .Should().BeFalse();
             parentsOfGarbage.Should().BeEmpty();
         }
+    }
+
+    [Fact]
+    public async Task Walk_ForwardEdgeLooseFileReaderSuccessors_MatchesSyntheticSuccessorsResult()
+    {
+        // §2 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): the walk's
+        // successors can come from ForwardEdgeLooseFileReader instead of a synthetic/live
+        // function. Same diamond graph as the other tests here, fed through the real forward-edge
+        // extractor/sorter pipeline instead of SyntheticSuccessors — the walk's result (and the
+        // reverse-edge index it produces) must be identical either way.
+        (ulong Parent, ulong Child)[] edges =
+        [
+            (0x10UL, 0x20UL), (0x10UL, 0x30UL), (0x20UL, 0x40UL), (0x30UL, 0x40UL),
+        ];
+
+        var forwardExtractor = new ForwardEdgeExtractor(bucketCount: 1, _testDir);
+        foreach ((ulong parent, ulong child) in edges)
+            forwardExtractor.RecordEdge(parent, child);
+        await forwardExtractor.DisposeAsync();
+
+        var forwardSorter = new ForwardEdgeSorter();
+        await forwardSorter.SortBucketsAsync(_testDir, bucketCount: 1, CancellationToken.None);
+
+        ForwardEdgeLooseFileReader.TryOpen(_testDir, bucketCount: 1, out ForwardEdgeLooseFileReader? forwardReader)
+            .Should().BeTrue();
+
+        // Different bucket-file prefixes ("forward_edges_bucket_*" vs "reverse_edges_bucket_*"),
+        // so both extractors can safely share _testDir.
+        var reverseExtractor = new ReverseEdgeExtractor(bucketCount: 1, _testDir);
+        IncrementalReachableWalker.Result result;
+        try
+        {
+            result = IncrementalReachableWalker.Walk([0x10UL], forwardReader!.GetChildren, reverseExtractor, CancellationToken.None);
+        }
+        finally
+        {
+            forwardReader!.Dispose();
+            await reverseExtractor.DisposeAsync();
+        }
+
+        result.NodeCount.Should().Be(4);
+        result.EdgeCount.Should().Be(4);
     }
 }

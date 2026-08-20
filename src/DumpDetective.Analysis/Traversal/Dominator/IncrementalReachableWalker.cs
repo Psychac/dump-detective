@@ -5,50 +5,26 @@ using DumpDetective.Core.Abstractions;
 namespace DumpDetective.Analysis.Traversal.Dominator;
 
 /// <summary>
-/// §4.1 prototype: the same reachability BFS as <see cref="ReachableGraphWalker"/>, but the
-/// in-memory <c>edgeFrom</c>/<c>edgeTo</c> edge lists become direct writes into a
-/// <see cref="ReverseEdgeExtractor"/>, mirroring exactly how the existing reverse-edge index streams
-/// edges to per-bucket scratch files during the raw heap scan — here fed from the BFS instead. See
-/// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §4.
+/// Breadth-first walk from the GC roots that streams every forward edge it crosses directly into
+/// a <see cref="ReverseEdgeExtractor"/>, keyed by child — i.e. it builds the reverse-edge index as
+/// a side effect of the walk, instead of the index being built by a separate per-object field scan.
 ///
-/// Deliberately does not (yet) implement §4.2's hub-overflow cap removal — it reuses
-/// <see cref="ReverseEdgeExtractor"/> unmodified, so <see cref="ReverseIndexConstants.MaxParentsPerChild"/>
-/// still applies.
+/// This is the sole production feed for the reverse-edge index (see
+/// <c>DiskBackedObjectIndexWriter.Build</c>, called right before the extractor's buckets are
+/// sorted and written to disk). Because the walk only visits objects reachable from a root, only
+/// reachable objects get reverse-index entries — see
+/// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §7 for why every current
+/// consumer of the index (all of which search backward from an object toward a root) is
+/// unaffected by that: a garbage object has no path to any root by definition, so it could never
+/// have answered such a query anyway.
 ///
-/// Does not build a CSR or resolve per-node metadata (§Architecture step 2-3) — that's Stage B's
-/// job, downstream of whatever ends up consuming this walk reverse index, and out of scope for
-/// this prototype's isolated measurement.
-///
-/// History (§7.3 item 2's measurement rounds, kept here because the design this class landed on is
-/// the *product* of that history, not an arbitrary pick):
-/// - v1 replaced <c>DenseIdMap</c> (13 bytes/reachable node, hash-based; since removed, see
-///   ReachableGraphWalker.cs — deleted when it was replaced with a plain
-///   <see cref="Dictionary{TKey,TValue}"/> there) with an
-///   ordinal-indexed <c>BitArray</c> (via <c>ObjectAddressLookup.TryGetOrdinal</c>'s binary search) —
-///   measured ~30% *slower* than <c>DenseIdMap</c> for the walk alone, because both approaches check
-///   "have I seen this" once per edge occurrence, and a binary search costs more per call than an
-///   O(1) hash probe.
-/// - v2 added a bounded direct-mapped <c>address -&gt; ordinal</c> cache in front of the binary
-///   search, catching real heaps' power-law in-degree distribution. This closed the walk-only gap
-///   against <c>DenseIdMap</c>, but a same-shape ablation then showed a plain <see cref="HashSet{T}"/>
-///   was still ~37% *faster* than the cached ordinal approach, with peak working set a wash across
-///   every variant tried — the "avoid DenseIdMap's peak-memory cost" motivation this design started
-///   from was never actually demonstrated on the 3.3GB test dump.
-/// - v3 (this version) dropped the ordinal/bitset/cache apparatus entirely for plain
-///   <see cref="HashSet{T}"/>-based visited-tracking — simpler, faster, and removed the
-///   <c>ObjectAddressLookup</c> dependency altogether. A further ablation split the walk's cost into
-///   successors()+visited-tracking (~3.5s) vs. <see cref="ReverseEdgeExtractor.RecordEdge"/> (~4.3s,
-///   ~55% of the walk).
-/// - A v4 attempt batched edges per bucket and flushed via
-///   <see cref="ReverseEdgeExtractor.RecordEdgesBatch"/> instead of calling <c>RecordEdge</c> once
-///   per edge, on the theory that RecordEdge's per-call lock was the dominant cost (as the
-///   extractor's own doc comment suggests for its *parallel*, multi-worker caller during the raw heap
-///   scan). Measured **slower** than v3 (11,033 ms vs. 10,045 ms total), not faster — this walker
-///   runs single-threaded, so there's no lock contention for batching to amortize away; RecordEdge's
-///   cost here is the `Dictionary&lt;ulong,int&gt;` fanout lookup/update plus the two
-///   `BinaryWriter.Write` calls themselves, not the lock, and batching only added List&lt;T&gt;
-///   bookkeeping overhead on top. Reverted — v3 (per-edge `RecordEdge`) is the current, best-measured
-///   version.
+/// Design history (measurement rounds that led to this implementation — kept in the design doc's
+/// §8, not here): earlier prototypes tried a dense id-map and an ordinal-indexed bitset in place
+/// of the plain <see cref="HashSet{T}"/> used for visited-tracking below, on the theory that
+/// avoiding per-node hashing would matter more than it measured to. None beat this version, which
+/// also does no batching of edges into <see cref="ReverseEdgeExtractor"/> — this walker runs
+/// single-threaded, so there's no lock contention on <see cref="ReverseEdgeExtractor.RecordEdge"/>
+/// for batching to amortize away.
 /// </summary>
 internal static class IncrementalReachableWalker
 {
@@ -65,7 +41,7 @@ internal static class IncrementalReachableWalker
     {
         var visited = new HashSet<ulong>();
         var frontier = new Queue<ulong>();
-        var scanCounter = new ObjectScanCounter("computing exact dominator tree (incremental walk prototype)", progress);
+        var scanCounter = new ObjectScanCounter("building reverse-edge index (reachability walk)", progress);
         var childBuffer = new ulong[64];
 
         int nodeCount = 0;

@@ -72,9 +72,12 @@ internal static class ReverseEdgeContainerWriter
             var metadata = new ReverseIndexMetadata
             {
                 BucketCount = bucketCount,
-                MaxParentsPerChild = ReverseIndexConstants.MaxParentsPerChild,
+                // Uncapped since §4.2/§7.4 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md) —
+                // int.MaxValue signals "no cap" to any reader still checking this field for
+                // on-disk format compatibility; nothing is ever truncated anymore.
+                MaxParentsPerChild = int.MaxValue,
                 TotalEdgesRecorded = extractionStats.TotalEdgesRecorded,
-                TotalTruncatedChildren = extractionStats.TotalTruncatedChildren,
+                TotalTruncatedChildren = 0,
             };
             for (int i = 0; i < bucketCount; i++)
             {

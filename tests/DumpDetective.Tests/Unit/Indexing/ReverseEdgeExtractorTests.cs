@@ -50,14 +50,14 @@ public class ReverseEdgeExtractorTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task RecordEdge_FanoutCapEnforced()
+    public async Task RecordEdge_NoFanoutCap_RecordsEveryEdgeForAHubChild()
     {
         await using (var extractor = new ReverseEdgeExtractor(bucketCount: 1, _tempDir))
         {
             const ulong child = 0x0100;
+            const int edgeCount = 10_100; // well past the old 10,000 cap
 
-            // Record MaxParentsPerChild + 100 edges for the same child
-            for (int i = 0; i < ReverseIndexConstants.MaxParentsPerChild + 100; i++)
+            for (int i = 0; i < edgeCount; i++)
             {
                 extractor.RecordEdge(parent: (ulong)(0x10000 + i), child: child);
             }
@@ -66,12 +66,8 @@ public class ReverseEdgeExtractorTests : IAsyncLifetime
 
             await extractor.DisposeAsync();
 
-            // Should have recorded exactly MaxParentsPerChild edges
-            stats.BucketStats[0].EdgeCount.Should().Be(ReverseIndexConstants.MaxParentsPerChild);
-            stats.BucketStats[0].TruncatedChildrenCount.Should().Be(1);
-            stats.TotalTruncatedChildren.Should().Be(1);
-
-            extractor.GetTruncatedChildren(0).Should().BeEquivalentTo(new[] { child });
+            // Uncapped since §4.2/§7.4 — every edge for the child is recorded, not truncated.
+            stats.BucketStats[0].EdgeCount.Should().Be(edgeCount);
         }
     }
 

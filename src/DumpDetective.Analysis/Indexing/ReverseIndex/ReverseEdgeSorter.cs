@@ -30,7 +30,6 @@ internal class ReverseEdgeSorter
         string cacheDir,
         int bucketCount,
         CancellationToken ct,
-        IReadOnlyList<IReadOnlySet<ulong>>? truncatedChildrenPerBucket = null,
         IProgress<AnalyzerProgressReport>? progress = null)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -51,7 +50,7 @@ internal class ReverseEdgeSorter
             async (i, token) =>
             {
                 BucketSortResult result = await Task.Run(
-                    () => SortBucketCore(cacheDir, i, bucketCount, truncatedChildrenPerBucket?[i], progress, stopwatch), token);
+                    () => SortBucketCore(cacheDir, i, bucketCount, progress, stopwatch), token);
                 results[i] = result;
 
                 long done = Interlocked.Increment(ref completed);
@@ -75,7 +74,6 @@ internal class ReverseEdgeSorter
         string cacheDir,
         int bucketIdx,
         int bucketCount,
-        IReadOnlySet<ulong>? truncatedChildren,
         IProgress<AnalyzerProgressReport>? progress,
         Stopwatch stopwatch)
     {
@@ -154,13 +152,13 @@ internal class ReverseEdgeSorter
                     i++;
                 int groupCount = i - groupStart;
 
-                // Write group: [child:8][count:4][truncated:1][pad:3][parents:8*count]
-                bool truncated = groupCount > ReverseIndexConstants.MaxParentsPerChild
-                    || (truncatedChildren?.Contains(child) ?? false);
-
+                // Write group: [child:8][count:4][truncated:1][pad:3][parents:8*count]. The
+                // `truncated` byte is kept for on-disk format/reader compatibility but is always
+                // false now — extraction is uncapped (docs/analysis/phase1-redesigns/
+                // dominator-tree-phase1-integration.md §4.2/§7.4), so no group is ever missing data.
                 bw.Write(child);
                 bw.Write(groupCount);
-                bw.Write(truncated);
+                bw.Write(false);
                 bw.Write(pad3);
 
                 for (int k = groupStart; k < groupStart + groupCount; k++)

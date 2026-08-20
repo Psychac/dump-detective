@@ -232,14 +232,14 @@ public class ReverseEdgeSorterTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SortBucketsAsync_ReportsTruncationFlag()
+    public async Task SortBucketsAsync_TruncatedFlagIsAlwaysFalse()
     {
-        // Create bucket with one child that has more than MaxParentsPerChild parents
-        // (This would require special setup - for now we'll test the basic flow)
+        // Uncapped since §4.2/§7.4 (dominator-tree-phase1-integration.md) — the on-disk
+        // `truncated` byte is kept for format/reader compatibility but is now always false,
+        // regardless of group size.
         var bucketFile = Path.Combine(_tempDir, "reverse_edges_bucket_0.tmp");
         using (var writer = new BinaryWriter(File.Create(bucketFile)))
         {
-            // Single child with 3 parents
             for (int i = 0; i < 3; i++)
             {
                 writer.Write(0x0100UL);
@@ -250,54 +250,15 @@ public class ReverseEdgeSorterTests : IAsyncLifetime
         var sorter = new ReverseEdgeSorter();
         await sorter.SortBucketsAsync(_tempDir, bucketCount: 1, CancellationToken.None);
 
-        // Read data and verify truncated flag
         var dataFile = Path.Combine(_tempDir, "reverse_edges_bucket_0.dat");
         using (var reader = new BinaryReader(File.OpenRead(dataFile)))
         {
             reader.ReadUInt64(); // child
-            reader.ReadInt32();  // count
+            reader.ReadInt32(); // count
             bool truncated = reader.ReadBoolean();
 
-            truncated.Should().BeFalse(); // Only 3 parents, not truncated
+            truncated.Should().BeFalse();
         }
-    }
-
-    [Fact]
-    public async Task SortBucketsAsync_MarksChildTruncatedWhenExtractorReportedIt()
-    {
-        // Phase A already caps parents-per-child at write time, so the raw bucket file itself
-        // never contains more than MaxParentsPerChild parents for any child — the sorter can only
-        // learn a child was truncated from the extractor's truncated-children set, not by counting.
-        var bucketFile = Path.Combine(_tempDir, "reverse_edges_bucket_0.tmp");
-        using (var writer = new BinaryWriter(File.Create(bucketFile)))
-        {
-            writer.Write(0x0100UL); writer.Write(0x1000UL);
-            writer.Write(0x0200UL); writer.Write(0x2000UL); // untouched child, not truncated
-        }
-
-        var truncatedSets = new IReadOnlySet<ulong>[] { new HashSet<ulong> { 0x0100UL } };
-
-        var sorter = new ReverseEdgeSorter();
-        await sorter.SortBucketsAsync(_tempDir, bucketCount: 1, CancellationToken.None, truncatedSets);
-
-        var dataFile = Path.Combine(_tempDir, "reverse_edges_bucket_0.dat");
-        using var reader = new BinaryReader(File.OpenRead(dataFile));
-
-        ulong child1 = reader.ReadUInt64();
-        reader.ReadInt32();
-        bool truncated1 = reader.ReadBoolean();
-        reader.ReadBytes(3);
-        reader.ReadUInt64(); // parent
-
-        child1.Should().Be(0x0100UL);
-        truncated1.Should().BeTrue();
-
-        ulong child2 = reader.ReadUInt64();
-        reader.ReadInt32();
-        bool truncated2 = reader.ReadBoolean();
-
-        child2.Should().Be(0x0200UL);
-        truncated2.Should().BeFalse();
     }
 
     [Fact]

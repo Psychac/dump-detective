@@ -11,6 +11,7 @@ using DumpDetective.Analysis.Indexing.Container;
 using DumpDetective.Analysis.Indexing.ForwardIndex;
 using DumpDetective.Analysis.Indexing.ReverseIndex;
 using DumpDetective.Analysis.Indexing.Satellite;
+using DumpDetective.Analysis.Traversal.Dominator;
 using DumpDetective.Core.Enums;
 using DumpDetective.Analysis.Utilities;
 
@@ -152,21 +153,20 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         int serialChunkEntries = Math.Max(writeBuffer / ColumnSize, 1);
         string indexDir = DumpIndexPaths.GetIndexDirectory(dumpPath);
 
-        // Reverse-reference index (Phase A): extracted alongside the main heap scan below since a
-        // second full heap pass is prohibitively expensive on large dumps — see
-        // docs/analysis/phase1-redesigns/full-reverse-index-plan.md Decision 2. One extractor
-        // instance for the whole scan; RecordEdge is thread-safe (per-bucket locks) so every
-        // segment's parallel worker below shares it directly.
+        // Reverse-reference index: constructed here, but no longer fed during the per-object scan
+        // below. It's populated after the scan completes by a BFS walk from the GC roots (see the
+        // IncrementalReachableWalker.Walk call right before WriteReverseIndexSections) — see
+        // docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §7 for why only
+        // BFS-reachable objects getting entries is not a loss of accuracy for any current consumer.
         int reverseIndexBucketCount = ReverseIndexConstants.CalculateBucketCount(new FileInfo(dumpPath).Length);
         ReverseEdgeExtractor? reverseEdgeExtractor = SkipReverseIndexBuild
             ? null
             : new ReverseEdgeExtractor(reverseIndexBucketCount, indexDir);
 
-        // Forward-reference index (§D5): extracted in the SAME per-object foreach below that
-        // already enumerates obj.EnumerateReferences(carefully: true) for the reverse index — no
-        // additional ClrMD reads, just a second batched write of the same already-enumerated
-        // references, keyed by parent instead of child. Reuses the reverse index's bucket-count
-        // formula (dump-size-based, not edge-count-based, so it applies equally well here).
+        // Forward-reference index (§D5): extracted in the per-object foreach below that enumerates
+        // obj.EnumerateReferences(carefully: true), keyed by parent. Reuses the reverse index's
+        // bucket-count formula (dump-size-based, not edge-count-based, so it applies equally well
+        // here) even though the two indices are no longer built from the same pass.
         int forwardIndexBucketCount = ForwardIndexConstants.CalculateBucketCount(new FileInfo(dumpPath).Length);
         ForwardEdgeExtractor? forwardEdgeExtractor = SkipForwardIndexBuild
             ? null
@@ -241,7 +241,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             0,
             segments.Length,
             parallelOptions,
-            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64), ModuleIdCache: new Dictionary<ulong, int>(capacity: 64), StringDedup: new Dictionary<ulong, StringDedupEntry>(capacity: 64), LengthSamples: new List<int>(), LengthBuckets: new Dictionary<string, int>(StringComparer.Ordinal), EdgeBucketBuffers: reverseEdgeExtractor is null ? null : new List<(ulong Child, ulong Parent)>?[reverseIndexBucketCount], ForwardEdgeBucketBuffers: forwardEdgeExtractor is null ? null : new List<(ulong Parent, ulong Child)>?[forwardIndexBucketCount], TaskStateFlagsFieldCache: new Dictionary<ulong, ClrInstanceField?>(capacity: 8)),
+            () => (Builder: new TypeIndexBuilder(), FlagsCache: new Dictionary<ulong, TypeAggregateFlags>(capacity: 64), ModuleIdCache: new Dictionary<ulong, int>(capacity: 64), StringDedup: new Dictionary<ulong, StringDedupEntry>(capacity: 64), LengthSamples: new List<int>(), LengthBuckets: new Dictionary<string, int>(StringComparer.Ordinal), ForwardEdgeBucketBuffers: forwardEdgeExtractor is null ? null : new List<(ulong Parent, ulong Child)>?[forwardIndexBucketCount], TaskStateFlagsFieldCache: new Dictionary<ulong, ClrInstanceField?>(capacity: 8)),
             (segIdx, _, state) =>
             {
                 ClrSegment segment = segments[segIdx];
@@ -306,19 +306,19 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                     columnWriter.Add(entry);
                     state.Builder.Add(entry, moduleId, flags, objGen);
 
-                    // Reverse-reference index (Phase A): record every outgoing edge for this
-                    // object. "carefully" matches the enumeration mode validated in Investigation 1
-                    // (see pre-implementation-validation.md) and, unlike a raw field walk, also
-                    // covers array elements — the dominant edge source for collection-held leaks.
+                    // Forward-reference index (§D5): record every outgoing edge for this object,
+                    // keyed by parent. "carefully" matches the enumeration mode validated in
+                    // Investigation 1 (see pre-implementation-validation.md) and, unlike a raw
+                    // field walk, also covers array elements — the dominant edge source for
+                    // collection-held leaks.
                     //
-                    // Edges are buffered per-bucket in thread-local lists and flushed in batches via
-                    // RecordEdgesBatch instead of calling RecordEdge per edge — at hundreds of
-                    // millions of edges, the fixed cost of the per-bucket lock (not the dictionary
-                    // work it guards) dominates, so amortizing it across EdgeBatchSize edges at a
-                    // time is the difference that matters.
-                    if (reverseEdgeExtractor is not null || forwardEdgeExtractor is not null)
+                    // The reverse-edge index used to be populated here too (one batch per edge,
+                    // keyed by child), but is now built after this scan completes by a BFS walk
+                    // from the GC roots — see the walk-based build right before
+                    // WriteReverseIndexSections is called below. See
+                    // docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §7.
+                    if (forwardEdgeExtractor is not null)
                     {
-                        var edgeBuffers = state.EdgeBucketBuffers;
                         var forwardEdgeBuffers = state.ForwardEdgeBucketBuffers;
                         foreach (ClrObject reference in obj.EnumerateReferences(carefully: true))
                         {
@@ -327,23 +327,6 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 
                             ulong child = reference.Address;
 
-                            if (reverseEdgeExtractor is not null)
-                            {
-                                int bucketIdx = (int)ReverseIndexConstants.ChildBucketHash(child, reverseIndexBucketCount);
-                                List<(ulong Child, ulong Parent)>? bucketBuf = edgeBuffers![bucketIdx];
-                                if (bucketBuf is null)
-                                {
-                                    bucketBuf = new List<(ulong Child, ulong Parent)>(EdgeBatchSize);
-                                    edgeBuffers[bucketIdx] = bucketBuf;
-                                }
-
-                                bucketBuf.Add((child, obj.Address));
-                                if (bucketBuf.Count >= EdgeBatchSize)
-                                    reverseEdgeExtractor.RecordEdgesBatch(bucketIdx, bucketBuf);
-                            }
-
-                            // §D5: the exact same enumerated reference, batched a second time keyed
-                            // by parent instead of child — no additional ClrMD read.
                             if (forwardEdgeExtractor is not null)
                             {
                                 int fwdBucketIdx = (int)ForwardIndexConstants.ParentBucketHash(obj.Address, forwardIndexBucketCount);
@@ -443,17 +426,6 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                 // Flush any partially-filled per-bucket edge batches before this thread-local
                 // state is discarded — otherwise the last <EdgeBatchSize edges recorded against
                 // each bucket would be silently dropped.
-                if (reverseEdgeExtractor is not null)
-                {
-                    var edgeBuffers = state.EdgeBucketBuffers!;
-                    for (int b = 0; b < edgeBuffers.Length; b++)
-                    {
-                        List<(ulong Child, ulong Parent)>? bucketBuf = edgeBuffers[b];
-                        if (bucketBuf is { Count: > 0 })
-                            reverseEdgeExtractor.RecordEdgesBatch(b, bucketBuf);
-                    }
-                }
-
                 if (forwardEdgeExtractor is not null)
                 {
                     var forwardEdgeBuffers = state.ForwardEdgeBucketBuffers!;
@@ -745,6 +717,49 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         if (reverseEdgeExtractor is not null)
         {
             MarkAlloc("satellite sections");
+
+            // §7 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): the
+            // reverse-edge index is now populated by a BFS walk from the GC roots instead of the
+            // raw per-object field scan above. This means an object only gets a reverse-index
+            // entry if it's actually reachable from a root — garbage never enters the walk, so it
+            // never gets an entry. Every current consumer of this index searches *backward* from
+            // an object toward a root, and a garbage object can have no such path by definition,
+            // so this is not a loss of any answer the index used to give.
+            progress?.Report(new(0, "walking reachable graph for reverse-edge index", Detail: null, Elapsed: stopwatch.Elapsed));
+            var walkRootAddresses = new List<ulong>(4096);
+            foreach (ClrRoot root in heap.EnumerateRoots())
+            {
+                ulong rootObjectAddress = root.Object.Address;
+                if (rootObjectAddress != 0)
+                    walkRootAddresses.Add(rootObjectAddress);
+            }
+
+            // Live ClrMD successors, same pattern as ReachableGraphBuilder.LiveSuccessorsInto —
+            // the just-written forward-edge index isn't safely re-readable mid-build, so a live
+            // per-object walk is the correct edge source here, not a shortcut.
+            SuccessorsFunc walkSuccessors = (ulong address, ref ulong[] buffer) =>
+            {
+                ClrObject walkObj = heap.GetObject(address);
+                if (!walkObj.IsValid || walkObj.Type is null)
+                    return 0;
+
+                int count = 0;
+                foreach (ClrObject child in walkObj.EnumerateReferences(carefully: true))
+                {
+                    if (!child.IsValid || child.Address == 0)
+                        continue;
+
+                    if (count == buffer.Length)
+                        Array.Resize(ref buffer, buffer.Length * 2);
+
+                    buffer[count++] = child.Address;
+                }
+
+                return count;
+            };
+
+            IncrementalReachableWalker.Walk(walkRootAddresses, walkSuccessors, reverseEdgeExtractor, cancellationToken, progress);
+
             string? reverseIndexWarning = WriteReverseIndexSections(
                 containerWriter, indexDir, reverseIndexBucketCount, reverseEdgeExtractor,
                 cancellationToken, progress, stopwatch);
@@ -961,14 +976,11 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         {
             progress?.Report(new(0, "collecting reverse-index statistics", Detail: null, Elapsed: stopwatch.Elapsed));
             ReverseEdgeExtractionStats stats = extractor.GetStatistics();
-            var truncatedPerBucket = new IReadOnlySet<ulong>[bucketCount];
-            for (int i = 0; i < bucketCount; i++)
-                truncatedPerBucket[i] = extractor.GetTruncatedChildren(i);
 
             extractor.DisposeAsync(progress).AsTask().GetAwaiter().GetResult();
 
             var sorter = new ReverseEdgeSorter();
-            sorter.SortBucketsAsync(indexDir, bucketCount, cancellationToken, truncatedPerBucket, progress)
+            sorter.SortBucketsAsync(indexDir, bucketCount, cancellationToken, progress)
                 .GetAwaiter().GetResult();
 
             ReverseEdgeContainerWriter.Write(containerWriter, indexDir, bucketCount, stats, progress);

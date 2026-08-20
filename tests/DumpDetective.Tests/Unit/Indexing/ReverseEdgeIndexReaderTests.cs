@@ -32,13 +32,10 @@ public class ReverseEdgeIndexReaderTests : IAsyncLifetime
         foreach (var (parent, child) in edges)
             extractor.RecordEdge(parent, child);
         var stats = extractor.GetStatistics();
-        var truncatedPerBucket = Enumerable.Range(0, bucketCount)
-            .Select(i => extractor.GetTruncatedChildren(i))
-            .ToArray();
         await extractor.DisposeAsync();
 
         var sorter = new ReverseEdgeSorter();
-        await sorter.SortBucketsAsync(_tempDir, bucketCount, CancellationToken.None, truncatedPerBucket);
+        await sorter.SortBucketsAsync(_tempDir, bucketCount, CancellationToken.None);
 
         string containerPath = Path.Combine(_tempDir, "cache.bin");
         using (var writer = new CacheContainerWriter(containerPath))
@@ -88,10 +85,13 @@ public class ReverseEdgeIndexReaderTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task TryGetParents_TruncatedChild_ReportsTruncatedTrue()
+    public async Task TryGetParents_HubChildWithManyParents_ReturnsAllUncappedAndNeverTruncated()
     {
+        // Uncapped since §4.2/§7.4 (dominator-tree-phase1-integration.md) — a hub child well past
+        // the old 10,000 cap gets every one of its parents back, and truncated is always false.
         const ulong hotChild = 0x0100UL;
-        var edges = new (ulong parent, ulong child)[ReverseIndexConstants.MaxParentsPerChild + 50];
+        const int edgeCount = 10_050;
+        var edges = new (ulong parent, ulong child)[edgeCount];
         for (int i = 0; i < edges.Length; i++)
             edges[i] = ((ulong)(0x10000 + i), hotChild);
 
@@ -103,8 +103,8 @@ public class ReverseEdgeIndexReaderTests : IAsyncLifetime
         using (reader)
         {
             reader!.TryGetParents(hotChild, out var parents, out bool truncated).Should().BeTrue();
-            parents.Should().HaveCount(ReverseIndexConstants.MaxParentsPerChild);
-            truncated.Should().BeTrue();
+            parents.Should().HaveCount(edgeCount);
+            truncated.Should().BeFalse();
         }
     }
 

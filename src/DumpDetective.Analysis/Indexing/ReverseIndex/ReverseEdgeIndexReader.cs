@@ -109,10 +109,11 @@ internal sealed unsafe class ReverseEdgeIndexReader : IDisposable
     /// <summary>
     /// Retrieves all recorded parent addresses for <paramref name="child"/>.
     /// Returns <c>false</c> if <paramref name="child"/> has no recorded parents (not present in
-    /// the index); <paramref name="parents"/> is empty and <paramref name="truncated"/> is
-    /// <c>false</c> in that case. When <paramref name="truncated"/> is <c>true</c>, the child hit
-    /// the fanout cap during extraction — <paramref name="parents"/> holds only the first
-    /// <see cref="ReverseIndexConstants.MaxParentsPerChild"/> parents in ascending address order.
+    /// the index); <paramref name="parents"/> is empty in that case.
+    /// Uncapped since §4.2/§7.4 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md) —
+    /// <paramref name="parents"/> always holds every recorded parent, however many there are.
+    /// <paramref name="truncated"/> is kept for on-disk format/caller compatibility but is always
+    /// <c>false</c> now.
     /// </summary>
     public bool TryGetParents(ulong child, out IReadOnlyList<ulong> parents, out bool truncated)
     {

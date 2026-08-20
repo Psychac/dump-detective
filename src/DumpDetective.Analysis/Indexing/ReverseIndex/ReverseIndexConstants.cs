@@ -4,7 +4,6 @@ internal static class ReverseIndexConstants
 {
     public const uint Magic = 0xDEADBEEF;
     public const uint DirectoryVersion = 1;
-    public const int MaxParentsPerChild = 10_000;
 
     /// <summary>
     /// Deterministic Fnv1a 64-bit hash for partitioning child addresses into buckets.

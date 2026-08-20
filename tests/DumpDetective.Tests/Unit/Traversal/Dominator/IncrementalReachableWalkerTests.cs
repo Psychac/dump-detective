@@ -85,11 +85,10 @@ public sealed class IncrementalReachableWalkerTests : IDisposable
         IncrementalReachableWalker.Walk([0x10UL], successors, extractor, CancellationToken.None);
 
         ReverseEdgeExtractionStats stats = extractor.GetStatistics();
-        var truncated = new IReadOnlySet<ulong>[] { extractor.GetTruncatedChildren(0) };
         extractor.DisposeAsync().AsTask().GetAwaiter().GetResult();
 
         var sorter = new ReverseEdgeSorter();
-        sorter.SortBucketsAsync(_testDir, bucketCount: 1, CancellationToken.None, truncated)
+        sorter.SortBucketsAsync(_testDir, bucketCount: 1, CancellationToken.None)
             .GetAwaiter().GetResult();
 
         // Phase C — a fresh container just for this merge; unrelated to any object-index container.
@@ -110,6 +109,55 @@ public sealed class IncrementalReachableWalkerTests : IDisposable
                 .Should().BeTrue();
             truncatedFlag.Should().BeFalse();
             parentsOfC.Should().BeEquivalentTo([0x20UL, 0x30UL]);
+        }
+    }
+
+    [Fact]
+    public void Walk_UnreachableSubgraph_GetsNoReverseIndexEntries()
+    {
+        // §7.3 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): the
+        // reverse-edge index is now built by this walk instead of a raw per-object field scan, so
+        // it only ever sees edges the BFS actually crosses. 0x99 -> 0xAA models a garbage
+        // subgraph — nothing points to 0x99 and it's not a root, so the walk never visits it, and
+        // 0xAA (which would otherwise look identical to a reachable child) must end up with no
+        // recorded parents at all, not an empty-but-present entry.
+        var successors = SyntheticSuccessors.Build(
+            (0x10UL, 0x20UL), (0x99UL, 0xAAUL));
+
+        var extractor = new ReverseEdgeExtractor(bucketCount: 1, _testDir);
+        IncrementalReachableWalker.Result result =
+            IncrementalReachableWalker.Walk([0x10UL], successors, extractor, CancellationToken.None);
+
+        result.NodeCount.Should().Be(2); // root 0x10 and reachable child 0x20 only
+        result.EdgeCount.Should().Be(1); // only 0x10 -> 0x20 was ever crossed
+
+        ReverseEdgeExtractionStats stats = extractor.GetStatistics();
+        extractor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+        var sorter = new ReverseEdgeSorter();
+        sorter.SortBucketsAsync(_testDir, bucketCount: 1, CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        string reverseIndexContainerPath = Path.Combine(_testDir, "reverse-index-unreachable.bin");
+        using (var reverseWriter = new CacheContainerWriter(reverseIndexContainerPath))
+        {
+            ReverseEdgeContainerWriter.Write(reverseWriter, _testDir, bucketCount: 1, stats, progress: null);
+            reverseWriter.Finish();
+        }
+
+        CacheContainerReader.TryOpen(reverseIndexContainerPath, out CacheContainerReader? containerReader)
+            .Should().BeTrue();
+        ReverseEdgeIndexReader.TryOpen(containerReader!, out ReverseEdgeIndexReader? reader)
+            .Should().BeTrue();
+        using (reader)
+        {
+            reader!.TryGetParents(0x20UL, out IReadOnlyList<ulong> parentsOf20, out _)
+                .Should().BeTrue();
+            parentsOf20.Should().BeEquivalentTo([0x10UL]);
+
+            reader!.TryGetParents(0xAAUL, out IReadOnlyList<ulong> parentsOfGarbage, out _)
+                .Should().BeFalse();
+            parentsOfGarbage.Should().BeEmpty();
         }
     }
 }

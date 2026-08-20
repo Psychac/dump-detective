@@ -9,8 +9,10 @@ using DumpDetective.Core.Abstractions;
 /// Phase A: Extracts and partitions heap edges into hash-partitioned buckets.
 ///
 /// During heap streaming, records (parent, child) edges by hashing the child address
-/// to determine bucket assignment. Implements fanout capping (max 10K parents per child)
-/// and tracks truncated children for later reporting.
+/// to determine bucket assignment. Uncapped by design — every edge is written, however large a
+/// single child's fan-in gets (see docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md
+/// §4.2/§7.4: real dumps measured up to a 10.7M-parent hub without the per-bucket sort ever
+/// approaching its memory ceiling, so no cap or hub-overflow routing is needed).
 ///
 /// Scratch files are written to &lt;cacheDir&gt;/reverse_edges_bucket_<i>.tmp
 /// Raw edge format: [ChildAddress: ulong(8)] [ParentAddress: ulong(8)] per record.
@@ -21,16 +23,11 @@ internal class ReverseEdgeExtractor : IAsyncDisposable
     private readonly BinaryWriter[] _bucketWriters;
 
     /// <summary>
-    /// Per-bucket fanout counter: tracks edge count for each child within that bucket.
-    /// Used to enforce MaxParentsPerChild cap.
+    /// Per-bucket fanout counter: exact, uncapped incoming-edge count for each child within that
+    /// bucket — used for reporting (§5's `DominatorReachableInDegree`-style diagnostics), not to
+    /// enforce any cap.
     /// </summary>
     private readonly Dictionary<ulong, int>[] _fanoutPerBucket;
-
-    /// <summary>
-    /// Per-bucket set of children that were truncated (hit MaxParentsPerChild cap).
-    /// Reported in metadata for diagnostics.
-    /// </summary>
-    private readonly HashSet<ulong>[] _truncatedPerBucket;
 
     /// <summary>
     /// Lock protecting concurrent writes to bucket files. Each bucket has its own lock
@@ -49,7 +46,6 @@ internal class ReverseEdgeExtractor : IAsyncDisposable
         _bucketCount = bucketCount;
         _bucketWriters = new BinaryWriter[bucketCount];
         _fanoutPerBucket = new Dictionary<ulong, int>[bucketCount];
-        _truncatedPerBucket = new HashSet<ulong>[bucketCount];
         _bucketLocks = new object[bucketCount];
 
         for (int i = 0; i < bucketCount; i++)
@@ -60,13 +56,12 @@ internal class ReverseEdgeExtractor : IAsyncDisposable
             var fs = File.Create(path, bufferSize: 65536);
             _bucketWriters[i] = new BinaryWriter(fs, Encoding.Default, leaveOpen: false);
             _fanoutPerBucket[i] = new Dictionary<ulong, int>(capacity: 1024);
-            _truncatedPerBucket[i] = new HashSet<ulong>();
         }
     }
 
     /// <summary>
-    /// Records a single (parent, child) edge, routing it to the appropriate bucket.
-    /// If child would exceed MaxParentsPerChild, edge is dropped and child marked truncated.
+    /// Records a single (parent, child) edge, routing it to the appropriate bucket. Uncapped —
+    /// every edge is written, regardless of how large the child's fan-in gets.
     /// Thread-safe: multiple threads can call this concurrently.
     /// </summary>
     public void RecordEdge(ulong parent, ulong child)
@@ -79,12 +74,6 @@ internal class ReverseEdgeExtractor : IAsyncDisposable
 
             if (!fanout.TryGetValue(child, out int count))
                 count = 0;
-
-            if (count >= ReverseIndexConstants.MaxParentsPerChild)
-            {
-                _truncatedPerBucket[bucketIdx].Add(child);
-                return;
-            }
 
             fanout[child] = count + 1;
             _bucketWriters[bucketIdx].Write(child);
@@ -108,19 +97,12 @@ internal class ReverseEdgeExtractor : IAsyncDisposable
         lock (_bucketLocks[bucketIdx])
         {
             Dictionary<ulong, int> fanout = _fanoutPerBucket[bucketIdx];
-            HashSet<ulong> truncated = _truncatedPerBucket[bucketIdx];
             BinaryWriter writer = _bucketWriters[bucketIdx];
 
             foreach ((ulong child, ulong parent) in edges)
             {
                 if (!fanout.TryGetValue(child, out int count))
                     count = 0;
-
-                if (count >= ReverseIndexConstants.MaxParentsPerChild)
-                {
-                    truncated.Add(child);
-                    continue;
-                }
 
                 fanout[child] = count + 1;
                 writer.Write(child);
@@ -132,28 +114,12 @@ internal class ReverseEdgeExtractor : IAsyncDisposable
     }
 
     /// <summary>
-    /// Returns the set of children that hit the fanout cap in bucket <paramref name="bucketIndex"/>.
-    /// <see cref="ReverseEdgeSorter"/> needs this because by the time Phase B counts parents per
-    /// child, the count can never exceed <see cref="ReverseIndexConstants.MaxParentsPerChild"/> —
-    /// <see cref="RecordEdge"/> already dropped anything past the cap — so "count &gt; cap" can
-    /// never be observed downstream; only this set records that a child was actually truncated.
-    /// </summary>
-    public IReadOnlySet<ulong> GetTruncatedChildren(int bucketIndex)
-    {
-        lock (_bucketLocks[bucketIndex])
-        {
-            return _truncatedPerBucket[bucketIndex].ToHashSet();
-        }
-    }
-
-    /// <summary>
-    /// Returns statistics collected during extraction: edge count per bucket and truncation info.
+    /// Returns statistics collected during extraction: exact, uncapped edge count per bucket.
     /// </summary>
     public ReverseEdgeExtractionStats GetStatistics()
     {
         long totalEdges = 0;
         var bucketStats = new List<ReverseEdgeBucketStats>();
-        int totalTruncatedChildren = 0;
 
         for (int i = 0; i < _bucketCount; i++)
         {
@@ -169,10 +135,7 @@ internal class ReverseEdgeExtractor : IAsyncDisposable
                     BucketIndex = i,
                     EdgeCount = bucketEdges,
                     UniqueChildrenCount = _fanoutPerBucket[i].Count,
-                    TruncatedChildrenCount = _truncatedPerBucket[i].Count,
                 });
-
-                totalTruncatedChildren += _truncatedPerBucket[i].Count;
             }
         }
 
@@ -180,7 +143,6 @@ internal class ReverseEdgeExtractor : IAsyncDisposable
         {
             BucketCount = _bucketCount,
             TotalEdgesRecorded = totalEdges,
-            TotalTruncatedChildren = totalTruncatedChildren,
             BucketStats = bucketStats,
         };
     }
@@ -234,7 +196,6 @@ internal class ReverseEdgeExtractionStats
 {
     public int BucketCount { get; set; }
     public long TotalEdgesRecorded { get; set; }
-    public int TotalTruncatedChildren { get; set; }
     public List<ReverseEdgeBucketStats> BucketStats { get; set; } = new();
 }
 
@@ -246,5 +207,4 @@ internal class ReverseEdgeBucketStats
     public int BucketIndex { get; set; }
     public long EdgeCount { get; set; }
     public long UniqueChildrenCount { get; set; }
-    public int TruncatedChildrenCount { get; set; }
 }

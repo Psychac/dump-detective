@@ -122,6 +122,13 @@ CLI, JSON, and structured reports. Summarize and rank findings; avoid raw dumps.
 - Avoid LINQ in hot paths; prefer explicit loops
 - Use `Span<T>`/`Memory<T>` and `readonly struct` where applicable
 - No comments unless explaining non-obvious WHY (see global CLAUDE conventions)
+- Code must be self-documenting without relying on comments: descriptive names for types, methods,
+  parameters, and locals; small well-named methods over long ones; structure that reveals intent.
+  This is a readability goal, not a license to add abstraction, indirection, or ceremony — keep
+  perf, complexity, and allocation characteristics exactly as they'd otherwise be.
+- This does not eliminate comments for non-obvious WHY: complex algorithms, tricky invariants,
+  workarounds for a specific bug/API quirk, or a non-obvious design decision still deserve a
+  comment explaining the reasoning — naming alone can't carry that.
 
 ## Testing
 Support small and very large dumps. Include perf benchmarks and memory validation.

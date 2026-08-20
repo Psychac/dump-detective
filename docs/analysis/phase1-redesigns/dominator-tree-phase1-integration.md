@@ -2,40 +2,31 @@
 
 ## Status at a glance
 
-**Stage A (§3-§4): complete.** Every piece of it has shipped, and §10's checklist has nothing left
-in Stage A's own scope — what remains there is either pure investigation with no code deliverable,
-or explicitly Stage B's territory. What shipped:
-
-- The reachability walk itself: bounded and uncapped by construction (§4), builds the reverse-edge
-  index directly as its own byproduct — the old raw-per-object-scan build of that index was
-  deleted (§7, §7.2a).
-- `DenseIdMap` → `Dictionary<ulong,int>` (§8.5) and the reverse-edge index's own
-  `MaxParentsPerChild` cap removal (§4.2/§7.4/§8.6).
-- The walk's successors source: `ForwardEdgeLooseFileReader` by default (§2/§8.8), after three
-  measured rounds — ~2x faster than a live ClrMD walk on a 25GB dump, roughly at parity on 3.3GB.
-  `DD_FORCE_LIVE_CLRMD_WALK=1` forces the live-ClrMD fallback.
+**Stage A (§3-§4): shipped, complete.**
+- The reachability walk builds the reverse-edge index directly as its own byproduct (§4, §7) — the
+  old raw-per-object-scan build of that index is gone.
+- `DenseIdMap` → `Dictionary<ulong,int>`/`HashSet<ulong>` (§4.1), and the reverse-edge index's
+  `MaxParentsPerChild` cap removed entirely (§4.2).
+- Walk successors default to `ForwardEdgeLooseFileReader` (§4.3); `DD_FORCE_LIVE_CLRMD_WALK=1`
+  forces the live-ClrMD fallback.
 - `DominatorReachableAddresses` persisted and queryable via
   `IHeapAnalysisCache.TryGetReachableAddressProvider()` (§5). `DominatorReachableInDegree` was
-  investigated and *deliberately not built* — it would duplicate fan-in data the reverse-edge
-  index's `EnumerateChildCounts` already exposes.
+  deliberately not built — redundant with the reverse-edge index's `EnumerateChildCounts`.
 
-**Stage A.5: not needed.** Determined unnecessary — see §7.1.
+**Stage A.5: not needed.** See §7.
 
-**Stage B (§3, §5, §9): not started.** `idom[]`/Lengauer-Tarjan computation still runs in Phase 2
-via `DominatorAnalyzer`'s own in-memory `ReachableGraphBuilder`, independent of everything above.
+**Stage B (§3, §5, §9): not started.** `idom[]`/Lengauer-Tarjan computation still runs in Phase 2 via
+`DominatorAnalyzer`'s own in-memory `ReachableGraphBuilder`, independent of everything above.
 
 ## Terminology, fixed for the rest of this doc
 
 - **Dominator child index** — parent → children in the *dominance* tree (`idom[]` inverted).
   Answers "what would freeing X free?" (`EnumerateRetainedSet`, `TryGetRetainedBytes`). Stage B,
   not built yet.
-- **Walk reverse index** — child → parents in the *raw object graph*, sourced from the
-  reachability walk (§4). Answers "who points at X?" for reachable objects. As of §7.2a, this is
-  **not** a separate structure from the one below — it *is* the reverse-edge index, now walk-fed
-  instead of scan-fed.
-- **Reverse-edge index** — the disk-backed structure `ReverseEdgeExtractor`/`ReverseEdgeSorter`/
-  `ReverseEdgeContainerWriter`/`ReverseEdgeIndexReader` build. Uncapped since §4.2/§7.4/§8.6, and,
-  since §7.2a, built by the walk above rather than a raw per-object heap scan.
+- **Reverse-edge index** — child → parents in the raw object graph, the disk-backed structure
+  `ReverseEdgeExtractor`/`ReverseEdgeSorter`/`ReverseEdgeContainerWriter`/`ReverseEdgeIndexReader`
+  build. Uncapped (§4.2) and, as of §7, fed by the reachability walk rather than a raw per-object
+  heap scan. There is no separate "walk reverse index" — it *is* this structure.
 
 ---
 
@@ -59,8 +50,7 @@ via `DominatorAnalyzer`'s own in-memory `ReachableGraphBuilder`, independent of 
 ## 2. Where it slots into the existing Phase 1 job
 
 [DiskBackedObjectIndexWriter.Build](../../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs)
-is the single orchestrator for the whole Phase 1 build. Relevant order today (shipped, not just
-planned — see below):
+is the single orchestrator for the whole Phase 1 build. Shipped order:
 
 1. Columnar object scan — `ObjectAddresses`/`ObjectMethodTables`/`ObjectSizes`/`ObjectGenerations`.
 2. `WriteSatelliteSections` — `Handles`, **`Roots`** (`RootIndexWriter.Write`), `Tasks`, `LargeObjects`,
@@ -70,29 +60,18 @@ planned — see below):
    loose `.dat`/`.idx` scratch files. Runs unconditionally, before the walk below, so the walk can
    read successors from these files.
 4. **The walk** (§4): BFS from the GC roots (step 2), feeding the reverse-edge index directly
-   (`IncrementalReachableWalker.Walk`). Successors default to `ForwardEdgeLooseFileReader` — a
-   point-lookup reader over step 3's loose files: `.dat` stays memory-mapped, but the small `.idx`
-   directory is decoded once into a plain managed struct array and binary-searched there instead
-   of via mmap pointer dereferences (§8.8's three measured rounds explain why). Falls back to a
-   live ClrMD walk (`obj.EnumerateReferences(carefully: true)`) when forced
+   (`IncrementalReachableWalker.Walk`). Successors default to `ForwardEdgeLooseFileReader`, falling
+   back to a live ClrMD walk (`obj.EnumerateReferences(carefully: true)`) when forced
    (`DD_FORCE_LIVE_CLRMD_WALK=1`) or when the forward index/loose files aren't available.
 5. Reverse-edge index Phase B+C: sort and merge the buckets the walk just populated
-   (`WriteReverseIndexSections`, unchanged from before this reordering).
+   (`WriteReverseIndexSections`).
 6. Forward-edge index Phase C: merge step 3's loose files into the container and delete them
    (`WriteForwardIndexSections`, now narrowed to just this).
 7. `TypeAggregates`.
 8. `containerWriter.Finish()`.
 
-This is exactly the insertion point this section originally proposed ("between Phase B and Phase
-C"), and the pipeline reordering shipped. The *reason* for doing it (successors from disk beating
-live ClrMD) took three rounds of measurement to actually hold up (§8.8), but it did: on a 25GB
-dump, `ForwardEdgeLooseFileReader` is now ~2x faster than live ClrMD, and it's the default. The
-live-ClrMD walk from earlier sessions never went away — it's the fallback now, not the primary
-path.
-
-**Not done:** persisting the dominator sections (§5's `DominatorReachableAddresses`/
-`DominatorReachableInDegree`) as part of this same Phase 1 pass. Only the reverse-edge-index side
-of Stage A's on-disk footprint has shipped so far — see the Status section at the top of this doc.
+**Not done:** persisting the Stage B dominator-tree sections as part of this same Phase 1 pass — only
+the reachable-graph/reverse-edge-index side of Stage A's on-disk footprint has shipped so far.
 
 ---
 
@@ -103,12 +82,11 @@ force every path-search-only consumer to pay for the full, expensive pipeline ju
 they don't need dominance for.
 
 - **Stage A — reachability walk, incremental and bounded by construction.** BFS from roots, builds the
-  walk reverse index. Bounded memory throughout (§4), and uncapped (§4 — no `MaxParentsPerChild`-
-  equivalent truncation). Persists on completion, independent of whether Stage B ever runs.
+  reverse-edge index. Bounded memory throughout, uncapped (no `MaxParentsPerChild`-equivalent
+  truncation). Persists on completion, independent of whether Stage B ever runs.
 - **Stage A.5 — close the reachable-only scope gap (optional, separately gated).** The walk never
-  visits garbage (unreachable) objects, so the walk reverse index has no entry for edges whose
-  *source* is garbage. One more sequential pass over the already-captured forward-edge data (no new
-  ClrMD reads) closes that gap. **Determined not required** — see §7.
+  visits garbage (unreachable) objects, so the reverse-edge index has no entry for edges whose
+  *source* is garbage. **Determined not required** — see §7.
 - **Stage B — fold + LT + rollup.** Only runs if an analyzer wants `idom[]`/retained bytes
   specifically. Gated on top of Stage A succeeding.
 
@@ -116,8 +94,7 @@ they don't need dominance for.
 
 Two marker interfaces (same shape as the existing `IParallelHeapIndexScanParticipant`), checked
 against the already-resolved `activeAnalyzers` list
-([DumpAnalysisService.cs:53-64](../../../src/DumpDetective.Cli/Execution/DumpAnalysisService.cs#L53-L64)
-confirms this list exists before the index build runs):
+([DumpAnalysisService.cs:53-64](../../../src/DumpDetective.Cli/Execution/DumpAnalysisService.cs#L53-L64)):
 
 ```csharp
 bool wantsReachableGraph =
@@ -141,73 +118,41 @@ If a stage is wanted but can't build (missing prerequisite), add to `satelliteWa
 as the existing `Handles`/`Roots`/`Tasks` try/catch blocks — rather than fail silently.
 
 **`IRequiresReachableGraphIndex`** — `DominatorAnalyzer`, `GCRootAnalyzer`, `StaticRootLeakAnalyzer`,
-`FinalizableObjectAnalyzer` (all also want Stage B, so implement both). If total replacement of the
-reverse-edge index (§7) is ever pursued, every current `IBackwardReferenceProvider` consumer
-(`EventLeakAnalyzer`, `ReferenceChainAnalyzer`, `TimerLeakAnalyzer`, `StaticRootLeakDetector`,
-`CollectionAnalyzer`) would implement this too, since Stage A would back
-`IBackwardReferenceProvider` for everyone.
+`FinalizableObjectAnalyzer` (all also want Stage B, so implement both). Every current
+`IBackwardReferenceProvider` consumer (`EventLeakAnalyzer`, `ReferenceChainAnalyzer`,
+`TimerLeakAnalyzer`, `StaticRootLeakDetector`, `CollectionAnalyzer`) implements this too, since
+Stage A now backs `IBackwardReferenceProvider` for everyone (§7).
 
-**`IRequiresDominatorTreeIndex`** — stays narrow regardless of §7's outcome: `DominatorAnalyzer`,
-`GCRootAnalyzer`, `StaticRootLeakAnalyzer`, `FinalizableObjectAnalyzer`.
+**`IRequiresDominatorTreeIndex`** — stays narrow: `DominatorAnalyzer`, `GCRootAnalyzer`,
+`StaticRootLeakAnalyzer`, `FinalizableObjectAnalyzer`.
 
 ---
 
-## 4. Stage A's construction: incremental and uncapped, by design
+## 4. Stage A's design — three decisions, each settled by measurement
 
-Two separate problems, both solved by changing *how* Stage A is built, not by tuning a budget number.
+Real dumps were measured before building anything speculative in each case; §8 has the numbers.
 
-### 4.1 Bounded memory during the walk
+1. **Visited tracking: `HashSet<ulong>`, not a bitset or `DenseIdMap`.** A bitset-over-`ObjectAddresses`
+   + ordinal-lookup design was built expecting a peak-memory win over `DenseIdMap` (~13 bytes/reachable
+   node). Measured peak working set was within noise (±17MB) of the baseline in every variant tried —
+   the memory win never materialized — so the design was picked on wall-clock alone instead, and plain
+   `HashSet<ulong>` beat every alternative (§8.1). Discovered edges are written straight to the
+   reverse-edge extractor's bucket files as found (the same hash-partition-by-child-address scheme
+   `ReverseEdgeExtractor` already used for its scan-fed version), so the BFS frontier only ever holds
+   the current wavefront, never the whole reachable graph.
+2. **Uncapped.** `MaxParentsPerChild` (previously 10,000) is deleted outright from
+   `ReverseEdgeExtractor`/`ReverseEdgeSorter` — real hub sizes measured on both dumps stay well under
+   the sort phase's 600MB-per-bucket ceiling even at the extreme end (§8.3), so hub-overflow routing
+   was never built. `ReverseIndexMetadata.MaxParentsPerChild` is kept for on-disk format stability,
+   always written as `int.MaxValue`.
+3. **Successors: `ForwardEdgeLooseFileReader` by default** — an mmap'd reader over the forward-edge
+   index's sorted-but-not-yet-merged loose files. ~2x faster than a live ClrMD walk at 25GB, roughly at
+   parity at 3.3GB, after three measured iterations (§8.4). `DD_FORCE_LIVE_CLRMD_WALK=1` forces the
+   live-ClrMD fallback (used when the forward index/loose files aren't available, or for future
+   re-measurement).
 
-The naive implementation (hold every discovered edge in one in-memory array, build the final CSR only
-once BFS completes) needs the whole reachable graph resident — forcing a hard memory budget and a
-mid-walk abort on the largest dumps. Two changes remove that:
-
-1. **"Have I visited this node" tracking is a bitset, not a hash map.** Instead of a `DenseIdMap`
-   (~13 bytes/reachable node), use a plain bitset over the already-sorted `ObjectAddresses` column — 1
-   bit per object, located via the same binary-search infrastructure `SegmentIndex`/
-   `ObjectAddressLookup` already use. A bitset over the *whole* heap's object count stays small
-   regardless of scale. Trade-off: binary search is slower per lookup than a hash probe, but still
-   fast in absolute terms.
-2. **Discovered edges are written to disk as found, not accumulated in memory** — same shape as
-   `ReverseEdgeExtractor` already uses (hash-partition by child address, stream to the bucket's
-   scratch file immediately). The BFS frontier only ever holds the current wavefront.
-
-Together, resident memory drops from "the whole reachable graph, edges included" to roughly "one bit
-per heap object." **§8 measured this line of attack in practice and found the wall-clock cost of the
-bitset approach outweighed the (unproven) memory benefit — the actual shipped fix ended up being
-simpler than this section originally proposed.** See §8 for what was actually built and measured.
-
-### 4.2 Uncapped — shipped, and simpler than originally planned
-
-The original plan here was hub-overflow routing: keep the cap's per-child counting but reroute any
-child whose count crosses a threshold into a dedicated overflow path, so a single hub object could
-never blow the sort phase's 600MB-per-bucket in-memory ceiling. **Before building that, real dumps
-were measured to check whether the risk it protects against actually occurs.** It doesn't, at least
-not on either dump available: on the 3.3GB dump, real hubs exist (worst case 346,470 true fan-in) but
-the whole bucket containing them stays under 77MB; on the 25.6GB dump, the worst real hub measured
-**10,757,536 true fan-in** — a genuinely extreme, pathological object — and its bucket still totals
-only ~233MB, comfortably under the 600MB ceiling. Working backward, a single object would need
-roughly 37.5 million fan-in, alone in its own bucket, to actually threaten the limit — about 3.5x
-larger than the most extreme real hub observed. The bucket-count formula
-(`ceil(dumpSizeMB / 500)`) scales bucket count with dump size specifically to keep average bucket
-size roughly constant, and empirically it absorbs severe real-world skew with real headroom to spare.
-
-**Shipped:** the cap (`MaxParentsPerChild = 10_000`) was deleted outright from
-`ReverseEdgeExtractor`/`ReverseEdgeSorter` — no hub-overflow routing, no new pipeline stage. The
-existing `MaxBucketSize` (600MB) check remains as the safety net it already was; if it's ever
-actually triggered on a real dump, that's the signal to build the overflow mechanism, not before.
-This applies to the *existing* reverse-edge index directly (§7.4), and `IncrementalReachableWalker`
-(§8.1's v3 prototype) inherited the same fix automatically, since it reuses the same extractor
-unmodified. Verified: all affected unit tests updated and passing, and a real 3.3GB-dump run produces
-identical dominator-tree results with the now-uncapped index. See §8.6 for the measurement and
-`ReverseIndexConstants.MaxParentsPerChild` (now deleted, along with the extractor's now-dead
-truncation-tracking fields) for what changed.
-
-### 4.3 This mechanism isn't specific to the walk reverse index
-
-Because it's a change to a generic pipeline shape, the reasoning above (measure real hub sizes before
-building routing complexity) would apply the same way to any other structure with the same shape —
-not something coupled to reachability walking specifically.
+This shape — measure real skew/scale before building routing complexity — isn't specific to the
+reachability walk; it applies to any structure with the same profile.
 
 ---
 
@@ -216,23 +161,18 @@ not something coupled to reachability walking specifically.
 Everything persisted, by stage. All additive `CacheSectionId` values (next available past
 `ForwardEdgeMetadata` = 20), no `FormatVersion` bump.
 
-**Stage A — reachable graph:**
+**Stage A — reachable graph (shipped):**
 
 | Section | Shape | Purpose |
 |---|---|---|
-| `DominatorReachableAddresses` | sorted `ulong[]` | **Shipped.** Written by `DominatorReachableAddressWriter`, read by `DominatorReachableAddressReader`/`IReachableAddressProvider` — "is this object reachable from a GC root?" from disk, no walk re-run needed. |
-| `DominatorReachableInDegree` | `int[]`, aligned to the above | **Determined redundant, not built.** The walk-fed reverse-edge index's `EnumerateChildCounts` already exposes exact, uncapped fan-in per reachable object; a second copy of the same data would cost real disk space for zero new capability. |
+| `DominatorReachableAddresses` | sorted `ulong[]` | Written by `DominatorReachableAddressWriter`, read by `DominatorReachableAddressReader`/`IReachableAddressProvider` — "is this object reachable from a GC root?" from disk, no walk re-run needed. |
+| `DominatorReachableInDegree` | — | **Not built.** The reverse-edge index's `EnumerateChildCounts` already exposes exact, uncapped fan-in per reachable object; a second copy would cost disk space for zero new capability. |
 
-There is no separate "walk reverse index" section — see the Terminology block at the top of this
-doc. The reverse-edge index (`ReverseEdgeBuckets`/`ReverseEdgeDirectories`/`ReverseEdgeMetadata`,
-already listed as part of the existing cache format) is walk-fed as of §7/§7.2a and *is* Stage A's
-"who points at this reachable object?" answer — nothing new to persist for that here.
+The reverse-edge index (`ReverseEdgeBuckets`/`ReverseEdgeDirectories`/`ReverseEdgeMetadata`) is Stage
+A's "who points at this reachable object?" answer — nothing new to persist for that beyond what
+already existed, since §7 made it walk-fed rather than scan-fed.
 
 **Stage A.5** — determined unnecessary (§7); no format entries needed.
-
-**Stage A is otherwise complete.** Every section this table originally sketched is now either
-shipped or deliberately not built, for a stated reason — see the Status section at the top of
-this doc and §10's checklist.
 
 **Stage B — dominance tree (not started):**
 
@@ -254,9 +194,6 @@ leaves appear as ordinary children, `FoldedBytesByNewId` becomes redundant — d
 
 **Open (Stage B only):** whether the dominator child index needs its own hub-overflow treatment (a
 single dominance-tree parent could, in principle, have an enormous number of direct children).
-(The other half of this question — whether the walk reverse index and dominator child index are
-genuinely separate structures — is resolved: the walk reverse index isn't a separate structure at
-all, per the Terminology block above.)
 
 ---
 
@@ -279,423 +216,173 @@ exited" or "how much is `Static` roots holding vs. `Handle` roots." Effectively 
 
 ---
 
-## 7. Total replacement of the reverse-edge index
+## 7. Total replacement of the reverse-edge index — shipped
 
-**Shipped** (see §7.2a). The goal explored here was not a targeted upgrade for one analyzer — it
-was replacing the raw-scan-built reverse-edge index with Stage A's walk-built one, so every
-current consumer reads from the walk reverse index instead. (Aside, uncontested: `idom[]`/
-dominance itself can never do this — `idom[v]` isn't required to be a real predecessor of `v`. The
-walk reverse index, a real-edges byproduct of building the tree, is a different thing and is what
-this section is about.)
+Every current `IBackwardReferenceProvider` consumer (`EventLeakAnalyzer`, `ReferenceChainAnalyzer`,
+`TimerLeakAnalyzer`, `StaticRootLeakDetector`, `CollectionAnalyzer`, `DominatorAnalyzer`) now reads
+from the walk-fed reverse-edge index instead of a raw per-object scan. The interface-facing classes
+(`ReverseEdgeExtractor`/`Sorter`/`ContainerWriter`/`IndexReader`, `IBackwardReferenceProvider`,
+`HeapAnalysisCache.TryGetReverseIndexProvider()`) needed **no changes** — only the *feed* changed:
+the raw per-object scan no longer populates `ReverseEdgeExtractor`; `IncrementalReachableWalker.Walk`'s
+BFS from GC roots does, in the same pipeline slot where the extractor's buckets were already being
+sorted and written (§2 step 4-5).
 
-**Correction to how this shipped, vs. how this section originally phrased it:** the plan below
-talks about "deleting `ReverseEdgeExtractor`/`ReverseEdgeSorter`/`ReverseEdgeContainerWriter`/
-`ReverseEdgeIndexReader` outright." That turned out to be the wrong framing once
-`IncrementalReachableWalker` was actually wired into production
-(`DiskBackedObjectIndexWriter.Build`): the walker already wrote into a `ReverseEdgeExtractor`
-directly, so those four classes, the on-disk section format, and every consumer-facing type
-(`IBackwardReferenceProvider`, `ReverseIndexBackwardReferenceProvider`,
-`HeapAnalysisCache.TryGetReverseIndexProvider()`) needed **no changes at all**. What actually
-shipped was smaller: the raw per-object scan stopped feeding the extractor, and a BFS walk from
-the GC roots (live ClrMD successors, same pattern as `ReachableGraphBuilder.LiveSuccessorsInto`)
-feeds it instead, in the same place in the build pipeline where the extractor was already being
-sorted and written to disk. The rest of this section is kept as the original decision record.
+**Why this is safe — parity confirmed, not assumed:**
+- `TryGetParents` has exactly one caller in the codebase
+  ([IndexBackedBidirectionalSearch.cs:114](../../../src/DumpDetective.Analysis/Traversal/IndexBackedBidirectionalSearch.cs#L114),
+  path-finding) and `EnumerateChildCounts` exactly one
+  (`DominatorAnalyzer.BuildLeakSignalsFromReverseIndex`, fan-in ranking) — no third usage shape to
+  account for.
+- Garbage objects reached mid-search are a dead end either way: if garbage object G had a real parent
+  P, G wouldn't be garbage — contradiction, so every one of G's real parents is also garbage,
+  transitively. A search can never reach a root past a garbage node under either index; the walk-fed
+  index just reports the dead end immediately (no entry) instead of burning a few more expansion
+  levels finding the same thing.
+- The walk sources roots via the same `RootSetCache` call path-finding's own consumers already use
+  ([ReachableGraphBuilder.cs:29](../../../src/DumpDetective.Analysis/Traversal/Dominator/ReachableGraphBuilder.cs#L29))
+  — no new root-enumeration dependency class introduced. The 256-frame stack cap
+  (`RootSetCache.MaxFramesPerThread`) only bounds cosmetic root labeling, not root discovery, and
+  `GCRootKind` coverage is complete.
+- **Stage A.5 is unnecessary as a result:** any reachable non-root object has at least one *reachable*
+  parent by construction (that's how BFS found it). A garbage-sourced parent can never itself continue
+  toward a root, so it's a dead end for path-finding regardless, and for fan-in ranking a
+  garbage-sourced reference would only inflate the signal with objects about to be collected.
 
-### 7.1 Why this looked promising
+**The one real trade-off:** the old scan-built index's correctness was independent of root
+enumeration; the walk-fed one's isn't — an object only gets a parent-list entry if BFS actually
+reaches it. Not new risk (the exact dominator tree already had this dependency), but a second consumer
+now shares it too.
 
-1. **Interface-level, this is a clean swap.** Every current consumer talks to
-   `IBackwardReferenceProvider` (`TryGetParents`, `EnumerateChildCounts`), never directly to
-   `ReverseEdgeIndexReader`. `HeapAnalysisCache.TryGetReverseIndexProvider()` is the only place that
-   decides which implementation backs that interface.
-2. **The scope gap (garbage objects as children) doesn't matter — proven, not assumed.**
-   `RootPathFinder`'s backward search does call `TryGetParents` on garbage nodes discovered mid-search
-   (`BidirectionalGraphSearch.ExpandLevel`, [:132-162](../../../src/DumpDetective.Analysis/Traversal/BidirectionalGraphSearch.cs#L132-L162)
-   expands multiple hops, not just the always-reachable target). This is harmless: if garbage object G
-   were reachable via any real parent P, G wouldn't be garbage — contradiction. So every one of G's
-   real parents is also garbage, transitively. Continuing the search past any garbage node can
-   therefore never reach a root, under either index — the reverse-edge index burns a few more
-   expansion levels discovering the same dead end the walk reverse index reports immediately (no entry
-   at all). Same final search outcome either way.
-3. **Stage A.5 turned out unnecessary.** Any reachable non-root object has at least one *reachable*
-   parent by construction (that's how BFS found it). A garbage-sourced parent can never itself
-   continue toward a root, so it's a dead end for path-finding regardless of whether Stage A.5
-   recovers it; for fan-in ranking, including garbage-sourced references would arguably *inflate* the
-   signal with objects about to be collected. Confirmed exhaustively, not just plausibly: `TryGetParents`
-   has exactly one caller in the whole codebase
-   ([IndexBackedBidirectionalSearch.cs:114](../../../src/DumpDetective.Analysis/Traversal/IndexBackedBidirectionalSearch.cs#L114),
-   path-finding), and `EnumerateChildCounts` has exactly one
-   (`DominatorAnalyzer.BuildLeakSignalsFromReverseIndex`, fan-in ranking) — no third usage shape to
-   account for. Stage A alone gives full behavioral parity with today's reverse-edge index.
-4. **No new root-enumeration dependency.** `ReachableGraphBuilder.Build` already sources roots via
-   `cache.GetOrBuildValidRoots(heap)`
-   ([ReachableGraphBuilder.cs:29](../../../src/DumpDetective.Analysis/Traversal/Dominator/ReachableGraphBuilder.cs#L29)) —
-   the same `RootSetCache` call the reverse-edge index's own path-finding consumers already use. Two
-   specific gaps were suspected and ruled out: the 256-frame stack cap
-   (`RootSetCache.MaxFramesPerThread`, [RootSetCache.cs:189](../../../src/DumpDetective.Analysis/Cache/RootSetCache.cs#L189))
-   only bounds a cosmetic root-labeling feature, not root discovery (`heap.EnumerateRoots()` never
-   touches it); and `GCRootKind` coverage is complete
-   ([RootIndexReader.cs:146-160](../../../src/DumpDetective.Analysis/Indexing/RootIndexReader.cs#L146-L160)
-   maps every value ClrMD 4 defines). Whatever incompleteness `heap.EnumerateRoots()` itself has is a
-   ClrMD-level property equally true for today's reverse-edge-index consumers — not new to replacement.
+**Cost:** see §8.2. In the common case — some standard, always-registered analyzer already wants the
+dominator tree — Stage A's cost is already sunk, so the reverse-edge index becomes a free byproduct.
+Only in the rare case where no dominator-tree consumer is active does replacement cost more than the
+old standalone scan-fed index would have.
 
-### 7.2 The cost case — depends on which analyzers are active, not a single ratio
-
-Every wall-clock figure measured in this doc (§8.1-8.4) compares Stage A's cost against the
-reverse-edge index's cost as if both are always built independently, on every run. **That framing is
-wrong given §3's gating design.** `RetentionOptions.EnableExactDominatorTree` defaults to `true`, and
-`DominatorAnalyzer` (along with `GCRootAnalyzer`, `StaticRootLeakAnalyzer`, `FinalizableObjectAnalyzer`)
-is a standard, always-registered analyzer, not behind an opt-in flag — so in a typical run, Stage A
-(and usually Stage B) already has to run *regardless of what this doc decides about the reverse-edge
-index*, because something else already wants the dominator tree. The cost question only has one real
-shape once that's accounted for:
-
-- **Dominator tree wanted (the default, common case): replacement is close to a pure win.** Stage A's
-  cost is already sunk — it's being paid for `idom[]`/retained bytes regardless. The walk reverse
-  index is then a free byproduct, and total replacement means `ReverseEdgeExtractor`/`Sorter`/
-  `ContainerWriter`/`IndexReader` can be deleted outright, saving their *entire* cost (5,570 ms at
-  3.3GB, 178,419 ms at 25.6GB, per §8.4) with nothing paid in exchange. This is not "Stage A costs
-  1.8x more" — in this case Stage A costs nothing extra at all, because it was never optional to begin
-  with.
-- **Dominator tree not wanted (a narrower, non-default case — e.g., analyzers filtered via CLI so only
-  path-finding/fan-in consumers like `EventLeakAnalyzer`/`ReferenceChainAnalyzer` run): replacement
-  genuinely costs more.** Here, and only here, do the §8.1-8.4 ratios actually apply — total
-  replacement would force Stage A's BFS to run *solely* to serve those consumers, instead of the
-  cheaper standalone reverse-edge index (~1.8x at 3.3GB, measured with comfortable memory margins; the
-  25.6GB figure favoring Stage A is present but confounded — see §8.4).
-
-**Verdict: replacement is close to a pure win in practice.** The narrower case (dominator-tree
-consumers excluded from a run) is extremely rare — confirmed, not just assumed — so the §8.1-8.4 cost
-ratios that motivated most of this investigation's caution turn out to apply to a corner case that
-essentially doesn't happen. In the overwhelming common case, Stage A's cost is already sunk, the walk
-reverse index is a free byproduct, and total replacement means deleting
-`ReverseEdgeExtractor`/`Sorter`/`ContainerWriter`/`IndexReader` outright with nothing paid in exchange.
-§7.4's in-place alternative is still worth having as a fallback (it's cheap and has no BFS/root-
-completeness dependency either way), but it's no longer carrying the weight of "the safe choice if
-replacement's cost doesn't pan out" — replacement's cost has, for practical purposes, panned out.
-
-### 7.2a Decision: replaced — shipped
-
-Given §7.1's parity findings and §7.2's verdict below, the decision was to proceed with total
-replacement, conditioned on §7.3's one flagged trade-off (walk reverse index correctness depends
-on root-enumeration/BFS completeness, unlike the direct-scan index) being an accepted, not a new,
-risk — §7.1 item 4 already shows the exact dominator tree carries this dependency today, so no
-consumer took on a risk that wasn't already live elsewhere in the system.
-
-**Shipped as:** the raw per-object scan in `DiskBackedObjectIndexWriter.Build` no longer feeds
-`ReverseEdgeExtractor`. Instead, right before the extractor's buckets are sorted and written
-(where `WriteReverseIndexSections` is called), a BFS walk from the GC roots
-(`IncrementalReachableWalker.Walk`, using live ClrMD successors) feeds it — see §7's correction
-note above for why `ReverseEdgeExtractor`/`Sorter`/`ContainerWriter`/`IndexReader` and every
-consumer-facing type were reused unchanged rather than deleted and rebuilt. Verified via
-`IncrementalReachableWalkerTests.Walk_UnreachableSubgraph_GetsNoReverseIndexEntries` (a garbage
-subgraph gets no reverse-index entry, a reachable object's parents are recorded exactly) plus the
-existing extractor/sorter/reader suites and the full unit test run, all green.
-
-### 7.3 The correctness question this framing raises
-
-The existing reverse-edge index is built by scanning every object's field directly — its correctness
-is independent of root enumeration. The walk reverse index's correctness is not: an object only gets a
-parent-list entry if BFS actually reaches it. §7.1 item 4 shows this isn't a *new* dependency (the
-exact tree already has it), but it does mean a second consumer would now share a dependency it
-previously didn't have. Not a blocker, given item 4's findings, but worth remembering as the one
-genuine trade-off total replacement introduces.
-
-### 7.4 The cheaper alternative — shipped
-
-§4.2's finding (real hub sizes don't threaten the sort-phase memory ceiling) applied directly to the
-*existing* reverse-edge index: **`MaxParentsPerChild` is deleted, no hub-overflow routing needed, no
-BFS or root-enumeration dependency introduced.** This was the fastest path to an uncapped structure
-regardless of how §7.2's total-replacement cost question ever resolves, so it shipped independent of
-that decision — see §4.2/§8.6 for what changed and how it was verified.
-
-**Non-negotiable constraint, now satisfied:** `MaxParentsPerChild = 10,000` was never acceptable as a
-permanent end state under any framing in this doc. It no longer exists — every consumer of the
-reverse-edge index (`EventLeakAnalyzer`, `ReferenceChainAnalyzer`, `TimerLeakAnalyzer`,
-`StaticRootLeakDetector`, `CollectionAnalyzer`, `DominatorAnalyzer`) now gets exact, uncapped parent
-lists today, regardless of whether §7's total replacement ever happens.
-
-### 7.5 A smaller, independent win either way
-
-Even without any of §7 shipping, the dominator tree can already independently confirm reachability and
-give an exact retained-bytes answer for an object whose reverse-edge-index entry is truncated. A
-`searchTruncated` confidence penalty (`Evidence.cs`, 0.8→0.6) shouldn't necessarily also suppress a
-retained-bytes figure that's exact for unrelated reasons.
+**Smaller, independent win regardless:** the dominator tree can already confirm reachability and give
+an exact retained-bytes answer for an object whose reverse-edge-index parent list would otherwise look
+truncated. A `searchTruncated` confidence penalty (`Evidence.cs`, 0.8→0.6) shouldn't necessarily also
+suppress a retained-bytes figure that's exact for unrelated reasons.
 
 ---
 
-## 8. Measurements and what shipped
+## 8. Measurements behind the shipped design
 
-All measurements below are from real dumps, foreground, single run at a time, per this project's
-real-dump-test rules — a 3.3GB dump (`Crash_IIS_BALTSTPRD`) and, for the scale-verification round, a
-25.6GB dump (`w3wp.exe_260421_175618.dmp`, 58.3M reachable nodes / 137M edges — ~8.7x/~7.9x the
-3.3GB dump's 6.69M nodes / 17.4M edges).
+All figures are from real dumps, foreground, single run at a time, per this project's real-dump-test
+rule: a 3.3GB dump (`Crash_IIS_BALTSTPRD`, 6.69M nodes / 17.4M edges reachable) and a 25.6GB dump
+(`w3wp.exe_260421_175618.dmp`, 58.3M nodes / 137M edges reachable — ~8.7x/~7.9x the 3.3GB dump).
 
-### 8.1 Stage A prototype: four implementation rounds
+### 8.1 Visited tracking: `HashSet<ulong>` won on wall-clock, not memory
 
-The question driving all four rounds: can a redesigned Stage A (§4.1's bitset idea, or anything else)
-match the existing reverse-edge index's build cost closely enough to justify §7's total replacement?
-
-| Round | Design | Walk-only | Full pipeline (walk+extract+sort+merge) | vs. reverse-edge index (3,503 ms) |
-|---|---|---|---|---|
-| Baseline | `DenseIdMap` (current production `ReachableGraphWalker`, also builds a CSR the others don't) | 11,511 ms | — | — |
-| v1 | Ordinal id via `ObjectAddressLookup.TryGetOrdinal` (binary search) + bitset | 14,994 ms | 16,601 ms | 4.74x |
-| v2 | v1 + a bounded direct-mapped ordinal cache (45.7% hit rate) | 11,397 ms | 12,887 ms | 3.68x |
-| v3 | Plain `HashSet<ulong>` — no ordinal, no bitset, no `ObjectAddressLookup` dependency | 8,156 ms | **10,045 ms** | **2.87x** |
-
-**v1 → v2:** the ordinal binary search cost more per call than `DenseIdMap`'s O(1) hash probe, at the
-same call frequency (both check "have I seen this" once per edge — "resolve once per node" was a
-mistaken premise, since neither walker can know a child is a duplicate without checking). A bounded
-cache absorbing repeat lookups (real heaps have a power-law in-degree distribution) closed the
-walk-only gap.
-
-**v2 → v3:** a same-shape ablation showed plain `HashSet<ulong>` beating the cached-ordinal approach
-by ~37% despite allocating more — `ObjectAddressLookup`'s `MemoryMappedViewAccessor` reads cost more
-per call than `HashSet`'s pure in-process hashing even on a cache hit path. v3 became the shipped
-prototype; the ordinal/bitset code and `ObjectAddressLookup.TryGetOrdinal`/`TotalObjectCount` (added
-for v1/v2) were deleted, not kept as a second path.
-
-**Peak memory, measured separately (isolated walk only, no metadata resolution/fold/LT/rollup):**
-peak working set was a wash across `DenseIdMap`, the ordinal+cache approach, and `HashSet` — within
-±17MB of each other on this dump, no meaningful difference. Allocated-bytes churn *did* differ (v3's
-`HashSet` allocated ~66% more than the ordinal+cache approach, which allocated ~34% less than
-`DenseIdMap`), but allocation churn isn't peak memory. **§4.1's original motivation — avoiding
-`DenseIdMap`'s peak-memory cost — was not demonstrated on this dump at any point in this
-investigation.** The eventual win was wall-clock, not memory.
-
-### 8.2 Why v3 didn't go faster: RecordEdge, not the walk
-
-A v4 attempt batched edges per bucket via `ReverseEdgeExtractor.RecordEdgesBatch` (its own doc comment
-recommends this to amortize lock overhead) — measured **slower** (11,033 ms total), not faster.
-`IncrementalReachableWalker` runs single-threaded, so there's no lock contention to amortize; batching
-only added `List<T>` bookkeeping on top of the same per-edge work. Reverted.
-
-A same-shape split of the walk isolated `RecordEdge`'s own cost: **~55% of the walk** (4,305 ms of
-7,759 ms), larger than successors()-lookup and visited-tracking combined. A further split, replaying
-the real captured edge stream through minimal variants, found the fanout-cap dictionary lookup
-(~1,401 ms) costs roughly 2x the raw `BinaryWriter` writes (~707 ms) — and, notably, doing both
-together cost *more* than their sum (3,252 ms vs. 2,108 ms), plausibly cache/pipeline interference
-between the dictionary's random access and the writer's sequential buffer.
-
-This closes the investigation: the fanout-count dictionary is required for correctness (knowing each
-child's live parent count for reporting/diagnostics) regardless of any cap-removal strategy —
-consistent with §4.2's eventual finding that hub-overflow routing wasn't needed at all; the dictionary
-was never the cap's mechanism, just its bookkeeping, and that bookkeeping stays either way.
-**Stage A's ~2.87x cost against the reverse-edge index is structural** — the BFS's own irreducible
-work — not a fixable inefficiency in how it's implemented. See §7.2's verdict.
-
-### 8.3 25GB verification
-
-The same v3 prototype and the same production baseline were re-measured on the 25.6GB dump (single
-foreground run, `DD_SCRATCH_DIR` on a drive with ample free space; ~18 minutes wall-clock total).
-
-| | 3.3GB dump | 25.6GB dump | Growth |
+| Design | 3.3GB walk-only | 3.3GB full pipeline | vs. reverse-edge index (5,570 ms fair cost, §8.2) |
 |---|---|---|---|
-| Nodes / edges | 6.69M / 17.4M | 58.3M / 137M | ~8.7x / ~7.9x |
-| `DenseIdMap` walk (production) | 11,511 ms | 240,985 ms | **20.9x** |
-| v3 (`HashSet`) walk | 8,156 ms | 91,528 ms | **11.2x** |
-| v3 full pipeline vs. reverse-edge index | 2.87x | 2.98x | — |
+| `DenseIdMap` (previous production) | 11,511 ms | — | — |
+| Ordinal binary search + bitset | 14,994 ms | 16,601 ms | 3.0x |
+| + bounded ordinal cache (45.7% hit rate) | 11,397 ms | 12,887 ms | 2.3x |
+| Plain `HashSet<ulong>` (shipped) | 8,156 ms | **10,045 ms** | **1.8x** |
 
-Two findings:
+Peak working set was within ±17MB across every variant — the memory win the bitset/ordinal design was
+built for never showed up on this dump, so the choice came down to wall-clock alone. A batched-edge
+variant (`RecordEdgesBatch`, meant to amortize lock overhead) measured *slower*, not faster —
+`IncrementalReachableWalker` is single-threaded, so there was no contention to amortize, only extra
+bookkeeping. A component split found `RecordEdge` itself is ~55% of the walk's cost (larger than
+successors-lookup + visited-tracking combined), and within that the fanout-count dictionary (required
+for correctness — reporting exact live parent counts) costs roughly 2x the raw `BinaryWriter` write.
 
-1. **§7.2's hard-wall ratio holds at scale** (2.87x → 2.98x) — not a 3.3GB artifact.
-2. **`DenseIdMap`'s wall-clock cost scales far worse than `HashSet<ulong>`'s** — 20.9x time growth
-   against ~8x data growth, vs. v3's 11.2x. At 3.3GB the two walks were roughly on par; at 25GB, v3 is
-   2.6x faster than the current production walk. This is a wall-clock scaling problem, not the
-   peak-memory one this design originally worried about (peak working set was still not dramatically
-   different between the two at 25GB either).
+At 25.6GB, the shipped `HashSet` design scaled 11.2x for ~8x data growth vs. `DenseIdMap`'s 20.9x —
+directionally consistent with the 3.3GB result, but confounded by the machine dropping to ~0.5GB free
+mid-run (plausible paging/compression effects on `DenseIdMap`'s larger backing arrays), so treat the
+exact ratio as unconfirmed rather than a proven algorithmic property.
 
-**A confound, stated plainly:** system memory dropped to 0.5GB free partway through the 25GB run
-(observed directly). Under that pressure, Windows can compress or page out portions of `DenseIdMap`'s
-larger backing arrays (~1.74GB at 25GB scale vs. ~218MB at 3.3GB), which would produce this exact
-result independent of any property of the algorithm itself. A code review of `DenseIdMap`'s resize
-path found nothing algorithmically wrong — standard amortized-doubling open addressing, same
-final-capacity-to-count ratio at either scale. Whether the 20.9x figure reflects genuine superlinear
-scaling or this run's memory pressure was not, and could not cheaply be, resolved — that would need a
-re-run with comfortable headroom throughout, a real cost/risk against a 25GB dump on this machine.
+**Shipped:** `ReachableGraphWalker`'s `DenseIdMap` replaced with `Dictionary<ulong,int>` (drop-in,
+since the APIs matched exactly and this walker still needs dense-id assignment for its own CSR build).
+`IncrementalReachableWalker` uses `HashSet<ulong>` directly — no dense-id assignment needed there.
+`DenseIdMap.cs` deleted (zero remaining callers). Verified: all 42 `Traversal.Dominator` tests pass
+unchanged, identical dominator-tree results on a fresh 3.3GB real-dump run.
 
-### 8.4 The reverse-edge index comparison was unfair — corrected
+### 8.2 The Stage A vs. reverse-edge-index comparison, made fair
 
-Every ratio in §7.2/§8.1-8.3 compared Stage A's *full* cost against only the reverse-edge index's
-sort+merge phase (`WriteReverseIndexSections`), omitting the `RecordEdge` cost it also pays inline
-during the shared per-object heap scan that Phase 1 runs regardless. The reverse-edge index has no
-separate "walk" the way Stage A does — it piggybacks entirely on that mandatory scan — but its
-`RecordEdge` calls during that scan are real, additional, marginal work, not free.
+Comparing Stage A's full cost against only the reverse-edge index's sort+merge phase understates the
+index's real cost — its `RecordEdge` calls during the mandatory per-object scan are real, marginal
+work too, not free. Measured via `DD_SKIP_REVERSE_INDEX_BUILD=1` (diffing total Phase 1 time with and
+without reverse-edge extraction):
 
-Measured via `DD_SKIP_REVERSE_INDEX_BUILD=1` (an existing escape hatch — no code changes needed),
-diffing total Phase 1 build time with and without reverse-edge extraction:
-
-| | Phase 1, with reverse index | Phase 1, without | Reverse-edge index total (fair) | vs. Stage A |
-|---|---|---|---|---|
-| 3.3GB | 26,192 ms | 20,622 ms | **5,570 ms** | Stage A (10,045 ms) is **~1.8x** |
-| 25.6GB | 631,431 ms | 453,012 ms | **178,419 ms** | Stage A (125,081 ms) is **~0.70x — cheaper** |
-
-At 3.3GB this alone nearly halves the previously-reported 2.87x. At 25.6GB it flips the comparison
-entirely: subtracting the already-known sort+merge cost (41,911 ms) leaves ~136,508 ms for extraction
-alone — a ~66x jump from the 3.3GB extraction cost (~2,067 ms) against only ~7-8x growth in edge
-count. That's the same shape of result as `DenseIdMap`'s scaling problem above (§8.3), and plausibly
-the same cause: the reverse-edge index's own per-bucket `Dictionary<ulong,int>` fanout counters are
-exposed to the same memory-pressure-under-scale effect. Both 25.6GB runs in this comparison were taken
-on a machine under real memory pressure (free memory fell to single-digit GB or below during each),
-so this specific number is the least trustworthy figure in this investigation — a genuine improvement
-in methodology over the number it replaces, but not confound-free. The 3.3GB figure (measured with
-comfortable memory margins throughout) is more trustworthy on its own, and it already reopens §7.2's
-verdict by roughly halving the gap.
-
-**Practical note on resolving this cleanly:** doing so would need a 25.6GB re-run pair under genuinely
-comfortable headroom throughout, not just above the immediate-crash line. On this machine (16GB total
-RAM), that may not be achievable at all for a dump this size — the dump itself needs multi-GB resident
-state regardless of which design wins, leaving little room to spare. If a cleaner run isn't possible
-here, this comparison may need a larger-memory machine to settle, or should be treated as
-directionally suggestive (favoring closing the gap, possibly reversing it) rather than conclusive.
-
-### 8.5 Decision: shipped (the `DenseIdMap` → `Dictionary` swap, independent of §8.4)
-
-The confound didn't block shipping, because the fix is safer independent of which explanation is
-true. `ReachableGraphWalker.cs`'s `DenseIdMap` was replaced with plain `Dictionary<ulong,int>` — a
-one-line constructor swap, since `DenseIdMap`'s `TryGetValue`/`Add` API already matched `Dictionary`'s
-exactly, and this walker (unlike `IncrementalReachableWalker`) still needs dense id assignment for its
-CSR build, so `HashSet<ulong>` alone wasn't a valid substitute here. `DenseIdMap.cs` was deleted (zero
-remaining callers).
-
-Verified: all 42 `Traversal.Dominator` unit tests pass unchanged, and a fresh 3.3GB real-dump run
-produced identical results (same node/edge counts, same exact retained-bytes per type) with wall-clock
-within the normal run-to-run variance already observed across many earlier runs — no regression at
-the scale this analyzer already runs at daily.
-
-This is a real, immediate win independent of §7's total-replacement question — it doesn't require any
-of the rest of this doc to ship.
-
-### 8.6 §4.2/§7.4 shipped: the cap is gone, no hub-overflow routing needed
-
-Before building hub-overflow routing (§4.2's original plan), real hub sizes were measured on both
-dumps to check whether the risk it protects against actually occurs:
-
-| Dump | Worst real hub (true fan-in) | Its bucket's total size | 600MB ceiling? |
+| | Stage A (full pipeline) | Reverse-edge index (fair: extraction+sort+merge) | Ratio |
 |---|---|---|---|
-| 3.3GB | 346,470 | ~77MB (bucket average; hub is a small fraction) | Not close |
-| 25.6GB | **10,757,536** | ~233MB | Not close |
+| 3.3GB | 10,045 ms | 5,570 ms | Stage A 1.8x |
+| 25.6GB | 125,081 ms | 178,419 ms | Stage A 0.70x (cheaper) |
 
-Even a genuinely extreme, 10.7-million-parent hub doesn't threaten the ceiling — a single object
-would need roughly 37.5 million fan-in, alone in its own bucket, to actually blow it. Measuring this
-required temporarily patching `ReverseEdgeExtractor` to keep counting past the cap without changing
-its on-disk output (safe, non-invasive), then reverting once the numbers were captured.
+The 25.6GB pair is the least trustworthy figure in this doc — both runs were taken under real memory
+pressure on this machine (free memory in the single-digit GB or below), and the reverse-edge index's
+own per-bucket fanout-counter dictionaries are plausibly exposed to the same effect suspected in §8.1.
+The gap is large enough it's unlikely to fully invert, but the precise ratio shouldn't be trusted.
 
-**Shipped as a result:** `MaxParentsPerChild` deleted from `ReverseEdgeExtractor.RecordEdge`/
-`RecordEdgesBatch` (every edge written, unconditionally) and from `ReverseEdgeSorter` (the `truncated`
-on-disk byte is now always `false` — kept for format/reader compatibility, not because anything is
-ever incomplete). `ReverseIndexConstants.MaxParentsPerChild` and the extractor's now-dead
-truncation-tracking (`_truncatedPerBucket`, `GetTruncatedChildren`) were deleted rather than left as
-unused plumbing. `ReverseIndexMetadata.MaxParentsPerChild` is kept for on-disk format stability but
-now always written as `int.MaxValue` (an explicit "uncapped" sentinel). No `IBackwardReferenceProvider`
-interface or consumer changes were needed — `truncated` flowing through as permanently `false` is
-already the correct behavior for every existing caller (confirmed via `ConfidenceScoring.Compute`,
-which simply skips an inactive flag with no code change required).
+**Why the ratio mostly doesn't matter:** `DominatorAnalyzer`, `GCRootAnalyzer`, `StaticRootLeakAnalyzer`,
+and `FinalizableObjectAnalyzer` are standard, always-registered analyzers (not opt-in), so in a typical
+run Stage A already has to build regardless of this comparison. The reverse-edge index then becomes a
+free byproduct, and the table above only applies to the rare case where a run has none of those
+analyzers active (e.g. a CLI filter down to only `EventLeakAnalyzer`/`ReferenceChainAnalyzer`).
+Confirmed rare, not just assumed to be — this narrow case essentially doesn't happen in practice.
 
-Existing tests asserting the old capped/truncated behavior were rewritten to assert the new uncapped
-behavior instead of deleted outright, so the "a hub child's full parent list survives" invariant stays
-covered. Verified via the standard 3.3GB real-dump test: identical dominator-tree results, and Phase 1
-index build legitimately does modestly more work now (real edge count rose from ~29M to ~33.76M once
-nothing is dropped), consistent with correctness rather than a regression.
+### 8.3 `MaxParentsPerChild`: measured unnecessary, deleted
 
-### 8.7 Other measured facts, not yet acted on
+Real worst-case hub fan-in, measured by temporarily patching the extractor to keep counting past the
+cap without changing its on-disk output:
 
-- **Garbage-sourced-edge ceiling:** whole-heap forward edges = 33,757,072; reachable-subgraph edges =
-  17,367,740 (3.3GB dump). The difference (48.6%) is a *ceiling* on Stage A.5's scope gap, not the gap
-  itself — splitting into garbage→garbage (noise) vs. garbage→reachable (the actual gap) was never
-  measured, and Stage A.5 was subsequently determined unnecessary (§7.1) regardless.
+| Dump | Worst real hub (true fan-in) | Its bucket's total size | 600MB ceiling |
+|---|---|---|---|
+| 3.3GB | 346,470 | ~77MB | not close |
+| 25.6GB | **10,757,536** | ~233MB | not close |
 
-### 8.8 The loose-file successors reader (§2) measured slower, not faster — reverted to opt-in
+A single object would need ~37.5M fan-in, alone in its own bucket, to actually threaten the ceiling —
+~3.5x the most extreme real hub observed. Bucket count already scales with dump size
+(`ceil(dumpSizeMB / 500)`) to keep average bucket size roughly constant, and it absorbed this much
+real-world skew with room to spare.
 
-§2's plan (a `ForwardEdgeLooseFileReader` reading the walk's successors from the forward-edge
-index's sorted-but-not-yet-merged loose files, instead of a live ClrMD field walk) shipped and was
-then measured, foreground, single run, on the standard 3.3GB dump (`Crash_IIS_BALTSTPRD`), via
-`DominatorAnalyzerExactTreeRealDumpTests` with a new `DD_FORCE_LIVE_CLRMD_WALK` escape hatch
-(since renamed — see below) to isolate the successors source:
+**Shipped:** `MaxParentsPerChild` deleted outright from `ReverseEdgeExtractor.RecordEdge`/
+`RecordEdgesBatch` and `ReverseEdgeSorter` — no hub-overflow routing built. The on-disk `truncated`
+byte is now always `false`; `ReverseIndexMetadata.MaxParentsPerChild` stays for format stability,
+always written as `int.MaxValue`. No `IBackwardReferenceProvider` consumer needed changes — a
+permanently-`false` `truncated` flag was already the correct behavior everywhere it's read. Verified
+via a 3.3GB real-dump run: identical dominator-tree results; real edge count rose from ~29M to ~33.76M
+once nothing is dropped, consistent with correctness rather than regression.
 
-| Successors source | Phase 1 index build |
-|---|---|
-| Live ClrMD walk | **29,589 ms** |
-| `ForwardEdgeLooseFileReader` | **221,106 ms** |
+### 8.4 Successors source for the walk: three rounds, conclusion reversed at scale
 
-Both runs produced the identical graph (6,686,490 reachable nodes, 17,367,740 edges), confirming
-this is a clean A/B on successors source only. **The loose-file reader is ~7.5x *slower*, not
-faster.** The plan's assumption — that reading pre-resolved edges off disk would beat re-resolving
-them via ClrMD — did not hold.
+| Successors source | 3.3GB Phase 1 build | 25.6GB Phase 1 build |
+|---|---|---|
+| Live ClrMD walk | 29,589 ms | 1,663,879 ms (~27m44s) |
+| `ForwardEdgeLooseFileReader` v1 (`FileStream` Seek+Read per probe) | 221,106 ms (7.5x slower) | not measured |
+| `ForwardEdgeLooseFileReader` v2 (mmap, raw pointer binary search) | 34,025 ms (~15% slower) | not measured |
+| `ForwardEdgeLooseFileReader` v3 (mmap `.dat` + decoded-array directory, **shipped**) | ~31-33 ms — within noise of live ClrMD | **833,702 ms (~13m54s) — ~2x faster** |
 
-**Root-cause hypothesis, not yet independently verified:** `ForwardEdgeLooseFileReader` was
-deliberately designed *not* to memory-map its loose files, reasoning that "the container isn't
-finalized yet, so there's nothing to map" (§2, as originally written). That reasoning conflates
-the *container* (genuinely not finalized) with the *loose per-bucket files themselves* (complete,
-standalone files at that point in the pipeline — mmap-able independently of the container, the
-same way `ObjectAddressLookup` and `ReverseEdgeIndexReader` mmap container *sections*). Instead,
-each `GetChildren` call does a `Seek`+`Read` per binary-search probe against a plain `FileStream`
-(~20-25 syscalls for a multi-million-entry bucket's directory, plus more for the data read),
-multiplied across every reachable node. That's a plausible, but unconfirmed, explanation for the
-7.5x gap — memory-mapping the loose files directly (mirroring `ForwardEdgeIndexReader`'s existing
-pointer-based binary search, just against per-file mmaps instead of container-section mmaps)
-would keep the same bounded-memory property this design wanted while avoiding the raw syscall
-cost, and is the natural next experiment if this path is revisited.
+Every variant produced the identical graph (6,686,490 nodes / 17,367,740 edges at 3.3GB) — differences
+are pure perf, not correctness. v1's per-probe `Seek`+`Read` cost ~20-25 syscalls per binary-search
+step against a multi-million-entry directory; mmap'ing the loose files directly (the same technique
+`ForwardEdgeIndexReader` already uses for finalized container sections) fixed most of that (v2).
+Decoding the directory into a plain managed array once, instead of binary-searching through raw mmap
+pointer dereferences, closed the rest of the 3.3GB gap (v3). At 25GB, live ClrMD's per-object
+DAC/type-resolution cost scales worse than v3's one-time directory decode + in-memory binary search,
+reversing the 3.3GB result decisively.
 
-**Shipped as a result:** the walk defaults back to the live ClrMD successors function.
-`ForwardEdgeLooseFileReader` and its tests are kept (not deleted) but are now opt-in via
-`DD_USE_LOOSE_FILE_WALK_SUCCESSORS=1`, for exactly this kind of future re-measurement rather than
-as a live default. §10's checklist item for this is reopened, not closed.
+**Shipped:** `ForwardEdgeLooseFileReader` (v3) is the default successors source — no meaningful
+regression at 3.3GB, a clean ~2x win at the 10GB-25GB+ scale this project targets.
+`DD_FORCE_LIVE_CLRMD_WALK=1` forces the live-ClrMD fallback. The 25GB pair was measured under real
+memory pressure (as low as ~1.4GB free) and the two runs weren't pressure-matched, so treat "~2x" as
+directional rather than a precise ratio.
 
-**Follow-up: mmap redesign, measured — fixes the disaster, doesn't beat live ClrMD.**
-The root-cause hypothesis above was acted on: `ForwardEdgeLooseFileReader` was rewritten to
-memory-map each bucket's loose `.dat`/`.idx` file directly (mirroring `ForwardEdgeIndexReader`'s
-unsafe pointer-based binary search exactly, just against per-file mmaps instead of
-container-section mmaps), replacing the `FileStream.Seek`+`Read`-per-probe version. Re-measured
-the same way, same dump:
+### 8.5 Known measurement caveats
 
-| Successors source | Phase 1 index build |
-|---|---|
-| Live ClrMD walk | 29,589 ms |
-| `ForwardEdgeLooseFileReader` (v1, Seek+Read) | 221,106 ms (7.5x slower) |
-| `ForwardEdgeLooseFileReader` (v2, mmap) | **34,025 ms** (~15% slower) |
+- Every 25.6GB figure in this doc was taken on a machine that dropped to single-digit-GB (sometimes
+  under ~1.5GB) free RAM mid-run. The most extreme scaling numbers (`DenseIdMap`'s 20.9x, the
+  reverse-edge index's ~66x extraction-cost jump) are plausibly page/compression artifacts rather than
+  pure algorithmic scaling, and weren't independently re-verified with comfortable headroom. Settling
+  this would need a 25GB re-run pair on a machine with real headroom throughout — not achievable on
+  this 16GB-RAM machine for a dump this size.
+- The garbage→reachable edge count specifically (as opposed to garbage→garbage noise) was never
+  isolated — moot since Stage A.5 was determined unnecessary regardless (§7). Whole-heap forward edges
+  were 33,757,072 vs. 17,367,740 reachable-subgraph edges on the 3.3GB dump, a ceiling on Stage A.5's
+  scope gap, not the gap itself.
 
-Same graph again (6,686,490 reachable nodes, 17,367,740 edges) — correctness holds across all
-three. The hypothesis was right directionally: mmap eliminated the syscall-storm regression
-entirely. But on this single run it's still slightly slower than live ClrMD, not faster — close
-enough to be within run-to-run noise, but not a demonstrated win. **Still shipped as opt-in, not
-flipped to default** — `DD_USE_LOOSE_FILE_WALK_SUCCESSORS=1` remains the only way to use it.
-Settling whether v2 is a genuine (if small) loss, a wash, or actually a win under less noisy
-conditions would need multiple runs, not the single foreground run this project's real-dump-test
-rule keeps each measurement to — left as a future exercise, not resolved here.
-
-**v3 refinement and 25GB re-measurement — the decisive result.** Two more changes were made to
-the mmap version before the 25GB re-measurement: (a) the directory is now decoded once into a
-plain managed array (`ulong[]`/`long[]`, later a single `DirectoryEntry[]` struct array read
-straight from disk with no per-entry parsing loop) instead of being binary-searched via pointer
-dereferences into the mmap'd view — on the 3.3GB dump this closed most of v2's gap (34.0s → ~31-33s,
-within noise of live ClrMD's 29.6s, no longer a clear loss). Then the same comparison was run on
-the 25GB dump this project's whole purpose targets (`w3wp.exe_260421_175618.dmp`, 87,104,236
-objects):
-
-| Successors source | 25GB dump Phase 1 build |
-|---|---|
-| Live ClrMD walk | 1,663,879 ms (~27m44s) |
-| `ForwardEdgeLooseFileReader` (mmap `.dat` + decoded-array directory) | **833,702 ms (~13m54s)** |
-
-Both runs produced the identical object count, confirming correctness. **The loose-file reader is
-~2x *faster*** at this scale — a clean reversal of the 3.3GB result. This tracks: live ClrMD's
-per-object DAC/type-resolution cost during the walk scales worse at 87M objects than a one-time
-directory decode followed by fast in-memory binary searches. (Caveat: the two 25GB runs weren't
-under identical memory-pressure conditions — see the note below — but a ~2x gap is large enough
-that this isn't attributable to that alone.)
-
-**Decision: shipped as the default.** Given no meaningful regression on the 3.3GB dump and a ~2x
-win on the 25GB dump — and this project's stated purpose is 10GB-25GB+ dumps — `ForwardEdgeLooseFileReader`
-is now the default successors source. `DD_FORCE_LIVE_CLRMD_WALK=1` forces the live-ClrMD walk
-instead, for cases where the forward index is unavailable for some other reason or for future
-re-measurement.
-
-**Open caveat on measurement conditions:** the 25GB dump measurements were taken on a machine
-under significant memory pressure (as low as ~1.4GB free RAM mid-run, page file nearly exhausted)
-— the same confound §8.4 already flagged for this machine's 25GB-scale runs. The two runs in this
-round weren't measured under identical pressure (free memory differed between them), so the exact
-"~2x" figure should be treated as directionally reliable, not a precise ratio. Re-measuring on a
-machine with real headroom would be the way to tighten this if it matters later.
 ---
 
 ## 9. New use cases beyond the four known consumers
@@ -723,46 +410,19 @@ Every current consumer of retained-size-shaped data, audited against what it doe
 
 ## 10. Open questions
 
-- [x] Successors source for the walk (§2) — done, three rounds measured (§8.8).
-      `ForwardEdgeLooseFileReader` (mmap'd `.dat` + a decoded-array directory) is the default,
-      after landing at roughly parity on the 3.3GB dump and ~2x faster on a 25GB dump than the
-      live-ClrMD walk it replaces. `DD_FORCE_LIVE_CLRMD_WALK=1` forces the fallback.
-- [x] `DominatorReachableAddresses` (§5, reserved section 21) — shipped.
-      `DominatorReachableAddressWriter`/`Reader` persist and query it, exposed via
-      `IHeapAnalysisCache.TryGetReachableAddressProvider()`. `DominatorReachableInDegree` (also
-      reserved in §5) was investigated and dropped — redundant with the reverse-edge index's
-      existing `EnumerateChildCounts`, so building it would only duplicate data at real disk cost.
-- [x] §4.2/§7.4 — done. Real hub sizes measured on both dumps (worst case: 10.7M true fan-in, still
-      well under the sort-phase memory ceiling), hub-overflow routing determined unnecessary, and the
-      cap deleted outright from the existing reverse-edge index. See §8.6.
-- [x] **How often does this tool actually run without any dominator-tree consumer active** (§7.2)?
-      Confirmed extremely rare. Total replacement's cost case is close to moot in practice — most runs
-      land in the near-free-win case, not the narrower one the §8.1-8.4 ratios apply to.
-- [ ] For the rare narrower case where it does still matter: the fair 3.3GB comparison (~1.8x) is reasonably
-      trustworthy; the 25.6GB comparison (~0.70x, favoring Stage A) is not, given the memory-pressure
-      confound in §8.3/§8.4. Resolving this cleanly may require a machine with more memory than this
-      one has, or accepting the 3.3GB figure as the more reliable data point available.
-- [ ] Whether the `DenseIdMap`-vs-`Dictionary` wall-clock gap at 25GB (§8.3) and the reverse-edge
-      index's extraction-cost jump (§8.4) are the same underlying memory-pressure effect — both show
-      the same "far worse than data-growth would predict" shape on this machine.
-- [ ] Walk reverse index vs. dominator child index — confirm these are genuinely two separate
-      bucket/directory structures (§5), and whether the dominator child index needs its own
-      hub-overflow handling.
+Everything from earlier drafts of this doc that's since been resolved has been folded into §4/§7/§8
+above as shipped state. What's actually still open:
+
+- [ ] **The rare narrower cost case (§8.2):** for a run with no dominator-tree consumer active, the
+      fair 3.3GB comparison (~1.8x) is trustworthy; the 25.6GB comparison (~0.70x, favoring Stage A) is
+      not, given the memory-pressure confound (§8.5). Resolving cleanly may need a machine with more
+      headroom than this one has, or accepting the 3.3GB figure as the more reliable data point.
+- [ ] Whether the `DenseIdMap`-vs-`Dictionary` wall-clock gap at 25GB and the reverse-edge index's
+      extraction-cost jump are the same underlying memory-pressure effect — both show the same
+      "far worse than data growth would predict" shape on this machine (§8.5).
+- [ ] Whether the dominator child index (Stage B) needs its own hub-overflow handling — a single
+      dominance-tree parent could, in principle, have an enormous number of direct children (§5).
 - [ ] `DominatorAnalyzer` should stop owning its own `TryComputeExactDominatorTree` build path and
-      become a normal reader-consumer like everyone else.
-- [x] Progress/UX sub-phase label — already resolved, not a gap. `IncrementalReachableWalker.Walk`
-      constructs its own `ObjectScanCounter("building reverse-edge index (reachability walk)",
-      progress)`, distinct from the main scan's "indexing heap" label — `PhaseTimeline.Record`
-      (`src/DumpDetective.Cli/Pipeline/PhaseTimeline.cs`) keys purely off whatever `Phase` string a
-      report carries, so the walk already gets its own segment in "Scan + Index heap"'s phase
-      breakdown, the same way "sorting forward-index buckets" or "merging reverse-index into
-      cache.bin" do. Confirmed directly in this session's 25GB real-dump progress logs (§8.8).
-- [x] Whether to totally replace the reverse-edge index (§7) — decided and shipped, see §7.2a.
-      `HeapAnalysisCache.TryGetReverseIndexProvider()` needed no change — it already reads from
-      the (now walk-fed) `ReverseEdgeExtractor`/`Sorter`/`ContainerWriter`/`IndexReader` pipeline.
-- [x] Whether Stage A ships as its own workstream ahead of Stage B — resolved by events: it did.
-      Everything in §4/§7/§8.8/§5 (this session's persisted `DominatorReachableAddresses`, the
-      walk-fed reverse-edge index, the loose-file successors source) shipped independently, with
-      Stage B (`idom[]`/LT, still Phase 2) untouched and not a dependency of any of it.
-- [ ] The garbage→reachable split specifically (§8.7) — separate from garbage→garbage noise — would
-      tell us Stage A.5's useful-output size, though Stage A.5 itself is no longer believed necessary.
+      become a normal reader-consumer like everyone else, once Stage B ships.
+- [ ] The garbage→reachable edge split specifically (§8.5) — separate from garbage→garbage noise —
+      would size Stage A.5's useful output, though Stage A.5 itself is no longer believed necessary.

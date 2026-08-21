@@ -6,8 +6,8 @@
     "Audience": "All"
   },
   "Diagnostics": {
-    "EnableMemoryDiagnostics": true,
-    "EnablePerformanceDiagnostics": true,
+    "EnableMemoryDiagnostics": false,
+    "EnablePerformanceDiagnostics": false,
     "ContinueOnAnalyzerFailure": true
   },
   "Indexing": {

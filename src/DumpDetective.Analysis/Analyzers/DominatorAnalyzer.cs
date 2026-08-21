@@ -137,7 +137,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
             IDominatorTreeProvider? provider = cache.TryGetDominatorTreeProvider();
             if (provider is null)
             {
-                _logger?.LogInformation("Exact dominator tree unavailable for this run; heuristic result is unaffected.");
+                if (diag) _logger?.LogInformation("Exact dominator tree unavailable for this run; heuristic result is unaffected.");
                 return null;
             }
 
@@ -162,10 +162,13 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
 
             if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: exact rollup read from disk", Console.Out);
 
-            _logger?.LogInformation(
-                "Exact dominator tree read from disk in {ElapsedMs:N0} ms: total retained bytes at GC roots " +
-                "{ExactTotalRetainedBytes:N0} vs. heuristic top-K estimate {HeuristicTotalRetainedBytes:N0}.",
-                stopwatch.ElapsedMilliseconds, provider.TotalRetainedBytes, heuristicResult.TotalEstimatedRetainedBytes);
+            if (diag)
+            {
+                _logger?.LogInformation(
+                    "Exact dominator tree read from disk in {ElapsedMs:N0} ms: total retained bytes at GC roots " +
+                    "{ExactTotalRetainedBytes:N0} vs. heuristic top-K estimate {HeuristicTotalRetainedBytes:N0}.",
+                    stopwatch.ElapsedMilliseconds, provider.TotalRetainedBytes, heuristicResult.TotalEstimatedRetainedBytes);
+            }
 
             return exactByTypeName;
         }

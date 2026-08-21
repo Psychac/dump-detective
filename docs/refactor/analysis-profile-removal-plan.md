@@ -195,22 +195,30 @@ options file. Assume nothing is live until grep says so.
 
 ## 6. Global blockers
 
-### 6.1 The performance checklist mandates the caps
+### 6.1 The performance checklist mandates the caps — resolved, rewritten
 
-[performance-checklist.md](../performance-checklist.md) currently states as hard rules:
+**Done.** [performance-checklist.md](../performance-checklist.md) now leads with an explicit
+bounded-memory (non-negotiable, unconditional) vs. bounded-work (case-by-case; illegitimate only when
+it silently caps a reported total/count/exactness flag) split, replacing the old blanket rules:
 
 > - Do NOT recursively traverse without depth limits
 > - Always use bounded traversal (BFS with limits)
 > - Analyze only top N types (default: 20-50)
 > - Avoid full reverse index
 
-The last is already false — the full reverse index exists and shipped. The others directly forbid
-this work. The checklist must be rewritten to separate **bounded memory** (keep, non-negotiable)
-from **bounded work** (drop), or every change here violates the project's own stated standard.
+Each is now reframed: the root-path BFS depth limit is scoped to display-path *selection*, not
+reachability; top-N candidate selection for leak detection is scoped to *which* items get expensive
+follow-up, not to capping reported totals; "avoid full reverse index" is retired outright — the
+reverse-edge index is now a full, disk-backed, uncapped index (per §6.2 /
+[phase1-integration.md §3](../analysis/phase1-redesigns/dominator-tree-phase1-integration.md#3-stage-a--reachability-walk-shipped)),
+with the old working-set concern resolved by disk-backed storage rather than by refusing to build it.
 
-Do this **before** the first exactness commit, so reviewers have a coherent rule to review against.
+### 6.2 `MaxParentsPerChild = 10_000` caps the graph itself — resolved, deleted
 
-### 6.2 `MaxParentsPerChild = 10_000` caps the graph itself
+**Resolved by [phase1-integration.md §3](../analysis/phase1-redesigns/dominator-tree-phase1-integration.md#3-stage-a--reachability-walk-shipped):**
+the cap was deleted outright, not raised. `ReverseIndexMetadata.MaxParentsPerChild` is kept only for
+on-disk format stability and is always written as `int.MaxValue`. Rest of this subsection kept for
+the original problem framing.
 
 [ReverseEdgeExtractor.cs:83-87](../../src/DumpDetective.Analysis/Indexing/ReverseIndex/ReverseEdgeExtractor.cs#L83-L87)
 **drops edges** past 10,000 parents per child during index extraction and records the child as
@@ -229,24 +237,31 @@ a silently incomplete graph*, which is worse than the status quo.
 real-dump run answers whether this is a footnote or a blocker, and determines whether every Q6-yes
 analyzer is GREEN or RED. Do this before auditing group 4.
 
-### 6.3 A second frame cap sits below the analyzer layer
+### 6.3 A second frame cap sits below the analyzer layer — resolved, scope was narrower than described
 
 [RootSetCache.cs:189](../../src/DumpDetective.Analysis/Cache/RootSetCache.cs#L189) declares
 `private const int MaxFramesPerThread = 256` and passes it to
-`thread.EnumerateStackTrace(includeContext: false, maxFrames: 256)`
-([:201](../../src/DumpDetective.Analysis/Cache/RootSetCache.cs#L201)).
+`thread.EnumerateStackTrace(includeContext: false, maxFrames: 256)` inside
+`BuildStackFrameOwnerMap` ([:191-201](../../src/DumpDetective.Analysis/Cache/RootSetCache.cs#L191-L201)).
 
-This is independent of `JitAnalysisOptions.MaxFramesPerThread` (§9.10) and is not configurable.
-Stack roots discovered beyond frame 256 are absent from the root set, which affects every consumer
-of `RootSetCache` — i.e. every root-path search and the dominator tree's GC-root seeding.
+**This subsection's original premise was wrong: the cap does not affect the root set.** The two
+canonical root-discovery paths — `RootIndexWriter.Write`
+([:56](../../src/DumpDetective.Analysis/Indexing/Satellite/RootIndexWriter.cs#L56), the Phase 1 disk
+index) and `RootSetCache.BuildFromLiveHeap`
+([:275](../../src/DumpDetective.Analysis/Cache/RootSetCache.cs#L275)) — both call
+`heap.EnumerateRoots()` with no frame cap at all, and that is what feeds every root-path search and
+the dominator tree's GC-root seeding. `MaxFramesPerThread` only bounds `BuildStackFrameOwnerMap`,
+which backs `TryResolveStackFrameOwner` alone — a narrow, on-demand feature that labels a stack
+root's owner type/method name for the small set of top-severity Stack-kind findings shown in a
+report. A root whose slot lies past frame 256 is still discovered, still contributes to retained
+bytes and path-finding exactness; it just renders without an owner-attribution label in that one
+report field.
 
-Same shape as §6.2: a bound below the options layer that no amount of analyzer unbounding reaches.
-Lower impact — 256 frames covers the overwhelming majority of threads — but it must be measured and
-either raised, removed, or documented as an accepted limit before any downstream analyzer is
-described as exact.
+This is independent of `JitAnalysisOptions.MaxFramesPerThread` (§9.10), which is a genuine
+work-bounding cap in `ThreadStackScanDispatcher`/JIT frame analysis and out of scope here.
 
-**Action:** count threads exceeding 256 frames on a real dump, in the same run that measures
-`TotalTruncatedChildren` (§6.2).
+**No real-dump measurement needed** — resolved by code inspection, not empirically: the cap's blast
+radius is a single cosmetic report field, not root exactness.
 
 ---
 
@@ -1261,13 +1276,14 @@ Has **no options class at all** and does not appear in `AnalysisOptions`. It cal
 ([:158](../../src/DumpDetective.Analysis/Analyzers/TimerLeakAnalyzer.cs#L158)) and consumes
 `searchTruncated`.
 
-Zero knobs to delete — but it inherits **every** shared traversal bound: `RootPathFinder` defaults,
-`RootSetCache`'s 256-frame cap (§6.3), and `MaxParentsPerChild` (§6.2). It is the cleanest
-demonstration that this refactor is not only about the options surface: an analyzer with no
-configuration at all is still not exact.
+Zero knobs to delete — it inherits only `RootPathFinder` defaults now that §6.2 (`MaxParentsPerChild`,
+deleted) and §6.3 (`RootSetCache`'s 256-frame cap, scoped to a cosmetic report label, not root
+discovery) are both resolved. It is the cleanest demonstration that this refactor is not only about
+the options surface: an analyzer with no configuration at all was still not exact, purely from
+shared-traversal bounds below the options layer.
 
-**Use it as the canary.** Because it has no knobs, any change in its output after the §10 workstream
-lands is attributable purely to the shared traversal becoming exact.
+**Was used as the canary.** Because it has no knobs, its output changing after the shared traversal
+became exact was attributable purely to that, not to any per-analyzer option change.
 
 ---
 
@@ -1630,9 +1646,10 @@ depend on them.
 
 ---
 
-## 10a. B2 design: the dominator-tree retention provider
+## 10a. B2 design: the dominator-tree retention provider — done
 
-**Superseded by [dominator-tree-phase1-integration.md](../analysis/phase1-redesigns/dominator-tree-phase1-integration.md).**
+**Superseded and shipped by [dominator-tree-phase1-integration.md](../analysis/phase1-redesigns/dominator-tree-phase1-integration.md)**
+(§6 "retained-bytes consumers", §7 "root-attribution").
 The in-memory cache-provider shape below has two real problems (implicit analyzer-ordering coupling,
 and ~1.5-3 GB held resident for the rest of the run) — the actual design is a disk-backed index built
 during Phase 1's index-build job, extending D7 rather than inventing a new in-memory structure. The
@@ -1758,10 +1775,10 @@ first exactness commit. Nothing here is optional; items marked **BLOCKER** stop 
 
 | # | Item | Source |
 |---|---|---|
-| B1 | **Rewrite `performance-checklist.md`** to separate bounded-memory (keep) from bounded-work (drop). It currently mandates the caps as hard rules, so every commit here violates the project standard until it changes. | §6.1 |
-| B2 | **Build the dominator-tree retained-size accessor** (`address → exact retained bytes / retained set`). Critical path: groups 3 and 4 are AMBER *only* because it doesn't exist. Design in §10a — cache-provider pattern (not analyzer reordering), plus an address→id map that doesn't exist today. | §10a, §9.14-9.16 |
-| B3 | **Measure `ReverseIndexMetadata.TotalTruncatedChildren`** on a real dump. Decides whether every Q6-gated analyzer is AMBER or RED. ReferenceChain stays RED until resolved. | §6.2 |
-| B4 | **Measure threads exceeding 256 frames** (`RootSetCache.MaxFramesPerThread`). Affects every root-path consumer and dominator root seeding. | §6.3 |
+| B1 | **DONE.** `performance-checklist.md` rewritten to separate bounded-memory (non-negotiable) from bounded-work (case-by-case; illegitimate only when it caps a reported total). | §6.1 |
+| B2 | **DONE.** Dominator-tree retained-size accessor built — shipped as a disk-backed Phase 1 index (`IDominatorTreeProvider.TryGetRetainedBytes`), not the in-memory cache-provider originally designed in §10a. | §10a, [phase1-integration.md](../analysis/phase1-redesigns/dominator-tree-phase1-integration.md) |
+| B3 | **DONE.** `MaxParentsPerChild` deleted outright (not just raised) — reverse index is uncapped. Real worst-case fan-in measured (346K at 3.3GB, 10.76M at 25.6GB) is far under the sort phase's ceiling. `TotalTruncatedChildren` is moot; every Q6-gated analyzer, including ReferenceChain, is no longer capped at the graph layer. | §6.2, [phase1-integration.md §3](../analysis/phase1-redesigns/dominator-tree-phase1-integration.md#3-stage-a--reachability-walk-shipped) |
+| B4 | **DONE.** `RootSetCache.MaxFramesPerThread = 256` only bounds `BuildStackFrameOwnerMap`/`TryResolveStackFrameOwner`'s owner-attribution label, not root discovery — `RootIndexWriter.Write` and `RootSetCache.BuildFromLiveHeap` both use uncapped `heap.EnumerateRoots()`. Root-path consumers and dominator root seeding were never affected; no real-dump measurement needed. | §6.3 |
 
 ### 11.2 Decisions required (no correct default)
 

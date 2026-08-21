@@ -18,7 +18,7 @@ namespace DumpDetective.Analysis.Analyzers
     /// Queue analysis (§21.2) calls <c>heap.EnumerateFinalizableObjects()</c>, bounded by
     /// configured options, with bounded BFS for the top entries only.
     /// </summary>
-    public sealed class FinalizableObjectAnalyzer : IAnalyzer
+    public sealed class FinalizableObjectAnalyzer : IAnalyzer, IRequiresReachableGraphIndex, IRequiresDominatorTreeIndex
     {
         public string Name => "Finalizable Object Analysis";
         public string Category => "Memory";

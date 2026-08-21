@@ -3,9 +3,11 @@ using DumpDetective.Core.Enums;
 namespace DumpDetective.Analysis.Traversal.Dominator;
 
 /// <summary>
-/// The reachable graph plus per-node metadata needed downstream (§Architecture step 2-3) — output
-/// of <see cref="ReachableGraphBuilder.Build"/>, input to <see cref="LeafFolder"/> and eventually
-/// Lengauer-Tarjan.
+/// The reachable graph plus per-node metadata needed downstream (§Architecture step 2-3) — built
+/// from <see cref="ReachableGraphWalkResult"/> plus per-node <c>MethodTable</c>/<c>ShallowSize</c>/
+/// <see cref="GenerationTag"/> resolution (<c>DiskBackedObjectIndexWriter.BuildAndPersistDominatorTree</c>,
+/// its only builder since §10.7's Batch 3 migration), input to <see cref="LeafFolder"/> and
+/// eventually Lengauer-Tarjan.
 /// </summary>
 internal sealed class ReachableGraph : IFoldInputs
 {

@@ -202,6 +202,7 @@ internal static class LeafFolder
 
         int reducedNodeCount = nextNewId;
         var foldedBytesByNewId = new ulong[reducedNodeCount];
+        var foldedLeafCountByNewId = new int[reducedNodeCount];
 
         // Fold each leaf's shallow size into its sole parent. A foldable leaf's single predecessor
         // is guaranteed to survive: any node with an edge to another node has out-degree >= 1, so it
@@ -216,6 +217,31 @@ internal static class LeafFolder
             int parentOldId = revTargetsLocal[revOffsetsLocal[i]]; // inDegree[i] == 1 — exactly one entry
             int parentNewId = oldToNewId[parentOldId];
             foldedBytesByNewId[parentNewId] += shallowSizes[i];
+            foldedLeafCountByNewId[parentNewId]++;
+        }
+
+        // §10.5 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): a
+        // (parentNewId -> folded old-ids) CSR, same two-phase counting-sort shape as the reduced
+        // forward CSR built below. Lets a future EnumerateRetainedSet walk folded leaves as ordinary
+        // children instead of only ever seeing their bytes folded into the aggregate above.
+        // foldedBytesByNewId is kept alongside this rather than replaced by it here — the
+        // aggregate's one remaining consumer (DominatorTreeComputer's shallow-size calc) isn't
+        // touched by this change; dropping it is deferred to whichever future change actually reads
+        // this CSR instead (§6, §10.4/§10.5).
+        var foldedLeafOffsets = new int[reducedNodeCount + 1];
+        for (int newId = 0; newId < reducedNodeCount; newId++)
+            foldedLeafOffsets[newId + 1] = foldedLeafOffsets[newId] + foldedLeafCountByNewId[newId];
+
+        var foldedLeafOldIds = new int[foldedLeafOffsets[reducedNodeCount]];
+        var foldedLeafCursor = (int[])foldedLeafOffsets.Clone();
+        for (int i = 0; i < nodeCount; i++)
+        {
+            if (!isFoldable[i])
+                continue;
+
+            int parentOldId = revTargetsLocal[revOffsetsLocal[i]];
+            int parentNewId = oldToNewId[parentOldId];
+            foldedLeafOldIds[foldedLeafCursor[parentNewId]++] = i;
         }
 
         // The reverse CSR's only purpose in Fold is the single-predecessor lookup above; the reduced
@@ -319,7 +345,9 @@ internal static class LeafFolder
             reducedFwdOffsets,
             reducedFwdTargets,
             reducedInDegree,
-            foldedBytesByNewId);
+            foldedBytesByNewId,
+            foldedLeafOffsets,
+            foldedLeafOldIds);
     }
 }
 
@@ -349,6 +377,16 @@ internal sealed class LeafFoldResult
     public ulong[] FoldedBytesByNewId { get; }
 
     /// <summary>
+    /// §10.5 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md):
+    /// <c>(parentNewId -> folded old-ids)</c> CSR, offsets into <see cref="FoldedLeafOldIds"/>.
+    /// Length = <see cref="ReducedNodeCount"/> + 1.
+    /// </summary>
+    public int[] FoldedLeafOffsets { get; }
+
+    /// <summary>Old (pre-fold) node ids of every folded leaf, grouped by surviving parent — see <see cref="FoldedLeafOffsets"/>.</summary>
+    public int[] FoldedLeafOldIds { get; }
+
+    /// <summary>
     /// Drops <see cref="ReducedInDegree"/> once the extended reverse CSR is built. Only N'-sized rather
     /// than E'-sized, but this object stays rooted for the whole computation (LT reads the forward arrays
     /// throughout, and the caller reads the id maps during the rollup), so an unused array here survives
@@ -364,7 +402,9 @@ internal sealed class LeafFoldResult
         int[] reducedFwdOffsets,
         int[] reducedFwdTargets,
         int[] reducedInDegree,
-        ulong[] foldedBytesByNewId)
+        ulong[] foldedBytesByNewId,
+        int[] foldedLeafOffsets,
+        int[] foldedLeafOldIds)
     {
         ReducedNodeCount = reducedNodeCount;
         OldToNewId = oldToNewId;
@@ -373,5 +413,7 @@ internal sealed class LeafFoldResult
         ReducedFwdTargets = reducedFwdTargets;
         ReducedInDegree = reducedInDegree;
         FoldedBytesByNewId = foldedBytesByNewId;
+        FoldedLeafOffsets = foldedLeafOffsets;
+        FoldedLeafOldIds = foldedLeafOldIds;
     }
 }

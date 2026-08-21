@@ -1,4 +1,5 @@
 using DumpDetective.Analysis.Cache;
+using DumpDetective.Analysis.Indexing.ReverseIndex;
 using DumpDetective.Core.Abstractions;
 
 namespace DumpDetective.Analysis.Traversal.Dominator;
@@ -18,28 +19,172 @@ namespace DumpDetective.Analysis.Traversal.Dominator;
 internal delegate int SuccessorsFunc(ulong address, ref ulong[] buffer);
 
 /// <summary>
-/// Core reachability walk + CSR build (design doc §D2, §D4, §D6) — deliberately heap-agnostic
-/// (injected root addresses and a <c>successors</c> function), same pattern as
-/// <see cref="BidirectionalGraphSearch"/>/<see cref="LengauerTarjan"/>, so it's unit-testable with
-/// synthetic graphs and works unmodified whether <c>successors</c> is backed by the persisted
-/// forward-edge index (§D5, preferred) or a live <c>ClrObject.EnumerateReferences</c> walk (§D4,
-/// fallback) — see <see cref="ReachableGraphBuilder"/> for the ClrHeap-aware adapter that picks
-/// which one to inject.
+/// Single reachability walk feeding both consumers that previously ran two independent BFS passes over
+/// the same reachable set — see
+/// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §10.1:
 ///
-/// Single-pass edge capture + O(N+E) counting-sort CSR build (§D4 — the two-pass count-then-fill
-/// design was measured to be slower, not faster, than this): walk each reachable node's successors
-/// exactly once, capturing <c>(fromId, toId)</c> pairs into a flat buffer while incrementing degree
-/// counters inline; build the final forward+reverse CSR arrays afterward via counting-sort
-/// redistribution.
+/// <list type="bullet">
+///   <item>Stage A (the reverse-edge index, §4/§7): streams every discovered edge to a
+///   <see cref="ReverseEdgeExtractor"/>, tracking visited addresses in a plain
+///   <see cref="HashSet{T}"/> — no dense ids, no in-memory CSR. This was previously
+///   <c>IncrementalReachableWalker</c>, now folded in here.</item>
+///   <item>Stage B (the exact dominator tree, §D2/§D4/§D6): assigns dense ids and captures a full
+///   forward+reverse CSR, for <see cref="LeafFolder"/>/<c>DominatorTreeComputer</c> to consume.</item>
+/// </list>
+///
+/// <paramref name="buildCsr"/> (see <see cref="Walk"/>) selects which of the two node-identity
+/// structures the walk uses — a plain <c>HashSet&lt;ulong&gt;</c> when only Stage A is wanted (§4.1:
+/// measured faster and no worse on memory than every id-map alternative tried), or a
+/// <c>Dictionary&lt;ulong,int&gt;</c> plus <see cref="ChunkedBuffer{T}"/> edge-list capture when Stage B
+/// is wanted too. <paramref name="reverseEdgeExtractor"/> is independent of that choice — when
+/// non-null, every edge crossed is streamed to it regardless of which identity structure is in use, so
+/// a caller wanting both stages together pays for <c>successors()</c> exactly once per reachable node
+/// instead of running this walk twice.
+///
+/// No memory-usage budget is enforced here (removed per
+/// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md's "review the budget"
+/// discussion — the calibrated byte-cost model it replaced was fit to two dumps under a memory profile
+/// that predated Stage A and Stage B ever sharing a walk, and its abort path could leave Stage A's
+/// reverse-edge index silently incomplete). The one hard limit that remains is a correctness
+/// invariant, not a policy: <see cref="ChunkedBuffer{T}"/> throws before any of Stage B's node/edge
+/// counts could silently wrap past <see cref="int.MaxValue"/> — callers that want a graceful "too big,
+/// skipped" outcome instead of a thrown exception need to catch around this call (see
+/// <c>DiskBackedObjectIndexWriter.Build</c>'s walk-phase try/catch).
 /// </summary>
 internal static class ReachableGraphWalker
 {
+    /// <param name="rootAddresses">GC root object addresses to seed the BFS frontier from.</param>
+    /// <param name="successors">Persisted forward-edge index (preferred) or live ClrMD walk (fallback).</param>
+    /// <param name="reverseEdgeExtractor">
+    /// When non-null, every edge crossed is streamed here (Stage A's reverse-edge index contract, §7).
+    /// When null, no reverse-edge index is fed — the caller only wants the CSR (Stage B alone; every
+    /// production caller passes a non-null extractor today, since Stage B only ever runs inside
+    /// <c>DiskBackedObjectIndexWriter.Build</c>'s Stage A block — the null case exists for
+    /// synthetic-graph unit tests that don't need a reverse-edge index at all).
+    /// </param>
+    /// <param name="buildCsr">
+    /// When true, assigns dense ids and captures the full forward+reverse CSR for Stage B. When
+    /// false, only Stage A's cheap <c>HashSet&lt;ulong&gt;</c> visited-tracking runs.
+    /// </param>
+    /// <param name="captureSortedAddresses">
+    /// When true, <see cref="ReachableGraphWalkResult.ReachableAddresses"/> is populated with every
+    /// reachable node's address, sorted ascending (§5's <c>DominatorReachableAddresses</c> persistence
+    /// needs this; Phase 2's exact-tree-only callers don't, so they skip the extra sort).
+    /// </param>
     public static ReachableGraphWalkResult Walk(
         IReadOnlyList<ulong> rootAddresses,
         SuccessorsFunc successors,
-        ExactDominatorTreeBudget budget,
+        ReverseEdgeExtractor? reverseEdgeExtractor,
+        bool buildCsr,
+        bool captureSortedAddresses,
         CancellationToken cancellationToken,
         IProgress<AnalyzerProgressReport>? progress = null)
+    {
+        return buildCsr
+            ? WalkWithCsr(rootAddresses, successors, reverseEdgeExtractor, captureSortedAddresses, cancellationToken, progress)
+            : WalkWithoutCsr(rootAddresses, successors, reverseEdgeExtractor, captureSortedAddresses, cancellationToken, progress);
+    }
+
+    /// <summary>
+    /// Stage A only (§4, §7 — formerly <c>IncrementalReachableWalker.Walk</c>): <see cref="HashSet{T}"/>
+    /// visited-tracking, no dense ids, no in-memory CSR — the walk's frontier is the only reachable-set
+    /// state ever held at once. Every edge crossed is streamed straight to
+    /// <paramref name="reverseEdgeExtractor"/> as discovered.
+    /// </summary>
+    private static ReachableGraphWalkResult WalkWithoutCsr(
+        IReadOnlyList<ulong> rootAddresses,
+        SuccessorsFunc successors,
+        ReverseEdgeExtractor? reverseEdgeExtractor,
+        bool captureSortedAddresses,
+        CancellationToken cancellationToken,
+        IProgress<AnalyzerProgressReport>? progress)
+    {
+        var visited = new HashSet<ulong>();
+        var frontier = new Queue<ulong>();
+        var scanCounter = new ObjectScanCounter("building reverse-edge index (reachability walk)", progress);
+        var childBuffer = new ulong[64];
+
+        int nodeCount = 0;
+        long edgeCount = 0;
+
+        foreach (ulong rootAddr in rootAddresses)
+        {
+            if (rootAddr == 0)
+                continue;
+
+            if (visited.Add(rootAddr))
+            {
+                nodeCount++;
+                frontier.Enqueue(rootAddr);
+            }
+        }
+
+        while (frontier.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            ulong address = frontier.Dequeue();
+            scanCounter.Tick();
+
+            int childCount = successors(address, ref childBuffer);
+            for (int c = 0; c < childCount; c++)
+            {
+                ulong childAddr = childBuffer[c];
+                if (childAddr == 0)
+                    continue;
+
+                reverseEdgeExtractor?.RecordEdge(address, childAddr);
+                edgeCount++;
+
+                if (visited.Add(childAddr))
+                {
+                    nodeCount++;
+                    frontier.Enqueue(childAddr);
+                }
+            }
+        }
+
+        scanCounter.Complete();
+
+        ulong[] reachableAddresses;
+        if (captureSortedAddresses)
+        {
+            reachableAddresses = visited.ToArray();
+            Array.Sort(reachableAddresses);
+        }
+        else
+        {
+            reachableAddresses = Array.Empty<ulong>();
+        }
+
+        return new ReachableGraphWalkResult(
+            nodeCount: nodeCount,
+            edgeCount: edgeCount,
+            addresses: Array.Empty<ulong>(),
+            reachableAddresses: reachableAddresses,
+            outDegree: Array.Empty<int>(),
+            inDegree: Array.Empty<int>(),
+            isRoot: Array.Empty<bool>(),
+            fwdOffsets: Array.Empty<int>(),
+            fwdTargets: Array.Empty<int>(),
+            revOffsets: Array.Empty<int>(),
+            revTargets: Array.Empty<int>());
+    }
+
+    /// <summary>
+    /// Stage B (§D2, §D4 — the walk half of the exact dominator tree's build): dense ids via
+    /// <see cref="Dictionary{TKey,TValue}"/>, single-pass edge capture into <see cref="ChunkedBuffer{T}"/>,
+    /// O(N+E) counting-sort CSR build at the end. When <paramref name="reverseEdgeExtractor"/> is
+    /// non-null, also streams every edge to it — Stage A's contract, folded into the same pass instead
+    /// of a second walk.
+    /// </summary>
+    private static ReachableGraphWalkResult WalkWithCsr(
+        IReadOnlyList<ulong> rootAddresses,
+        SuccessorsFunc successors,
+        ReverseEdgeExtractor? reverseEdgeExtractor,
+        bool captureSortedAddresses,
+        CancellationToken cancellationToken,
+        IProgress<AnalyzerProgressReport>? progress)
     {
         // Frontier BFS is the dominant cost on real dumps (millions of nodes) — without a tick
         // here the console progress line sits frozen on whatever phase preceded this call for the
@@ -56,9 +201,11 @@ internal static class ReachableGraphWalker
         // this again — that confound (this measurement partly overlapped a period of genuine system
         // memory pressure on the test machine) is documented there, not fully resolved.
         var idMap = new Dictionary<ulong, int>();
-        // ChunkedBuffer, not List<T> (§D4/§D6): at 25GB-dump scale (E ≈ 137M edges) a List<T>'s
+        // ChunkedBuffer, not List<T> (§D4): at 25GB-dump scale (E ≈ 137M edges) a List<T>'s
         // double-and-copy growth would transiently hold up to ~2x the final size, with the old and
         // new backing arrays both alive during the copy — see the design doc's Measured Numbers.
+        // Also the one place a runaway graph gets caught (ChunkedBuffer.Add's int.MaxValue guard) —
+        // see this class's own doc comment.
         var addresses = new ChunkedBuffer<ulong>();
         var outDegree = new ChunkedBuffer<int>();
         var isRoot = new ChunkedBuffer<bool>();
@@ -92,19 +239,6 @@ internal static class ReachableGraphWalker
                 frontier.Enqueue(id);
         }
 
-        // §D6: budget enforced mid-walk (neither the reachable count nor the edge count is known until
-        // the walk completes) — abort and discard partial state the moment the projected peak would
-        // exceed it. Both terms matter: a dense graph can blow the budget on edges while its node count
-        // still looks comfortable, which the old node-only cap could not see.
-        if (budget.IsExceededBy(addresses.Count, edgeFrom.Count))
-            return ReachableGraphWalkResult.Capped();
-
-        // Edges accumulate between node discoveries, so a purely discovery-driven check can overshoot
-        // across a high-out-degree tail. Re-check every few million edges to bound that overshoot
-        // without paying two multiplies on every single edge in the hot loop.
-        const int EdgeCheckInterval = 4_000_000;
-        long nextEdgeCheck = EdgeCheckInterval;
-
         while (frontier.Count > 0)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -120,26 +254,15 @@ internal static class ReachableGraphWalker
                 if (childAddr == 0)
                     continue;
 
+                reverseEdgeExtractor?.RecordEdge(address, childAddr);
+
                 (int childId, bool isNew) = GetOrAddId(childAddr);
                 edgeFrom.Add(id);
                 edgeTo.Add(childId);
                 outDegree[id]++;
 
                 if (isNew)
-                {
-                    if (budget.IsExceededBy(addresses.Count, edgeFrom.Count))
-                        return ReachableGraphWalkResult.Capped();
-
                     frontier.Enqueue(childId);
-                }
-            }
-
-            if (edgeFrom.Count >= nextEdgeCheck)
-            {
-                if (budget.IsExceededBy(addresses.Count, edgeFrom.Count))
-                    return ReachableGraphWalkResult.Capped();
-
-                nextEdgeCheck = edgeFrom.Count + EdgeCheckInterval;
             }
         }
 
@@ -175,10 +298,23 @@ internal static class ReachableGraphWalker
             revTargets[revCursor[to]++] = from;
         }
 
+        ulong[] addressArray = addresses.ToArray();
+        ulong[] reachableAddresses;
+        if (captureSortedAddresses)
+        {
+            reachableAddresses = (ulong[])addressArray.Clone();
+            Array.Sort(reachableAddresses);
+        }
+        else
+        {
+            reachableAddresses = Array.Empty<ulong>();
+        }
+
         return new ReachableGraphWalkResult(
-            capExceeded: false,
             nodeCount: nodeCount,
-            addresses: addresses.ToArray(),
+            edgeCount: edgeCount,
+            addresses: addressArray,
+            reachableAddresses: reachableAddresses,
             outDegree: outDegree.ToArray(),
             inDegree: inDegree,
             isRoot: isRoot.ToArray(),
@@ -189,29 +325,38 @@ internal static class ReachableGraphWalker
     }
 }
 
-/// <summary>Result of <see cref="ReachableGraphWalker.Walk"/> — see §D6 for the capped case.</summary>
+/// <summary>
+/// Result of <see cref="ReachableGraphWalker.Walk"/>. Always a complete result — a walk either
+/// finishes or throws (see the type's own doc comment on why no memory budget is enforced here, and
+/// <c>DiskBackedObjectIndexWriter.Build</c>'s walk-phase try/catch for how a caller degrades a thrown
+/// exception into a graceful "skipped" outcome instead).
+/// </summary>
 internal sealed class ReachableGraphWalkResult
 {
-    public bool CapExceeded { get; }
     public int NodeCount { get; }
-    public ulong[] Addresses { get; } = Array.Empty<ulong>();
-    public int[] OutDegree { get; } = Array.Empty<int>();
-    public int[] InDegree { get; } = Array.Empty<int>();
+    public long EdgeCount { get; }
+    /// <summary>Id -> address, discovery order. Empty unless the walk built a CSR.</summary>
+    public ulong[] Addresses { get; }
+    /// <summary>Every reachable node's address, sorted ascending. Empty unless requested.</summary>
+    public ulong[] ReachableAddresses { get; }
+    public int[] OutDegree { get; }
+    public int[] InDegree { get; }
     /// <summary>
     /// True for nodes seeded directly from <c>rootAddresses</c> — these are LT's virtual-root
     /// children and must never be excluded by <see cref="LeafFolder"/> regardless of degree, since
     /// they have an "invisible" incoming edge from the virtual root the CSR doesn't represent.
     /// </summary>
-    public bool[] IsRoot { get; } = Array.Empty<bool>();
-    public int[] FwdOffsets { get; } = Array.Empty<int>();
-    public int[] FwdTargets { get; } = Array.Empty<int>();
-    public int[] RevOffsets { get; } = Array.Empty<int>();
-    public int[] RevTargets { get; } = Array.Empty<int>();
+    public bool[] IsRoot { get; }
+    public int[] FwdOffsets { get; }
+    public int[] FwdTargets { get; }
+    public int[] RevOffsets { get; }
+    public int[] RevTargets { get; }
 
     public ReachableGraphWalkResult(
-        bool capExceeded,
         int nodeCount,
+        long edgeCount,
         ulong[] addresses,
+        ulong[] reachableAddresses,
         int[] outDegree,
         int[] inDegree,
         bool[] isRoot,
@@ -220,9 +365,10 @@ internal sealed class ReachableGraphWalkResult
         int[] revOffsets,
         int[] revTargets)
     {
-        CapExceeded = capExceeded;
         NodeCount = nodeCount;
+        EdgeCount = edgeCount;
         Addresses = addresses;
+        ReachableAddresses = reachableAddresses;
         OutDegree = outDegree;
         InDegree = inDegree;
         IsRoot = isRoot;
@@ -231,11 +377,4 @@ internal sealed class ReachableGraphWalkResult
         RevOffsets = revOffsets;
         RevTargets = revTargets;
     }
-
-    private ReachableGraphWalkResult(bool capExceeded)
-    {
-        CapExceeded = capExceeded;
-    }
-
-    public static ReachableGraphWalkResult Capped() => new(capExceeded: true);
 }

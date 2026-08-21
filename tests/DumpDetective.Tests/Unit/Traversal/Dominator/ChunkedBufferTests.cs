@@ -76,4 +76,32 @@ public sealed class ChunkedBufferTests
         var buffer = new ChunkedBuffer<int>();
         buffer.ToArray().Should().BeEmpty();
     }
+
+    [Fact]
+    public void Add_UpToMaxCount_Succeeds()
+    {
+        // §10.4/§10.8 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): the
+        // int.MaxValue-overflow guard, exercised at a size a test can actually afford via the
+        // test-only maxCount seam.
+        var buffer = new ChunkedBuffer<int>(maxCount: 3);
+        buffer.Add(1);
+        buffer.Add(2);
+        buffer.Add(3);
+
+        buffer.Count.Should().Be(3);
+    }
+
+    [Fact]
+    public void Add_PastMaxCount_ThrowsInsteadOfSilentlyWrappingCount()
+    {
+        var buffer = new ChunkedBuffer<int>(maxCount: 3);
+        buffer.Add(1);
+        buffer.Add(2);
+        buffer.Add(3);
+
+        Action act = () => buffer.Add(4);
+
+        act.Should().Throw<InvalidOperationException>();
+        buffer.Count.Should().Be(3, "the rejected Add must not have corrupted the existing count");
+    }
 }

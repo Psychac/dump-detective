@@ -15,12 +15,42 @@ internal sealed class ChunkedBuffer<T>
     private const int ChunkSize = 1 << 16; // 65,536 elements/chunk
 
     private readonly List<T[]> _chunks = new();
+    private readonly int _maxCount;
     private int _countInLastChunk;
 
     public int Count { get; private set; }
 
+    public ChunkedBuffer() : this(int.MaxValue)
+    {
+    }
+
+    /// <param name="maxCount">
+    /// Test-only seam — production callers always get the real limit. Exists so a unit test can
+    /// exercise <see cref="Add"/>'s overflow guard below without actually accumulating
+    /// <see cref="int.MaxValue"/> elements.
+    /// </param>
+    internal ChunkedBuffer(int maxCount)
+    {
+        _maxCount = maxCount;
+    }
+
     public void Add(T value)
     {
+        // Guards the actual root cause of the silent-corruption risk this type exists to prevent
+        // (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md, the "review the
+        // budget" discussion): every reachable-graph node/edge count downstream of the walk
+        // (LeafFolder, DominatorTreeComputer) is bounded by what this buffer accumulated, so one
+        // guard here — rather than periodic checks scattered through the walker — protects the
+        // whole pipeline. Throwing instead of silently wrapping Count past int.MaxValue converts
+        // "wrong dominator tree, no diagnostic" into a loud, catchable failure a caller can react
+        // to (see DiskBackedObjectIndexWriter.Build's walk-phase try/catch).
+        if (Count == _maxCount)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(ChunkedBuffer<T>)} would exceed {_maxCount:N0} elements — the reachable graph is too " +
+                "large to represent in this pipeline's int-indexed arrays.");
+        }
+
         if (_chunks.Count == 0 || _countInLastChunk == ChunkSize)
         {
             _chunks.Add(new T[ChunkSize]);

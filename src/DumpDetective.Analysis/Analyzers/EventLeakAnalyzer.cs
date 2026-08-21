@@ -14,7 +14,7 @@ using Microsoft.Extensions.Logging;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    public class EventLeakAnalyzer : IAnalyzer, IHeapIndexScanParticipant
+    public class EventLeakAnalyzer : IAnalyzer, IHeapIndexScanParticipant, IRequiresReachableGraphIndex
     {
         // Presentation and severity tuning moved to EventLeakOptions
 

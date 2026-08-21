@@ -17,8 +17,9 @@ public class DominatorTreeComputerTests
         SuccessorsFunc successors,
         Dictionary<ulong, ulong> shallowSizesByAddress)
     {
-        ReachableGraphWalkResult walk = ReachableGraphWalker.Walk(rootAddresses, successors, ExactDominatorTreeBudget.Unlimited, CancellationToken.None);
-        walk.CapExceeded.Should().BeFalse();
+        ReachableGraphWalkResult walk = ReachableGraphWalker.Walk(
+            rootAddresses, successors, reverseEdgeExtractor: null, buildCsr: true,
+            captureSortedAddresses: false, CancellationToken.None);
 
         var methodTables = new ulong[walk.NodeCount];
         var shallowSizes = new ulong[walk.NodeCount];
@@ -40,6 +41,15 @@ public class DominatorTreeComputerTests
         return result.RetainedBytes[newId];
     }
 
+    /// <summary>§10.4: dominator-tree children of <paramref name="parentNewId"/>, as graph addresses.</summary>
+    private static List<ulong> ChildAddressesOf(ReachableGraph graph, DominatorTreeComputeResult result, int parentNewId)
+    {
+        var addresses = new List<ulong>();
+        for (int e = result.ChildOffsets[parentNewId]; e < result.ChildOffsets[parentNewId + 1]; e++)
+            addresses.Add(graph.Addresses[result.LeafFold.NewToOldId[result.ChildTargets[e]]]);
+        return addresses;
+    }
+
     [Fact]
     public void Compute_Diamond_MergePointDominatedByRoot_RetainedBytesSumCorrectly()
     {
@@ -55,6 +65,15 @@ public class DominatorTreeComputerTests
         RetainedBytesOf(graph, result, 0x2UL).Should().Be(2, "a doesn't dominate c, so a's subtree is just itself");
         RetainedBytesOf(graph, result, 0x3UL).Should().Be(3, "b doesn't dominate c either");
         RetainedBytesOf(graph, result, 0x1UL).Should().Be(1 + 2 + 3 + 4, "root dominates everything");
+
+        // §10.4: dominator-tree child adjacency — root directly dominates a, b, AND c (neither a nor
+        // b individually dominates c, since c is also reachable via the other branch), so all three
+        // are root's direct dominator-tree children, not just a and b.
+        int rootNewId = result.LeafFold.OldToNewId[Array.IndexOf(graph.Addresses, 0x1UL)];
+        ChildAddressesOf(graph, result, rootNewId).Should().BeEquivalentTo([0x2UL, 0x3UL, 0x4UL]);
+
+        int aNewId = result.LeafFold.OldToNewId[Array.IndexOf(graph.Addresses, 0x2UL)];
+        ChildAddressesOf(graph, result, aNewId).Should().BeEmpty("a doesn't dominate anything");
     }
 
     [Fact]
@@ -91,6 +110,10 @@ public class DominatorTreeComputerTests
         int root2OldId = Array.IndexOf(graph.Addresses, 0x2UL);
         result.Idom[result.LeafFold.OldToNewId[root1OldId]].Should().Be(result.VirtualRoot);
         result.Idom[result.LeafFold.OldToNewId[root2OldId]].Should().Be(result.VirtualRoot);
+
+        // §10.4: the virtual root's own dominator-tree children are both real roots — 0x10/0x20 are
+        // folded away (out=0, in=1) and never appear as anyone's CSR child.
+        ChildAddressesOf(graph, result, result.VirtualRoot).Should().BeEquivalentTo([0x1UL, 0x2UL]);
     }
 
     [Fact]

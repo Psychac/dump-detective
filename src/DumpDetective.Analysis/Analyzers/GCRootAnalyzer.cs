@@ -19,7 +19,7 @@ namespace DumpDetective.Analysis.Analyzers
     /// (<c>RootIndex.bin</c>) when available, falling back to a live
     /// <c>heap.EnumerateRoots()</c> walk otherwise.
     /// </summary>
-    public sealed class GCRootAnalyzer : IAnalyzer
+    public sealed class GCRootAnalyzer : IAnalyzer, IRequiresReachableGraphIndex, IRequiresDominatorTreeIndex
     {
         public string Name => "GC Root Analysis";
         public string Category => "Memory";

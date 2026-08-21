@@ -30,6 +30,7 @@ namespace DumpDetective.Analysis.Cache
         private readonly ReverseIndexCache _reverseIndexCache;
         private readonly ForwardIndexCache _forwardIndexCache;
         private readonly DominatorReachableIndexCache _dominatorReachableIndexCache;
+        private readonly DominatorTreeIndexCache _dominatorTreeCache;
 
         public long ObjectScanCount => Interlocked.Read(ref _objectScanCount);
         public long CacheHits => Interlocked.Read(ref _cacheHits);
@@ -73,6 +74,11 @@ namespace DumpDetective.Analysis.Cache
                 _heapIndexCache.TryGetHeapIndex(out var h);
                 return h;
             });
+            _dominatorTreeCache = new DominatorTreeIndexCache(() =>
+            {
+                _heapIndexCache.TryGetHeapIndex(out var h);
+                return h;
+            });
         }
 
         public IEnumerable<CacheMetrics> GetCacheMetrics()
@@ -86,6 +92,7 @@ namespace DumpDetective.Analysis.Cache
             yield return _reverseIndexCache.GetMetrics();
             yield return _forwardIndexCache.GetMetrics();
             yield return _dominatorReachableIndexCache.GetMetrics();
+            yield return _dominatorTreeCache.GetMetrics();
         }
 
         public HeapCacheHealth GetHealth()
@@ -139,10 +146,12 @@ namespace DumpDetective.Analysis.Cache
             ClrHeap heap,
             string dumpPath,
             CancellationToken cancellationToken,
-            IProgress<AnalyzerProgressReport>? progress = null)
+            IProgress<AnalyzerProgressReport>? progress = null,
+            IReadOnlyList<IAnalyzer>? activeAnalyzers = null,
+            bool enableExactDominatorTree = false)
         {
             Interlocked.Increment(ref _cacheMisses);
-            var result = _heapIndexCache.PrebuildHeapIndex(heap, dumpPath, cancellationToken, progress);
+            var result = _heapIndexCache.PrebuildHeapIndex(heap, dumpPath, cancellationToken, progress, activeAnalyzers, enableExactDominatorTree);
             return result;
         }
 
@@ -332,6 +341,11 @@ namespace DumpDetective.Analysis.Cache
             return _dominatorReachableIndexCache.TryGetProvider();
         }
 
+        public IDominatorTreeProvider? TryGetDominatorTreeProvider()
+        {
+            return _dominatorTreeCache.TryGetProvider();
+        }
+
         private void ReportProgress(string phase, long totalScans)
         {
             if (_progress is null || totalScans % ProgressReportEveryScans != 0)
@@ -345,6 +359,7 @@ namespace DumpDetective.Analysis.Cache
             _reverseIndexCache.Dispose();
             _forwardIndexCache.Dispose();
             _dominatorReachableIndexCache.Dispose();
+            _dominatorTreeCache.Dispose();
             _heapIndexCache.Dispose();
         }
     }

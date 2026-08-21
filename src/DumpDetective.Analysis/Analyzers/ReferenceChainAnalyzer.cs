@@ -8,7 +8,7 @@ using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    public class ReferenceChainAnalyzer : IAnalyzer
+    public class ReferenceChainAnalyzer : IAnalyzer, IRequiresReachableGraphIndex
     {
         private readonly record struct ObjectMetadata(bool IsValid, string? TypeName, ulong Size);
 

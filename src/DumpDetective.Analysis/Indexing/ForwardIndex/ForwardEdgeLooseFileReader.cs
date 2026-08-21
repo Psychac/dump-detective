@@ -10,7 +10,7 @@ namespace DumpDetective.Analysis.Indexing.ForwardIndex;
 /// Point-lookup reader over <see cref="ForwardEdgeSorter"/>'s per-bucket <c>.dat</c>/<c>.idx</c>
 /// scratch files (Phase B output), read before <see cref="ForwardEdgeContainerWriter"/> (Phase C)
 /// merges them into <c>cache.bin</c> and deletes them. Lets Stage A's reachability walk
-/// (<see cref="IncrementalReachableWalker"/>) reuse the forward edges ClrMD already resolved
+/// (<see cref="Traversal.Dominator.ReachableGraphWalker"/>, <c>buildCsr: false</c>) reuse the forward edges ClrMD already resolved
 /// during the main heap scan, instead of a second per-node <c>obj.EnumerateReferences</c> walk —
 /// see docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §2/§8.8.
 ///
@@ -28,7 +28,8 @@ namespace DumpDetective.Analysis.Indexing.ForwardIndex;
 /// `ulong[]`/`long[]`, `Array.BinarySearch`) instead of the mapped view. A directory entry is 16
 /// bytes; even a dump with tens of millions of reachable objects has a directory total in the
 /// hundreds of MB, comparable to structures this codebase already accepts in memory during the
-/// walk (e.g. <c>IncrementalReachableWalker</c>'s own visited-node `HashSet&lt;ulong&gt;`) — and
+/// walk (e.g. <c>ReachableGraphWalker</c>'s own visited-node `HashSet&lt;ulong&gt;` in
+/// <c>buildCsr: false</c> mode) — and
 /// unlike the mmap'd version, once decoded these arrays are fully resident, contiguous, and
 /// cache-friendly for repeated binary search; no page faults, no syscalls, ever again after the
 /// one-time sequential decode. The <c>.dat</c> file (the actual, larger children data) stays
@@ -199,7 +200,7 @@ internal sealed unsafe class ForwardEdgeLooseFileReader : IDisposable
 
     /// <summary>
     /// Matches <see cref="SuccessorsFunc"/>'s signature exactly, so an instance's method group can
-    /// be passed straight into <see cref="IncrementalReachableWalker.Walk"/>.
+    /// be passed straight into <see cref="Traversal.Dominator.ReachableGraphWalker.Walk"/>.
     /// </summary>
     public int GetChildren(ulong parent, ref ulong[] buffer)
     {

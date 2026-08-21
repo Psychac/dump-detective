@@ -32,7 +32,9 @@ internal class HeapIndexCache : IDisposable
         ClrHeap heap,
         string dumpPath,
         CancellationToken cancellationToken,
-        IProgress<AnalyzerProgressReport>? progress = null)
+        IProgress<AnalyzerProgressReport>? progress = null,
+        IReadOnlyList<IAnalyzer>? activeAnalyzers = null,
+        bool enableExactDominatorTree = false)
     {
         if (_heapIndex is not null)
             return _heapIndex;
@@ -56,7 +58,8 @@ internal class HeapIndexCache : IDisposable
         try
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            _heapIndex = writer.Build(heap, cancellationToken, progress, dumpPath, _sizeTier);
+            _heapIndex = writer.Build(
+                heap, cancellationToken, progress, dumpPath, _sizeTier, activeAnalyzers, enableExactDominatorTree);
             sw.Stop();
             _lastBuildTime = DateTime.UtcNow;
             _lastBuildDuration = sw.Elapsed;

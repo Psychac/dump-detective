@@ -12,5 +12,7 @@ internal interface IObjectIndexWriter
         CancellationToken cancellationToken,
         IProgress<AnalyzerProgressReport>? progress = null,
         string? dumpPath = null,
-        DumpSizeTier sizeTier = DumpSizeTier.Medium);
+        DumpSizeTier sizeTier = DumpSizeTier.Medium,
+        IReadOnlyList<IAnalyzer>? activeAnalyzers = null,
+        bool enableExactDominatorTree = false);
 }

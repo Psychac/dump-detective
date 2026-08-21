@@ -99,7 +99,8 @@ public class LeafFolderReleaseTests
     {
         SuccessorsFunc successors = SyntheticSuccessors.Build(s_edges);
         ReachableGraphWalkResult walk = ReachableGraphWalker.Walk(
-            [0x1UL], successors, ExactDominatorTreeBudget.Unlimited, CancellationToken.None);
+            [0x1UL], successors, reverseEdgeExtractor: null, buildCsr: true,
+            captureSortedAddresses: false, CancellationToken.None);
 
         var sizes = new ulong[walk.NodeCount];
         for (int i = 0; i < walk.NodeCount; i++)

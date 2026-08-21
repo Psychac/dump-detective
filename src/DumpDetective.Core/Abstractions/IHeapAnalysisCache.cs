@@ -65,4 +65,12 @@ public interface IHeapAnalysisCache
     /// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §5.
     /// </summary>
     IReachableAddressProvider? TryGetReachableAddressProvider();
+
+    /// <summary>
+    /// Returns the shared "what would freeing this object free?" provider backed by the disk-backed
+    /// exact dominator tree, or <c>null</c> when unavailable (in-memory mode, Stage B not gated on
+    /// for this run, a legacy pre-Stage-B cache.bin, or Stage B failed to persist). See
+    /// <see cref="IDominatorTreeProvider"/>.
+    /// </summary>
+    IDominatorTreeProvider? TryGetDominatorTreeProvider();
 }

@@ -15,8 +15,41 @@
 
 **Stage A.5: not needed.** See §7.
 
-**Stage B (§3, §5, §9): not started.** `idom[]`/Lengauer-Tarjan computation still runs in Phase 2 via
-`DominatorAnalyzer`'s own in-memory `ReachableGraphBuilder`, independent of everything above.
+**Stage B (§3, §5, §9, §10): fully shipped — §10.1, Batch 1, Batch 2a, Batch 2b, and Batch 3 are all
+in, plus the two real problems Batch 2a surfaced are fixed. The double-computation problem flagged at
+the start of the whole "review the budget" thread is also finally closed.**
+`IncrementalReachableWalker` and `ReachableGraphWalker` are now one walker (§10.1).
+`DiskBackedObjectIndexWriter.Build` computes a real `buildStageB` (§10.3) and, when true, runs Stage
+B's fold + LT + idom + dominator child index + retained-bytes-per-row + per-type rollup, all persisted
+inside Phase 1 (§10.4's `BuildAndPersistDominatorTree`). `DominatorAnalyzer` no longer recomputes any
+of this in Phase 2 — it reads `IDominatorTreeProvider` (§10.6, `IHeapAnalysisCache.TryGetDominatorTreeProvider()`)
+instead (§10.7). `ReachableGraphBuilder.Build` (Phase 2's old live-walk path, now unused) and the
+D7-era `DominatorTreeResult`/`DominatorTreeMode` models (never fit anything real) were deleted as
+confirmed dead code. §10.8's four real-dump measurement items (hub-overflow, unified-walk cost,
+scratch-file monotonicity, child-index re-keying cost) are now all measured on both the 3.3GB and
+25.6GB dumps, via a `DD_PERF_DOMINATOR_STAGEB=1`-gated instrumentation pass
+([DominatorStageBPerfMeasurementTests.cs](../../../tests/DumpDetective.Tests/Integration/CacheDiscrepancies/DominatorStageBPerfMeasurementTests.cs))
+— see §10.8. Nothing architectural or measurement-related remains open for Stage A/B themselves.
+
+**The budget review concluded: drop `ExactDominatorTreeBudget` entirely, fix what it was covering
+for at the root cause instead.** Removed: the calibrated byte-cost model, its 20 GiB default, the
+`budget` parameter on `ReachableGraphWalker.Walk`, and `ReachableGraphWalkResult.CapExceeded` — a walk
+either completes or throws now, no third "capped" state. `RetentionOptions.EnableExactDominatorTree`
+(the feature toggle) stays; `ExactDominatorTreeMemoryBudgetBytes` (the memory limit) is gone. Two real
+problems the review surfaced are both fixed, not just documented:
+- **Walk-phase isolation.** `DiskBackedObjectIndexWriter.Build`'s reachability-walk phase — previously
+  the one place in that method with no failure isolation of its own — now has a try/catch matching
+  every other satellite section's existing pattern: a `Walk()` failure discards the reverse-edge
+  index's partial state and the deferred per-segment scratch files, logs a warning, and lets the rest
+  of the index build (forward index, TypeAggregates, `Finish()`) continue untouched. This also
+  resolves the "Stage B budget trip corrupts Stage A" risk directly — there's no cap left to trip
+  mid-walk, and if the walk fails for any other reason, Stage A's now-unreliable partial data is
+  discarded rather than persisted incomplete.
+- **Silent `int` overflow.** `ChunkedBuffer<T>.Add` — the one place every downstream node/edge count
+  in this pipeline is ultimately bounded by — now throws before `Count` could wrap past
+  `int.MaxValue`, instead of silently wrapping. One guard at the root cause protects `LeafFolder` and
+  `DominatorTreeComputer` transitively, converting "wrong dominator tree, no diagnostic" into a loud
+  exception the walk-phase isolation above already knows how to degrade gracefully.
 
 ## Terminology, fixed for the rest of this doc
 
@@ -71,7 +104,9 @@ is the single orchestrator for the whole Phase 1 build. Shipped order:
 8. `containerWriter.Finish()`.
 
 **Not done:** persisting the Stage B dominator-tree sections as part of this same Phase 1 pass — only
-the reachable-graph/reverse-edge-index side of Stage A's on-disk footprint has shipped so far.
+the reachable-graph/reverse-edge-index side of Stage A's on-disk footprint has shipped so far. §10
+scopes this, including replacing step 4's walker with one that also produces Stage B's CSR in the
+same pass, rather than running a second, independent walk later.
 
 ---
 
@@ -408,21 +443,544 @@ Every current consumer of retained-size-shaped data, audited against what it doe
 
 ---
 
-## 10. Open questions
+## 10. Stage B design
 
-Everything from earlier drafts of this doc that's since been resolved has been folded into §4/§7/§8
-above as shipped state. What's actually still open:
+Scope for Stage B's implementation, decided before any code is written. Includes unifying the two
+walkers — `IncrementalReachableWalker` (Stage A, shipped) and `ReachableGraphWalker` (Stage B's CSR
+build, currently run standalone in Phase 2) — into one walk. That unification is part of *this* scope,
+not a follow-up: Stage B is exactly the consumer that needs the second walker's output, so building
+Stage B without folding the two walks together would ship a second full reachability walk right next
+to the first one, on purpose, in the same pass.
+
+### 10.1 Walker unification — shipped
+
+**Implemented as designed below, with two naming/shape differences from the original decision, both
+smaller than the design predicted:**
+- The mode parameter is `buildCsr: bool`, not `buildStageB: bool` — named for what it does (build the
+  CSR) rather than which stage wants it, since §10.3's gating (which would have supplied a
+  `buildStageB` value) isn't implemented yet; today's only caller passes `buildCsr: false` (see below).
+- A second parameter, `captureSortedAddresses: bool`, was added beyond the original design — needed
+  because `DiskBackedObjectIndexWriter.Build`'s call always wants the sorted `DominatorReachableAddresses`
+  regardless of `buildCsr`, while `ReachableGraphBuilder.Build`'s Phase 2 call never wants it; baking the
+  sort into both paths unconditionally would have cost Phase 2 an unwanted O(N log N) sort.
+
+`IncrementalReachableWalker.cs` is deleted; `ReachableGraphWalker.cs`
+([ReachableGraphWalker.cs](../../../src/DumpDetective.Analysis/Traversal/Dominator/ReachableGraphWalker.cs))
+now dispatches to `WalkWithoutCsr` (formerly `IncrementalReachableWalker.Walk`, `HashSet<ulong>`-based,
+now also accepting an optional `captureSortedAddresses` flag it already effectively always exercised) or
+`WalkWithCsr` (formerly this file's own `Walk`, `Dictionary<ulong,int>`+`ChunkedBuffer`-based, now also
+accepting an optional `reverseEdgeExtractor` and streaming to it inline). Both call sites updated:
+`DiskBackedObjectIndexWriter.Build`'s step 4 (`buildCsr: false, captureSortedAddresses: true`) and
+`ReachableGraphBuilder.Build`'s Phase 2 path (`reverseEdgeExtractor: null, buildCsr: true,
+captureSortedAddresses: false`) — the latter's behavior and performance are unchanged, since it always
+built the CSR anyway and never asked for sorted addresses. Tests: `IncrementalReachableWalkerTests.cs`
+merged into `ReachableGraphWalkerTests.cs` (both modes covered in one file now, plus a new test for
+`captureSortedAddresses: false` leaving `ReachableAddresses` empty). All 45 `Traversal.Dominator` unit
+tests and all 95 `Unit.Indexing` tests pass; `DumpDetective.Analysis`, `.Tests`, `.Cli`, and `.Reporting`
+all build clean.
+
+**Not done as part of this change** (deliberately out of scope for §10.1 alone, per §10.3/§10.7): no
+caller passes `buildCsr: true` together with a non-null `reverseEdgeExtractor` in production yet — that
+combination (the actual "both stages in one pass" win §10.1 was designed for) only activates once §10.3's
+gating exists to compute a real `buildStageB` value and thread it into `DiskBackedObjectIndexWriter.Build`'s
+call. Until then, the unification's only realized benefit is eliminating the second walker class and
+proving both modes share one call surface — the double-`successors()`-call cost §10.1 targets is still
+paid today, just by two different callers (Phase 1 and Phase 2) instead of by design necessity.
+
+---
+
+Original design (for reference — see "shipped" note above for what actually landed):
+
+Today, two independent BFS walks exist:
+
+- `IncrementalReachableWalker.Walk` (§4, shipped) — `HashSet<ulong>` visited tracking, no dense ids, no
+  in-memory CSR. Streams every edge straight to `ReverseEdgeExtractor.RecordEdge(fromAddr, toAddr)` as
+  discovered. Returns only a sorted `ulong[]` of reachable addresses + counts.
+- `ReachableGraphWalker.Walk` — `Dictionary<ulong,int>` id map, `ChunkedBuffer<T>` edge-list capture,
+  `ExactDominatorTreeBudget` enforced mid-walk, O(N+E) counting-sort CSR build at the end. Feeds nothing
+  to `ReverseEdgeExtractor` — purely in-memory, currently invoked by `ReachableGraphBuilder.Build` from
+  `DominatorAnalyzer` in Phase 2.
+
+**Decision:** replace both with a single walker (extend `ReachableGraphWalker` in place;
+`IncrementalReachableWalker` is deleted, its doc comments and `Result` shape folded in) that always
+feeds `ReverseEdgeExtractor` per edge — Stage A's existing, unconditional contract — and additionally
+builds the dense-id CSR only when a new `buildStageB: bool` parameter is `true`:
+
+- `buildStageB == false`: unchanged from today's `IncrementalReachableWalker` behavior — `HashSet<ulong>`
+  visited only, no id map, no edge-list capture, no budget check. This preserves §4.1's measured result
+  (plain `HashSet<ulong>` beat `Dictionary`/bitset) for the common case where Stage A alone is wanted.
+- `buildStageB == true`: additionally maintains the id map and `ChunkedBuffer` edge lists exactly as
+  `ReachableGraphWalker` does today, applies `ExactDominatorTreeBudget` mid-walk unchanged, and runs the
+  same counting-sort CSR build at the end. If the budget trips, only the CSR-capture side aborts —
+  Stage A's `ReverseEdgeExtractor` calls up to that point are independent of the CSR and are unaffected,
+  so a capped Stage B degrades to "Stage A shipped, Stage B skipped, warning logged," the same
+  graceful-degradation contract §3's gating already has for every other missing prerequisite.
+
+**Net effect:** `successors()` — the mmap probe against the forward-edge loose files, or the live ClrMD
+fallback — is called exactly once per reachable node regardless of how many of Stage A/B are wanted,
+instead of once per walker per node. Per §8.2, `DominatorAnalyzer`/`GCRootAnalyzer`/`StaticRootLeakAnalyzer`/
+`FinalizableObjectAnalyzer` are standard, always-registered analyzers that want both stages in the
+common case — today that means paying for successor lookups twice over the same reachable set. This is
+a real perf win from unification, not just a memory-neutral relocation.
+
+**Exact call site (confirmed against current code, not just the design doc's pseudocode):**
+`DiskBackedObjectIndexWriter.Build` already assembles everything the unified walker needs, in one place
+([DiskBackedObjectIndexWriter.cs:756-809](../../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs#L756-L809)):
+`walkRootAddresses` (built from `heap.EnumerateRoots()`), `walkSuccessors` (the
+`ForwardEdgeLooseFileReader`-or-live-ClrMD delegate §4.3 describes), and `reverseEdgeExtractor`. The only
+change at this call site is swapping `IncrementalReachableWalker.Walk(walkRootAddresses, walkSuccessors,
+reverseEdgeExtractor, cancellationToken, progress)` for the unified walker's call, adding `budget` and
+`buildStageB` as new arguments. No new plumbing is needed to get root addresses or a successors function
+to this point — both already exist exactly where the unified walker needs them.
+
+**New per-node metadata resolution gap, found while confirming the call site.** `ReachableGraphBuilder.Build`'s
+post-walk loop resolves each node's `MethodTable`/`ShallowSize` via `cache.TryGetObjectMetadata`
+([ReachableGraphBuilder.cs:51-64](../../../src/DumpDetective.Analysis/Traversal/Dominator/ReachableGraphBuilder.cs#L51-L64)),
+which prefers a disk-backed `ObjectAddressLookup` opened from the *finalized* container file
+([HeapIndexCache.cs:107-138](../../../src/DumpDetective.Analysis/Cache/HeapIndexCache.cs#L107-L138)). That
+lookup requires a complete TOC, which doesn't exist until `containerWriter.Finish()` — Phase 1's own
+`ObjectAddresses`/`ObjectMethodTables`/`ObjectSizes` sections are written into the in-progress container
+stream well before `Finish()` ([DiskBackedObjectIndexWriter.cs:532-547](../../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs#L532-L547))
+but aren't queryable as a finished index yet, and the per-segment scratch files that fed them are
+concatenated-and-discarded, not kept as an in-memory address→metadata map. Running Stage B's metadata
+resolution inside Phase 1 therefore means `cache.TryGetObjectMetadata`'s disk branch always misses and
+every call would silently take the existing live-ClrMD fallback branch — same code path this already
+has today for in-memory-mode/pre-v4-cache runs, just always-taken here instead of sometimes-taken.
+
+**Decision: don't fall back to live ClrMD — reuse the already-in-memory `SegmentIndexEntry[]` against the
+per-segment scratch files instead, deferring their deletion.** `ObjectAddressLookup`
+([ObjectAddressLookup.cs](../../../src/DumpDetective.Analysis/Indexing/ObjectAddressLookup.cs)) already
+solves exactly this problem post-`Finish()` with a two-level binary search: a small in-memory
+`SegmentIndexEntry[]` table narrows to a segment, then a binary search over that segment's `ObjectAddresses`
+slice finds the record index, and `ObjectMethodTables`/`ObjectSizes` are read at that same index
+([ObjectAddressLookup.cs:93-162](../../../src/DumpDetective.Analysis/Indexing/ObjectAddressLookup.cs#L93-L162)).
+The `SegmentIndexEntry[]` half of that already exists in memory during Phase 1 —
+`DiskBackedObjectIndexWriter.Build` builds it at
+[DiskBackedObjectIndexWriter.cs:573-587](../../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs#L573-L587),
+well before step 4's walk runs. The only real blocker is that `ConcatenateScratchFiles` deletes each
+per-segment `Address`/`MethodTable`/`Size` scratch file immediately after copying it into the container
+stream ([DiskBackedObjectIndexWriter.cs:1427](../../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs#L1427))
+— by the time the walk runs, the source files are already gone even though the in-memory segment table
+describing them survives.
+
+Fix: when `buildStageB` is true, skip deleting `segAddrScratchFiles`/`segMtScratchFiles`/`segSizeScratchFiles`
+during concatenation, and do point lookups directly against those per-segment files during Stage B's
+metadata-resolution pass — the same `FindSegment`/`FindRecord` binary-search logic
+`ObjectAddressLookup` already has, actually *simpler* here since each per-segment scratch file is
+self-contained (record indices start at 0 for that segment, no `FirstRecordIndex`-relative offset math
+needed the way the merged container column requires). Delete the three scratch-file arrays once Stage
+B's metadata pass completes, instead of immediately after concatenation.
+
+This avoids all three costs the live-ClrMD fallback would have paid: no `heap.GetObject` calls, no new
+in-memory address→metadata structure (reuses the segment table that's already built), and no changes to
+`CacheContainerWriter` or its in-progress stream (the per-segment scratch files are read directly,
+independent of what's already been copied into the container). It also doesn't need `ObjectAddressLookup`
+itself touched — a new, small sibling reader over per-segment files, sharing its binary-search shape, is
+enough. **Pending:** confirm per-segment scratch files support the same within-segment address
+monotonicity `ObjectAddressLookup`'s doc comment already validated for the merged case (expected to hold
+trivially, since the merged column is just these same per-segment files concatenated in order) and pick
+`FileStream.Seek`+`Read` vs. a small `MemoryMappedFile` per segment for the point-read itself — moved to
+§10.8.
+
+### 10.2 Placement in the Phase 1 pipeline — resolved
+
+Runs once, in the existing walk slot (§2 step 4), replacing that step's call to
+`IncrementalReachableWalker.Walk` with the unified walker, `buildStageB` passed through from §10.3's
+gating.
+
+The successors-source placement question this section previously left pending is resolved by reading
+the call site directly: `ForwardEdgeLooseFileReader.TryOpen` already runs successfully at this exact
+point today, against step 3's loose, not-yet-merged forward-edge files
+([DiskBackedObjectIndexWriter.cs:769-799](../../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs#L769-L799)) —
+step 6 (`WriteForwardIndexSections`, which merges those loose files into the container and deletes them)
+runs *after* this call, not before. Stage A's shipped walk is proof this works. No step-ordering change
+needed; the unified walker's `buildStageB == true` mode reuses `walkSuccessors` exactly as constructed
+today, unchanged.
+
+### 10.3 Gating — shipped (Batch 2a), narrower than §3's original design
+
+**Shipped:** both marker interfaces exist and are applied to all 8 analyzers listed below (with the
+`StaticRootLeakDetector` name correction). The four-hop plumbing chain is wired end to end —
+`BuildHeapIndexStage` now passes `state.ActiveAnalyzers` and
+`state.Resolved.MemoryLeak.EnableExactDominatorTree` through
+`IHeapIndexBuilder.PrebuildHeapIndex` → `HeapAnalysisCache`/`HeapIndexCache.PrebuildHeapIndex` →
+`IObjectIndexWriter.Build`/`DiskBackedObjectIndexWriter.Build`. All new parameters have safe defaults
+(`null`/`false`) so every pre-existing caller — benchmarks, discrepancy tests — keeps compiling
+unchanged; only `BuildHeapIndexStage` (the one production call site) passes real values. (A third
+parameter, the memory budget, was threaded through this same chain when Batch 2a first shipped —
+removed along with `ExactDominatorTreeBudget` itself once the budget review concluded it should be
+dropped; see the top-of-doc status summary and §10.4/§10.8.)
+
+**Narrower than §3's original design, deliberately:** only `buildStageB` is actually computed and
+consumed —
+
+```csharp
+bool buildStageB =
+    reverseEdgeExtractor is not null       // Stage A actually running — its own existing gate
+    && !SkipDominatorIndexBuild
+    && enableExactDominatorTree
+    && (activeAnalyzers?.Any(a => a is IRequiresDominatorTreeIndex) ?? false);
+```
+
+`IRequiresReachableGraphIndex` is implemented by every listed analyzer but **not yet consumed** —
+Stage A's own construction stays unconditional (gated only by `SkipReverseIndexBuild`, unchanged), not
+`wantsReachableGraph`-gated as §3 originally specified. Making Stage A itself skippable when no analyzer
+wants it is a real, separate change to already-shipped behavior, deliberately deferred rather than
+bundled into this pass.
+
+§3's `wantsReachableGraph`/`wantsExactTree`/`buildStageA`/`buildStageB` pseudocode, and the
+`IRequiresReachableGraphIndex`/`IRequiresDominatorTreeIndex` marker interfaces it depends on, **didn't
+exist in code before this pass** — confirmed absent from the codebase at the time of scoping. Today's
+prior gating was a single, simpler flag, `SkipReverseIndexBuild`
+([DiskBackedObjectIndexWriter.cs:174-176](../../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs#L174-L176)),
+with no analyzer-based decision at all — Stage A's walk always runs whenever the reverse index isn't
+explicitly skipped.
+
+**Marker interfaces — decided.** Two empty tag interfaces (no members needed; §3's gating only ever does
+`activeAnalyzers.Any(a => a is ...)`), placed in `DumpDetective.Analysis.Pipeline` alongside
+`IHeapIndexScanParticipant`/`IParallelHeapIndexScanParticipant`
+([IParallelHeapIndexScanParticipant.cs](../../../src/DumpDetective.Analysis/Pipeline/IParallelHeapIndexScanParticipant.cs)) —
+same assembly as every analyzer class that will implement them, same opt-in convention.
+
+**Analyzer name correction, found while confirming this section against real code.** §3's consumer
+lists mostly check out — `DominatorAnalyzer`, `GCRootAnalyzer`, `FinalizableObjectAnalyzer`,
+`EventLeakAnalyzer`, `ReferenceChainAnalyzer`, `TimerLeakAnalyzer`, `CollectionAnalyzer` all exist under
+those exact names — but **`StaticRootLeakAnalyzer` doesn't exist**; the real class is
+`StaticRootLeakDetector`
+([StaticRootLeakDetector.cs:12](../../../src/DumpDetective.Analysis/Analyzers/StaticRootLeakDetector.cs#L12)).
+§3's two consumer lists should read `StaticRootLeakDetector` throughout, not `StaticRootLeakAnalyzer`.
+
+**Plumbing chain to reach `DiskBackedObjectIndexWriter.Build` — decided, four hops, all confirmed by
+reading the actual call chain (not assumed from the design doc):**
+
+1. [BuildHeapIndexStage.cs:19-65](../../../src/DumpDetective.Cli/Pipeline/Stages/BuildHeapIndexStage.cs#L19-L65) —
+   `state.ActiveAnalyzers` and `state.Resolved.MemoryLeak.EnableExactDominatorTree`
+   (`ResolvedExecutionOptions.MemoryLeak: RetentionOptions`) are both already resolved and sitting on
+   `state` by the time this stage runs — `state.ActiveAnalyzers` is even read a few lines further down
+   in this same method, just after the index-build call. No new resolution work needed, only passing
+   what's already there into the `PrebuildHeapIndex` call two lines above where it's currently omitted.
+2. `IHeapIndexBuilder.PrebuildHeapIndex`
+   ([IHeapIndexBuilder.cs:20-24](../../../src/DumpDetective.Analysis/Cache/IHeapIndexBuilder.cs#L20-L24)) —
+   add two parameters: `IReadOnlyList<IAnalyzer> activeAnalyzers`, `bool enableExactDominatorTree`. Passing
+   the single bool rather than the whole `RetentionOptions` keeps this indexing-layer interface from
+   depending on option fields it has no other reason to know about.
+3. `HeapAnalysisCache.PrebuildHeapIndex`
+   ([HeapAnalysisCache.cs:138-146](../../../src/DumpDetective.Analysis/Cache/HeapAnalysisCache.cs#L138-L146))
+   and `HeapIndexCache.PrebuildHeapIndex`
+   ([HeapIndexCache.cs:31-73](../../../src/DumpDetective.Analysis/Cache/HeapIndexCache.cs#L31-L73)) — pure
+   pass-through at both layers, same two new parameters threaded to the next call.
+4. `IObjectIndexWriter.Build`/`DiskBackedObjectIndexWriter.Build`
+   ([DiskBackedObjectIndexWriter.cs:74-79](../../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs#L74-L79)) —
+   same two new parameters; §3's pseudocode is implemented here, replacing the current
+   `SkipReverseIndexBuild`-only condition around `reverseEdgeExtractor`'s construction. A new
+   `SkipDominatorIndexBuild` env-flag field is added here too, mirroring the existing
+   `SkipRootIndexBuild`/`SkipReverseIndexBuild`/`SkipForwardIndexBuild` pattern
+   ([DiskBackedObjectIndexWriter.cs:37-53](../../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs#L37-L53)),
+   for the `!SkipDominatorIndexBuild` term in `wantsReachableGraph`. `buildStageA`/`buildStageB` computed
+   here feed directly into the unified walker's `reverseEdgeExtractor`/`buildCsr` parameters (§10.1) at
+   the existing call site.
+
+**Resolved: landed together with §10.4, per the decision recorded here previously.** `buildStageB` now
+feeds directly into the unified walker's `buildCsr` parameter, and a real consumer
+(`BuildAndPersistDominatorTree`, §10.4) reads and persists the result — gating is no longer inert.
+
+**Smaller pending item found in the same pass, not blocking either option above:**
+`HeapIndexCache.PrebuildHeapIndex`'s early-return fast path
+(`if (_heapIndex is not null) return _heapIndex;`,
+[HeapIndexCache.cs:37-38](../../../src/DumpDetective.Analysis/Cache/HeapIndexCache.cs#L37-L38)) means a
+second `PrebuildHeapIndex` call on the same `HeapAnalysisCache` instance with a *different*
+`activeAnalyzers`/`enableExactDominatorTree` silently reuses whatever the first call decided, gating
+included. Not reachable through the CLI's normal single-dump-per-cache-instance usage today, but worth a
+one-line note or assert if an embedder/test ever reuses a cache instance across differently-gated runs.
+
+### 10.4 Persistence — shipped in full (Batch 2a + Batch 2b)
+
+**Shipped (Batch 2a):** `DiskBackedObjectIndexWriter.Build` now runs Stage B end to end when
+`buildStageB` is true — `BuildAndPersistDominatorTree`
+([DiskBackedObjectIndexWriter.cs](../../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs)),
+called right after `DominatorReachableAddressWriter.Write`, resolves each reachable node's
+`MethodTable`/`ShallowSize` via `ScratchFileObjectMetadataLookup` (falling back to live ClrMD if the
+scratch files can't be opened), resolves `GenerationTag` via `ReachableGraphBuilder.ResolveGenerationTag`
+(now `internal`, shared with Phase 2's path), builds a `ReachableGraph`, runs
+`DominatorTreeComputer.Compute` (which already runs `LeafFolder.Fold` internally), translates `idom[]`
+back to addresses (folded leaves resolve to their one real predecessor directly, virtual-root children
+to a `0` sentinel), and persists via the now-split `DominatorTreeIndexWriter.WriteImmediateDominatorAddresses`.
+The deferred `Address`/`MethodTable`/`Size` scratch files are deleted right after, regardless of
+outcome (success or exception).
+
+**Resolved: the Stage-A-corruption risk this section originally flagged here is fixed, not just
+documented.** `ExactDominatorTreeBudget` bounded a Phase-2-only walk Stage A never participated in —
+tripping it just meant "no exact tree this run." Once `buildCsr: true` and Stage A's
+`reverseEdgeExtractor` started running in the *same* walk (this section, Batch 2a), a budget trip
+aborted the whole walk while edges already streamed to `reverseEdgeExtractor` stayed recorded, leaving
+Stage A's reverse-edge index silently incomplete. The budget review (top-of-doc status summary,
+§10.8) concluded the right fix wasn't recalibrating the model but removing it: `ExactDominatorTreeBudget`
+is deleted, `DiskBackedObjectIndexWriter.Build`'s walk phase now has its own try/catch (matching every
+other satellite section's existing isolation pattern) that discards Stage A's partial state on *any*
+walk failure rather than persisting it incomplete, and the one correctness invariant worth keeping —
+never silently overflow the `int`-indexed arrays — is enforced at its actual root cause
+(`ChunkedBuffer<T>.Add`) instead of a periodic byte-cost estimate.
+
+§5 originally framed the child index and metadata rollup as "new, no prior art to adapt." That
+undersold what was actually available — `DominatorTreeComputer.Compute` already built the child CSR
+internally (just discarded on return), and the per-type rollup logic already existed in
+`DominatorAnalyzer`. Both are now shipped.
+
+**Shipped (Batch 2b): the dominator child index and `DominatorTreeMetadata`.**
+New `CacheSectionId` values 23-25: `DominatorChildOffsets`, `DominatorChildAddresses`,
+`DominatorTreeMetadata`.
+
+**The re-keying question from earlier drafts — resolved, and cheaper than expected.**
+`DominatorTreeComputeResult.ChildOffsets`/`ChildTargets` (Batch 1) are indexed by *reduced* id, not
+address — but every other section here is row-aligned with `DominatorReachableAddresses`' sorted
+order. Rather than have each writer re-derive that address order independently (which
+`DominatorTreeIndexWriter.WriteImmediateDominatorAddresses` used to do, via its own internal
+`Array.Sort` of `(Address, DominatorAddress)` tuples), the row mapping is now computed **once**, in
+`DominatorRowMapping.Compute` — N binary searches against `ReachableGraphWalkResult.ReachableAddresses`,
+which is already sorted, so this doesn't re-sort anything, only locates where each node already sits.
+`DominatorTreeIndexWriter` was simplified to take a pre-built `ulong[] dominatorAddressesByRow` and
+just write it — no more internal sort. `DominatorChildIndexBuilder.Build` reuses that same row mapping
+to merge `tree.ChildOffsets`/`ChildTargets` (real dominator-tree edges) with
+`fold.FoldedLeafOffsets`/`FoldedLeafOldIds` (folded leaves, §10.5, included as ordinary children per
+§5's original motivation) into one row-ordered CSR, via the same two-phase counting sort used
+everywhere else in this pipeline. Net effect: one shared O(N log N) pass instead of two separate ones.
+- **The `int` vs. `long` offsets question (§10.8) is resolved as a consequence of the earlier budget
+  fix, not new work.** Total child-index entries ≤ reduced edges + folded-leaf count ≤ the original
+  edge count, and `ChunkedBuffer<T>.Add`'s overflow guard (from the budget-removal fix) already
+  guarantees that count fits safely in `int`. `int[]` offsets are safe by construction here, not by a
+  fresh check.
+- Folded leaves' addresses appear as ordinary child entries in their surviving parent's row, exactly
+  as §5 originally wanted — covered by `DominatorChildIndexBuilderTests`.
+- The virtual root itself has no row (no address to key one on) — its direct children (real GC roots)
+  are already identifiable via `DominatorImmediateDominatorAddresses`' `0` sentinel.
+- `DominatorTreeMetadata` (JSON: whole-tree total + per-`MethodTable` rollup) is computed by a new
+  shared helper, `DominatorRetainedBytesRollup.Compute` — extracted from
+  `DominatorAnalyzer.TryComputeExactDominatorTree`'s per-type loop so both Phase 1 (this section) and
+  Phase 2 (unchanged until §10.7) use the exact same aggregation instead of two copies drifting apart.
+- New minimal readers, `DominatorChildIndexReader`/`DominatorTreeMetadataReader` — deliberately
+  bare (open the section, binary-search a row, slice/deserialize). The richer query surface
+  (`EnumerateRetainedSet`, `TryGetRetainedBytes`'s subtree-sum walk, the `IDominatorTreeProvider`
+  facade) is still Batch 3 (§10.6), not built here — this batch is "persist and read back correctly,"
+  not "consume."
+- New tests: `DominatorChildIndexBuilderTests` (the merge algorithm, `ClrHeap`-independent, same
+  synthetic-graph style as `DominatorTreeComputerTests`), `DominatorChildIndexTests`/
+  `DominatorTreeMetadataTests` (format round-trip, mirroring `DominatorTreeIndexTests`).
+
+**Prior-art audit that motivated all of the above — still accurate, kept for context:**
+
+**1. `DominatorTreeIndexWriter`/`DominatorTreeIndexReader`/`DominatorTreeIndexTests` already existed and
+already worked — they were built for D7's abandoned "compute in Phase 2, append after `Finish()`"
+design and never deleted.**
+[DominatorTreeIndexWriter.cs](../../../src/DumpDetective.Analysis/Indexing/Dominator/DominatorTreeIndexWriter.cs)
+writes `DominatorReachableAddresses` + `DominatorImmediateDominatorAddresses` as a sorted-by-address
+pair;
+[DominatorTreeIndexReader.cs](../../../src/DumpDetective.Analysis/Indexing/Dominator/DominatorTreeIndexReader.cs)
+binary-searches both and already implements `TryGetImmediateDominator(address, out dominatorAddress)`
+correctly; [DominatorTreeIndexTests.cs](../../../tests/DumpDetective.Tests/Unit/Indexing/DominatorTreeIndexTests.cs)
+round-trip-tests the format. The reader needed **no change at all** across both batches — `TryOpen`
+already opens the two sections independently and doesn't care which writer produced which, or how.
+- Folded leaves get a `DominatorImmediateDominatorAddresses` entry too: their "dominator address" is
+  their one real predecessor's address, resolved directly — a folded leaf's predecessor can never
+  itself be folded, since a folded node has out-degree 0 by definition and therefore can't be anyone's
+  predecessor, so no chained resolution is needed.
+- Nodes seeded directly from a GC root (LT's virtual-root children) have no real dominator address;
+  written as a `0` sentinel, consistent with how "no value" is represented elsewhere in this format.
+- Two stale doc comments were fixed as part of Batch 2a, both pre-dating Stage A's proof that running
+  everything before `Finish()` avoids D7's "needs a container rewrite" premise: `DominatorTreeIndexWriter`'s
+  class comment, and `CacheSectionId.DominatorReachableAddresses`'s own XML doc.
+
+**2. The dominator child index was already built in memory by `DominatorTreeComputer.Compute` and thrown
+away — it didn't need a new algorithm, only a return value.** `childOffsets`/`childTargets`
+([DominatorTreeComputer.cs:110-121](../../../src/DumpDetective.Analysis/Traversal/Dominator/DominatorTreeComputer.cs#L110-L121))
+were the exact dominator-tree parent→children CSR §5 asked for — built via the same counting-sort
+pattern as everything else in this file, previously used only internally for the preorder
+traversal/retained-bytes rollup, then discarded when `Compute` returned. Exposing them on
+`DominatorTreeComputeResult` (Batch 1) was the only change needed on the compute side; Batch 2b's
+`DominatorChildIndexBuilder` is what actually re-keys them into the persisted form described above.
+
+**Where this runs.** All of this belongs inside `DiskBackedObjectIndexWriter.Build`'s step 4, right
+after `ReachableGraphWalker.Walk(..., buildCsr: true, ...)` returns (§10.1/§10.3), before `Finish()`.
+`DominatorTreeComputer.Compute`'s retained-bytes rollup needs each reachable node's shallow size — which
+`WalkWithCsr` doesn't resolve (it only builds the graph structure); today that resolution happens in
+`ReachableGraphBuilder.Build`'s post-walk loop via `cache.TryGetObjectMetadata`, unusable mid-Phase-1-build
+for the reasons §10.1 already covers in depth. This is the same problem §10.1 already designed a fix
+for (reuse the in-memory `SegmentIndexEntry[]` against the not-yet-deleted per-segment scratch files) —
+that fix is a hard prerequisite for §10.4, not a parallel, independently-schedulable piece of work.
+
+**Shipped (Batch 1): the fix itself —
+[ScratchFileObjectMetadataLookup.cs](../../../src/DumpDetective.Analysis/Indexing/ScratchFileObjectMetadataLookup.cs) —
+same two-level binary search as `ObjectAddressLookup`, but takes an explicit
+`IReadOnlyList<ScratchSegmentSource>` (a `SegmentIndexEntry` paired with its own three scratch-file
+paths) instead of reopening a finalized container, and searches each segment's own scratch file with
+local (0-based) record indices instead of `FirstRecordIndex`-relative ones, since these files were
+never concatenated. Uses `MemoryMappedFile` per segment (resolves the mmap-vs-`FileStream.Seek+Read`
+question §10.8 had left open, in mmap's favor — consistent with every other measured comparison in this
+doc). Per-segment open failures are skipped, not fatal, matching every other optional-satellite
+contract. **Not yet wired in**: `DiskBackedObjectIndexWriter.Build` still deletes the per-segment
+scratch files immediately after concatenation — deferring that deletion when Stage B wants them, and
+building the `ScratchSegmentSource[]` array from the writer's existing per-segment loop, is Batch 2
+work (needs `buildStageB` to exist first, per §10.3).
+
+### 10.5 Folded-leaf CSR — shipped
+
+`LeafFoldResult` previously exposed only the aggregate `FoldedBytesByNewId`
+([LeafFolder.cs:349](../../../src/DumpDetective.Analysis/Traversal/Dominator/LeafFolder.cs#L349)), not
+which old-ids were folded into which surviving parent. Implemented as designed: `LeafFolder.Fold` now
+also builds `FoldedLeafOffsets`/`FoldedLeafOldIds`, a `(parentNewId → folded old-ids)` CSR, via the same
+two-phase counting-sort shape `Fold` already uses for the reduced forward CSR a few lines later — a
+first pass counts foldable children per surviving parent (added to the same loop that already fills
+`foldedBytesByNewId`), a second pass fills `FoldedLeafOldIds` via cursor-based redistribution. Needed
+for two things: `EnumerateRetainedSet` including folded leaves as children (§5's original motivation),
+and §10.4's child-index re-keying pass, which needs every folded leaf's address merged into its
+parent's child list.
+
+**Deliberately not done yet:** `FoldedBytesByNewId` is *not* dropped — its one live consumer
+(`DominatorTreeComputer`'s shallow-size calculation) isn't touched by this change. Per §6/the original
+plan it becomes redundant once something actually reads the new CSR instead; that removal is deferred
+to whichever future change is that first real reader (§10.4's child-index writer, in Batch 2), not done
+speculatively here. Covered by two new `LeafFolderTests` cases (leaves folded under one parent vs.
+several under a shared parent, plus the zero-folds case).
+
+### 10.6 Reader side — shipped in full (Batch 3)
+
+`DominatorTreeIndexReader` (§10.4) already covered the `TryGetImmediateDominator` half; Batch 2b added
+the bare `DominatorChildIndexReader`/`DominatorTreeMetadataReader`. **Batch 3 adds the fourth persisted
+column and the facade:**
+- **New `DominatorRetainedBytes` section** (`CacheSectionId = 26`) — exact retained bytes per row,
+  computed in Phase 1 (`tree.RetainedBytes[newId]`, or a folded leaf's own shallow size) and persisted
+  so `TryGetRetainedBytes` is a binary search, not a per-query subtree walk. This wasn't in the original
+  §10.6 plan — the scoping pass for Batch 3 found that walking the child index per query would be
+  needlessly expensive for anything near the tree's root, when the exact value was already sitting in
+  memory during Phase 1 and just never written down. `DominatorTreeIndexWriter`/`DominatorTreeIndexReader`
+  were extended (not replaced) to carry this as a second scalar column alongside idom, since both are
+  the same shape (one value per row) — the dominator child index stays its own class, since it's
+  structurally different (variable-length CSR, not a fixed column). Backward-compatible: a cache.bin
+  from Batch 2a/2b has idom but not this column, and the reader treats that as "unavailable," not
+  corrupt.
+- **`IDominatorTreeProvider`** (new interface, `DumpDetective.Core.Abstractions`, mirroring
+  `IBackwardReferenceProvider`'s/`IReachableAddressProvider`'s shape) — `TryGetImmediateDominator`,
+  `TryGetRetainedBytes`, `EnumerateRetainedSet` (an iterative child-index walk, streaming, no resident
+  array — this one *is* a real subtree walk, since listing the whole retained set can't be
+  precomputed the way the byte count can), `TotalRetainedBytes`, `TryGetRetainedBytesByMethodTable`.
+- **`DominatorTreeReaderProvider`** — the concrete facade wrapping all four readers (via
+  `DominatorTreeIndexReader`, `DominatorChildIndexReader`, `DominatorTreeMetadataReader`), so a caller
+  has one thing to null-check instead of three classes.
+- **`IHeapAnalysisCache.TryGetDominatorTreeProvider()`** + `DominatorTreeIndexCache`, mirroring
+  `DominatorReachableIndexCache`'s exact lazy-open-once pattern.
+
+### 10.7 `DominatorAnalyzer` migration — shipped (Batch 3)
+
+`TryComputeExactDominatorTree` (renamed `TryReadExactDominatorTree`) no longer runs
+`ReachableGraphBuilder.Build` → `DominatorTreeComputer.Compute` at all — it reads
+`cache.TryGetDominatorTreeProvider()` and looks up each report candidate's exact retained bytes via
+`TryGetRetainedBytesByMethodTable`. **This is what actually closes the double-computation problem
+flagged at the start of this whole thread**: Phase 2 no longer recomputes what Phase 1 already
+computed and persisted; it reads it. A missing provider (legacy pre-Stage-B cache.bin, Stage B not
+gated on, or a failed persist) degrades exactly like the old cap-exceeded/exception paths did — the
+heuristic result is returned unaffected, no fallback recompute.
+
+**Cleanup done alongside the migration**, since removing `DominatorAnalyzer`'s live-compute call site
+turned two things into confirmed dead code:
+- `ReachableGraphBuilder.Build` had exactly one caller in the whole codebase. Deleted; its
+  `ResolveGenerationTag` (purely live-ClrMD, no disk-cache dependency, still needed by
+  `BuildAndPersistDominatorTree`'s Phase 1 path) was pulled out into its own
+  `GenerationTagResolver`, since a class with no `Build` method left in it called "…Builder" would be
+  actively misleading.
+- `DominatorTreeResult`/`DominatorTreeMode`/`DominatorNodeSnapshot`/`DominatorTypeRollup` — the §10.8
+  pending item asking whether these D7-era models fit `IDominatorTreeProvider` is resolved as **no**:
+  the actual shipped report integration already uses a different, working shape
+  (`DominatorDomainResult.ExactRetainedBytesByTypeName`), and retrofitting the unused D7 models would
+  have meant changing a working report path for no functional gain. Deleted as dead code rather than
+  adopted.
+
+### 10.8 Pending — needs measurement before shipping
+
+- **`ExactDominatorTreeBudget` review — resolved: deleted, not recalibrated.** Batch 2a's wiring found
+  the model was worse than stale — a budget trip could silently corrupt Stage A's reverse-edge index,
+  not just skip Stage B. The review concluded no calibrated byte-cost model was worth keeping: it's
+  removed entirely, along with `RetentionOptions.ExactDominatorTreeMemoryBudgetBytes`. What replaced
+  it: `DiskBackedObjectIndexWriter.Build`'s walk phase now has its own failure isolation (any exception
+  discards Stage A's partial state and lets the rest of the index build continue, matching every other
+  satellite section's existing pattern), and `ChunkedBuffer<T>.Add` throws before silently overflowing
+  `int.MaxValue` instead of a periodic byte estimate trying to predict that in advance. No memory-usage
+  ceiling is enforced anymore — a reachable population large enough to actually exhaust memory now
+  fails as an ordinary OOM (caught by the same walk-phase isolation) rather than being pre-emptively
+  rejected by a heuristic. Real dumps measured so far peak at 6.42GB (§8) — comfortably below any
+  machine this runs on; an untested, much larger dump is the only scenario where this trade would
+  matter, and that scenario now fails safely (isolated, warned, rest of the build unaffected) rather
+  than either silently corrupting or being rejected by a stale heuristic.
+- **Dominator child index hub-overflow (§5) — measured, resolved: no capping needed.** Widest single
+  dominator-child-index row, measured via a full-scan of `childOffsetsByRow` right after
+  `DominatorChildIndexBuilder.Build` (no second pass — the CSR is already resident):
+
+  | Dump | Widest row's direct-child count | Total rows | Total child entries |
+  |---|---|---|---|
+  | 3.3GB | 178,804 | 6,686,490 | 6,469,153 |
+  | 25.6GB | 645,533 | 58,339,936 | 58,189,663 |
+
+  Both are small relative to total row count, and — unlike the reverse-edge index's
+  `MaxParentsPerChild` (§8.3), which had to worry about per-*bucket* sort-phase memory during the
+  build — a dominator child index row is just a contiguous slice of one on-disk `ulong[]`; reading it
+  back doesn't risk the sort-phase memory blowup §8.3's cap was guarding against. No hub-overflow
+  routing needed, consistent with §8.3's conclusion for the reverse-edge index.
+- **Perf re-measurement of the unified walker — measured; literal old-vs-new A/B no longer
+  reproducible.** The two-walker design §8.4 measured against was already deleted before this
+  measurement pass (§10.7 removed `ReachableGraphBuilder.Build`, the old Phase-2-only walker's only
+  caller), so there's no code left to run the old "two separate passes" side of the comparison
+  without reverting deleted work. What was measured instead — the unified walk's real wall-clock with
+  `buildCsr: true`, as part of the actual shipped Phase 1 pass:
+
+  | Dump | Unified walk (`buildCsr=true`) | Rest of `BuildAndPersistDominatorTree` | Total Phase 1 (Stage A+B) |
+  |---|---|---|---|
+  | 3.3GB (6,686,490 nodes) | 19,561 ms | metadata 8,118 ms + fold/LT 4,699 ms + row-map 1,077 ms + idom/retained persist 1,312 ms + child-index 1,259 ms + rollup 377 ms | 81,345 ms |
+  | 25.6GB (58,339,936 nodes) | 197,032 ms | metadata 55,802 ms + fold/LT 21,480 ms + row-map 11,813 ms + idom/retained persist 7,286 ms + child-index 7,129 ms + rollup 2,514 ms | 884,173 ms (~14m44s) |
+
+  The walk is a large but not dominant share of the total build (~24% at 3.3GB, ~22% at 25.6GB) —
+  affordable at both scales tested. Object counts: 14,620,162 (3.3GB), 87,104,236 (25.6GB).
+- **Mid-build metadata lookup — implemented, wired in (Batch 2a), and now measured.**
+  `ScratchFileObjectMetadataLookup` (§10.4) is built, wired into `DiskBackedObjectIndexWriter.Build`,
+  and unit-tested against synthetic scratch files; picked mmap over `FileStream.Seek`+`Read` per §8.4's
+  precedent. Metadata resolution itself took 8,118 ms (3.3GB) / 55,802 ms (25.6GB), see above.
+  **Within-segment address monotonicity — confirmed on both real dumps, no exceptions.** Every segment
+  in both dumps' scratch files (34 segments at 3.3GB, 60 at 25.6GB) verified strictly increasing —
+  `FindRecord`'s binary-search assumption, carried over from `ObjectAddressLookup`'s merged-column
+  case, holds for the per-segment scratch files too, not just synthetic test data.
+- **Child-index `int` vs. `long` offsets — resolved, no longer open.** Total child-index entries are
+  bounded by the original edge count, which `ChunkedBuffer<T>.Add`'s overflow guard (the budget-removal
+  fix, above) already guarantees fits safely in `int`. `int[]` offsets are safe by construction, not by
+  a fresh size-tier check.
+- **Child-index re-keying cost (§10.4) — measured, cheap.** `DominatorChildIndexBuilder.Build` + write:
+  1,259 ms (3.3GB) / 7,129 ms (25.6GB) — well under 10% of total Phase 1 build time at both scales, and
+  cheaper than the fold+LT phase it runs right after. The shared-row-mapping design's "one O(N log N)
+  pass instead of two" claim holds up in practice, not just in theory.
+- **`DominatorTreeResult`/`DominatorTreeMode` fit (§10.7) — resolved: they didn't fit, deleted.** The
+  actual shipped report path already uses a different, working shape
+  (`DominatorDomainResult.ExactRetainedBytesByTypeName`); the D7-era models were dead code and are gone.
+- **`IDominatorTreeProvider` query performance — unmeasured on a real dump.** `TryGetImmediateDominator`/
+  `TryGetRetainedBytes` are O(log N) binary searches, cheap by construction; `EnumerateRetainedSet` is a
+  genuine subtree walk with no upper bound on result size for an object near the tree's root. Whether
+  this matters in practice for `DominatorAnalyzer`'s actual query pattern (a handful of
+  `TryGetRetainedBytesByMethodTable` calls per run, no `EnumerateRetainedSet` calls at all yet — no
+  caller uses it) is unmeasured; revisit once a real caller for `EnumerateRetainedSet` exists (§9's
+  audit lists several candidates).
+
+---
+
+## 11. Open questions
+
+Everything from earlier drafts of this doc that's since been resolved has been folded into §4/§7/§8/§10
+above as shipped or decided state. What's actually still open (Stage B-specific pending items now live
+in §10.8, not duplicated here):
 
 - [ ] **The rare narrower cost case (§8.2):** for a run with no dominator-tree consumer active, the
       fair 3.3GB comparison (~1.8x) is trustworthy; the 25.6GB comparison (~0.70x, favoring Stage A) is
       not, given the memory-pressure confound (§8.5). Resolving cleanly may need a machine with more
-      headroom than this one has, or accepting the 3.3GB figure as the more reliable data point.
+      headroom than this one has, or accepting the 3.3GB figure as the more reliable data point. Note
+      this comparison's framing changes somewhat once §10.1 ships — with the walks unified, there's no
+      longer a standalone "reverse-edge index only" walk to compare against a standalone "Stage B only"
+      walk; both are the same walk with a mode flag.
 - [ ] Whether the `DenseIdMap`-vs-`Dictionary` wall-clock gap at 25GB and the reverse-edge index's
       extraction-cost jump are the same underlying memory-pressure effect — both show the same
       "far worse than data growth would predict" shape on this machine (§8.5).
-- [ ] Whether the dominator child index (Stage B) needs its own hub-overflow handling — a single
-      dominance-tree parent could, in principle, have an enormous number of direct children (§5).
-- [ ] `DominatorAnalyzer` should stop owning its own `TryComputeExactDominatorTree` build path and
-      become a normal reader-consumer like everyone else, once Stage B ships.
 - [ ] The garbage→reachable edge split specifically (§8.5) — separate from garbage→garbage noise —
       would size Stage A.5's useful output, though Stage A.5 itself is no longer believed necessary.

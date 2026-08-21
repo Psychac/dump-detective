@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing.Container;
 using DumpDetective.Analysis.Indexing.Dominator;
 using DumpDetective.Analysis.Indexing.ForwardIndex;
@@ -71,12 +72,30 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     private static readonly bool SkipSegmentIndexBuild =
         Environment.GetEnvironmentVariable("DD_SKIP_SEGMENT_INDEX_BUILD") == "1";
 
+    // Escape hatch for Stage B (§10.3, docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md):
+    // set DD_SKIP_DOMINATOR_INDEX_BUILD=1 to force buildStageB false regardless of what
+    // activeAnalyzers/enableExactDominatorTree say — same A/B-isolation contract as the other
+    // Skip*Build flags above.
+    private static readonly bool SkipDominatorIndexBuild =
+        Environment.GetEnvironmentVariable("DD_SKIP_DOMINATOR_INDEX_BUILD") == "1";
+
+    // §10.8 measurement pass (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md):
+    // set DD_PERF_DOMINATOR_STAGEB=1 to print, in one Phase 1 run, everything §10.8 still needs a
+    // real-dump number for — the unified walk's own wall-clock, each BuildAndPersistDominatorTree
+    // sub-phase's wall-clock (metadata resolution, fold+LT, row mapping, child-index re-keying,
+    // retained-bytes rollup), and the dominator child index's widest single row (hub-overflow
+    // sizing). All from the one existing buildStageB pass — no second walk or separate run needed.
+    private static readonly bool PerfLogDominatorStageB =
+        Environment.GetEnvironmentVariable("DD_PERF_DOMINATOR_STAGEB") == "1";
+
     public HeapIndexBuildResult Build(
         ClrHeap heap,
         CancellationToken cancellationToken,
         IProgress<AnalyzerProgressReport>? progress = null,
         string? dumpPath = null,
-        DumpSizeTier sizeTier = DumpSizeTier.Medium)
+        DumpSizeTier sizeTier = DumpSizeTier.Medium,
+        IReadOnlyList<IAnalyzer>? activeAnalyzers = null,
+        bool enableExactDominatorTree = false)
     {
         ArgumentNullException.ThrowIfNull(dumpPath, nameof(dumpPath));
         Stopwatch stopwatch = Stopwatch.StartNew();
@@ -167,7 +186,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 
         // Reverse-reference index: constructed here, but no longer fed during the per-object scan
         // below. It's populated after the scan completes by a BFS walk from the GC roots (see the
-        // IncrementalReachableWalker.Walk call right before WriteReverseIndexSections) — see
+        // ReachableGraphWalker.Walk call right before WriteReverseIndexSections) — see
         // docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §7 for why only
         // BFS-reachable objects getting entries is not a loss of accuracy for any current consumer.
         int reverseIndexBucketCount = ReverseIndexConstants.CalculateBucketCount(new FileInfo(dumpPath).Length);
@@ -183,6 +202,18 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         ForwardEdgeExtractor? forwardEdgeExtractor = SkipForwardIndexBuild
             ? null
             : new ForwardEdgeExtractor(forwardIndexBucketCount, indexDir);
+
+        // §10.3 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): Stage B only
+        // ever runs on top of Stage A actually running (reverseEdgeExtractor is not null is Stage A's
+        // own existing gate, §7) — a narrower, already-shipped-code-grounded version of §3's
+        // `canBuildReachableGraph` term. Deliberately does NOT gate Stage A's own construction above
+        // on `IRequiresReachableGraphIndex` — that would change already-shipped Stage A's behavior,
+        // which is out of scope here (see §10.3's note on this).
+        bool buildStageB =
+            reverseEdgeExtractor is not null
+            && !SkipDominatorIndexBuild
+            && enableExactDominatorTree
+            && (activeAnalyzers?.Any(a => a is IRequiresDominatorTreeIndex) ?? false);
 
         // heap.Segments is lazily resolved by ClrMD on first access — reported separately from
         // "preparing heap scan" above so a profiling run can attribute time to this specific
@@ -529,22 +560,48 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // deterministic and match memory-mode's segment-ordered output, and keeps each
         // column contiguous in the container so a reader that only needs MethodTable (type
         // aggregation) or Size (histograms) doesn't pay to read Address too.
+        // §10.1/§10.4: when Stage B wants them, the Address/MethodTable/Size scratch files are kept
+        // on disk past this point for ScratchFileObjectMetadataLookup — deleted explicitly once
+        // Stage B's metadata resolution finishes (see the reverseEdgeExtractor block below), instead
+        // of here.
         containerWriter.BeginSection(CacheSectionId.ObjectAddresses);
-        uint addrChecksum = ConcatenateScratchFiles(stream, segAddrScratchFiles, writeBuffer);
+        uint addrChecksum = ConcatenateScratchFiles(stream, segAddrScratchFiles, writeBuffer, deleteAfterCopy: !buildStageB);
         containerWriter.EndSection(objectCount, addrChecksum);
 
         containerWriter.BeginSection(CacheSectionId.ObjectMethodTables);
-        uint mtChecksum = ConcatenateScratchFiles(stream, segMtScratchFiles, writeBuffer);
+        uint mtChecksum = ConcatenateScratchFiles(stream, segMtScratchFiles, writeBuffer, deleteAfterCopy: !buildStageB);
         containerWriter.EndSection(objectCount, mtChecksum);
 
         containerWriter.BeginSection(CacheSectionId.ObjectSizes);
-        uint sizeChecksum = ConcatenateScratchFiles(stream, segSizeScratchFiles, writeBuffer);
+        uint sizeChecksum = ConcatenateScratchFiles(stream, segSizeScratchFiles, writeBuffer, deleteAfterCopy: !buildStageB);
         containerWriter.EndSection(objectCount, sizeChecksum);
 
         containerWriter.BeginSection(CacheSectionId.ObjectGenerations);
         uint genChecksum = ConcatenateScratchFiles(stream, segGenScratchFiles, writeBuffer);
         MarkAlloc("columnar scratch concatenation");
         containerWriter.EndSection(objectCount, genChecksum);
+
+        // §10.1/§10.4: build the (SegmentIndexEntry, scratch-file-paths) triples
+        // ScratchFileObjectMetadataLookup needs, mirroring the SegmentIndex satellite's own
+        // Start/End/FirstRecordIndex/RecordCount loop below — built here, before that satellite
+        // write, since it needs to exist regardless of whether SkipSegmentIndexBuild is set.
+        List<ScratchSegmentSource>? scratchSegmentSources = null;
+        if (buildStageB)
+        {
+            scratchSegmentSources = new List<ScratchSegmentSource>(segments.Length);
+            long cumulativeRecordIndex = 0;
+            for (int i = 0; i < segments.Length; i++)
+            {
+                long recordCount = segRecordCounts[i];
+                if (recordCount > 0)
+                {
+                    scratchSegmentSources.Add(new ScratchSegmentSource(
+                        new SegmentIndexEntry(segments[i].Start, segments[i].End, cumulativeRecordIndex, (int)recordCount),
+                        segAddrScratchFiles[i], segMtScratchFiles[i], segSizeScratchFiles[i]));
+                }
+                cumulativeRecordIndex += recordCount;
+            }
+        }
 
         // Capture the main heap scan elapsed time for HeapIndexBuildResult before satellite writes.
         // We keep the stopwatch running during satellite file writes so their progress reports
@@ -798,29 +855,100 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                 };
             }
 
-            IncrementalReachableWalker.Result walkResult;
+            // buildCsr: buildStageB — §10.3's gating decides whether Stage B's CSR gets built
+            // alongside Stage A's walk in this same pass (§10.1/§10.4).
+            // captureSortedAddresses: true — DominatorReachableAddressWriter below needs the sorted
+            // set regardless of whether Stage B ever runs.
+            //
+            // §10.8 Fix 1 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): the
+            // walk itself is the one place in this block with no isolation of its own — everything
+            // after it (DominatorReachableAddressWriter.Write, BuildAndPersistDominatorTree,
+            // WriteReverseIndexSections) already degrades gracefully on its own failure. If the walk
+            // throws (a genuine OOM, or ChunkedBuffer's int-overflow guard tripping on a graph too
+            // large to represent), every edge already streamed to reverseEdgeExtractor before that
+            // point is now unreliable — so on failure this discards the reverse-edge index for this
+            // dump entirely (same cleanup WriteReverseIndexSections's own catch already does for its
+            // failures) rather than ever persisting or reading from a silently partial one, and skips
+            // the rest of this block. Everything outside it (columnar sections, satellite sections,
+            // forward index, TypeAggregates) is unaffected and still gets written.
+            ReachableGraphWalkResult? walkResult = null;
+            Stopwatch? walkStopwatch = PerfLogDominatorStageB ? Stopwatch.StartNew() : null;
             try
             {
-                walkResult = IncrementalReachableWalker.Walk(walkRootAddresses, walkSuccessors, reverseEdgeExtractor, cancellationToken, progress);
+                try
+                {
+                    walkResult = ReachableGraphWalker.Walk(
+                        walkRootAddresses, walkSuccessors, reverseEdgeExtractor, buildCsr: buildStageB,
+                        captureSortedAddresses: true, cancellationToken, progress);
+                }
+                finally
+                {
+                    looseForwardReader?.Dispose();
+                }
             }
-            finally
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
             {
-                looseForwardReader?.Dispose();
+                satelliteWarnings.Add($"ReachableGraphWalk: {ex.GetType().Name}: {ex.Message}");
+
+                try { reverseEdgeExtractor.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { /* best-effort */ }
+                DeleteReverseIndexScratchFiles(indexDir, reverseIndexBucketCount);
+
+                if (buildStageB)
+                {
+                    DeleteScratchFiles(segAddrScratchFiles);
+                    DeleteScratchFiles(segMtScratchFiles);
+                    DeleteScratchFiles(segSizeScratchFiles);
+                }
             }
 
-            // §5 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): persist
-            // the walk's reachable-address set so "is this object reachable?" is answerable from
-            // disk without re-running the walk. DominatorReachableInDegree (also reserved in that
-            // section) is deliberately not persisted — it would duplicate the exact fan-in counts
-            // the reverse-edge index above already exposes via EnumerateChildCounts.
-            DominatorReachableAddressWriter.Write(containerWriter, walkResult.ReachableAddresses);
+            if (walkStopwatch is not null)
+            {
+                Console.Error.WriteLine($"[PERF] DominatorStageB: unified walk (buildCsr={buildStageB}) " +
+                    $"took {walkStopwatch.Elapsed.TotalMilliseconds:N0} ms, " +
+                    $"{(walkResult is null ? "failed" : $"{walkResult.NodeCount:N0} nodes")}");
+            }
 
-            MarkAlloc("reverse index (sort + write)");
-            string? reverseIndexWarning = WriteReverseIndexSections(
-                containerWriter, indexDir, reverseIndexBucketCount, reverseEdgeExtractor,
-                cancellationToken, progress, stopwatch);
-            if (reverseIndexWarning is not null)
-                satelliteWarnings.Add(reverseIndexWarning);
+            if (walkResult is not null)
+            {
+                // §5 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): persist
+                // the walk's reachable-address set so "is this object reachable?" is answerable from
+                // disk without re-running the walk. DominatorReachableInDegree (also reserved in that
+                // section) is deliberately not persisted — it would duplicate the exact fan-in counts
+                // the reverse-edge index above already exposes via EnumerateChildCounts.
+                DominatorReachableAddressWriter.Write(containerWriter, walkResult.ReachableAddresses);
+
+                // §10.4 Batch 2a: Stage B's fold + LT + idom persistence, using the CSR the walk
+                // above just built. The deferred Address/MethodTable/Size scratch files (kept on
+                // disk by the deleteAfterCopy: !buildStageB calls above) are deleted here regardless
+                // of outcome — this is the only place that still needs them.
+                if (buildStageB)
+                {
+                    try
+                    {
+                        BuildAndPersistDominatorTree(
+                            containerWriter, heap, walkResult, scratchSegmentSources!, cancellationToken, progress);
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex)
+                    {
+                        satelliteWarnings.Add($"DominatorTree: {ex.GetType().Name}: {ex.Message}");
+                    }
+                    finally
+                    {
+                        DeleteScratchFiles(segAddrScratchFiles);
+                        DeleteScratchFiles(segMtScratchFiles);
+                        DeleteScratchFiles(segSizeScratchFiles);
+                    }
+                }
+
+                MarkAlloc("reverse index (sort + write)");
+                string? reverseIndexWarning = WriteReverseIndexSections(
+                    containerWriter, indexDir, reverseIndexBucketCount, reverseEdgeExtractor,
+                    cancellationToken, progress, stopwatch);
+                if (reverseIndexWarning is not null)
+                    satelliteWarnings.Add(reverseIndexWarning);
+            }
         }
 
         // Forward-reference index Phase C: merge the loose files Phase B already sorted into the
@@ -1006,6 +1134,194 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         }
 
         return warnings;
+    }
+
+    /// <summary>
+    /// §10.4 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md) — Batch 2a: Stage
+    /// B's fold + LT + idom persistence, run entirely inside Phase 1 using the CSR
+    /// <paramref name="walkResult"/> just built. Per-node <c>MethodTable</c>/<c>Size</c> resolution
+    /// goes through <see cref="ScratchFileObjectMetadataLookup"/> (§10.1) rather than
+    /// <c>cache.TryGetObjectMetadata</c>, which is unusable before <see cref="CacheContainerWriter.Finish"/>
+    /// writes a complete TOC; falls back to live ClrMD if the scratch files can't be opened, the same
+    /// graceful-degradation contract as everywhere else in this pipeline.
+    ///
+    /// Persists <c>DominatorImmediateDominatorAddresses</c> only — the dominator child index and
+    /// <c>DominatorTreeMetadata</c> rollup (§10.4's other two sections) are Batch 2b, not yet wired in.
+    ///
+    /// This method is only ever reached once <see cref="ReachableGraphWalker.Walk"/> has already
+    /// returned successfully (its caller checks that first) — so by the time this runs,
+    /// <c>reverseEdgeExtractor</c>'s data is already complete and correct regardless of anything that
+    /// happens in here. A failure in this method (including
+    /// <see cref="Traversal.Dominator.ChunkedBuffer{T}"/>'s <c>int</c>-overflow guard, or any other
+    /// exception) is caught by the caller and only skips Stage B's persistence — it can no longer
+    /// touch Stage A's already-good data (§10.8's "review the budget" fix).
+    /// </summary>
+    private static void BuildAndPersistDominatorTree(
+        CacheContainerWriter containerWriter,
+        ClrHeap heap,
+        ReachableGraphWalkResult walkResult,
+        IReadOnlyList<ScratchSegmentSource> scratchSegmentSources,
+        CancellationToken cancellationToken,
+        IProgress<AnalyzerProgressReport>? progress)
+    {
+        var methodTables = new ulong[walkResult.NodeCount];
+        var shallowSizes = new ulong[walkResult.NodeCount];
+        var generationTags = new GenerationTag[walkResult.NodeCount];
+
+        Stopwatch? phaseStopwatch = PerfLogDominatorStageB ? Stopwatch.StartNew() : null;
+        void LogPhase(string phase)
+        {
+            if (phaseStopwatch is null)
+                return;
+            Console.Error.WriteLine($"[PERF] DominatorStageB: {phase} took {phaseStopwatch.Elapsed.TotalMilliseconds:N0} ms");
+            phaseStopwatch.Restart();
+        }
+
+        var scanCounter = new ObjectScanCounter("computing exact dominator tree (resolving node metadata)", progress);
+        if (ScratchFileObjectMetadataLookup.TryOpen(scratchSegmentSources, out ScratchFileObjectMetadataLookup? metadataLookup))
+        {
+            using (metadataLookup)
+            {
+                for (int id = 0; id < walkResult.NodeCount; id++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    scanCounter.Tick();
+
+                    ulong address = walkResult.Addresses[id];
+                    if (metadataLookup!.TryGetEntry(address, out ulong methodTable, out ulong size))
+                    {
+                        methodTables[id] = methodTable;
+                        shallowSizes[id] = size;
+                    }
+
+                    generationTags[id] = GenerationTagResolver.Resolve(heap, address);
+                }
+            }
+        }
+        else
+        {
+            // Scratch files unopenable (already deleted, I/O error) — fall back to live ClrMD
+            // (§10.1's documented fallback contract).
+            for (int id = 0; id < walkResult.NodeCount; id++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                scanCounter.Tick();
+
+                ulong address = walkResult.Addresses[id];
+                ClrObject obj = heap.GetObject(address);
+                if (obj.IsValid && obj.Type is not null)
+                {
+                    methodTables[id] = obj.Type.MethodTable;
+                    shallowSizes[id] = obj.Size;
+                }
+
+                generationTags[id] = GenerationTagResolver.Resolve(heap, address);
+            }
+        }
+        scanCounter.Complete();
+        LogPhase("metadata resolution (ScratchFileObjectMetadataLookup / live-ClrMD fallback)");
+
+        var graph = new ReachableGraph(walkResult, methodTables, shallowSizes, generationTags);
+        DominatorTreeComputeResult tree = DominatorTreeComputer.Compute(graph, cancellationToken);
+        LeafFoldResult fold = tree.LeafFold;
+        int n = graph.NodeCount;
+        LogPhase("fold + Lengauer-Tarjan (DominatorTreeComputer.Compute)");
+
+        // §10.4 Batch 2b: each reachable node's row in the already-written, sorted
+        // DominatorReachableAddresses column — computed once here and reused for both the idom
+        // section below and the dominator child index, instead of each writer re-deriving its own
+        // address-sorted order (DominatorTreeIndexWriter used to sort its own tuples internally;
+        // it's since been simplified to trust this row order instead).
+        int[] oldIdToRow = DominatorRowMapping.Compute(graph, walkResult.ReachableAddresses);
+        LogPhase("row mapping (DominatorRowMapping.Compute)");
+
+        // Reverse map: which surviving parent (new id) did each folded-away old id fold into? Built
+        // once here rather than per-lookup, since every folded leaf needs its dominator address
+        // resolved below (§10.4/§10.5 — a folded leaf's immediate dominator is its one real
+        // predecessor, directly, with no chained resolution needed).
+        var parentNewIdOfFoldedOldId = new int[n];
+        Array.Fill(parentNewIdOfFoldedOldId, -1);
+        for (int parentNewId = 0; parentNewId < fold.ReducedNodeCount; parentNewId++)
+        {
+            for (int e = fold.FoldedLeafOffsets[parentNewId]; e < fold.FoldedLeafOffsets[parentNewId + 1]; e++)
+                parentNewIdOfFoldedOldId[fold.FoldedLeafOldIds[e]] = parentNewId;
+        }
+
+        var dominatorAddressesByRow = new ulong[n];
+        for (int oldId = 0; oldId < n; oldId++)
+        {
+            int newId = fold.OldToNewId[oldId];
+            ulong dominatorAddress;
+            if (newId >= 0)
+            {
+                int dominatorNewId = tree.Idom[newId];
+                dominatorAddress = dominatorNewId == tree.VirtualRoot
+                    ? 0UL
+                    : graph.Addresses[fold.NewToOldId[dominatorNewId]];
+            }
+            else
+            {
+                int parentNewId = parentNewIdOfFoldedOldId[oldId];
+                dominatorAddress = graph.Addresses[fold.NewToOldId[parentNewId]];
+            }
+
+            dominatorAddressesByRow[oldIdToRow[oldId]] = dominatorAddress;
+        }
+
+        DominatorTreeIndexWriter.WriteImmediateDominatorAddresses(containerWriter, dominatorAddressesByRow);
+
+        // §10.4 Batch 3: exact retained bytes per row — same "newId >= 0 ? tree.RetainedBytes[newId]
+        // : shallow size" rule DominatorRetainedBytesRollup uses, so a folded leaf's retained bytes
+        // (its subtree is just itself) match what the whole-tree rollup below already assumes.
+        // Persisted so IDominatorTreeProvider.TryGetRetainedBytes is a binary search, not a
+        // per-query subtree walk over the child index.
+        var retainedBytesByRow = new ulong[n];
+        for (int oldId = 0; oldId < n; oldId++)
+        {
+            int newId = fold.OldToNewId[oldId];
+            ulong retainedBytes = newId >= 0 ? tree.RetainedBytes[newId] : graph.ShallowSizes[oldId];
+            retainedBytesByRow[oldIdToRow[oldId]] = retainedBytes;
+        }
+
+        DominatorTreeIndexWriter.WriteRetainedBytes(containerWriter, retainedBytesByRow);
+        LogPhase("idom + retained-bytes persistence (per-row rewrite + write)");
+
+        // §10.4 Batch 2b: the dominator child index — same row order as above.
+        DominatorChildIndexBuildResult childIndex = DominatorChildIndexBuilder.Build(graph, tree, oldIdToRow);
+        DominatorChildIndexWriter.Write(containerWriter, childIndex.ChildOffsetsByRow, childIndex.ChildAddressesByRow);
+        LogPhase("child-index re-keying (DominatorChildIndexBuilder.Build + write)");
+
+        if (PerfLogDominatorStageB)
+        {
+            // §10.8 hub-overflow sizing: the widest single row in the dominator child index — the
+            // real-dump number needed to decide whether a dominance-tree parent can have enough
+            // direct children to threaten a hub-overflow scenario analogous to §8.3's reverse-edge
+            // MaxParentsPerChild measurement, without adding a second pass (the CSR is already built).
+            int[] offsets = childIndex.ChildOffsetsByRow;
+            int widestRow = -1;
+            int widestRowChildCount = 0;
+            for (int row = 0; row < n; row++)
+            {
+                int childCount = offsets[row + 1] - offsets[row];
+                if (childCount > widestRowChildCount)
+                {
+                    widestRowChildCount = childCount;
+                    widestRow = row;
+                }
+            }
+
+            ulong widestRowAddress = widestRow >= 0 ? walkResult.ReachableAddresses[widestRow] : 0UL;
+            Console.Error.WriteLine($"[PERF] DominatorStageB: widest dominator child-index row has " +
+                $"{widestRowChildCount:N0} direct children (address 0x{widestRowAddress:X}), " +
+                $"out of {n:N0} rows / {offsets[n]:N0} total child entries");
+        }
+
+        // §10.4 Batch 2b: whole-tree total + per-MethodTable rollup, now consumed by
+        // IDominatorTreeProvider (§10.6/§10.7, Batch 3) instead of DominatorAnalyzer recomputing it
+        // live in Phase 2.
+        DominatorRetainedBytesRollupResult rollup = DominatorRetainedBytesRollup.Compute(graph, tree);
+        DominatorTreeMetadataWriter.Write(containerWriter, rollup);
+        LogPhase("retained-bytes rollup (DominatorRetainedBytesRollup.Compute + write)");
     }
 
     /// <summary>
@@ -1403,7 +1719,13 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     /// these columnar sections have no placeholder-header-patched-afterward step, so an inline hash
     /// is safe and, at up to a few GB per section on large dumps, avoids doubling that section's I/O.
     /// </summary>
-    private static uint ConcatenateScratchFiles(Stream stream, string[] files, int bufferSize)
+    /// <param name="deleteAfterCopy">
+    /// §10.1/§10.4 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): pass
+    /// <c>false</c> for the Address/MethodTable/Size columns when Stage B wants these files kept
+    /// around for <see cref="ScratchFileObjectMetadataLookup"/> — the caller becomes responsible for
+    /// deleting them once Stage B's metadata resolution finishes.
+    /// </param>
+    private static uint ConcatenateScratchFiles(Stream stream, string[] files, int bufferSize, bool deleteAfterCopy = true)
     {
         var hasher = new XxHash32();
         byte[] copyBuf = ArrayPool<byte>.Shared.Rent(bufferSize);
@@ -1424,7 +1746,8 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         hasher.Append(copyBuf.AsSpan(0, read));
                     }
                 }
-                File.Delete(segFile);
+                if (deleteAfterCopy)
+                    File.Delete(segFile);
             }
             stream.Flush();
         }

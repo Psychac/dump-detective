@@ -29,14 +29,39 @@ public class DominatorTreeIndexTests : IDisposable
             Directory.Delete(_tempDir, recursive: true);
     }
 
-    private string WriteContainer(params (ulong Address, ulong DominatorAddress)[] entries)
+    private string WriteContainer(
+        (ulong Address, ulong DominatorAddress)[] entries, Dictionary<ulong, ulong>? retainedBytesByAddress = null)
     {
         string containerPath = Path.Combine(_tempDir, "cache.bin");
         using var writer = new CacheContainerWriter(containerPath);
-        DominatorTreeIndexWriter.Write(writer, entries);
+
+        // §10.4: DominatorReachableAddresses and DominatorImmediateDominatorAddresses are now
+        // written by two separate classes (Stage A owns the former) — both are written here so
+        // these round-trip tests still exercise DominatorTreeIndexReader's real two-section contract.
+        // §10.4 Batch 2b: WriteImmediateDominatorAddresses now takes a row-ordered array directly
+        // (the caller — normally DiskBackedObjectIndexWriter.BuildAndPersistDominatorTree — computes
+        // the row order once and reuses it for the child index too) rather than sorting tuples
+        // itself, so this test builds that row order the same way a real caller would.
+        var byAddress = entries.ToDictionary(e => e.Address, e => e.DominatorAddress);
+        var sortedAddresses = byAddress.Keys.OrderBy(a => a).ToArray();
+        var dominatorAddressesByRow = sortedAddresses.Select(a => byAddress[a]).ToArray();
+        DominatorReachableAddressWriter.Write(writer, sortedAddresses);
+        DominatorTreeIndexWriter.WriteImmediateDominatorAddresses(writer, dominatorAddressesByRow);
+
+        // §10.4 Batch 3: DominatorRetainedBytes is optional in this test on purpose — omitting it
+        // exercises DominatorTreeIndexReader's backward-compatibility path for a cache.bin written
+        // before this column existed (Batch 2a/2b).
+        if (retainedBytesByAddress is not null)
+        {
+            var retainedBytesByRow = sortedAddresses.Select(a => retainedBytesByAddress[a]).ToArray();
+            DominatorTreeIndexWriter.WriteRetainedBytes(writer, retainedBytesByRow);
+        }
+
         writer.Finish();
         return containerPath;
     }
+
+    private string WriteContainer(params (ulong Address, ulong DominatorAddress)[] entries) => WriteContainer(entries, retainedBytesByAddress: null);
 
     [Fact]
     public void Write_AddsBothColumnarSections()
@@ -108,6 +133,64 @@ public class DominatorTreeIndexTests : IDisposable
                 indexReader!.TryGetImmediateDominator(address, out ulong actual).Should().BeTrue();
                 actual.Should().Be(expectedDominator);
             }
+        }
+    }
+
+    [Fact]
+    public void Reader_TryGetRetainedBytes_RoundTripsExactly()
+    {
+        (ulong Address, ulong DominatorAddress)[] entries =
+        [
+            (0x100UL, 0x0UL),
+            (0x200UL, 0x100UL),
+        ];
+        var retainedBytes = new Dictionary<ulong, ulong> { [0x100UL] = 300UL, [0x200UL] = 200UL };
+
+        string containerPath = WriteContainer(entries, retainedBytes);
+
+        CacheContainerReader.TryOpen(containerPath, out var containerReader).Should().BeTrue();
+        DominatorTreeIndexReader.TryOpen(containerReader!, out var indexReader).Should().BeTrue();
+        using (indexReader)
+        {
+            indexReader!.TryGetRetainedBytes(0x100UL, out ulong retained1).Should().BeTrue();
+            retained1.Should().Be(300UL);
+
+            indexReader.TryGetRetainedBytes(0x200UL, out ulong retained2).Should().BeTrue();
+            retained2.Should().Be(200UL);
+        }
+    }
+
+    [Fact]
+    public void Reader_TryGetRetainedBytes_MissingSection_ReturnsFalseWithoutBreakingIdomReads()
+    {
+        // Legacy cache.bin written before DominatorRetainedBytes existed (Batch 2a/2b) — must not
+        // be mistaken for a corrupt container, and idom reads must still work.
+        string containerPath = WriteContainer((0x100UL, 0x1UL));
+
+        CacheContainerReader.TryOpen(containerPath, out var containerReader).Should().BeTrue();
+        DominatorTreeIndexReader.TryOpen(containerReader!, out var indexReader).Should().BeTrue();
+        using (indexReader)
+        {
+            indexReader!.TryGetRetainedBytes(0x100UL, out ulong retainedBytes).Should().BeFalse();
+            retainedBytes.Should().Be(0);
+
+            indexReader.TryGetImmediateDominator(0x100UL, out ulong dominatorAddress).Should().BeTrue();
+            dominatorAddress.Should().Be(0x1UL);
+        }
+    }
+
+    [Fact]
+    public void Reader_TryGetRetainedBytes_UnknownAddress_ReturnsFalse()
+    {
+        var retainedBytes = new Dictionary<ulong, ulong> { [0x100UL] = 50UL };
+        string containerPath = WriteContainer([(0x100UL, 0x0UL)], retainedBytes);
+
+        CacheContainerReader.TryOpen(containerPath, out var containerReader).Should().BeTrue();
+        DominatorTreeIndexReader.TryOpen(containerReader!, out var indexReader).Should().BeTrue();
+        using (indexReader)
+        {
+            indexReader!.TryGetRetainedBytes(0xDEADUL, out ulong retained).Should().BeFalse();
+            retained.Should().Be(0);
         }
     }
 }

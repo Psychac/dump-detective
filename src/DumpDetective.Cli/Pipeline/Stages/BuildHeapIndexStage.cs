@@ -62,7 +62,9 @@ internal sealed class BuildHeapIndexStage(AnalyzerExecutionService analyzerExecu
                 state.LoadContext!.Heap,
                 state.Resolved.DumpPath,
                 cancellationToken,
-                progress: progress),
+                progress: progress,
+                activeAnalyzers: state.ActiveAnalyzers,
+                enableExactDominatorTree: state.Resolved.MemoryLeak.EnableExactDominatorTree),
             cancellationToken);
 
         while (true)

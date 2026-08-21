@@ -8,7 +8,8 @@ namespace DumpDetective.Analysis.Indexing.Dominator;
 /// Writes the <c>DominatorReachableAddresses</c> section (§5,
 /// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): a sorted <c>ulong[]</c>
 /// column of every object Stage A's reachability walk
-/// (<see cref="Traversal.Dominator.IncrementalReachableWalker"/>) found reachable from a GC root.
+/// (<see cref="Traversal.Dominator.ReachableGraphWalker"/>, <c>buildCsr: false</c>) found reachable
+/// from a GC root.
 ///
 /// Deliberately separate from <see cref="DominatorTreeIndexWriter"/>, which writes this same
 /// section paired with <c>DominatorImmediateDominatorAddresses</c> — that's Stage B's shape
@@ -18,8 +19,8 @@ namespace DumpDetective.Analysis.Indexing.Dominator;
 internal static class DominatorReachableAddressWriter
 {
     /// <param name="sortedAddresses">
-    /// Must already be sorted ascending — <see cref="Traversal.Dominator.IncrementalReachableWalker.Result.ReachableAddresses"/>
-    /// already is. Not re-sorted here; <see cref="DominatorReachableAddressReader"/>'s binary
+    /// Must already be sorted ascending — <see cref="Traversal.Dominator.ReachableGraphWalkResult.ReachableAddresses"/>
+    /// already is when <c>captureSortedAddresses: true</c>. Not re-sorted here; <see cref="DominatorReachableAddressReader"/>'s binary
     /// search depends on this.
     /// </param>
     public static void Write(CacheContainerWriter containerWriter, IReadOnlyList<ulong> sortedAddresses)

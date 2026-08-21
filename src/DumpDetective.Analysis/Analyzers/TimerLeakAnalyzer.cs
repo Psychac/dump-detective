@@ -16,7 +16,7 @@ namespace DumpDetective.Analysis.Analyzers;
 ///   - System.Timers.Timer
 ///   - System.Threading.TimerQueueTimer / TimerHolder
 /// </summary>
-public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource, ITypedResourceInstanceSampler<TimerStateSnapshot>
+public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource, ITypedResourceInstanceSampler<TimerStateSnapshot>, IRequiresReachableGraphIndex
 {
     public string Name => "Timer Leak Analysis";
     public string Category => "Infrastructure";

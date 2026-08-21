@@ -128,6 +128,7 @@ public class RunAnalyzersPipelineStageTests
         public DumpDetective.Core.Abstractions.IBackwardReferenceProvider? TryGetReverseIndexProvider() => null;
         public DumpDetective.Core.Abstractions.IForwardReferenceProvider? TryGetForwardIndexProvider() => null;
         public DumpDetective.Core.Abstractions.IReachableAddressProvider? TryGetReachableAddressProvider() => null;
+        public DumpDetective.Core.Abstractions.IDominatorTreeProvider? TryGetDominatorTreeProvider() => null;
         public bool TryGetObjectMetadata(Microsoft.Diagnostics.Runtime.ClrHeap heap, ulong address, out ulong methodTable, out ulong size)
         {
             methodTable = 0;

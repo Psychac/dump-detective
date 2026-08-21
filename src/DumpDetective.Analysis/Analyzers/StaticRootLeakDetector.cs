@@ -9,7 +9,7 @@ using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    public class StaticRootLeakDetector : IAnalyzer
+    public class StaticRootLeakDetector : IAnalyzer, IRequiresReachableGraphIndex, IRequiresDominatorTreeIndex
     {
         private readonly record struct ObjectMetadata(bool IsValid, string TypeName, ulong Size, ulong MethodTable);
 

@@ -1,3 +1,6 @@
+using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Analysis.Indexing.ForwardIndex;
+using DumpDetective.Analysis.Indexing.ReverseIndex;
 using DumpDetective.Analysis.Traversal.Dominator;
 
 using FluentAssertions;
@@ -6,10 +9,35 @@ using Xunit;
 
 namespace DumpDetective.Tests.Unit.Traversal.Dominator;
 
-public class ReachableGraphWalkerTests
+/// <summary>
+/// Covers both modes of the unified <see cref="ReachableGraphWalker"/> (§10.1,
+/// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): the CSR-building mode
+/// (<c>buildCsr: true</c>, formerly this walker's only mode) and the reverse-edge-index-only mode
+/// (<c>buildCsr: false</c>, formerly <c>IncrementalReachableWalker</c>, folded in here).
+/// </summary>
+public sealed class ReachableGraphWalkerTests : IDisposable
 {
+    private readonly string _testDir;
+
+    public ReachableGraphWalkerTests()
+    {
+        _testDir = Path.Combine(Path.GetTempPath(), "reachable-graph-walker-tests", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(_testDir);
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_testDir))
+            Directory.Delete(_testDir, recursive: true);
+    }
+
     private static SuccessorsFunc BuildSuccessors(params (ulong Parent, ulong Child)[] edges) =>
         SyntheticSuccessors.Build(edges);
+
+    private static ReachableGraphWalkResult WalkCsr(IReadOnlyList<ulong> roots, SuccessorsFunc successors) =>
+        ReachableGraphWalker.Walk(
+            roots, successors, reverseEdgeExtractor: null, buildCsr: true,
+            captureSortedAddresses: false, CancellationToken.None);
 
     [Fact]
     public void Walk_AssignsDenseIdsAndBuildsForwardCsr()
@@ -17,9 +45,8 @@ public class ReachableGraphWalkerTests
         // root(0x10) -> a(0x20) -> b(0x30)
         var successors = BuildSuccessors((0x10UL, 0x20UL), (0x20UL, 0x30UL));
 
-        ReachableGraphWalkResult result = ReachableGraphWalker.Walk([0x10UL], successors, ExactDominatorTreeBudget.Unlimited, CancellationToken.None);
+        ReachableGraphWalkResult result = WalkCsr([0x10UL], successors);
 
-        result.CapExceeded.Should().BeFalse();
         result.NodeCount.Should().Be(3);
         result.Addresses.Should().BeEquivalentTo([0x10UL, 0x20UL, 0x30UL]);
     }
@@ -31,7 +58,7 @@ public class ReachableGraphWalkerTests
         var successors = BuildSuccessors(
             (0x1UL, 0x2UL), (0x1UL, 0x3UL), (0x2UL, 0x4UL), (0x3UL, 0x4UL));
 
-        ReachableGraphWalkResult result = ReachableGraphWalker.Walk([0x1UL], successors, ExactDominatorTreeBudget.Unlimited, CancellationToken.None);
+        ReachableGraphWalkResult result = WalkCsr([0x1UL], successors);
 
         result.NodeCount.Should().Be(4);
 
@@ -53,7 +80,7 @@ public class ReachableGraphWalkerTests
     {
         var successors = BuildSuccessors((0x1UL, 0x3UL), (0x2UL, 0x3UL));
 
-        ReachableGraphWalkResult result = ReachableGraphWalker.Walk([0x1UL, 0x2UL], successors, ExactDominatorTreeBudget.Unlimited, CancellationToken.None);
+        ReachableGraphWalkResult result = WalkCsr([0x1UL, 0x2UL], successors);
 
         result.NodeCount.Should().Be(3);
     }
@@ -64,7 +91,7 @@ public class ReachableGraphWalkerTests
         // root -> a -> b -> a (back edge)
         var successors = BuildSuccessors((0x1UL, 0x2UL), (0x2UL, 0x3UL), (0x3UL, 0x2UL));
 
-        ReachableGraphWalkResult result = ReachableGraphWalker.Walk([0x1UL], successors, ExactDominatorTreeBudget.Unlimited, CancellationToken.None);
+        ReachableGraphWalkResult result = WalkCsr([0x1UL], successors);
 
         result.NodeCount.Should().Be(3);
     }
@@ -75,7 +102,7 @@ public class ReachableGraphWalkerTests
         // root -> a. b exists in the successors map but nothing points to it from the root.
         var successors = BuildSuccessors((0x1UL, 0x2UL), (0x99UL, 0x3UL));
 
-        ReachableGraphWalkResult result = ReachableGraphWalker.Walk([0x1UL], successors, ExactDominatorTreeBudget.Unlimited, CancellationToken.None);
+        ReachableGraphWalkResult result = WalkCsr([0x1UL], successors);
 
         result.NodeCount.Should().Be(2);
         result.Addresses.Should().NotContain(0x3UL);
@@ -86,79 +113,221 @@ public class ReachableGraphWalkerTests
     {
         var successors = BuildSuccessors((0x1UL, 0x0UL), (0x1UL, 0x2UL));
 
-        ReachableGraphWalkResult result = ReachableGraphWalker.Walk([0x1UL, 0x0UL], successors, ExactDominatorTreeBudget.Unlimited, CancellationToken.None);
+        ReachableGraphWalkResult result = WalkCsr([0x1UL, 0x0UL], successors);
 
         result.NodeCount.Should().Be(2);
         result.Addresses.Should().BeEquivalentTo([0x1UL, 0x2UL]);
     }
 
-    /// <summary>Node-only budget (zero bytes/edge) — reproduces the old flat node-cap semantics.</summary>
-    private static ExactDominatorTreeBudget NodeBudget(int maxNodes) =>
-        new(maxBytes: maxNodes * 100L, bytesPerNode: 100, bytesPerEdge: 0);
-
-    /// <summary>Edge-only budget (zero bytes/node) — isolates the term the old node cap couldn't see.</summary>
-    private static ExactDominatorTreeBudget EdgeBudget(int maxEdges) =>
-        new(maxBytes: maxEdges * 100L, bytesPerNode: 0, bytesPerEdge: 100);
+    // --- buildCsr: false (formerly IncrementalReachableWalkerTests) ---
+    // §4.1 prototype correctness tests — mirrors the CSR-mode synthetic graphs above. No disk-backed
+    // object index needed (v3 dropped the ordinal/ObjectAddressLookup dependency in favor of plain
+    // HashSet<ulong>-based visited-tracking), only a scratch directory for ReverseEdgeExtractor's
+    // bucket files.
 
     [Fact]
-    public void Walk_ReachablePopulationExceedsNodeBudget_ReturnsCappedResult()
+    public void Walk_NoCsr_DiamondGraph_MatchesCsrModeNodeAndEdgeCounts()
     {
-        // root -> a -> b -> c: a 2-node budget should trip while discovering the 3rd node.
-        var successors = BuildSuccessors((0x1UL, 0x2UL), (0x2UL, 0x3UL), (0x3UL, 0x4UL));
+        // root(0x10) -> a(0x20), root(0x10) -> b(0x30), a(0x20) -> c(0x40), b(0x30) -> c(0x40)
+        var successors = SyntheticSuccessors.Build(
+            (0x10UL, 0x20UL), (0x10UL, 0x30UL), (0x20UL, 0x40UL), (0x30UL, 0x40UL));
 
-        ReachableGraphWalkResult result = ReachableGraphWalker.Walk([0x1UL], successors, NodeBudget(2), CancellationToken.None);
+        var extractor = new ReverseEdgeExtractor(bucketCount: 1, _testDir);
+        ReachableGraphWalkResult result;
+        try
+        {
+            result = ReachableGraphWalker.Walk(
+                [0x10UL], successors, extractor, buildCsr: false,
+                captureSortedAddresses: true, CancellationToken.None);
+        }
+        finally
+        {
+            extractor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
 
-        result.CapExceeded.Should().BeTrue();
-        result.NodeCount.Should().Be(0, "a capped result carries no partial graph data");
-    }
-
-    [Fact]
-    public void Walk_ReachablePopulationUnderNodeBudget_SucceedsNormally()
-    {
-        var successors = BuildSuccessors((0x1UL, 0x2UL), (0x2UL, 0x3UL));
-
-        ReachableGraphWalkResult result = ReachableGraphWalker.Walk([0x1UL], successors, NodeBudget(10), CancellationToken.None);
-
-        result.CapExceeded.Should().BeFalse();
-        result.NodeCount.Should().Be(3);
-    }
-
-    [Fact]
-    public void Walk_DenseGraphExceedsEdgeBudget_ReturnsCappedResult()
-    {
-        // A hub with 5 children: only 6 nodes, but 5 edges. The pre-existing node-only cap could not
-        // express this — a dense graph can blow the memory budget on its edge arrays while its node
-        // count still looks comfortable, which is the whole reason the budget model has an edge term.
-        var successors = BuildSuccessors(
-            (0x1UL, 0x2UL), (0x1UL, 0x3UL), (0x1UL, 0x4UL), (0x1UL, 0x5UL), (0x1UL, 0x6UL));
-
-        ReachableGraphWalkResult result = ReachableGraphWalker.Walk([0x1UL], successors, EdgeBudget(3), CancellationToken.None);
-
-        result.CapExceeded.Should().BeTrue();
-        result.NodeCount.Should().Be(0);
-    }
-
-    [Fact]
-    public void Walk_DenseGraphWithinEdgeBudget_SucceedsNormally()
-    {
-        var successors = BuildSuccessors(
-            (0x1UL, 0x2UL), (0x1UL, 0x3UL), (0x1UL, 0x4UL), (0x1UL, 0x5UL), (0x1UL, 0x6UL));
-
-        ReachableGraphWalkResult result = ReachableGraphWalker.Walk([0x1UL], successors, EdgeBudget(50), CancellationToken.None);
-
-        result.CapExceeded.Should().BeFalse();
-        result.NodeCount.Should().Be(6);
-        result.FwdTargets.Length.Should().Be(5);
-    }
-
-    [Fact]
-    public void Walk_UnlimitedBudget_NeverCaps()
-    {
-        var successors = BuildSuccessors((0x1UL, 0x2UL), (0x2UL, 0x3UL), (0x3UL, 0x4UL));
-
-        ReachableGraphWalkResult result = ReachableGraphWalker.Walk([0x1UL], successors, ExactDominatorTreeBudget.Unlimited, CancellationToken.None);
-
-        result.CapExceeded.Should().BeFalse();
         result.NodeCount.Should().Be(4);
+        result.EdgeCount.Should().Be(4);
+        result.ReachableAddresses.Should().Equal([0x10UL, 0x20UL, 0x30UL, 0x40UL]);
+    }
+
+    [Fact]
+    public void Walk_NoCsr_MultipleRoots_AllReachableFromEitherRoot()
+    {
+        var successors = SyntheticSuccessors.Build((0x1UL, 0x3UL), (0x2UL, 0x3UL));
+
+        var extractor = new ReverseEdgeExtractor(bucketCount: 1, _testDir);
+        ReachableGraphWalkResult result;
+        try
+        {
+            result = ReachableGraphWalker.Walk(
+                [0x1UL, 0x2UL], successors, extractor, buildCsr: false,
+                captureSortedAddresses: true, CancellationToken.None);
+        }
+        finally
+        {
+            extractor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+
+        result.NodeCount.Should().Be(3);
+        result.EdgeCount.Should().Be(2);
+        result.ReachableAddresses.Should().Equal([0x1UL, 0x2UL, 0x3UL]);
+    }
+
+    [Fact]
+    public void Walk_NoCsr_CaptureSortedAddressesFalse_LeavesReachableAddressesEmpty()
+    {
+        var successors = SyntheticSuccessors.Build((0x1UL, 0x2UL));
+
+        var extractor = new ReverseEdgeExtractor(bucketCount: 1, _testDir);
+        ReachableGraphWalkResult result;
+        try
+        {
+            result = ReachableGraphWalker.Walk(
+                [0x1UL], successors, extractor, buildCsr: false,
+                captureSortedAddresses: false, CancellationToken.None);
+        }
+        finally
+        {
+            extractor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+
+        result.NodeCount.Should().Be(2);
+        result.ReachableAddresses.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Walk_NoCsr_StreamsEdgesToReverseEdgeExtractor_RecoverableAfterSortAndMerge()
+    {
+        // Same diamond as above — verifies the streamed edges survive Phase B (sort) exactly like
+        // the existing reverse-edge index's own edges do, since this walk reuses that pipeline
+        // unmodified downstream of the walk itself.
+        var successors = SyntheticSuccessors.Build(
+            (0x10UL, 0x20UL), (0x10UL, 0x30UL), (0x20UL, 0x40UL), (0x30UL, 0x40UL));
+
+        var extractor = new ReverseEdgeExtractor(bucketCount: 1, _testDir);
+        ReachableGraphWalker.Walk(
+            [0x10UL], successors, extractor, buildCsr: false,
+            captureSortedAddresses: true, CancellationToken.None);
+
+        ReverseEdgeExtractionStats stats = extractor.GetStatistics();
+        extractor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+        var sorter = new ReverseEdgeSorter();
+        sorter.SortBucketsAsync(_testDir, bucketCount: 1, CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        // Phase C — a fresh container just for this merge; unrelated to any object-index container.
+        string reverseIndexContainerPath = Path.Combine(_testDir, "reverse-index.bin");
+        using (var reverseWriter = new CacheContainerWriter(reverseIndexContainerPath))
+        {
+            ReverseEdgeContainerWriter.Write(reverseWriter, _testDir, bucketCount: 1, stats, progress: null);
+            reverseWriter.Finish();
+        }
+
+        CacheContainerReader.TryOpen(reverseIndexContainerPath, out CacheContainerReader? containerReader)
+            .Should().BeTrue();
+        ReverseEdgeIndexReader.TryOpen(containerReader!, out ReverseEdgeIndexReader? reader)
+            .Should().BeTrue();
+        using (reader)
+        {
+            reader!.TryGetParents(0x40UL, out IReadOnlyList<ulong> parentsOfC, out bool truncatedFlag)
+                .Should().BeTrue();
+            truncatedFlag.Should().BeFalse();
+            parentsOfC.Should().BeEquivalentTo([0x20UL, 0x30UL]);
+        }
+    }
+
+    [Fact]
+    public void Walk_NoCsr_UnreachableSubgraph_GetsNoReverseIndexEntries()
+    {
+        // §7.3 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): the
+        // reverse-edge index is now built by this walk instead of a raw per-object field scan, so
+        // it only ever sees edges the BFS actually crosses. 0x99 -> 0xAA models a garbage
+        // subgraph — nothing points to 0x99 and it's not a root, so the walk never visits it, and
+        // 0xAA (which would otherwise look identical to a reachable child) must end up with no
+        // recorded parents at all, not an empty-but-present entry.
+        var successors = SyntheticSuccessors.Build(
+            (0x10UL, 0x20UL), (0x99UL, 0xAAUL));
+
+        var extractor = new ReverseEdgeExtractor(bucketCount: 1, _testDir);
+        ReachableGraphWalkResult result = ReachableGraphWalker.Walk(
+            [0x10UL], successors, extractor, buildCsr: false,
+            captureSortedAddresses: true, CancellationToken.None);
+
+        result.NodeCount.Should().Be(2); // root 0x10 and reachable child 0x20 only
+        result.EdgeCount.Should().Be(1); // only 0x10 -> 0x20 was ever crossed
+
+        ReverseEdgeExtractionStats stats = extractor.GetStatistics();
+        extractor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+        var sorter = new ReverseEdgeSorter();
+        sorter.SortBucketsAsync(_testDir, bucketCount: 1, CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        string reverseIndexContainerPath = Path.Combine(_testDir, "reverse-index-unreachable.bin");
+        using (var reverseWriter = new CacheContainerWriter(reverseIndexContainerPath))
+        {
+            ReverseEdgeContainerWriter.Write(reverseWriter, _testDir, bucketCount: 1, stats, progress: null);
+            reverseWriter.Finish();
+        }
+
+        CacheContainerReader.TryOpen(reverseIndexContainerPath, out CacheContainerReader? containerReader)
+            .Should().BeTrue();
+        ReverseEdgeIndexReader.TryOpen(containerReader!, out ReverseEdgeIndexReader? reader)
+            .Should().BeTrue();
+        using (reader)
+        {
+            reader!.TryGetParents(0x20UL, out IReadOnlyList<ulong> parentsOf20, out _)
+                .Should().BeTrue();
+            parentsOf20.Should().BeEquivalentTo([0x10UL]);
+
+            reader!.TryGetParents(0xAAUL, out IReadOnlyList<ulong> parentsOfGarbage, out _)
+                .Should().BeFalse();
+            parentsOfGarbage.Should().BeEmpty();
+        }
+    }
+
+    [Fact]
+    public async Task Walk_NoCsr_ForwardEdgeLooseFileReaderSuccessors_MatchesSyntheticSuccessorsResult()
+    {
+        // §2 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): the walk's
+        // successors can come from ForwardEdgeLooseFileReader instead of a synthetic/live
+        // function. Same diamond graph as the other tests here, fed through the real forward-edge
+        // extractor/sorter pipeline instead of SyntheticSuccessors — the walk's result (and the
+        // reverse-edge index it produces) must be identical either way.
+        (ulong Parent, ulong Child)[] edges =
+        [
+            (0x10UL, 0x20UL), (0x10UL, 0x30UL), (0x20UL, 0x40UL), (0x30UL, 0x40UL),
+        ];
+
+        var forwardExtractor = new ForwardEdgeExtractor(bucketCount: 1, _testDir);
+        foreach ((ulong parent, ulong child) in edges)
+            forwardExtractor.RecordEdge(parent, child);
+        await forwardExtractor.DisposeAsync();
+
+        var forwardSorter = new ForwardEdgeSorter();
+        await forwardSorter.SortBucketsAsync(_testDir, bucketCount: 1, CancellationToken.None);
+
+        ForwardEdgeLooseFileReader.TryOpen(_testDir, bucketCount: 1, out ForwardEdgeLooseFileReader? forwardReader)
+            .Should().BeTrue();
+
+        // Different bucket-file prefixes ("forward_edges_bucket_*" vs "reverse_edges_bucket_*"),
+        // so both extractors can safely share _testDir.
+        var reverseExtractor = new ReverseEdgeExtractor(bucketCount: 1, _testDir);
+        ReachableGraphWalkResult result;
+        try
+        {
+            result = ReachableGraphWalker.Walk(
+                [0x10UL], forwardReader!.GetChildren, reverseExtractor, buildCsr: false,
+                captureSortedAddresses: true, CancellationToken.None);
+        }
+        finally
+        {
+            forwardReader!.Dispose();
+            await reverseExtractor.DisposeAsync();
+        }
+
+        result.NodeCount.Should().Be(4);
+        result.EdgeCount.Should().Be(4);
     }
 }

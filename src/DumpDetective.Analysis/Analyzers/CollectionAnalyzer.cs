@@ -18,7 +18,7 @@ namespace DumpDetective.Analysis.Analyzers
     // This would impact the root hints shown for wasteful collections that are rooted in stacks.
     // Also, need to refactor this class. It's currently doing too much (identification, waste analysis, root description) and could be split into multiple focused classes or methods for clarity and maintainability.
     // Need to revisit the logic once again.
-    public class CollectionAnalyzer : IAnalyzer, IParallelHeapIndexScanParticipant
+    public class CollectionAnalyzer : IAnalyzer, IParallelHeapIndexScanParticipant, IRequiresReachableGraphIndex
     {
         // Cache of resolved interesting instance fields per MethodTable to avoid
         // repeatedly enumerating ClrType.Fields for every object of the same type.

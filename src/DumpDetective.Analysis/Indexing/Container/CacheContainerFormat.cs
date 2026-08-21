@@ -65,16 +65,35 @@ internal enum CacheSectionId
     /// <summary>JSON <see cref="Indexing.ForwardIndex.ForwardIndexMetadata"/>: bucket count and per-bucket offsets/lengths into the two sections above.</summary>
     ForwardEdgeMetadata = 20,
     /// <summary>
-    /// Columnar <c>ulong[]</c> of reachable-node addresses, sorted, one per node in the computed
-    /// exact dominator tree (§D7 — docs/analysis/phase1-redesigns/dominator-tree-lengauer-tarjan.md).
-    /// NOT YET WIRED into the main build: <see cref="Container.CacheContainerWriter"/> is write-once
-    /// (always creates a new file), so persisting this section — computed by `DominatorAnalyzer` in
-    /// Phase 2, after Phase 1's container write already finished — requires either a full container
-    /// rewrite or a design change, still unresolved. See the design doc's Open Questions.
+    /// Columnar <c>ulong[]</c> of reachable-node addresses, sorted — every object Stage A's
+    /// reachability walk found reachable from a GC root (§4/§7,
+    /// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md). Written by
+    /// <c>DominatorReachableAddressWriter</c> entirely inside Phase 1, before
+    /// <see cref="Container.CacheContainerWriter.Finish"/> — the "write-once container" concern this
+    /// comment used to raise never actually applied once everything runs before <c>Finish()</c>.
     /// </summary>
     DominatorReachableAddresses = 21,
     /// <summary>Columnar <c>ulong[]</c> of each node's immediate-dominator address, aligned with <see cref="DominatorReachableAddresses"/>.</summary>
     DominatorImmediateDominatorAddresses = 22,
+    /// <summary>
+    /// Columnar <c>int[]</c> CSR offsets into <see cref="DominatorChildAddresses"/>, row-aligned with
+    /// <see cref="DominatorReachableAddresses"/> — §10.4 (Batch 2b,
+    /// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): what would freeing this
+    /// object free, one level down. Length = reachable-node count + 1.
+    /// </summary>
+    DominatorChildOffsets = 23,
+    /// <summary>Flat <c>ulong[]</c> column of dominator-tree child addresses, grouped by parent row — see <see cref="DominatorChildOffsets"/>.</summary>
+    DominatorChildAddresses = 24,
+    /// <summary>JSON <see cref="Indexing.Dominator.DominatorTreeMetadata"/>: whole-tree total retained bytes and the per-<c>MethodTable</c> rollup (§10.4, Batch 2b).</summary>
+    DominatorTreeMetadata = 25,
+    /// <summary>
+    /// Columnar <c>ulong[]</c> of each reachable node's exact retained bytes (subtree sum, folded
+    /// leaves' own shallow size included), row-aligned with <see cref="DominatorReachableAddresses"/>
+    /// — §10.4 (Batch 3, docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md).
+    /// Persisted so <c>IDominatorTreeProvider.TryGetRetainedBytes</c> is a binary search instead of
+    /// a per-query subtree walk.
+    /// </summary>
+    DominatorRetainedBytes = 26,
 }
 
 /// <summary>

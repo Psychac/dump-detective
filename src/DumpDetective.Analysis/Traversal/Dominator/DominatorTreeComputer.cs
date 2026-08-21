@@ -156,7 +156,7 @@ internal static class DominatorTreeComputer
                 retained[parent] += retained[v];
         }
 
-        return new DominatorTreeComputeResult(fold, idom, retained, depth, virtualRoot);
+        return new DominatorTreeComputeResult(fold, idom, retained, depth, virtualRoot, childOffsets, childTargets);
     }
 }
 
@@ -176,12 +176,29 @@ internal sealed class DominatorTreeComputeResult
     public int[] Depth { get; }
     public int VirtualRoot { get; }
 
-    public DominatorTreeComputeResult(LeafFoldResult leafFold, int[] idom, ulong[] retainedBytes, int[] depth, int virtualRoot)
+    /// <summary>
+    /// §10.4 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): the dominator
+    /// tree's own child adjacency, keyed by <em>dominator-tree</em> parent (<c>idom[v]</c>), not by
+    /// graph parent — answers "what would freeing X free?" (<c>EnumerateRetainedSet</c>). Length
+    /// <see cref="VirtualRoot"/> + 2 — index <see cref="VirtualRoot"/> holds the virtual root's own
+    /// child count, so <c>ChildTargets[ChildOffsets[VirtualRoot]..ChildOffsets[VirtualRoot+1]]</c> is
+    /// every node directly dominated by a GC root.
+    /// </summary>
+    public int[] ChildOffsets { get; }
+
+    /// <summary>New id of each dominator-tree child, grouped by parent — see <see cref="ChildOffsets"/>. Length = <see cref="VirtualRoot"/>.</summary>
+    public int[] ChildTargets { get; }
+
+    public DominatorTreeComputeResult(
+        LeafFoldResult leafFold, int[] idom, ulong[] retainedBytes, int[] depth, int virtualRoot,
+        int[] childOffsets, int[] childTargets)
     {
         LeafFold = leafFold;
         Idom = idom;
         RetainedBytes = retainedBytes;
         Depth = depth;
         VirtualRoot = virtualRoot;
+        ChildOffsets = childOffsets;
+        ChildTargets = childTargets;
     }
 }

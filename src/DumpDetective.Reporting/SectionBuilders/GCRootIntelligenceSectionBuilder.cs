@@ -20,17 +20,28 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
     {
         var roots = (GCRootDomainResult)result;
 
+        // §12.1 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): once the
+        // dominator tree resolved every kind's retained-byte total exactly, the long-standing
+        // "heuristic estimate" caveat no longer applies to this report.
+        bool anyKindIsHeuristic = roots.ByKind.Count == 0 || roots.ByKind.Any(k => !k.IsExactRetainedBytes);
+
         var (confidenceScore, capCaveats) = ConfidenceScoring.Compute(0.75,
             ConfidenceScoring.F(roots.PathSearchCapped, 0.20, $"Root path search was capped ({roots.PathSearchCappedCount:N0} path(s) truncated)."));
 
         var compactTables = new List<CompactTable>();
-        var blocks = new List<SectionBlock>
+        var blocks = new List<SectionBlock>();
+        if (anyKindIsHeuristic)
         {
-            BuildConfidenceBand(confidenceScore,
-                new[] { "Average retained bytes are heuristic estimates." }.Concat(capCaveats).ToArray()),
-            T("Average retained bytes are heuristic estimates unless a targeted retained-size pass is available."),
-            T("Root-owned subgraph types show the object types reachable from each root. For exact root-to-target retention chains, use WinDbg !gcroot or dotMemory."),
-        };
+            blocks.Add(BuildConfidenceBand(confidenceScore,
+                new[] { "Average retained bytes are heuristic estimates." }.Concat(capCaveats).ToArray()));
+            blocks.Add(T("Average retained bytes are heuristic estimates unless a targeted retained-size pass is available."));
+        }
+        else
+        {
+            blocks.Add(BuildConfidenceBand(confidenceScore, capCaveats.ToArray()));
+            blocks.Add(T("Retained bytes are exact — computed from the dominator tree, not a heuristic estimate."));
+        }
+        blocks.Add(T("Root-owned subgraph types show the object types reachable from each root. For exact root-to-target retention chains, use WinDbg !gcroot or dotMemory."));
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
@@ -40,12 +51,12 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
 
         compactTables.Add(STCompact(
             "GC root kinds",
-            new[] { CH("Root Kind"), CH("Count","number"), CH("Estimated Retained","bytes"), CH("% of Heap", "number", "percent") },
+            new[] { CH("Root Kind"), CH("Count","number"), CH("Estimated Retained","bytes"), CH("% of Heap", "number", "percent"), CH("Exact?") },
             BuildKindRows(roots.ByKind).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
         compactTables.Add(STCompact(
             "Top GC roots by severity",
-            new[] { CH("Root Kind"), CH("Root Addr"), CH("Field"), CH("Target Type"), CH("Target Addr"), CH("Est. Retained","bytes"), CH("Severity","number") },
+            new[] { CH("Root Kind"), CH("Root Addr"), CH("Field"), CH("Target Type"), CH("Target Addr"), CH("Est. Retained","bytes"), CH("Severity","number"), CH("Exact?") },
             BuildSeverityRows(roots.TopRootsBySeverity).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
         var finalizerRoots = roots.TopRootsBySeverity.Where(root => string.Equals(root.RootKind, "FinalizerQueue", StringComparison.Ordinal)).ToArray();
@@ -85,7 +96,8 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
                         WasCapped:     p.WasCapped,
                         Hops:          p.PathTypeNames,
                         EstimatedRetainedBytes:  p.EstimatedRetainedBytes,
-                        RetainedSizeWasWalked:   p.RetainedSizeWasWalked));
+                        RetainedSizeWasWalked:   p.RetainedSizeWasWalked,
+                        RetainedSizeIsExact:     p.RetainedSizeIsExact));
                 }
 
                 rootPathGroups.Add(new RootPathGroup(
@@ -117,7 +129,8 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
                 Cell(kind.Kind),
                 Cell(kind.Count.ToString("N0"), kind.Count),
                 Cell(FormatBytes(kind.EstimatedRetainedBytes), (long)Math.Min(kind.EstimatedRetainedBytes, long.MaxValue)),
-                Cell(kind.PctOfManagedHeap.ToString("F1") + "%")));
+                Cell(kind.PctOfManagedHeap.ToString("F1") + "%"),
+                Cell(kind.IsExactRetainedBytes ? "Yes" : "No")));
         }
 
         return rows;
@@ -136,7 +149,8 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
                 Cell(root.TargetTypeName),
                 Cell($"0x{root.TargetAddress:X}"),
                 Cell(FormatBytes(root.EstimatedRetainedBytes), (long)Math.Min(root.EstimatedRetainedBytes, long.MaxValue)),
-                Cell(root.SeverityScore.ToString("N0"), root.SeverityScore)));
+                Cell(root.SeverityScore.ToString("N0"), root.SeverityScore),
+                Cell(root.RetainedBytesIsExact ? "Yes" : "No")));
         }
 
         return rows;

@@ -984,3 +984,297 @@ in §10.8, not duplicated here):
       "far worse than data growth would predict" shape on this machine (§8.5).
 - [ ] The garbage→reachable edge split specifically (§8.5) — separate from garbage→garbage noise —
       would size Stage A.5's useful output, though Stage A.5 itself is no longer believed necessary.
+
+---
+
+## 12. §6's root-attribution idea — implementation plan, two phases
+
+§6 flagged that the dominator tree, once built, can be cross-referenced with `RootIndex`'s
+`(TargetAddr, RootAddr, Kind)` triples to answer "how much is `Static` roots holding vs. `Handle`
+roots" and "how much would become collectible if thread N exited." These are two very different sized
+pieces of work — Phase 1 upgrades an existing report's numbers with data that's already fully built by
+the time it runs; Phase 2 adds new on-disk data and a new report surface. They're scoped and planned
+separately below.
+
+### 12.1 Phase 1 — exact retained bytes by root kind — shipped
+
+Implemented as designed below, no deviations. `DominatorRetainedSetAggregator`
+([DominatorRetainedSetAggregator.cs](../../../src/DumpDetective.Analysis/Traversal/Dominator/DominatorRetainedSetAggregator.cs))
+is a new, dependency-free static class, unit-tested directly against a fake `IDominatorTreeProvider`
+(`DominatorRetainedSetAggregatorTests.cs`, 7 cases: empty set, single target, independent siblings,
+direct and indirect ancestor-exclusion, duplicate-address dedup, unreachable-target skip) — no real
+dump or `ReachableGraph` fixture needed, since the aggregator only calls the two interface methods.
+
+`GCRootAnalysisProjection.Build` gained an optional `IDominatorTreeProvider? treeProvider = null`
+parameter; `GCRootAnalyzer.Analyze` resolves it once via `cache.TryGetDominatorTreeProvider()` and
+passes it through. Three call sites now prefer the exact value, all falling back to today's
+shallow-size/BFS behavior unchanged when `treeProvider` is `null`:
+- Per-`RootFinding` retained bytes and severity score — direct `TryGetRetainedBytes` per target, no
+  aggregation needed (single object).
+- Per-kind (`RootKindSummary`) totals — `DominatorRetainedSetAggregator.ComputeExclusiveRetainedBytes`
+  over each kind's target-address list, avoiding the double-count risk called out in the original plan.
+- Step 3's per-top-N-root BFS retained-size estimate — a target `treeProvider.TryGetRetainedBytes`
+  already resolved exactly is now skipped as a BFS candidate entirely rather than spending one of
+  `RetainedSizeCandidateSelector`'s `maxCandidatesToWalk` slots on it; `maxCandidatesToWalk` is capped
+  to the (now possibly smaller) walk-candidate list length rather than the original `pathN`, which is a
+  no-op when `treeProvider` is `null` (the list was already `<= pathN` in that case) and a real BFS-cost
+  reduction when it isn't.
+
+`RootKindSummary.IsExactRetainedBytes`, `RootFinding.RetainedBytesIsExact`, and
+`RootPathFinding`/`RootPath` (Reporting)'s `RetainedSizeIsExact` are new, additive, default-`false`
+fields — no existing construction site outside this feature's own code broke. `GCRootIntelligenceSectionBuilder`
+gained an "Exact?" column on both the by-kind and by-severity tables, and its confidence-band/caveat
+text now reads "Retained bytes are exact — computed from the dominator tree, not a heuristic estimate."
+whenever every kind resolved exactly, instead of unconditionally claiming "heuristic estimates."
+
+**Not yet measured on a real dump** — `DominatorAnalyzerExactTreeRealDumpTests.cs` was extended to also
+run `GCRootAnalyzer` and print `ByKind` (with each kind's exact/fallback flag) after Stage B builds, and
+that test's own `PrebuildHeapIndex` call was fixed to actually pass `activeAnalyzers`/
+`enableExactDominatorTree: true` — it previously called `PrebuildHeapIndex` with neither, which meant
+Stage B was silently never built and every "exact" comparison that test's docstring promised was in
+fact heuristic-vs-heuristic. Running it (real dump, foreground, one at a time per this project's
+real-dump-test rule) is the next step to confirm the wiring end-to-end and get real exact-vs-shallow
+numbers, but wasn't run as part of landing this code.
+
+Original design (for reference — matches what shipped):
+
+**What exists today.** `GCRootAnalysisProjection.Build`
+([GCRootAnalysisProjection.cs:15-79](../../../src/DumpDetective.Analysis/Utilities/GCRootAnalysisProjection.cs#L15-L79))
+buckets every root by `Kind` (`Static`, `Handle`, `Stack`, …) and sums each target's *shallow* size
+(`cache.TryGetObjectMetadata`'s `size` out-param) into `RootKindSummary.EstimatedRetainedBytes` — a
+name that already promises "retained," but the value today is shallow. Separately,
+`GCRootAnalyzer.Analyze`'s step 3
+([GCRootAnalyzer.cs:34-132](../../../src/DumpDetective.Analysis/Analyzers/GCRootAnalyzer.cs#L34-L132))
+runs a capped BFS (`RetainedSizeCandidateSelector.SelectAndCompute`) to *estimate* retained bytes for
+only the top `PathSearchTopN` roots by severity — this is exactly the heuristic this whole redesign
+exists to replace with an O(log N) exact lookup, for every root, not just the top N.
+
+**The double-counting problem, and why it's solvable exactly.** A `RootKindSummary` bucket, or the
+whole-report total, sums retained bytes across *multiple* root targets. If target A's dominator
+subtree contains target B (B is a descendant of A in the dominator tree — reachable from A through the
+object graph, not just independently rooted), naively summing `TryGetRetainedBytes(A) +
+TryGetRetainedBytes(B)` double-counts every byte in B's subtree. This is decidable exactly, cheaply,
+using only what `IDominatorTreeProvider` already exposes: dominance is a tree, so for any two nodes,
+either one is a strict ancestor of the other or neither dominates the other — never a partial overlap.
+So for a set of targets, the exact answer is: for each target, walk `TryGetImmediateDominator` upward;
+if that walk reaches another target in the same set before reaching the virtual root (idom `0`), drop
+it (it's already counted inside that other target's subtree); sum `TryGetRetainedBytes` over the
+survivors. Chain depth is small in practice (§8's dumps show dominator trees are shallow near any given
+node — most objects are a handful of hops from a GC root), so this is cheap: O(targets × average chain
+depth) `TryGetImmediateDominator` calls, each O(log N).
+
+**New reusable API — not buried in `GCRootAnalysisProjection`.** §9's audit lists several other
+candidates for exactly this "sum retained bytes across a set of targets without double-counting"
+operation (`EventLeakAnalyzer`'s per-subscriber-group totals, `CollectionAnalyzer`'s wasteful-collection
+totals), so it belongs on `IDominatorTreeProvider` itself or a small sibling helper, not inline in one
+analyzer's projection code:
+
+```csharp
+namespace DumpDetective.Analysis.Traversal.Dominator;
+
+/// <summary>
+/// Sums <see cref="IDominatorTreeProvider.TryGetRetainedBytes"/> across a set of targets without
+/// double-counting when one target's dominator subtree contains another — see §12.1
+/// (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md) for why this is decidable
+/// exactly rather than approximated.
+/// </summary>
+internal static class DominatorRetainedSetAggregator
+{
+    /// <summary>
+    /// Returns the exact retained-byte total for the *union* of <paramref name="targets"/>' dominator
+    /// subtrees. Targets not reachable when the tree was built are silently skipped (same "not an
+    /// error" contract as <see cref="IDominatorTreeProvider.TryGetRetainedBytes"/>).
+    /// </summary>
+    public static ulong ComputeExclusiveRetainedBytes(
+        IDominatorTreeProvider provider, IReadOnlyList<ulong> targets)
+    {
+        // 1. Build a HashSet<ulong> of targets for O(1) ancestor-chain membership checks.
+        // 2. For each target, walk TryGetImmediateDominator upward (bounded by the tree's depth,
+        //    stopping at idom == 0) checking membership in that set at each hop; if a hop lands on a
+        //    different member of the set, this target is a descendant of another survivor — skip it.
+        // 3. Sum TryGetRetainedBytes(survivor) over the targets that survive step 2.
+    }
+}
+```
+
+This is a pure function over an already-open `IDominatorTreeProvider` — no new persisted data, no new
+`CacheSectionId`, no gating changes. It's placed in `Traversal.Dominator` (same namespace as
+`DominatorTreeComputer`/`DominatorChildIndexBuilder`) since it's dominator-tree machinery, not a
+root-specific concept, even though its first caller is root-kind rollup.
+
+**Wiring into `GCRootAnalysisProjection`.** `Build`'s signature gains an optional
+`IDominatorTreeProvider? treeProvider` parameter (`cache.TryGetDominatorTreeProvider()`, resolved once
+by the caller, same as every other `TryGetXProvider()` call site in this codebase):
+- **Per-kind totals:** after the existing per-root loop populates `kindBytes` with shallow sizes,
+  when `treeProvider` is non-null, additionally group each kind's *target addresses* into a list and
+  call `DominatorRetainedSetAggregator.ComputeExclusiveRetainedBytes` once per kind, replacing that
+  kind's `kindBytes` entry. When `treeProvider` is null (legacy cache.bin, Stage B not gated on, or
+  Stage A/B failed to persist — same degrade contract §10.7 already established for
+  `DominatorAnalyzer`), keep today's shallow-size sum unchanged. `RootKindSummary` gains a bool,
+  `IsExactRetainedBytes`, so the report can label which numbers are exact vs. shallow-size estimates —
+  mirrors `RootPathFinding.RetainedSizeWasWalked`'s existing "was this actually computed or just
+  defaulted" precedent in the same model file.
+- **Per-`RootFinding` retained bytes (replaces the BFS estimate for the common case):** in
+  `GCRootAnalyzer.Analyze`'s step 3, before running `RetainedSizeCandidateSelector.SelectAndCompute`'s
+  capped BFS, try `treeProvider?.TryGetRetainedBytes(f.TargetAddress, out ulong exact)` for each of the
+  top `PathSearchTopN` roots; only fall through to the BFS heuristic for targets where that returns
+  `false` (unreachable-when-built or no provider at all). This removes the `MaxBfsNodes`/`MaxBfsDepth`
+  cap and `PathSearchCapped`/`PathSearchCappedCount`'s reason for existing for the exact-tree case —
+  those fields stay (still needed for the no-Stage-B fallback path and for `PathTypeNames`'s own
+  forward-BFS, which this doesn't replace), but `RootPathFinding.RetainedSizeWasWalked` should be
+  joined by (or repurposed as a three-state) marker distinguishing "walked (heuristic)" from "exact"
+  from "unavailable," so the report can say which kind of number it's showing.
+
+**Effort and risk.** No new format, no new gating, no new analyzer registration — a signature addition
+to an existing utility, a new small static helper class, and a conditional branch in an existing
+analyzer's already-existing step. Testable with synthetic `ReachableGraph`/`DominatorTreeComputeResult`
+fixtures the same way `DominatorChildIndexBuilderTests` already exercises `DominatorChildIndexBuilder`
+— no real dump needed to verify `DominatorRetainedSetAggregator`'s ancestor-exclusion logic, only to
+confirm the wiring end-to-end (existing `DominatorAnalyzerExactTreeRealDumpTests`-style test, or a new
+one, extended to also print `GCRootDomainResult.ByKind`).
+
+### 12.2 Phase 2 — per-thread retained bytes ("what would thread N's exit free") — shipped (index + provider), report surface deferred
+
+Implemented as designed below, with the deviations noted inline. Not bundled into Phase 1's change,
+as originally planned.
+
+**Shipped:**
+- New additive `CacheSectionId.RootStackThreadAttribution = 27` — independent section, not a second
+  trailer bolted onto `Roots`' single `IndexHeader.Reserved` slot, exactly as designed.
+- `RootStackThreadIndexWriter`
+  ([RootStackThreadIndexWriter.cs](../../../src/DumpDetective.Analysis/Indexing/Satellite/RootStackThreadIndexWriter.cs)) —
+  loops live (`thread.IsAlive`) `heap.Runtime.Threads`, each thread's own `EnumerateStackRoots()`
+  (confirmed via reflection against the installed ClrMD 4.0.732401 package that this returns
+  `IEnumerable<ClrStackRoot>`, not `ClrRoot` — same `Address`/`RootKind` shape, plus `StackFrame`),
+  writing fixed 16-byte `RootAddr(8) | OSThreadId(4) | ManagedThreadId(4)` records — no padding
+  needed (unlike the design's original 24-byte guess), since 8+4+4 is already a clean record size.
+  Wired into `DiskBackedObjectIndexWriter.WriteSatelliteSections` immediately after `Roots`, same
+  `!SkipRootIndexBuild` gate, own try/catch/warning matching every other satellite section.
+- `RootStackThreadIndexReader.Read` — loads the whole map into memory, same precedent
+  `RootIndexReader.ReadRootIndexFile` already sets. `RootIndexReader.ReadRootIndexFile` gained a
+  `CacheContainerReader`-accepting overload (the path-based overload now delegates to it) so a
+  caller that already has a container open — `ThreadRetentionReaderProvider`, below — doesn't pay
+  for a second, redundant container open.
+- `ThreadRetentionReaderProvider`
+  ([ThreadRetentionReaderProvider.cs](../../../src/DumpDetective.Analysis/Indexing/Dominator/ThreadRetentionReaderProvider.cs)) —
+  cross-references `RootStackThreadAttribution` against `Roots`' Stack-kind entries to build each
+  thread's target-address set, then calls §12.1's `DominatorRetainedSetAggregator.ComputeExclusiveRetainedBytes`
+  once per thread, eagerly, at open time — reused unmodified, exactly as designed; no second
+  ancestor-exclusion implementation.
+- `IThreadRetentionProvider` (`DumpDetective.Core.Abstractions`) — one method,
+  `TryGetRetainedBytesForThread(uint osThreadId, out ulong retainedBytes)`. **Deviation from the
+  design's sketch:** `osThreadId` is `uint`, not `int` — matches `ClrThread.OSThreadId`'s actual type
+  (confirmed against existing usage in `ThreadAnalyzer.cs`/`ThreadDomainResult.cs`, which already
+  treat it as `uint` throughout), avoiding a silent narrowing/sign-mismatch bug the design's
+  pseudocode would have introduced.
+- `ThreadRetentionIndexCache` (Cache folder) + `IHeapAnalysisCache.TryGetThreadRetentionProvider()` —
+  mirrors `DominatorTreeIndexCache`'s lazy-open-once pattern exactly, composing
+  `_dominatorTreeCache.TryGetProvider()` as its own dependency (a thread-retention provider can't
+  exist without the dominator tree it's built from).
+- Tests: `RootStackThreadIndexTests.cs` (reader round-trip, missing-section handling, and an
+  end-to-end `ThreadRetentionReaderProvider.TryOpen` case verifying the exact scenario the design's
+  caveat called out — one thread's two stack roots where one's target dominates the other's, so the
+  thread's total must count it once, not twice) — all against hand-built `cache.bin` fixtures and a
+  fake `IDominatorTreeProvider`, no real dump needed.
+
+**Deferred, not shipped:** the "new report surface" (§12.2's original plan suggested a `ThreadAnalyzer`
+section). `ThreadAnalyzer` is a substantially more complex, dispatcher-based analyzer
+(`IThreadStackScanParticipant`, shared-stack-scan, sampling caps) than `GCRootAnalyzer` was for §12.1,
+and threading a cache-backed provider into its per-thread categorization path is a real, separate
+change with its own risk — deliberately not bundled into landing the index/provider itself. The
+provider is fully usable today via `cache.TryGetThreadRetentionProvider()` for any future caller
+(including a `ThreadAnalyzer` section, when someone picks that up), and is validated end-to-end
+against a real dump via `DominatorAnalyzerExactTreeRealDumpTests.cs`'s extended §12.2 block, which
+prints exact retained bytes for up to 20 live threads that own at least one Stack-kind root.
+
+**Why `RootIndex` alone can't answer this today.** `RootIndexWriter.Write`
+([RootIndexWriter.cs:26-186](../../../src/DumpDetective.Analysis/Indexing/Satellite/RootIndexWriter.cs#L26-L186))
+persists `(TargetAddr, RootAddr, Kind)` from a single `heap.EnumerateRoots()` pass. For a `Stack`-kind
+root, `RootAddr` is the stack slot's address — not a thread identity. Confirmed directly against the
+installed ClrMD 4 package (`Microsoft.Diagnostics.Runtime.xml`, `microsoft.diagnostics.runtime`
+4.0.732401): `ClrRoot` (the type `EnumerateRoots()` yields) exposes only `Address`/`Object`/
+`RootKind`/`IsInterior`/`IsPinned` — no thread back-reference. Thread attribution only exists via
+`ClrThread.EnumerateStackRoots()`, called per-thread
+(`ClrRuntime.Threads`, reachable from `heap.Runtime` without any new parameter threading through
+`DiskBackedObjectIndexWriter.Build`) — confirmed already in use the same way by
+`ThreadAnalyzer.CountStackRoots`
+([ThreadAnalyzer.cs:603-614](../../../src/DumpDetective.Analysis/Analyzers/ThreadAnalyzer.cs#L603-L614)).
+
+**Cost shape.** Thread counts and per-thread stack-root counts are both small (dozens of threads,
+typically well under a thousand stack roots per thread) — nowhere near heap-object-population scale.
+This second enumeration is cheap relative to the rest of Phase 1's build, the same way the existing
+static-field trailer (`WriteFieldNameTrailer`) is cheap relative to the main columnar object scan.
+
+**On-disk design — a new, independent `CacheSectionId`, not a trailer bolted onto `Roots`.**
+`RootIndex`'s own internal format (magic `RTIX`, version, currently 2 for the field-name trailer) has
+exactly one `IndexHeader.Reserved` slot, already spent on that trailer's record count — reusing it for
+a second, differently-shaped trailer would need either a version bump (invalidating every existing
+`Roots` section on next read, same cost the v1→v2 field-name bump already paid once) or a fragile
+"try to read past where the last trailer ended, treat short reads as absent" convention. Cleaner:
+follow this doc's own established pattern for adding new data (§5, §10.4's Batch 2b) — a brand new,
+additive `CacheSectionId` (next available past whatever Batch 3 left off), independent of `Roots`'
+internal versioning entirely:
+
+| Section | Shape | Purpose |
+|---|---|---|
+| `RootStackThreadAttribution` (new) | own `IndexHeader` (magic `RTTA`, version 1) + fixed 24-byte records: `RootAddr(8) \| OSThreadId(8) \| ManagedThreadId(4) \| Pad(4)` | `RootAddr → (OSThreadId, ManagedThreadId)`, built once at Phase 1 build time from `ClrThread.EnumerateStackRoots()`, one pass per thread |
+
+- **Writer** (`RootStackThreadIndexWriter`, sibling to `RootIndexWriter`): after (or alongside)
+  `RootIndexWriter.Write`'s existing pass, loop `heap.Runtime.Threads`; for each thread, for each
+  `ClrRoot` yielded by `thread.EnumerateStackRoots()`, write `(root.Address, thread.OSThreadId,
+  thread.ManagedThreadId)`. No dependency on `RootIndex`'s own record stream — reads a second time from
+  ClrMD, not from the just-written `Roots` section, mirroring how `WriteFieldNameTrailer` independently
+  re-resolves static fields rather than reusing `Roots`' in-flight state.
+- **Reader** (`RootStackThreadIndexReader`, sibling to `RootIndexReader`): loads the whole map into a
+  `Dictionary<ulong, (int OSThreadId, int ManagedThreadId)>` at read time — same "fully in memory is
+  fine" precedent `RootIndexReader.ReadRootIndexFile` already sets, since this is bounded by root
+  count, not object count.
+- **Gating:** build unconditionally whenever the `Roots` section itself builds (same
+  `!SkipRootIndexBuild` gate, no new marker interface) — this is a cheap satellite index, not something
+  that needs its own opt-in the way Stage B's exact tree does.
+
+**Query surface — new method, not a growth of `IDominatorTreeProvider`.** Thread-retained-bytes is a
+*root-index* concept layered on top of the dominator tree, not a dominator-tree-native operation the
+way `TryGetRetainedBytes`/`EnumerateRetainedSet` are — it belongs on a new small provider, exposed the
+same way `IDominatorTreeProvider` is (`IHeapAnalysisCache.TryGetThreadRetentionProvider()`, lazily
+opened once, mirroring `DominatorTreeIndexCache`'s pattern):
+
+```csharp
+namespace DumpDetective.Core.Abstractions;
+
+public interface IThreadRetentionProvider
+{
+    /// <summary>
+    /// Exact retained bytes for everything reachable only through <paramref name="osThreadId"/>'s own
+    /// stack roots — the answer to "how much would become collectible if this thread exited" (modulo
+    /// finalization/other GC-root retention keeping some of it alive regardless; see the report-level
+    /// caveat below). Computed via DominatorRetainedSetAggregator.ComputeExclusiveRetainedBytes (§12.1)
+    /// over that thread's Stack-kind root targets — reused unmodified, not a second implementation.
+    /// </summary>
+    bool TryGetRetainedBytesForThread(int osThreadId, out ulong retainedBytes);
+}
+```
+
+**The caveat this API must document, not hide.** An object dominated (in the whole-heap dominator tree)
+only by thread N's stack roots would indeed become collectible if every one of those roots vanished —
+but if the same object is also reachable from a second GC root (another thread's stack, a static field,
+a handle), its dominator-tree idom is the virtual root, not any single thread's root, and it's already
+correctly excluded from that thread's exclusive retained set by `ComputeExclusiveRetainedBytes`'s own
+logic (§12.1) applied to that thread's target set alone — this is why reusing §12.1's aggregator instead
+of a bespoke sum is load-bearing, not just convenient. The number this API returns is therefore already
+"what's exclusively reachable via this thread" by construction; it does not need (and must not attempt)
+extra logic to subtract other threads' contributions.
+
+**New report surface.** A new analyzer or a new section on the existing thread report (`ThreadAnalyzer`
+already owns per-thread stack/state reporting) that, for each live thread, calls
+`TryGetRetainedBytesForThread` and surfaces "would free ~X MB if this thread exited" alongside existing
+stack-trace/blocking findings — natural fit next to `ThreadAnalyzer`'s existing per-thread rows rather
+than a standalone analyzer.
+
+**Effort and risk — larger than Phase 1, still bounded.** New on-disk section (additive, no
+`FormatVersion` bump — same low-risk shape §5/§10 already used repeatedly), new writer/reader pair
+(structurally simple, no sort/merge phase — a per-thread loop, unlike the reverse-edge index's
+bucket/sort machinery), new provider interface, new report wiring. No new algorithmic risk — the hard
+part (exact, non-double-counting retained bytes for a set of targets) is Phase 1's
+`DominatorRetainedSetAggregator`, reused as-is. Recommend building this only once Phase 1 has shipped
+and `DominatorRetainedSetAggregator` has a real caller to validate its correctness against.

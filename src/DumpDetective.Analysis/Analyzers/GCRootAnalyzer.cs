@@ -56,8 +56,13 @@ namespace DumpDetective.Analysis.Analyzers
 
             IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates = idx.TypeAggregates;
 
+            // §12.1 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): null when
+            // Stage B wasn't built for this run — every consumer below degrades to today's
+            // shallow-size/BFS-heuristic behavior in that case.
+            IDominatorTreeProvider? treeProvider = cache.TryGetDominatorTreeProvider();
+
             // ── Step 2: Group by kind, estimate retained bytes, score severity ─
-            GCRootAnalysisProjectionResult projection = GCRootAnalysisProjection.Build(roots, heap, cache, aggregates);
+            GCRootAnalysisProjectionResult projection = GCRootAnalysisProjection.Build(roots, heap, cache, aggregates, treeProvider);
 
             List<RootFinding> findings = projection.FindingsBySeverityDescending;
             int topCount = Math.Min(findings.Count, options.TopSeverityLimit);
@@ -81,17 +86,27 @@ namespace DumpDetective.Analysis.Analyzers
             int pathCappedCount = 0;
             int pathN = Math.Min(findings.Count, options.PathSearchTopN);
 
+            // §12.1: a target the dominator tree can answer exactly for needs no BFS at all — skip
+            // it as a walk candidate entirely rather than spending one of RetainedSizeCandidateSelector's
+            // maxCandidatesToWalk slots on it.
+            var exactRetainedByAddress = treeProvider is not null ? new Dictionary<ulong, ulong>(pathN) : null;
             var walkCandidates = new List<(ulong Address, ulong MethodTable, ulong ShallowSize)>(pathN);
             for (int i = 0; i < pathN; i++)
             {
                 RootFinding f = findings[i];
+                if (exactRetainedByAddress is not null && treeProvider!.TryGetRetainedBytes(f.TargetAddress, out ulong exactRetainedBytes))
+                {
+                    exactRetainedByAddress[f.TargetAddress] = exactRetainedBytes;
+                    continue;
+                }
+
                 if (cache.TryGetObjectMetadata(heap, f.TargetAddress, out ulong methodTable, out ulong size))
                     walkCandidates.Add((f.TargetAddress, methodTable, size));
             }
 
             var retainedVisited = new HashSet<ulong>(capacity: Math.Min(pathN * 64, 4096));
             IReadOnlyList<RetainedSizeResult> retainedResults = RetainedSizeCandidateSelector.SelectAndCompute(
-                walkCandidates, heap, cache, retainedVisited, maxCandidatesToWalk: pathN, options.MaxBfsNodes, options.MaxBfsDepth, cancellationToken);
+                walkCandidates, heap, cache, retainedVisited, maxCandidatesToWalk: walkCandidates.Count, options.MaxBfsNodes, options.MaxBfsDepth, cancellationToken);
 
             var retainedByAddress = new Dictionary<ulong, RetainedSizeResult>(retainedResults.Count);
             foreach (RetainedSizeResult r in retainedResults)
@@ -109,7 +124,22 @@ namespace DumpDetective.Analysis.Analyzers
                 if (wasCapped)
                     pathCappedCount++;
 
-                retainedByAddress.TryGetValue(f.TargetAddress, out RetainedSizeResult retained);
+                ulong retainedBytes;
+                bool retainedSizeWasWalked;
+                bool retainedSizeIsExact;
+                if (exactRetainedByAddress is not null && exactRetainedByAddress.TryGetValue(f.TargetAddress, out ulong exactRetainedBytes))
+                {
+                    retainedBytes = exactRetainedBytes;
+                    retainedSizeWasWalked = false;
+                    retainedSizeIsExact = true;
+                }
+                else
+                {
+                    retainedByAddress.TryGetValue(f.TargetAddress, out RetainedSizeResult retained);
+                    retainedBytes = retained.RetainedSize;
+                    retainedSizeWasWalked = retained.WasWalked;
+                    retainedSizeIsExact = false;
+                }
 
                 pathFindings.Add(new RootPathFinding(
                     TargetAddress: f.TargetAddress,
@@ -118,8 +148,9 @@ namespace DumpDetective.Analysis.Analyzers
                     PathTypeNames: pathTypes,
                     PathLength: pathTypes.Count,
                     WasCapped: wasCapped,
-                    EstimatedRetainedBytes: retained.RetainedSize,
-                    RetainedSizeWasWalked: retained.WasWalked));
+                    EstimatedRetainedBytes: retainedBytes,
+                    RetainedSizeWasWalked: retainedSizeWasWalked,
+                    RetainedSizeIsExact: retainedSizeIsExact));
             }
 
             return new GCRootDomainResult(

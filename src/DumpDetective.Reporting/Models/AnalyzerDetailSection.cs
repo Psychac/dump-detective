@@ -101,7 +101,8 @@ internal sealed record RootPath(
     bool WasCapped,
     IReadOnlyList<string> Hops,   // type names in BFS order from target; shows graph shape owned by root
     ulong EstimatedRetainedBytes = 0,
-    bool RetainedSizeWasWalked = false);  // false => EstimatedRetainedBytes is the target's shallow size, not a true BFS walk result
+    bool RetainedSizeWasWalked = false,  // true => a capped BFS walk computed EstimatedRetainedBytes, not the target's shallow size
+    bool RetainedSizeIsExact = false);   // true => the dominator tree resolved EstimatedRetainedBytes exactly (§12.1); takes precedence over RetainedSizeWasWalked
 
 /// <summary>Object subgraphs reachable from roots of a particular target type, grouped for display.</summary>
 internal sealed record RootPathGroup(

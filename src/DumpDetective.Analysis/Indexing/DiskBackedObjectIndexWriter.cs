@@ -1078,6 +1078,32 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             warnings.Add($"Roots: {ex.GetType().Name}: {ex.Message}");
         }
 
+        // RootStackThreadAttribution — §12.2 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md):
+        // which thread owns each Stack-kind root. Same gate as Roots (a ClrRoot alone carries no
+        // thread identity, so this is only useful alongside the Roots section it cross-references
+        // against at read time) — cheap relative to the rest of Phase 1, unconditional whenever
+        // Roots itself builds, no separate opt-in.
+        try
+        {
+            if (SkipRootIndexBuild)
+            {
+                progress?.Report(new(0, "skipping stack-root thread attribution (DD_SKIP_ROOT_INDEX_BUILD=1)", Detail: null, Elapsed: stopwatch.Elapsed));
+            }
+            else
+            {
+                progress?.Report(new(0, "enumerating stack root thread ownership", Detail: null, Elapsed: stopwatch.Elapsed));
+                containerWriter.BeginSection(CacheSectionId.RootStackThreadAttribution);
+                long recordCount = RootStackThreadIndexWriter.Write(containerWriter.Stream, heap, cancellationToken, progress, stopwatch);
+                containerWriter.EndSection(recordCount);
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            containerWriter.AbortSection();
+            warnings.Add($"RootStackThreadAttribution: {ex.GetType().Name}: {ex.Message}");
+        }
+
         // Tasks — Task objects collected during heap scan
         try
         {

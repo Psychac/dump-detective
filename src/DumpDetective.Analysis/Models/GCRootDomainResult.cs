@@ -8,7 +8,8 @@ public sealed record RootKindSummary(
     string Kind,
     int Count,
     ulong EstimatedRetainedBytes,
-    double PctOfManagedHeap);
+    double PctOfManagedHeap,
+    bool IsExactRetainedBytes = false);
 
 public sealed record RootFinding(
     string RootKind,
@@ -17,7 +18,8 @@ public sealed record RootFinding(
     string TargetTypeName,
     ulong TargetAddress,
     ulong EstimatedRetainedBytes,
-    int SeverityScore);
+    int SeverityScore,
+    bool RetainedBytesIsExact = false);
 
 public sealed record RootPathFinding(
     ulong TargetAddress,
@@ -27,7 +29,8 @@ public sealed record RootPathFinding(
     int PathLength,
     bool WasCapped,
     ulong EstimatedRetainedBytes = 0,
-    bool RetainedSizeWasWalked = false);
+    bool RetainedSizeWasWalked = false,
+    bool RetainedSizeIsExact = false);
 
 internal sealed record GCRootDomainResult(
     int TotalRoots,

@@ -31,6 +31,7 @@ namespace DumpDetective.Analysis.Cache
         private readonly ForwardIndexCache _forwardIndexCache;
         private readonly DominatorReachableIndexCache _dominatorReachableIndexCache;
         private readonly DominatorTreeIndexCache _dominatorTreeCache;
+        private readonly ThreadRetentionIndexCache _threadRetentionCache;
 
         public long ObjectScanCount => Interlocked.Read(ref _objectScanCount);
         public long CacheHits => Interlocked.Read(ref _cacheHits);
@@ -79,6 +80,13 @@ namespace DumpDetective.Analysis.Cache
                 _heapIndexCache.TryGetHeapIndex(out var h);
                 return h;
             });
+            _threadRetentionCache = new ThreadRetentionIndexCache(
+                () =>
+                {
+                    _heapIndexCache.TryGetHeapIndex(out var h);
+                    return h;
+                },
+                () => _dominatorTreeCache.TryGetProvider());
         }
 
         public IEnumerable<CacheMetrics> GetCacheMetrics()
@@ -93,6 +101,7 @@ namespace DumpDetective.Analysis.Cache
             yield return _forwardIndexCache.GetMetrics();
             yield return _dominatorReachableIndexCache.GetMetrics();
             yield return _dominatorTreeCache.GetMetrics();
+            yield return _threadRetentionCache.GetMetrics();
         }
 
         public HeapCacheHealth GetHealth()
@@ -344,6 +353,11 @@ namespace DumpDetective.Analysis.Cache
         public IDominatorTreeProvider? TryGetDominatorTreeProvider()
         {
             return _dominatorTreeCache.TryGetProvider();
+        }
+
+        public IThreadRetentionProvider? TryGetThreadRetentionProvider()
+        {
+            return _threadRetentionCache.TryGetProvider();
         }
 
         private void ReportProgress(string phase, long totalScans)

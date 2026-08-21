@@ -56,13 +56,19 @@ public sealed class DominatorAnalyzerExactTreeRealDumpTests(ITestOutputHelper ou
 
             var cache = new HeapAnalysisCache();
 
-            var indexStopwatch = Stopwatch.StartNew();
-            cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
-            indexStopwatch.Stop();
-            output.WriteLine($"Phase 1 index build (incl. §D5 forward index): {indexStopwatch.ElapsedMilliseconds:N0} ms");
+            // enableExactDominatorTree: true + a IRequiresDominatorTreeIndex analyzer in
+            // activeAnalyzers is what flips buildStageB on (§10.3) — without both, this run would
+            // silently skip Stage B entirely and every "exact" comparison below would be
+            // heuristic-vs-heuristic, not exact-vs-heuristic.
+            var dominatorAnalyzer = new DominatorAnalyzer(new TestOutputLogger<DominatorAnalyzer>(output));
+            IReadOnlyList<IAnalyzer> activeAnalyzers = new IAnalyzer[] { dominatorAnalyzer };
 
-            var logger = new TestOutputLogger<DominatorAnalyzer>(output);
-            var analyzer = new DominatorAnalyzer(logger);
+            var indexStopwatch = Stopwatch.StartNew();
+            cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null, activeAnalyzers, enableExactDominatorTree: true);
+            indexStopwatch.Stop();
+            output.WriteLine($"Phase 1 index build (incl. §D5 forward index, Stage B): {indexStopwatch.ElapsedMilliseconds:N0} ms");
+
+            DominatorAnalyzer analyzer = dominatorAnalyzer;
 
             var context = new AnalysisContext
             {
@@ -100,6 +106,52 @@ public sealed class DominatorAnalyzerExactTreeRealDumpTests(ITestOutputHelper ou
                 output.WriteLine($"§Report integration: exact retained bytes resolved for {exactByType.Count:N0}/{dominatorResult.TopDominatorTypes.Count:N0} top dominator types.");
                 foreach (KeyValuePair<string, ulong> kvp in exactByType)
                     output.WriteLine($"  {kvp.Key}: {kvp.Value:N0} bytes (exact)");
+            }
+
+            // §12.1 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): with
+            // Stage B built above, GCRootAnalyzer's ByKind rollup should now come back exact rather
+            // than shallow-size-summed.
+            var gcRootAnalyzer = new GCRootAnalyzer();
+            var gcRootContext = new AnalysisContext
+            {
+                Runtime = runtime,
+                Cache = cache,
+                AnalysisOptions = new AnalysisOptions { MemoryLeak = new RetentionOptions() },
+            };
+            AnalyzerDomainResult gcRootResult = gcRootAnalyzer.AnalyzeAsync(gcRootContext, CancellationToken.None).AsTask().GetAwaiter().GetResult();
+            if (gcRootResult is GCRootDomainResult gcRoot)
+            {
+                output.WriteLine($"§12.1: GCRootAnalyzer ByKind ({gcRoot.ByKind.Count:N0} kinds):");
+                foreach (RootKindSummary kind in gcRoot.ByKind)
+                {
+                    output.WriteLine($"  {kind.Kind}: {kind.Count:N0} roots, {kind.EstimatedRetainedBytes:N0} bytes " +
+                        $"({(kind.IsExactRetainedBytes ? "exact" : "shallow-size fallback")}), {kind.PctOfManagedHeap:F1}% of heap");
+                }
+            }
+
+            // §12.2: "how much would become collectible if this thread exited" — per-thread exact
+            // retained bytes, cross-referencing RootStackThreadAttribution against the same
+            // dominator tree Stage B just built.
+            IThreadRetentionProvider? threadRetention = cache.TryGetThreadRetentionProvider();
+            output.WriteLine($"§12.2: IThreadRetentionProvider {(threadRetention is null ? "unavailable" : "available")}.");
+            if (threadRetention is not null)
+            {
+                int printed = 0;
+                foreach (ClrThread thread in runtime.Threads)
+                {
+                    if (!thread.IsAlive)
+                        continue;
+
+                    if (threadRetention.TryGetRetainedBytesForThread(thread.OSThreadId, out ulong retainedBytes))
+                    {
+                        output.WriteLine($"  OSThread {thread.OSThreadId} (managed {thread.ManagedThreadId}): {retainedBytes:N0} bytes exact retained");
+                        if (++printed >= 20)
+                            break;
+                    }
+                }
+
+                if (printed == 0)
+                    output.WriteLine("  No live thread had any Stack-kind roots attributed to it.");
             }
         }
         finally

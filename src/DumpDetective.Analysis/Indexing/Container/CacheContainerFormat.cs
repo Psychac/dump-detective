@@ -94,6 +94,16 @@ internal enum CacheSectionId
     /// a per-query subtree walk.
     /// </summary>
     DominatorRetainedBytes = 26,
+    /// <summary>
+    /// Fixed <c>RootAddr(8) | OSThreadId(4) | ManagedThreadId(4)</c> records — §12.2
+    /// (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): which thread owns
+    /// each Stack-kind GC root, resolved once at Phase 1 build time via
+    /// <c>ClrThread.EnumerateStackRoots()</c> (a <c>ClrRoot</c> alone carries no thread identity).
+    /// Independent of <see cref="Roots"/>'s own internal versioning — a brand new section rather
+    /// than a second trailer bolted onto <see cref="Roots"/>'s single <c>IndexHeader.Reserved</c>
+    /// slot, which the field-name trailer already spends.
+    /// </summary>
+    RootStackThreadAttribution = 27,
 }
 
 /// <summary>

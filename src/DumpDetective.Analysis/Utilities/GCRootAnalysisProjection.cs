@@ -2,6 +2,7 @@ using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Traversal.Dominator;
 using DumpDetective.Core.Abstractions;
 
 namespace DumpDetective.Analysis.Utilities;
@@ -12,11 +13,18 @@ internal sealed record GCRootAnalysisProjectionResult(
 
 internal static class GCRootAnalysisProjection
 {
+    /// <param name="treeProvider">
+    /// §12.1 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): when available,
+    /// upgrades both per-<see cref="RootFinding"/> and per-kind retained-byte totals from shallow
+    /// size to exact dominator-tree retained bytes. <c>null</c> (legacy cache.bin, Stage B not gated
+    /// on, or Stage A/B failed to persist) falls back to today's shallow-size behavior unchanged.
+    /// </param>
     public static GCRootAnalysisProjectionResult Build(
         IReadOnlyList<(ulong TargetAddr, ulong RootAddr, byte Kind)> roots,
         ClrHeap heap,
         IHeapAnalysisCache cache,
-        IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates)
+        IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates,
+        IDominatorTreeProvider? treeProvider = null)
     {
         ulong totalHeapBytes = 0;
         foreach (TypeAggregateIndexEntry agg in aggregates.Values)
@@ -24,6 +32,7 @@ internal static class GCRootAnalysisProjection
 
         var kindCounts = new Dictionary<string, int>(8);
         var kindBytes = new Dictionary<string, ulong>(8);
+        Dictionary<string, List<ulong>>? targetsByKind = treeProvider is not null ? new Dictionary<string, List<ulong>>(8) : null;
         var findings = new List<RootFinding>(roots.Count);
         Dictionary<ulong, (string TypeName, string FieldName, int AppDomainId)>? staticFieldsByRootAddress = null;
 
@@ -38,8 +47,28 @@ internal static class GCRootAnalysisProjection
             kindCounts[kind] = (kindCounts.TryGetValue(kind, out int count) ? count : 0) + 1;
             kindBytes[kind] = (kindBytes.TryGetValue(kind, out ulong bytes) ? bytes : 0UL) + size;
 
+            if (targetsByKind is not null)
+            {
+                if (!targetsByKind.TryGetValue(kind, out List<ulong>? targetList))
+                    targetsByKind[kind] = targetList = new List<ulong>();
+                targetList.Add(targetAddr);
+            }
+
+            ulong retainedBytes;
+            bool retainedBytesIsExact;
+            if (treeProvider is not null && treeProvider.TryGetRetainedBytes(targetAddr, out ulong exactRetainedBytes))
+            {
+                retainedBytes = exactRetainedBytes;
+                retainedBytesIsExact = true;
+            }
+            else
+            {
+                retainedBytes = size;
+                retainedBytesIsExact = false;
+            }
+
             string targetType = ResolveTypeName(heap, methodTable, targetAddr);
-            int severity = ComputeSeverity(size, kind);
+            int severity = ComputeSeverity(retainedBytes, kind);
 
             string? fieldDescription = null;
             if (kind is "StaticVar" or "ThreadStaticVar")
@@ -59,17 +88,29 @@ internal static class GCRootAnalysisProjection
                 FieldDescription: fieldDescription,
                 TargetTypeName: targetType,
                 TargetAddress: targetAddr,
-                EstimatedRetainedBytes: size,
-                SeverityScore: severity));
+                EstimatedRetainedBytes: retainedBytes,
+                SeverityScore: severity,
+                RetainedBytesIsExact: retainedBytesIsExact));
         }
 
         var byKind = new List<RootKindSummary>(kindCounts.Count);
         foreach (KeyValuePair<string, int> kv in kindCounts)
         {
             string kind = kv.Key;
-            ulong estBytes = kindBytes.TryGetValue(kind, out ulong kb) ? kb : 0UL;
+            ulong estBytes;
+            bool isExact = false;
+            if (treeProvider is not null && targetsByKind is not null && targetsByKind.TryGetValue(kind, out List<ulong>? targets))
+            {
+                estBytes = DominatorRetainedSetAggregator.ComputeExclusiveRetainedBytes(treeProvider, targets);
+                isExact = true;
+            }
+            else
+            {
+                estBytes = kindBytes.TryGetValue(kind, out ulong kb) ? kb : 0UL;
+            }
+
             double pct = totalHeapBytes > 0 ? (double)estBytes / totalHeapBytes * 100.0 : 0.0;
-            byKind.Add(new RootKindSummary(kind, kv.Value, estBytes, pct));
+            byKind.Add(new RootKindSummary(kind, kv.Value, estBytes, pct, isExact));
         }
         byKind.Sort(static (a, b) => b.EstimatedRetainedBytes.CompareTo(a.EstimatedRetainedBytes));
 

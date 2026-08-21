@@ -73,4 +73,12 @@ public interface IHeapAnalysisCache
     /// <see cref="IDominatorTreeProvider"/>.
     /// </summary>
     IDominatorTreeProvider? TryGetDominatorTreeProvider();
+
+    /// <summary>
+    /// Returns the shared "how much would become collectible if this thread exited?" provider, or
+    /// <c>null</c> when unavailable (in-memory mode, the dominator tree itself unavailable, a legacy
+    /// pre-§12.2 cache.bin, or the section failed to persist). See
+    /// <see cref="IThreadRetentionProvider"/> and docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §12.2.
+    /// </summary>
+    IThreadRetentionProvider? TryGetThreadRetentionProvider();
 }

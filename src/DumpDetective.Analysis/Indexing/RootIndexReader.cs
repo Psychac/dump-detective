@@ -38,10 +38,21 @@ internal static class RootIndexReader
 
     public static List<(ulong TargetAddr, ulong RootAddr, byte Kind)> ReadRootIndexFile(string containerPath, CancellationToken cancellationToken)
     {
-        var roots = new List<(ulong, ulong, byte)>();
-
         if (string.IsNullOrWhiteSpace(containerPath) || !CacheContainerReader.TryOpen(containerPath, out CacheContainerReader? reader) || reader is null)
-            return roots;
+            return new List<(ulong, ulong, byte)>();
+
+        return ReadRootIndexFile(reader, cancellationToken);
+    }
+
+    /// <summary>
+    /// Same as the path-based overload, but reads from a <see cref="CacheContainerReader"/> the
+    /// caller already has open — avoids a second, redundant container open when a caller (e.g.
+    /// §12.2's <c>ThreadRetentionReaderProvider</c>, docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md)
+    /// already opened one for another section.
+    /// </summary>
+    public static List<(ulong TargetAddr, ulong RootAddr, byte Kind)> ReadRootIndexFile(CacheContainerReader reader, CancellationToken cancellationToken)
+    {
+        var roots = new List<(ulong, ulong, byte)>();
 
         if (!reader.TryOpenSection(CacheSectionId.Roots, out Stream? sectionStream) || sectionStream is null)
             return roots;

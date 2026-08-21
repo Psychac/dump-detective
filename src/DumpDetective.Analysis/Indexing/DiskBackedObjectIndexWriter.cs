@@ -1208,19 +1208,16 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         {
             using (metadataLookup)
             {
+                // §10.8: one sort + sequential merge across all segments instead of one random-access
+                // binary search per node — see ResolveBatch's doc comment for the measured rationale.
+                metadataLookup!.ResolveBatch(walkResult.Addresses, methodTables, shallowSizes, cancellationToken);
+
                 for (int id = 0; id < walkResult.NodeCount; id++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     scanCounter.Tick();
 
-                    ulong address = walkResult.Addresses[id];
-                    if (metadataLookup!.TryGetEntry(address, out ulong methodTable, out ulong size))
-                    {
-                        methodTables[id] = methodTable;
-                        shallowSizes[id] = size;
-                    }
-
-                    generationTags[id] = GenerationTagResolver.Resolve(heap, address);
+                    generationTags[id] = GenerationTagResolver.Resolve(heap, walkResult.Addresses[id]);
                 }
             }
         }

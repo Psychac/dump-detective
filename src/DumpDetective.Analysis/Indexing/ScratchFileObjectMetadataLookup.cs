@@ -272,6 +272,67 @@ internal sealed class ScratchFileObjectMetadataLookup : IDisposable
         return -1;
     }
 
+    /// <summary>
+    /// §10.8 measurement pass confirmed the per-node <see cref="TryGetEntry"/> path (called once per
+    /// reachable node in BFS discovery order, not address order) was the single largest sub-phase of
+    /// Stage B's metadata resolution — its random-access binary search per node repeatedly re-walks
+    /// each segment's mmap and thrashes the page cache at multi-million-node scale, even though every
+    /// segment is confirmed address-sorted (see <see cref="VerifySegmentMonotonicity"/>). This resolves
+    /// every <paramref name="addresses"/> entry with one O(N log N) sort plus a single O(N + total
+    /// records) sequential merge across all segments (also sorted by <see cref="FindSegment"/>'s same
+    /// start-address order) instead of N random-access binary searches — addresses not covered by any
+    /// segment are left as the caller's existing default in <paramref name="methodTablesOut"/>/
+    /// <paramref name="sizesOut"/>, same "not an error" contract as <see cref="TryGetEntry"/>.
+    /// </summary>
+    public void ResolveBatch(ulong[] addresses, ulong[] methodTablesOut, ulong[] sizesOut, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        int n = addresses.Length;
+        var sortedAddresses = new ulong[n];
+        var order = new int[n];
+        for (int i = 0; i < n; i++)
+        {
+            sortedAddresses[i] = addresses[i];
+            order[i] = i;
+        }
+        Array.Sort(sortedAddresses, order);
+
+        int queryIdx = 0;
+        foreach (OpenSegment segment in _segmentsByStart)
+        {
+            while (queryIdx < n && sortedAddresses[queryIdx] < segment.Entry.Start)
+                queryIdx++;
+
+            long recordIndex = 0;
+            long recordCount = segment.Entry.RecordCount;
+            while (queryIdx < n && sortedAddresses[queryIdx] < segment.Entry.End)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                ulong queryAddress = sortedAddresses[queryIdx];
+                while (recordIndex < recordCount &&
+                    segment.AddressAccessor.ReadUInt64(recordIndex * ColumnSize) < queryAddress)
+                {
+                    recordIndex++;
+                }
+
+                if (recordIndex >= recordCount)
+                    break;
+
+                if (segment.AddressAccessor.ReadUInt64(recordIndex * ColumnSize) == queryAddress)
+                {
+                    long byteOffset = recordIndex * ColumnSize;
+                    int originalId = order[queryIdx];
+                    methodTablesOut[originalId] = segment.MethodTableAccessor.ReadUInt64(byteOffset);
+                    sizesOut[originalId] = segment.SizeAccessor.ReadUInt64(byteOffset);
+                }
+
+                queryIdx++;
+            }
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed)

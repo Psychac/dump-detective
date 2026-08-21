@@ -68,6 +68,13 @@ namespace DumpDetective.Analysis.Analyzers
             int deadWeakTargets = 0;
             bool scanCapped = false;
 
+            // §9 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): a genuine
+            // enhancement, not a fix — WeakReferenceObjectBytes already honestly reports the
+            // wrapper objects' own shallow size. This adds "what does each alive weak target
+            // transitively retain?" alongside it, when the exact tree is available.
+            IDominatorTreeProvider? weakTreeProvider = cache.TryGetDominatorTreeProvider();
+            ulong aliveWeakTargetsRetainedBytes = 0;
+
             var targetTypeHits = new Dictionary<string, int>(StringComparer.Ordinal);
             var weakHandleKinds = new Dictionary<string, int>(StringComparer.Ordinal);
 
@@ -133,6 +140,8 @@ namespace DumpDetective.Analysis.Analyzers
                                 aliveWeakTargets++;
                                 string typeName = mt != 0 ? (heap.GetTypeByMethodTable(mt)?.Name ?? "Unknown") : "Unknown";
                                 IncrementDict(targetTypeHits, typeName);
+                                if (weakTreeProvider is not null && weakTreeProvider.TryGetRetainedBytes(addr, out ulong retained))
+                                    aliveWeakTargetsRetainedBytes += retained;
                             }
                             else
                             {
@@ -205,6 +214,8 @@ namespace DumpDetective.Analysis.Analyzers
                                         aliveWeakTargets++;
                                         string typeName = mt != 0 ? (heap.GetTypeByMethodTable(mt)?.Name ?? "Unknown") : "Unknown";
                                         IncrementDict(targetTypeHits, typeName);
+                                        if (weakTreeProvider is not null && weakTreeProvider.TryGetRetainedBytes(addr, out ulong retained))
+                                            aliveWeakTargetsRetainedBytes += retained;
                                     }
                                     else
                                     {
@@ -404,7 +415,9 @@ namespace DumpDetective.Analysis.Analyzers
                 ScanCapUsed: options.HandleScanCap,
                 PhaseBFallbackUsed: phaseBFallbackUsed,
                 PhaseBSkipped: phaseBSkipped,
-                Artifacts: rawExports);
+                Artifacts: rawExports,
+                AliveWeakTargetsRetainedBytes: aliveWeakTargetsRetainedBytes,
+                AliveWeakTargetsRetainedBytesIsExact: weakTreeProvider is not null);
         }
 
 

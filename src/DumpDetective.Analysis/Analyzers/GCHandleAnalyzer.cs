@@ -31,6 +31,14 @@ namespace DumpDetective.Analysis.Analyzers
         {
             var scanCounter = new ObjectScanCounter("scanning GC handles", progress, reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
+            // §9 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): a
+            // correctness fix, not an enhancement. Without a tree provider, totalPinnedRetainedBytes/
+            // totalAsyncPinnedRetainedBytes only sum ResolveSize's *shallow* size per handle target —
+            // "retained" was never true. When the exact tree is available, use it instead.
+            IDominatorTreeProvider? handleTreeProvider = cache?.TryGetDominatorTreeProvider();
+            int pinnedExactCount = 0, pinnedFallbackCount = 0;
+            int asyncPinnedExactCount = 0, asyncPinnedFallbackCount = 0;
+
             var byKind = new Dictionary<string, int>(StringComparer.Ordinal);
             var pinnedTypes = new Dictionary<string, int>(StringComparer.Ordinal);
             var pinnedBytesByType = new Dictionary<string, ulong>(StringComparer.Ordinal);
@@ -88,9 +96,21 @@ namespace DumpDetective.Analysis.Analyzers
                 // P1-2: Separate AsyncPinned vs Pinned byte accounting
                 if (kind == "AsyncPinned")
                 {
-                    // OPT (docs/cache/cache-architecture.md Phase 6): only Size is needed —
-                    // resolve via the disk-backed address index instead of heap.GetObject.
-                    ulong resolvedSize = ResolveSize(heap, cache, targetAddress);
+                    // §9: exact retained bytes when the dominator tree is available — this is what
+                    // "would become collectible if this pin were released" actually means. Falls
+                    // back to ResolveSize's shallow size (the target's own bytes, not what it
+                    // transitively holds) when the tree can't answer for this address.
+                    ulong resolvedSize;
+                    if (handleTreeProvider is not null && handleTreeProvider.TryGetRetainedBytes(targetAddress, out ulong exactAsyncPinnedBytes))
+                    {
+                        resolvedSize = exactAsyncPinnedBytes;
+                        asyncPinnedExactCount++;
+                    }
+                    else
+                    {
+                        resolvedSize = ResolveSize(heap, cache, targetAddress);
+                        asyncPinnedFallbackCount++;
+                    }
 
                     if (resolvedSize > 0)
                     {
@@ -104,9 +124,18 @@ namespace DumpDetective.Analysis.Analyzers
                 else if (kind == "Pinned")
                 {
                     Increment(pinnedTypes, typeName);
-                    // OPT (docs/cache/cache-architecture.md Phase 6): only Size is needed —
-                    // resolve via the disk-backed address index instead of heap.GetObject.
-                    ulong resolvedSize = ResolveSize(heap, cache, targetAddress);
+                    // §9: same exact-retained-bytes preference as the AsyncPinned branch above.
+                    ulong resolvedSize;
+                    if (handleTreeProvider is not null && handleTreeProvider.TryGetRetainedBytes(targetAddress, out ulong exactPinnedBytes))
+                    {
+                        resolvedSize = exactPinnedBytes;
+                        pinnedExactCount++;
+                    }
+                    else
+                    {
+                        resolvedSize = ResolveSize(heap, cache, targetAddress);
+                        pinnedFallbackCount++;
+                    }
 
                     if (resolvedSize > 0)
                     {
@@ -238,7 +267,9 @@ namespace DumpDetective.Analysis.Analyzers
                 dependentUnresolvedPercent,
                 ToTopEntries(dependentSourceTypeCounts, options.TopTypeCount),
                 ToTopEntries(dependentTargetTypeCounts, options.TopTypeCount),
-                ToTopEntries(dependentSourceTargetPairCounts, options.TopTypeCount));
+                ToTopEntries(dependentSourceTargetPairCounts, options.TopTypeCount),
+                PinnedRetainedBytesIsExact: pinnedExactCount > 0 && pinnedFallbackCount == 0,
+                AsyncPinnedRetainedBytesIsExact: asyncPinnedExactCount > 0 && asyncPinnedFallbackCount == 0);
         }
 
         public void Dispose() { }

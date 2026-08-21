@@ -40,4 +40,9 @@ internal sealed record WastefulCollectionSnapshot(
     string ElementType = "",
     string SizeEstimateConfidence = "Unknown",
     string DetectionMethod = "",
-    string? RootDescription = null);
+    string? RootDescription = null,
+    /// <summary>Exact dominator-tree retained bytes for this collection's own address (§9,
+    /// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md) — what freeing it
+    /// would actually free, distinct from <see cref="WastedMemory"/>'s over-capacity estimate.
+    /// Null when the exact tree wasn't available.</summary>
+    ulong? RetainedBytes = null);

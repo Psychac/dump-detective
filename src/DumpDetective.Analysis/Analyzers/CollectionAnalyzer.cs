@@ -119,9 +119,17 @@ namespace DumpDetective.Analysis.Analyzers
             var collectionStats = AnalyzeCollections(heap, cache, progress, cancellationToken);
             int topToShow = Math.Min(_options.TopWastefulCollectionsToShow, collectionStats.WastefulCollections.Count);
             var topSnapshots = new List<WastefulCollectionSnapshot>(topToShow);
+            // §9 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): a natural
+            // additional column now that it's cheap to compute exactly — only ever looked up for
+            // the already-capped top-N shown collections, never the full wasteful population.
+            IDominatorTreeProvider? collectionTreeProvider = cache?.TryGetDominatorTreeProvider();
             for (int i = 0; i < topToShow; i++)
             {
                 WastefulCollection w = collectionStats.WastefulCollections[i];
+                ulong? retainedBytes = collectionTreeProvider is not null
+                    && collectionTreeProvider.TryGetRetainedBytes(w.Address, out ulong exactRetained)
+                        ? exactRetained
+                        : null;
                 topSnapshots.Add(new WastefulCollectionSnapshot(
                     w.Type,
                     (CollectionKind)w.Kind,
@@ -138,7 +146,8 @@ namespace DumpDetective.Analysis.Analyzers
                     w.ElementType,
                     w.SizeEstimateConfidence,
                     w.DetectionMethod,
-                    w.RootDescription));
+                    w.RootDescription,
+                    retainedBytes));
             }
 
             var domainResult = new CollectionDomainResult(

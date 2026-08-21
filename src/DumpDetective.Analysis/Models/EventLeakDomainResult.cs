@@ -55,7 +55,10 @@ internal sealed record SubscriberDetail(
     string Type,
     string? MethodName,
     ulong Size,
-    int Count = 1);
+    int Count = 1,
+    /// <summary>True when <see cref="Size"/> is the exact dominator-tree retained bytes for this
+    /// subscriber rather than the per-type shallow-size average (§9).</summary>
+    bool SizeIsExact = false);
 
 /// <summary>Structured subscriber-type tally for an instance; formatted for display in the report layer.</summary>
 internal sealed record SubscriberTypeCount(string Type, int Count);

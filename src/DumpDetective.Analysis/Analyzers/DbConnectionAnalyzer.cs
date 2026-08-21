@@ -119,6 +119,7 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
     // BeforeHeapIndexScan (called by the pipeline dispatcher) and mutated per-entry by
     // OnHeapEntry; consumed by AnalyzeAsync once the shared index scan has completed.
     private ClrHeap? _heap;
+    private IHeapAnalysisCache? _cache;
     private Dictionary<ulong, (string TypeName, long Count, ulong Bytes)>? _candidateMts;
     private Dictionary<ulong, (string Name, int Total, int Open, int Closed, int Broken, int Other, int Unknown, int Gen2Open, int Gen0Open, ulong Bytes)>? _typeStats;
     private InstanceStateSampler<DbConnectionSnapshot>? _sampler;
@@ -131,6 +132,7 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
     {
         ClrHeap heap = context.Heap;
         _heap = heap;
+        _cache = context.Cache;
 
         Dictionary<ulong, (string TypeName, long Count, ulong Bytes)> candidateMts =
             TypedResourceScanDriver.DiscoverCandidates(this, heap, context.Cache);
@@ -275,8 +277,10 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
 
         byType.Sort(static (a, b) => b.TotalCount.CompareTo(a.TotalCount));
 
+        IReadOnlyList<DbConnectionSnapshot> topOpenConnections = WithRetainedBytes(_sampler?.TopSamples ?? []);
+
         // Build top pools by server/database grouping
-        var topPools = BuildTopPools(_sampler?.TopSamples ?? []);
+        var topPools = BuildTopPools(topOpenConnections);
 
         return new DbConnectionDomainResult(
             ConnectionsFound:    totalConnections > 0,
@@ -289,9 +293,28 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
             Gen2OpenConnections: totalGen2Open,
             Gen0OpenConnections: totalGen0Open,
             ByType:              byType,
-            TopOpenConnections:  _sampler?.TopSamples ?? [],
+            TopOpenConnections:  topOpenConnections,
             TopPools:            topPools,
             StateScanCapped:     _sampler?.ScanCapped ?? false);
+    }
+
+    // §9 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): the biggest gap
+    // found in that audit — DbConnectionSnapshot carried no size field of any kind. Only ever
+    // applied to the already-capped TopSampleCap list.
+    private IReadOnlyList<DbConnectionSnapshot> WithRetainedBytes(IReadOnlyList<DbConnectionSnapshot> snapshots)
+    {
+        IDominatorTreeProvider? treeProvider = _cache?.TryGetDominatorTreeProvider();
+        if (treeProvider is null || snapshots.Count == 0)
+            return snapshots;
+
+        var result = new List<DbConnectionSnapshot>(snapshots.Count);
+        foreach (DbConnectionSnapshot s in snapshots)
+        {
+            result.Add(treeProvider.TryGetRetainedBytes(s.Address, out ulong retained)
+                ? s with { RetainedBytes = retained }
+                : s);
+        }
+        return result;
     }
 
     private static List<PoolSummary> BuildTopPools(IReadOnlyList<DbConnectionSnapshot> topOpenConnections)

@@ -20,4 +20,10 @@ internal sealed record WeakReferenceDomainResult(
     int ScanCapUsed,
     bool PhaseBFallbackUsed,
     bool PhaseBSkipped,
-    IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? Artifacts = null) : AnalyzerDomainResult;
+    IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? Artifacts = null,
+    /// <summary>Sum of exact dominator-tree retained bytes over every alive weak-handle target
+    /// seen (§9, docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md) — what each
+    /// target transitively holds, distinct from <see cref="WeakReferenceObjectBytes"/>'s wrapper
+    /// shallow size. 0 when the exact tree wasn't available.</summary>
+    ulong AliveWeakTargetsRetainedBytes = 0,
+    bool AliveWeakTargetsRetainedBytesIsExact = false) : AnalyzerDomainResult;

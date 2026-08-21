@@ -15,6 +15,13 @@
 
 **Stage A.5: not needed.** See §7.
 
+**§9's five new consumers: all shipped.** `EventLeakAnalyzer`, `GCHandleAnalyzer` (a correctness fix),
+`WeakReferenceAnalyzer`, `CollectionAnalyzer`, and `WcfChannelAnalyzer`/`DbConnectionAnalyzer` all now
+call `IDominatorTreeProvider.TryGetRetainedBytes`, each degrading to its pre-existing shallow-size
+heuristic when the tree is unavailable. See §9 and §10.8 for the shipped shape of each.
+`EnumerateRetainedSet` still has no caller — none of the five needed the member list, only a byte
+count — so that half of §10.8's "query performance unmeasured" item stays open.
+
 **Stage B (§3, §5, §9, §10): fully shipped — §10.1, Batch 1, Batch 2a, Batch 2b, and Batch 3 are all
 in, plus the two real problems Batch 2a surfaced are fixed. The double-computation problem flagged at
 the start of the whole "review the budget" thread is also finally closed.**
@@ -420,26 +427,31 @@ directional rather than a precise ratio.
 
 ---
 
-## 9. New use cases beyond the four known consumers
+## 9. New use cases beyond the four known consumers — all five shipped
 
-Every current consumer of retained-size-shaped data, audited against what it does today:
+Every current consumer of retained-size-shaped data, audited against what it did before this pass —
+all five are now wired to `IDominatorTreeProvider.TryGetRetainedBytes`, gracefully degrading to each
+analyzer's pre-existing shallow-size heuristic when the tree isn't available. See §10.8 for the shipped
+shape of each (narrower than the original framing below in a couple of cases).
 
-- **`EventLeakAnalyzer.EstimateGroupRetainedBytes`** — currently `subscriberCount × typeSizeMap[type]`,
-  a shallow multiplication, not a graph walk. A direct `TryGetRetainedBytes` replacement per subscriber
-  would be an accuracy upgrade, not just a performance one.
-- **`GCHandleAnalyzer`'s pinned-retained-bytes totals** — a genuine **correctness gap**, not an
-  enhancement. `totalPinnedRetainedBytes`/`totalAsyncPinnedRetainedBytes` are misnamed today:
-  `ResolveSize` returns the pinned object's own shallow size, not what it transitively holds.
-- **`WeakReferenceAnalyzer`** — audited, no gap. `WeakReferenceObjectBytes` is honestly the wrapper
-  objects' own shallow size. A `TryGetRetainedBytes(target)` addition would be a genuine enhancement,
-  not a fix.
-- **`CollectionAnalyzer.PopulateRootDescriptions`** — already a `RootPathFinder` consumer; a wasteful
-  collection's *retained* bytes would be a natural additional column once cheap to compute exactly.
-- **`WcfChannelAnalyzer`/`DbConnectionAnalyzer`** — the biggest gap found in this audit.
-  `WcfChannelSnapshot`/`DbConnectionSnapshot` carry **no size field of any kind**. A
-  `TryGetRetainedBytes` column would distinguish "100 faulted channels retaining 50KB each" from "100
-  faulted channels retaining 200 bytes each" — currently indistinguishable.
-- **"Retention roots" report concept** — see §6's new-idea callout.
+- **`EventLeakAnalyzer.EstimateGroupRetainedBytes`** — was `subscriberCount × typeSizeMap[type]`, a
+  shallow multiplication, not a graph walk. Shipped: exact per-subscriber retained bytes for the
+  capped `TopInstances` list, where real addresses exist; the whole-group fold (which only has type
+  counts, no addresses) is unchanged.
+- **`GCHandleAnalyzer`'s pinned-retained-bytes totals** — was a genuine **correctness gap**, not an
+  enhancement: `totalPinnedRetainedBytes`/`totalAsyncPinnedRetainedBytes` were misnamed, since
+  `ResolveSize` returned the pinned object's own shallow size, not what it transitively holds. Shipped:
+  exact retained bytes per handle target when the tree is available.
+- **`WeakReferenceAnalyzer`** — audited, no gap; `WeakReferenceObjectBytes` was already honestly the
+  wrapper objects' own shallow size. Shipped: an additive `AliveWeakTargetsRetainedBytes` enhancement,
+  not a fix to the existing field.
+- **`CollectionAnalyzer.PopulateRootDescriptions`** — already a `RootPathFinder` consumer. Shipped: a
+  nullable `RetainedBytes` column on the top-N wasteful-collection snapshots.
+- **`WcfChannelAnalyzer`/`DbConnectionAnalyzer`** — the biggest gap found in this audit;
+  `WcfChannelSnapshot`/`DbConnectionSnapshot` carried **no size field of any kind**. Shipped: a nullable
+  `RetainedBytes` column on both, populated for the capped top-N sample list, distinguishing "100
+  faulted channels retaining 50KB each" from "100 faulted channels retaining 200 bytes each."
+- **"Retention roots" report concept** — see §6's new-idea callout. Not part of this pass — still open.
 
 ---
 
@@ -956,13 +968,33 @@ turned two things into confirmed dead code:
 - **`DominatorTreeResult`/`DominatorTreeMode` fit (§10.7) — resolved: they didn't fit, deleted.** The
   actual shipped report path already uses a different, working shape
   (`DominatorDomainResult.ExactRetainedBytesByTypeName`); the D7-era models were dead code and are gone.
-- **`IDominatorTreeProvider` query performance — unmeasured on a real dump.** `TryGetImmediateDominator`/
-  `TryGetRetainedBytes` are O(log N) binary searches, cheap by construction; `EnumerateRetainedSet` is a
-  genuine subtree walk with no upper bound on result size for an object near the tree's root. Whether
-  this matters in practice for `DominatorAnalyzer`'s actual query pattern (a handful of
-  `TryGetRetainedBytesByMethodTable` calls per run, no `EnumerateRetainedSet` calls at all yet — no
-  caller uses it) is unmeasured; revisit once a real caller for `EnumerateRetainedSet` exists (§9's
-  audit lists several candidates).
+- **`IDominatorTreeProvider` query performance — `TryGetRetainedBytes` now has real callers; `EnumerateRetainedSet`
+  still has none.** §9's five consumers (`EventLeakAnalyzer`, `GCHandleAnalyzer`, `WeakReferenceAnalyzer`,
+  `CollectionAnalyzer`, `WcfChannelAnalyzer`/`DbConnectionAnalyzer`) are all shipped — every one of them
+  calls `TryGetRetainedBytes` (an O(log N) binary search, cheap by construction) against a single
+  address, never `EnumerateRetainedSet`. None of §9's candidates actually needed the member list, only
+  a byte count, so this closes the "no real caller" half of the open item but not the
+  `EnumerateRetainedSet`-specific one: its unbounded subtree walk near the tree's root is still
+  unmeasured on a real dump, and still has no production caller. Revisit if/when a feature genuinely
+  needs the member list itself (e.g. an "objects freed by collecting X" drill-down), not just its byte
+  count.
+
+  **§9 consumers as shipped — narrower than the original framing in each case:**
+  - `EventLeakAnalyzer`: exact per-subscriber retained bytes only for the capped `TopInstances` list
+    (`SubscriberInfo.Address` is only retained there) — `EstimateGroupRetainedBytes`'s whole-group fold
+    over `AllSubscriberTypeCounts` has no addresses to look up and stays on the shallow-size-average
+    heuristic.
+  - `GCHandleAnalyzer`: the intended correctness fix — `totalPinnedRetainedBytes`/
+    `totalAsyncPinnedRetainedBytes` now sum exact retained bytes per handle target when the tree is
+    available, falling back to `ResolveSize`'s shallow size per-handle otherwise. New
+    `PinnedRetainedBytesIsExact`/`AsyncPinnedRetainedBytesIsExact` flags are true only when every
+    contributing handle resolved exactly.
+  - `WeakReferenceAnalyzer`: new `AliveWeakTargetsRetainedBytes` field, additive alongside the existing
+    (unchanged, still-shallow) `WeakReferenceObjectBytes`.
+  - `CollectionAnalyzer`: new nullable `WastefulCollectionSnapshot.RetainedBytes`, looked up only for the
+    already-capped top-N shown collections.
+  - `WcfChannelAnalyzer`/`DbConnectionAnalyzer`: new nullable `RetainedBytes` on `WcfChannelSnapshot`/
+    `DbConnectionSnapshot`, populated post-scan for the capped `TopSampleCap` list only.
 
 ---
 

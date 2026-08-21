@@ -137,6 +137,7 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
     }
 
     private ClrHeap? _heap;
+    private IHeapAnalysisCache? _cache;
     private Dictionary<ulong, (string TypeName, long Count, ulong Bytes)>? _candidateMts;
     private HashSet<ulong>? _factoryMts;
     private Dictionary<ulong, (string Name, int Total, int Opening, int Opened, int Faulted, int Closing, int Closed, int Other, ulong Bytes)>? _typeStats;
@@ -154,6 +155,7 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
     {
         ClrHeap heap = context.Heap;
         _heap = heap;
+        _cache = context.Cache;
 
         Dictionary<ulong, (string TypeName, long Count, ulong Bytes)> candidateMts =
             TypedResourceScanDriver.DiscoverCandidates(this, heap, context.Cache);
@@ -303,10 +305,30 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
             ClosedChannels:   totalClosed,
             OtherChannels:    totalOther,
             ByType:           byType,
-            TopFaultedChannels: _sampler?.TopSamples ?? [],
+            TopFaultedChannels: WithRetainedBytes(_sampler?.TopSamples ?? []),
             StateScanCapped:  _sampler?.ScanCapped ?? false,
             FactoryCount:     _factoryCount,
             TotalBytes:       totalBytes);
+    }
+
+    // §9 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): the biggest gap
+    // found in that audit — WcfChannelSnapshot carried no size field of any kind, so "100 faulted
+    // channels retaining 50KB each" and "100 faulted channels retaining 200 bytes each" were
+    // indistinguishable. Only ever applied to the already-capped TopSampleCap list.
+    private IReadOnlyList<WcfChannelSnapshot> WithRetainedBytes(IReadOnlyList<WcfChannelSnapshot> snapshots)
+    {
+        IDominatorTreeProvider? treeProvider = _cache?.TryGetDominatorTreeProvider();
+        if (treeProvider is null || snapshots.Count == 0)
+            return snapshots;
+
+        var result = new List<WcfChannelSnapshot>(snapshots.Count);
+        foreach (WcfChannelSnapshot s in snapshots)
+        {
+            result.Add(treeProvider.TryGetRetainedBytes(s.Address, out ulong retained)
+                ? s with { RetainedBytes = retained }
+                : s);
+        }
+        return result;
     }
 
     private static string MapCommunicationState(int state) => state switch

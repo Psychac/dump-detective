@@ -149,11 +149,29 @@ namespace DumpDetective.Analysis.Analyzers
             __sw.Restart();
 
             // Back-fill SubscriberSize on stored instances now that typeSizeMap is available.
+            // §9 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): prefer the
+            // exact dominator tree's per-subscriber retained bytes over the per-type shallow-size
+            // average — the addresses here are real (only the capped Instances list, not the
+            // AllSubscriberTypeCounts fold used by EstimateGroupRetainedBytes, which has no
+            // addresses to look up).
+            IDominatorTreeProvider? eventLeakTreeProvider = cache?.TryGetDominatorTreeProvider();
             for (int i = 0; i < groupedLeaks.Count; i++)
                 foreach (EventLeakInfo inst in groupedLeaks[i].Instances)
                     foreach (SubscriberInfo s in inst.Subscribers)
-                        if (s.SubscriberSize == 0 && typeSizeMap.TryGetValue(s.Type, out ulong sz))
+                    {
+                        if (s.SubscriberSize != 0)
+                            continue;
+
+                        if (eventLeakTreeProvider is not null && eventLeakTreeProvider.TryGetRetainedBytes(s.Address, out ulong exactBytes))
+                        {
+                            s.SubscriberSize = exactBytes;
+                            s.SubscriberSizeIsExact = true;
+                        }
+                        else if (typeSizeMap.TryGetValue(s.Type, out ulong sz))
+                        {
                             s.SubscriberSize = sz;
+                        }
+                    }
 
             int totalSubscribers = 0;
             int staticLeaks = 0;
@@ -244,16 +262,21 @@ namespace DumpDetective.Analysis.Analyzers
                     subTypeList.Sort((a, b) => b.Count.CompareTo(a.Count));
 
                     // Build per-subscriber detail rows (deduplicated by type+method, summed count).
-                    var detailKey = new Dictionary<(string Type, string? Method), (int Count, ulong Size)>(inst.Subscribers.Count);
+                    // An exact retained-bytes value (§9) always wins as the representative size
+                    // over the per-type shallow-size average, even if a same-key entry was seen first.
+                    var detailKey = new Dictionary<(string Type, string? Method), (int Count, ulong Size, bool SizeIsExact)>(inst.Subscribers.Count);
                     foreach (SubscriberInfo s in inst.Subscribers)
                     {
                         var key = (s.Type, s.MethodName);
                         detailKey.TryGetValue(key, out var existing);
-                        detailKey[key] = (existing.Count + 1, s.SubscriberSize > 0 ? s.SubscriberSize : existing.Size);
+                        bool preferNew = s.SubscriberSizeIsExact && !existing.SizeIsExact;
+                        ulong size = preferNew || (existing.Size == 0 && s.SubscriberSize > 0) ? s.SubscriberSize : existing.Size;
+                        bool isExact = existing.SizeIsExact || s.SubscriberSizeIsExact;
+                        detailKey[key] = (existing.Count + 1, size, isExact);
                     }
                     var subDetails = new List<SubscriberDetail>(detailKey.Count);
                     foreach (var kvp in detailKey.OrderByDescending(kv => kv.Value.Count))
-                        subDetails.Add(new SubscriberDetail(kvp.Key.Type, kvp.Key.Method, kvp.Value.Size, kvp.Value.Count));
+                        subDetails.Add(new SubscriberDetail(kvp.Key.Type, kvp.Key.Method, kvp.Value.Size, kvp.Value.Count, kvp.Value.SizeIsExact));
 
                     topLeakInstances.Add(new EventLeakInstanceSnapshot(
                         g.PublisherType,

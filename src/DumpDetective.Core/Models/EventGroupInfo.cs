@@ -43,6 +43,11 @@ internal class SubscriberInfo
     public string Type { get; set; } = string.Empty;
     /// <summary>Resolved handler method name, e.g. "MyClass.OnDataReceived". Null when not yet resolved or unavailable.</summary>
     public string? MethodName { get; set; }
-    /// <summary>Average size (bytes) of this subscriber type on the heap. 0 when unknown.</summary>
+    /// <summary>Average size (bytes) of this subscriber type on the heap, or this subscriber's
+    /// exact retained bytes when <see cref="SubscriberSizeIsExact"/> is true. 0 when unknown.</summary>
     public ulong SubscriberSize { get; set; }
+    /// <summary>True when <see cref="SubscriberSize"/> came from the exact dominator tree
+    /// (§9, docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md) rather than
+    /// the per-type shallow-size average.</summary>
+    public bool SubscriberSizeIsExact { get; set; }
 }

@@ -24,7 +24,11 @@ internal sealed record DbConnectionSnapshot(
     string StateLabel,
     int StateValue,
     string? AnonymisedConnectionString = null,
-    sbyte Generation = -1);
+    sbyte Generation = -1,
+    /// <summary>Exact dominator-tree retained bytes for this connection (§9,
+    /// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md). Null when the exact
+    /// tree wasn't available.</summary>
+    ulong? RetainedBytes = null);
 
 /// <summary>
 /// Summary of connections grouped by pool (server/database).
@@ -137,7 +141,11 @@ internal sealed record WcfChannelSnapshot(
     ulong Address,
     string StateLabel,
     int StateValue,
-    string? RemoteAddress = null);
+    string? RemoteAddress = null,
+    /// <summary>Exact dominator-tree retained bytes for this channel (§9,
+    /// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md). Null when the exact
+    /// tree wasn't available.</summary>
+    ulong? RetainedBytes = null);
 
 /// <summary>
 /// Domain result produced by <c>WcfChannelAnalyzer</c>.

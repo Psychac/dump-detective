@@ -30,4 +30,10 @@ internal sealed record GCHandleDomainResult(
     double DependentUnresolvedPercent = 0,
     IReadOnlyList<NameCountEntry>? DependentTopSourceTypes = null,
     IReadOnlyList<NameCountEntry>? DependentTopTargetTypes = null,
-    IReadOnlyList<NameCountEntry>? DependentTopSourceTargetEdges = null) : AnalyzerDomainResult;
+    IReadOnlyList<NameCountEntry>? DependentTopSourceTargetEdges = null,
+    /// <summary>True when every handle contributing to <see cref="PinnedRetainedBytes"/> was
+    /// resolved via the exact dominator tree (§9, docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md)
+    /// rather than falling back to the target's own shallow size.</summary>
+    bool PinnedRetainedBytesIsExact = false,
+    /// <summary>Same as <see cref="PinnedRetainedBytesIsExact"/>, for <see cref="AsyncPinnedRetainedBytes"/>.</summary>
+    bool AsyncPinnedRetainedBytesIsExact = false) : AnalyzerDomainResult;

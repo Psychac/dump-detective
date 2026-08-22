@@ -86,7 +86,6 @@ public sealed class StartupValidatorTests
             HeapTopology: new HeapTopologyAnalysisOptions(),
             AllocationPatternAnalysis: new AllocationPatternAnalysisOptions(),
             ThreadStackClusterAnalysis: new ThreadStackClusterAnalysisOptions(),
-            LockGraphAnalysis: new LockGraphAnalysisOptions(),
             FinalizableObjectAnalysis: new FinalizableObjectAnalysisOptions(),
             GCGenerationAnalysis: new GCGenerationAnalysisOptions(),
             GCRootAnalysis: new GCRootAnalysisOptions(),

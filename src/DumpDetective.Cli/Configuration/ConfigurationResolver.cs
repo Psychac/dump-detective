@@ -47,7 +47,6 @@ internal sealed class ConfigurationResolver
         HeapTopologyAnalysisOptions heapTopology = Resolve(usedConfigFile, BuildHeapTopologyAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, HeapTopologyAnalysisOptions.Preset), fileModel, request);
         AllocationPatternAnalysisOptions allocationPatternAnalysis = Resolve(usedConfigFile, BuildAllocationPatternAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, AllocationPatternAnalysisOptions.Preset), fileModel, request);
         ThreadStackClusterAnalysisOptions threadStackClusterAnalysis = Resolve(usedConfigFile, BuildThreadStackClusterAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, ThreadStackClusterAnalysisOptions.Preset), fileModel, request);
-        LockGraphAnalysisOptions lockGraphAnalysis = Resolve(usedConfigFile, BuildLockGraphAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, LockGraphAnalysisOptions.Preset), fileModel, request);
         FinalizableObjectAnalysisOptions finalizableObjectAnalysis = Resolve(usedConfigFile, BuildFinalizableObjectAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, FinalizableObjectAnalysisOptions.Preset), fileModel, request);
         GCGenerationAnalysisOptions gcGenerationAnalysis = Resolve(usedConfigFile, BuildGCGenerationAnalysisFromConfig, _ => new GCGenerationAnalysisOptions(), fileModel, request);
         GCRootAnalysisOptions gcRootAnalysis = Resolve(usedConfigFile, BuildGCRootAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, GCRootAnalysisOptions.Preset), fileModel, request);
@@ -116,7 +115,6 @@ internal sealed class ConfigurationResolver
             heapTopology,
             allocationPatternAnalysis,
             threadStackClusterAnalysis,
-            lockGraphAnalysis,
             finalizableObjectAnalysis,
             gcGenerationAnalysis,
             gcRootAnalysis,
@@ -372,13 +370,6 @@ internal sealed class ConfigurationResolver
             "ThreadStackCluster",
             config.ThreadStackClusterAnalysis,
             ThreadStackClusterAnalysisOptions.Preset);
-
-    private static LockGraphAnalysisOptions BuildLockGraphAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "LockGraph",
-            config.LockGraphAnalysis,
-            LockGraphAnalysisOptions.Preset);
 
     private static FinalizableObjectAnalysisOptions BuildFinalizableObjectAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
         => BuildAnalyzerOptionsFromConfig(

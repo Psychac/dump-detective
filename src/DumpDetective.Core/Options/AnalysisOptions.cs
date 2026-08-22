@@ -17,7 +17,6 @@ public sealed record AnalysisOptions
     public HeapTopologyAnalysisOptions HeapTopology { get; init; } = new();
     public AllocationPatternAnalysisOptions AllocationPatternAnalysis { get; init; } = new();
     public ThreadStackClusterAnalysisOptions ThreadStackClusterAnalysis { get; init; } = new();
-    public LockGraphAnalysisOptions LockGraphAnalysis { get; init; } = new();
     public FinalizableObjectAnalysisOptions FinalizableObjectAnalysis { get; init; } = new();
     public GCGenerationAnalysisOptions GCGenerationAnalysis { get; init; } = new();
     public GCRootAnalysisOptions GCRootAnalysis { get; init; } = new();

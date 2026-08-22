@@ -40,12 +40,11 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
         var topTypes = d.TopContestedLockTypes ?? [];
         if (topTypes.Count > 0)
         {
-            int limit = Math.Min(topTypes.Count, 8);
-            var ctRows = new List<TableRow>(limit);
-            for (int i = 0; i < limit; i++)
+            var ctRows = new List<TableRow>(topTypes.Count);
+            foreach (var entry in topTypes)
                 ctRows.Add(new TableRow([
-                    Cell(FormatHelper.TruncateString(topTypes[i].Name, 70)),
-                    Cell($"{topTypes[i].Count:N0} cumulative waiter(s)", topTypes[i].Count)]));
+                    Cell(FormatHelper.TruncateString(entry.Name, 70)),
+                    Cell($"{entry.Count:N0} cumulative waiter(s)", entry.Count)]));
             compactTables.Add(STCompact("Top contested lock types", new[] { CH("Type"), CH("Waiters") }, ctRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

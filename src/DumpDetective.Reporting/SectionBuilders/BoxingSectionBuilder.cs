@@ -11,9 +11,6 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    private const int TopTypesToShow = 15;
-    private const int TopPaddingToShow = 10;
-
     public string AnalyzerName => "Boxing Analysis";
     public string DisplayTitle => "Boxing & Value Type Pressure";
     public int SortOrder => 500; // §20 — after WeakReferenceSectionBuilder (49)
@@ -50,7 +47,7 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(FormatHelper.FormatBytes(e.TotalBoxBytes), (long)e.TotalBoxBytes),
                     Cell(e.IsEnum ? "Yes" : "No")]));
             }
-            compactTables.Add(STCompact("Top boxed types by total size", new[] { CH("Value Type"), CH("Box Count","number"), CH("Total Box Bytes","bytes"), CH("IsEnum") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray(), TopTypesToShow));
+            compactTables.Add(STCompact("Top boxed types by total size", new[] { CH("Value Type"), CH("Box Count","number"), CH("Total Box Bytes","bytes"), CH("IsEnum") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopOversizedTypes.Count > 0)
@@ -80,7 +77,7 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell($"{e.WasteRatio:P0}")]));
             }
             compactTables.Add(STCompact("Struct types with highest padding waste",
-                new[] { CH("Type"), CH("Size"), CH("Field Bytes"), CH("Wasted","bytes"), CH("Waste %", "number", "percent") }, padRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray(), TopPaddingToShow));
+                new[] { CH("Type"), CH("Size"), CH("Field Bytes"), CH("Wasted","bytes"), CH("Waste %", "number", "percent") }, padRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
         else
         {

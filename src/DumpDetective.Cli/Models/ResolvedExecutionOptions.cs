@@ -22,7 +22,6 @@ internal sealed record ResolvedExecutionOptions(
     HeapTopologyAnalysisOptions HeapTopology,
     AllocationPatternAnalysisOptions AllocationPatternAnalysis,
     ThreadStackClusterAnalysisOptions ThreadStackClusterAnalysis,
-    LockGraphAnalysisOptions LockGraphAnalysis,
     FinalizableObjectAnalysisOptions FinalizableObjectAnalysis,
     GCGenerationAnalysisOptions GCGenerationAnalysis,
     GCRootAnalysisOptions GCRootAnalysis,

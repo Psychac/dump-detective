@@ -31,7 +31,6 @@ internal sealed class CliConfigurationFileModel
     public HeapTopologyAnalysisOptions? HeapTopology { get; init; }
     public AllocationPatternAnalysisOptions? AllocationPatternAnalysis { get; init; }
     public ThreadStackClusterAnalysisOptions? ThreadStackClusterAnalysis { get; init; }
-    public LockGraphAnalysisOptions? LockGraphAnalysis { get; init; }
     public FinalizableObjectAnalysisOptions? FinalizableObjectAnalysis { get; init; }
     public GCGenerationAnalysisOptions? GCGenerationAnalysis { get; init; }
     public GCRootAnalysisOptions? GCRootAnalysis { get; init; }
@@ -104,7 +103,6 @@ internal sealed class ExecutionPolicyModel
 [JsonSerializable(typeof(HeapTopologyAnalysisOptions))]
 [JsonSerializable(typeof(AllocationPatternAnalysisOptions))]
 [JsonSerializable(typeof(ThreadStackClusterAnalysisOptions))]
-[JsonSerializable(typeof(LockGraphAnalysisOptions))]
 [JsonSerializable(typeof(FinalizableObjectAnalysisOptions))]
 [JsonSerializable(typeof(GCGenerationAnalysisOptions))]
 [JsonSerializable(typeof(GCRootAnalysisOptions))]

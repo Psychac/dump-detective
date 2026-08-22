@@ -10,9 +10,6 @@ namespace DumpDetective.Reporting.SectionBuilders;
 /// <summary>B1 — Generation Pressure. Source: <see cref="GCGenerationDomainResult"/>.</summary>
 internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    private const int TopLohTypesToShow = 15;
-    private const int TopGenProfilesToShow = 30;
-
     public string AnalyzerName => "GC Generation Analysis";
     public string DisplayTitle => "Generation Pressure";
     public int SortOrder => 100;
@@ -78,7 +75,7 @@ internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IAnalyzerSe
                         Cell(p.LohCount.ToString("N0"),  p.LohCount),
                         Cell(p.TotalBytes > 0 ? FormatBytes(p.TotalBytes) : "—")));
                 }
-                compactTables.Add(STCompact("Top LOH types", new[] { CH("Type"), CH("Gen0","number"), CH("Gen1","number"), CH("Gen2","number"), CH("LOH Count","number"), CH("Total Bytes","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray(), TopLohTypesToShow));
+                compactTables.Add(STCompact("Top LOH types", new[] { CH("Type"), CH("Gen0","number"), CH("Gen1","number"), CH("Gen2","number"), CH("LOH Count","number"), CH("Total Bytes","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
         }
         else if (d.TopLohTypes.Count > 0)
@@ -92,7 +89,7 @@ internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IAnalyzerSe
                     Cell(FormatBytes(t.TotalBytes), (long)Math.Min(t.TotalBytes, long.MaxValue)),
                     Cell(t.LohBytes > 0 ? FormatBytes(t.LohBytes) : "—")));
             }
-            compactTables.Add(STCompact("Top LOH types", new[] { CH("Type"), CH("Count","number"), CH("Total Bytes","bytes"), CH("LOH Bytes","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray(), TopLohTypesToShow));
+            compactTables.Add(STCompact("Top LOH types", new[] { CH("Type"), CH("Count","number"), CH("Total Bytes","bytes"), CH("LOH Bytes","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.PerTypeGenerationProfiles is { Count: > 0 })
@@ -116,7 +113,7 @@ internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IAnalyzerSe
             }
             compactTables.Add(STCompact("Per-type generation profiles",
                 new[] { CH("Type"), CH("Gen0","number"), CH("Gen1","number"), CH("Gen2","number"), CH("LOH","number"), CH("Total Bytes","bytes"), CH("Gen2%", "number", "percent"), CH("Survival Ratio", "number", "ratio"), CH("Finalizable") },
-                rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray(), TopGenProfilesToShow));
+                rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         return new AnalyzerDetailSection(

@@ -73,7 +73,6 @@ internal sealed class AnalyzerExecutionService(FindingGenerationPipeline finding
                 HeapTopology = resolved.HeapTopology,
                 AllocationPatternAnalysis = resolved.AllocationPatternAnalysis,
                 ThreadStackClusterAnalysis = resolved.ThreadStackClusterAnalysis,
-                LockGraphAnalysis = resolved.LockGraphAnalysis,
                 FinalizableObjectAnalysis = resolved.FinalizableObjectAnalysis,
                 GCGenerationAnalysis = resolved.GCGenerationAnalysis,
                 GCRootAnalysis = resolved.GCRootAnalysis,

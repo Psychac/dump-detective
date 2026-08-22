@@ -2,7 +2,6 @@ using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
-using DumpDetective.Core.Options;
 
 using Microsoft.Diagnostics.Runtime;
 
@@ -14,7 +13,6 @@ namespace DumpDetective.Analysis.Analyzers
     /// and joins with <see cref="HeapIndexBuildResult.TypeAggregates"/> for instance counts.
     /// Classifies types as ReferenceHeavy / ValueHeavy / Balanced / Scalar and ranks
     /// by (referenceFieldRatio × instanceCount) to surface GC-scan-cost hotspots.
-    /// Capped at top 200 types by instance count to bound ClrType metadata lookups.
     /// </summary>
     public sealed class ObjectShapeAnalyzer : IAnalyzer
     {
@@ -24,11 +22,10 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            ObjectShapeAnalysisOptions options = context.AnalysisOptions.ObjectShapeAnalysis;
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache).Stamp(this));
         }
 
-        private static AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache, ObjectShapeAnalysisOptions options)
+        private static AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache)
         {
             if (cache is not HeapAnalysisCache heapCache
                 || !heapCache.TryGetHeapIndex(out HeapIndexBuildResult? idx)
@@ -40,25 +37,19 @@ namespace DumpDetective.Analysis.Analyzers
                     TopBalancedTypes: [],
                     TotalTypesAnalyzed: 0,
                     AvgRefFieldsPerType: 0,
-                    TotalGcScanWork: 0,
-                    InstanceCountCap: options.InstanceCountCap);
+                    TotalGcScanWork: 0);
             }
 
             IReadOnlyDictionary<ulong, TypeShapeEntry> shapes = idx.TypeShapeCache;
             IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates = idx.TypeAggregates;
 
-            // Collect MTs present in both shape cache and aggregates, sorted by descending
-            // instance count — cap by options to bound ClrType metadata access.
+            // Collect MTs present in both shape cache and aggregates.
             var candidates = new List<(ulong Mt, TypeShapeEntry Shape, long Count)>(shapes.Count);
             foreach (KeyValuePair<ulong, TypeShapeEntry> kv in shapes)
             {
                 if (aggregates.TryGetValue(kv.Key, out TypeAggregateIndexEntry agg))
                     candidates.Add((kv.Key, kv.Value, agg.Count));
             }
-
-            candidates.Sort(static (a, b) => b.Count.CompareTo(a.Count));
-
-            int cap = Math.Min(candidates.Count, options.InstanceCountCap);
 
             var refHeavyCandidates = new List<TypeShapeProfile>();
             var valHeavyCandidates = new List<TypeShapeProfile>();
@@ -68,10 +59,8 @@ namespace DumpDetective.Analysis.Analyzers
             long totalGcScanWork = 0;
             int typesAnalyzed = 0;
 
-            for (int i = 0; i < cap; i++)
+            foreach ((ulong mt, TypeShapeEntry shape, long count) in candidates)
             {
-                (ulong mt, TypeShapeEntry shape, long count) = candidates[i];
-
                 ClrType? type = heap.GetTypeByMethodTable(mt);
                 if (type is null)
                     continue;
@@ -136,20 +125,15 @@ namespace DumpDetective.Analysis.Analyzers
             balancedCandidates.Sort(static (a, b) =>
                 b.InstanceCount.CompareTo(a.InstanceCount));
 
-            var refHeavy = refHeavyCandidates.Take(options.TopListLimit).ToList();
-            var valHeavy = valHeavyCandidates.Take(options.TopListLimit).ToList();
-            var balanced = balancedCandidates.Take(options.TopListLimit).ToList();
-
             double avgRefFields = typesAnalyzed > 0 ? totalRefFields * 1.0 / typesAnalyzed : 0.0;
 
             return new ObjectShapeAnalyzerDomainResult(
-                TopReferenceHeavyTypes: refHeavy,
-                TopValueHeavyTypes: valHeavy,
-                TopBalancedTypes: balanced,
+                TopReferenceHeavyTypes: refHeavyCandidates,
+                TopValueHeavyTypes: valHeavyCandidates,
+                TopBalancedTypes: balancedCandidates,
                 TotalTypesAnalyzed: typesAnalyzed,
                 AvgRefFieldsPerType: avgRefFields,
-                TotalGcScanWork: totalGcScanWork,
-                InstanceCountCap: options.InstanceCountCap);
+                TotalGcScanWork: totalGcScanWork);
         }
 
         private static int ComputeBaseTypeDepth(ClrType type)

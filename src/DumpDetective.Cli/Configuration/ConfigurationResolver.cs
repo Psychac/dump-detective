@@ -57,7 +57,6 @@ internal sealed class ConfigurationResolver
         HangAnalysisOptions hangAnalysis = Resolve(usedConfigFile, BuildHangAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, HangAnalysisOptions.Preset), fileModel, request);
         JitAnalysisOptions jitAnalysis = Resolve(usedConfigFile, BuildJitAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, JitAnalysisOptions.Preset), fileModel, request);
         WeakReferenceAnalysisOptions weakReferenceAnalysis = Resolve(usedConfigFile, BuildWeakReferenceAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, WeakReferenceAnalysisOptions.Preset), fileModel, request);
-        ObjectShapeAnalysisOptions objectShapeAnalysis = Resolve(usedConfigFile, BuildObjectShapeAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, ObjectShapeAnalysisOptions.Preset), fileModel, request);
         ModuleAnalysisOptions moduleAnalysis = Resolve(usedConfigFile, BuildModuleAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, ModuleAnalysisOptions.Preset), fileModel, request);
         DependentHandleAnalysisOptions dependentHandleAnalysis = Resolve(usedConfigFile, BuildDependentHandleAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, DependentHandleAnalysisOptions.Preset), fileModel, request);
         GCHandleAnalysisOptions gcHandleAnalysis = Resolve(usedConfigFile, BuildGCHandleAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, GCHandleAnalysisOptions.Preset), fileModel, request);
@@ -128,7 +127,6 @@ internal sealed class ConfigurationResolver
             hangAnalysis,
             jitAnalysis,
             weakReferenceAnalysis,
-            objectShapeAnalysis,
             moduleAnalysis,
             dependentHandleAnalysis,
             gcHandleAnalysis,
@@ -446,13 +444,6 @@ internal sealed class ConfigurationResolver
             "WeakReference",
             config.WeakReferenceAnalysis,
             WeakReferenceAnalysisOptions.Preset);
-
-    private static ObjectShapeAnalysisOptions BuildObjectShapeAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "ObjectShape",
-            config.ObjectShapeAnalysis,
-            ObjectShapeAnalysisOptions.Preset);
 
     private static ModuleAnalysisOptions BuildModuleAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
         => BuildAnalyzerOptionsFromConfig(

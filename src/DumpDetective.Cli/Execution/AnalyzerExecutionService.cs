@@ -83,7 +83,6 @@ internal sealed class AnalyzerExecutionService(FindingGenerationPipeline finding
                 HangAnalysis = resolved.HangAnalysis,
                 JitAnalysis = resolved.JitAnalysis,
                 WeakReferenceAnalysis = resolved.WeakReferenceAnalysis,
-                ObjectShapeAnalysis = resolved.ObjectShapeAnalysis,
                 ModuleAnalysis = resolved.ModuleAnalysis,
                 DependentHandleAnalysis = resolved.DependentHandleAnalysis,
                 GCHandleAnalysis = resolved.GCHandleAnalysis,

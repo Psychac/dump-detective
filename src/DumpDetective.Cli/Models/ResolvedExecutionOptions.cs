@@ -32,7 +32,6 @@ internal sealed record ResolvedExecutionOptions(
     HangAnalysisOptions HangAnalysis,
     JitAnalysisOptions JitAnalysis,
     WeakReferenceAnalysisOptions WeakReferenceAnalysis,
-    ObjectShapeAnalysisOptions ObjectShapeAnalysis,
     ModuleAnalysisOptions ModuleAnalysis,
     DependentHandleAnalysisOptions DependentHandleAnalysis,
     GCHandleAnalysisOptions GCHandleAnalysis,

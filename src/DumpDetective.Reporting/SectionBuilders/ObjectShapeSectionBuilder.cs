@@ -58,7 +58,7 @@ internal sealed class ObjectShapeSectionBuilder : SectionBuilderBase, IAnalyzerS
         }
 
         blocks.Add(T("Reference-heavy types (ratio > 0.6) are candidates for GC root retention and may inflate promotion pressure. Balanced types (ratio 0.2–0.6) are the numerically dominant heap residents. Value-heavy types (ratio < 0.2) with large struct sizes can cause excess stack pressure or LOH allocation. " +
-                    $"(Avg ref fields is computed over at most {d.InstanceCountCap:N0} types by instance count. Array analysis is handled by ArrayAnalyzer.)"));
+                    "(Array analysis is handled by ArrayAnalyzer.)"));
 
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,

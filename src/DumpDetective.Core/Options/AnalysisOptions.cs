@@ -27,7 +27,6 @@ public sealed record AnalysisOptions
     public HangAnalysisOptions HangAnalysis { get; init; } = new();
     public JitAnalysisOptions JitAnalysis { get; init; } = new();
     public WeakReferenceAnalysisOptions WeakReferenceAnalysis { get; init; } = new();
-    public ObjectShapeAnalysisOptions ObjectShapeAnalysis { get; init; } = new();
     public ModuleAnalysisOptions ModuleAnalysis { get; init; } = new();
     public DependentHandleAnalysisOptions DependentHandleAnalysis { get; init; } = new();
     public GCHandleAnalysisOptions GCHandleAnalysis { get; init; } = new();

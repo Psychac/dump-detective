@@ -33,5 +33,4 @@ internal sealed record ObjectShapeAnalyzerDomainResult(
     IReadOnlyList<TypeShapeProfile> TopBalancedTypes,
     int TotalTypesAnalyzed,
     double AvgRefFieldsPerType,
-    long TotalGcScanWork,
-    int InstanceCountCap) : AnalyzerDomainResult;
+    long TotalGcScanWork) : AnalyzerDomainResult;

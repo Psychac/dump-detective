@@ -41,7 +41,6 @@ internal sealed class CliConfigurationFileModel
     public HangAnalysisOptions? HangAnalysis { get; init; }
     public JitAnalysisOptions? JitAnalysis { get; init; }
     public WeakReferenceAnalysisOptions? WeakReferenceAnalysis { get; init; }
-    public ObjectShapeAnalysisOptions? ObjectShapeAnalysis { get; init; }
     public ModuleAnalysisOptions? ModuleAnalysis { get; init; }
     public DependentHandleAnalysisOptions? DependentHandleAnalysis { get; init; }
     public GCHandleAnalysisOptions? GCHandleAnalysis { get; init; }
@@ -116,7 +115,6 @@ internal sealed class ExecutionPolicyModel
 [JsonSerializable(typeof(HangAnalysisOptions))]
 [JsonSerializable(typeof(JitAnalysisOptions))]
 [JsonSerializable(typeof(WeakReferenceAnalysisOptions))]
-[JsonSerializable(typeof(ObjectShapeAnalysisOptions))]
 [JsonSerializable(typeof(ModuleAnalysisOptions))]
 [JsonSerializable(typeof(DependentHandleAnalysisOptions))]
 [JsonSerializable(typeof(GCHandleAnalysisOptions))]

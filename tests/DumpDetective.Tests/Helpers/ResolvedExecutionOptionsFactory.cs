@@ -37,7 +37,6 @@ internal static class ResolvedExecutionOptionsFactory
             HangAnalysis: new DumpDetective.Core.Options.HangAnalysisOptions(),
             JitAnalysis: new DumpDetective.Core.Options.JitAnalysisOptions(),
             WeakReferenceAnalysis: new DumpDetective.Core.Options.WeakReferenceAnalysisOptions(),
-            ObjectShapeAnalysis: new DumpDetective.Core.Options.ObjectShapeAnalysisOptions(),
             ModuleAnalysis: new DumpDetective.Core.Options.ModuleAnalysisOptions(),
             DependentHandleAnalysis: new DumpDetective.Core.Options.DependentHandleAnalysisOptions(),
             GCHandleAnalysis: new DumpDetective.Core.Options.GCHandleAnalysisOptions(),

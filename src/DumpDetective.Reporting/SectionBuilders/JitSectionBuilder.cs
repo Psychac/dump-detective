@@ -11,9 +11,6 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    private const int TopMethodsToShow = 15;
-    private const int TopFrameTypesToShow = 15;
-
     public string AnalyzerName => "JIT Analysis";
     public string DisplayTitle => "JIT & Code Footprint";
     public int SortOrder => 200; // §G3 — after ModuleSectionBuilder (120)
@@ -43,8 +40,8 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
 
         if (d.TopActiveFrameTypes.Count > 0)
         {
-            var typeRows = new List<TableRow>(Math.Min(d.TopActiveFrameTypes.Count, TopFrameTypesToShow));
-            foreach (NameCountEntry e in d.TopActiveFrameTypes.Take(TopFrameTypesToShow))
+            var typeRows = new List<TableRow>(d.TopActiveFrameTypes.Count);
+            foreach (NameCountEntry e in d.TopActiveFrameTypes)
                 typeRows.Add(new TableRow([Cell(e.Name), Cell($"{e.Count:N0}", e.Count)]));
             compactTables.Add(STCompact("Active frame types (stack hotspots)", new[] { CH("Type"), CH("Stack Hits","number") }, typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
@@ -52,11 +49,11 @@ internal sealed class JitSectionBuilder : SectionBuilderBase, IAnalyzerSectionBu
         if (d.TopLargestMethods.Count > 0)
         {
             blocks.Add(T("ReadyToRun/native image detection is not available through ClrMD here; treat R2R status as N/A."));
-            var methodRows = new List<TableRow>(Math.Min(d.TopLargestMethods.Count, TopMethodsToShow));
-            foreach (JitMethodSnapshot m in d.TopLargestMethods.Take(TopMethodsToShow))
+            var methodRows = new List<TableRow>(d.TopLargestMethods.Count);
+            foreach (JitMethodSnapshot m in d.TopLargestMethods)
             {
                 ulong total = (ulong)m.HotSize + m.ColdSize;
-                string largeFlag = total > 64_000 ? ">64 KB" : string.Empty;
+                string largeFlag = total > d.LargeMethodThresholdBytes ? $">{FormatHelper.FormatBytes(d.LargeMethodThresholdBytes)}" : string.Empty;
                 methodRows.Add(new TableRow([
                     Cell(m.Signature),
                     Cell(FormatHelper.TruncateString(m.DeclaringType, 60)),

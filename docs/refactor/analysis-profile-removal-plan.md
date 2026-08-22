@@ -12,11 +12,11 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 8 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
+**Implementation progress: 9 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
 §9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph, §9.8 LohFragmentation, §9.9
-SegmentReservation (§9.6's orphaned `DependentHandleAnalysisOptions` was also deleted alongside
-GCHandle — not a separate registered analyzer, per the row-4 cross-reference below).** See each
-section and the §7 verdict table for what shipped in each.
+SegmentReservation, §9.10 Jit (§9.6's orphaned `DependentHandleAnalysisOptions` was also deleted
+alongside GCHandle — not a separate registered analyzer, per the row-4 cross-reference below).**
+See each section and the §7 verdict table for what shipped in each.
 
 > **Correction (roster built from the wrong source):** the audit was originally built by walking
 > `src/DumpDetective.Core/Options/`, not the analyzer registry — so any analyzer with no dedicated
@@ -294,7 +294,7 @@ radius is a single cosmetic report field, not root exactness.
 | 7 | ObjectShape | aggregator | **GREEN** ✅ DONE | 2 of 2 | §9.2 — cap of 200 types corrupts three whole-heap aggregates |
 | 8 | SegmentReservation | aggregator | **GREEN** ✅ DONE | 0 of 2 | §9.9 — already exact; preset varies *semantics*, so it must still die |
 | 9 | Module | aggregator | **GREEN** ✅ DONE | 8 of 11 | §9.3 — 2 knobs are dead code; one deletion cascades into 4 more |
-| 10 | Jit | aggregator | **GREEN** | 3 of 4 | §9.10 — one cap corrupts **six** accumulators; worst Q7 so far |
+| 10 | Jit | aggregator | **GREEN** ✅ DONE | 3 of 4 | §9.10 — one cap corrupts **six** accumulators; worst Q7 so far; render layer also hardcoded a stale 64 KB flag threshold, fixed |
 | 11 | Array | sampling | **GREEN** | 5 of 6 | §9.11 — `WastedBytes` is an extrapolation of an extrapolation of one sample object |
 | 12 | String | sampling | **AMBER** | ~8 of 16 | §9.12 — exact dedup needs a restructured hash-count pass, not just cap removal |
 | 13 | AsyncStateMachine | sampling | **GREEN** | 5-6 of 7 | §9.13 — a domain-result comment already documents its own corrupted sum |
@@ -808,6 +808,7 @@ This analyzer also handles dependent handles (hence
 
 ---
 
+
 ### 9.6 DependentHandle options — **GREEN** ✅ IMPLEMENTED, and the class looks orphaned
 
 [DependentHandleAnalysisOptions.cs](../../src/DumpDetective.Core/Options/DependentHandleAnalysisOptions.cs)
@@ -1014,7 +1015,7 @@ must not vary by effort level.
 
 ---
 
-### 9.10 Jit — **GREEN**, worst Q7 finding so far
+### 9.10 Jit — **GREEN** ✅ IMPLEMENTED, worst Q7 finding so far
 
 [JitAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/JitAnalyzer.cs) ·
 [JitAnalysisOptions.cs](../../src/DumpDetective.Core/Options/JitAnalysisOptions.cs)
@@ -1051,6 +1052,34 @@ analysis tier. Keep the knob, stop varying it.
 depth, not heap size, so this does not scale with dump size. Negligible.
 
 **Q8 — a second frame cap exists one layer down.** See §6.3.
+
+#### Implementation notes (as shipped)
+
+- **`MaxFramesPerThread` deleted; the stack-walk loop now runs to completion** for every live thread.
+  `frameIdx` is kept (for the every-50-frames cancellation check cadence) but the `break` on the cap
+  is gone — all six accumulators Q7 listed are now exact.
+- **`TopMethodsLimit`/`TopFrameTypesLimit` deleted; `BuildTopMethods`/`BuildTopFrameTypes` now return
+  the complete sorted lists** (no `limit` parameter, no `Math.Min`/truncated loop).
+- **`LargeMethodThresholdBytes` promoted to a plain initializer with a D4 rationale comment** ("64 KB
+  — arbitrary round number, no theoretical basis; revisit with field data"), matching D4's own
+  classification of this threshold as shaky. `Preset`/`Default` deleted.
+- **`JitSectionBuilder` had the same double-truncation shape found in every prior section**:
+  `d.TopActiveFrameTypes.Take(TopFrameTypesToShow)`/`d.TopLargestMethods.Take(TopMethodsToShow)` on
+  top of the (formerly capped) domain lists. Fixed by feeding the full lists into `STCompact`; per the
+  §11.2 D5 amendment, no custom `rowLimit` was reintroduced — both tables fall through to the default.
+- **Found and fixed an independent, unrelated inconsistency while touching this file**: the "large
+  method" flag column in the report table hardcoded `total > 64_000` regardless of the actual
+  configured `LargeMethodThresholdBytes` (65,536 by default — close enough to `64_000` to hide the bug,
+  but wrong on its face and silently stale if the threshold is ever overridden via config). Changed to
+  compare against `d.LargeMethodThresholdBytes` (already carried on `JitDomainResult`) and format the
+  flag text from the real threshold instead of a hardcoded "64 KB" string.
+- `JitFindingGenerator`/`JitTrendComparer` needed no changes — neither referenced any of the deleted
+  knobs.
+- Same `ConfigurationResolver` profile-bypass pattern as every prior section — `Preset` deleted, so
+  `BuildJitAnalysisFromConfig` applies overrides directly onto `new JitAnalysisOptions()`.
+- **Confirmed independent of §6.3's `RootSetCache.MaxFramesPerThread = 256`** (Q8) — that's a
+  different constant in a different class serving stack-root owner-attribution labeling, already
+  resolved out-of-scope there; no interaction with this section's changes.
 
 ### 9.11 Array — **GREEN**
 

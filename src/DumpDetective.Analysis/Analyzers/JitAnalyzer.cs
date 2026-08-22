@@ -71,7 +71,7 @@ public sealed class JitAnalyzer : IAnalyzer
             int frameIdx = 0;
             foreach (ClrStackFrame frame in thread.EnumerateStackTrace())
             {
-                if (frameIdx++ >= options.MaxFramesPerThread) break;
+                frameIdx++;
 
                 // Check cancellation every 50 frames to allow responsive cancellation during deep stack walks
                 if (frameIdx % 50 == 0)
@@ -144,8 +144,8 @@ public sealed class JitAnalyzer : IAnalyzer
         }
 
         // ── Build result lists ───────────────────────────────────────────────
-        var topMethods = BuildTopMethods(methodCandidates, tieredNativeCodes, options.TopMethodsLimit);
-        var topFrameTypes = BuildTopFrameTypes(frameTypeCounts, options.TopFrameTypesLimit);
+        var topMethods = BuildTopMethods(methodCandidates, tieredNativeCodes);
+        var topFrameTypes = BuildTopFrameTypes(frameTypeCounts);
 
         return new JitDomainResult(
             TotalJitHeapBytes: totalJitHeapBytes,
@@ -161,12 +161,11 @@ public sealed class JitAnalyzer : IAnalyzer
 
     private static IReadOnlyList<JitMethodSnapshot> BuildTopMethods(
         Dictionary<ulong, JitMethodEntry> candidates,
-        HashSet<ulong> tieredNativeCodes,
-        int limit)
+        HashSet<ulong> tieredNativeCodes)
     {
         if (candidates.Count == 0) return [];
 
-        // Sort by total native code size descending; pick top N
+        // Sort by total native code size descending.
         var entries = new JitMethodEntry[candidates.Count];
         int idx = 0;
         foreach (JitMethodEntry e in candidates.Values) entries[idx++] = e;
@@ -177,11 +176,9 @@ public sealed class JitAnalyzer : IAnalyzer
             return sizeB.CompareTo(sizeA);
         });
 
-        int count = Math.Min(entries.Length, limit);
-        var result = new List<JitMethodSnapshot>(count);
-        for (int i = 0; i < count; i++)
+        var result = new List<JitMethodSnapshot>(entries.Length);
+        foreach (JitMethodEntry e in entries)
         {
-            JitMethodEntry e = entries[i];
             bool isTiered = tieredNativeCodes.Contains(e.NativeCodeAddress);
             result.Add(new JitMethodSnapshot(e.Signature, e.DeclaringType,
                 e.NativeCodeAddress, e.HotSize, e.ColdSize, isTiered));
@@ -189,8 +186,7 @@ public sealed class JitAnalyzer : IAnalyzer
         return result;
     }
 
-    private static IReadOnlyList<NameCountEntry> BuildTopFrameTypes(
-        Dictionary<string, int> counts, int limit)
+    private static IReadOnlyList<NameCountEntry> BuildTopFrameTypes(Dictionary<string, int> counts)
     {
         if (counts.Count == 0) return [];
 
@@ -199,10 +195,9 @@ public sealed class JitAnalyzer : IAnalyzer
         foreach (KeyValuePair<string, int> kv in counts) pairs[idx++] = kv;
         Array.Sort(pairs, static (a, b) => b.Value.CompareTo(a.Value));
 
-        int count = Math.Min(pairs.Length, limit);
-        var result = new List<NameCountEntry>(count);
-        for (int i = 0; i < count; i++)
-            result.Add(new NameCountEntry(pairs[i].Key, pairs[i].Value));
+        var result = new List<NameCountEntry>(pairs.Length);
+        foreach (KeyValuePair<string, int> kv in pairs)
+            result.Add(new NameCountEntry(kv.Key, kv.Value));
         return result;
     }
 

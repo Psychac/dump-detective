@@ -53,7 +53,7 @@ internal sealed class ConfigurationResolver
         SegmentReservationAnalysisOptions segmentReservationAnalysis = Resolve(usedConfigFile, BuildSegmentReservationAnalysisFromConfig, _ => new SegmentReservationAnalysisOptions(), fileModel, request);
         ThreadAnalysisOptions threadAnalysis = Resolve(usedConfigFile, BuildThreadAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, ThreadAnalysisOptions.Preset), fileModel, request);
         HangAnalysisOptions hangAnalysis = Resolve(usedConfigFile, BuildHangAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, HangAnalysisOptions.Preset), fileModel, request);
-        JitAnalysisOptions jitAnalysis = Resolve(usedConfigFile, BuildJitAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, JitAnalysisOptions.Preset), fileModel, request);
+        JitAnalysisOptions jitAnalysis = Resolve(usedConfigFile, BuildJitAnalysisFromConfig, _ => new JitAnalysisOptions(), fileModel, request);
         WeakReferenceAnalysisOptions weakReferenceAnalysis = Resolve(usedConfigFile, BuildWeakReferenceAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, WeakReferenceAnalysisOptions.Preset), fileModel, request);
         ModuleAnalysisOptions moduleAnalysis = Resolve(usedConfigFile, BuildModuleAnalysisFromConfig, _ => new ModuleAnalysisOptions(), fileModel, request);
         GCHandleAnalysisOptions gcHandleAnalysis = Resolve(usedConfigFile, BuildGCHandleAnalysisFromConfig, _ => new GCHandleAnalysisOptions(), fileModel, request);
@@ -418,11 +418,14 @@ internal sealed class ConfigurationResolver
             HangAnalysisOptions.Preset);
 
     private static JitAnalysisOptions BuildJitAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "Jit",
-            config.JitAnalysis,
-            JitAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "Jit", out JsonElement section))
+            return ApplySectionOverrides(new JitAnalysisOptions(), section);
+
+        return config.JitAnalysis is null
+            ? new JitAnalysisOptions()
+            : ApplyOptionsOverrides(new JitAnalysisOptions(), config.JitAnalysis);
+    }
 
     private static WeakReferenceAnalysisOptions BuildWeakReferenceAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
         => BuildAnalyzerOptionsFromConfig(

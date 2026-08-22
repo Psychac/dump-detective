@@ -12,11 +12,11 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 7 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
-§9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph, §9.8 LohFragmentation (§9.6's orphaned
-`DependentHandleAnalysisOptions` was also deleted alongside GCHandle — not a separate registered
-analyzer, per the row-4 cross-reference below).** See each section and the §7 verdict table for what
-shipped in each.
+**Implementation progress: 8 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
+§9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph, §9.8 LohFragmentation, §9.9
+SegmentReservation (§9.6's orphaned `DependentHandleAnalysisOptions` was also deleted alongside
+GCHandle — not a separate registered analyzer, per the row-4 cross-reference below).** See each
+section and the §7 verdict table for what shipped in each.
 
 > **Correction (roster built from the wrong source):** the audit was originally built by walking
 > `src/DumpDetective.Core/Options/`, not the analyzer registry — so any analyzer with no dedicated
@@ -292,7 +292,7 @@ radius is a single cosmetic report field, not root exactness.
 | 5 | LockGraph | aggregator | **GREEN** ✅ DONE | 1 of 1 | §9.7 — options class deleted outright; two independent lists shared one cap, plus a second unrelated render-layer cap found and fixed |
 | 6 | LohFragmentation | aggregator | **GREEN** ✅ DONE | 2 of 2 | §9.8 — one cap applies during collection, truncating a type aggregation; the index fast path was also missing a sort entirely, found during implementation |
 | 7 | ObjectShape | aggregator | **GREEN** ✅ DONE | 2 of 2 | §9.2 — cap of 200 types corrupts three whole-heap aggregates |
-| 8 | SegmentReservation | aggregator | **GREEN** | 0 of 2 | §9.9 — already exact; preset varies *semantics*, so it must still die |
+| 8 | SegmentReservation | aggregator | **GREEN** ✅ DONE | 0 of 2 | §9.9 — already exact; preset varies *semantics*, so it must still die |
 | 9 | Module | aggregator | **GREEN** ✅ DONE | 8 of 11 | §9.3 — 2 knobs are dead code; one deletion cascades into 4 more |
 | 10 | Jit | aggregator | **GREEN** | 3 of 4 | §9.10 — one cap corrupts **six** accumulators; worst Q7 so far |
 | 11 | Array | sampling | **GREEN** | 5 of 6 | §9.11 — `WastedBytes` is an extrapolation of an extrapolation of one sample object |
@@ -970,7 +970,7 @@ type names (≤ 100 objects)"* while the effective default is 20.
 
 ---
 
-### 9.9 SegmentReservation — **GREEN**, but for an unusual reason
+### 9.9 SegmentReservation — **GREEN** ✅ IMPLEMENTED, but for an unusual reason
 
 [SegmentReservationAnalysisOptions.cs](../../src/DumpDetective.Core/Options/SegmentReservationAnalysisOptions.cs)
 
@@ -997,6 +997,20 @@ yields contradictory findings depending on a knob the user reads as "how thoroug
 
 This is the general argument for Category 5 in one case: thresholds define semantics, and semantics
 must not vary by effort level.
+
+#### Implementation notes (as shipped)
+
+- **Analyzer itself untouched** — confirmed no caps/limits/sampling exist to remove, matching the
+  audit exactly.
+- **`Preset`/`Default` deleted, Balanced's values promoted straight to field initializers**, each with
+  the D4-mandated rationale comment: `ThirtyTwoBitPressureThresholdBytes` (1.5 GB) documents the
+  32-bit VA-space anchor; `RatioHighPressureThreshold` (10.0x) documents that it's unanchored and
+  flagged for revisit with field data, per D4's own classification of these two thresholds.
+- Same `ConfigurationResolver` profile-bypass pattern as every other section so far — `Preset` deleted,
+  so `BuildSegmentReservationAnalysisFromConfig` applies overrides directly onto
+  `new SegmentReservationAnalysisOptions()`.
+- No section builder, finding generator, or trend comparer changes needed — none of them referenced
+  `Preset`/`Default`, and there was no capped list to unbound.
 
 ---
 

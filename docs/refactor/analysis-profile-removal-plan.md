@@ -12,6 +12,9 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
+**Implementation progress: 3 of 33 analyzers done — §9.1 Boxing, §9.2 ObjectShape, §9.3 Module.**
+See each section and the §7 verdict table for what shipped in each.
+
 > **Correction (roster built from the wrong source):** the audit was originally built by walking
 > `src/DumpDetective.Core/Options/`, not the analyzer registry — so any analyzer with no dedicated
 > options class was invisible to it. Cross-checking against
@@ -279,15 +282,15 @@ radius is a single cosmetic report field, not root exactness.
 
 | # | Analyzer | Group | Verdict | Knobs deleted | Notes |
 |---|---|---|---|---|---|
-| 1 | Boxing | aggregator | **GREEN** | 4 of 5 | §9.1 — cap bites today; deleting it also deletes a determinism workaround |
+| 1 | Boxing | aggregator | **GREEN** ✅ DONE | 4 of 5 | §9.1 — cap bites today; deleting it also deletes a determinism workaround |
 | 2 | GCGeneration | aggregator | **GREEN** | 2 of 5 | §9.4 — pure output slicing; 3 thresholds survive |
 | 3 | GCHandle | aggregator | **GREEN** | 1 of 5 | §9.5 — pure output slicing; 4 thresholds survive |
 | 4 | *(GCHandle, cont'd)* | — | — | — | `DependentHandleAnalysisOptions` is **not a registered analyzer** — orphaned options class, folded into §9.6 below rather than counted as its own row |
 | 5 | LockGraph | aggregator | **GREEN** | 1 of 1 | §9.7 — options class deleted outright |
 | 6 | LohFragmentation | aggregator | **GREEN** | 2 of 2 | §9.8 — one cap applies during collection, truncating a type aggregation |
-| 7 | ObjectShape | aggregator | **GREEN** | 2 of 2 | §9.2 — cap of 200 types corrupts three whole-heap aggregates |
+| 7 | ObjectShape | aggregator | **GREEN** ✅ DONE | 2 of 2 | §9.2 — cap of 200 types corrupts three whole-heap aggregates |
 | 8 | SegmentReservation | aggregator | **GREEN** | 0 of 2 | §9.9 — already exact; preset varies *semantics*, so it must still die |
-| 9 | Module | aggregator | **GREEN** | 8 of 11 | §9.3 — 2 knobs are dead code; one deletion cascades into 4 more |
+| 9 | Module | aggregator | **GREEN** ✅ DONE | 8 of 11 | §9.3 — 2 knobs are dead code; one deletion cascades into 4 more |
 | 10 | Jit | aggregator | **GREEN** | 3 of 4 | §9.10 — one cap corrupts **six** accumulators; worst Q7 so far |
 | 11 | Array | sampling | **GREEN** | 5 of 6 | §9.11 — `WastedBytes` is an extrapolation of an extrapolation of one sample object |
 | 12 | String | sampling | **AMBER** | ~8 of 16 | §9.12 — exact dedup needs a restructured hash-count pass, not just cap removal |
@@ -371,7 +374,7 @@ grep -rn "options.Profile"        src
 
 ## 9. Per-analyzer audits
 
-### 9.1 Boxing — **GREEN**
+### 9.1 Boxing — **GREEN** ✅ IMPLEMENTED
 
 Source: [BoxingAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/BoxingAnalyzer.cs) ·
 [BoxingAnalysisOptions.cs](../../src/DumpDetective.Core/Options/BoxingAnalysisOptions.cs)
@@ -437,7 +440,34 @@ the Category 1 move already half-done, and confirms it is natural here.
    JSON schema change requiring a version bump per
    [schema-versioning.md](../schema-versioning.md).
 
-### 9.2 ObjectShape — **GREEN**
+#### Implementation notes (as shipped)
+
+- **Schema check resolved as D2 predicted:** `BoxingDomainResult` never reaches JSON — confirmed no
+  version bump needed, `TypeScanCapped`/`TypeScanCapUsed` were deleted outright.
+- **`BoxingSectionBuilder` had a second, independent truncation** beyond the analyzer cap: it built
+  `CompactTable` rows from `d.TopBoxedTypes.Take(TopTypesToShow)` (and similarly for padding waste),
+  plus a "N additional type(s) omitted" text block — a Mechanism-1/Mechanism-2 mix per §11.2 D5. Fixed
+  by feeding the *full* list into `STCompact` and passing the old `TopTypesToShow`/`TopPaddingToShow`
+  constants as `STCompact`'s `rowLimit` (the initial page size), not a hard cutoff — no more omitted
+  text block needed since nothing is actually dropped.
+- **Trend comparer — got this wrong once, corrected.** First pass added a `TopTypeMetricLimit = 50`
+  cap in `BoxingTrendComparer.ExtractMetrics` to bound per-type trend-metric volume now that
+  `TopBoxedTypes` is unbounded. Reverted after review: per §11.2 D5, the right shape is *full data at
+  the model layer, paginate only at render* — capping inside the comparer reintroduces exactly the
+  kind of silent truncation this whole effort is removing. `BoxingTrendComparer` now emits one
+  `boxing.type.bytes`/`boxing.type.count` metric pair per boxed type with no limit. Generalize this
+  lesson to every other trend comparer touched later in §9: don't add a "reasonable-sounding" cap at
+  the comparer/analyzer boundary to solve a display-volume concern — that's a render-layer job
+  (`TrendMetricTimelineSectionBuilder`'s `TableBlock` output doesn't paginate today, which is a
+  pre-existing gap in the render layer, not a reason to cap the data feeding it).
+- **`ConfigurationResolver` wiring:** the generic `BuildAnalyzerOptionsFromConfig<T>(..., Func<AnalysisProfile,T> createPreset)` helper assumes every options type still has a profile-based `Preset`. With `BoxingAnalysisOptions.Preset` deleted, `BuildBoxingAnalysisFromConfig` was rewritten as a
+  one-off: apply JSON section overrides (or legacy `config.BoxingAnalysis`) on top of
+  `new BoxingAnalysisOptions()` directly, bypassing profile resolution entirely. The CLI-flags-only
+  fallback path (`AnalyzerOptionsBuilder.BuildBalancedPresetFromCli`) was likewise replaced with
+  `_ => new BoxingAnalysisOptions()`. This is the pattern every other analyzer whose options class
+  loses its `Preset` will need (see §9.2, §9.3 below).
+
+### 9.2 ObjectShape — **GREEN** ✅ IMPLEMENTED
 
 Source: [ObjectShapeAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/ObjectShapeAnalyzer.cs) ·
 [ObjectShapeAnalysisOptions.cs](../../src/DumpDetective.Core/Options/ObjectShapeAnalysisOptions.cs)
@@ -500,9 +530,29 @@ the wrong number is computed in the analyzer.
    ([:44, :152](../../src/DumpDetective.Analysis/Analyzers/ObjectShapeAnalyzer.cs#L152)). Same
    version-bump question as §9.1 item 4.
 
+#### Implementation notes (as shipped)
+
+- **This was the first "delete the whole options class" case**, and it cascades further than §9.1's
+  "options survive with fewer fields" shape: `ObjectShapeAnalysisOptions` had to come out of
+  `AnalysisOptions`, `CliConfigurationModels` (property *and* its `[JsonSerializable]` roster entry),
+  `ConfigurationResolver` (builder method + call site), `AnalyzerExecutionService`, and
+  `ResolvedExecutionOptions` — plus three test call sites that constructed
+  `ResolvedExecutionOptions`/`ObjectShapeAnalyzerDomainResult` positionally
+  (`ResolvedExecutionOptionsFactory`, `StartupValidatorTests`, `ReportingCompositionTests`).
+  `ObjectShapeAnalyzer.AnalyzeAsync`/`Analyze` no longer take an options parameter at all — there was
+  nothing left to configure once both knobs were gone. **Any other §9 row marked "options class
+  deleted outright" (LockGraph §9.7, AsyncTask §9.29, WcfChannel/HttpObject/DbConnection §9.32-34)
+  should expect this same wiring surface, not just a file deletion.**
+- **§10's D5 pagination point didn't need any work here** — `ObjectShapeSectionBuilder` was already
+  passing full `TopReferenceHeavyTypes`/`TopValueHeavyTypes`/`TopBalancedTypes` lists into
+  `STCompact` with no `.Take()`, unlike Boxing (§9.1). The only render-layer change was deleting the
+  now-false "(Avg ref fields is computed over at most N types…)" caveat sentence.
+- **No dedicated `ObjectShapeAnalyzer` unit tests existed** to update — the only test-side fallout was
+  the positional-constructor breakage above, not behavioral test rewrites.
+
 ---
 
-### 9.3 Module — **GREEN** (with the largest cascade so far)
+### 9.3 Module — **GREEN** ✅ IMPLEMENTED (with the largest cascade so far)
 
 Source: [ModuleAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/ModuleAnalyzer.cs) ·
 [ModuleAnalysisOptions.cs](../../src/DumpDetective.Core/Options/ModuleAnalysisOptions.cs)
@@ -595,6 +645,38 @@ a real negative cost). Confirmed: metadata-table iteration, not heap work, and n
 ~10-minute nominal budget. Safe to delete `ModuleEnumerationLimit`.
 
 **Q6 — reverse index.** Not used.
+
+#### Implementation notes (as shipped)
+
+- **The per-domain `Array.Sort` by module size was kept, not deleted**, despite the plan text above
+  framing it as existing "only to make the truncation deterministic." On inspection it does double
+  duty: it also drives `AppDomainSnapshot.TopModules` — a hard-coded top-8-by-size narrative list per
+  domain, unrelated to `ModuleEnumerationLimit`. Deleting the sort would have made that list
+  enumeration-order-dependent instead of size-ranked. Kept the sort, renamed its comment to describe
+  the surviving purpose, and dropped only the truncation-driven pieces (`enumerationBound`,
+  `totalExcludedModules`, the conditional truncation warning). The `8` itself stays a local constant
+  per §11.2 D5 ("true inline prose lists embedded in a sentence... can stay small analyzer-local
+  constants").
+- **`PreferIndexOnly`'s hard-coded replacement is a plain `hasIndex` check**, not `hasIndex || !true`
+  simplified by hand — same behavior, clearer code: `if (!hasIndex) continue;` before the per-module
+  type-enumeration loop, with the domain-level warning text reworded to drop the now-nonexistent
+  setting name.
+- **Deleted `tests/.../ModuleAnalyzerUncappedRealDumpTests.cs` outright.** That test existed
+  specifically to A/B-measure `ModuleEnumerationLimit`'s capped-vs-uncapped cost — the exact
+  measurement recorded here as M1. Once the cap is gone there is only one code path left to run, so
+  the "capped baseline" side of the comparison no longer compiles or means anything; the measurement
+  it produced is preserved in this doc's M1 entry (§11.4), which is the artifact that actually
+  justified the deletion.
+- **Cleaned the stale example out of `src/DumpDetective.Cli/config.json`** — its commented-out
+  `"Module": { "Profile": ..., "TopLoadedAssembliesCount": ..., "TopModulesByHeapCount": ... }` block
+  referenced three names that no longer exist. Left the other commented analyzer examples
+  (Crash/Collection/String/GCRoot) alone since those analyzers haven't been migrated yet.
+- **Same `ConfigurationResolver` profile-bypass pattern as §9.1's Boxing notes** — `Preset` deleted,
+  so `BuildModuleAnalysisFromConfig` applies overrides directly onto `new ModuleAnalysisOptions()`.
+- **`ModuleAggregator.Aggregate` still takes `ModuleAnalysisOptions`** (for the surviving
+  `DensityAnomalyMinBytes`/`DensityAnomalyMaxTypes` thresholds) — only its `TopModulesByHeapCount`
+  cap was removed; `ModuleSectionBuilder` already rendered that list via `STCompact` with no
+  additional `.Take()`, so no render-layer change was needed there either.
 
 ### 9.4 GCGeneration — **GREEN**
 

@@ -14,7 +14,28 @@ internal sealed class GCGenerationFindingGenerator : IFindingGenerator
     {
         if (result is not GCGenerationDomainResult r) return [];
 
-        var findings = new List<InsightFinding>(2);
+        var findings = new List<InsightFinding>(3);
+
+        // ── POH share finding ─────────────────────────────────────────────────
+        // Only emit if POH share exceeds configured threshold (default 5%).
+        // POH (Pinned Object Heap, .NET 5+) holds pinned objects; a growing share often
+        // indicates buffer-pinning pressure from interop, sockets, or Span<T>-heavy code.
+        double pohPct = r.TotalObjects == 0 ? 0.0 : r.PohObjects * 100.0 / r.TotalObjects;
+        if (r.PohBytes > 0 && pohPct >= r.PohThresholdPercent)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "GC",
+                Severity: pohPct >= 20 ? FindingSeverity.Warning : FindingSeverity.Info,
+                Title: "Pinned Object Heap (POH) share",
+                Evidence: $"POH holds {pohPct:F1}% of objects ({FormatBytes(r.PohBytes)}, {r.PohObjects:N0} objects).",
+                Recommendation: pohPct >= 20
+                    ? "Investigate sources of object pinning (interop buffers, sockets, Span<T>/Memory<T> usage). Excess pinning fragments the heap and can inflate GC pause times."
+                    : "POH share is within expected range for this dump.",
+                Tags: ["gc", "poh", "pinning"],
+                MetricValue: pohPct,
+                MetricUnit: "%"));
+        }
 
         // ── LOH share finding ─────────────────────────────────────────────────
         // Only emit if LOH share exceeds configured threshold (default 20%).

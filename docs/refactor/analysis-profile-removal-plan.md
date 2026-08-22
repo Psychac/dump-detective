@@ -12,8 +12,8 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 3 of 33 analyzers done — §9.1 Boxing, §9.2 ObjectShape, §9.3 Module.**
-See each section and the §7 verdict table for what shipped in each.
+**Implementation progress: 4 of 33 analyzers done — §9.1 Boxing, §9.2 ObjectShape, §9.3 Module,
+§9.4 GCGeneration.** See each section and the §7 verdict table for what shipped in each.
 
 > **Correction (roster built from the wrong source):** the audit was originally built by walking
 > `src/DumpDetective.Core/Options/`, not the analyzer registry — so any analyzer with no dedicated
@@ -283,7 +283,7 @@ radius is a single cosmetic report field, not root exactness.
 | # | Analyzer | Group | Verdict | Knobs deleted | Notes |
 |---|---|---|---|---|---|
 | 1 | Boxing | aggregator | **GREEN** ✅ DONE | 4 of 5 | §9.1 — cap bites today; deleting it also deletes a determinism workaround |
-| 2 | GCGeneration | aggregator | **GREEN** | 2 of 5 | §9.4 — pure output slicing; 3 thresholds survive |
+| 2 | GCGeneration | aggregator | **GREEN** ✅ DONE | 2 of 5 | §9.4 — pure output slicing; `PohThresholdPercent` (flagged dead by V4) was instead wired up to a real POH-share finding rather than deleted — see implementation notes; 3 thresholds survive |
 | 3 | GCHandle | aggregator | **GREEN** | 1 of 5 | §9.5 — pure output slicing; 4 thresholds survive |
 | 4 | *(GCHandle, cont'd)* | — | — | — | `DependentHandleAnalysisOptions` is **not a registered analyzer** — orphaned options class, folded into §9.6 below rather than counted as its own row |
 | 5 | LockGraph | aggregator | **GREEN** | 1 of 1 | §9.7 — options class deleted outright |
@@ -678,7 +678,7 @@ a real negative cost). Confirmed: metadata-table iteration, not heap work, and n
   cap was removed; `ModuleSectionBuilder` already rendered that list via `STCompact` with no
   additional `.Take()`, so no render-layer change was needed there either.
 
-### 9.4 GCGeneration — **GREEN**
+### 9.4 GCGeneration — **GREEN** ✅ IMPLEMENTED
 
 [GCGenerationAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/GCGenerationAnalyzer.cs) ·
 [GCGenerationAnalysisOptions.cs](../../src/DumpDetective.Core/Options/GCGenerationAnalysisOptions.cs)
@@ -689,7 +689,7 @@ a real negative cost). Confirmed: metadata-table iteration, not heap work, and n
 | `TopGenProfileLimit` | 20 | 1 — rows | move to render |
 | `LohThresholdPercent` | 20.0 | 5 | keep |
 | `Gen0PressureThresholdPercent` | 40.0 | 5 | keep |
-| `PohThresholdPercent` | 5.0 | 5 | **dead (V4), delete** — `GCGenerationAnalyzer.cs` computes `PohBytes`/`PohObjects` but never thresholds against it |
+| `PohThresholdPercent` | 5.0 | 5 | flagged dead by V4 (nothing thresholded against it at audit time) — **as shipped: kept, wired up to a new POH-share finding instead of deleted; see implementation notes** |
 
 The preset varies only the two row limits, so `Preset` dies and the three thresholds move to
 initializers unchanged.
@@ -704,6 +704,44 @@ Category 1 shape — cosmetic truncation only. First analyzer audited where the 
 because it was *"defined but never applied… a correctness trap where users could configure a setting
 with no effect."* The codebase has already found and fixed one dead knob by hand, which is exactly
 what §5's procedural grep step systematises.
+
+#### Implementation notes (as shipped)
+
+- **Both analyzer paths capped independently** (`BuildFromIndex` and the no-index fallback
+  `BuildFromTypeStatistics`), each with its own `Math.Min(options.Top*Limit, candidates.Count)` +
+  indexed loop. Converted both to `foreach` over the full sorted list — no shared helper introduced,
+  since the two paths build different snapshot types (`TypeAggregateIndexEntry`-backed vs
+  `CachedTypeStatistics`-backed) and forcing a shared abstraction here would be more machinery than
+  the duplication justifies.
+- **`GCPressureSectionBuilder` had the same double-truncation shape as Boxing's §9.1**: analyzer-side
+  caps *and* independent render-side `Math.Min(..., 15)`/`Math.Min(..., 30)` re-slicing on top of the
+  (already capped) domain lists. Fixed the same way — feed the full list into `STCompact`, pass the
+  old local constants (`TopLohTypesToShow = 15`, `TopGenProfilesToShow = 30`) as the `rowLimit`
+  (initial page size) instead of a hard slice. Three call sites needed this: the `PerTypeGenerationProfiles`-derived "Top LOH types" table, the `TopLohTypes`-fallback "Top LOH types" table, and
+  the "Per-type generation profiles" table.
+  **Known pre-existing accuracy gap, not touched here:** when `PerTypeGenerationProfiles` is
+  available, "Top LOH types" is built by filtering that list (ranked by *instance count*) down to
+  entries with `LohCount > 0` — a materially different, weaker ranking than `TopLohTypes` (ranked
+  directly by *LOH byte size*, the fallback path's source). A type with huge LOH bytes but low overall
+  instance count could rank in `TopLohTypes` but be excluded from the `PerTypeGenerationProfiles`-derived table's candidate pool. This predates the exactness work and isn't a truncation defect — the
+  candidate pool itself is now unbounded — but is worth a dedicated follow-up: consider sourcing "Top LOH types" from `TopLohTypes` unconditionally rather than switching sources based on which list happens to be non-empty.
+- **`GCGenerationTrendComparer` needed no change** — it already iterated the full `TopLohTypes` list
+  with no local cap, consistent with §9.1's "don't cap at the comparer" correction.
+- Same `ConfigurationResolver` profile-bypass pattern as §9.1/§9.3 — `Preset` deleted, so
+  `BuildGCGenerationAnalysisFromConfig` applies overrides directly onto `new GCGenerationAnalysisOptions()`.
+- **Correction from initial implementation: `PohThresholdPercent` was wired up instead of deleted.**
+  V4 (§11.3) flagged it dead because `GCGenerationAnalyzer.cs` computed `PohBytes`/`PohObjects` but
+  never gated a finding on the threshold — that's a real gap, not evidence the knob should go away.
+  Deleting a semantically-meaningful threshold "because nothing reads it yet" reproduces the exact
+  defect this whole effort exists to fix (a config value with no effect), just one step earlier in the
+  knob's life — the fix for dead-but-meaningful is to finish wiring it, not remove it. Added a POH-share
+  `InsightFinding` to `GCGenerationFindingGenerator` (mirrors the existing LOH-share finding: emits
+  Info/Warning based on `PohThresholdPercent`/a 20% escalation line, evidence includes POH bytes and
+  object count, recommendation points at interop/pinning/`Span<T>` usage). `PohThresholdPercent` is
+  back on `GCGenerationAnalysisOptions` and threaded through `GCGenerationDomainResult` from both
+  analyzer paths. **General lesson for the rest of §9: a knob found dead by V4 needs the analyzer/finding-generator checked for "should this be wired up" before defaulting to deletion** — V4's grep only
+  proves *nothing reads it today*, not that it's semantically vestigial the way `ModuleSelectionMode`
+  or `IncludeExcludedModuleSummary` are.
 
 ---
 

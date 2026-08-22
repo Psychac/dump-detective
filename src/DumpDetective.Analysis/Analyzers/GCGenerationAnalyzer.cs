@@ -85,27 +85,23 @@ namespace DumpDetective.Analysis.Analyzers
             double gen0Pct = totalObjects == 0 ? 0.0 : gen0Objects * 100.0 / totalObjects;
             double gen2Pct = totalObjects == 0 ? 0.0 : gen2Objects * 100.0 / totalObjects;
 
-            // Top LOH types — resolve names only for top N.
+            // Top LOH types, ranked by LOH size.
             lohCandidates.Sort(static (a, b) => b.Entry.LohSize.CompareTo(a.Entry.LohSize));
-            int lohTake = Math.Min(options.TopLohTypeLimit, lohCandidates.Count);
-            var topLohTypes = new List<TypeSnapshot>(lohTake);
-            for (int i = 0; i < lohTake; i++)
+            var topLohTypes = new List<TypeSnapshot>(lohCandidates.Count);
+            foreach ((ulong mt, TypeAggregateIndexEntry e) in lohCandidates)
             {
-                (ulong mt, TypeAggregateIndexEntry e) = lohCandidates[i];
                 string name = heap.GetTypeByMethodTable(mt)?.Name ?? $"MT:0x{mt:x}";
                 topLohTypes.Add(new TypeSnapshot(name, (int)Math.Min(int.MaxValue, e.LohCount), e.LohSize, e.LohSize));
             }
 
-            // Per-type generation profiles.
+            // Per-type generation profiles, ranked by instance count.
             List<TypeGenerationProfile> profiles = [];
             if (accountedGen > 0)
             {
                 genCandidates.Sort(static (a, b) => b.Entry.Count.CompareTo(a.Entry.Count));
-                int genTake = Math.Min(options.TopGenProfileLimit, genCandidates.Count);
-                profiles = new List<TypeGenerationProfile>(genTake);
-                for (int i = 0; i < genTake; i++)
+                profiles = new List<TypeGenerationProfile>(genCandidates.Count);
+                foreach ((ulong mt, TypeAggregateIndexEntry e) in genCandidates)
                 {
-                    (ulong mt, TypeAggregateIndexEntry e) = genCandidates[i];
                     string name = heap.GetTypeByMethodTable(mt)?.Name ?? $"MT:0x{mt:x}";
                     profiles.Add(new TypeGenerationProfile(
                         name, e.Gen0Count, e.Gen1Count, e.Gen2Count,
@@ -137,7 +133,8 @@ namespace DumpDetective.Analysis.Analyzers
                 GenBytesAreApproximate: false,
                 FallbackMode: false,
                 LohThresholdPercent: options.LohThresholdPercent,
-                Gen0PressureThresholdPercent: options.Gen0PressureThresholdPercent);
+                Gen0PressureThresholdPercent: options.Gen0PressureThresholdPercent,
+                PohThresholdPercent: options.PohThresholdPercent);
         }
 
         // ── Slow / fallback path (no heap index) ──────────────────────────────────
@@ -171,13 +168,9 @@ namespace DumpDetective.Analysis.Analyzers
             foreach (CachedTypeStatistics stat in typeStats.Values)
                 if (stat.LohCount > 0) lohList.Add(stat);
             lohList.Sort(static (a, b) => b.LohSize.CompareTo(a.LohSize));
-            int lohTake = Math.Min(options.TopLohTypeLimit, lohList.Count);
-            var topLohTypes = new List<TypeSnapshot>(lohTake);
-            for (int i = 0; i < lohTake; i++)
-            {
-                CachedTypeStatistics stat = lohList[i];
+            var topLohTypes = new List<TypeSnapshot>(lohList.Count);
+            foreach (CachedTypeStatistics stat in lohList)
                 topLohTypes.Add(new TypeSnapshot(stat.TypeName, stat.LohCount, stat.LohSize, stat.LohSize));
-            }
 
             return new GCGenerationDomainResult(
                 Gen0Bytes: 0, Gen0Objects: 0,
@@ -193,7 +186,8 @@ namespace DumpDetective.Analysis.Analyzers
                 GenBytesAreApproximate: true,
                 FallbackMode: true,
                 LohThresholdPercent: options.LohThresholdPercent,
-                Gen0PressureThresholdPercent: options.Gen0PressureThresholdPercent);
+                Gen0PressureThresholdPercent: options.Gen0PressureThresholdPercent,
+                PohThresholdPercent: options.PohThresholdPercent);
         }
 
         public void Dispose() { }

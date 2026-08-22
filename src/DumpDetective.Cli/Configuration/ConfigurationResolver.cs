@@ -49,7 +49,7 @@ internal sealed class ConfigurationResolver
         ThreadStackClusterAnalysisOptions threadStackClusterAnalysis = Resolve(usedConfigFile, BuildThreadStackClusterAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, ThreadStackClusterAnalysisOptions.Preset), fileModel, request);
         LockGraphAnalysisOptions lockGraphAnalysis = Resolve(usedConfigFile, BuildLockGraphAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, LockGraphAnalysisOptions.Preset), fileModel, request);
         FinalizableObjectAnalysisOptions finalizableObjectAnalysis = Resolve(usedConfigFile, BuildFinalizableObjectAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, FinalizableObjectAnalysisOptions.Preset), fileModel, request);
-        GCGenerationAnalysisOptions gcGenerationAnalysis = Resolve(usedConfigFile, BuildGCGenerationAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, GCGenerationAnalysisOptions.Preset), fileModel, request);
+        GCGenerationAnalysisOptions gcGenerationAnalysis = Resolve(usedConfigFile, BuildGCGenerationAnalysisFromConfig, _ => new GCGenerationAnalysisOptions(), fileModel, request);
         GCRootAnalysisOptions gcRootAnalysis = Resolve(usedConfigFile, BuildGCRootAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, GCRootAnalysisOptions.Preset), fileModel, request);
         LohFragmentationAnalysisOptions lohFragmentationAnalysis = Resolve(usedConfigFile, BuildLohFragmentationAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, LohFragmentationAnalysisOptions.Preset), fileModel, request);
         SegmentReservationAnalysisOptions segmentReservationAnalysis = Resolve(usedConfigFile, BuildSegmentReservationAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, SegmentReservationAnalysisOptions.Preset), fileModel, request);
@@ -390,11 +390,14 @@ internal sealed class ConfigurationResolver
             FinalizableObjectAnalysisOptions.Preset);
 
     private static GCGenerationAnalysisOptions BuildGCGenerationAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "GCGeneration",
-            config.GCGenerationAnalysis,
-            GCGenerationAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "GCGeneration", out JsonElement section))
+            return ApplySectionOverrides(new GCGenerationAnalysisOptions(), section);
+
+        return config.GCGenerationAnalysis is null
+            ? new GCGenerationAnalysisOptions()
+            : ApplyOptionsOverrides(new GCGenerationAnalysisOptions(), config.GCGenerationAnalysis);
+    }
 
     private static GCRootAnalysisOptions BuildGCRootAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
         => BuildAnalyzerOptionsFromConfig(

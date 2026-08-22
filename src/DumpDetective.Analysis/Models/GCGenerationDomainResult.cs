@@ -33,4 +33,5 @@ public sealed record GCGenerationDomainResult(
     bool GenBytesAreApproximate = true,
     bool FallbackMode = false,
     double LohThresholdPercent = 20.0,
-    double Gen0PressureThresholdPercent = 40.0) : AnalyzerDomainResult;
+    double Gen0PressureThresholdPercent = 40.0,
+    double PohThresholdPercent = 5.0) : AnalyzerDomainResult;

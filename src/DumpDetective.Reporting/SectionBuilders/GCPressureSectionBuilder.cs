@@ -10,6 +10,9 @@ namespace DumpDetective.Reporting.SectionBuilders;
 /// <summary>B1 — Generation Pressure. Source: <see cref="GCGenerationDomainResult"/>.</summary>
 internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
+    private const int TopLohTypesToShow = 15;
+    private const int TopGenProfilesToShow = 30;
+
     public string AnalyzerName => "GC Generation Analysis";
     public string DisplayTitle => "Generation Pressure";
     public int SortOrder => 100;
@@ -64,11 +67,9 @@ internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IAnalyzerSe
 
             if (lohProfiles.Count > 0)
             {
-                int limit = Math.Min(lohProfiles.Count, 15);
-                var rows = new List<TableRow>(limit);
-                for (int i = 0; i < limit; i++)
+                var rows = new List<TableRow>(lohProfiles.Count);
+                foreach (TypeGenerationProfile p in lohProfiles)
                 {
-                    TypeGenerationProfile p = lohProfiles[i];
                     rows.Add(Row(
                         Cell(p.TypeName),
                         Cell(p.Gen0Count.ToString("N0"), p.Gen0Count),
@@ -77,32 +78,28 @@ internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IAnalyzerSe
                         Cell(p.LohCount.ToString("N0"),  p.LohCount),
                         Cell(p.TotalBytes > 0 ? FormatBytes(p.TotalBytes) : "—")));
                 }
-                compactTables.Add(STCompact("Top LOH types", new[] { CH("Type"), CH("Gen0","number"), CH("Gen1","number"), CH("Gen2","number"), CH("LOH Count","number"), CH("Total Bytes","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+                compactTables.Add(STCompact("Top LOH types", new[] { CH("Type"), CH("Gen0","number"), CH("Gen1","number"), CH("Gen2","number"), CH("LOH Count","number"), CH("Total Bytes","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray(), TopLohTypesToShow));
             }
         }
         else if (d.TopLohTypes.Count > 0)
         {
-            int limit = Math.Min(d.TopLohTypes.Count, 15);
-            var rows = new List<TableRow>(limit);
-            for (int i = 0; i < limit; i++)
+            var rows = new List<TableRow>(d.TopLohTypes.Count);
+            foreach (TypeSnapshot t in d.TopLohTypes)
             {
-                TypeSnapshot t = d.TopLohTypes[i];
                 rows.Add(Row(
                     Cell(t.TypeName),
                     Cell(t.Count.ToString("N0"), t.Count),
                     Cell(FormatBytes(t.TotalBytes), (long)Math.Min(t.TotalBytes, long.MaxValue)),
                     Cell(t.LohBytes > 0 ? FormatBytes(t.LohBytes) : "—")));
             }
-            compactTables.Add(STCompact("Top LOH types", new[] { CH("Type"), CH("Count","number"), CH("Total Bytes","bytes"), CH("LOH Bytes","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Top LOH types", new[] { CH("Type"), CH("Count","number"), CH("Total Bytes","bytes"), CH("LOH Bytes","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray(), TopLohTypesToShow));
         }
 
         if (d.PerTypeGenerationProfiles is { Count: > 0 })
         {
-            int limit = Math.Min(d.PerTypeGenerationProfiles.Count, 30);
-            var rows = new List<TableRow>(limit);
-            for (int i = 0; i < limit; i++)
+            var rows = new List<TableRow>(d.PerTypeGenerationProfiles.Count);
+            foreach (TypeGenerationProfile p in d.PerTypeGenerationProfiles)
             {
-                TypeGenerationProfile p = d.PerTypeGenerationProfiles[i];
                 long total = p.Gen0Count + p.Gen1Count + p.Gen2Count + p.LohCount;
                 double gen2Pct   = total == 0 ? 0.0 : p.Gen2Count  * 100.0 / total;
                 double survivalR = total == 0 ? 0.0 : (p.Gen2Count + p.LohCount) * 1.0 / total;
@@ -119,7 +116,7 @@ internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IAnalyzerSe
             }
             compactTables.Add(STCompact("Per-type generation profiles",
                 new[] { CH("Type"), CH("Gen0","number"), CH("Gen1","number"), CH("Gen2","number"), CH("LOH","number"), CH("Total Bytes","bytes"), CH("Gen2%", "number", "percent"), CH("Survival Ratio", "number", "ratio"), CH("Finalizable") },
-                rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+                rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray(), TopGenProfilesToShow));
         }
 
         return new AnalyzerDetailSection(

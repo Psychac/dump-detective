@@ -1,8 +1,16 @@
 # Exact analysis: removing scan caps, sampling, and the AnalysisProfile system
 
-Status: **audit complete** — 33 of 33 registered analyzers (**26 GREEN, 6 AMBER, 1 RED**).
-**Start at §11, the pre-implementation checklist.** Nothing should be implemented before B1-B4 are
-resolved and D1-D9 are decided.
+Status: **audit complete, §11 pre-implementation checklist fully closed out** — 33 of 33 registered
+analyzers (**26 GREEN, 6 AMBER, 1 RED**). Blockers **B1-B4** (§11.1), decisions **D1-D10** (§11.2),
+verifications **V1-V4** (§11.3, surfaced 6 additional dead knobs beyond the original 3), and
+measurements **M1-M10** (§11.4, all measured or explicitly flagged as needing a different dump) are
+all resolved — see each section for the individual outcomes, including two real defects found in the
+process (F10's `List<T>`-capacity `OutOfMemoryException`, D8's `AdaptForSize` double-scaling bug) and
+one production defect confirmed cheap-but-real (M6's HeapTopology live walk, with a free exact
+alternative identified). **Nothing left to decide before implementation starts** — the per-analyzer
+exactness migration (§9) and ordering constraints (§11.5) are next. The goal throughout (§1) is
+exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
+not estimated or silently capped.
 
 > **Correction (roster built from the wrong source):** the audit was originally built by walking
 > `src/DumpDetective.Core/Options/`, not the analyzer registry — so any analyzer with no dedicated
@@ -124,8 +132,10 @@ for deleting the preset system: even an analyzer with no caps at all (§9.9 Segm
 made incoherent by it. It also means §2's "commit 1 changes no output" property holds only where the
 test config does not set a profile — which is the default, but worth stating.
 
-**Action:** every Category 5 threshold keeps its Balanced value as its single constant. Reviewers
-should sanity-check each one on its merits rather than inheriting "Balanced was the middle option."
+**Action (D4, decided):** every Category 5 threshold keeps its Balanced value as its single constant,
+non-blocking. Add a one-line rationale comment next to each when it lands as a standalone value — see
+D4 (§11.2) for the per-threshold anchor/shaky breakdown and which ones to flag for revisit once field
+data exists rather than re-deriving them abstractly now.
 
 ---
 
@@ -576,11 +586,13 @@ initializers (§2 commit 1) resolves it; the knobs then disappear entirely.
 **Q3 — materialization.** `moduleTypeData` is O(distinct modules) — hundreds. `moduleEntries` the
 same. **No memory risk.**
 
-**Q5 — cost.** Full `EnumerateTypeDefToMethodTableMap()` across all modules in all domains. This is
-the one aggregator where unbounding does real extra work — the Full preset's comment
-([:92](../../src/DumpDetective.Core/Options/ModuleAnalysisOptions.cs#L92)) warns *"the analysis time
-grows quickly with the number of modules."* Still metadata-table iteration, not heap work; expect
-seconds to low tens of seconds. **Measure this one rather than assuming.**
+**Q5 — cost, measured (M1, §11.4).** Full `EnumerateTypeDefToMethodTableMap()` across all modules in
+all domains. The Full preset's comment ([:92](../../src/DumpDetective.Core/Options/ModuleAnalysisOptions.cs#L92))
+warns *"the analysis time grows quickly with the number of modules,"* but on a real 3.35GB dump with
+266 modules (already past the Balanced cap of 50), fully uncapped `ModuleAnalyzer.AnalyzeAsync` ran in
+178 ms — actually faster than the capped run's 506 ms (almost certainly warm-cache ordering noise, not
+a real negative cost). Confirmed: metadata-table iteration, not heap work, and negligible against the
+~10-minute nominal budget. Safe to delete `ModuleEnumerationLimit`.
 
 **Q6 — reverse index.** Not used.
 
@@ -595,7 +607,7 @@ seconds to low tens of seconds. **Measure this one rather than assuming.**
 | `TopGenProfileLimit` | 20 | 1 — rows | move to render |
 | `LohThresholdPercent` | 20.0 | 5 | keep |
 | `Gen0PressureThresholdPercent` | 40.0 | 5 | keep |
-| `PohThresholdPercent` | 5.0 | 5 | keep |
+| `PohThresholdPercent` | 5.0 | 5 | **dead (V4), delete** — `GCGenerationAnalyzer.cs` computes `PohBytes`/`PohObjects` but never thresholds against it |
 
 The preset varies only the two row limits, so `Preset` dies and the three thresholds move to
 initializers unchanged.
@@ -843,9 +855,12 @@ what is discovered, not just what is shown.
 **Q3 — no materialization risk.** `sparseCandidates` is O(distinct array types); the element walk
 holds no per-element state beyond two counters.
 
-**Q5.** Full element walks over qualifying arrays (length ≥ 10,000). Bounded by total array elements
-on the heap, read through already-mapped pages. Estimate: seconds. Worth measuring if a dump has
-unusually many large arrays.
+**Q5 — measured (M3, §11.4).** Full element walks over qualifying arrays (length ≥ 10,000). On a real
+3.35GB dump (1.73M array objects): capped 39 ms vs. fully uncapped 42 ms — negligible, confirms the
+estimate. Also surfaced a real defect: `TopSparseLimit` is used directly as a `List<T>` constructor
+capacity ([:241](../../src/DumpDetective.Analysis/Analyzers/ArrayAnalyzer.cs#L241)) — setting it to
+`int.MaxValue` to remove the loop bound throws `OutOfMemoryException` rather than just uncapping the
+search. See F10 (§11.6).
 
 ---
 
@@ -881,6 +896,16 @@ Sixteen knobs — the largest options surface in the codebase.
   fingerprint map O(unique strings). At ~10M unique strings this is hundreds of MB — survivable, but
   it is a genuine resident-bytes cap, not a wall-clock one, and it is the only thing standing between
   the current design and unbounded growth.
+- **Found via M5 (§11.4): this isn't even the cap that binds in production.** `StringAnalyzer.Analyze`'s
+  fast path reads `heapIndex.StringDedupIndex`, a Phase 1 satellite index built once during
+  `PrebuildHeapIndex` and governed by its own hardcoded `const int MaxDedupUnique = 500_000`
+  ([DiskBackedObjectIndexWriter.cs:167](../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs#L167)) —
+  not part of `StringAnalysisOptions` at all, and not touched by anything in this table. Once Phase 1's
+  index exists (always, in production), `MaxStringsToDedup`/`MaxUniqueStringTracking` only govern
+  fallback branches that essentially never execute. **Decided: delete `MaxDedupUnique` too**, same
+  reasoning as the audited options — confirmed via measurement not to bind on a 3.35GB/321K-unique-string
+  real dump, so the ~10M-unique-string memory-growth question (estimated at 2-2.5GB by linear
+  extrapolation from this measurement, not directly confirmed) needs a larger dump to validate exactly.
 - **`MaxDuplicateStringLength` is a materialization guard.** [:1185](../../src/DumpDetective.Analysis/Analyzers/StringAnalyzer.cs#L1185)
   calls `obj.AsString(maxLength: MaxDuplicateStringLength - 1)`. Removing it means materializing
   every string at full length — a single 100 MB string becomes a 200 MB managed allocation. This
@@ -933,7 +958,7 @@ reachable only by explicit config. Live code ([:157](../../src/DumpDetective.Ana
 | `HistogramTopTypeLimit` | 10 | 3 | delete |
 | `SuspendedMethodMapLimit` | 20 | 1 — rows | move to render |
 | `TopCapturedSizeEntries` | 10 | 1 — rows | move to render |
-| `TopTypeLimit` | 20 | 1 — rows | **verify**: no use found in `DumpDetective.Analysis` |
+| `TopTypeLimit` | 20 | 1 — rows | move to render — **confirmed live by V2/§11.3** (original grep was incomplete; genuinely read at [AsyncStateMachineAnalyzer.cs:109](../../src/DumpDetective.Analysis/Analyzers/AsyncStateMachineAnalyzer.cs#L109), distinct from `AllocationPatternAnalysisOptions`'s same-named property) |
 | `LargeCaptureThresholdBytes` | 1 MB | 5 | keep |
 
 #### Q7 — the domain result documents its own corruption
@@ -955,10 +980,12 @@ types, the reported distribution reflects at most 10,000 instances from 10 types
 ([:341-342](../../src/DumpDetective.Analysis/Analyzers/AsyncStateMachineAnalyzer.cs#L341)) and
 `TopCapturedSizeEntries` a `Math.Min` at :309 — both pure output slicing with no cascade.
 
-**Q5 — measure.** Removing the histogram caps means the second heap pass tracks every
-state-machine method table and every instance rather than 10 x 1,000. It is still a single bounded
-heap pass with O(types) accumulator state, so the expected cost is one extra scan, but this is the
-group-2 analyzer most worth timing rather than estimating.
+**Q5 — measured (M2, §11.4), partially.** On a real 3.35GB dump, the second full-index scan itself
+costs ~2s and is cap-independent (uncapped vs. capped: 1,728ms vs. 2,132ms, no real difference). But
+that dump only has 11 total state machines, so the per-type instance cap never actually bound in
+either run — the interesting case (this section's own 500,000-instance-across-60-types example,
+directly above) needs a dump with a large state-machine population to measure the per-instance field-read
+cost directly; estimated (not measured) at hundreds of ms to low seconds even at that scale.
 
 **Q3 — no risk.** Histogram state is a per-type state-value counter, O(types x distinct states).
 
@@ -1085,11 +1112,13 @@ root path at all; `MaxBfsNodes = 500` bounds each search. Candidate 26 gets no p
 confidence 0.8 → 0.6 whenever a search truncates — so the analyzer is scoring its own output as
 low-confidence by construction on any non-trivial heap.
 
-**Q5 — this is the group-3 analyzer whose cost most needs measuring.** Removing `PathSearchTopN`
-means a root path for *every* candidate rather than 25. Served from the dominator tree this is a
-parent-pointer walk per candidate (cheap); served from the current BFS it is O(candidates x graph)
-and would be unacceptable. **The verdict depends entirely on the §10 workstream landing first** —
-do not delete these caps against the existing BFS.
+**Q5 — measured (M4, §11.4): affordable even without the dominator-tree rewire.** Removing
+`PathSearchTopN` means a root path for *every* candidate rather than 25. On a real dump with 1,404
+findings, computing a path for all of them (still via the current BFS — `CollectForwardTypeNames`
+hasn't been re-pointed at the dominator tree yet) took 568 ms, actually faster than the capped run's
+874 ms for 25. §10's `EnumerateRetainedSet` rewire is still worth doing (an O(1) parent-pointer read
+beats a bounded BFS per candidate), but is no longer a blocking prerequisite — `PathSearchTopN` can be
+deleted now.
 
 ### 9.17 Collection — **AMBER**
 
@@ -1145,21 +1174,26 @@ the options surface is genuinely done. Two groups of knobs still need action:
 | `MaxRootPathExpansionDepth` | 12 | 4 | delete |
 | `RootPathLargeFanoutThreshold` | 100 | 4 — **excludes paths** | see below |
 | `HighReferenceThreshold` | 50 | 5 | keep |
-| `TopFinalizerTypesToShow` | 10 | 1 — rows | move to render |
+| `TopFinalizerTypesToShow` | 10 | 1 — rows | **dead (V4), delete** — zero references in any analyzer, including `DominatorAnalyzer.cs` |
 | `TopHighlyReferencedObjectsToShow` | 15 | 1 — rows | move to render |
 | `EnableExactDominatorTree` | true | capability | **keep**, already correct |
 | `ExactDominatorTreeMemoryBudgetBytes` | 20 GB | 3 — **memory** | **keep**, already correct |
 
-#### Q7 — `RootPathLargeFanoutThreshold` is not a budget, it is an exclusion
+#### Q7 — `RootPathLargeFanoutThreshold` is not a budget, it is an exclusion — kept, by decision (D3)
 
 Documented as *"Fanout threshold above which a reference path is considered 'large' and **skipped** to
 avoid exploring extremely high-connectivity clusters."* Paths through any object with more than 100
 referents are not searched more cheaply — they are **not searched**. Those objects are static caches,
 singletons and interned strings: the most likely retainers in a real leak.
 
-Combined with `MaxParentsPerChild` (§6.2), the same class of object is excluded twice, at two
-different layers, for the same reason. **Resolving §6.2 without also resolving this leaves the
-exclusion in place** — folded into D3.
+**Resolved by D3: keep this one as-is.** Here it only bounds the `PopulateEvidence` path-display
+search used for this analyzer's "highly referenced objects" evidence text — the retained-bytes
+totals this analyzer reports come from the exact dominator tree, computed independently, so an
+un-found display path only costs a confidence downgrade (`searchTruncated`), not a wrong number.
+Removing it would risk multi-million-node single-query blowups on exactly the hub objects (static
+caches, singletons, interned strings) this evidence search is most likely to hit, for a purely
+cosmetic payoff. Contrast with `ReferenceChainAnalyzer` (§9.20), where the equivalent cap **is**
+being removed, because there the path is the reported result, not decoration on one.
 
 #### Q7 — `MaxLeakScanObjects = 2,000,000` against an 87 M-object heap
 
@@ -1201,9 +1235,9 @@ Sixteen knobs; eight are severity-scoring weights (Category 5, all keep).
 | `LifetimeMismatchProbeLimit` | 50 | 3 | delete |
 | `IncludeNonLeakingEvents` | false | toggle | hard-code true under exactness |
 | `EnableLowIncomingRefsCheck` | false | toggle | see below |
-| `TopSubscriberTypesToShow` | 5 | 1 — rows | move to render |
+| `TopSubscriberTypesToShow` | 5 | 1 — rows | **dead (V4), delete** — `EventLeakAnalyzer.cs` uses a hardcoded `TopCorrelationEntries = 20` instead |
 | `TopDetailedInstancesPerGroup` | 5 | 1 — rows | move to render |
-| `EnableDiagnostics` | true | diagnostics | move to diagnostics options |
+| `EnableDiagnostics` | true | diagnostics | **dead (V4), delete** — never read by `EventLeakAnalyzer.cs` |
 | 6 x `Severity*Bonus` / `SeveritySubscriberLogScale` | — | 5 | keep |
 
 #### This analyzer already has the mechanism the whole plan needs
@@ -1261,7 +1295,7 @@ regardless of how many knobs are deleted.
 | `MaxCandidateNodes` / `MaxCandidateDepth` / `MaxRootExpansionDepth` | 0 → mode | 4 | delete with the strategy collapse |
 | `MaxPathDepth` | 25 | 4 | delete |
 | `LargeFanoutThreshold` | 100 | 4 — **excludes paths** | see §6.2 |
-| `SkipArrays` | true | pruning | **verify semantics** — feeds `IsNoisyType`; confirm whether it prunes traversal or only presentation before changing |
+| `SkipArrays` | true | pruning | **confirmed by V3/§11.3: real traversal pruning, not presentation** — force `false`, folded into D1's exact-search work |
 | `TopCount` / `FallbackTopCount` | 5 / 10 | 1 — rows | move to render |
 | `KnownLeakTypePatterns` | 3 patterns | 5 — heuristic | keep; identical in all three presets (pure duplication) |
 
@@ -1309,7 +1343,7 @@ Ten knobs plus an enum plus **a third tier system**.
 | `DetectWaitPatterns` | true | toggle | hard-code true |
 | `MaxTopHotspots` | 10 | 1 — rows | move to render |
 
-#### `AdaptForSize` is a third scaling layer, invisible to the user
+#### `AdaptForSize` is a third scaling layer, invisible to the user — resolved by D8: delete it, and it was double-applying
 
 `ThreadAnalysisOptions.AdaptForSize(options, DumpSizeTier)` divides
 `MaxThreadsToCaptureSnapshots` and `MaxSampledStackSnapshots` by **4 (Large) / 2 (Medium) / 1**.
@@ -1317,6 +1351,20 @@ Ten knobs plus an enum plus **a third tier system**.
 So the effective value is `preset value ÷ size divisor` — and the divisor is derived automatically
 from dump size, not configured. On a large dump the Balanced default of 20 thread snapshots becomes
 **5**. Nothing surfaces this. Fifth instance of *configured value ≠ applied value* (§11.6).
+
+**Worse than described: this divisor is applied twice.** `AdaptForSize` runs in
+[AnalyzerExecutionService.cs:52](../../src/DumpDetective.Cli/Execution/AnalyzerExecutionService.cs#L52)
+before `ThreadAnalyzer` ever sees the options, but `ThreadAnalyzer.ComputeSamplerCapacity`
+([ThreadAnalyzer.cs:22-42](../../src/DumpDetective.Analysis/Analyzers/ThreadAnalyzer.cs#L22-L42))
+independently looks up the same size tier and re-applies the same divisor to the *already-divided*
+value it receives — Large-dump Balanced default 20 → 5 (AdaptForSize) → 1 (ComputeSamplerCapacity), a
+16x reduction instead of the intended 4x. **Resolved by D8 (§11.2): delete `AdaptForSize` outright.**
+It was never a memory guard — `ThreadWithStackTrace` is small and fixed-size (bounded by
+`MaxFramesForThreadScan`, also deleted), and the counts/totals this analyzer reports already come from
+enumerating every thread regardless of this cap. `MaxSampledStackSnapshots`/`MaxThreadsToCaptureSnapshots`
+become ordinary fixed Category-1 display-example limits, no dump-size scaling. `ComputeSamplerCapacity`'s
+`totalThreads / 10` term survives independently as a legitimate "don't oversample a small population"
+guard.
 
 **Q7 — `MaxFramesForThreadScan = 8`.** Eight frames per thread, four at Fast. Compare Jit's 200
 (§9.10) and `RootSetCache`'s 256 (§6.3): three different frame budgets in three layers, differing by
@@ -1358,13 +1406,15 @@ these threads doing," that is the headline number.
 | Knob | Default | Category | Action |
 |---|---:|---|---|
 | `MaxTasksToScan` | 50,000 | 3 | delete |
-| `TopWaitingThreadsPerGroup` | 5 | 1 — rows | move to render |
+| `TopWaitingThreadsPerGroup` | 5 | 1 — rows | **dead (V4), delete** — never read by `HangAnalyzer.cs` |
 | `TopContinuationTypesToShow` | 5 | 1 — rows | move to render |
-| `LongWaitThreshold` | 5 | 5 — **varied by tier** | keep, stop varying |
+| `LongWaitThreshold` | 5 | 5 — **varied by tier** | **dead (V4), delete** — never read by `HangAnalyzer.cs`; the tier variance discussed in §3.1/D4 was inert |
 | `HighThreadPoolThreshold` | 100 | 5 — **varied by tier** | keep, stop varying |
 
-Two more semantics-by-tier thresholds for §3.1: a thread waiting 6 seconds is *not* long-waiting at
-Fast (8) and *is* at Full (3). Whether a dump is diagnosed as hung depends on the tier.
+One semantics-by-tier threshold remains live for §3.1 after V4: `HighThreadPoolThreshold` (100 vs
+150 vs 60). **`LongWaitThreshold`'s apparent tier variance (5 vs 8 vs 3 seconds) turned out to be
+inert** — `HangAnalyzer.cs` never reads it (§11.3 V4), so no dump's hang diagnosis ever actually
+depended on it.
 
 ---
 
@@ -1434,12 +1484,15 @@ One knob, `CountSohObjects`, and its own doc describes it as an exactness switch
 Fast and Balanced set `false`; only Full sets `true`. **The default configuration does not count the
 small object heap** — the bulk of objects on nearly every dump.
 
-Under an exactness goal this is the most favourable change in the audit: set it to `true`
-permanently, delete the knob, delete the options class. No structural work, no new dependency.
-
-**Q5 — the one cost to confirm.** This enables per-object counting across all SOH segments, i.e. a
-full heap traversal that is currently skipped. It should be served from the existing index rather
-than a fresh ClrMD walk; verify which it does before assuming the cost is free. Add to §11.4.
+**Q5 — measured (M6, §11.4): real cost, but a free exact alternative exists.** This enables
+per-object counting across all SOH segments via a live `segment.EnumerateObjects()` ClrMD walk
+([:284](../../src/DumpDetective.Analysis/Analyzers/HeapTopologyAnalyzer.cs#L284)) — confirmed **not**
+served from the disk-backed index. On a real 3.35GB dump this costs 10.2 extra seconds (606 ms → 10.8
+s), affordable against the ~10-minute budget but not free. Better than "set to `true` permanently":
+**derive the exact SOH count as `TotalObjectCount − LohCount − PohCount − FrozenCount`**, using Phase
+1's already-exact total object count and this analyzer's own already-cheap LOH/POH/Frozen walks — zero
+additional heap traversal, genuinely free exactness rather than a 10-second one. Delete the knob and
+options class either way; prefer the arithmetic over the live walk when implementing.
 
 ---
 
@@ -1470,12 +1523,14 @@ far more than 50,000 `Task` objects; orphaned-task and unresolved-`TaskCompletio
 therefore drawn from a prefix of the population, in index order. `MaxContinuationDepth = 20` further
 truncates continuation-chain walks, which is how orphaned tasks are identified in the first place.
 
-**Q2 — check before deleting.** Confirm these scans are index-backed rather than per-object ClrMD
-walks; if the latter, unbounding is a genuine cost increase rather than a free one. Added to §11.4.
+**Q2 — confirmed index-backed (M7, §11.4).** The Tasks section (`TaskIndex.bin`) is built
+unconditionally during Phase 1, not gated on which analyzers are active — `LoadTaskEntries` reads it
+back rather than falling to a live `heap.EnumerateObjects()` scan. Measured on a real dump: uncapped
+vs. capped delta was 311 ms against a shared ~4.4s baseline, negligible. Safe to delete.
 
 ---
 
-### 9.30 AllocationPattern — **AMBER**
+### 9.30 AllocationPattern — **AMBER**, resolved by D7
 
 [AllocationPatternAnalysisOptions.cs](../../src/DumpDetective.Core/Options/AllocationPatternAnalysisOptions.cs)
 
@@ -1492,6 +1547,17 @@ walks; if the latter, unbounding is a genuine cost increase rather than a free o
 `ScanStrategy.FullScan` exists and is reachable **only at Full**. Exactness means adopting it
 permanently, which collapses `ScanStrategy` entirely — but `SelectionMode` and `SelectionPriority`
 are genuine algorithm choices that outlive the tier system and need an explicit decision (see D7).
+
+**Resolved by D7 — with one addendum this audit missed:** `FullScan`'s `scanLimit` is still capped by
+`MaxScanItemsAbsolute` (10,000 Balanced/default, 20,000 Full) — since `TypeAggregates` runs ~50-100k
+entries at 25GB scale (§9.1's Q5), `FullScan` alone is not actually exact; `MaxScanItemsAbsolute` must
+be deleted too. `SelectionPriority` turned out not to be a preference at all: `LongLivedFirst`'s
+single-pass sequential bucket-fill is scan-order-dependent and can silently drop a bucket's true
+top-N member, while `ClassificationFirst` classifies every candidate before ranking each bucket
+independently — the only one of the two that's actually correct. Keep `ClassificationFirst`, delete
+`LongLivedFirst` and the never-used `Mixed`. `SelectionMode` turned out to be a Category-1
+display-ranking choice, not an algorithm choice, once `MaxScanItemsAbsolute` is gone (classification
+itself never depended on it) — keep `CompositeScore`, delete the other three.
 
 The four classification thresholds (`LongLivedSelectionThreshold`, `LongLivedClassificationThreshold`,
 `TransientClassificationThreshold`, `ShortLivedSelectionThreshold`) are Category 5 and — unusually —
@@ -1512,7 +1578,7 @@ sixth instance of *configured ≠ applied* (§11.6).
 | `HandleScanCap` | 50,000 | 3 | delete |
 | `WeakRefProbeSampleLimit` | 50 | 2 — sampling | **delete** |
 | `TopTypeLimit` | 15 | 1 — rows | move to render |
-| `AbsoluteDeadCountThreshold` | 10,000 | 5 | keep |
+| `AbsoluteDeadCountThreshold` | 10,000 | 5 | **dead (V4), delete** — zero references in `WeakReferenceAnalyzer.cs` |
 | `ProduceRawExports` | false | report artifact | move (D6) |
 
 **Q7 — `HandleScanCap` truncates the handle table itself**, not a derived list:
@@ -1784,25 +1850,25 @@ first exactness commit. Nothing here is optional; items marked **BLOCKER** stop 
 
 | # | Decision | Source |
 |---|---|---|
-| D1 | **`ReferenceChainSearchMode`** — collapse to one exact strategy, or keep as a genuine algorithm selector? Deleting `AnalysisProfile` orphans the mapping but not the enum. | §9.20 |
-| D2 | **Schema version bump.** Do domain results reach the serialized report? If so, removing `TypeScanCapped`, `TypeScanCapUsed`, `InstanceCountCap`, `ExcludedModuleCount` etc. is a schema change per [schema-versioning.md](../schema-versioning.md). Decide once, apply everywhere. | §9.1, §9.2, §9.3, §9.6 |
-| D3 | **Fanout exclusions.** `RootPathLargeFanoutThreshold` (100) and `LargeFanoutThreshold` (100) *exclude* high-fanout objects from search rather than budgeting them. Resolving §6.2 alone leaves these in place. | §9.20, §9.22 |
-| D4 | **Every Category 5 threshold keeps its Balanced value** — but sanity-check each on its merits rather than inheriting "Balanced was the middle option." Seven were varied by tier. | §3.1 |
-| D5 | **Where do render-layer display limits live** — per-analyzer, or one shared policy? GCHandle alone has six lists governed by one knob today. | §9.5, §10 |
-| D6 | **Report-artifact toggles** (`ProduceRawExports`, `EnableDiagnostics`, `SurfaceProbingExceptions`, `ProduceClusterExports`) are not analysis config. Move to report/diagnostics options or keep? | §9.12, §9.17, §9.19, §9.24 |
-| D7 | **AllocationPattern's `SelectionMode` and `SelectionPriority`** survive the tier system as genuine algorithm choices. `ScanStrategy` collapses to `FullScan`. Pick one mode/priority and justify it. | §9.30 |
-| D8 | **`ThreadAnalysisOptions.AdaptForSize`** — a third, automatic scaling layer keyed on `DumpSizeTier`. Delete with the caps, or keep as a memory guard on snapshot capture? | §9.23 |
-| D9 | **`AsyncChainDetectionMode`** (Thread) and **`ReferenceChainSearchMode`** (§9.20) are the two remaining mode enums after `TypeEnumerationMode` and `ScanStrategy` collapse. Decide together — same shape of question. | §9.20, §9.23 |
-| D10 | **The typed-resource quartet's caps are `private const`, not `AnalysisOptions`.** Promoting `MaxStateSamplesPerType`/`TopSampleCap` into a shared options surface (one per analyzer, or one shared record) is a bigger decision than deleting them, since the mechanism itself is currently outside the config system entirely. | §9.32-9.34 |
+| D1 | **DECIDED: delete `ReferenceChainSearchMode` entirely, collapse to one exact bidirectional strategy.** `Balanced`/`Deep` only ever differed by budget (`MaxCandidateNodes`/`MaxCandidateDepth`/`MaxRootExpansionDepth`) around the same algorithm — building a *scoped* candidate set from a *partial* reverse index, a workaround for §6.2's old 10K-fanout cap. With the reverse-edge index now full, disk-backed, and uncapped, there's no more "partial reverse index" to scope around, so exact bidirectional search against the real index replaces all three tiers with one path. `Fast` (unidirectional forward BFS only, explicitly "may miss long paths") is the one truly different algorithm here, but keeping an approximate mode around contradicts the §1 exactness goal unless explicitly opt-in and labeled non-exact — no evidence yet that exact bidirectional search is too slow to be the only mode. **Follow-up before implementation:** measure exact bidirectional search wall-clock on the 25.6GB real dump; if meaningfully slower than today's `Fast`, revisit keeping a documented, explicitly-non-exact fast path rather than assuming it away. D3's `LargeFanoutThreshold` is a separate, still-open decision — not resolved by this collapse. | §9.20 |
+| D2 | **RESOLVED: no schema version bump needed.** Domain results never reach the JSON serialization surface — [ReportJsonContext.cs](../../src/DumpDetective.Reporting/Serialization/ReportJsonContext.cs)'s `[JsonSerializable]` roster is exclusively report/section-layer types (`ReportDomainSection`, `SectionKeyMetric`, `NumericMetricValue`, `CompactTable`, …); `BoxingDomainResult`/`ModuleDomainResult`/`ObjectShapeAnalyzerDomainResult` (and their `TypeScanCapped`/`TypeScanCapUsed`/`ExcludedModuleCount`/`InstanceCountCap` fields) are internal-only, confirmed via grep for `JsonSerializer.Serialize` against any `*DomainResult` type (zero hits) — no raw-export path touches them either (`ProduceRawExports` writes unrelated sample records). Every current surfacing of these values in the report contract is already either a conditionally-emitted `Dictionary<string, MetricValue>` entry (e.g. `ModuleSectionBuilder`'s `excluded_modules`, gated on `> 0`) or free-text narrative baked into a `SectionBlock` (e.g. `ObjectShapeSectionBuilder`'s "computed over at most N types" sentence) — both are inherently additive/mutable, not a fixed schema shape. Deleting the caps just means the condition permanently evaluates false or the sentence gets reworded; nothing named in [schema-versioning.md](../schema-versioning.md)'s "do not remove or rename persisted fields" sense is being removed. No trend comparer references any of these fields either (verified by grep). | §9.1, §9.2, §9.3, §9.6 |
+| D3 | **DECIDED: split by consumer, not a blanket removal.** Traced every call site of `LargeFanoutThreshold`/`RootPathLargeFanoutThreshold` (`RootPathFinder.cs`, `IndexBackedBidirectionalSearch.cs`) — they fall into two groups with opposite answers. **Keep the cap** (no change) for the five evidence-decoration consumers, all of which call it from a method literally named `PopulateEvidence`, *after* the reported total/count/boolean is already computed independently: `StaticRootLeakDetector`, `TimerLeakAnalyzer`, `EventLeakAnalyzer`, `CollectionAnalyzer`, and `DominatorAnalyzer`'s "highly referenced objects" list (§9.18). For these, the search only builds a "why is this alive" representative-path string for display; `searchTruncated` already flows into `Evidence` and drops confidence 0.8→0.6 when it bites ([Evidence.cs:27](../../src/DumpDetective.Analysis/Models/Evidence.cs#L27)) — removing the cap buys zero exactness benefit (the reported numbers don't depend on whether a path is found) while risking real wall-clock blowup: `BidirectionalGraphSearch`'s outer node budget (`MaxCandidateNodes`, e.g. 5,000) is separate from this per-node fanout cap ([BidirectionalGraphSearch.cs:64-67](../../src/DumpDetective.Analysis/Traversal/BidirectionalGraphSearch.cs#L64-L67)) — hitting the real measured worst-case hub (10.76M parents at 25.6GB, §3 of phase1-integration.md) without a per-node cap would dump millions of nodes into a single level-expansion (each needing a `RootPathSearchSupport.ResolveType` lookup), for a feature that runs once per top-N finding across five-plus analyzers, on exactly the objects (singletons, static caches) most likely to sit near a finding. **Remove the cap** only for `ReferenceChainAnalyzer` (§9.20) — there the path *is* the deliverable, so the cap directly determines whether the true shortest chain is found, unlike the five consumers above. Folded into D1's implementation scope: measure exact bidirectional search wall-clock on the 25.6GB real dump before committing to unconditional removal there; if a hub-adjacent worst case proves too costly, document an explicit non-exact fallback for that analyzer specifically rather than silently capping. | §9.20, §9.22 |
+| D4 | **DECIDED: keep every Balanced value as the sole constant, non-blocking.** Recalibrating "what counts as long-waiting/oversized/heavy" is a product decision best driven by real user reports, not re-derivable from first principles — not worth gating implementation on. When each constant lands as a standalone value (no more tiers), add a one-line rationale comment next to it rather than leaving it as an unexplained survivor of three arbitrary picks: **reasonably anchored, comment can state the anchor** — `ThirtyTwoBitPressureThresholdBytes` (1.5 GB; 32-bit VA space caps around 2-4 GB, this is an "approaching the wall" line), `DensityAnomalyMinBytes`/`MaxTypes` (50 MB / 5 types; describes a real anomaly shape — huge footprint from very few distinct types — not just a size cutoff). **Shaky, comment should say so and flag for revisit once field data exists:** `RatioHighPressureThreshold` (10.0x reserved:committed, [SegmentReservationAnalyzer.cs:142](../../src/DumpDetective.Analysis/Analyzers/SegmentReservationAnalyzer.cs#L142) — no external standard), `LargeMethodThresholdBytes` (Jit, 64 KB — arbitrary round number), `OversizedThresholdBytes` (Boxing, 64 bytes — arbitrary, "oversized" scales continuously), `HighThreadPoolThreshold` (Hang, 100 — ignores machine core count/workload, likely the shakiest of the remaining ones). `HeavyModuleWarningThresholdBytes` (Module, 200 MB) is loosely anchored (most modules are single-digit MB) but not flagged urgent. **Correction from V4 (§11.3): `LongWaitThreshold` (Hang) is not a threshold to keep at all — it's dead code.** `HangAnalyzer.cs` never reads it; nothing was ever gated on "5s = long-waiting." Delete it outright, no rationale comment needed, nothing to revisit. Memory's per-tier `TopTypesBy*Weight` re-tuning (§9.27) and AllocationPattern's mode/weight switching (§9.30, D7) are a separate, sharper defect (an algorithm silently changing, not just a threshold) — not resolved by this decision. | §3.1 |
+| D5 | **DECIDED: one shared mechanism (already mostly built), converge Mechanism 2 onto it, and upgrade it to real pagination.** Two render mechanisms currently coexist. **Mechanism 1 — `CompactTable`** ([SectionBuilderBase.cs:50-51](../../src/DumpDetective.Reporting/SectionBuilders/SectionBuilderBase.cs#L50-L51), `STCompact`/`RowLimit`, rendered via [report.renderers.sections.js:322-369](../../src/DumpDetective.Reporting/Templates/report.renderers.sections.js#L322-L369) + [report.ui.tables.js](../../src/DumpDetective.Reporting/Templates/report.ui.tables.js)) already sends every row to the client, and sort/filter already operate over the complete dataset, not just the visible slice — confirmed in code: `hydrateRows()` builds a `<tr>` for every row up front (or on first expand past 180 rows), `doSort` reorders the full `tbody`, and `applyManagedTableState` filters over every row's text before applying the display limit to the matched set. The only real gap is the browsing model — today it's a binary "first `limit` rows, or reveal everything" toggle, not true pagination. **Action:** replace the binary `limit`/`showAll` state in `applyManagedTableState` with real pagination state (current page + page size) and a page-size selector (20/50/100/all), default 20 — a self-contained front-end change to `report.ui.tables.js`/`report.renderers.sections.js`'s button/DOM wiring; no domain-model or backend change, since full data is already delivered and `CompactTable.RowLimit` just becomes the default page size instead of a hard initial-reveal cutoff. GCHandle's actual defect isn't the render mechanism (already correct) — it's that `GCHandleAnalyzer` still truncates to `TopTypeCount = 15` **before** the domain result is built (§9.5, `ToTopEntries`/`ToTopByteEntries` at :226-232); deleting that upstream cap and letting each of its seven existing `STCompact` calls carry the full list resolves the "one knob governs six lists" problem without inventing a new abstraction — each call already has its own independently-settable limit. **Mechanism 2 — ad-hoc `.Take(N)` before narrative blocks** (`Li`/`M`/`TextBlock`, a structurally different, non-tabular, non-sortable, non-filterable, irreversible-truncation path — confirmed distinct from `CompactTable` via [AnalyzerDetailSection.cs:203,222-237](../../src/DumpDetective.Analysis/Models/AnalyzerDetailSection.cs#L203)) exists in `BoxingSectionBuilder`, `JitSectionBuilder`, `WeakReferenceSectionBuilder`, `LeakAnalysisSectionBuilder`, `TypeSystemSectionBuilder`, `ExceptionAnalysisSectionBuilder`, `GCRootIntelligenceSectionBuilder`, each with its own inconsistent locally-named constant (`TopTypesToShow`, `TopFrameTypesToShow`, `TopCandidateCount`, `TopRows`, or bare `15`/`10`/`3`/`6`). **Action:** migrate these onto `CompactTable`/`STCompact` wherever the content is genuinely per-item tabular data (most of them — type name, count, bytes triples), which also gets them sorting/filtering/pagination for free. Leave alone: true inline prose lists embedded in a sentence (`ModuleSectionBuilder`'s "Conflict groups include: {csv of 6 names}", `LeakAnalysisSectionBuilder`'s "{csv of top 3 types}") — capping a name list inside a sentence is a prose-length choice, not a hidden-data concern, so these can stay small analyzer-local constants rather than being forced into a table. **Do not force something that isn't a table into a table just to get pagination.** When implementing, leave a comment at each retained inline-prose truncation noting that if the full list ever needs to be browsable, the right fix is a small dedicated list-pagination affordance for prose (not `CompactTable`, and not silently raising the inline cap) — flagged as a possibility to look for, not a decision to build one now. | §9.5, §10 |
+| D6 | **DECIDED: split by what each flag actually does; both destination classes already exist.** `ProduceRawExports` (String, also on `WeakReferenceAnalysisOptions`) and `ProduceClusterExports` (ThreadStackCluster, §9.24) control whether an extra output *artifact* gets written alongside the report (`.ndjson.gz` raw samples, cluster export files) — a report/output-format concern, same category as [ReportOptions.cs](../../src/DumpDetective.Core/Options/ReportOptions.cs)'s existing `SeparateJson`/`PreRender`. **Move both to `ReportOptions`.** `SurfaceProbingExceptions` (Collection, §9.17 — confirmed at [CollectionAnalyzer.cs:1289,1395,1508,1582,1687](../../src/DumpDetective.Analysis/Analyzers/CollectionAnalyzer.cs#L1289) gating whether internal reflection/probing exceptions get surfaced as diagnostic output vs. silently swallowed) controls visibility into analyzer internals, not analysis results — same category as [DiagnosticsOptions.cs](../../src/DumpDetective.Core/Options/DiagnosticsOptions.cs)'s existing `EnableMemoryDiagnostics`/`EnablePerformanceDiagnostics`. **Move it to `DiagnosticsOptions`.** No new options class needed. **Correction from V4 (§11.3): `EnableDiagnostics` (EventLeak, §9.19) is not live — there's nothing to move.** `EventLeakAnalyzer.cs` never reads it; delete it outright instead of moving it. | §9.12, §9.17, §9.19, §9.24 |
+| D7 | **DECIDED, with a code-grounded justification for each, not just "keep Balanced."** `ScanStrategy` → `FullScan`, but this alone is not exact: [AllocationPatternAnalyzer.cs:170-171](../../src/DumpDetective.Analysis/Analyzers/AllocationPatternAnalyzer.cs#L170-L171) shows `FullScan`'s `scanLimit` is still `Min(metrics.Count, MaxScanItemsAbsolute)` (10,000 Balanced/default, 20,000 Full) — since `TypeAggregates` was measured at ~50-100k distinct types on a 25GB dump (§9.1's Q5), `FullScan` would still silently truncate classification on exactly the large dumps this tool targets. **`MaxScanItemsAbsolute` must be deleted alongside `ScanStrategy`**, not kept as a safety cap — the classification loop is O(distinct types) with cheap cached lookups, the same negligible-cost shape already established for Boxing (§9.1); this wasn't called out in the original §9.30 audit and is an addendum to it. **`SelectionPriority`: keep `ClassificationFirst` only, delete `LongLivedFirst` and `Mixed` — a correctness fix, not a preference.** `LongLivedFirst` ([:304-349](../../src/DumpDetective.Analysis/Analyzers/AllocationPatternAnalyzer.cs#L304-L349)) walks one globally-sorted list once and fills buckets incrementally, stopping each at `TopTypeLimit` — scan-order-dependent, so a type that's genuinely the #1 most-transient type in the heap can be silently excluded from the "top transient" table if other buckets filled first. `ClassificationFirst` ([:192-302](../../src/DumpDetective.Analysis/Analyzers/AllocationPatternAnalyzer.cs#L192-L302)) classifies every candidate into its bucket first, then sorts and takes top-N independently per bucket — the only way to guarantee each table's top-N is actually the top-N for that category. `Mixed` is unused by every preset and documented as "reserved for future tweaks" — dead code, delete outright. **`SelectionMode`: keep `CompositeScore` only — demotes to a Category-1 display-ranking choice, not a correctness question, once the above lands.** Classification (Transient/Retained/Mixed) is decided purely by fixed threshold comparisons on `Gen0Pct`/`longLivedRatio` ([:215-219](../../src/DumpDetective.Analysis/Analyzers/AllocationPatternAnalyzer.cs#L215-L219)) — `Mode` never affects whether a type is correctly classified, only which sort key orders the top-N shown within each bucket (its effect on which types survive the `MaxScanItemsAbsolute` prefix disappears once that cap is deleted). `CompositeScore` is what Balanced and Full already independently converged on — it blends Gen0%/Gen2/LOH into a signal aligned with "interesting allocation pattern," unlike raw count/size which just surfaces "the biggest collection" regardless of whether it's pathological; delete `TopByCount`/`TopByGen0Pct`/`TopBySize`. **`Gen0Weight`/`Gen2Weight`/`LohSizeWeight`** (feeding `CompositeScore`) are the same shape as D4's semantics-vary-by-tier defect — folded into D4's resolution: keep Balanced's 1.0/1.0/1.0 (equal weighting is the least arbitrary default), flagged shaky/revisit-with-field-data like D4's other flagged thresholds. | §9.30 |
+| D8 | **DECIDED: delete `AdaptForSize` entirely — it isn't a memory guard, and it's actively double-applying a bug today.** [AnalyzerExecutionService.cs:52](../../src/DumpDetective.Cli/Execution/AnalyzerExecutionService.cs#L52) calls `AdaptForSize` (divides `MaxSampledStackSnapshots`/`MaxThreadsToCaptureSnapshots` by 4/2/1 before the tier's) before the analyzer runs, then `ThreadAnalyzer.ComputeSamplerCapacity` ([ThreadAnalyzer.cs:22-42](../../src/DumpDetective.Analysis/Analyzers/ThreadAnalyzer.cs#L22-L42)) independently looks up the *same* size tier and re-applies the *same* divisor to the already-divided value — on a Large dump, Balanced's `MaxSampledStackSnapshots = 20` becomes 5 via `AdaptForSize`, then 1 via `ComputeSamplerCapacity`, a 16x reduction instead of the intended 4x. This is a real bug independent of the exactness work, found while investigating D8. Root cause is a category error: `MaxSampledStackSnapshots`/`MaxThreadsToCaptureSnapshots` were treated as memory guards needing dump-size scaling, but `ThreadWithStackTrace` ([ThreadAnalyzer.cs:784-793](../../src/DumpDetective.Analysis/Analyzers/ThreadAnalyzer.cs#L784-L793)) — a `ClrThread` ref plus a `List<ClrStackFrame>` already bounded by `MaxFramesForThreadScan` (itself deleted, §9.23) — is small and fixed-size, not something whose per-item cost scales with dump size; and per [performance-checklist.md](../performance-checklist.md)'s Thread Analysis section, full thread enumeration/categorization already runs over every thread regardless of this cap — these knobs only govern how many illustrative example stack traces get attached to the report. **They're ordinary Category-1 display-example limits, not memory guards**, so there's nothing left for a dump-size-based auto-scaling layer to protect. Delete `AdaptForSize`; keep `MaxSampledStackSnapshots`/`MaxThreadsToCaptureSnapshots` as fixed (non-scaling) Category-1 defaults per D5's mechanism. `ComputeSamplerCapacity`'s own `Math.Min(capacity, totalThreads / 10)` term is a different, defensible thing — a "don't oversample a small thread population" statistical sanity guard, not a bytes cap — keep it on its own merits, independent of `AdaptForSize`. | §9.23 |
+| D9 | **DECIDED: delete both enums, same as D1's reasoning — `AsyncChainDetectionMode` turned out to be an even easier case.** `ReferenceChainSearchMode` is already resolved (D1): collapse to the single exact bidirectional strategy. `AsyncChainDetectionMode` (Thread) has three values, but only one changes what's counted: `Disabled` skips `AsyncChainThreadCount`/`MaxAsyncChainDepth` entirely — a real correctness effect, but one that contradicts the exactness goal outright (a user could silently get an under-reported/zero count with no indication) rather than being a legitimate mode to preserve. `CountOnly` vs `Full` compute the *identical* counts/totals ([ThreadAnalyzer.cs:500-520](../../src/DumpDetective.Analysis/Analyzers/ThreadAnalyzer.cs#L500-L520)) — the only difference is whether the illustrative example stack trace gets a wider frame window for display, and that window is built from frames the walk already captured in memory (`availableFrames`), so `Full` costs nothing extra over `CountOnly`. There's no genuine "more thorough but slower" tradeoff here to preserve as a knob at all. **Delete `AsyncChainDetectionMode` entirely, hard-code the `Full` behavior** (matches §9.23's own audit table, already scoped as "collapse to Full" before D9 was raised) — free correctness (chain counts always computed) at zero cost, unlike `ReferenceChainSearchMode` where dropping `Fast` has a real, to-be-measured wall-clock cost (D1's follow-up). | §9.20, §9.23 |
+| D10 | **DECIDED: no new shared options surface — the premise dissolves once connected to M9 and D5.** The sampler mechanism is already shared and parameterized, not duplicated: [TypedResourceSampler.cs:67-80](../../src/DumpDetective.Analysis/Analyzers/TypedResourceSampler.cs#L67-L80)'s `InstanceStateSampler<TSnapshot>` already takes `maxSamplesPerType`/`topNCap` as constructor parameters — only the three call sites' literal values (500/50, 500/50, 500/20) differ. `MaxStateSamplesPerType` (500 everywhere) is expected to be **deleted outright, not promoted** — M9 (§11.4) already frames it as bounded by resource-instance count (open connections/channels/HTTP clients — always a small fraction of a heap's population), expected cheap once measured, matching the "vestigial cap" pattern established throughout this doc (§4); if there's no cap left, there's nothing to build a config surface for. `TopSampleCap`/`TopOpenCap`/`TopFaultedCap`/`TopHttpClientSampleCap` (50/50/20) are ordinary Category-1 detail-table limits, already covered by D5's `CompactTable`/`STCompact` + pagination mechanism — no new options class needed there either. **Action:** delete `MaxStateSamplesPerType` once M9 confirms it's cheap; if M9 surprises us and shows it's genuinely needed on some dump shape, fall back to one shared `private const` across the three analyzers (not a new `AnalysisOptions` class) — none of the three ever had one, and introducing one now just to hold a single safety-net int would be more machinery than the need justifies. | §9.32-9.34 |
 
 ### 11.3 Verify before deleting
 
 | # | Verification | Source |
 |---|---|---|
-| V1 | **`DependentHandleAnalysisOptions` is orphaned** — confirm no reflection- or serialization-based consumer, and whether a `DependentHandleAnalyzer` was planned rather than removed. | §9.6 |
-| V2 | **`AsyncStateMachineAnalysisOptions.TopTypeLimit`** — no use found in `DumpDetective.Analysis`, but the grep was truncated and `AllocationPatternAnalyzer` has a same-named knob. Confirm cleanly. | §9.13 |
-| V3 | **`ReferenceChainOptions.SkipArrays` semantics** — it feeds `IsNoisyType(type, skipArrays)`. Confirm whether it prunes traversal or only presentation before changing it; the two have very different blast radii. | §9.20 |
-| V4 | Run the §5 **dead-knob grep on every remaining analyzer**, not just the audited ones. Three dead or inert knobs found so far (`ModuleSelectionMode`, `IncludeExcludedModuleSummary`, `DeduplicationStringCountThreshold`). | §5, §9.3, §9.12 |
+| V1 | **CONFIRMED orphaned — delete.** No reflection- or serialization-based consumer exists: grepped every `System.Reflection.GetProperty`/`GetProperties` call site in `DumpDetective.Analysis` (`GCHandleAnalyzer.cs`, `HangAnalyzer.cs`) and both operate on ClrMD-resolved dump types, not on `AnalysisOptions`/config binding. No `DependentHandleAnalyzer.cs` exists anywhere in `src` (only `Options/DependentHandleAnalysisOptions.cs`) — no planned-but-unbuilt analyzer file or stub either. `DependentHandleAnalysis` on `AnalysisOptions`/`ResolvedExecutionOptions` is set but never read by any analyzer; only CLI config plumbing (`CliConfigurationModels.cs`, `ConfigurationResolver.cs`) and the JSON source-gen attribute reference it. Safe to delete the class and all four plumbing references per §9.6's original work item. | §9.6 |
+| V2 | **CONFIRMED live, not dead — the original grep was incomplete.** `AsyncStateMachineAnalysisOptions.TopTypeLimit` (declared at [AsyncStateMachineAnalysisOptions.cs:5](../../src/DumpDetective.Core/Options/AsyncStateMachineAnalysisOptions.cs#L5)) is genuinely read at [AsyncStateMachineAnalyzer.cs:109](../../src/DumpDetective.Analysis/Analyzers/AsyncStateMachineAnalyzer.cs#L109), and is distinct from `AllocationPatternAnalysisOptions.TopTypeLimit` (a same-named but unrelated property on a different class — confirmed by checking the `options` variable's type at each call site). It's used only as an initial-capacity hint at :109/:114, not a loop bound — the field-metadata analysis loop at :116 iterates every candidate regardless (bounded separately by `TypeCandidateLimit`, already flagged for deletion). Its real effect is truncating `TopStateMachineTypes` in the domain result, confirmed via `AsyncStateMachineDomainResult.cs:40` and the trend comparer. **Correction: this is an ordinary Category-1 "rows" knob, same shape as its table neighbors `SuspendedMethodMapLimit`/`TopCapturedSizeEntries`** — §9.13's "verify: no use found" action should read "move to render," not "delete." | §9.13 |
+| V3 | **CONFIRMED: `SkipArrays` prunes traversal, not just presentation — a real correctness gap, not a display concern.** Traced `IsNoisyType(type, skipArrays)` into `RootPathFinder`/`IndexBackedBidirectionalSearch`, where the `isNoise` predicate is a hard traversal-pruning gate (`if (_isNoise(type)) { ...; yield break; }` in both `ForwardNeighbors` and `BackwardNeighbors`) — when `SkipArrays = true`, the BFS refuses to expand through *any* array object, treating it as a dead end. Since collections are almost universally array-backed (`List<T>`'s internal array, `Dictionary<TKey,TValue>`'s bucket/entry arrays, etc.), a real shortest reference chain routed through an array is not an edge case, it's the common case. **This defaults to `true` in Balanced** ([ReferenceChainOptions.cs:58](../../src/DumpDetective.Core/Options/ReferenceChainOptions.cs#L58)) — meaning ReferenceChainAnalyzer's default configuration today silently drops real paths through arrays, undiscovered by any prior audit pass. `System.String`/`System.Object` pruning (also inside `IsNoisyType`, always-on, not gated by `SkipArrays`) is comparatively safe — both are typically leaf nodes with no outgoing reference fields relevant to retention, so pruning through them doesn't lose real paths. **Action, folded into D1's exact-bidirectional-search work:** force `SkipArrays = false` for the exact search; it cannot be `true` and still support D1's "true shortest chain" claim. | §9.20 |
+| V4 | **DONE.** Ran the §5 dead-knob grep (`grep -rn "KnobName" --include=*.cs src \| grep -v "/Options/"`) against all 232 unique option property names project-wide, not just the previously-audited analyzers. Found **6 more dead knobs** beyond the original three (`ModuleSelectionMode`, `IncludeExcludedModuleSummary`, `DeduplicationStringCountThreshold`), each individually verified by reading the analyzer, not just trusting a zero grep-hit count: `LongWaitThreshold` and `TopWaitingThreadsPerGroup` (`HangAnalysisOptions` — `HangAnalyzer.cs` never reads either), `PohThresholdPercent` (`GCGenerationAnalysisOptions` — `GCGenerationAnalyzer.cs` computes `PohBytes`/`PohObjects` but never thresholds against it), `AbsoluteDeadCountThreshold` (`WeakReferenceAnalysisOptions` — zero references in `WeakReferenceAnalyzer.cs`), `TopFinalizerTypesToShow` (`RetentionOptions` — zero references in any analyzer including `DominatorAnalyzer.cs`), and `EnableDiagnostics` (`EventLeakOptions` — zero references in `EventLeakAnalyzer.cs`). **`TopSubscriberTypesToShow` (`EventLeakOptions`) is worse than merely unused** — [EventLeakAnalyzer.cs:315-316,337](../../src/DumpDetective.Analysis/Analyzers/EventLeakAnalyzer.cs#L315-L337) hardcodes `private const int TopCorrelationEntries = 20` instead of reading the configurable option at all. This corrects two decisions already made this session: **D4** treated `LongWaitThreshold` as a real, meaningful semantic threshold worth a rationale comment — it's dead code, delete it, no comment needed. **D6** planned to move `EnableDiagnostics` to `DiagnosticsOptions` — there's no behavior to move, delete it instead. Also corrects §9.19 and §9.25, which listed `TopSubscriberTypesToShow` and `TopWaitingThreadsPerGroup` as live "Category 1 — move to render" knobs; neither is live, so there's nothing to move — delete the options, the render layer keeps whatever hardcoded/default behavior already exists independently of them. | §5, §9.3, §9.12, §9.19, §9.23, §9.25 |
 
 ### 11.4 Measurements deferred from Q5
 
@@ -1810,21 +1876,21 @@ Fold these into the same real-dump run as B3/B4 — **one dump at a time, foregr
 
 | # | Measure | Source |
 |---|---|---|
-| M1 | Module: uncapped `EnumerateTypeDefToMethodTableMap()` across all modules/domains. The Full preset's own comment warns time "grows quickly with the number of modules." | §9.3 |
-| M2 | AsyncStateMachine: uncapped histogram heap pass (all types x all instances vs 10 x 1,000). | §9.13 |
-| M3 | Array: full element walks over all arrays ≥ `SparseSampleMinLength`. | §9.11 |
-| M4 | GCRoot: per-candidate root path once served from the dominator tree rather than BFS. | §9.16 |
-| M5 | String: memory profile of an unbounded fingerprint map at ~10 M unique strings. | §9.12 |
-| M6 | HeapTopology: cost of `CountSohObjects = true` — confirm it is served from the existing index rather than a fresh ClrMD heap walk. | §9.28 |
-| M7 | AsyncTask: confirm the three scan caps bound index-backed reads, not per-object ClrMD walks. If the latter, unbounding is a real cost increase. | §9.29 |
-| M8 | Thread: cost of unbounded stack scans once `MaxFramesForThreadScan` (8) and `MaxStackRootsToCount` (256) are removed. | §9.23 |
-| M9 | Typed-resource quartet: cost of removing `MaxStateSamplesPerType` (500/type) across DbConnection, WcfChannel, HttpObject. Each state read is one `heap.GetObject` + field read; bounded by resource-instance count, not heap size — expect cheap, but unmeasured. | §9.32-9.34 |
-| M10 | **Dominator retention provider's concurrent resident cost** — not construction peak (already measured, §4), but the tree kept alive alongside every analyzer between module order 140 and 340 that queries it. `ExactDominatorTreeMemoryBudgetBytes` (20 GB) has never been validated against this. | §10a |
+| M1 | **MEASURED, negligible — safe to delete.** Real 3.35GB dump (`Crash_IIS_BALTSTPRD`, 266 total modules across all AppDomains — already past Balanced's `ModuleEnumerationLimit=50`, so the cap genuinely bites on this dump). `ModuleAnalyzer.AnalyzeAsync`, Balanced default (capped at 50, `TypeEnumerationMode` unaffected since `Full` is already the default): 506 ms. Fully uncapped (`ModuleEnumerationLimit=int.MaxValue`, all 266 modules, `TypeEnumerationMode.Full`, `PreferIndexOnly=false`): 178 ms — faster, not slower, almost certainly a JIT/ClrMD-metadata-cache warm-up artifact from running capped first rather than a real negative cost, but either way both numbers are sub-second against the ~10-minute nominal budget (§1). Confirms §9.3 Q5's "expect seconds, not minutes" — it's actually milliseconds. Test: [ModuleAnalyzerUncappedRealDumpTests.cs](../../tests/DumpDetective.Tests/Integration/CacheDiscrepancies/ModuleAnalyzerUncappedRealDumpTests.cs), run via `DD_RUN_DISCREPANCY_TESTS=1`, foreground, one dump at a time. | §9.3 |
+| M2 | **PARTIALLY MEASURED — index-scan cost confirmed cheap, per-instance cost still an estimate.** Same 3.35GB dump: capped (Balanced: `HistogramTopTypeLimit=10`, `HistogramInstanceCapPerType=1000`, `TypeCandidateLimit=200`) took 2,132 ms; fully uncapped (all `int.MaxValue`) took 1,728 ms — no real difference, within warm-cache noise. **Caveat: this dump only has 11 total async state machines across 7 types, so candidate selection was identical in both runs and the per-type instance cap never actually bound in either — the doc's own worst-case example (500,000 pending state machines across 60 types, §9.13 Q7) was not exercised.** What *is* confirmed: the second full-index pass itself (`cache.EnumerateIndexedEntriesAsTuples()` over 14.6M objects, dictionary-lookup-and-skip per entry) costs ~2s and is cap-independent — both runs did the full scan since the early-exit (`typesStillOpen == 0`) never fired given how few state machines exist. The additional cost of uncapping `HistogramInstanceCapPerType` specifically — one extra `ClrInstanceField.Read<int>` call per additional instance — remains an estimate, not a measurement: bounded to roughly hundreds of ms to low seconds even at the cited 500K-instance worst case (field reads are sub-microsecond to low-microsecond), nowhere near the ~10-minute budget, but a dump with a genuinely large state-machine population would be needed to measure it directly. Test: [AsyncStateMachineUncappedRealDumpTests.cs](../../tests/DumpDetective.Tests/Integration/CacheDiscrepancies/AsyncStateMachineUncappedRealDumpTests.cs). | §9.13 |
+| M3 | **MEASURED, negligible — safe to delete.** Same 3.35GB dump. Balanced default (`SampleStride=100`, `SparseSampleLimit=500`, `TopSparseLimit=10`; 1,734,392 array objects, `ScanLimited: True` — the 500 cap genuinely bites): 39 ms. Fully uncapped (walk every element of every qualifying array, no candidate-set or discovery cap, `ScanLimited: False`): 42 ms — a 3ms delta, noise-level. `TopSparseArrays` count happened to stay at 3 either way on this dump, but that's this dump's data, not a guarantee: the capped run's `ScanLimited: True` means it only ever considered the top-500-by-size candidates, so a real sparse array outside that window could be missed on a different dump even though this one didn't hit that case. **Found in passing: `TopSparseLimit=int.MaxValue` throws `OutOfMemoryException`** — [ArrayAnalyzer.cs:241](../../src/DumpDetective.Analysis/Analyzers/ArrayAnalyzer.cs#L241) passes it directly as a `List<SparseArrayEntry>` capacity (`new List<SparseArrayEntry>(options.TopSparseLimit)`), which tries to allocate a 2-billion-element backing array. Folded into F10 (§11.6) — uncapping this knob needs a capacity-safe rewrite (e.g. don't pre-size, or clamp the hint), not a literal `int.MaxValue`. Test: [ArrayUncappedRealDumpTests.cs](../../tests/DumpDetective.Tests/Integration/CacheDiscrepancies/ArrayUncappedRealDumpTests.cs) (uses `TopSparseLimit=1_000_000` to work around the bug for measurement purposes). | §9.11 |
+| M4 | **MEASURED, cheap even without the dominator-tree rewire — simplifies the decision.** Same 3.35GB dump, Stage B (exact dominator tree) built. 1,411 total roots, 1,404 severity-scored findings. Balanced default (`PathSearchTopN=25`, only 25 of 1,404 findings get a root path): 874 ms. Fully uncapped (every one of the 1,404 findings gets a root path): 568 ms — faster, not slower (56x more candidates walked). **Important nuance: this is not yet the dominator-tree-backed path the doc originally envisioned.** [GCRootAnalyzer.cs:97-101](../../src/DumpDetective.Analysis/Analyzers/GCRootAnalyzer.cs#L97-L101) already skips the retained-*bytes* BFS when the exact tree can answer it (§7.1 of phase1-integration.md), but the separate forward-type-names-along-the-path walk (`BoundedGraphWalk.CollectForwardTypeNames`, [:122](../../src/DumpDetective.Analysis/Analyzers/GCRootAnalyzer.cs#L122)) is still called unconditionally per candidate and has *not* been re-pointed at `IDominatorTreeProvider.EnumerateRetainedSet` (which per phase1-integration.md has no caller yet). This measurement shows that **even the still-BFS-backed path walk, bounded by `MaxBfsNodes`/`MaxBfsDepth`, is already affordable at 56x scale** — roughly 0.4ms/candidate average. Extrapolated (not measured) to a dump with tens of thousands of roots, this would still land in the tens-of-seconds range, well inside the ~10-minute budget. **Conclusion: `PathSearchTopN` can be deleted without waiting on the `EnumerateRetainedSet` rewire** — that rewire remains worth doing for its own sake (an O(1) parent-pointer read beats a bounded BFS), but is no longer a hard prerequisite. Test: [GCRootAnalyzerUncappedRealDumpTests.cs](../../tests/DumpDetective.Tests/Integration/CacheDiscrepancies/GCRootAnalyzerUncappedRealDumpTests.cs). | §9.16 |
+| M5 | **PARTIALLY MEASURED — surfaced that the real cap lives in Phase 1, not the audited options class; decided to delete it too.** Same 3.35GB dump, 2,421,447 total strings. Running `StringAnalyzer` with `StringAnalysisOptions.MaxStringsToDedup`/`MaxUniqueStringTracking` capped (Balanced: 50,000/200,000) vs. fully uncapped (`int.MaxValue`) produced **byte-for-byte identical results** — `StringsSampled: 321,266`, `SampledUniquePatterns: 147,400`, both runs, no difference at all. Traced why: `StringAnalyzer.Analyze`'s fast path ([StringAnalyzer.cs:628-669](../../src/DumpDetective.Analysis/Analyzers/StringAnalyzer.cs#L628-L669)) reads `heapIndex.StringDedupIndex`, a Phase 1 satellite index built once during `PrebuildHeapIndex` and governed by its own **hardcoded** `const int MaxDedupUnique = 500_000` ([DiskBackedObjectIndexWriter.cs:167](../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs#L167)) — completely independent of the `StringAnalysisOptions` values under audit in §9.12's table, which only matter in fallback branches (no prebuilt index, or a live participant scan) that don't execute once Phase 1's index exists, i.e. essentially never in production. **Decision: delete `MaxDedupUnique`'s cap entirely as well, not just the Phase 2 options** — same reasoning as every other vestigial cap in this doc, and the same "genuine resident-bytes cap" analysis in §9.12 applies to it more than to the options that were actually audited. **Not stress-tested by this measurement**: this dump's real unique-string population (321,266) is already under the 500,000 cap, so removing it changes nothing observable here — there is no different number to measure on this dump. Validating the "~10M unique strings → hundreds of MB" estimate needs either a dump with a much larger unique-string population, or accepting the estimate (both `StringFingerprint` and `StringDedupEntry` are small fixed-size records, so linear extrapolation from the ~34MB allocated for ~147K unique patterns here to 10M would land around 2-2.5GB — worth treating as an estimate, not a confirmed number, same caveat shape as M2). Test: [StringAnalyzerUncappedRealDumpTests.cs](../../tests/DumpDetective.Tests/Integration/CacheDiscrepancies/StringAnalyzerUncappedRealDumpTests.cs) (measures the Phase 2 options only; does not yet exercise `MaxDedupUnique`). | §9.12 |
+| M6 | **MEASURED, real cost, and a free fix exists.** Confirmed by reading [HeapTopologyAnalyzer.cs:284](../../src/DumpDetective.Analysis/Analyzers/HeapTopologyAnalyzer.cs#L284) (`CountObjects` calls `segment.EnumerateObjects()`) — this is a live ClrMD walk, **not** served from the disk-backed index; `HeapTopologyAnalyzer.Analyze` doesn't even take `IHeapAnalysisCache` as a parameter. On the 3.35GB dump: `CountSohObjects=false` (default): 606 ms. `CountSohObjects=true` (full live SOH walk): 10,780 ms — a real **10.2-second cost**, not noise like M1/M3/M4. Still affordable against the ~10-minute nominal budget (~1.7%), so the doc's original recommendation ("set to `true` permanently") is still viable as-is. **But there's a free alternative worth taking instead of paying this cost:** Phase 1's index already has the exact total object count across the *entire* heap (`HeapIndexBuildResult.ObjectCount`, already used by every other measurement in this section — e.g. 14,620,162 for this dump). Since `HeapTopologyAnalyzer` already counts LOH/POH/Frozen objects exactly via their own (cheap, small-segment-count) live walks, exact SOH count is just `TotalObjectCount - LohCount - PohCount - FrozenCount` — arithmetic, zero additional heap traversal. Recommend rewriting to this instead of enabling the live SOH walk; it gets exactness for free rather than for 10 seconds. Test: [HeapTopologyUncappedRealDumpTests.cs](../../tests/DumpDetective.Tests/Integration/CacheDiscrepancies/HeapTopologyUncappedRealDumpTests.cs). | §9.28 |
+| M7 | **CONFIRMED index-backed, measured negligible delta.** [DiskBackedObjectIndexWriter.cs:1107-1119](../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs#L1107-L1119) shows the Tasks section (`TaskIndex.bin`) is built unconditionally during Phase 1 (task candidates collected during the main heap scan, not gated on which analyzers are active) — so `AsyncTaskAnalyzer.LoadTaskEntries` hits the fast index-backed path (`TaskIndexReader.ReadTaskIndexFile`/`InMemoryTaskCandidates`), not the live `heap.EnumerateObjects()` fallback (`ScanRawHeapForTasks`), which only runs if no index exists at all. On the 3.35GB dump (12,071 total tasks — under all three caps, so they didn't genuinely bind here either): Balanced default (`MaxTasksToScan=50000`, `MaxTcsToScan=20000`, `MaxVtsToScan=20000`): 4,447 ms. Fully uncapped: 4,758 ms — a 311ms delta, negligible relative to the ~4.4s baseline both runs share. That shared ~4.4s baseline is unrelated to these three caps (likely per-task state-flag re-reads and `MaxContinuationDepth`-bounded continuation walks, a separate Category 4 knob already flagged for deletion) — same caveat as M2/M5: this dump's task population is under all three caps, so the "population exceeds the cap" case isn't stress-tested, but the qualitative Q2 concern (index-backed vs. live walk) is conclusively resolved by code, not just this dump's numbers. Test: [AsyncTaskUncappedRealDumpTests.cs](../../tests/DumpDetective.Tests/Integration/CacheDiscrepancies/AsyncTaskUncappedRealDumpTests.cs). | §9.29 |
+| M8 | **MEASURED, negligible — safe to delete.** Same 3.35GB dump, 135 total threads (38 alive) — a modest population. Using `ThreadAnalyzer`'s documented direct-invocation fallback path: Balanced default (`MaxFramesForThreadScan=8`, `MaxStackRootsToCount=256`): 25 ms. Fully uncapped (`MaxFramesForThreadScan=100,000`, `MaxStackRootsToCount=100,000`): 2 ms — both effectively instant, no meaningful cost either way. Caveat: this dump's thread count (135) and presumably stack depths are modest; a dump with thousands of threads or pathologically deep recursive/async stacks isn't stress-tested here, but stack frame counts don't scale with heap size the way object counts do, so there's no structural reason to expect this to behave differently at larger scale. Test: [ThreadUncappedRealDumpTests.cs](../../tests/DumpDetective.Tests/Integration/CacheDiscrepancies/ThreadUncappedRealDumpTests.cs). | §9.23 |
+| M9 | **MEASURED, negligible — after fixing a real bug in the test setup itself.** First attempt read back zero instances for all three resource types, which turned out to be a test-harness bug, not the dump: passing these analyzers as `activeAnalyzers` to `PrebuildHeapIndex` only affects Stage B gating ([DiskBackedObjectIndexWriter.cs:216](../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs#L216)) — it does not register them as heap-index-scan participants. The real wiring lives in `AnalysisPipeline.ExecuteAsync` ([AnalysisPipeline.cs:41-44](../../src/DumpDetective.Analysis/Pipeline/AnalysisPipeline.cs#L41-L44)), which collects `IHeapIndexScanParticipant` analyzers and runs `HeapIndexScanDispatcher` *before* calling `AnalyzeAsync`; calling `AnalyzeAsync` directly (as M1/M3/M4/M6/M8 safely do for index-backed Phase-2-only analyzers) skips that step, so `OnHeapEntry` never populates candidate state — DbConnection/WcfChannel/HttpObject have no unconditional Phase-1 satellite index to fall back on the way String (`StringDedupIndex`) and AsyncTask (`TaskIndex.bin`) do, so this gap produced silent zeros instead of a visible error. **After running `HeapIndexScanDispatcher` first:** 503 DB connections, 1,210 WCF channels, 102 HTTP objects — all real, all `StateScanCapped: False` (the 500 cap is per-*type*, not a global total, so even 1,210 total WCF channels didn't trip it if spread across multiple channel types). Elapsed: 109 ms / 1 ms / 1 ms — confirms the "expect cheap" reasoning (D10, §11.2) with real nonzero data, consistent with every other index-backed per-item measurement in this section. Per-type cap still didn't bind on this dump, so the exact cost of exceeding it per-type remains an extrapolation, not a direct measurement — same shape of caveat as M2/M5/M7. Test: [TypedResourceQuartetRealDumpTests.cs](../../tests/DumpDetective.Tests/Integration/CacheDiscrepancies/TypedResourceQuartetRealDumpTests.cs) (now runs the dispatcher correctly). | §9.32-9.34 |
+| M10 | **MEASURED, comfortably within budget.** Ran the real production analyzer set (`DefaultAnalyzerFactory.CreateAnalyzers()`, all 33 registered analyzers, real module order — not a hand-copied subset) through `AnalysisPipeline.ExecuteAsync` against the 3.35GB dump with Stage B enabled, sampling `Environment.WorkingSet` on a 200ms background timer throughout the whole run to catch a transient mid-run peak a before/after snapshot could miss. All 33 analyzers reported `Success` (0 failures) — a useful end-to-end validation on its own. Working set immediately after Phase 1 (Stage B construction done): ~3.95 GB. Peak working set across the *entire* 33-analyzer run (36.6s, Stage B resident throughout): ~4.75 GB — roughly 0.8 GB above the Stage-B-only figure, attributable to the other analyzers' own working memory rather than the tree itself growing. Comfortably inside `ExactDominatorTreeMemoryBudgetBytes` (20 GB) — only ~24% of budget used on this dump. **Caveat:** this dump is smaller than the 25.6GB reference dump used for phase1-integration.md §5's 6.42GB Stage-B-construction-peak figure, so this doesn't directly confirm the budget at that scale — but the measured overhead ratio here (peak ÷ Stage-B-only ≈ 1.2x) extrapolated to the 25.6GB figure would land around 7.7 GB, still comfortably under 20 GB. A direct run against the 25.6GB dump would close this out fully. Test: [DominatorConcurrentResidentMemoryRealDumpTests.cs](../../tests/DumpDetective.Tests/Integration/CacheDiscrepancies/DominatorConcurrentResidentMemoryRealDumpTests.cs). | §10a |
 
 ### 11.5 Ordering constraints (violating these blows the budget or the bisect)
 
 1. **`CollectionAnalyzer.cs:1154` lands alone, first.** Only runtime read of `AnalysisProfile`; only predicate rewrite in the plan. | §8.3, §9.17
-2. **Do not delete GCRoot's caps against the existing BFS.** `PathSearchTopN` removal is O(candidates x graph) until B2 lands. | §9.16
+2. ~~**Do not delete GCRoot's caps against the existing BFS.**~~ **Superseded by M4 (§11.4): measured cheap without B2/`EnumerateRetainedSet` landing first.** `PathSearchTopN` removal was assumed O(candidates x graph) and unacceptable against the existing BFS, but a real-dump measurement found 1,404 candidates (56x the capped default) walked in 568 ms — faster than the capped run. `PathSearchTopN` can be deleted now; the `EnumerateRetainedSet` rewire remains worth doing for its own sake but is no longer an ordering prerequisite. | §9.16, §11.4 M4
 3. **Collection is blocked on ReferenceChain** — it embeds `ReferenceChainOptions` and calls `IsNoisyType`. | §9.17
 4. **String needs a restructure, not cap removal.** Two genuine memory guards; exact dedup needs a streaming hash-count pass. | §9.12
 5. **B1 before the first exactness commit**, so reviewers have a coherent standard.
@@ -1840,8 +1906,9 @@ Fold these into the same real-dump run as B3/B4 — **one dump at a time, foregr
 | F5 | `RetentionOptions.MaxLeakScanObjects` XML doc has a lost sentence fragment. | §9.22 |
 | F6 | LohFragmentation comment says "≤ 100 objects" where the effective default is 20. | §9.8 |
 | F7 | Boxing/Module determinism sorts, and Thread's `SamplingSeed`, exist only to make truncation reproducible — remove with the caps. | §9.1, §9.3, §9.23 |
-| F8 | `ThreadAnalysisOptions.AdaptForSize` divides two caps by 4/2/1 on dump size — invisible third scaling layer. | §9.23 |
+| F8 | `ThreadAnalysisOptions.AdaptForSize` divides two caps by 4/2/1 on dump size — invisible third scaling layer. **Worse than described (D8, §11.2): the same divisor is applied a second time** by `ThreadAnalyzer.ComputeSamplerCapacity`, independently re-deriving the size tier — a Large-dump 20-snapshot default silently becomes 1, not the intended 5 (16x reduction instead of 4x). Resolved by deleting `AdaptForSize` outright, not fixing the double-application. | §9.23, D8 |
 | F9 | AllocationPattern's `TopTypeLimit x ScanMultiplier` compound into the real scan limit. | §9.30 |
+| F10 | Array's `TopSparseLimit` is used directly as a `List<SparseArrayEntry>` constructor capacity ([ArrayAnalyzer.cs:241](../../src/DumpDetective.Analysis/Analyzers/ArrayAnalyzer.cs#L241)) — raising it to remove the loop bound (e.g. `int.MaxValue`) throws `OutOfMemoryException` instead of uncapping the search. Found while measuring M3 (§11.4). Needs a capacity-safe rewrite when the cap is removed. | §9.11, §11.4 M3 |
 
 > **Pattern worth naming:** F1-F4, F8 and F9 are **six** separate instances of *configured value ≠
 > applied value*.

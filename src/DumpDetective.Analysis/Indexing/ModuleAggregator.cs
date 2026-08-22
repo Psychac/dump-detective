@@ -55,8 +55,8 @@ namespace DumpDetective.Analysis.Indexing
             }
 
             topByMemory.Sort((a, b) => b.Bytes.CompareTo(a.Bytes));
-            var topStats = new List<ModuleHeapStats>(Math.Min(options.TopModulesByHeapCount, topByMemory.Count));
-            for (int i = 0; i < topByMemory.Count && i < options.TopModulesByHeapCount; i++)
+            var topStats = new List<ModuleHeapStats>(topByMemory.Count);
+            for (int i = 0; i < topByMemory.Count; i++)
             {
                 int id = topByMemory[i].Id;
                 var mod = modules[id];

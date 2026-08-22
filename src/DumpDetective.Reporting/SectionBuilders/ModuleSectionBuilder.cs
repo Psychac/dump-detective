@@ -32,8 +32,6 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         };
         if (d.DynamicModuleBytes > 0)
             keyMetrics["dynamic_module_bytes"] = new NumericMetricValue((double)d.DynamicModuleBytes, MetricUnit.Bytes, FormatBytes(d.DynamicModuleBytes));
-        if (d.ExcludedModuleCount > 0)
-            keyMetrics["excluded_modules"] = new NumericMetricValue(d.ExcludedModuleCount, MetricUnit.Count);
 
         // Build summary narrative
         var summaryParts = new List<string>();
@@ -50,9 +48,6 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
 
         if (d.UnknownIdentityDuplicateModules.Count > 0)
             summaryParts.Add($"{d.UnknownIdentityDuplicateModules.Count:N0} unknown-identity duplicate(s)");
-
-        if (d.ExcludedModuleCount > 0)
-            summaryParts.Add($"{d.ExcludedModuleCount:N0} modules excluded from deep analysis");
 
         if (d.AnonymousModuleCount > 0)
             summaryParts.Add($"{d.AnonymousModuleCount:N0} anonymous/in-memory modules");

@@ -39,11 +39,6 @@
   //    "PathSearchTopN": 25,
   //    "MaxBfsNodes": 500,
   //    "MaxBfsDepth": 20
-  //  },
-  //  "Module": {
-  //    "Profile": "Balanced",
-  //    "TopLoadedAssembliesCount": 30,
-  //    "TopModulesByHeapCount": 20
   //  }
   //} ,
   //,"IncludeAnalyzers": [ "GC Root Analysis" ]

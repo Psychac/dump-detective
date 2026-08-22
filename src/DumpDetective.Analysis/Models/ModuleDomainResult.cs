@@ -70,5 +70,4 @@ internal sealed record ModuleDomainResult(
     int TotalDynamicModules = 0,
     ulong DynamicModuleBytes = 0,
     int AnonymousModuleCount = 0,
-    IReadOnlyList<ModuleTypeCountEntry>? TopModulesByTypeCount = null,
-    int ExcludedModuleCount = 0) : AnalyzerDomainResult;
+    IReadOnlyList<ModuleTypeCountEntry>? TopModulesByTypeCount = null) : AnalyzerDomainResult;

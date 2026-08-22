@@ -89,7 +89,6 @@ public sealed class StartupValidatorTests
             FinalizableObjectAnalysis: new FinalizableObjectAnalysisOptions(),
             GCGenerationAnalysis: new GCGenerationAnalysisOptions(),
             GCRootAnalysis: new GCRootAnalysisOptions(),
-            LohFragmentationAnalysis: new LohFragmentationAnalysisOptions(),
             SegmentReservationAnalysis: new SegmentReservationAnalysisOptions(),
             ThreadAnalysis: new ThreadAnalysisOptions(),
             HangAnalysis: new HangAnalysisOptions(),

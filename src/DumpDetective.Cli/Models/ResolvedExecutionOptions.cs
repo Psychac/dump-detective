@@ -25,7 +25,6 @@ internal sealed record ResolvedExecutionOptions(
     FinalizableObjectAnalysisOptions FinalizableObjectAnalysis,
     GCGenerationAnalysisOptions GCGenerationAnalysis,
     GCRootAnalysisOptions GCRootAnalysis,
-    LohFragmentationAnalysisOptions LohFragmentationAnalysis,
     SegmentReservationAnalysisOptions SegmentReservationAnalysis,
     ThreadAnalysisOptions ThreadAnalysis,
     HangAnalysisOptions HangAnalysis,

@@ -30,7 +30,6 @@ internal static class ResolvedExecutionOptionsFactory
             FinalizableObjectAnalysis: new DumpDetective.Core.Options.FinalizableObjectAnalysisOptions(),
             GCGenerationAnalysis: new DumpDetective.Core.Options.GCGenerationAnalysisOptions(),
             GCRootAnalysis: new DumpDetective.Core.Options.GCRootAnalysisOptions(),
-            LohFragmentationAnalysis: new DumpDetective.Core.Options.LohFragmentationAnalysisOptions(),
             SegmentReservationAnalysis: new DumpDetective.Core.Options.SegmentReservationAnalysisOptions(),
             ThreadAnalysis: new DumpDetective.Core.Options.ThreadAnalysisOptions(),
             HangAnalysis: new DumpDetective.Core.Options.HangAnalysisOptions(),

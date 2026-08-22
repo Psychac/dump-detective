@@ -76,7 +76,6 @@ internal sealed class AnalyzerExecutionService(FindingGenerationPipeline finding
                 FinalizableObjectAnalysis = resolved.FinalizableObjectAnalysis,
                 GCGenerationAnalysis = resolved.GCGenerationAnalysis,
                 GCRootAnalysis = resolved.GCRootAnalysis,
-                LohFragmentationAnalysis = resolved.LohFragmentationAnalysis,
                 SegmentReservationAnalysis = resolved.SegmentReservationAnalysis,
                 ThreadAnalysis = threadOptions ?? resolved.ThreadAnalysis,
                 HangAnalysis = resolved.HangAnalysis,

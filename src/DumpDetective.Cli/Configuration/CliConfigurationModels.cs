@@ -34,7 +34,6 @@ internal sealed class CliConfigurationFileModel
     public FinalizableObjectAnalysisOptions? FinalizableObjectAnalysis { get; init; }
     public GCGenerationAnalysisOptions? GCGenerationAnalysis { get; init; }
     public GCRootAnalysisOptions? GCRootAnalysis { get; init; }
-    public LohFragmentationAnalysisOptions? LohFragmentationAnalysis { get; init; }
     public SegmentReservationAnalysisOptions? SegmentReservationAnalysis { get; init; }
     public ThreadAnalysisOptions? ThreadAnalysis { get; init; }
     public HangAnalysisOptions? HangAnalysis { get; init; }
@@ -106,7 +105,6 @@ internal sealed class ExecutionPolicyModel
 [JsonSerializable(typeof(FinalizableObjectAnalysisOptions))]
 [JsonSerializable(typeof(GCGenerationAnalysisOptions))]
 [JsonSerializable(typeof(GCRootAnalysisOptions))]
-[JsonSerializable(typeof(LohFragmentationAnalysisOptions))]
 [JsonSerializable(typeof(SegmentReservationAnalysisOptions))]
 [JsonSerializable(typeof(ThreadAnalysisOptions))]
 [JsonSerializable(typeof(HangAnalysisOptions))]

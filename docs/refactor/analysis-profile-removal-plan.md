@@ -12,8 +12,8 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 6 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
-§9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph (§9.6's orphaned
+**Implementation progress: 7 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
+§9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph, §9.8 LohFragmentation (§9.6's orphaned
 `DependentHandleAnalysisOptions` was also deleted alongside GCHandle — not a separate registered
 analyzer, per the row-4 cross-reference below).** See each section and the §7 verdict table for what
 shipped in each.
@@ -290,7 +290,7 @@ radius is a single cosmetic report field, not root exactness.
 | 3 | GCHandle | aggregator | **GREEN** ✅ DONE | 1 of 5 | §9.5 — pure output slicing; 4 thresholds survive, but were only reachable in the analyzer — the finding generator read its own disconnected copies until this pass rewired them through the domain result |
 | 4 | *(GCHandle, cont'd)* | — | ✅ DONE | — | `DependentHandleAnalysisOptions` is **not a registered analyzer** — orphaned options class, folded into §9.6 below rather than counted as its own row; deleted outright |
 | 5 | LockGraph | aggregator | **GREEN** ✅ DONE | 1 of 1 | §9.7 — options class deleted outright; two independent lists shared one cap, plus a second unrelated render-layer cap found and fixed |
-| 6 | LohFragmentation | aggregator | **GREEN** | 2 of 2 | §9.8 — one cap applies during collection, truncating a type aggregation |
+| 6 | LohFragmentation | aggregator | **GREEN** ✅ DONE | 2 of 2 | §9.8 — one cap applies during collection, truncating a type aggregation; the index fast path was also missing a sort entirely, found during implementation |
 | 7 | ObjectShape | aggregator | **GREEN** ✅ DONE | 2 of 2 | §9.2 — cap of 200 types corrupts three whole-heap aggregates |
 | 8 | SegmentReservation | aggregator | **GREEN** | 0 of 2 | §9.9 — already exact; preset varies *semantics*, so it must still die |
 | 9 | Module | aggregator | **GREEN** ✅ DONE | 8 of 11 | §9.3 — 2 knobs are dead code; one deletion cascades into 4 more |
@@ -897,7 +897,7 @@ LINQ per the project's no-LINQ-in-hot-paths rule.
 
 ---
 
-### 9.8 LohFragmentation — **GREEN**
+### 9.8 LohFragmentation — **GREEN** ✅ IMPLEMENTED
 
 [LohFragmentationAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/LohFragmentationAnalyzer.cs) ·
 [LohFragmentationAnalysisOptions.cs](../../src/DumpDetective.Core/Options/LohFragmentationAnalysisOptions.cs)
@@ -930,6 +930,43 @@ to whatever the first 20 records happened to be, in index order.
 **Doc drift:** the comment at
 [:340](../../src/DumpDetective.Analysis/Analyzers/LohFragmentationAnalyzer.cs#L340) says *"resolve
 type names (≤ 100 objects)"* while the effective default is 20.
+
+#### Implementation notes (as shipped)
+
+- **`AnalyzeFromIndex`'s early-return bug was worse than Q7 described — it wasn't just truncating
+  `typeAggregation`, the surviving `topLargeObjects` list was never sorted by size at all.** The
+  heap-scan fallback path (`AnalyzeFromHeap`) sorts `largeObjectCandidates` by size before building
+  snapshots; the index fast path built `topLargeObjects` straight from `LargeObjectTracker.ReadRecords`
+  callback order (`LargeObjectIndex.bin`'s on-disk order) with no sort call anywhere afterward. Once
+  the cap capped the list at "however many records satisfied it first," this went unnoticed because
+  20 items in mostly-arbitrary order can still look plausible in a report; a fully unbounded list in
+  file order would have been an obviously-wrong "Top large objects" table. **Fixed by adding
+  `topLargeObjects.Sort(static (a, b) => b.Size.CompareTo(a.Size))` after the `ReadRecords` loop** —
+  this was a real, independent correctness defect this pass found, not something Q7/Q8 called out.
+- **Removed the early-return cap entirely** from the `ReadRecords` callback — every record is now
+  resolved and aggregated. Per Q8, `ReadRecords` already read every record regardless of the cap, so
+  this only adds one cached `GetTypeByMethodTable` lookup per large object (negligible, matches Q8's
+  own cost analysis).
+- **Heap-scan fallback's `AccumulateSegmentObject` used a genuinely different technique than the index
+  path** — a proper bounded top-K-by-size accumulator (`if (largeObjectCandidates.Count > maxLargeObjects) { find-and-remove smallest }`), not an arbitrary-order cutoff. This means the heap-scan path's
+  `topLargeObjects` were already correctly ranked even before this fix — only `typeAggregation` was
+  fine here too, since it's built unconditionally, outside the size-based eviction. **So the heap-scan
+  path had no correctness bug, only the removed capacity limit; the index path had two** (aggregation
+  truncation *and* the missing sort). Deleted the min-eviction logic anyway since LOH-threshold-sized
+  objects (≥ 85 KB) are a naturally small population on any real heap — no bound needed, matches this
+  doc's "vestigial cap" pattern.
+- **`TrimLargeObjectCandidates` helper deleted outright** — it existed solely to serve the cap that no
+  longer exists.
+- **Options class deleted outright** (both knobs fully move to render, matching the plan's call).
+  Collapsed two now-redundant private `Analyze` overloads in the process — one 4-arg overload
+  (heap/cache/progress/token) was dead code, never called; `AnalyzeAsync` always went through the
+  5-arg options-taking overload. With options gone there was only one shape left, so it became the
+  sole private `Analyze`. Removed from `AnalysisOptions`, `CliConfigurationModels` (property +
+  `[JsonSerializable]`), `ConfigurationResolver` (builder + call site + constructor arg),
+  `ResolvedExecutionOptions`, `AnalyzerExecutionService`, and two test call sites
+  (`ResolvedExecutionOptionsFactory`, `StartupValidatorTests`).
+- `LohFragmentationSectionBuilder` needed no changes — already rendered full lists via `STCompact`
+  with no `.Take()`, and (per the D5 amendment) uses the table's default page size uniformly.
 
 ---
 

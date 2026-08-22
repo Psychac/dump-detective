@@ -3,7 +3,6 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Indexing.Container;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
-using DumpDetective.Core.Options;
 using DumpDetective.Analysis.Indexing.Satellite;
 
 using Microsoft.Diagnostics.Runtime;
@@ -35,8 +34,7 @@ namespace DumpDetective.Analysis.Analyzers
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            LohFragmentationAnalysisOptions options = context.AnalysisOptions.LohFragmentationAnalysis;
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, options, cancellationToken).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, cancellationToken).Stamp(this));
         }
 
         /// <summary>Entry point for benchmarks and direct callers (no cache — falls back to heap scan).</summary>
@@ -49,27 +47,13 @@ namespace DumpDetective.Analysis.Analyzers
         {
             // Fast path: use Phase 1 pre-built LOH indices — no per-segment EnumerateObjects call.
             if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
-            {
-                LohFragmentationAnalysisOptions options = new();
-                return AnalyzeFromIndex(heap, heapIndex, progress, options, cancellationToken);
-            }
+                return AnalyzeFromIndex(heap, heapIndex, progress, cancellationToken);
 
             // Fallback: full segment object scan (benchmarks, tests, or no index available).
             return AnalyzeFromHeap(heap, progress);
         }
 
-        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache? cache, IProgress<AnalyzerProgressReport>? progress, LohFragmentationAnalysisOptions options, CancellationToken cancellationToken)
-        {
-            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
-                return AnalyzeFromIndex(heap, heapIndex, progress, options, cancellationToken);
-
-            return AnalyzeFromHeap(heap, progress, options);
-        }
-
         private AnalyzerDomainResult AnalyzeFromHeap(ClrHeap heap, IProgress<AnalyzerProgressReport>? progress)
-            => AnalyzeFromHeap(heap, progress, new LohFragmentationAnalysisOptions());
-
-        private AnalyzerDomainResult AnalyzeFromHeap(ClrHeap heap, IProgress<AnalyzerProgressReport>? progress, LohFragmentationAnalysisOptions options)
         {
             // NOTE: fallback path — used when no Phase 1 index is available.
 
@@ -105,7 +89,6 @@ namespace DumpDetective.Analysis.Analyzers
                         freeGapBucketCounts,
                         largeObjectCandidates,
                         typeAggregation,
-                        options.TopLargeObjectsCount,
                         ref freeBytes,
                         ref largestFreeBlock,
                         ref objectCount,
@@ -145,18 +128,15 @@ namespace DumpDetective.Analysis.Analyzers
                 int cmp = b.FragmentationPercent.CompareTo(a.FragmentationPercent);
                 return cmp != 0 ? cmp : b.FreeBytes.CompareTo(a.FreeBytes);
             });
-            int topN = Math.Min(options.TopSegments, segmentStats.Count);
-            var topSegments = new List<LohSegmentSnapshot>(topN);
-            for (int i = 0; i < topN; i++)
-                topSegments.Add(new LohSegmentSnapshot(segmentStats[i].Address, segmentStats[i].TotalBytes, segmentStats[i].FragmentationPercent, segmentStats[i].FreeBytes, segmentStats[i].LargestFreeBlock));
+            var topSegments = new List<LohSegmentSnapshot>(segmentStats.Count);
+            foreach (var s in segmentStats)
+                topSegments.Add(new LohSegmentSnapshot(s.Address, s.TotalBytes, s.FragmentationPercent, s.FreeBytes, s.LargestFreeBlock));
 
             var freeGapHistogram = new List<FreeGapBucket>(s_gapBuckets.Length);
             for (int b = 0; b < s_gapBuckets.Length; b++)
                 if (freeGapBucketCounts[b] > 0)
                     freeGapHistogram.Add(new FreeGapBucket(s_gapBuckets[b].Label, freeGapBucketCounts[b]));
 
-            // Keep only top-N large objects (bounded accumulator reduces memory on high-object-count heaps).
-            TrimLargeObjectCandidates(largeObjectCandidates, options.TopLargeObjectsCount);
             largeObjectCandidates.Sort(static (a, b) => b.Size.CompareTo(a.Size));
             var topLargeObjects = new List<LargeObjectSnapshot>(largeObjectCandidates.Count);
             foreach (var cand in largeObjectCandidates)
@@ -196,7 +176,6 @@ namespace DumpDetective.Analysis.Analyzers
             int[] freeGapBucketCounts,
             List<(ulong Address, string TypeName, ulong Size)> largeObjectCandidates,
             Dictionary<string, (int Count, ulong TotalBytes)> typeAggregation,
-            int maxLargeObjects,
             ref ulong freeBytes,
             ref ulong largestFreeBlock,
             ref int objectCount,
@@ -236,20 +215,10 @@ namespace DumpDetective.Analysis.Analyzers
 
                 if (size >= LohThreshold)
                 {
-                    var candidate = (obj.Address, typeName, size);
-                    largeObjectCandidates.Add(candidate);
-
-                    // Bounded accumulator: keep only top-N by size (same pattern as LargeObjectTracker).
-                    if (largeObjectCandidates.Count > maxLargeObjects)
-                    {
-                        int minIdx = 0;
-                        for (int i = 1; i < largeObjectCandidates.Count; i++)
-                        {
-                            if (largeObjectCandidates[i].Size < largeObjectCandidates[minIdx].Size)
-                                minIdx = i;
-                        }
-                        largeObjectCandidates.RemoveAt(minIdx);
-                    }
+                    // Unbounded: LOH-threshold-sized objects (>= 85 KB) are a small fraction of any
+                    // real heap's population, so keeping every candidate and sorting once at the end
+                    // costs single-digit MB even on a 25 GB dump.
+                    largeObjectCandidates.Add((obj.Address, typeName, size));
                 }
             }
         }
@@ -260,7 +229,6 @@ namespace DumpDetective.Analysis.Analyzers
             ClrHeap heap,
             HeapIndexBuildResult heapIndex,
             IProgress<AnalyzerProgressReport>? progress,
-            LohFragmentationAnalysisOptions options,
             CancellationToken cancellationToken)
         {
             string indexDir = Path.GetDirectoryName(heapIndex.IndexPath) ?? string.Empty;
@@ -269,7 +237,7 @@ namespace DumpDetective.Analysis.Analyzers
             // (LohFreeBlockIndex.bin, LargeObjectIndex.bin) only exist in disk mode.
             // Fall back to the full segment scan so both modes produce identical rich output.
             if (indexDir.Length == 0)
-                return AnalyzeFromHeap(heap, progress, options);
+                return AnalyzeFromHeap(heap, progress);
 
             progress?.Report(new(0, "reading LOH segment metadata", null, TimeSpan.Zero));
 
@@ -330,19 +298,20 @@ namespace DumpDetective.Analysis.Analyzers
                 return cmp != 0 ? cmp : b.FreeBytes.CompareTo(a.FreeBytes);
             });
 
-            var topSegs = new List<LohSegmentSnapshot>(Math.Min(options.TopSegments, segStats.Count));
-            for (int i = 0; i < topSegs.Capacity; i++)
-                topSegs.Add(new LohSegmentSnapshot(segStats[i].Address, segStats[i].TotalBytes, segStats[i].FragPct, segStats[i].FreeBytes, segStats[i].LargestFree));
+            var topSegs = new List<LohSegmentSnapshot>(segStats.Count);
+            foreach (var s in segStats)
+                topSegs.Add(new LohSegmentSnapshot(s.Address, s.TotalBytes, s.FragPct, s.FreeBytes, s.LargestFree));
 
             // Step 4: Build free-gap histogram.
             var freeGapHistogram = BuildFreeGapHistogram(allFreeSizes, cancellationToken);
 
-            // Step 5: Read LargeObjectIndex.bin and resolve type names (≤ 100 objects).
+            // Step 5: Read LargeObjectIndex.bin and resolve every record's type name — the file
+            // already only contains LOH-threshold-sized objects, so this is bounded by the same
+            // small population AccumulateSegmentObject relies on in the heap-scan path.
             List<LargeObjectSnapshot> topLargeObjects = [];
             var typeAggregation = new Dictionary<string, (int Count, ulong TotalBytes)>();
             progress?.Report(new(0, "reading LargeObjectIndex.bin", null, TimeSpan.Zero));
             LargeObjectTracker.ReadRecords(heapIndex.IndexPath, (address, mt, size) => {
-                if (topLargeObjects.Count >= options.TopLargeObjectsCount) return;
                 // OPT (docs/cache/cache-architecture.md Phase 5): mt is already a
                 // parameter of this callback — resolve via the metadata cache instead of
                 // materializing a ClrObject. A null type is the equivalent "unresolvable" gate
@@ -359,6 +328,9 @@ namespace DumpDetective.Analysis.Analyzers
                 else
                     typeAggregation[typeName] = (1, size);
             }, cancellationToken);
+
+            // Rank by size descending — the index file itself carries no size ordering.
+            topLargeObjects.Sort(static (a, b) => b.Size.CompareTo(a.Size));
 
             // Build type-aggregated LOH consumption view: top types by total bytes.
             var typeProfiles = new List<LohTypeProfile>(typeAggregation.Count);
@@ -484,20 +456,6 @@ namespace DumpDetective.Analysis.Analyzers
                 ObjectCount = objectCount;
                 FreeObjectCount = freeObjectCount;
                 FragmentationPercent = fragmentationPercent;
-            }
-        }
-
-        private static void TrimLargeObjectCandidates(List<(ulong Address, string TypeName, ulong Size)> candidates, int maxCount)
-        {
-            while (candidates.Count > maxCount)
-            {
-                int minIdx = 0;
-                for (int i = 1; i < candidates.Count; i++)
-                {
-                    if (candidates[i].Size < candidates[minIdx].Size)
-                        minIdx = i;
-                }
-                candidates.RemoveAt(minIdx);
             }
         }
 

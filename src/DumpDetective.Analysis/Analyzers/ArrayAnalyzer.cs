@@ -1,14 +1,11 @@
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Indexing.Container;
 using DumpDetective.Analysis.Indexing.Satellite;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 
 using Microsoft.Diagnostics.Runtime;
-
-using System.Buffers.Binary;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -22,9 +19,9 @@ namespace DumpDetective.Analysis.Analyzers
     /// Large array analysis (§22.2) reads <c>LargeObjectIndex.bin</c> (top-100 LOH objects)
     /// and cross-references with array MTs; falls back to TypeAggregates for memory mode.
     ///
-    /// Sparse sampling (§22.3) is bounded to <see cref="SparseSampleLimit"/> arrays
-    /// with at least <see cref="SparseSampleMinLength"/> elements; samples every
-    /// <see cref="SampleStride"/>-th element to estimate null/zero density.
+    /// Sparse sampling (§22.3) walks every element of every array with at least
+    /// <see cref="ArrayAnalysisOptions.SparseSampleMinLength"/> elements to compute exact
+    /// null/zero density.
     /// </summary>
     public sealed class ArrayAnalyzer : IAnalyzer
     {
@@ -55,7 +52,7 @@ namespace DumpDetective.Analysis.Analyzers
                 typeAggregates = heapIndex.TypeAggregates;
 
             if (typeAggregates is null)
-                return new ArrayDomainResult(0, 0, 0, 0, 0, 0, [], [], [], false);
+                return new ArrayDomainResult(0, 0, 0, 0, 0, 0, [], [], []);
 
             // ── Step 1: Aggregate population from TypeAggregates ─────────────────
             progress?.Report(new(0, "scanning array type aggregates"));
@@ -159,11 +156,9 @@ namespace DumpDetective.Analysis.Analyzers
             }
             typeList.Sort(static (a, b) => b.Bytes.CompareTo(a.Bytes));
 
-            int typeListLimit = Math.Min(typeList.Count, options.TopTypeLimit);
-            var topArrayTypes = new List<ArrayTypeProfile>(typeListLimit);
-            for (int i = 0; i < typeListLimit; i++)
+            var topArrayTypes = new List<ArrayTypeProfile>(typeList.Count);
+            foreach (var t in typeList)
             {
-                var t = typeList[i];
                 double percentOfHeap = totalHeapBytes > 0 ? t.Bytes * 100.0 / totalHeapBytes : 0.0;
                 double gen2PlusLohPct = t.Count > 0 ? (t.Gen2Count + t.LohCount) * 100.0 / t.Count : 0.0;
                 double avgSize = t.Count > 0 ? t.Bytes / (double)t.Count : 0.0;
@@ -175,15 +170,12 @@ namespace DumpDetective.Analysis.Analyzers
             // Try LargeObjectIndex.bin (disk mode) first; fall back to TypeAggregates LohSize
             progress?.Report(new(0, "analysing large arrays"));
 
-            var topLargeArrays = new List<LargeArrayEntry>(options.TopLargeLimit);
+            var topLargeArrays = new List<LargeArrayEntry>(64);
 
             if (heapIndex is not null && heapIndex.StorageKind == HeapIndexStorageKind.Disk)
             {
                 LargeObjectTracker.ReadRecords(heapIndex.IndexPath, (address, mt, size) =>
                 {
-                    if (topLargeArrays.Count >= options.TopLargeLimit)
-                        return;
-
                     if (!arrayMtSet.Contains(mt))
                         return;
 
@@ -211,10 +203,9 @@ namespace DumpDetective.Analysis.Analyzers
             if (topLargeArrays.Count == 0 && lohFallbackCandidates.Count > 0)
             {
                 lohFallbackCandidates.Sort(static (a, b) => b.LohSize.CompareTo(a.LohSize));
-                int fallbackLimit = Math.Min(lohFallbackCandidates.Count, options.TopLargeLimit);
-                for (int i = 0; i < fallbackLimit; i++)
+                foreach (var candidate in lohFallbackCandidates)
                 {
-                    ulong sampleAddress = lohFallbackCandidates[i].SampleAddress;
+                    ulong sampleAddress = candidate.SampleAddress;
                     ClrObject obj = heap.GetObject(sampleAddress);
                     if (!obj.IsValid || obj.Type is null) continue;
 
@@ -229,22 +220,17 @@ namespace DumpDetective.Analysis.Analyzers
                 }
             }
             // Use pre-collected ref-type candidates from Step 1 — no second typeAggregates scan.
-            // Sort by TotalSize descending so the most impactful arrays are probed first.
-            // Cap at SparseSampleLimit before opening any objects.
+            // Every candidate is probed; the sort only affects display/processing order, not which
+            // arrays get evaluated.
             progress?.Report(new(0, "sampling sparse arrays"));
 
             sparseCandidates.Sort(static (a, b) => b.TotalSize.CompareTo(a.TotalSize));
 
-            bool scanLimited = sparseCandidates.Count > options.SparseSampleLimit;
-            int candidateLimit = Math.Min(sparseCandidates.Count, options.SparseSampleLimit);
+            var topSparseArrays = new List<SparseArrayEntry>(64);
 
-            var topSparseArrays = new List<SparseArrayEntry>(options.TopSparseLimit);
-
-            for (int ci = 0; ci < candidateLimit && topSparseArrays.Count < options.TopSparseLimit; ci++)
+            foreach (var (sampleAddr, elemName, _) in sparseCandidates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-
-                var (sampleAddr, elemName, _) = sparseCandidates[ci];
 
                 ClrObject obj = heap.GetObject(sampleAddr);
                 if (!obj.IsValid || obj.Type is null) continue;
@@ -254,28 +240,28 @@ namespace DumpDetective.Analysis.Analyzers
                 // Rank was already confirmed == 1 at collection time, but re-check for safety
                 if (arr.Rank > 1) continue;
 
+                // Walk every element — no stride sampling, so NullOrZeroCount and WastedBytes
+                // below are exact counts, not extrapolated estimates.
                 int nullCount = 0;
-                int sampleLen = 0;
-                for (int i = 0; i < arr.Length; i += options.SampleStride)
+                for (int i = 0; i < arr.Length; i++)
                 {
                     ClrObject elem = arr.GetObjectValue(i);
                     if (!elem.IsValid || elem.Address == 0) nullCount++;
-                    sampleLen++;
                 }
 
-                if (sampleLen == 0) continue;
+                if (arr.Length == 0) continue;
 
-                double sparseRatio = (double)nullCount / sampleLen;
+                double sparseRatio = (double)nullCount / arr.Length;
                 if (sparseRatio < 0.5) continue;
 
                 ulong elemSize = (ulong)IntPtr.Size;
-                ulong wastedBytes = (ulong)(arr.Length * sparseRatio * (double)elemSize);
+                ulong wastedBytes = (ulong)nullCount * elemSize;
 
                 topSparseArrays.Add(new SparseArrayEntry(
                     Address: sampleAddr,
                     ElementTypeName: elemName,
                     Length: arr.Length,
-                    NullOrZeroCount: (int)Math.Min((long)(nullCount * ((double)arr.Length / sampleLen)), int.MaxValue),
+                    NullOrZeroCount: nullCount,
                     SparseRatio: sparseRatio,
                     WastedBytes: wastedBytes));
             }
@@ -291,65 +277,10 @@ namespace DumpDetective.Analysis.Analyzers
                 LohArrayBytes: lohBytes,
                 TopArrayTypesBySize: topArrayTypes,
                 TopLargeArrays: topLargeArrays,
-                TopSparseArrays: topSparseArrays,
-                ScanLimited: scanLimited);
+                TopSparseArrays: topSparseArrays);
         }
 
         // ── Large array index reader ──────────────────────────────────────────────
-
-        private static void ReadLargeArraysFromIndex(
-            ClrHeap heap,
-            string containerPath,
-            HashSet<ulong> arrayMtSet,
-            List<LargeArrayEntry> result,
-            int topLargeLimit,
-            CancellationToken cancellationToken)
-        {
-            try
-            {
-                if (!CacheSectionHelper.TryOpenCacheSection(containerPath, CacheSectionId.LargeObjects, out Stream? stream) || stream is null)
-                    return;
-
-                using (stream)
-                {
-                    if (!IndexHeader.TryRead(stream, out IndexHeader header))
-                        return;
-
-                    const int RecordSize = 24; // Address(8) | MT(8) | Size(8)
-                    Span<byte> rec = stackalloc byte[RecordSize];
-                    for (long i = 0; i < header.RecordCount && result.Count < topLargeLimit; i++)
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        int read = stream.ReadAtLeast(rec, RecordSize, throwOnEndOfStream: false);
-                        if (read < RecordSize) break;
-
-                        ulong address = BinaryPrimitives.ReadUInt64LittleEndian(rec);
-                        ulong mt = BinaryPrimitives.ReadUInt64LittleEndian(rec[8..]);
-                        ulong size = BinaryPrimitives.ReadUInt64LittleEndian(rec[16..]);
-
-                        if (!arrayMtSet.Contains(mt)) continue;
-
-                        ClrObject obj = heap.GetObject(address);
-                        if (!obj.IsValid || obj.Type is null) continue;
-
-                        string elemName = obj.Type.ComponentType?.Name ?? obj.Type.Name ?? "Unknown";
-                        if (string.Equals(elemName, "Free", StringComparison.Ordinal)) continue;
-
-                        ClrArray arr = obj.AsArray();
-                        result.Add(new LargeArrayEntry(
-                            Address: address,
-                            ElementTypeName: elemName,
-                            Length: arr.Length,
-                            Rank: arr.Rank,
-                            Size: size));
-                    }
-                }
-            }
-            catch (Exception)
-            {
-                // Section not found or read failed; caller will continue without large array index.
-            }
-        }
 
         public void Dispose() { }
     }

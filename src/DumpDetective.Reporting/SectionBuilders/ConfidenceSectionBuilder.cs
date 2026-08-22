@@ -108,7 +108,6 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
         AddLimitation(limitationRows, "Hang / task scan", results.Get<HangDomainResult>() is HangDomainResult hang && (!hang.RuntimeThreadPoolDataAvailable || hang.TaskScanLimited), BuildHangText(results.Get<HangDomainResult>()));
         AddLimitation(limitationRows, "Async tasks", results.Get<AsyncTaskDomainResult>() is AsyncTaskDomainResult asyncTasks && asyncTasks.TaskScanLimited, BuildAsyncTaskText(results.Get<AsyncTaskDomainResult>()));
         AddLimitation(limitationRows, "Async state machines", results.Get<AsyncStateMachineDomainResult>() is AsyncStateMachineDomainResult asyncState && asyncState.ScanLimited, BuildAsyncStateText(results.Get<AsyncStateMachineDomainResult>()));
-        AddLimitation(limitationRows, "Arrays", results.Get<ArrayDomainResult>() is ArrayDomainResult array && array.ScanLimited, BuildArrayText(results.Get<ArrayDomainResult>()));
 
         if (limitationRows.Count > 0)
         {
@@ -206,13 +205,4 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
             : "Async state-machine scan completed within the configured cap.";
     }
 
-    private static string BuildArrayText(ArrayDomainResult? array)
-    {
-        if (array is null)
-            return "No array result available.";
-
-        return array.ScanLimited
-            ? "Array scanning was capped; sparse-array and large-array lists may be partial."
-            : "Array scan completed within the configured cap.";
-    }
 }

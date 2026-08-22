@@ -12,11 +12,11 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 9 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
+**Implementation progress: 10 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
 §9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph, §9.8 LohFragmentation, §9.9
-SegmentReservation, §9.10 Jit (§9.6's orphaned `DependentHandleAnalysisOptions` was also deleted
-alongside GCHandle — not a separate registered analyzer, per the row-4 cross-reference below).**
-See each section and the §7 verdict table for what shipped in each.
+SegmentReservation, §9.10 Jit, §9.11 Array (§9.6's orphaned `DependentHandleAnalysisOptions` was
+also deleted alongside GCHandle — not a separate registered analyzer, per the row-4 cross-reference
+below).** See each section and the §7 verdict table for what shipped in each.
 
 > **Correction (roster built from the wrong source):** the audit was originally built by walking
 > `src/DumpDetective.Core/Options/`, not the analyzer registry — so any analyzer with no dedicated
@@ -295,7 +295,7 @@ radius is a single cosmetic report field, not root exactness.
 | 8 | SegmentReservation | aggregator | **GREEN** ✅ DONE | 0 of 2 | §9.9 — already exact; preset varies *semantics*, so it must still die |
 | 9 | Module | aggregator | **GREEN** ✅ DONE | 8 of 11 | §9.3 — 2 knobs are dead code; one deletion cascades into 4 more |
 | 10 | Jit | aggregator | **GREEN** ✅ DONE | 3 of 4 | §9.10 — one cap corrupts **six** accumulators; worst Q7 so far; render layer also hardcoded a stale 64 KB flag threshold, fixed |
-| 11 | Array | sampling | **GREEN** | 5 of 6 | §9.11 — `WastedBytes` is an extrapolation of an extrapolation of one sample object |
+| 11 | Array | sampling | **GREEN** ✅ DONE | 5 of 6 | §9.11 — `WastedBytes` is an extrapolation of an extrapolation of one sample object; also found an orphaned dead-code reader and an obsolete `ScanLimited` field |
 | 12 | String | sampling | **AMBER** | ~8 of 16 | §9.12 — exact dedup needs a restructured hash-count pass, not just cap removal |
 | 13 | AsyncStateMachine | sampling | **GREEN** | 5-6 of 7 | §9.13 — a domain-result comment already documents its own corrupted sum |
 | 14 | StaticRootLeak | retained-size | **AMBER** | 4 of 6 | §9.14 — `MaxRetainedObjectsToScan` materializes a Dictionary; needs dominator tree |
@@ -1081,7 +1081,7 @@ depth, not heap size, so this does not scale with dump size. Negligible.
   different constant in a different class serving stack-root owner-attribution labeling, already
   resolved out-of-scope there; no interaction with this section's changes.
 
-### 9.11 Array — **GREEN**
+### 9.11 Array — **GREEN** ✅ IMPLEMENTED
 
 [ArrayAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/ArrayAnalyzer.cs) ·
 [ArrayAnalysisOptions.cs](../../src/DumpDetective.Core/Options/ArrayAnalysisOptions.cs)
@@ -1134,6 +1134,43 @@ estimate. Also surfaced a real defect: `TopSparseLimit` is used directly as a `L
 capacity ([:241](../../src/DumpDetective.Analysis/Analyzers/ArrayAnalyzer.cs#L241)) — setting it to
 `int.MaxValue` to remove the loop bound throws `OutOfMemoryException` rather than just uncapping the
 search. See F10 (§11.6).
+
+#### Implementation notes (as shipped)
+
+- **All three stacked approximations from Q7 are gone.** `sparseCandidates` is no longer capped at
+  `SparseSampleLimit` before probing — every 1-D ref-type array candidate is walked.
+  `SparseSampleLimit`/`SampleStride` deleted entirely; the element loop now walks every index
+  (`for (int i = 0; i < arr.Length; i++)`) instead of every 100th. Since the sample now always covers
+  the whole array, `NullOrZeroCount`/`WastedBytes` collapsed from extrapolated estimates
+  (`nullCount * (arr.Length / sampleLen)`) to exact values (`nullCount` directly, `nullCount * elemSize`)
+  — the extrapolation math is gone, not just uncapped.
+- **`TopSparseLimit`'s F10 `List<T>` capacity `OutOfMemoryException` defect is moot, not "fixed"** —
+  the loop bound that motivated pre-sizing the list is deleted, so `topSparseArrays`/`topLargeArrays`
+  are now plain growable lists seeded with a small fixed capacity (64), never derived from a
+  user-controllable value. Same fix applied to `topArrayTypes`.
+- **`TopTypeLimit`/`TopLargeLimit`/`TopSparseLimit` all deleted, moved to render** — `ArraySectionBuilder`
+  had the by-now-familiar double-truncation shape (`Math.Min(..., TopTypeRows/TopLargeRows/TopSparseRows)`
+  slicing on top of the analyzer cap, plus "N additional omitted" text blocks for all three tables).
+  Fixed by feeding full lists into `STCompact`; per the §11.2 D5 amendment, no `rowLimit` was
+  reintroduced — all three fall through to the default.
+- **Deleted dead code found while touching this file**: `ReadLargeArraysFromIndex`, a full alternate
+  large-object-index reader, was defined but never called anywhere — the live code path uses
+  `LargeObjectTracker.ReadRecords` instead. Removed it along with the now-unused
+  `DumpDetective.Analysis.Indexing.Container` / `System.Buffers.Binary` usings it required.
+- **`ArrayDomainResult.ScanLimited` deleted** (permanently-false once `SparseSampleLimit` is gone) —
+  removed from the domain result, `ArraySectionBuilder`'s `scan_limit_reached` key metric, and
+  `ConfidenceSectionBuilder`'s "Arrays" limitation row + `BuildArrayText` helper. Left the sibling
+  `AsyncTaskDomainResult.TaskScanLimited`/`AsyncStateMachineDomainResult.ScanLimited` rows in
+  `ConfidenceSectionBuilder` untouched — those analyzers haven't been migrated yet (§9.29-ish, later
+  in this doc) and their caps are still real.
+- **Deleted `tests/.../ArrayUncappedRealDumpTests.cs`** — existed solely to produce the M3
+  capped-vs-uncapped measurement recorded above; same reasoning as the `ModuleAnalyzerUncappedRealDumpTests.cs` deletion in §9.3.
+- **`MaxSparseFindings = 3` in `ArrayFindingGenerator` left untouched** — that's a deliberate
+  findings-count throttle (how many low-value sparse-array findings surface in the report), not a
+  data-completeness cap; `r.TopSparseArrays` itself is the full, unbounded list, so this doesn't
+  interact with anything §9.11 changed.
+- Same `ConfigurationResolver` profile-bypass pattern as every prior section — `Preset` deleted, so
+  `BuildArrayAnalysisFromConfig` applies overrides directly onto `new ArrayAnalysisOptions()`.
 
 ---
 

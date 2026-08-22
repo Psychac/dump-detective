@@ -35,6 +35,4 @@ internal sealed record BoxingDomainResult(
     IReadOnlyList<OversizedTypeEntry> TopOversizedTypes,
     IReadOnlyList<StructPaddingEntry> TopPaddingWasteTypes,
     ulong AggregatePaddingWasteBytes,
-    double AvgBoxedInstanceBytes,
-    bool TypeScanCapped,
-    int TypeScanCapUsed) : AnalyzerDomainResult;
+    double AvgBoxedInstanceBytes) : AnalyzerDomainResult;

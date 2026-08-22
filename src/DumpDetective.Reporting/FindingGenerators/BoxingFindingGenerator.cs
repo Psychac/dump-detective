@@ -99,7 +99,6 @@ internal sealed class BoxingFindingGenerator : IFindingGenerator
         }
 
         // Summary finding (always).
-        string capNote = r.TypeScanCapped ? $" (type scan capped at {r.TypeScanCapUsed:N0} entries)" : string.Empty;
         FindingSeverity overallSeverity = r.TotalBoxedObjects > 1_000_000 ? FindingSeverity.Critical
             : r.TotalBoxedObjects > 500_000 ? FindingSeverity.Warning
             : FindingSeverity.Info;
@@ -108,7 +107,7 @@ internal sealed class BoxingFindingGenerator : IFindingGenerator
             Category: "Memory",
             Severity: overallSeverity,
             Title: "Boxing pressure overview",
-            Evidence: $"Total boxed value type instances: {r.TotalBoxedObjects:N0}{capNote} " +
+            Evidence: $"Total boxed value type instances: {r.TotalBoxedObjects:N0} " +
                       $"({FormatHelper.FormatBytes(r.TotalBoxedBytes)}). " +
                       $"Boxed enums: {r.BoxedEnumCount:N0}. " +
                       $"Oversized value types: {r.OversizedValueTypeInstanceCount:N0}. " +

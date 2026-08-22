@@ -18,8 +18,6 @@ namespace DumpDetective.Analysis.Analyzers
     ///
     /// Struct padding: for each value type with a populated <see cref="TypeShapeCache"/> entry,
     /// computes <c>StaticSize – sum(field.Size)</c> to surface padding waste.
-    ///
-    /// Capped at <see cref="TypeScanCap"/> MT lookups to bound metadata overhead.
     /// </summary>
     public sealed class BoxingAnalyzer : IAnalyzer
     {
@@ -52,7 +50,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             if (typeAggregates is null)
             {
-                return new BoxingDomainResult(0, 0, [], 0, 0, 0, 0, 0, [], [], 0, 0.0, false, options.TypeScanCap);
+                return new BoxingDomainResult(0, 0, [], 0, 0, 0, 0, 0, [], [], 0, 0.0);
             }
 
             // ── Boxing inventory ──────────────────────────────────────────────
@@ -73,31 +71,9 @@ namespace DumpDetective.Analysis.Analyzers
             // Oversized value type candidates: aggregated by type name during the same pass
             var oversizedByTypeName = new Dictionary<string, (int StaticSize, int Count)>(StringComparer.Ordinal);
 
-            // Dictionary enumeration order depends on parallel segment-merge order,
-            // which differs between disk/memory index builders (and across runs of
-            // the same builder). Capping on raw iteration order therefore truncated
-            // to a different arbitrary subset of types each time once distinct-type
-            // count exceeded TypeScanCap, making TotalBoxedObjects non-deterministic.
-            // Only sort (by TotalSize desc, MethodTable as tiebreak) when a cap will
-            // actually bite, so the common case (types <= cap) pays no extra cost.
-            bool scanCapped = typeAggregates.Count > options.TypeScanCap;
-            IEnumerable<KeyValuePair<ulong, TypeAggregateIndexEntry>> scanOrder = typeAggregates;
-            if (scanCapped)
-            {
-                var ordered = new List<KeyValuePair<ulong, TypeAggregateIndexEntry>>(typeAggregates);
-                ordered.Sort((a, b) =>
-                {
-                    int cmp = b.Value.TotalSize.CompareTo(a.Value.TotalSize);
-                    return cmp != 0 ? cmp : a.Key.CompareTo(b.Key);
-                });
-                scanOrder = ordered;
-            }
-
-            int scanned = 0;
-            foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in scanOrder)
+            foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in typeAggregates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (++scanned > options.TypeScanCap) break;
 
                 TypeAggregateIndexEntry entry = kv.Value;
 
@@ -175,24 +151,18 @@ namespace DumpDetective.Analysis.Analyzers
 
             typeList.Sort(static (a, b) => b.Bytes.CompareTo(a.Bytes));
 
-            int topLimit = Math.Min(typeList.Count, options.TopBoxedTypeLimit);
-            var topBoxedTypes = new List<BoxedTypeEntry>(topLimit);
-            for (int i = 0; i < topLimit; i++)
-            {
-                var t = typeList[i];
-                topBoxedTypes.Add(new BoxedTypeEntry(t.Name, t.Count, t.Bytes, t.IsEnum, t.HasRefFields));
-            }
+            var boxedTypes = new List<BoxedTypeEntry>(typeList.Count);
+            foreach (var t in typeList)
+                boxedTypes.Add(new BoxedTypeEntry(t.Name, t.Count, t.Bytes, t.IsEnum, t.HasRefFields));
 
-            // ── Build top padding waste types ─────────────────────────────────
+            // ── Build padding waste types, ranked by waste ──────────────────────
             paddingCandidates.Sort(static (a, b) => b.WastedBytes.CompareTo(a.WastedBytes));
 
-            int padLimit = Math.Min(paddingCandidates.Count, options.TopPaddingLimit);
-            var topPaddingWaste = new List<StructPaddingEntry>(padLimit);
-            for (int i = 0; i < padLimit; i++)
+            var paddingWaste = new List<StructPaddingEntry>(paddingCandidates.Count);
+            foreach (var c in paddingCandidates)
             {
-                var c = paddingCandidates[i];
                 double ratio = c.StructSize > 0 ? (double)c.WastedBytes / c.StructSize : 0.0;
-                topPaddingWaste.Add(new StructPaddingEntry(
+                paddingWaste.Add(new StructPaddingEntry(
                     TypeName: c.TypeName,
                     TotalFieldBytes: c.FieldBytes,
                     StructSize: c.StructSize,
@@ -200,42 +170,34 @@ namespace DumpDetective.Analysis.Analyzers
                     WasteRatio: ratio));
             }
 
-            // Compute aggregate padding waste across ALL padding candidates (not just top)
             ulong aggregatePaddingWaste = 0;
             foreach (var c in paddingCandidates)
             {
                 aggregatePaddingWaste += (ulong)(c.WastedBytes * c.Count);
             }
 
-            // ── Build top oversized types ─────────────────────────────────────
+            // ── Build oversized types, ranked by instance count ─────────────────
             var oversizedList = new List<OversizedTypeEntry>(oversizedByTypeName.Count);
             foreach (KeyValuePair<string, (int StaticSize, int Count)> kv2 in oversizedByTypeName)
                 oversizedList.Add(new OversizedTypeEntry(kv2.Key, kv2.Value.StaticSize, kv2.Value.Count));
 
             oversizedList.Sort(static (a, b) => b.Count.CompareTo(a.Count));
 
-            int oversizedLimit = Math.Min(oversizedList.Count, options.TopOversizedTypeLimit);
-            var topOversizedTypes = oversizedLimit == oversizedList.Count
-                ? oversizedList
-                : oversizedList.GetRange(0, oversizedLimit);
-
             double avgBoxedInstanceBytes = totalBoxedObjects > 0 ? (double)totalBoxedBytes / totalBoxedObjects : 0.0;
 
             return new BoxingDomainResult(
                 TotalBoxedObjects: totalBoxedObjects,
                 TotalBoxedBytes: totalBoxedBytes,
-                TopBoxedTypes: topBoxedTypes,
+                TopBoxedTypes: boxedTypes,
                 BoxedEnumCount: boxedEnumCount,
                 BoxedEnumBytes: boxedEnumBytes,
                 NullableBoxedCount: nullableCount,
                 NullableBoxedBytes: nullableBytes,
                 OversizedValueTypeInstanceCount: oversizedCount,
-                TopOversizedTypes: topOversizedTypes,
-                TopPaddingWasteTypes: topPaddingWaste,
+                TopOversizedTypes: oversizedList,
+                TopPaddingWasteTypes: paddingWaste,
                 AggregatePaddingWasteBytes: aggregatePaddingWaste,
-                AvgBoxedInstanceBytes: avgBoxedInstanceBytes,
-                TypeScanCapped: scanCapped,
-                TypeScanCapUsed: options.TypeScanCap);
+                AvgBoxedInstanceBytes: avgBoxedInstanceBytes);
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────

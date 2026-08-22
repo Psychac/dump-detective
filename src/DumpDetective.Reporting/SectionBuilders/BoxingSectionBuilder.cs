@@ -39,13 +39,10 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             ["aggregate_padding_waste"] = new NumericMetricValue((double)d.AggregatePaddingWasteBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.AggregatePaddingWasteBytes)),
         };
 
-        if (d.TypeScanCapped)
-            blocks.Add(T($"⚠ Type scan was capped at {d.TypeScanCapUsed:N0} entries — totals may be underestimated."));
-
         if (d.TopBoxedTypes.Count > 0)
         {
-            var rows = new List<TableRow>(Math.Min(d.TopBoxedTypes.Count, TopTypesToShow));
-            foreach (BoxedTypeEntry e in d.TopBoxedTypes.Take(TopTypesToShow))
+            var rows = new List<TableRow>(d.TopBoxedTypes.Count);
+            foreach (BoxedTypeEntry e in d.TopBoxedTypes)
             {
                 rows.Add(new TableRow([
                     Cell(e.ValueTypeName),
@@ -53,9 +50,7 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(FormatHelper.FormatBytes(e.TotalBoxBytes), (long)e.TotalBoxBytes),
                     Cell(e.IsEnum ? "Yes" : "No")]));
             }
-            compactTables.Add(STCompact("Top boxed types by total size", new[] { CH("Value Type"), CH("Box Count","number"), CH("Total Box Bytes","bytes"), CH("IsEnum") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
-            if (d.TopBoxedTypes.Count > TopTypesToShow)
-                blocks.Add(T($"Showing top {TopTypesToShow} boxed types. {d.TopBoxedTypes.Count - TopTypesToShow} additional type(s) omitted."));
+            compactTables.Add(STCompact("Top boxed types by total size", new[] { CH("Value Type"), CH("Box Count","number"), CH("Total Box Bytes","bytes"), CH("IsEnum") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray(), TopTypesToShow));
         }
 
         if (d.TopOversizedTypes.Count > 0)
@@ -74,8 +69,8 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
 
         if (d.TopPaddingWasteTypes.Count > 0)
         {
-            var padRows = new List<TableRow>(Math.Min(d.TopPaddingWasteTypes.Count, TopPaddingToShow));
-            foreach (StructPaddingEntry e in d.TopPaddingWasteTypes.Take(TopPaddingToShow))
+            var padRows = new List<TableRow>(d.TopPaddingWasteTypes.Count);
+            foreach (StructPaddingEntry e in d.TopPaddingWasteTypes)
             {
                 padRows.Add(new TableRow([
                     Cell(e.TypeName),
@@ -85,9 +80,7 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell($"{e.WasteRatio:P0}")]));
             }
             compactTables.Add(STCompact("Struct types with highest padding waste",
-                new[] { CH("Type"), CH("Size"), CH("Field Bytes"), CH("Wasted","bytes"), CH("Waste %", "number", "percent") }, padRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
-            if (d.TopPaddingWasteTypes.Count > TopPaddingToShow)
-                blocks.Add(T($"Showing top {TopPaddingToShow} padding-waste types. {d.TopPaddingWasteTypes.Count - TopPaddingToShow} additional type(s) omitted."));
+                new[] { CH("Type"), CH("Size"), CH("Field Bytes"), CH("Wasted","bytes"), CH("Waste %", "number", "percent") }, padRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray(), TopPaddingToShow));
         }
         else
         {

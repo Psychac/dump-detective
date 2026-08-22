@@ -38,45 +38,58 @@ function applyTableCellClamp(scope) {
 
 function applyManagedTableState(tbl) {
   if (!tbl) return;
-  const limit = Number(tbl.dataset.limit || '0');
-  const showAll = tbl.dataset.showAll === '1';
+  const pageSizeRaw = tbl.dataset.pageSize || '20';
+  const pageSize = pageSizeRaw === 'all' ? 0 : Number(pageSizeRaw);
   const input = document.querySelector('.table-filter-input[data-target-table="' + tbl.id + '"]');
   const query = input ? input.value.trim().toLowerCase() : '';
   const rows = Array.from(tbl.querySelectorAll('tbody tr'));
-  let matched = 0;
-  let visible = 0;
+  const matchedRows = [];
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const text = (row.textContent || '').toLowerCase();
-    const isMatch = !query || text.includes(query);
-    if (!isMatch) {
-      row.hidden = true;
-      continue;
-    }
-    matched++;
-    if (!showAll && limit > 0 && matched > limit) {
-      row.hidden = true;
+    if (!query || text.includes(query)) {
+      matchedRows.push(row);
     } else {
-      row.hidden = false;
-      visible++;
+      row.hidden = true;
     }
   }
+
+  const totalPages = pageSize > 0 ? Math.max(1, Math.ceil(matchedRows.length / pageSize)) : 1;
+  let page = Number(tbl.dataset.page || '1');
+  if (!Number.isFinite(page) || page < 1) page = 1;
+  if (page > totalPages) page = totalPages;
+  tbl.dataset.page = String(page);
+
+  const start = pageSize > 0 ? (page - 1) * pageSize : 0;
+  const end = pageSize > 0 ? start + pageSize : matchedRows.length;
+  for (let i = 0; i < matchedRows.length; i++) {
+    matchedRows[i].hidden = !(i >= start && i < end);
+  }
+  const visible = Math.max(0, Math.min(end, matchedRows.length) - start);
 
   const count = document.querySelector('[data-target-table-count="' + tbl.id + '"]');
   if (count) {
-    count.textContent = query ? (visible + ' of ' + matched + ' matching rows') : (visible + ' rows shown');
+    if (matchedRows.length === 0) {
+      count.textContent = query ? '0 matching rows' : '0 rows';
+    } else {
+      const rangeText = (start + 1) + '–' + Math.min(end, matchedRows.length);
+      count.textContent = query
+        ? (rangeText + ' of ' + matchedRows.length + ' matching rows')
+        : (rangeText + ' of ' + matchedRows.length + ' rows');
+    }
   }
 
-  const btn = document.querySelector('.table-show-all-btn[data-target-table="' + tbl.id + '"]');
-  if (btn) {
-    if (showAll) {
-      btn.textContent = 'Show top ' + limit + ' rows';
-    } else {
-      const labelCount = query ? matched : rows.length;
-      btn.textContent = 'Show all ' + labelCount + ' rows';
-    }
-    btn.disabled = limit <= 0 || matched <= limit;
-  }
+  const sizeSelect = document.querySelector('.table-page-size-select[data-target-table="' + tbl.id + '"]');
+  if (sizeSelect && sizeSelect.value !== pageSizeRaw) sizeSelect.value = pageSizeRaw;
+
+  const indicator = document.querySelector('[data-target-table-page="' + tbl.id + '"]');
+  if (indicator) indicator.textContent = 'Page ' + page + ' of ' + totalPages;
+
+  const prevBtn = document.querySelector('.table-page-prev-btn[data-target-table="' + tbl.id + '"]');
+  if (prevBtn) prevBtn.disabled = page <= 1;
+
+  const nextBtn = document.querySelector('.table-page-next-btn[data-target-table="' + tbl.id + '"]');
+  if (nextBtn) nextBtn.disabled = page >= totalPages;
 
   applyTableCellClamp(tbl);
 }
@@ -168,16 +181,39 @@ export function setupDetailTables() {
     input.addEventListener('input', function () {
       const tableId = input.getAttribute('data-target-table');
       const tbl = tableId ? document.getElementById(tableId) : null;
+      if (!tbl) return;
+      tbl.dataset.page = '1';
       applyManagedTableState(tbl);
     });
   });
 
-  document.querySelectorAll('.table-show-all-btn[data-target-table]').forEach(function (btn) {
+  document.querySelectorAll('.table-page-size-select[data-target-table]').forEach(function (select) {
+    select.addEventListener('change', function () {
+      const tableId = select.getAttribute('data-target-table');
+      const tbl = tableId ? document.getElementById(tableId) : null;
+      if (!tbl) return;
+      tbl.dataset.pageSize = select.value;
+      tbl.dataset.page = '1';
+      applyManagedTableState(tbl);
+    });
+  });
+
+  document.querySelectorAll('.table-page-prev-btn[data-target-table]').forEach(function (btn) {
     btn.addEventListener('click', function () {
       const tableId = btn.getAttribute('data-target-table');
       const tbl = tableId ? document.getElementById(tableId) : null;
       if (!tbl) return;
-      tbl.dataset.showAll = tbl.dataset.showAll === '1' ? '0' : '1';
+      tbl.dataset.page = String(Math.max(1, Number(tbl.dataset.page || '1') - 1));
+      applyManagedTableState(tbl);
+    });
+  });
+
+  document.querySelectorAll('.table-page-next-btn[data-target-table]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      const tableId = btn.getAttribute('data-target-table');
+      const tbl = tableId ? document.getElementById(tableId) : null;
+      if (!tbl) return;
+      tbl.dataset.page = String(Number(tbl.dataset.page || '1') + 1);
       applyManagedTableState(tbl);
     });
   });

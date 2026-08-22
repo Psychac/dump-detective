@@ -33,7 +33,6 @@ internal sealed record ResolvedExecutionOptions(
     JitAnalysisOptions JitAnalysis,
     WeakReferenceAnalysisOptions WeakReferenceAnalysis,
     ModuleAnalysisOptions ModuleAnalysis,
-    DependentHandleAnalysisOptions DependentHandleAnalysis,
     GCHandleAnalysisOptions GCHandleAnalysis,
     StaticRootLeakAnalysisOptions StaticRootLeakAnalysis,
     MemoryAnalysisOptions MemoryAnalysis,

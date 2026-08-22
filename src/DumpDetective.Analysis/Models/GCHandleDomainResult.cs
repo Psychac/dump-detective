@@ -36,4 +36,8 @@ internal sealed record GCHandleDomainResult(
     /// rather than falling back to the target's own shallow size.</summary>
     bool PinnedRetainedBytesIsExact = false,
     /// <summary>Same as <see cref="PinnedRetainedBytesIsExact"/>, for <see cref="AsyncPinnedRetainedBytes"/>.</summary>
-    bool AsyncPinnedRetainedBytesIsExact = false) : AnalyzerDomainResult;
+    bool AsyncPinnedRetainedBytesIsExact = false,
+    int TotalHandlesWarningThreshold = 10000,
+    int PinnedHandleTargetsWarningThreshold = 1000,
+    ulong PinnedRetainedBytesWarningThreshold = 100 * 1024 * 1024,
+    double DependentUnresolvedPercentWarningThreshold = 50.0) : AnalyzerDomainResult;

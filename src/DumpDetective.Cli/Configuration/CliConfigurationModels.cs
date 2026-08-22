@@ -42,7 +42,6 @@ internal sealed class CliConfigurationFileModel
     public JitAnalysisOptions? JitAnalysis { get; init; }
     public WeakReferenceAnalysisOptions? WeakReferenceAnalysis { get; init; }
     public ModuleAnalysisOptions? ModuleAnalysis { get; init; }
-    public DependentHandleAnalysisOptions? DependentHandleAnalysis { get; init; }
     public GCHandleAnalysisOptions? GCHandleAnalysis { get; init; }
     public StaticRootLeakAnalysisOptions? StaticRootLeakAnalysis { get; init; }
     public MemoryAnalysisOptions? MemoryAnalysis { get; init; }
@@ -116,7 +115,6 @@ internal sealed class ExecutionPolicyModel
 [JsonSerializable(typeof(JitAnalysisOptions))]
 [JsonSerializable(typeof(WeakReferenceAnalysisOptions))]
 [JsonSerializable(typeof(ModuleAnalysisOptions))]
-[JsonSerializable(typeof(DependentHandleAnalysisOptions))]
 [JsonSerializable(typeof(GCHandleAnalysisOptions))]
 [JsonSerializable(typeof(StaticRootLeakAnalysisOptions))]
 [JsonSerializable(typeof(MemoryAnalysisOptions))]

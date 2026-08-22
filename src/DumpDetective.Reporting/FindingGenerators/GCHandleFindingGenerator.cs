@@ -8,20 +8,14 @@ internal sealed class GCHandleFindingGenerator : IFindingGenerator
 {
     public string AnalyzerName => "GC Handle Analysis";
 
-    /// <summary>Configurable thresholds (P1-5) — can be set by DI container or tests.</summary>
-    public int TotalHandlesWarningThreshold { get; init; } = 10000;
-    public int PinnedHandleTargetsWarningThreshold { get; init; } = 1000;
-    public ulong PinnedRetainedBytesWarningThreshold { get; init; } = 100 * 1024 * 1024;
-    public double DependentUnresolvedPercentWarningThreshold { get; init; } = 50.0;
-
     public bool CanGenerate(AnalyzerDomainResult result) => result is GCHandleDomainResult;
 
     public IReadOnlyList<InsightFinding> Generate(AnalyzerDomainResult result)
     {
         if (result is not GCHandleDomainResult r) return [];
 
-        FindingSeverity severity = r.PinnedHandleTargets >= PinnedHandleTargetsWarningThreshold
-            || r.TotalHandles >= TotalHandlesWarningThreshold
+        FindingSeverity severity = r.PinnedHandleTargets >= r.PinnedHandleTargetsWarningThreshold
+            || r.TotalHandles >= r.TotalHandlesWarningThreshold
             ? FindingSeverity.Warning : FindingSeverity.Info;
 
         var findings = new List<InsightFinding>(capacity: 2)
@@ -43,7 +37,7 @@ internal sealed class GCHandleFindingGenerator : IFindingGenerator
         // P1-1: Add PinnedRetainedBytes threshold finding
         if (r.PinnedRetainedBytes > 0)
         {
-            FindingSeverity pinnedBytesSeverity = r.PinnedRetainedBytes >= PinnedRetainedBytesWarningThreshold
+            FindingSeverity pinnedBytesSeverity = r.PinnedRetainedBytes >= r.PinnedRetainedBytesWarningThreshold
                 ? FindingSeverity.Warning
                 : FindingSeverity.Info;
 
@@ -64,7 +58,7 @@ internal sealed class GCHandleFindingGenerator : IFindingGenerator
 
         if (r.DependentHandleCount > 0)
         {
-            FindingSeverity dependentSeverity = r.DependentUnresolvedPercent >= DependentUnresolvedPercentWarningThreshold
+            FindingSeverity dependentSeverity = r.DependentUnresolvedPercent >= r.DependentUnresolvedPercentWarningThreshold
                 ? FindingSeverity.Warning
                 : FindingSeverity.Info;
 

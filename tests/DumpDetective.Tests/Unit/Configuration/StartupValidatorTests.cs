@@ -97,7 +97,6 @@ public sealed class StartupValidatorTests
             JitAnalysis: new JitAnalysisOptions(),
             WeakReferenceAnalysis: new WeakReferenceAnalysisOptions(),
             ModuleAnalysis: new ModuleAnalysisOptions(),
-            DependentHandleAnalysis: new DependentHandleAnalysisOptions(),
             GCHandleAnalysis: new GCHandleAnalysisOptions(),
             StaticRootLeakAnalysis: new StaticRootLeakAnalysisOptions(),
             MemoryAnalysis: new MemoryAnalysisOptions(),

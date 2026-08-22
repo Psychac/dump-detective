@@ -84,7 +84,6 @@ internal sealed class AnalyzerExecutionService(FindingGenerationPipeline finding
                 JitAnalysis = resolved.JitAnalysis,
                 WeakReferenceAnalysis = resolved.WeakReferenceAnalysis,
                 ModuleAnalysis = resolved.ModuleAnalysis,
-                DependentHandleAnalysis = resolved.DependentHandleAnalysis,
                 GCHandleAnalysis = resolved.GCHandleAnalysis,
                 StaticRootLeakAnalysis = resolved.StaticRootLeakAnalysis,
                 MemoryAnalysis = resolved.MemoryAnalysis,

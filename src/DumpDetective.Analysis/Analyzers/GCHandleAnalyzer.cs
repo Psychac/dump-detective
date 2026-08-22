@@ -232,18 +232,20 @@ namespace DumpDetective.Analysis.Analyzers
             double dependentUnresolvedPercent = dependentHandleCount == 0 ? 0
                 : dependentUnresolvedTargetCount * 100.0 / dependentHandleCount;
 
-            static List<NameCountEntry> ToTopEntries(Dictionary<string, int> source, int take)
+            static List<NameCountEntry> ToRankedEntries(Dictionary<string, int> source)
             {
-                var list = new List<NameCountEntry>(Math.Min(source.Count, take));
-                foreach (var kvp in source.OrderByDescending(k => k.Value).Take(take))
+                var list = new List<NameCountEntry>(source.Count);
+                foreach (var kvp in source)
                     list.Add(new NameCountEntry(kvp.Key, kvp.Value));
+                list.Sort(static (a, b) => b.Count.CompareTo(a.Count));
                 return list;
             }
-            static List<NameBytesEntry> ToTopByteEntries(Dictionary<string, ulong> source, int take)
+            static List<NameBytesEntry> ToRankedByteEntries(Dictionary<string, ulong> source)
             {
-                var list = new List<NameBytesEntry>(Math.Min(source.Count, take));
-                foreach (var kvp in source.OrderByDescending(k => k.Value).Take(take))
+                var list = new List<NameBytesEntry>(source.Count);
+                foreach (var kvp in source)
                     list.Add(new NameBytesEntry(kvp.Key, kvp.Value));
+                list.Sort(static (a, b) => b.Bytes.CompareTo(a.Bytes));
                 return list;
             }
 
@@ -252,24 +254,28 @@ namespace DumpDetective.Analysis.Analyzers
                 strongLikeHandles,
                 weakLikeHandles,
                 pinnedHandleTargets,
-                ToTopEntries(byKind, options.TopTypeCount),
-                ToTopEntries(allTargetTypes, options.TopTypeCount),
-                ToTopEntries(pinnedTypes, options.TopTypeCount),
+                ToRankedEntries(byKind),
+                ToRankedEntries(allTargetTypes),
+                ToRankedEntries(pinnedTypes),
                 totalPinnedRetainedBytes,
-                ToTopByteEntries(pinnedBytesByType, options.TopTypeCount),
+                ToRankedByteEntries(pinnedBytesByType),
                 totalAsyncPinnedRetainedBytes,
-                ToTopByteEntries(asyncPinnedBytesByType, options.TopTypeCount),
-                ToTopEntries(nullTargetHandlesByKind, options.TopTypeCount),
+                ToRankedByteEntries(asyncPinnedBytesByType),
+                ToRankedEntries(nullTargetHandlesByKind),
                 unknownTargetCount,
                 dependentHandleCount,
                 dependentResolvedEdgeCount,
                 dependentUnresolvedTargetCount,
                 dependentUnresolvedPercent,
-                ToTopEntries(dependentSourceTypeCounts, options.TopTypeCount),
-                ToTopEntries(dependentTargetTypeCounts, options.TopTypeCount),
-                ToTopEntries(dependentSourceTargetPairCounts, options.TopTypeCount),
+                ToRankedEntries(dependentSourceTypeCounts),
+                ToRankedEntries(dependentTargetTypeCounts),
+                ToRankedEntries(dependentSourceTargetPairCounts),
                 PinnedRetainedBytesIsExact: pinnedExactCount > 0 && pinnedFallbackCount == 0,
-                AsyncPinnedRetainedBytesIsExact: asyncPinnedExactCount > 0 && asyncPinnedFallbackCount == 0);
+                AsyncPinnedRetainedBytesIsExact: asyncPinnedExactCount > 0 && asyncPinnedFallbackCount == 0,
+                TotalHandlesWarningThreshold: options.TotalHandlesWarningThreshold,
+                PinnedHandleTargetsWarningThreshold: options.PinnedHandleTargetsWarningThreshold,
+                PinnedRetainedBytesWarningThreshold: options.PinnedRetainedBytesWarningThreshold,
+                DependentUnresolvedPercentWarningThreshold: options.DependentUnresolvedPercentWarningThreshold);
         }
 
         public void Dispose() { }

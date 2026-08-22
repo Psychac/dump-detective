@@ -28,7 +28,6 @@ public sealed record AnalysisOptions
     public JitAnalysisOptions JitAnalysis { get; init; } = new();
     public WeakReferenceAnalysisOptions WeakReferenceAnalysis { get; init; } = new();
     public ModuleAnalysisOptions ModuleAnalysis { get; init; } = new();
-    public DependentHandleAnalysisOptions DependentHandleAnalysis { get; init; } = new();
     public GCHandleAnalysisOptions GCHandleAnalysis { get; init; } = new();
     public StaticRootLeakAnalysisOptions StaticRootLeakAnalysis { get; init; } = new();
     public MemoryAnalysisOptions MemoryAnalysis { get; init; } = new();

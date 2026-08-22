@@ -353,13 +353,47 @@ export function buildAnalyzerSection(section, i) {
         count.textContent = rowCount + ' rows';
         tools.appendChild(count);
 
-        if (limit > 0 && rowCount > limit) {
-          const showAll = document.createElement('button');
-          showAll.type = 'button';
-          showAll.className = 'action-btn table-show-all-btn';
-          showAll.setAttribute('data-target-table', tableId);
-          showAll.textContent = 'Show all ' + rowCount + ' rows';
-          tools.appendChild(showAll);
+        const pageSizeOptions = [10, 20, 50, 100, 'all'];
+        if (rowCount > pageSizeOptions[0]) {
+          const pagination = el('div', 'table-pagination');
+          pagination.setAttribute('data-target-table', tableId);
+
+          const sizeLabel = document.createElement('label');
+          sizeLabel.className = 'table-pagination__size-label';
+          sizeLabel.textContent = 'Rows per page';
+          const sizeSelect = document.createElement('select');
+          sizeSelect.className = 'table-page-size-select';
+          sizeSelect.setAttribute('data-target-table', tableId);
+          sizeSelect.setAttribute('aria-label', 'Rows per page');
+          for (let oi = 0; oi < pageSizeOptions.length; oi++) {
+            const opt = document.createElement('option');
+            opt.value = String(pageSizeOptions[oi]);
+            opt.textContent = pageSizeOptions[oi] === 'all' ? 'All' : String(pageSizeOptions[oi]);
+            if (pageSizeOptions[oi] === limit) opt.selected = true;
+            sizeSelect.appendChild(opt);
+          }
+          sizeLabel.appendChild(sizeSelect);
+          pagination.appendChild(sizeLabel);
+
+          const prevBtn = document.createElement('button');
+          prevBtn.type = 'button';
+          prevBtn.className = 'action-btn table-page-prev-btn';
+          prevBtn.setAttribute('data-target-table', tableId);
+          prevBtn.textContent = 'Prev';
+          pagination.appendChild(prevBtn);
+
+          const pageIndicator = el('span', 'table-pagination__indicator');
+          pageIndicator.setAttribute('data-target-table-page', tableId);
+          pagination.appendChild(pageIndicator);
+
+          const nextBtn = document.createElement('button');
+          nextBtn.type = 'button';
+          nextBtn.className = 'action-btn table-page-next-btn';
+          nextBtn.setAttribute('data-target-table', tableId);
+          nextBtn.textContent = 'Next';
+          pagination.appendChild(nextBtn);
+
+          tools.appendChild(pagination);
 
           const printNote = el('div', 'table-print-note');
           printNote.textContent = 'Print/export summary: table body omitted. Showing summary only for ' + rowCount + ' rows.';
@@ -377,8 +411,8 @@ export function buildAnalyzerSection(section, i) {
         tableEl.id = tableId;
         tableEl.classList.add('detail-filterable-table');
         tableEl.dataset.responsiveStack = '1';
-        tableEl.dataset.limit = String(limit > 0 ? limit : 0);
-        tableEl.dataset.showAll = '0';
+        tableEl.dataset.pageSize = String(limit > 0 ? limit : 'all');
+        tableEl.dataset.page = '1';
         tableEl.dataset.hydrated = '0';
         tableEl.dataset.lazyHydrate = shouldLazyHydrate ? '1' : '0';
         const thead = document.createElement('thead');

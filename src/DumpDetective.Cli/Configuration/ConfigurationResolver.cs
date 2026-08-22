@@ -58,8 +58,7 @@ internal sealed class ConfigurationResolver
         JitAnalysisOptions jitAnalysis = Resolve(usedConfigFile, BuildJitAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, JitAnalysisOptions.Preset), fileModel, request);
         WeakReferenceAnalysisOptions weakReferenceAnalysis = Resolve(usedConfigFile, BuildWeakReferenceAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, WeakReferenceAnalysisOptions.Preset), fileModel, request);
         ModuleAnalysisOptions moduleAnalysis = Resolve(usedConfigFile, BuildModuleAnalysisFromConfig, _ => new ModuleAnalysisOptions(), fileModel, request);
-        DependentHandleAnalysisOptions dependentHandleAnalysis = Resolve(usedConfigFile, BuildDependentHandleAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, DependentHandleAnalysisOptions.Preset), fileModel, request);
-        GCHandleAnalysisOptions gcHandleAnalysis = Resolve(usedConfigFile, BuildGCHandleAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, GCHandleAnalysisOptions.Preset), fileModel, request);
+        GCHandleAnalysisOptions gcHandleAnalysis = Resolve(usedConfigFile, BuildGCHandleAnalysisFromConfig, _ => new GCHandleAnalysisOptions(), fileModel, request);
         StaticRootLeakAnalysisOptions staticRootLeakAnalysis = Resolve(usedConfigFile, BuildStaticRootLeakAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, StaticRootLeakAnalysisOptions.Preset), fileModel, request);
         MemoryAnalysisOptions memoryAnalysis = Resolve(usedConfigFile, BuildMemoryAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, MemoryAnalysisOptions.Preset), fileModel, request);
 
@@ -128,7 +127,6 @@ internal sealed class ConfigurationResolver
             jitAnalysis,
             weakReferenceAnalysis,
             moduleAnalysis,
-            dependentHandleAnalysis,
             gcHandleAnalysis,
             staticRootLeakAnalysis,
             memoryAnalysis,
@@ -458,19 +456,15 @@ internal sealed class ConfigurationResolver
             : ApplyOptionsOverrides(new ModuleAnalysisOptions(), config.ModuleAnalysis);
     }
 
-    private static DependentHandleAnalysisOptions BuildDependentHandleAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "DependentHandle",
-            config.DependentHandleAnalysis,
-            DependentHandleAnalysisOptions.Preset);
-
     private static GCHandleAnalysisOptions BuildGCHandleAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "GCHandle",
-            config.GCHandleAnalysis,
-            GCHandleAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "GCHandle", out JsonElement section))
+            return ApplySectionOverrides(new GCHandleAnalysisOptions(), section);
+
+        return config.GCHandleAnalysis is null
+            ? new GCHandleAnalysisOptions()
+            : ApplyOptionsOverrides(new GCHandleAnalysisOptions(), config.GCHandleAnalysis);
+    }
 
     private static StaticRootLeakAnalysisOptions BuildStaticRootLeakAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
         => BuildAnalyzerOptionsFromConfig(

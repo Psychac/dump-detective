@@ -12,8 +12,10 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 4 of 33 analyzers done — §9.1 Boxing, §9.2 ObjectShape, §9.3 Module,
-§9.4 GCGeneration.** See each section and the §7 verdict table for what shipped in each.
+**Implementation progress: 5 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
+§9.3 Module, §9.4 GCGeneration, §9.5 GCHandle (§9.6's orphaned `DependentHandleAnalysisOptions`
+was also deleted alongside GCHandle — not a separate registered analyzer, per the row-4 cross-reference
+below).** See each section and the §7 verdict table for what shipped in each.
 
 > **Correction (roster built from the wrong source):** the audit was originally built by walking
 > `src/DumpDetective.Core/Options/`, not the analyzer registry — so any analyzer with no dedicated
@@ -284,8 +286,8 @@ radius is a single cosmetic report field, not root exactness.
 |---|---|---|---|---|---|
 | 1 | Boxing | aggregator | **GREEN** ✅ DONE | 4 of 5 | §9.1 — cap bites today; deleting it also deletes a determinism workaround |
 | 2 | GCGeneration | aggregator | **GREEN** ✅ DONE | 2 of 5 | §9.4 — pure output slicing; `PohThresholdPercent` (flagged dead by V4) was instead wired up to a real POH-share finding rather than deleted — see implementation notes; 3 thresholds survive |
-| 3 | GCHandle | aggregator | **GREEN** | 1 of 5 | §9.5 — pure output slicing; 4 thresholds survive |
-| 4 | *(GCHandle, cont'd)* | — | — | — | `DependentHandleAnalysisOptions` is **not a registered analyzer** — orphaned options class, folded into §9.6 below rather than counted as its own row |
+| 3 | GCHandle | aggregator | **GREEN** ✅ DONE | 1 of 5 | §9.5 — pure output slicing; 4 thresholds survive, but were only reachable in the analyzer — the finding generator read its own disconnected copies until this pass rewired them through the domain result |
+| 4 | *(GCHandle, cont'd)* | — | ✅ DONE | — | `DependentHandleAnalysisOptions` is **not a registered analyzer** — orphaned options class, folded into §9.6 below rather than counted as its own row; deleted outright |
 | 5 | LockGraph | aggregator | **GREEN** | 1 of 1 | §9.7 — options class deleted outright |
 | 6 | LohFragmentation | aggregator | **GREEN** | 2 of 2 | §9.8 — one cap applies during collection, truncating a type aggregation |
 | 7 | ObjectShape | aggregator | **GREEN** ✅ DONE | 2 of 2 | §9.2 — cap of 200 types corrupts three whole-heap aggregates |
@@ -745,7 +747,7 @@ what §5's procedural grep step systematises.
 
 ---
 
-### 9.5 GCHandle — **GREEN**
+### 9.5 GCHandle — **GREEN** ✅ IMPLEMENTED
 
 [GCHandleAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/GCHandleAnalyzer.cs) ·
 [GCHandleAnalysisOptions.cs](../../src/DumpDetective.Core/Options/GCHandleAnalysisOptions.cs)
@@ -767,9 +769,42 @@ Category 1 mechanism (§10).
 This analyzer also handles dependent handles (hence
 `DependentUnresolvedPercentWarningThreshold`), which is relevant to §9.6.
 
+#### Implementation notes (as shipped)
+
+- **Renamed `ToTopEntries`/`ToTopByteEntries` to `ToRankedEntries`/`ToRankedByteEntries`** and dropped
+  the `take` parameter — each now builds the full sorted list from its source `Dictionary`, replacing
+  the `.OrderByDescending(...).Take(take)` LINQ with an explicit `List<T>.Sort` per the no-LINQ-in-hot-paths
+  rule (the LINQ chain here wasn't itself hot-path-relevant at ~thousands of distinct handle target
+  types, but there's no reason to keep it once touching the call site anyway).
+- **`GCHandleSectionBuilder` needed no data-flow change** — its seven `STCompact` calls already
+  rendered whatever `IReadOnlyList` the domain result gave them with no additional `.Take()`. Only
+  addition: each call now passes an explicit `TopTypesToShow = 15` `rowLimit` (matching the deleted
+  option's old default) so the initial page size doesn't silently jump to "however many distinct
+  types this dump happens to have."
+- **Second, independent defect found and fixed while touching this analyzer — the same "V4 grep says
+  dead, but the real bug is a wiring gap" shape as §9.4's `PohThresholdPercent`, but one layer deeper.**
+  `GCHandleFindingGenerator` did not read `GCHandleAnalysisOptions.TotalHandlesWarningThreshold`/
+  `PinnedHandleTargetsWarningThreshold`/`PinnedRetainedBytesWarningThreshold`/
+  `DependentUnresolvedPercentWarningThreshold` at all — it declared its own same-named `{ get; init; }`
+  properties with independently hardcoded defaults, and nothing ever set them from the resolved
+  options (finding generators are constructed once via the module catalog and only ever see
+  `AnalyzerDomainResult` in `Generate`, not `AnalysisContext`/`AnalysisOptions` — there's no injection
+  path from resolved CLI/config options to a finding generator's properties today). So these four
+  "keep, semantic" thresholds were fully plumbed through config/CLI, reached `GCHandleAnalysisOptions`
+  correctly, and then went nowhere — configuring them in a config file did nothing, silently, exactly
+  the failure mode this whole doc exists to eliminate. **Fixed using the pattern `GCGenerationDomainResult`
+  already established successfully**: added the four thresholds to `GCHandleDomainResult` (populated by
+  `GCHandleAnalyzer` from `options`), and changed `GCHandleFindingGenerator` to read `r.<Threshold>`
+  instead of its own disconnected copies. **General lesson, now confirmed twice: before trusting a
+  "keep, semantic threshold" audit row, check that the finding generator (not just the analyzer) actually
+  reads it — a threshold can be alive in the analyzer's options class and still be practically dead
+  because the consumer reads a different, unconnected copy of the same value.**
+- Same `ConfigurationResolver` profile-bypass pattern as prior sections — `Preset` deleted, so
+  `BuildGCHandleAnalysisFromConfig` applies overrides directly onto `new GCHandleAnalysisOptions()`.
+
 ---
 
-### 9.6 DependentHandle options — **GREEN**, and the class looks orphaned
+### 9.6 DependentHandle options — **GREEN** ✅ IMPLEMENTED, and the class looks orphaned
 
 [DependentHandleAnalysisOptions.cs](../../src/DumpDetective.Core/Options/DependentHandleAnalysisOptions.cs)
 
@@ -804,6 +839,16 @@ kept as a placeholder.
 **Work item:** delete the class and its four plumbing references. Removing it from
 `ResolvedExecutionOptions` / `AnalysisOptions` may be a schema-visible change — apply the §9.1 item 4
 check.
+
+#### Implementation notes (as shipped)
+
+- **Confirmed orphaned exactly as audited** — no reflection/serialization consumer, no planned-but-missing
+  analyzer found. Deleted `DependentHandleAnalysisOptions.cs` outright and its five plumbing references
+  (`AnalysisOptions`, `CliConfigurationModels` property + `[JsonSerializable]` entry,
+  `ConfigurationResolver` builder method + call site + constructor argument, `ResolvedExecutionOptions`,
+  `AnalyzerExecutionService`) plus two test call sites (`ResolvedExecutionOptionsFactory`,
+  `StartupValidatorTests`). No schema-bump concern — same D2 reasoning as §9.1/§9.2 (never reaches the
+  JSON report surface).
 
 ---
 

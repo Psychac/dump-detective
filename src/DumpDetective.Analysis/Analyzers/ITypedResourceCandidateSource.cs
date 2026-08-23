@@ -17,12 +17,15 @@ internal interface ITypedResourceCandidateSource
 }
 
 /// <summary>
-/// Opt-in interface for the two typed-resource quartet members that read a per-instance
-/// runtime state field (<c>DbConnectionAnalyzer</c>, <c>WcfChannelAnalyzer</c>). Pairs with
+/// Opt-in interface for the typed-resource quartet members that read a per-instance runtime
+/// state field via the shared per-object heap scan (<c>DbConnectionAnalyzer</c>,
+/// <c>WcfChannelAnalyzer</c>, <c>HttpObjectAnalyzer</c>). Pairs with
 /// <see cref="InstanceStateSampler{TSnapshot}"/>: <see cref="TypedResourceScanDriver"/> enforces
 /// that a sample slot is reserved via <see cref="InstanceStateSampler{TSnapshot}.TryReserveSample"/>
 /// before <see cref="TrySample"/> is ever called, so implementations can't accidentally read a
-/// field for an entry that was never gated.
+/// field for an entry that was never gated. <c>TimerLeakAnalyzer</c> is the fourth quartet member
+/// but doesn't implement this — it isn't a heap-scan participant and samples its one evidence
+/// instance directly, outside this reserve/top-N mechanism.
 /// </summary>
 internal interface ITypedResourceInstanceSampler<TSnapshot>
 {

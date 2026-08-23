@@ -12,7 +12,7 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 19 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
+**Implementation progress: 20 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
 §9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph, §9.8 LohFragmentation, §9.9
 SegmentReservation, §9.10 Jit, §9.11 Array, §9.12 String (partial — AMBER, not GREEN; see its
 implementation notes for what's deliberately still deferred), §9.13 AsyncStateMachine, §9.14
@@ -23,7 +23,10 @@ real work-scoping thresholds and kept), §9.18 Dominator (only one confirmed-dea
 `Preset`/`Default` removed and all kept fields stopped tier-varying), §9.19 EventLeak (partial —
 AMBER; `MaxGroupsToEnrich` fully deleted thanks to the existing wall-clock budget, but
 `EnableLowIncomingRefsCheck`'s underlying correctness bug documented and deliberately left for a
-follow-up) (§9.6's orphaned `DependentHandleAnalysisOptions` was also deleted alongside GCHandle —
+follow-up), §9.21 TimerLeak (had no `AnalysisOptions` knobs to begin with; found and fixed a dead
+`ITypedResourceInstanceSampler` implementation outside the original audit scope — a bogus `Generation`
+sentinel and a fully-unconsumed sample payload — and wired the sample data into the report instead of
+deleting it) (§9.6's orphaned `DependentHandleAnalysisOptions` was also deleted alongside GCHandle —
 not a separate registered analyzer, per the row-4 cross-reference below).** See each section and
 the §7 verdict table for what shipped in each.
 
@@ -314,7 +317,7 @@ radius is a single cosmetic report field, not root exactness.
 | 18 | Dominator | retained-size | **GREEN** ✅ DONE | 1 of 8 (7 recategorized/already-resolved, kept) | §9.18 — already exact; owns `RetentionOptions` exclusively (see row 22 note); only confirmed-dead `TopFinalizerTypesToShow` deleted; `Preset`/`Default` deleted, all kept fields stopped tier-varying |
 | 19 | EventLeak | root-path | **AMBER** ⚠️ PARTIAL | 8 of 10 (`MinSubscribers` also deleted, a correction; `EnableLowIncomingRefsCheck` deliberately deferred) | §9.19 — wall-clock budget let `MaxGroupsToEnrich` be fully deleted (rare win); found `CountIncomingRefs` is not just slow but wrong (arbitrary 500-object sample) — documented, not fixed this pass |
 | 20 | ReferenceChain | root-path | **AMBER** ⚠️ PARTIAL (was RED) | 5 of 8 (+3 dead `ExecutionPolicy`/CLI knobs found and deleted) | §9.20 — parallel profile enum deleted, no longer RED; `LargeFanoutThreshold`/`MaxCandidateNodes`/`MaxRootExpansionDepth` recategorized and kept (real search-layer caps, not the now-resolved index-layer one) — real hub fan-in measured up to 10.76M keeps this AMBER |
-| 21 | TimerLeak | root-path | **AMBER** | 0 (no options class) | §9.21 — no knobs of its own; inherits every shared traversal bound |
+| 21 | TimerLeak | root-path | **GREEN** ✅ DONE | 0 (no options class) | §9.21 — no knobs of its own; inherits every shared traversal bound; found and fixed a dead `ITypedResourceInstanceSampler` implementation (bogus `Generation` sentinel, unconsumed sample payload) outside the original audit and wired the sample into the report |
 | 22 | *(= Dominator, row 18)* | — | — | — | "Retention" is **not a separate analyzer** — `RetentionOptions` belongs to `DominatorAnalyzer`. Originally audited as a second, duplicate row; findings (`RootPathLargeFanoutThreshold` exclusion, `MaxLeakScanObjects` vs. 87M-object heap, etc.) merged into §9.18. |
 | 23 | Thread | non-heap | **AMBER** | 8 of 10 | §9.23 — a **third** tier system (`AdaptForSize`); scans 8 frames per thread |
 | 24 | ThreadStackCluster | non-heap | **GREEN** | 6 of 7 | §9.24 — 6-frame signatures merge genuinely different stacks |
@@ -2149,7 +2152,7 @@ beyond the node/depth budget. This is why the analyzer moves from RED to **AMBER
 
 ---
 
-### 9.21 TimerLeak — **AMBER**, no options class
+### 9.21 TimerLeak — **GREEN** ✅ IMPLEMENTED, no options class
 
 [TimerLeakAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/TimerLeakAnalyzer.cs)
 
@@ -2158,14 +2161,54 @@ Has **no options class at all** and does not appear in `AnalysisOptions`. It cal
 ([:158](../../src/DumpDetective.Analysis/Analyzers/TimerLeakAnalyzer.cs#L158)) and consumes
 `searchTruncated`.
 
-Zero knobs to delete — it inherits only `RootPathFinder` defaults now that §6.2 (`MaxParentsPerChild`,
-deleted) and §6.3 (`RootSetCache`'s 256-frame cap, scoped to a cosmetic report label, not root
-discovery) are both resolved. It is the cleanest demonstration that this refactor is not only about
-the options surface: an analyzer with no configuration at all was still not exact, purely from
-shared-traversal bounds below the options layer.
+Zero `AnalysisOptions` knobs to delete — it inherits only `RootPathFinder` defaults now that §6.2
+(`MaxParentsPerChild`, deleted) and §6.3 (`RootSetCache`'s 256-frame cap, scoped to a cosmetic report
+label, not root discovery) are both resolved. It is the cleanest demonstration that this refactor is
+not only about the options surface: an analyzer with no configuration at all was still not exact,
+purely from shared-traversal bounds below the options layer.
 
 **Was used as the canary.** Because it has no knobs, its output changing after the shared traversal
 became exact was attributable purely to that, not to any per-analyzer option change.
+
+#### A dead-sampler defect found outside the original audit scope, and fixed
+
+`TimerLeakAnalyzer` implements `ITypedResourceCandidateSource` (real, used for `IsCandidateType`) and
+previously also declared `ITypedResourceInstanceSampler<TimerStateSnapshot>` — `MaxStateSamplesPerType
+= 100`, `TopSampleCap = 20` — to satisfy the same "typed-resource quartet" contract as
+`DbConnectionAnalyzer`/`WcfChannelAnalyzer`/`HttpObjectAnalyzer` (§9.32-9.34). Unlike those three,
+Timer never wired into the real mechanism: it isn't an `IHeapIndexScanParticipant`, so
+`TypedResourceScanDriver.CreateSampler`/`TryGetSample` (the reserve-slot + top-N `InstanceStateSampler`
+machinery those two properties actually parameterize) were never called for it.
+`PopulateEvidence` instead fetched exactly one address per type via `cache.GetSampleInstanceAddress`
+and sampled it directly — so `MaxStateSamplesPerType`/`TopSampleCap` were dead, satisfying an interface
+contract they never fulfilled. Two further defects surfaced from tracing this:
+
+- The `List<TimerStateSnapshot>(sampler.MaxStateSamplesPerType)` capacity hint pre-sized a list to 100
+  for something that only ever held 0 or 1 item — harmless (small type), but another instance of
+  §11.6's "configured value ≠ applied value" pattern.
+- The evidence sample's `HeapEntry` was fabricated as `new HeapEntry(address, 0, 0)` — the 3-arg ctor
+  defaults `Generation = -1` (the "unresolved" sentinel per
+  [HeapEntry.cs:9-16](../../src/DumpDetective.Analysis/Indexing/HeapEntry.cs#L9-L16)) — so
+  `TimerStateSnapshot.Generation` was always `(uint)(-1)` = `4294967295`, never a real value.
+- Worse than either: `TimerStateSnapshot`'s period/callback-owner/generation was computed but **never
+  consumed anywhere** — not in `TimerLeakSectionBuilder`, not in `TimerLeakFindingGenerator`, not in
+  the trend comparer. Only `Evidence` (the root path) was read; the whole sampling branch was dead
+  computation end-to-end.
+
+**Fix shipped:** stopped implementing `ITypedResourceInstanceSampler<TimerStateSnapshot>` on
+`TimerLeakAnalyzer` (deleted the two dead properties); the interface's XML doc corrected to list the
+three real heap-scan-backed members (`DbConnectionAnalyzer`, `WcfChannelAnalyzer`,
+`HttpObjectAnalyzer`) and note Timer's different, direct-sample shape. `TrySample` became a plain
+private static `TrySampleTimerState(ClrHeap, ulong, string)`, called directly — no more `HeapEntry`
+fabrication. Generation is now resolved for real via the existing
+[`GenerationTagResolver.Resolve`](../../src/DumpDetective.Analysis/Traversal/Dominator/GenerationTagResolver.cs)
+helper (already used by Stage B persistence), replacing the bogus sentinel with an actual
+`GenerationTag` (Gen0/Gen1/Gen2/LOH/POH/Frozen/Unknown). Rather than deleting the now-dead-code
+sampling branch outright, **`Samples` was wired into the report**: `TimerLeakSectionBuilder`'s
+"Timer-related objects by type" table gained three columns — Sample Period, Sample Callback Owner,
+Sample Gen — populated from `TimerObjectTypeSummary.Samples[0]` when present (only
+`System.Threading.TimerQueueTimer` yields a sample; other rows show `—`). No `TimerLeakDomainResult`
+count/total changed — this is additive report detail, not an exactness fix to the headline numbers.
 
 ---
 

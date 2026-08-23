@@ -207,7 +207,7 @@ internal sealed record HttpObjectDomainResult(
 /// </summary>
 internal sealed record TimerStateSnapshot(
     ulong Address,
-    uint Generation,
+    DumpDetective.Core.Enums.GenerationTag Generation,
     long PeriodMs,
     string? CallbackOwnerType);
 

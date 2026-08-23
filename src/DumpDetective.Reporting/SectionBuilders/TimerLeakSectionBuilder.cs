@@ -54,10 +54,15 @@ internal sealed class TimerLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     hasTruncatedSearch = true;
                 }
 
+                TimerStateSnapshot? sample = t.Samples is { Count: > 0 } ? t.Samples[0] : null;
+
                 rows.Add(Row(
                     Cell(displayName),
                     Cell($"{t.Count:N0}", t.Count),
-                    Cell(FormatBytes(t.TotalBytes))));
+                    Cell(FormatBytes(t.TotalBytes)),
+                    Cell(sample != null && sample.PeriodMs >= 0 ? $"{sample.PeriodMs:N0} ms" : "—"),
+                    Cell(sample?.CallbackOwnerType ?? "—"),
+                    Cell(sample != null ? FormatGeneration(sample.Generation) : "—")));
             }
 
             var compactRows = new List<CompactRow>(rows.Count);
@@ -72,7 +77,11 @@ internal sealed class TimerLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                 compactRows.Add(R(values));
             }
 
-            compactTables.Add(STCompact("Timer-related objects by type", new[] { CH("Type"), CH("Count","number"), CH("Heap Size","bytes") }, compactRows));
+            compactTables.Add(STCompact("Timer-related objects by type", new[]
+            {
+                CH("Type"), CH("Count", "number"), CH("Heap Size", "bytes"),
+                CH("Sample Period"), CH("Sample Callback Owner"), CH("Sample Gen")
+            }, compactRows));
 
             if (hasTruncatedSearch)
             {
@@ -118,4 +127,15 @@ internal sealed class TimerLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
             KeyMetrics: keyMetrics,
             CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
+
+    private static string FormatGeneration(GenerationTag tag) => tag switch
+    {
+        GenerationTag.Gen0 => "Gen0",
+        GenerationTag.Gen1 => "Gen1",
+        GenerationTag.Gen2 => "Gen2",
+        GenerationTag.Loh => "LOH",
+        GenerationTag.Poh => "POH",
+        GenerationTag.Frozen => "Frozen",
+        _ => "Unknown",
+    };
 }

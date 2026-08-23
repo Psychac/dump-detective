@@ -1,7 +1,8 @@
-using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Traversal;
+using DumpDetective.Analysis.Traversal.Dominator;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 
 using Microsoft.Diagnostics.Runtime;
@@ -16,13 +17,10 @@ namespace DumpDetective.Analysis.Analyzers;
 ///   - System.Timers.Timer
 ///   - System.Threading.TimerQueueTimer / TimerHolder
 /// </summary>
-public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource, ITypedResourceInstanceSampler<TimerStateSnapshot>, IRequiresReachableGraphIndex
+public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource, IRequiresReachableGraphIndex
 {
     public string Name => "Timer Leak Analysis";
     public string Category => "Infrastructure";
-
-    public int MaxStateSamplesPerType => 100;
-    public int TopSampleCap => 20;
 
     private static readonly string[] OtherTimerNamespacePrefixes = ["System.Threading.", "System.Timers."];
     private static readonly string[] OtherTimerTokens = ["Timer"];
@@ -138,9 +136,6 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
         };
         var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType, static _ => false, cache.TryGetReverseIndexProvider(), cache);
 
-        var sampler = new TimerLeakAnalyzer();
-        var samplesByType = new Dictionary<string, List<TimerStateSnapshot>>(byType.Count);
-
         for (int i = 0; i < byType.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -149,11 +144,7 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
             if (sampleAddress is null)
                 continue;
 
-            var samples = new List<TimerStateSnapshot>(sampler.MaxStateSamplesPerType);
-            var entry = new HeapEntry(sampleAddress.Value, 0, 0);
-            var snapshot = (sampler as ITypedResourceInstanceSampler<TimerStateSnapshot>).TrySample(heap, entry, summary.TypeName);
-            if (snapshot != null)
-                samples.Add(snapshot);
+            TimerStateSnapshot? snapshot = TrySampleTimerState(heap, sampleAddress.Value, summary.TypeName);
 
             bool found = finder.TryFindAnyRootPath(sampleAddress.Value, roots, out string? rootKind, out List<ulong>? addresses, out bool searchTruncated, out _, out _);
             string? rootPath = found ? RootPathSearchSupport.FormatPath(heap, rootKind!, addresses, cache) : null;
@@ -165,20 +156,23 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
                     rootPath,
                     searchTruncated,
                     [new EvidenceSignal("InstanceCount", "Instances of this timer type", summary.Count)]),
-                Samples = samples.Count > 0 ? samples : null
+                Samples = snapshot != null ? [snapshot] : null
             };
         }
     }
 
-    TimerStateSnapshot? ITypedResourceInstanceSampler<TimerStateSnapshot>.TrySample(ClrHeap heap, in HeapEntry entry, string typeName)
+    // Only System.Threading.TimerQueueTimer exposes a period/callback-owner worth reporting — the
+    // other timer wrapper types don't hold that state directly on the object read here.
+    private static TimerStateSnapshot? TrySampleTimerState(ClrHeap heap, ulong address, string typeName)
     {
         if (!typeName.Equals("System.Threading.TimerQueueTimer", StringComparison.Ordinal))
             return null;
 
-        long periodMs = TryReadPeriod(heap, entry.Address);
-        string? callbackOwnerType = TryReadCallbackOwner(heap, entry.Address);
+        long periodMs = TryReadPeriod(heap, address);
+        string? callbackOwnerType = TryReadCallbackOwner(heap, address);
+        GenerationTag generation = GenerationTagResolver.Resolve(heap, address);
 
-        return new TimerStateSnapshot(entry.Address, (uint)entry.Generation, periodMs, callbackOwnerType);
+        return new TimerStateSnapshot(address, generation, periodMs, callbackOwnerType);
     }
 
     private static long TryReadPeriod(ClrHeap heap, ulong address)

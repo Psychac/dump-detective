@@ -37,7 +37,7 @@ internal sealed class ConfigurationResolver
         DiagnosticsOptions diagnostics = Resolve(usedConfigFile, BuildDiagnosticsFromConfig, AnalyzerOptionsBuilder.BuildDiagnosticsFromCli, fileModel, request);
         ReportOptions report = Resolve(usedConfigFile, BuildReportFromConfig, AnalyzerOptionsBuilder.BuildReportFromCli, fileModel, request);
         ExecutionPolicy executionPolicy = BuildExecutionPolicy(fileModel, memoryLeak);
-        CrashAnalysisOptions crash = Resolve(usedConfigFile, BuildCrashFromConfig, req => AnalyzerOptionsBuilder.BuildValidatedBalancedPresetFromCli(req, CrashAnalysisOptions.Preset, CrashAnalysisOptions.Validate), fileModel, request);
+        CrashAnalysisOptions crash = Resolve(usedConfigFile, BuildCrashFromConfig, _ => new CrashAnalysisOptions(), fileModel, request);
         AsyncTaskAnalysisOptions asyncTaskAnalysis = Resolve(usedConfigFile, BuildAsyncTaskAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, AsyncTaskAnalysisOptions.Preset), fileModel, request);
         AsyncStateMachineAnalysisOptions asyncStateMachineAnalysis = Resolve(usedConfigFile, BuildAsyncStateMachineAnalysisFromConfig, _ => new AsyncStateMachineAnalysisOptions(), fileModel, request);
         ArrayAnalysisOptions arrayAnalysis = Resolve(usedConfigFile, BuildArrayAnalysisFromConfig, _ => new ArrayAnalysisOptions(), fileModel, request);
@@ -297,18 +297,12 @@ internal sealed class ConfigurationResolver
 
     private static CrashAnalysisOptions BuildCrashFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
     {
-        CrashAnalysisOptionsModel? legacy = config.Crash;
-        CrashAnalysisOptionsModel? modern = null;
-        if (TryGetAnalyzerSection(config, "Crash", out JsonElement modernSection))
-            modern = modernSection.Deserialize<CrashAnalysisOptionsModel>();
-        CrashAnalysisOptionsModel? model = MergeCrashModel(primary: modern, fallback: legacy);
+        if (TryGetAnalyzerSection(config, "Crash", out JsonElement section))
+            return ApplySectionOverrides(new CrashAnalysisOptions(), section);
 
-        AnalysisProfile profile = ResolveAnalyzerProfile(model?.Profile, config.Profile);
-        CrashAnalysisOptions preset = CrashAnalysisOptions.Preset(profile);
-        CrashAnalysisOptions effective = CrashAnalysisOptions.ApplyOverrides(preset, model);
-        effective = CrashAnalysisOptions.Validate(effective);
-
-        return effective;
+        return config.Crash is null
+            ? new CrashAnalysisOptions()
+            : ApplyOptionsOverrides(new CrashAnalysisOptions(), config.Crash);
     }
 
     private static AsyncTaskAnalysisOptions BuildAsyncTaskAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
@@ -607,27 +601,6 @@ internal sealed class ConfigurationResolver
             "full" => AnalysisProfile.Full,
             "deep" => AnalysisProfile.Full,
             _ => throw new ArgumentException($"Invalid Analysis Profile value '{raw}' in config.")
-        };
-    }
-
-    private static CrashAnalysisOptionsModel? MergeCrashModel(CrashAnalysisOptionsModel? primary, CrashAnalysisOptionsModel? fallback)
-    {
-        if (primary is null)
-            return fallback;
-        if (fallback is null)
-            return primary;
-
-        return new CrashAnalysisOptionsModel
-        {
-            Profile = primary.Profile ?? fallback.Profile,
-            MaxExceptionsPerType = primary.MaxExceptionsPerType ?? fallback.MaxExceptionsPerType,
-            TopExceptionTypesToInclude = primary.TopExceptionTypesToInclude ?? fallback.TopExceptionTypesToInclude,
-            MaxDetailedExceptionsPerType = primary.MaxDetailedExceptionsPerType ?? fallback.MaxDetailedExceptionsPerType,
-            MaxOriginalStackFramesToPrint = primary.MaxOriginalStackFramesToPrint ?? fallback.MaxOriginalStackFramesToPrint,
-            MaxCurrentThreadFramesToPrint = primary.MaxCurrentThreadFramesToPrint ?? fallback.MaxCurrentThreadFramesToPrint,
-            TopCrashThreadCandidates = primary.TopCrashThreadCandidates ?? fallback.TopCrashThreadCandidates,
-            TopDetailedExceptionInstances = primary.TopDetailedExceptionInstances ?? fallback.TopDetailedExceptionInstances,
-            IncludeAllTypesInPayload = primary.IncludeAllTypesInPayload ?? fallback.IncludeAllTypesInPayload,
         };
     }
 

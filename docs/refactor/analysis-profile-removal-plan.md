@@ -12,7 +12,7 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 23 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
+**Implementation progress: 24 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
 §9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph, §9.8 LohFragmentation, §9.9
 SegmentReservation, §9.10 Jit, §9.11 Array, §9.12 String (partial — AMBER, not GREEN; see its
 implementation notes for what's deliberately still deferred), §9.13 AsyncStateMachine, §9.14
@@ -33,7 +33,11 @@ ThreadStackCluster (6-frame lossy signature deleted — cluster identity is now 
 once §9.23's unbounded frame capture landed; found and fixed a dead always-`false` `Truncated` render
 flag in passing), §9.25 Hang (`MaxTasksToScan` was corrupting `PendingTasks`/`FaultedTasks`/
 `CanceledTasks` past the cap, not just report width; found the real waiting-thread display cap was a
-hardcoded `.Take(10)` masquerading behind the already-dead `TopWaitingThreadsPerGroup` option)
+hardcoded `.Take(10)` masquerading behind the already-dead `TopWaitingThreadsPerGroup` option), §9.26
+Crash (corrected its own "options class deleted outright" claim — `MaxExceptionsPerType` gates real
+per-object stack-trace/inner-exception-chain extraction, kept as a fixed constant; the other seven
+knobs deleted as originally planned, plus one more confirmed-dead knob and a genuinely-uncapped live
+stack walk found in passing)
 (§9.6's orphaned
 `DependentHandleAnalysisOptions` was also deleted alongside GCHandle — not a separate registered
 analyzer, per the row-4 cross-reference below).** See each section and the §7 verdict table for what
@@ -331,7 +335,7 @@ radius is a single cosmetic report field, not root exactness.
 | 23 | Thread | non-heap | **GREEN** ✅ DONE | 9 of 10 (1 kept, `PrewarmCacheInBackground`) | §9.23 — a **third** tier system (`AdaptForSize`) deleted along with its double-applying bug; unbounded stack walk via a named 100K sentinel, not `int.MaxValue`; reservoir-sampled "other threads" redesigned into a complete deterministic `STCompact` table |
 | 24 | ThreadStackCluster | non-heap | **GREEN** ✅ DONE | 6 of 7 (1 kept, `MinClusterSize`; `ProduceClusterExports` stays pending D6's deferred cross-cutting move) | §9.24 — 6-frame signatures no longer merge genuinely different stacks; fixed a dead always-false `Truncated` render flag found in passing |
 | 25 | Hang | non-heap | **GREEN** ✅ DONE | 4 of 5 (1 kept, `HighThreadPoolThreshold`) | §9.25 — `MaxTasksToScan` corrupted `PendingTasks`/`FaultedTasks`/`CanceledTasks` past the cap, not just report width; found the real waiting-thread cap was a hardcoded `.Take(10)`, not the dead `TopWaitingThreadsPerGroup` option |
-| 26 | Crash | non-heap | **GREEN** | 8 of 8 | §9.26 — **already implements the §10 render-layer pattern**; use as reference |
+| 26 | Crash | non-heap | **GREEN** ✅ DONE | 7 of 8 (1 kept, `MaxExceptionsPerType` — corrects the row's own "8 of 8" claim) | §9.26 — already implements the §10 render-layer pattern for 7 knobs; `MaxExceptionsPerType` gates real per-object stack-trace/inner-exception extraction and was kept |
 | 27 | Memory | non-heap | **GREEN** | 1 of 6 | §9.27 — tier changes the *ranking function*, not just the row count |
 | 28 | HeapTopology | non-heap | **GREEN** | 1 of 1 | §9.28 — a literal exact/not-exact switch, defaulting to **not** |
 | 29 | AsyncTask | non-heap | **GREEN** | 8 of 8 | §9.29 — options class deleted outright |
@@ -2465,7 +2469,7 @@ depended on it.
 
 ---
 
-### 9.26 Crash — **GREEN**, and it is the reference implementation
+### 9.26 Crash — **GREEN** ✅ IMPLEMENTED (7 of 8 deleted, not "options class deleted outright")
 
 [CrashAnalysisOptions.cs](../../src/DumpDetective.Core/Options/CrashAnalysisOptions.cs)
 
@@ -2486,6 +2490,64 @@ implemented, already the default here.
 
 **Use Crash as the reference implementation when building the §10 render-layer mechanism (D5).**
 It also settles part of D5 empirically: the split works, and the renderer is the right owner.
+
+#### Correction: `MaxExceptionsPerType` is not Category 1 like its seven neighbors
+
+This row's original one-line verdict ("all eight knobs are Category 1... options class deleted
+outright") undersold `MaxExceptionsPerType` specifically. Tracing what it actually gates:
+[`ExtractExceptionInfo`](../../src/DumpDetective.Analysis/Analyzers/CrashAnalyzer.cs) walks the
+inner-exception chain (up to depth 16) and parses the exception's original stack trace into a
+`List<string>` — genuinely expensive per-object work, not a cheap field read — and the resulting
+`ExceptionInstance` holds that full stack-trace text. `MaxExceptionsPerType` is what decides, per
+exception type, how many instances get this treatment; active-thread exceptions are always processed
+regardless of the cap, and every reported total (`TotalExceptions`, per-type/per-generation counts)
+is already computed unconditionally elsewhere in the scan, untouched by this cap either way. This is
+the same shape as the evidence-decoration caps D3 (§11.2) later decided to *keep* for
+TimerLeak/StaticRootLeak/EventLeak/CollectionAnalyzer/Dominator — a cap gating expensive per-item
+detail-extraction work whose absence costs nothing in reported-total exactness. **Kept as a fixed
+internal constant** (10, unchanged from Balanced), not tier-varied, with the reasoning captured in an
+XML doc comment on the surviving `CrashAnalysisOptions` class so a future reader doesn't mistake it
+for an oversight.
+
+#### Implementation notes (as shipped)
+
+- **The other seven knobs are gone, confirming the row's core claim.** `IncludeAllTypesInPayload`'s
+  `false` branch (`BuildDomainResult`'s `Take(TopExceptionTypesToInclude)`) deleted — the analyzer now
+  unconditionally emits complete `ExceptionTypeCounts`/`ActiveExceptionTypeCounts` dictionaries, the
+  behavior the option already defaulted to. `TopCrashThreadCandidates` deleted —
+  `BuildCrashThreadSnapshotsImpl` emits every distinct crash-thread candidate (bounded by thread count,
+  never heap-scale). `TopDetailedExceptionInstances` deleted — `BuildExceptionInstanceSnapshots`'s flat
+  list is already bounded by `MaxExceptionsPerType` upstream, so no further slice was needed.
+  `MaxDetailedExceptionsPerType` was **dead code** (confirmed zero reads in `CrashAnalyzer.cs`, only
+  referenced by the config-plumbing round-trip) — deleted, another §11.3-V4-style dead knob the
+  original per-knob table didn't catch.
+- **`MaxOriginalStackFramesToPrint`/`MaxCurrentThreadFramesToPrint` were truncating data that was
+  already fully captured, not bounding new work.** `ExceptionInstance.OriginalStackTrace`
+  (`ExtractExceptionStackTrace`) and `ActiveExceptionContext.CurrentThreadStack` were both already
+  materializing every frame at extraction time — the two options only sliced the list afterward, when
+  building the domain-result snapshot. One exception: `BuildActiveExceptionLookup`'s
+  `thread.EnumerateStackTrace().Take(MaxCurrentThreadFramesToPrint)` *did* bound the live stack walk
+  itself — removed too, matching §9.23 Thread's precedent (walk the whole stack; only threads with an
+  active exception reach this path, never heap-scale). `TakeNormalized` (truncate-and-normalize)
+  replaced with `NormalizeAll` (normalize only) at all four call sites.
+- **Schema unaffected**, matching D2: `CrashDomainResult`'s field names/shapes are unchanged — only
+  what they now contain (complete instead of capped) changed.
+- **`ExceptionAnalysisSectionBuilder` gained matching render-layer constants**
+  (`TopExceptionTypesToShow = 15`, `TopCrashThreadCandidatesToShow = 5`,
+  `TopExceptionInstancesToShow = 25`) at every table that previously relied on the analyzer's cap for
+  display width; the depth-histogram aggregate was left reading the *complete* `TopExceptionInstances`
+  list (it already did), so it gets more accurate once the upstream cap is gone, for free.
+- **Options-surface cleanup matched every other row's shape**, but with an extra step: since
+  `CrashAnalysisOptionsModel` (the config-binding wrapper carrying a legacy per-analyzer `Profile` key,
+  §8 item 5) is now unnecessary for a single-field options class, it was deleted outright —
+  `CliConfigurationFileModel.Crash` binds directly to `CrashAnalysisOptions`, matching the
+  no-Model pattern already used by GCGeneration/SegmentReservation/Thread/ThreadStackCluster/Hang. This
+  executes §8 item 5's Crash half early (Collection's Model still carries its own `Profile` key,
+  untouched). `ConfigurationResolverTests`' Crash-preset-specific test deleted; two profile-mapping
+  tests (`Resolve_ShouldMapDeepToFull_ForGlobalProfile`,
+  `Resolve_ShouldFallbackToBalancedProfile_WhenNoProfileProvided`) kept but trimmed of their
+  now-invalid Crash-field assertions, since their real subject is the global profile-string mapping via
+  `Collection.PathAnalysisTopN`, not Crash specifically.
 
 ---
 

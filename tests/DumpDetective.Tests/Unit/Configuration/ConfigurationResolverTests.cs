@@ -204,41 +204,6 @@ public sealed class ConfigurationResolverTests
     }
 
     [Fact]
-    public void Resolve_ShouldApplyAnalyzerProfileThenFieldOverrides_ForCrash()
-    {
-        string tempDirectory = CreateTempDirectory();
-        try
-        {
-            string configPath = Path.Combine(tempDirectory, "config.json");
-            File.WriteAllText(configPath, """
-            {
-              "DumpPath": "C:/dumps/from-config.dmp",
-              "Profile": "Fast",
-              "Analyzers": {
-                "Crash": {
-                  "Profile": "Full",
-                  "TopDetailedExceptionInstances": 7
-                }
-              }
-            }
-            """);
-
-            AnalysisCommandRequest request = CreateRequest(configPath: configPath);
-            ConfigurationResolver resolver = new();
-
-            ResolvedExecutionOptions resolved = resolver.Resolve(request);
-
-            resolved.Crash.TopDetailedExceptionInstances.Should().Be(7);
-            resolved.Crash.MaxDetailedExceptionsPerType.Should().Be(10);
-            resolved.Crash.MaxOriginalStackFramesToPrint.Should().Be(40);
-        }
-        finally
-        {
-            Directory.Delete(tempDirectory, recursive: true);
-        }
-    }
-
-    [Fact]
     public void Resolve_ShouldMapDeepToFull_ForGlobalProfile()
     {
         string tempDirectory = CreateTempDirectory();
@@ -257,7 +222,6 @@ public sealed class ConfigurationResolverTests
 
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
-            resolved.Crash.MaxOriginalStackFramesToPrint.Should().Be(40);
             resolved.Collection.PathAnalysisTopN.Should().Be(5);
         }
         finally
@@ -284,7 +248,6 @@ public sealed class ConfigurationResolverTests
 
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
-            resolved.Crash.TopDetailedExceptionInstances.Should().Be(25);
             resolved.Collection.PathAnalysisTopN.Should().Be(5);
         }
         finally

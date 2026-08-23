@@ -21,7 +21,7 @@ internal sealed class CliConfigurationFileModel
     public ReferenceChainOptions? ReferenceChain { get; init; }
     public EventLeakOptions? EventLeak { get; init; }
     public DiagnosticsOptions? Diagnostics { get; init; }
-    public CrashAnalysisOptionsModel? Crash { get; init; }
+    public CrashAnalysisOptions? Crash { get; init; }
     public AsyncTaskAnalysisOptions? AsyncTaskAnalysis { get; init; }
     public AsyncStateMachineAnalysisOptions? AsyncStateMachineAnalysis { get; init; }
     public ArrayAnalysisOptions? ArrayAnalysis { get; init; }
@@ -86,7 +86,7 @@ internal sealed class ExecutionPolicyModel
 [JsonSerializable(typeof(CliConfigurationFileModel))]
 [JsonSerializable(typeof(AnalyzerOptionsModel))]
 [JsonSerializable(typeof(ExecutionPolicyModel))]
-[JsonSerializable(typeof(CrashAnalysisOptionsModel))]
+[JsonSerializable(typeof(CrashAnalysisOptions))]
 [JsonSerializable(typeof(AsyncTaskAnalysisOptions))]
 [JsonSerializable(typeof(AsyncStateMachineAnalysisOptions))]
 [JsonSerializable(typeof(ArrayAnalysisOptions))]

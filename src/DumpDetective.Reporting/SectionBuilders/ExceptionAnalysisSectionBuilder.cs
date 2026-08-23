@@ -9,6 +9,12 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
+    // Report-width display limits (§9.26 D5) — the analyzer emits complete, uncapped candidate and
+    // instance data; these are render-layer-only slicing constants.
+    private const int TopExceptionTypesToShow = 15;
+    private const int TopCrashThreadCandidatesToShow = 5;
+    private const int TopExceptionInstancesToShow = 25;
+
     public string AnalyzerName => "Crash Analysis";
     public string DisplayTitle => "Exception Analysis";
     public int SortOrder => 100;
@@ -66,8 +72,8 @@ internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IAna
         // All-heap exception type counts
         if (crash.ExceptionTypeCounts.Count > 0)
         {
-            var heapTypeRows = new List<TableRow>(Math.Min(crash.ExceptionTypeCounts.Count, 15));
-            foreach (KeyValuePair<string, int> kvp in crash.ExceptionTypeCounts.OrderByDescending(kvp => kvp.Value).Take(15))
+            var heapTypeRows = new List<TableRow>(Math.Min(crash.ExceptionTypeCounts.Count, TopExceptionTypesToShow));
+            foreach (KeyValuePair<string, int> kvp in crash.ExceptionTypeCounts.OrderByDescending(kvp => kvp.Value).Take(TopExceptionTypesToShow))
                 heapTypeRows.Add(Row(Cell(kvp.Key), Cell(kvp.Value.ToString("N0"), kvp.Value)));
             compactTables.Add(STCompact("Exception type counts (all heap)", new[] { CH("Exception Type"), CH("Count","number") }, heapTypeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
@@ -83,8 +89,9 @@ internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IAna
 
         if (crash.TopCrashThreadCandidates is { Count: > 0 })
         {
-            var hotspotRows = new List<TableRow>(crash.TopCrashThreadCandidates.Count);
-            for (int i = 0; i < crash.TopCrashThreadCandidates.Count; i++)
+            int candidateLimit = Math.Min(crash.TopCrashThreadCandidates.Count, TopCrashThreadCandidatesToShow);
+            var hotspotRows = new List<TableRow>(candidateLimit);
+            for (int i = 0; i < candidateLimit; i++)
             {
                 CrashThreadCandidateSnapshot candidate = crash.TopCrashThreadCandidates[i];
                 hotspotRows.Add(Row(
@@ -100,8 +107,8 @@ internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IAna
                 new[] { CH("Managed Thread","number"), CH("OS Thread","number"), CH("Active Exceptions","number"), CH("Primary Exception"), CH("Trace Confidence"), CH("Trace Source"), CH("Top Frame") },
                 hotspotRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
-            var originRows = new List<TableRow>(crash.TopCrashThreadCandidates.Count);
-            for (int i = 0; i < crash.TopCrashThreadCandidates.Count; i++)
+            var originRows = new List<TableRow>(candidateLimit);
+            for (int i = 0; i < candidateLimit; i++)
             {
                 CrashThreadCandidateSnapshot candidate = crash.TopCrashThreadCandidates[i];
                 int frameworkFrames = 0; int thirdPartyFrames = 0; int userCodeFrames = 0;
@@ -132,8 +139,9 @@ internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IAna
 
         if (crash.TopExceptionInstances is { Count: > 0 })
         {
-            var rows = new List<TableRow>(crash.TopExceptionInstances.Count);
-            for (int i = 0; i < crash.TopExceptionInstances.Count; i++)
+            int instanceLimit = Math.Min(crash.TopExceptionInstances.Count, TopExceptionInstancesToShow);
+            var rows = new List<TableRow>(instanceLimit);
+            for (int i = 0; i < instanceLimit; i++)
             {
                 ExceptionInstanceSnapshot ex = crash.TopExceptionInstances[i];
                 rows.Add(Row(

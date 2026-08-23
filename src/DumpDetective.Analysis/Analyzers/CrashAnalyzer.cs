@@ -15,7 +15,7 @@ namespace DumpDetective.Analysis.Analyzers
 {
     public class CrashAnalyzer : IAnalyzer, IParallelHeapIndexScanParticipant
     {
-        private CrashAnalysisOptions _options = CrashAnalysisOptions.Default;
+        private CrashAnalysisOptions _options = new CrashAnalysisOptions();
         private ILogger<CrashAnalyzer>? _logger;
 
         public string Name => "Crash Analysis";
@@ -50,12 +50,12 @@ namespace DumpDetective.Analysis.Analyzers
 
         public CrashAnalyzer(CrashAnalysisOptions options)
         {
-            _options = options ?? CrashAnalysisOptions.Default;
+            _options = options ?? new CrashAnalysisOptions();
         }
 
         public CrashAnalyzer(CrashAnalysisOptions options, ILogger<CrashAnalyzer>? logger)
         {
-            _options = options ?? CrashAnalysisOptions.Default;
+            _options = options ?? new CrashAnalysisOptions();
             _logger = logger;
         }
 
@@ -337,30 +337,12 @@ namespace DumpDetective.Analysis.Analyzers
         {
             var candidateSnapshots = BuildCrashThreadSnapshotsImpl(exceptionInfo);
 
-            // Respect payload options: by default include all types in payload. When disabled,
-            // limit the sent type-counts to the top-N configured in options to reduce JSON size.
-            Dictionary<string, int> payloadExceptionTypeCounts;
-            Dictionary<string, int> payloadActiveExceptionTypeCounts;
+            // Complete type-count dictionaries — no report-width cap here (§9.26 D5); the render
+            // layer slices for display.
+            var payloadExceptionTypeCounts = new Dictionary<string, int>(exceptionInfo.ExceptionTypeCounts);
+            var payloadActiveExceptionTypeCounts = new Dictionary<string, int>(exceptionInfo.ActiveExceptionTypeCounts);
 
-            if (_options.IncludeAllTypesInPayload)
-            {
-                payloadExceptionTypeCounts = new Dictionary<string, int>(exceptionInfo.ExceptionTypeCounts);
-                payloadActiveExceptionTypeCounts = new Dictionary<string, int>(exceptionInfo.ActiveExceptionTypeCounts);
-            }
-            else
-            {
-                payloadExceptionTypeCounts = exceptionInfo.ExceptionTypeCounts
-                    .OrderByDescending(kvp => kvp.Value)
-                    .Take(_options.TopExceptionTypesToInclude)
-                    .ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.Ordinal);
-
-                payloadActiveExceptionTypeCounts = exceptionInfo.ActiveExceptionTypeCounts
-                    .OrderByDescending(kvp => kvp.Value)
-                    .Take(_options.TopExceptionTypesToInclude)
-                    .ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.Ordinal);
-            }
-
-            var domainResult = new CrashDomainResult(
+            return new CrashDomainResult(
                 exceptionInfo.TotalExceptions,
                 exceptionInfo.ActiveExceptions,
                 payloadExceptionTypeCounts,
@@ -368,13 +350,6 @@ namespace DumpDetective.Analysis.Analyzers
                 candidateSnapshots,
                 BuildExceptionInstanceSnapshots(exceptionInfo),
                 exceptionInfo.InferredTraceCount);
-
-            if (exceptionInfo.TotalExceptions == 0)
-            {
-                return domainResult;
-            }
-
-            return domainResult;
         }
 
         private IReadOnlyList<CrashThreadCandidateSnapshot> BuildCrashThreadSnapshotsImpl(ExceptionAnalysis analysis)
@@ -385,7 +360,9 @@ namespace DumpDetective.Analysis.Analyzers
                 allInstances.AddRange(list);
 
             int inferredCount = 0;
-            int take = Math.Min(analysis.CrashThreadCandidates.Count, _options.TopCrashThreadCandidates);
+            // Complete candidate list — bounded by distinct thread count, never heap-scale. No
+            // report-width cap here (§9.26 D5); the render layer slices for display.
+            int take = analysis.CrashThreadCandidates.Count;
             var snapshots = new List<CrashThreadCandidateSnapshot>(take);
 
             for (int ci = 0; ci < take; ci++)
@@ -399,7 +376,7 @@ namespace DumpDetective.Analysis.Analyzers
                 // Tier 1: candidate already has its own original stack (exact)
                 if (c.OriginalExceptionStack != null && c.OriginalExceptionStack.Count > 0)
                 {
-                    original = TakeNormalized(c.OriginalExceptionStack, _options.MaxOriginalStackFramesToPrint);
+                    original = NormalizeAll(c.OriginalExceptionStack);
                     confidence = InferenceConfidence.Exact;
                 }
 
@@ -411,7 +388,7 @@ namespace DumpDetective.Analysis.Analyzers
                         var e = allInstances[i];
                         if (e.ThreadId.HasValue && e.ThreadId.Value == c.ThreadId && e.OriginalStackTrace.Count > 0)
                         {
-                            original = TakeNormalized(e.OriginalStackTrace, _options.MaxOriginalStackFramesToPrint);
+                            original = NormalizeAll(e.OriginalStackTrace);
                             inferred = true;
                             inferredFrom = $"0x{e.Address:X} ({e.Type})";
                             confidence = InferenceConfidence.ThreadId;
@@ -431,7 +408,7 @@ namespace DumpDetective.Analysis.Analyzers
                             && e.HResult == c.SampleHResult
                             && e.OriginalStackTrace.Count > 0)
                         {
-                            original = TakeNormalized(e.OriginalStackTrace, _options.MaxOriginalStackFramesToPrint);
+                            original = NormalizeAll(e.OriginalStackTrace);
                             inferred = true;
                             inferredFrom = $"0x{e.Address:X} ({e.Type})";
                             confidence = InferenceConfidence.MessageHResult;
@@ -452,7 +429,7 @@ namespace DumpDetective.Analysis.Analyzers
                                 ? e.InnerExceptionType == c.SampleInnerExceptionType
                                 : e.InnerExceptionType == null))
                         {
-                            original = TakeNormalized(e.OriginalStackTrace, _options.MaxOriginalStackFramesToPrint);
+                            original = NormalizeAll(e.OriginalStackTrace);
                             inferred = true;
                             inferredFrom = $"0x{e.Address:X} ({e.Type})";
                             confidence = InferenceConfidence.TypeInnerType;
@@ -463,9 +440,9 @@ namespace DumpDetective.Analysis.Analyzers
 
                 if (inferred) inferredCount++;
 
-                // Build top-frames list without LINQ
-                var topFrames = new List<string>(Math.Min(c.CurrentThreadStack.Count, _options.MaxCurrentThreadFramesToPrint));
-                for (int f = 0; f < c.CurrentThreadStack.Count && f < _options.MaxCurrentThreadFramesToPrint; f++)
+                // Build full frames list without LINQ — no report-width cap here (§9.26 D5)
+                var topFrames = new List<string>(c.CurrentThreadStack.Count);
+                for (int f = 0; f < c.CurrentThreadStack.Count; f++)
                 {
                     var frame = c.CurrentThreadStack[f];
                     topFrames.Add(NormalizeFrame(frame.Method?.Signature ?? frame.FrameName ?? frame.ToString() ?? StringConstants.UnknownType));
@@ -487,11 +464,12 @@ namespace DumpDetective.Analysis.Analyzers
             return snapshots;
         }
 
-        // Take up to max frames, normalizing each one (strips "at " prefix, simplifies async names)
-        private static List<string> TakeNormalized(List<string> frames, int max)
+        // Normalize every frame (strips "at " prefix, simplifies async names) — no report-width
+        // cap here (§9.26 D5); the render layer slices for display.
+        private static List<string> NormalizeAll(List<string> frames)
         {
-            var result = new List<string>(Math.Min(frames.Count, max));
-            for (int i = 0; i < frames.Count && i < max; i++)
+            var result = new List<string>(frames.Count);
+            for (int i = 0; i < frames.Count; i++)
                 result.Add(NormalizeFrame(frames[i]));
             return result;
         }
@@ -613,7 +591,9 @@ namespace DumpDetective.Analysis.Analyzers
                     .CompareTo(string.IsNullOrWhiteSpace(a.Instance.Message) ? 0 : 1);
             });
 
-            int limit = Math.Min(flat.Count, _options.TopDetailedExceptionInstances);
+            // Complete list — already bounded by MaxExceptionsPerType upstream, never heap-scale.
+            // No further report-width cap here (§9.26 D5); the render layer slices for display.
+            int limit = flat.Count;
             var snapshots = new List<ExceptionInstanceSnapshot>(limit);
 
             for (int i = 0; i < limit; i++)
@@ -623,8 +603,8 @@ namespace DumpDetective.Analysis.Analyzers
                 List<string>? threadFrames = null;
                 if (inst.CurrentThreadStack.Count > 0)
                 {
-                    threadFrames = new List<string>(Math.Min(inst.CurrentThreadStack.Count, _options.MaxCurrentThreadFramesToPrint));
-                    for (int f = 0; f < inst.CurrentThreadStack.Count && f < _options.MaxCurrentThreadFramesToPrint; f++)
+                    threadFrames = new List<string>(inst.CurrentThreadStack.Count);
+                    for (int f = 0; f < inst.CurrentThreadStack.Count; f++)
                     {
                         var fr = inst.CurrentThreadStack[f];
                         threadFrames.Add(NormalizeFrame(fr.Method?.Signature ?? fr.FrameName ?? fr.ToString() ?? StringConstants.UnknownType));
@@ -633,7 +613,7 @@ namespace DumpDetective.Analysis.Analyzers
 
                 List<string>? origFrames = null;
                 if (inst.OriginalStackTrace.Count > 0)
-                    origFrames = TakeNormalized(inst.OriginalStackTrace, _options.MaxOriginalStackFramesToPrint);
+                    origFrames = NormalizeAll(inst.OriginalStackTrace);
 
                 snapshots.Add(new ExceptionInstanceSnapshot(
                     typeName,
@@ -832,11 +812,13 @@ namespace DumpDetective.Analysis.Analyzers
                 if (thread.CurrentException == null)
                     continue;
 
+                // Full stack — no artificial per-thread frame cap (§9.26). Only threads with an
+                // active exception reach here, never heap-scale.
                 lookup[thread.CurrentException.Address] = new ActiveExceptionContext
                 {
                     ThreadId = (uint)thread.ManagedThreadId,
                     OSThreadId = thread.OSThreadId,
-                    CurrentThreadStack = thread.EnumerateStackTrace().Take(_options.MaxCurrentThreadFramesToPrint).ToList()
+                    CurrentThreadStack = thread.EnumerateStackTrace().ToList()
                 };
             }
 

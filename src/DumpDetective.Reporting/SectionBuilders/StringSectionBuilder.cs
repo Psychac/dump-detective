@@ -10,6 +10,8 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
+    private const int PreviewDisplayLength = 80;
+
     public string AnalyzerName => "String Analysis";
     public string DisplayTitle => "String Analysis";
     public int SortOrder => 700;
@@ -25,9 +27,7 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             BuildConfidenceBand(0.85, ["String statistics are measured from analyzed heap data."]),
         };
 
-        string dedupLine = d.DeduplicationSkipped
-            ? "Skipped"
-            : $"Performed ({d.StringsSampled:N0} sampled, {(d.SamplingCoverage * 100.0):F1}% coverage)";
+        string dedupLine = $"Performed ({d.StringsSampled:N0} sampled, {(d.SamplingCoverage * 100.0):F1}% coverage)";
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
@@ -36,10 +36,6 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             ["pct_of_managed_heap"] = new NumericMetricValue(d.PctOfManagedHeap, MetricUnit.Percent),
             ["sampled_unique_patterns"] = new NumericMetricValue(d.SampledUniquePatterns, MetricUnit.Count),
             ["sampling_coverage"] = new NumericMetricValue(d.SamplingCoverage * 100.0, MetricUnit.Percent),
-            ["sampling_mode"] = new TextMetricValue(d.SamplingMode ?? "(unknown)"),
-            ["dedup_mode"] = new TextMetricValue(d.DeduplicationMode ?? "(unknown)"),
-            ["dedup_threshold"] = new NumericMetricValue(d.DeduplicationThreshold, MetricUnit.Count),
-            ["max_to_dedup"] = new NumericMetricValue(d.MaxStringsToDedup, MetricUnit.Count),
             ["deduplication"] = new TextMetricValue(dedupLine),
             ["dedup_source"] = new TextMetricValue(d.DedupSource ?? "(none)"),
             ["analysis_duration_ms"] = (d.AnalysisDurationMs > 0)
@@ -52,8 +48,6 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             ["interned_strings_foh"] = new NumericMetricValue(d.InternedStringCount, MetricUnit.Count),
             ["interned_string_bytes"] = new NumericMetricValue((double)d.InternedStringBytes, MetricUnit.Bytes),
         };
-        if (!string.IsNullOrEmpty(d.DedupSkipReason))
-            keyMetrics["dedup_skip_reason"] = new TextMetricValue(d.DedupSkipReason);
 
         if (d.Distribution is not null && d.Distribution.SampleCount > 0)
         {
@@ -120,7 +114,7 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             {
                 var dup = d.TopDuplicates[i];
                 double pct = d.TotalStringMemoryBytes > 0 ? dup.WastedBytes * 100.0 / d.TotalStringMemoryBytes : 0.0;
-                string preview = FormatHelper.TruncateString(dup.Preview, Math.Max(32, d.PreviewMaxLength));
+                string preview = FormatHelper.TruncateString(dup.Preview, PreviewDisplayLength);
                 string examples = dup.SampleAddresses is not null ? string.Join(", ", dup.SampleAddresses.Select(a => $"0x{a:X}")) : string.Empty;
                 string fingerprint = dup.FingerprintHash is not null ? $"0x{dup.FingerprintHash.Value:X16}" : "—";
                 string totalSize = dup.TotalSize > 0 ? FormatHelper.FormatBytes(dup.TotalSize) : "(n/a)";

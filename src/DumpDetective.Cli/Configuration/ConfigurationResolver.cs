@@ -43,7 +43,7 @@ internal sealed class ConfigurationResolver
         ArrayAnalysisOptions arrayAnalysis = Resolve(usedConfigFile, BuildArrayAnalysisFromConfig, _ => new ArrayAnalysisOptions(), fileModel, request);
         BoxingAnalysisOptions boxingAnalysis = Resolve(usedConfigFile, BuildBoxingAnalysisFromConfig, _ => new BoxingAnalysisOptions(), fileModel, request);
         CollectionAnalysisOptions collection = Resolve(usedConfigFile, BuildCollectionFromConfig, req => AnalyzerOptionsBuilder.BuildValidatedBalancedPresetFromCli(req, CollectionAnalysisOptions.Preset, CollectionAnalysisOptions.Validate), fileModel, request);
-        StringAnalysisOptions stringAnalysis = Resolve(usedConfigFile, BuildStringAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, StringAnalysisOptions.Preset), fileModel, request);
+        StringAnalysisOptions stringAnalysis = Resolve(usedConfigFile, BuildStringAnalysisFromConfig, AnalyzerOptionsBuilder.BuildStringAnalysisFromCli, fileModel, request);
         HeapTopologyAnalysisOptions heapTopology = Resolve(usedConfigFile, BuildHeapTopologyAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, HeapTopologyAnalysisOptions.Preset), fileModel, request);
         AllocationPatternAnalysisOptions allocationPatternAnalysis = Resolve(usedConfigFile, BuildAllocationPatternAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, AllocationPatternAnalysisOptions.Preset), fileModel, request);
         ThreadStackClusterAnalysisOptions threadStackClusterAnalysis = Resolve(usedConfigFile, BuildThreadStackClusterAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, ThreadStackClusterAnalysisOptions.Preset), fileModel, request);
@@ -345,11 +345,14 @@ internal sealed class ConfigurationResolver
     }
 
     private static StringAnalysisOptions BuildStringAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "String",
-            config.StringAnalysis,
-            StringAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "String", out JsonElement section))
+            return ApplySectionOverrides(new StringAnalysisOptions(), section);
+
+        return config.StringAnalysis is null
+            ? new StringAnalysisOptions()
+            : ApplyOptionsOverrides(new StringAnalysisOptions(), config.StringAnalysis);
+    }
 
     private static HeapTopologyAnalysisOptions BuildHeapTopologyAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
         => BuildAnalyzerOptionsFromConfig(

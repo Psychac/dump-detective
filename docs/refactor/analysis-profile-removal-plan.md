@@ -12,11 +12,13 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 10 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
+**Implementation progress: 11 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
 §9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph, §9.8 LohFragmentation, §9.9
-SegmentReservation, §9.10 Jit, §9.11 Array (§9.6's orphaned `DependentHandleAnalysisOptions` was
-also deleted alongside GCHandle — not a separate registered analyzer, per the row-4 cross-reference
-below).** See each section and the §7 verdict table for what shipped in each.
+SegmentReservation, §9.10 Jit, §9.11 Array, §9.12 String (partial — AMBER, not GREEN; see its
+implementation notes for what's deliberately still deferred) (§9.6's orphaned
+`DependentHandleAnalysisOptions` was also deleted alongside GCHandle — not a separate registered
+analyzer, per the row-4 cross-reference below).** See each section and the §7 verdict table for what
+shipped in each.
 
 > **Correction (roster built from the wrong source):** the audit was originally built by walking
 > `src/DumpDetective.Core/Options/`, not the analyzer registry — so any analyzer with no dedicated
@@ -296,7 +298,7 @@ radius is a single cosmetic report field, not root exactness.
 | 9 | Module | aggregator | **GREEN** ✅ DONE | 8 of 11 | §9.3 — 2 knobs are dead code; one deletion cascades into 4 more |
 | 10 | Jit | aggregator | **GREEN** ✅ DONE | 3 of 4 | §9.10 — one cap corrupts **six** accumulators; worst Q7 so far; render layer also hardcoded a stale 64 KB flag threshold, fixed |
 | 11 | Array | sampling | **GREEN** ✅ DONE | 5 of 6 | §9.11 — `WastedBytes` is an extrapolation of an extrapolation of one sample object; also found an orphaned dead-code reader and an obsolete `ScanLimited` field |
-| 12 | String | sampling | **AMBER** | ~8 of 16 | §9.12 — exact dedup needs a restructured hash-count pass, not just cap removal |
+| 12 | String | sampling | **AMBER** ⚠️ PARTIAL | 9 of 16 (+`MaxDedupUnique`, a non-`StringAnalysisOptions` cap) | §9.12 — the 9 safely-removable knobs are gone (incl. the real Q7 cap, `MaxStringsToDedup`); full exact dedup still needs a restructured hash-count pass, not shipped this pass |
 | 13 | AsyncStateMachine | sampling | **GREEN** | 5-6 of 7 | §9.13 — a domain-result comment already documents its own corrupted sum |
 | 14 | StaticRootLeak | retained-size | **AMBER** | 4 of 6 | §9.14 — `MaxRetainedObjectsToScan` materializes a Dictionary; needs dominator tree |
 | 15 | FinalizableObject | retained-size | **AMBER** | 5 of 5 | §9.15 — a **fourth** private copy of bounded-BFS retained estimation |
@@ -1174,7 +1176,7 @@ search. See F10 (§11.6).
 
 ---
 
-### 9.12 String — **AMBER**, the first analyzer where cap removal is not sufficient
+### 9.12 String — **AMBER** ⚠️ PARTIALLY IMPLEMENTED, the first analyzer where cap removal is not sufficient
 
 [StringAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/StringAnalyzer.cs) ·
 [StringAnalysisOptions.cs](../../src/DumpDetective.Core/Options/StringAnalysisOptions.cs)
@@ -1253,6 +1255,98 @@ the value that applies. Deleting `SamplingMode` removes the compounding.
 Defaults to `int.MaxValue`, so the auto-disable never fires, and no preset overrides it. It is
 reachable only by explicit config. Live code ([:157](../../src/DumpDetective.Analysis/Analyzers/StringAnalyzer.cs#L157),
 [:546](../../src/DumpDetective.Analysis/Analyzers/StringAnalyzer.cs#L546)), but dead in practice.
+
+#### Implementation notes (as shipped) — scope explicitly bounded to what AMBER allows
+
+**What shipped:** every knob the table marks `delete`/`toggle`/`hard-code`/`collapse`/`move to render`
+is gone — `MaxStringsToDedup`, `SamplingMode` (+ its compounding multiplier and the whole
+`StringSamplingMode` enum), `EnableDeduplication`, `DeduplicationStringCountThreshold`,
+`DeduplicationMode` (+ enum, + the `PreferPrebuiltOnly`/`Disabled` branches), `DetectInterning`
+(now unconditional whenever FOH segments exist), `TopDuplicatesToShow`, `PreviewMaxLength`. The two
+genuine memory guards Q3 identified — `MaxUniqueStringTracking` and `MaxDuplicateStringLength` — are
+kept, exactly as the table specifies. `MaxDedupUnique` (the Phase 1 satellite-index cap Q8/M5 found
+actually binds in production, not part of `StringAnalysisOptions` at all) is also deleted, per the
+decision recorded in that finding.
+
+**What did NOT ship, and why this stays AMBER, not GREEN:** the doc is explicit that "exactness here
+needs a different shape, not a bigger number" — a disk-backed, hash-partitioned streaming
+fingerprint-and-count pass imitating `ReverseEdgeExtractor`. That is a new subsystem, not a knob
+deletion, and building it was out of scope for this pass. What shipped instead is the full set of
+knobs that were safe to remove without that redesign: `MaxStringsToDedup` no longer truncates *how
+many strings get read* (the real Q7 finding), so duplicate statistics are now drawn from every string
+that fits within `MaxUniqueStringTracking`'s dictionary, not an arbitrary 50,000-string prefix. That
+is a genuine, large exactness improvement even without the full redesign — but it is not the same as
+proving every duplicate pattern on a heap with, say, 10M unique strings is exact, which is precisely
+the scenario `MaxUniqueStringTracking` still guards against (Q3, unconfirmed, needs a larger dump).
+
+**Simplification found while implementing, not called out by the audit:** the analyzer had two
+parallel implementations of "collect stats + dedup in one pass" — a `runDedup`-gated no-index-fallback
+branch inside the `if (runDedup)` block, and a *separate* `else if (typeAggregates is null)`
+stats-only branch that ran only when `runDedup` was false. Once `EnableDeduplication`/
+`DeduplicationStringCountThreshold`/`DeduplicationMode.Disabled` are gone, `runDedup` is
+unconditionally true, so the second branch became dead code — deleted, and the no-index-fallback
+branch (which already computed both stats and dedup together) is now the sole no-index path.
+
+**Replaced the two-`PriorityQueue`-plus-merge top-K selection with a single sort over the full set.**
+`TopDuplicatesToShow` fed two bounded `PriorityQueue<StringLeakInfo, TKey>` (by-waste, by-count) that
+were drained and merged (`MergeTopDuplicates`) to approximate "top by either ranking." Since nothing
+is truncated anymore, the merge is moot — the analyzer now builds one list of every pattern meeting
+`MinDuplicateStringCount`, sorted by wasted bytes descending (count, then total size, as tiebreaks).
+`DrainToDescendingWaste`/`DrainToDescendingCount`/`MergeTopDuplicates` collapsed into one
+`BuildDuplicateSnapshots` helper.
+
+**`PreviewMaxLength` "moved to render" concretely means: a fixed local constant, not a rowLimit.**
+Unlike the row-count knobs in other sections, this controlled how long a *stored* preview string is
+(`CreatePreview` at fingerprint time) — there's no equivalent to "send the full data, let the table
+paginate" for a single already-truncated string field. Hardcoded `PreviewLength = 80` at creation time
+in the analyzer (matching the old Balanced default) and a matching `PreviewDisplayLength = 80` local
+const in `StringSectionBuilder` (the previous `Math.Max(32, d.PreviewMaxLength)` re-truncation was
+redundant anyway since both values came from the same options object).
+
+**`DeduplicationSkipped`/`DedupSkipReason` deleted — permanently-false/null once the skip conditions
+that drove them are gone**, same pattern as Boxing's `TypeScanCapped` (§9.1) and Module's
+`ExcludedModuleCount` (§9.3). Removed from `StringDomainResult`, `StringSectionBuilder`'s
+`dedup_skip_reason` key metric and `dedupLine` ternary, and `StringFindingGenerator`'s low-coverage
+finding condition.
+
+**`SamplingMode`/`DeduplicationMode`/`DeduplicationThreshold`/`MaxStringsToDedup` metadata fields on
+`StringDomainResult` deleted** along with their `sampling_mode`/`dedup_mode`/`dedup_threshold`/
+`max_to_dedup` key metrics in `StringSectionBuilder` — all became permanently-fixed/meaningless once
+the underlying options were deleted.
+
+**`ProduceRawExports` "move to report options" deliberately deferred, left on `StringAnalysisOptions`
+unchanged.** A generic `ReportOptions` class already exists (`Format`/`StyleVersion`/`PreRender`/
+`SeparateJson`), which made this item look like a natural fit — but `ReportOptions` is only
+constructed at the CLI/report-generation layer, never passed into `AnalysisContext`, while raw-export
+generation currently happens *inside* `StringAnalyzer.Analyze` (JSON/CSV/NDJSON written mid-analysis).
+Moving the toggle there properly means either wiring `ReportOptions` into `AnalysisContext` or moving
+export generation itself into a later report-building stage — a real design decision, not a rename,
+and `WeakReferenceAnalyzer` has the exact same `ProduceRawExports` pattern and hasn't been migrated
+yet either. Doing this for String alone would create an inconsistency with WeakReference; flagged
+here as a cross-cutting item for whenever WeakReference's own audit section is implemented, not solved
+in this pass.
+
+**Config/CLI wiring:** `StringAnalysisOptions.Preset` deleted like every other section, but the CLI
+special-case for `--max-duplicate-string-length`/`--min-duplicate-string-count`
+(`AnalyzerOptionsBuilder.BuildBalancedPresetFromCli`'s `StringAnalysisOptions`-specific branch) needed
+its own extraction into `BuildStringAnalysisFromCli` rather than the generic `Preset`-bypass pattern,
+since it wasn't just "apply overrides onto `new T()`" — it only overrides when the CLI request
+actually sets one of those two fields. **Caught a real bug while doing this**: an early version of
+`BuildStringAnalysisFromConfig`'s "config file used, but no String section present" fallback branch
+called into the CLI-override helper, which broke `ConfigurationResolverTests.Resolve_ShouldUseProfileBaseline_WhenConfigMissingThatField`
+— the original `BuildAnalyzerOptionsFromConfig` never consulted CLI flags once a config file was in
+play at all (config-file mode and CLI-only mode were strictly separate paths in the old code). Fixed
+by falling back to plain `new StringAnalysisOptions()` in that branch, matching original behavior.
+
+**Deleted `tests/.../StringAnalyzerOptionsTests.cs` outright** (tested `Preset`/`SamplingMode`/
+`ComputeEffectiveCaps`, all gone) and **`tests/.../StringAnalyzerUncappedRealDumpTests.cs`** (the M5
+measurement test — its "capped baseline" comparison for `MaxStringsToDedup` no longer has a capped
+alternative to compare against). `StringAnalyzerHeapIndexScanTests.cs`'s reflection-based `SeedState`
+helper needed one field removed (`_indexScanMaxToDedup`) but otherwise required no changes.
+**M5's `MaxUniqueStringTracking` question remains genuinely open** — the ~10M-unique-string
+memory-growth estimate (2-2.5GB) was never directly measured, only extrapolated; validating it needs
+a larger real dump than the 3.35GB/321K-unique-string one used for M3/M5, which is exactly why this
+option survives as a guard rather than being deleted alongside `MaxDedupUnique`.
 
 ---
 

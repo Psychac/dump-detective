@@ -61,20 +61,12 @@ internal sealed record StringDomainResult(
     ulong InternedStringBytes,
     long Gen2StringCount,
     ulong Gen2StringBytes,
-    bool DeduplicationSkipped,
     int StringsSampled,
     double SamplingCoverage = 0.0,
-    // New metadata fields for reporting
-    string? SamplingMode = null,
-    string? DeduplicationMode = null,
-    int DeduplicationThreshold = 0,
-    int MaxStringsToDedup = 0,
     string? DedupSource = null,
     long AnalysisDurationMs = 0,
-    string? DedupSkipReason = null,
     IReadOnlyList<DumpDetective.Core.Models.NameCountEntry>? TopDuplicateTypes = null,
     /// <summary>Top object types by total string bytes they reference (not duplicate strings, all strings)</summary>
     IReadOnlyList<(string TypeName, ulong TotalBytes)>? TopStringOwnerTypes = null,
     DistributionSummary? Distribution = null,
-    int PreviewMaxLength = 0,
     IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? Artifacts = null) : AnalyzerDomainResult;

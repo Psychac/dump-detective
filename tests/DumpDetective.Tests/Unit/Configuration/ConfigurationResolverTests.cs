@@ -131,7 +131,7 @@ public sealed class ConfigurationResolverTests
 
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
-            var balancedString = StringAnalysisOptions.Preset(AnalysisProfile.Balanced);
+            var balancedString = new StringAnalysisOptions();
             resolved.StringAnalysis.MaxDuplicateStringLength.Should().Be(balancedString.MaxDuplicateStringLength);
             resolved.ReferenceChain.TopCount.Should().Be(balancedReferenceChain.TopCount);
             resolved.Report.Format.Should().Be(ReportFormat.Html);

@@ -154,7 +154,6 @@ public sealed class StringAnalyzerHeapIndexScanTests
         Set(t, analyzer, "_indexScanVeryLongStrings", veryLongStrings ?? new List<LongStringEntry>());
         Set(t, analyzer, "_indexScanStringsRead", stringsRead);
         Set(t, analyzer, "_indexScanMaxUnique", 10_000);
-        Set(t, analyzer, "_indexScanMaxToDedup", 1_000_000);
     }
 
     private static void Set(Type t, object obj, string name, object? val) =>

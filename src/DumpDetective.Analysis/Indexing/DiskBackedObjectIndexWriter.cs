@@ -163,8 +163,10 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         var largeCandidates = new ConcurrentBag<(ulong Addr, ulong Mt, ulong Size)>();
         // Collected during scan to avoid a second walk of LOH/POH segments in LohFreeBlockWriter.
         var lohFreeBlockCandidates = new ConcurrentBag<(ulong SegStart, ulong Offset, ulong Size)>();
-        // String dedup index built while dump pages are hot — zero extra I/O cost.
-        const int MaxDedupUnique = 500_000;
+        // String dedup index built while dump pages are hot — zero extra I/O cost. Unbounded:
+        // measured (§11.4 M5) not to bind at 321K unique strings on a 3.35GB real dump; the
+        // per-analyzer StringAnalysisOptions.MaxUniqueStringTracking is the surviving guard for
+        // the multi-million-unique-string extreme this hasn't been validated against yet.
         var masterStringDedup = new Dictionary<ulong, StringDedupEntry>(capacity: 4096);
         // Global distribution collectors (merged from per-thread state)
         var globalLengthSamples = new List<int>();
@@ -415,7 +417,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         lohFreeBlockCandidates.Add((segStart, obj.Address - segStart, entry.Size));
 
                     // Build string dedup index while dump pages are hot from type resolution.
-                    if ((flags & TypeAggregateFlags.IsStringType) != 0 && state.StringDedup.Count < MaxDedupUnique)
+                    if ((flags & TypeAggregateFlags.IsStringType) != 0)
                     {
                         string? val = obj.AsString(maxLength: 1024);
                         if (val is { Length: > 0 })
@@ -503,7 +505,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                             if (me.DominantMethodTable == 0 && kvp.Value.DominantMethodTable != 0)
                                 me.DominantMethodTable = kvp.Value.DominantMethodTable;
                         }
-                        else if (masterStringDedup.Count < MaxDedupUnique)
+                        else
                         { masterStringDedup[kvp.Key] = kvp.Value; }
                     }
 

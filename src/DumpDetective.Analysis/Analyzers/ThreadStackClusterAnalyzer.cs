@@ -18,7 +18,6 @@ namespace DumpDetective.Analysis.Analyzers
         // Instance accumulator state for the IThreadStackScanParticipant path — shares
         // ThreadStackScanDispatcher's single EnumerateStackTrace() pass with ThreadAnalyzer/
         // HangAnalyzer/LockGraphAnalyzer instead of independently walking runtime.Threads.
-        private ThreadStackClusterAnalysisOptions? _participantOptions;
         private Dictionary<ulong, uint>? _participantOsThreadIdByAddress;
         private Dictionary<string, StackCluster>? _participantClusters;
         private int _participantAliveThreads;
@@ -37,12 +36,10 @@ namespace DumpDetective.Analysis.Analyzers
             return Analyze(runtime, progress: null, new ThreadStackClusterAnalysisOptions());
         }
 
-        public int GetRequiredFrameCount(AnalysisContext context) =>
-            context.AnalysisOptions.ThreadStackClusterAnalysis.MaxFramesPerSignature;
+        public int GetRequiredFrameCount(AnalysisContext context) => ThreadAnalyzer.UnboundedFrameCount;
 
         public void BeforeThreadStackScan(AnalysisContext context)
         {
-            _participantOptions = context.AnalysisOptions.ThreadStackClusterAnalysis;
             _participantOsThreadIdByAddress = new Dictionary<ulong, uint>();
             _participantClusters = new Dictionary<string, StackCluster>(StringComparer.Ordinal);
             _participantAliveThreads = 0;
@@ -64,8 +61,8 @@ namespace DumpDetective.Analysis.Analyzers
                 return;
 
             _participantAliveThreads++;
-            string signature = BuildSignature(snapshot.TopFrames, _participantOptions!.MaxFramesPerSignature, thread);
-            AccumulateCluster(_participantClusters!, signature, thread, _participantOptions.MaxThreadIdsPerCluster);
+            string signature = BuildSignature(snapshot.TopFrames, thread);
+            AccumulateCluster(_participantClusters!, signature, thread);
         }
 
         public void OnThreadStackScanCompleted(bool succeeded)
@@ -113,8 +110,8 @@ namespace DumpDetective.Analysis.Analyzers
                         continue;
 
                     aliveThreads++;
-                    string signature = BuildSignature(thread.EnumerateStackTrace(), options.MaxFramesPerSignature, thread);
-                    AccumulateCluster(clusters, signature, thread, options.MaxThreadIdsPerCluster);
+                    string signature = BuildSignature(thread.EnumerateStackTrace(), thread);
+                    AccumulateCluster(clusters, signature, thread);
                 }
 
                 scanCounter.Complete();
@@ -132,16 +129,13 @@ namespace DumpDetective.Analysis.Analyzers
 
             double diversity = aliveThreads == 0 ? 0 : clusters.Count * 100.0 / aliveThreads;
             int singletonSignatures = topClusters.Count(c => c.Count == 1);
-            var topSignatures = topClusters.Take(options.TopSignaturesToShow).Select(c => c.Signature).ToArray();
+            // Complete ranked signature/cluster lists — no report-width cap here (§9.24 D5); the
+            // render layer slices for display.
+            var topSignatures = topClusters.Select(c => c.Signature).ToArray();
 
-            // Apply MinClusterSize and MaxClusters before snapshot/export
             var filteredClusters = topClusters.Where(c => c.Count >= Math.Max(1, options.MinClusterSize)).ToArray();
-            bool maxClustersCapReached = filteredClusters.Length >= options.MaxClusters;
-            if (filteredClusters.Length > options.MaxClusters)
-                filteredClusters = filteredClusters.Take(options.MaxClusters).ToArray();
 
             var topClusterSnapshots = filteredClusters
-                .Take(options.TopClustersToShow)
                 .Select(c => new ThreadClusterSnapshot(
                     c.Count,
                     ProjectSampleOsThreadIds(c.SampleThreadAddresses, osThreadIdByAddress),
@@ -211,7 +205,7 @@ namespace DumpDetective.Analysis.Analyzers
                 }
             }
 
-            return new ThreadStackClusterDomainResult(aliveThreads, clusters.Count, singletonSignatures, diversity, topSignatures, topClusterSnapshots, rawExports, maxClustersCapReached);
+            return new ThreadStackClusterDomainResult(aliveThreads, clusters.Count, singletonSignatures, diversity, topSignatures, topClusterSnapshots, rawExports);
         }
 
         private static IReadOnlyList<uint> ProjectSampleOsThreadIds(IReadOnlyList<ulong> sampleThreadAddresses, IReadOnlyDictionary<ulong, uint> osThreadIdByAddress)
@@ -226,7 +220,7 @@ namespace DumpDetective.Analysis.Analyzers
             return sampleIds;
         }
 
-        private static void AccumulateCluster(Dictionary<string, StackCluster> clusters, string signature, ClrThread thread, int maxThreadIdsPerCluster)
+        private static void AccumulateCluster(Dictionary<string, StackCluster> clusters, string signature, ClrThread thread)
         {
             if (!clusters.TryGetValue(signature, out StackCluster? cluster))
             {
@@ -242,16 +236,22 @@ namespace DumpDetective.Analysis.Analyzers
             if (thread.IsFinalizer)
                 cluster.FinalizerCount++;
 
-            if (cluster.SampleThreadAddresses.Count < maxThreadIdsPerCluster && thread.Address != 0)
+            // Every thread's address is recorded — the display-width cap on how many sample IDs
+            // to show per cluster is a render-layer concern (§9.24 D5), not an accumulation cap.
+            if (thread.Address != 0)
             {
                 cluster.SampleThreadAddresses.Add(thread.Address);
                 cluster.SampleManagedThreadIds.Add(thread.ManagedThreadId);
             }
         }
 
-        private static string BuildSignature(IEnumerable<ClrStackFrame> frames, int maxFramesPerSignature, ClrThread? thread = null)
+        // Cluster identity is the thread's whole captured stack — no artificial frame-count cap
+        // (§9.24). A signature match now means two threads share their entire call stack, not just
+        // its top N frames, so distinct threads whose stacks diverge below frame N are no longer
+        // merged into the same cluster.
+        private static string BuildSignature(IEnumerable<ClrStackFrame> frames, ClrThread? thread = null)
         {
-            var parts = new List<string>(maxFramesPerSignature);
+            var parts = new List<string>();
 
             foreach (ClrStackFrame frame in frames)
             {
@@ -263,8 +263,6 @@ namespace DumpDetective.Analysis.Analyzers
                     continue;
 
                 parts.Add(name.Trim());
-                if (parts.Count >= maxFramesPerSignature)
-                    break;
             }
 
             if (parts.Count == 0)

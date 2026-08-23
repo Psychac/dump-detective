@@ -5,38 +5,14 @@ namespace DumpDetective.Core.Options;
 /// </summary>
 public sealed class ThreadStackClusterAnalysisOptions
 {
-    public int MaxFramesPerSignature { get; init; } = 6;
-    public int MaxThreadIdsPerCluster { get; init; } = 8;
-    public int TopSignaturesToShow { get; init; } = 5;
-    public int TopClustersToShow { get; init; } = 12;
-    public bool ProduceClusterExports { get; init; } = false;
+    // Semantic threshold (Category 5): a cluster of size 1 is always a singleton, never
+    // "interesting" on its own — kept as the single Balanced value, not tier-varied.
     public int MinClusterSize { get; init; } = 1;
-    public int MaxClusters { get; init; } = 500;
 
-    public static ThreadStackClusterAnalysisOptions Preset(AnalysisProfile profile) => profile switch
-    {
-        AnalysisProfile.Fast => new ThreadStackClusterAnalysisOptions
-        {
-            MaxFramesPerSignature = 4,
-            MaxThreadIdsPerCluster = 5,
-            TopSignaturesToShow = 3,
-            TopClustersToShow = 8,
-            MinClusterSize = 1,
-            MaxClusters = 200,
-            ProduceClusterExports = false
-        },
-        AnalysisProfile.Full => new ThreadStackClusterAnalysisOptions
-        {
-            MaxFramesPerSignature = 10,
-            MaxThreadIdsPerCluster = 20,
-            TopSignaturesToShow = 10,
-            TopClustersToShow = 20,
-            MinClusterSize = 1,
-            MaxClusters = 2000,
-            ProduceClusterExports = true
-        },
-        _ => new ThreadStackClusterAnalysisOptions(),
-    };
-
-    public static ThreadStackClusterAnalysisOptions Default { get; } = Preset(AnalysisProfile.Balanced);
+    // Whether to also write the filtered cluster set to disk as JSON/NDJSON exports for offline
+    // inspection. An output-format toggle, not an exactness knob — deliberately left here rather
+    // than moved to ReportOptions per D6 (§11.2), which decided the destination but is a
+    // cross-cutting change shared with StringAnalysisOptions.ProduceRawExports/
+    // WeakReferenceAnalysisOptions.ProduceRawExports; not executed in this pass.
+    public bool ProduceClusterExports { get; init; } = false;
 }

@@ -9,6 +9,10 @@ namespace DumpDetective.Reporting.SectionBuilders;
 internal sealed class ThreadStackClusterSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
     private const int TopSignaturesToShow = 5;
+    // Report-width display limits (§9.24 D5) — the analyzer emits complete, uncapped cluster and
+    // sample-thread-ID data; these are render-layer-only slicing constants, not exactness knobs.
+    private const int TopClustersToShow = 12;
+    private const int MaxSampleIdsPerClusterToShow = 8;
 
     public string AnalyzerName => "Thread Stack Signature Clustering";
     public int SortOrder => 110;
@@ -42,23 +46,24 @@ internal sealed class ThreadStackClusterSectionBuilder : SectionBuilderBase, IAn
             ? T("Low signature diversity; large clusters may indicate coordinated blocking/contention.")
             : T("Signature diversity suggests varied active work."));
 
-        if (d.MaxClustersCapReached)
-            blocks.Add(T("⚠️  MaxClusters cap reached: output truncated. See full cluster exports for complete analysis."));
-
-        // Typed StackClusters slot
+        // Typed StackClusters slot — full cluster/sample data already computed by the analyzer;
+        // only the display width (how many clusters, how many sample IDs per cluster) is capped
+        // here (§9.24 D5).
         var stackClusters = new List<StackCluster>();
         var clusters = d.TopClusters ?? [];
-        for (int i = 0; i < clusters.Count; i++)
+        int clusterLimit = Math.Min(clusters.Count, TopClustersToShow);
+        for (int i = 0; i < clusterLimit; i++)
         {
             var cluster = clusters[i];
-            var osIds = new List<string>(cluster.SampleOsThreadIds.Count);
-            for (int j = 0; j < cluster.SampleOsThreadIds.Count; j++)
+            int idLimit = Math.Min(cluster.SampleOsThreadIds.Count, MaxSampleIdsPerClusterToShow);
+            var osIds = new List<string>(idLimit);
+            for (int j = 0; j < idLimit; j++)
                 osIds.Add($"0x{cluster.SampleOsThreadIds[j]:X}");
             stackClusters.Add(new StackCluster(
                 ThreadCount: cluster.Count,
                 OsThreadIds: osIds,
                 Signature:   cluster.Signature,
-                Truncated:   false));
+                Truncated:   cluster.SampleOsThreadIds.Count > idLimit));
         }
 
         // Typed Artifacts slot

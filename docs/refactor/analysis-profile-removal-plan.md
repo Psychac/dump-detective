@@ -12,7 +12,7 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 21 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
+**Implementation progress: 22 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
 §9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph, §9.8 LohFragmentation, §9.9
 SegmentReservation, §9.10 Jit, §9.11 Array, §9.12 String (partial — AMBER, not GREEN; see its
 implementation notes for what's deliberately still deferred), §9.13 AsyncStateMachine, §9.14
@@ -28,7 +28,10 @@ follow-up), §9.21 TimerLeak (had no `AnalysisOptions` knobs to begin with; foun
 sentinel and a fully-unconsumed sample payload — and wired the sample data into the report instead of
 deleting it), §9.23 Thread (a third size-tier scaling system, `AdaptForSize`, deleted along with its
 own double-applying bug found in D8; the reservoir-sampled "other threads" feature redesigned into a
-complete deterministic `STCompact` table rather than left capped or deleted outright) (§9.6's orphaned
+complete deterministic `STCompact` table rather than left capped or deleted outright), §9.24
+ThreadStackCluster (6-frame lossy signature deleted — cluster identity is now the whole stack, free
+once §9.23's unbounded frame capture landed; found and fixed a dead always-`false` `Truncated` render
+flag in passing) (§9.6's orphaned
 `DependentHandleAnalysisOptions` was also deleted alongside GCHandle — not a separate registered
 analyzer, per the row-4 cross-reference below).** See each section and the §7 verdict table for what
 shipped in each.
@@ -323,7 +326,7 @@ radius is a single cosmetic report field, not root exactness.
 | 21 | TimerLeak | root-path | **GREEN** ✅ DONE | 0 (no options class) | §9.21 — no knobs of its own; inherits every shared traversal bound; found and fixed a dead `ITypedResourceInstanceSampler` implementation (bogus `Generation` sentinel, unconsumed sample payload) outside the original audit and wired the sample into the report |
 | 22 | *(= Dominator, row 18)* | — | — | — | "Retention" is **not a separate analyzer** — `RetentionOptions` belongs to `DominatorAnalyzer`. Originally audited as a second, duplicate row; findings (`RootPathLargeFanoutThreshold` exclusion, `MaxLeakScanObjects` vs. 87M-object heap, etc.) merged into §9.18. |
 | 23 | Thread | non-heap | **GREEN** ✅ DONE | 9 of 10 (1 kept, `PrewarmCacheInBackground`) | §9.23 — a **third** tier system (`AdaptForSize`) deleted along with its double-applying bug; unbounded stack walk via a named 100K sentinel, not `int.MaxValue`; reservoir-sampled "other threads" redesigned into a complete deterministic `STCompact` table |
-| 24 | ThreadStackCluster | non-heap | **GREEN** | 6 of 7 | §9.24 — 6-frame signatures merge genuinely different stacks |
+| 24 | ThreadStackCluster | non-heap | **GREEN** ✅ DONE | 6 of 7 (1 kept, `MinClusterSize`; `ProduceClusterExports` stays pending D6's deferred cross-cutting move) | §9.24 — 6-frame signatures no longer merge genuinely different stacks; fixed a dead always-false `Truncated` render flag found in passing |
 | 25 | Hang | non-heap | **GREEN** | 3 of 5 | §9.25 — 2 more semantics-by-tier thresholds |
 | 26 | Crash | non-heap | **GREEN** | 8 of 8 | §9.26 — **already implements the §10 render-layer pattern**; use as reference |
 | 27 | Memory | non-heap | **GREEN** | 1 of 6 | §9.27 — tier changes the *ranking function*, not just the row count |
@@ -2335,7 +2338,7 @@ determinism sort (§9.1) and Module's (§9.3). Third instance.
 
 ---
 
-### 9.24 ThreadStackCluster — **GREEN**
+### 9.24 ThreadStackCluster — **GREEN** ✅ IMPLEMENTED
 
 [ThreadStackClusterAnalysisOptions.cs](../../src/DumpDetective.Core/Options/ThreadStackClusterAnalysisOptions.cs)
 
@@ -2355,6 +2358,54 @@ as one cluster. This does not truncate a list — it **merges distinct clusters*
 *count* and the per-cluster thread counts are both wrong, in a direction that understates diversity.
 For a deadlock or thread-pool-starvation dump, where the question is "how many distinct things are
 these threads doing," that is the headline number.
+
+#### Implementation notes (as shipped)
+
+- **`MaxFramesPerSignature` deleted — cluster identity is now the thread's whole captured stack.**
+  `GetRequiredFrameCount` returns [`ThreadAnalyzer.UnboundedFrameCount`](../../src/DumpDetective.Analysis/Analyzers/ThreadAnalyzer.cs#L27)
+  (the same 100K sentinel §9.23 introduced) instead of `MaxFramesPerSignature`, so the shared
+  `ThreadStackScanDispatcher` pass was already capturing full stacks for every participant once §9.23
+  landed — this row's fix was free at the scan layer, only `BuildSignature`'s internal truncation
+  break needed to come out. Two threads that share their first 6 frames and diverge below that are no
+  longer merged into one cluster — the Q7 defect is gone, not just bounded differently.
+- **`MaxClusters` deleted outright** — the clusters `Dictionary` and every derived array
+  (`topClusters`/`filteredClusters`/`topClusterSnapshots`) are unbounded; `MaxClustersCapReached`
+  removed from `ThreadStackClusterDomainResult` along with the warning block that read it.
+- **`MaxThreadIdsPerCluster`/`TopSignaturesToShow`/`TopClustersToShow` moved to the render layer**,
+  matching D5 — but note the destination is **not** `CompactTable`. `ThreadStackClusterSectionBuilder`
+  renders one collapsible card per cluster via the pre-existing `StackClusters` typed slot (confirmed
+  the sole consumer of that slot in `src`), which is a legitimate specialized display in the same
+  family as `NamedStackTrace`/`EventLeakGroupCards`, not the ad-hoc `.Take()`-before-narrative-block
+  pattern D5's Mechanism 2 targets — so unlike §9.23's `SampledThreads`→`OtherThreads` conversion
+  (which moved genuinely tabular per-thread rows off a one-block-per-thread rendering and onto
+  `STCompact`), this one keeps its existing typed slot and gets ordinary section-builder-local
+  constants (`TopClustersToShow = 12`, `MaxSampleIdsPerClusterToShow = 8`) instead.
+- **Found and fixed in passing: the per-cluster `Truncated` flag was dead code.** It was hardcoded
+  `false` at the render layer regardless of whether the sample thread-ID list was actually complete —
+  because the analyzer previously capped `SampleThreadAddresses` at `MaxThreadIdsPerCluster` before the
+  section builder ever saw it, so there was no way to tell truncated from complete. Now that
+  `AccumulateCluster` records every thread's address unconditionally (bounded naturally by cluster
+  size, never heap-scale), `ThreadStackClusterSectionBuilder` computes a real
+  `Truncated = cluster.SampleOsThreadIds.Count > idLimit` at render time.
+- **`SampleOsThreadIds`/`SampleManagedThreadIds` keep their "Sample" name despite now being complete
+  lists** — unlike §9.23's `SampledThreads`→`OtherThreads` rename, these fields are written verbatim
+  into the on-disk JSON/NDJSON cluster exports (an external artifact contract, not an internal-only
+  domain result), so renaming them would be a breaking export-schema change for no behavioral benefit.
+  Documented via XML doc comment on `ThreadClusterSnapshot` instead.
+- **`ProduceClusterExports`'s D6-decided move to `ReportOptions` was not executed in this pass** — D6
+  groups it with `StringAnalysisOptions`/`WeakReferenceAnalysisOptions.ProduceRawExports` as one
+  cross-cutting change, and neither of those has landed yet (String is still its own AMBER row,
+  §9.12). `ReportOptions` is a CLI/report-layer concept with no existing wiring path into
+  `AnalysisContext.AnalysisOptions` (confirmed: `ReportOptions` has zero consumers in
+  `DumpDetective.Analysis` today) — moving it would mean relocating the actual JSON/NDJSON export
+  generation out of the analyzer into a post-analysis Reporting-layer step, a materially bigger change
+  than this pass's scope. Left as a `ThreadStackClusterAnalysisOptions` field with its tier variance
+  removed (single Balanced-shaped default, `false`), flagged in-code as deferred.
+- **`ConfigurationResolver`/test fallout, same shape as every other `Preset`-deletion row:**
+  `BuildThreadStackClusterAnalysisFromConfig` rewritten to the section-overrides-on-`new
+  ThreadStackClusterAnalysisOptions()` pattern (§9.4/§9.9/§9.23's shape); deleted the one test
+  (`ThreadStackClusterAnalyzerOptionsTests.Preset_Fast_Sets_Coarse_Values`) that asserted on `Preset`
+  values, keeping the file's unrelated `DomainResult_Can_Carry_Artifacts` test.
 
 ---
 

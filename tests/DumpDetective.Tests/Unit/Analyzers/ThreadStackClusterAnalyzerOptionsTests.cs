@@ -10,18 +10,6 @@ namespace DumpDetective.Tests.Unit.Analyzers;
 public sealed class ThreadStackClusterAnalyzerOptionsTests
 {
     [Fact]
-    public void Preset_Fast_Sets_Coarse_Values()
-    {
-        var opts = ThreadStackClusterAnalysisOptions.Preset(AnalysisProfile.Fast);
-
-        opts.MaxFramesPerSignature.Should().Be(4);
-        opts.MaxThreadIdsPerCluster.Should().Be(5);
-        opts.TopSignaturesToShow.Should().Be(3);
-        opts.TopClustersToShow.Should().Be(8);
-        opts.ProduceClusterExports.Should().BeFalse();
-    }
-
-    [Fact]
     public void DomainResult_Can_Carry_Artifacts()
     {
         var artifact = new ReportArtifact("Test", "f.txt", "hello", "text/plain", null);

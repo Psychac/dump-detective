@@ -11,9 +11,14 @@ internal sealed record ThreadStackClusterDomainResult(
     double DiversityPercent,
     IReadOnlyList<string> TopClusterSignatures,
     IReadOnlyList<ThreadClusterSnapshot>? TopClusters = null,
-    IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? Artifacts = null,
-    bool MaxClustersCapReached = false) : AnalyzerDomainResult;
+    IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? Artifacts = null) : AnalyzerDomainResult;
 
+/// <summary>
+/// <paramref name="SampleOsThreadIds"/>/<paramref name="SampleManagedThreadIds"/> are the complete
+/// per-cluster thread ID lists (§9.24) — the "Sample" prefix is kept only for artifact-schema
+/// stability (JSON/NDJSON cluster exports), not because the list is truncated. Display-width
+/// truncation, if any, happens at the render layer.
+/// </summary>
 internal sealed record ThreadClusterSnapshot(
     int Count,
     IReadOnlyList<uint> SampleOsThreadIds,

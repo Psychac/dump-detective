@@ -49,7 +49,6 @@ namespace DumpDetective.Analysis.Analyzers
 
             var topRoots = allStaticRootAnalysis
                 .OrderByDescending(r => r.TotalMemoryImpact)
-                .Take(options.MaxRootsToReport)
                 .Select(r => BuildSnapshot(heap, cache, validRoots, finder, r))
                 .ToArray();
 
@@ -108,6 +107,13 @@ namespace DumpDetective.Analysis.Analyzers
             HashSet<ulong> staticRootedAddresses = cache.GetStaticRootedAddresses(heap);
             var staticFieldsByRootAddress = cache.GetStaticFieldsByRootAddress(heap);
 
+            // §12.1 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): null
+            // when Stage B wasn't built for this run — retained-set analysis below degrades to
+            // direct-object-only (ScanWasCapped = true) in that case.
+            IDominatorTreeProvider? treeProvider = cache.TryGetDominatorTreeProvider();
+            var typeNameByMethodTable = new Dictionary<ulong, string>(capacity: 64);
+            var delegateFieldByMethodTable = new Dictionary<ulong, bool>(capacity: 64);
+
             foreach ((string rootKind, ulong rootAddress, ulong rootStorageAddress) in allRoots)
             {
                 if (!staticRootedAddresses.Contains(rootAddress))
@@ -133,8 +139,7 @@ namespace DumpDetective.Analysis.Analyzers
 
                 // Shape pre-check (docs/analysis/retained-size-candidate-selection.md Phase 4):
                 // a root whose direct object has no reference-typed field anywhere in its field
-                // tree can't reach anything beyond itself, so CollectRetainedObjects — which
-                // materializes a Dictionary up to MaxRetainedObjectsToScan entries — would only
+                // tree can't reach anything beyond itself, so walking its retained set would only
                 // ever discover the root itself. Skip building it and synthesize the equivalent
                 // single-entry result directly from already-resolved rootMetadata.
                 if (!RetainedSizeCandidateSelector.RequiresWalk(cache, heap, rootMetadata.MethodTable))
@@ -149,30 +154,26 @@ namespace DumpDetective.Analysis.Analyzers
                     containsCollections = false;
                     containsEventHandlers = false;
                 }
-                else
+                else if (treeProvider is not null && treeProvider.TryGetRetainedBytes(rootAddress, out ulong exactTotalSize))
                 {
-                    var retainedObjects = BoundedGraphWalk.CollectRetainedObjects(heap, rootAddress, out scanWasCapped, options.MaxRetainedObjectsToScan, cancellationToken: cancellationToken);
-
+                    // §12.1 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md):
+                    // exact retained bytes in O(1); the per-type breakdown below streams the
+                    // dominator subtree's member addresses (no resident Dictionary, unlike the old
+                    // BoundedGraphWalk.CollectRetainedObjects) — every retained object is counted,
+                    // not just the first MaxRetainedObjectsToScan of them.
                     var typeStats = new Dictionary<string, RetainedTypeInfo>();
-                    // Memoizes MethodTable -> type name so a type with N retained instances resolves
-                    // its name once via heap.GetTypeByMethodTable (metadata-cache hit, no dump I/O)
-                    // instead of N times — see docs/cache/cache-architecture.md Phase 4.
-                    var typeNameByMethodTable = new Dictionary<ulong, string>(capacity: 64);
-                    var delegateFieldByMethodTable = new Dictionary<ulong, bool>(capacity: 64);
-                    totalSize = 0;
+                    totalSize = exactTotalSize;
                     containsCollections = false;
                     containsEventHandlers = false;
-                    int sampledCount = 0;
+                    int count = 0;
 
-                    foreach (var (address, (methodTable, size)) in retainedObjects)
+                    foreach (ulong address in treeProvider.EnumerateRetainedSet(rootAddress))
                     {
-                        // MethodTable == 0 means CollectRetainedObjects never resolved this address
-                        // (invalid, or — only when scanWasCapped — a frontier node the scan hit its
-                        // cap before dequeuing). See that method's remarks for the full contract.
-                        if (methodTable == 0)
-                            continue;
+                        cancellationToken.ThrowIfCancellationRequested();
+                        count++;
 
-                        totalSize += size;
+                        if (!cache.TryGetObjectMetadata(heap, address, out ulong methodTable, out ulong size) || methodTable == 0)
+                            continue;
 
                         if (!typeNameByMethodTable.TryGetValue(methodTable, out string? typeName))
                         {
@@ -189,24 +190,31 @@ namespace DumpDetective.Analysis.Analyzers
                         info.Count++;
                         info.TotalSize += size;
 
-                        if (sampledCount < options.SampleRetainedObjectsToInspect)
-                        {
-                            if (!containsCollections && TypeFilterHelper.IsCollectionType(typeName))
-                            {
-                                containsCollections = true;
-                            }
+                        if (!containsCollections && TypeFilterHelper.IsCollectionType(typeName))
+                            containsCollections = true;
 
-                            if (!containsEventHandlers)
-                            {
-                                containsEventHandlers = HasDelegateFields(heap, address, methodTable, delegateFieldByMethodTable);
-                            }
-
-                            sampledCount++;
-                        }
+                        if (!containsEventHandlers)
+                            containsEventHandlers = HasDelegateFields(heap, address, methodTable, delegateFieldByMethodTable);
                     }
 
-                    objectsKeptAlive = retainedObjects.Count;
-                    topRetainedTypes = GetTopRetainedTypes(typeStats, options.TopRetainedTypesToReport);
+                    objectsKeptAlive = count;
+                    scanWasCapped = false;
+                    topRetainedTypes = GetTopRetainedTypes(typeStats);
+                }
+                else
+                {
+                    // Dominator tree unavailable for this run (Stage B not built, or this root
+                    // wasn't reachable when the tree was built) — no exact retained-set analysis
+                    // possible; report the direct object only rather than guess.
+                    objectsKeptAlive = 1;
+                    totalSize = rootMetadata.Size;
+                    topRetainedTypes = new List<RetainedTypeInfo>(1)
+                    {
+                        new RetainedTypeInfo { TypeName = rootMetadata.TypeName, Count = 1, TotalSize = rootMetadata.Size }
+                    };
+                    scanWasCapped = true;
+                    containsCollections = false;
+                    containsEventHandlers = false;
                 }
 
                 string? alcInfo = null;
@@ -247,14 +255,11 @@ namespace DumpDetective.Analysis.Analyzers
             return results;
         }
 
-        private List<RetainedTypeInfo> GetTopRetainedTypes(Dictionary<string, RetainedTypeInfo> typeStats, int topRetainedTypesToReport)
+        private List<RetainedTypeInfo> GetTopRetainedTypes(Dictionary<string, RetainedTypeInfo> typeStats)
         {
-            // Manual sorting - no LINQ allocations
+            // Manual sorting - no LINQ allocations. Full list — the section builder paginates.
             var result = new List<RetainedTypeInfo>(typeStats.Values);
             result.Sort((a, b) => b.TotalSize.CompareTo(a.TotalSize));
-            if (result.Count > topRetainedTypesToReport)
-                result.RemoveRange(topRetainedTypesToReport, result.Count - topRetainedTypesToReport);
-
             return result;
         }
 

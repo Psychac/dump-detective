@@ -2,7 +2,6 @@ using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
-using DumpDetective.Core.Options;
 
 using Microsoft.Diagnostics.Runtime;
 
@@ -15,8 +14,10 @@ namespace DumpDetective.Analysis.Analyzers
     /// Population sweep (§21.1) uses <c>TypeAggregates</c> from Phase 1 filtered by
     /// <see cref="TypeAggregateFlags.IsFinalizableType"/> — no full heap re-scan.
     ///
-    /// Queue analysis (§21.2) calls <c>heap.EnumerateFinalizableObjects()</c>, bounded by
-    /// configured options, with bounded BFS for the top entries only.
+    /// Queue analysis (§21.2) calls <c>heap.EnumerateFinalizableObjects()</c> exhaustively (no
+    /// row cap); per-entry retained bytes come from the exact dominator tree
+    /// (<see cref="IDominatorTreeProvider.TryGetRetainedBytes"/>) when available, falling back
+    /// to shallow size otherwise — no bounded BFS estimator remains in this analyzer.
     /// </summary>
     public sealed class FinalizableObjectAnalyzer : IAnalyzer, IRequiresReachableGraphIndex, IRequiresDominatorTreeIndex
     {
@@ -28,14 +29,12 @@ namespace DumpDetective.Analysis.Analyzers
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            FinalizableObjectAnalysisOptions options = context.AnalysisOptions.FinalizableObjectAnalysis;
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, cancellationToken).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, cancellationToken).Stamp(this));
         }
 
         private static AnalyzerDomainResult Analyze(
             ClrHeap heap,
             IHeapAnalysisCache cache,
-            FinalizableObjectAnalysisOptions options,
             CancellationToken cancellationToken)
         {
             // ── Step 1: Population from TypeAggregates (Phase 1 index) ────────
@@ -128,9 +127,8 @@ namespace DumpDetective.Analysis.Analyzers
 
             // ── Step 2: Top finalizable types by Gen2Count ─────────────────────
             finalizableTypes.Sort(static (a, b) => b.Entry.Gen2Count.CompareTo(a.Entry.Gen2Count));
-            int typeLimit = Math.Min(finalizableTypes.Count, options.TopTypeLimit);
-            var topTypesByGen2 = new List<TypeGenerationProfile>(typeLimit);
-            for (int i = 0; i < typeLimit; i++)
+            var topTypesByGen2 = new List<TypeGenerationProfile>(finalizableTypes.Count);
+            for (int i = 0; i < finalizableTypes.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 (ulong mt, TypeAggregateIndexEntry e) = finalizableTypes[i];
@@ -149,8 +147,13 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             // ── Step 3: Finalizer queue analysis ─────────────────────────────
+            // §12.1 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): null
+            // when Stage B wasn't built for this run — retained-bytes below degrades to shallow
+            // size in that case (IsRetainedBytesExact = false on the affected entries).
+            IDominatorTreeProvider? treeProvider = cache.TryGetDominatorTreeProvider();
+
             int queueCount = 0;
-            var queueSamples = new List<(ClrObject Obj, string TypeName)>(Math.Min(options.QueueScanLimit, 128));
+            var queueSamples = new List<(ClrObject Obj, string TypeName)>(128);
             var queueTypeCountMap = new Dictionary<string, int>();
 
             foreach (ClrObject obj in heap.EnumerateFinalizableObjects())
@@ -163,22 +166,20 @@ namespace DumpDetective.Analysis.Analyzers
                     queueTypeCountMap[typeName] = 0;
                 queueTypeCountMap[typeName]++;
 
-                if (queueSamples.Count < options.QueueScanLimit && obj.IsValid && obj.Type is not null)
+                if (obj.IsValid && obj.Type is not null)
                     queueSamples.Add((obj, typeName));
             }
 
-            // Build top queue types by count
-            var topQueueTypes = queueTypeCountMap
-                .OrderByDescending(x => x.Value)
-                .Take(Math.Min(queueTypeCountMap.Count, options.TopTypeLimit))
-                .Select(x => new QueueTypeStatistic(x.Key, x.Value))
-                .ToList();
+            // Build queue types by count, full list — no LINQ, manual sort
+            var topQueueTypes = new List<QueueTypeStatistic>(queueTypeCountMap.Count);
+            foreach (KeyValuePair<string, int> kv in queueTypeCountMap)
+                topQueueTypes.Add(new QueueTypeStatistic(kv.Key, kv.Value));
+            topQueueTypes.Sort(static (a, b) => b.QueueCount.CompareTo(a.QueueCount));
 
-            // Sort by shallow size descending, analyse top N
+            // Sort by shallow size descending
             queueSamples.Sort(static (a, b) => b.Obj.Size.CompareTo(a.Obj.Size));
 
-            int entryLimit = Math.Min(queueSamples.Count, options.TopQueueEntries);
-            var topEntries = new List<FinalizerQueueEntry>(entryLimit);
+            var topEntries = new List<FinalizerQueueEntry>(queueSamples.Count);
             ulong totalQueueRetained = 0;
             bool hasUndisposedDisposable = false;
             bool isRetainedEstimatePartial = false;
@@ -186,7 +187,7 @@ namespace DumpDetective.Analysis.Analyzers
             var isDisposableCache = new Dictionary<ulong, bool>();
             var disposedFieldCache = new Dictionary<ulong, ClrInstanceField?>();
 
-            for (int i = 0; i < entryLimit; i++)
+            for (int i = 0; i < queueSamples.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 (ClrObject obj, string typeName) = queueSamples[i];
@@ -210,9 +211,13 @@ namespace DumpDetective.Analysis.Analyzers
                 if (isDisposable && disposedFound && !disposedValue)
                     hasUndisposedDisposable = true;
 
-                (ulong retained, bool wasCapped) = BfsEstimateRetained(heap, obj.Address, options.MaxBfsNodes, options.MaxBfsDepth);
-                if (wasCapped)
+                ulong retained = 0;
+                bool retainedIsExact = treeProvider is not null && treeProvider.TryGetRetainedBytes(obj.Address, out retained);
+                if (!retainedIsExact)
+                {
+                    retained = obj.Size;
                     isRetainedEstimatePartial = true;
+                }
                 totalQueueRetained += retained;
 
                 topEntries.Add(new FinalizerQueueEntry(
@@ -222,7 +227,8 @@ namespace DumpDetective.Analysis.Analyzers
                     EstimatedRetainedBytes: retained,
                     IsDisposableType: isDisposable,
                     DisposedFieldFound: disposedFound,
-                    DisposedFieldValue: disposedValue));
+                    DisposedFieldValue: disposedValue,
+                    RetainedBytesIsExact: retainedIsExact));
             }
 
             // Sort by estimated retained size descending
@@ -283,52 +289,6 @@ namespace DumpDetective.Analysis.Analyzers
 
             cache[methodTable] = field;
             return field;
-        }
-
-        /// <summary>
-        /// Bounded BFS from <paramref name="startAddr"/>; returns the sum of sizes of all
-        /// reachable objects (including the start object) and a flag indicating if traversal
-        /// was capped by node limit or depth. Capped at <paramref name="maxNodes"/> nodes
-        /// and <paramref name="maxDepth"/> depth. When capped, returned size is a partial
-        /// estimate of the true sub-graph (lower bound).
-        /// </summary>
-        private static (ulong RetainedSize, bool WasCapped) BfsEstimateRetained(ClrHeap heap, ulong startAddr, int maxNodes, int maxDepth)
-        {
-            if (startAddr == 0)
-                return (0, false);
-
-            var visited = new HashSet<ulong>(capacity: 32) { startAddr };
-            var queue = new Queue<(ulong Addr, int Depth)>(capacity: 32);
-            queue.Enqueue((startAddr, 0));
-            ulong totalSize = 0;
-            int nodesSeen = 0;
-            bool wasCapped = false;
-
-            while (queue.Count > 0)
-            {
-                (ulong addr, int depth) = queue.Dequeue();
-                nodesSeen++;
-
-                if (nodesSeen > maxNodes || depth >= maxDepth)
-                {
-                    wasCapped = true;
-                    break;
-                }
-
-                ClrObject obj = heap.GetObject(addr);
-                if (!obj.IsValid || obj.Type is null)
-                    continue;
-
-                totalSize += obj.Size;
-
-                foreach (ClrObject child in obj.EnumerateReferences(carefully: true))
-                {
-                    if (child.IsValid && child.Address != 0 && visited.Add(child.Address))
-                        queue.Enqueue((child.Address, depth + 1));
-                }
-            }
-
-            return (totalSize, wasCapped);
         }
 
         public void Dispose() { }

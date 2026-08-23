@@ -12,10 +12,11 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 12 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
+**Implementation progress: 15 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
 §9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph, §9.8 LohFragmentation, §9.9
 SegmentReservation, §9.10 Jit, §9.11 Array, §9.12 String (partial — AMBER, not GREEN; see its
-implementation notes for what's deliberately still deferred), §9.13 AsyncStateMachine (§9.6's orphaned
+implementation notes for what's deliberately still deferred), §9.13 AsyncStateMachine, §9.14
+StaticRootLeak, §9.15 FinalizableObject, §9.16 GCRoot (§9.6's orphaned
 `DependentHandleAnalysisOptions` was also deleted alongside GCHandle — not a separate registered
 analyzer, per the row-4 cross-reference below).** See each section and the §7 verdict table for what
 shipped in each.
@@ -300,9 +301,9 @@ radius is a single cosmetic report field, not root exactness.
 | 11 | Array | sampling | **GREEN** ✅ DONE | 5 of 6 | §9.11 — `WastedBytes` is an extrapolation of an extrapolation of one sample object; also found an orphaned dead-code reader and an obsolete `ScanLimited` field |
 | 12 | String | sampling | **AMBER** ⚠️ PARTIAL | 9 of 16 (+`MaxDedupUnique`, a non-`StringAnalysisOptions` cap) | §9.12 — the 9 safely-removable knobs are gone (incl. the real Q7 cap, `MaxStringsToDedup`); full exact dedup still needs a restructured hash-count pass, not shipped this pass |
 | 13 | AsyncStateMachine | sampling | **GREEN** ✅ DONE | 6 of 7 | §9.13 — a domain-result comment already documented its own corrupted sum; the per-type histogram cap was replaced with an exact-count early-exit instead of being dropped outright |
-| 14 | StaticRootLeak | retained-size | **AMBER** | 4 of 6 | §9.14 — `MaxRetainedObjectsToScan` materializes a Dictionary; needs dominator tree |
-| 15 | FinalizableObject | retained-size | **AMBER** | 5 of 5 | §9.15 — a **fourth** private copy of bounded-BFS retained estimation |
-| 16 | GCRoot | retained-size | **AMBER** | 4 of 4 | §9.16 — `MaxBfsDepth = 30` at Full is silently clamped to 20 |
+| 14 | StaticRootLeak | retained-size | **GREEN** ✅ DONE | 4 of 4 (2 kept, Category 5) | §9.14 — §10's dominator provider shipped; `MaxRetainedObjectsToScan`/`SampleRetainedObjectsToInspect`/`MaxRootsToReport`/`TopRetainedTypesToReport` all resolved via `EnumerateRetainedSet` + render-layer pagination |
+| 15 | FinalizableObject | retained-size | **GREEN** ✅ DONE | 5 of 5 | §9.15 — the fourth private BFS copy (`BfsEstimateRetained`) deleted outright, replaced by `TryGetRetainedBytes`; options class deleted |
+| 16 | GCRoot | retained-size | **GREEN** ✅ DONE | 4 of 4 (2 hardcoded, not deleted) | §9.16 — `PathSearchTopN` deleted per M4; `MaxBfsDepth`/`MaxBfsNodes` moved off the profile surface to internal constants (dominator-tree rewire for the path-type-name walk itself stays deferred, see notes) |
 | 17 | Collection | retained-size | **AMBER** | 4 of 9 | §9.17 — the only analyzer reading `AnalysisProfile` at runtime |
 | 18 | Dominator | retained-size | **GREEN** | 0 | §9.18 — already exact; owns `RetentionOptions` exclusively (see row 22 note); its own flags were *deliberately* kept off the profile system |
 | 19 | EventLeak | root-path | **AMBER** | 5 of 16 | §9.19 — holds the codebase's **only wall-clock budget**; useful precedent |
@@ -1441,6 +1442,18 @@ All six knobs deleted from `AsyncStateMachineAnalysisOptions`; only `LargeCaptur
 
 ### 9.14-9.16 preamble: group 3 shares one root cause
 
+**Update (post-§10): the blocking item shipped.** §10's dominator-tree retention provider
+(`IDominatorTreeProvider`) landed via
+[dominator-tree-phase1-integration.md](../analysis/phase1-redesigns/dominator-tree-phase1-integration.md),
+resolving the preamble's original blocker. §9.14 and §9.15 now read the exact tree instead of
+running `BoundedGraphWalk.CollectRetainedObjects`/`FinalizableObjectAnalyzer.BfsEstimateRetained`
+(both deleted). §9.16 partially migrated (retained *bytes* already came from the tree; the
+forward-path-type-names walk deliberately did not, see its implementation notes) —
+`BoundedGraphWalk.CollectForwardTypeNames` and `RetainedSizeCandidateSelector`'s
+`ComputeExclusiveRetained` fallback walk both remain, now as an intentional non-blocking
+residual rather than the section's headline blocker. The original preamble text below is kept for
+the problem framing.
+
 All three analyzers below approximate **retained size / retained set** with a node- and depth-bounded
 BFS. There are **four separate implementations** of that approximation:
 
@@ -1467,7 +1480,7 @@ that first, then all three analyzers become deletions rather than rewrites.
 
 ---
 
-### 9.14 StaticRootLeak — **AMBER**
+### 9.14 StaticRootLeak — **GREEN** ✅ IMPLEMENTED
 
 [StaticRootLeakDetector.cs](../../src/DumpDetective.Analysis/Analyzers/StaticRootLeakDetector.cs) ·
 [StaticRootLeakAnalysisOptions.cs](../../src/DumpDetective.Core/Options/StaticRootLeakAnalysisOptions.cs)
@@ -1498,7 +1511,50 @@ number that saturates: every root retaining more than 10,000 objects looks ident
 
 ---
 
-### 9.15 FinalizableObject — **AMBER**
+#### Implementation notes (as shipped)
+
+`§10`'s dominator-tree retention provider (`IDominatorTreeProvider`, shipped per
+[dominator-tree-phase1-integration.md](../analysis/phase1-redesigns/dominator-tree-phase1-integration.md))
+resolved the blocker this section was AMBER on — `EnumerateRetainedSet` got its first real caller here.
+
+- `StaticRootLeakAnalysisOptions` reduced to the two Category-5 fields
+  (`SignificantMemoryThresholdBytes`, `SignificantObjectCountThreshold`); `MaxRootsToReport`,
+  `TopRetainedTypesToReport`, `SampleRetainedObjectsToInspect`, `MaxRetainedObjectsToScan` all
+  deleted. No `Preset`/`Default` remain.
+- `StaticRootLeakDetector.AnalyzeStaticRoots` now has three paths per root, in priority order: (1)
+  the pre-existing shape pre-check (no reference-typed fields anywhere in the field tree — direct
+  object only, exact, `ScanWasCapped = false`); (2) `treeProvider.TryGetRetainedBytes` for the
+  exact total, then a streaming `treeProvider.EnumerateRetainedSet` pass building the per-type
+  breakdown (`ObjectsKeptAlive`, `TopRetainedTypes`, `ContainsCollections`, `ContainsEventHandlers`)
+  over *every* retained object, not a `SampleRetainedObjectsToInspect`-bounded prefix —
+  `ScanWasCapped = false`; (3) dominator tree unavailable for this run or this root wasn't
+  reachable when it was built — degrades to direct-object-only, `ScanWasCapped = true` (repurposed
+  from "hit the numeric cap" to "not exact this run," same field, same section-builder/finding-
+  generator consumers, no churn there).
+- `BoundedGraphWalk.CollectRetainedObjects` deleted outright — no remaining caller anywhere in the
+  codebase after this change (confirmed by search). Its two dedicated tests
+  (`BoundedGraphWalkDepthCapTests.cs`, and the first test in what's now
+  `StaticRootLeakDetectorDominatorTreeDiscrepancyTests.cs`) deleted with it; the file's still-valid
+  `StaticRootLeakDetector` end-to-end real-dump test was kept and the file renamed to match.
+- `MaxRootsToReport`/`TopRetainedTypesToReport` moved to render: the analyzer now returns every
+  analyzed root (sorted) and every retained type per root (sorted); `StaticRootSectionBuilder`'s
+  flat "top roots by retained bytes" table uses `STCompact`'s default pagination (§11.2 D5). The
+  per-root "top retained types" *sub-tables* are a different shape — one table per root, not rows
+  within one table — so D5's row-pagination argument doesn't apply; kept a small render-layer
+  constant (`MaxRootDetailTables = 8`, matching the prior `TopRootsToShow` default) bounding how
+  many roots get their own detail sub-table. The collections/event-handler/ALC advisory blocks now
+  scan the *full* root list rather than the display-limited slice.
+- **Residual, deliberately out of scope:** `EnumerateRetainedSet`'s cost near the dominator tree's
+  root is flagged unmeasured in the source doc ("its unbounded subtree-walk cost near the tree's
+  root is unmeasured on a real dump"). This section is its first production caller. The risk is
+  judged acceptable because (a) it's memory-safe regardless of cost — a streaming walk, not the old
+  Dictionary materialization it replaces — and (b) it replaces a heuristic that was already
+  silently wrong (truncated at 10,000 objects) with an exact one, which is this whole plan's goal.
+  Wall-clock cost for a pathological "root retains most of the heap" case has not been measured on
+  a real dump; if it turns out to be a problem in practice, the fallback path (case 3 above) is
+  already there to degrade to.
+
+### 9.15 FinalizableObject — **GREEN** ✅ IMPLEMENTED
 
 [FinalizableObjectAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/FinalizableObjectAnalyzer.cs) ·
 [FinalizableObjectAnalysisOptions.cs](../../src/DumpDetective.Core/Options/FinalizableObjectAnalysisOptions.cs)
@@ -1530,7 +1586,36 @@ queue statistics are truncated at 500 entries.
 
 ---
 
-### 9.16 GCRoot — **AMBER**
+#### Implementation notes (as shipped)
+
+`FinalizableObjectAnalysisOptions` deleted outright (all five fields), matching the doc's own
+prediction — no fields survived once Category 1/2/3/4 were resolved.
+
+- `BfsEstimateRetained` (the "fourth private copy" of bounded retained-size BFS) deleted entirely,
+  per Q4's directive — no internal-constant fallback BFS kept, unlike GCRoot's path-type-name walk
+  (§9.16), because this analyzer's retained-size *is* the feature being measured, not a supporting
+  narrative detail. Per-entry retained bytes now come from
+  `treeProvider.TryGetRetainedBytes(obj.Address, ...)`; when the tree is unavailable (or the lookup
+  misses), falls back to `obj.Size` (shallow) — the same "shallow size as honest degrade" pattern
+  already shipped for `GCHandleAnalyzer` in §10's own consumer list.
+- Added `FinalizerQueueEntry.RetainedBytesIsExact` (mirrors `GCHandleAnalyzer`'s
+  `PinnedRetainedBytesIsExact`) so the report can show which entries are exact vs. degraded; new
+  "Exact?" column in `FinalizableObjectSectionBuilder`'s queue-entries table.
+  `IsRetainedEstimatePartial` on the domain result is now true whenever *any* entry fell back to
+  shallow size, repurposed from its old "BFS hit its cap" meaning — same field name, updated
+  wording in the finding generator and section builder ("dominator tree unavailable for some
+  entries" instead of "BFS capped").
+- `QueueScanLimit` deleted: with the O(1) exact-bytes lookup replacing a per-entry BFS, processing
+  every finalizer-queue entry (not just the first 500) is cheap — `queueSamples` now collects every
+  entry from `heap.EnumerateFinalizableObjects()`.
+- `TopTypeLimit`/`TopQueueEntries` moved to render: `topTypesByGen2`, `topQueueTypes`, and
+  `topEntries` are now full sorted lists; `FinalizableObjectSectionBuilder` dropped its
+  `TopTypeRows`/`TopQueueRows` consts and per-table `Math.Min`/"N additional omitted" text,
+  matching D5's default-pagination pattern used everywhere else.
+- Test suite regression only (no dedicated pre-existing unit tests for this analyzer, same as
+  before this change) — covered by the real-dump discrepancy/integration suite.
+
+### 9.16 GCRoot — **GREEN** ✅ IMPLEMENTED
 
 [GCRootAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/GCRootAnalyzer.cs) ·
 [GCRootAnalysisOptions.cs](../../src/DumpDetective.Core/Options/GCRootAnalysisOptions.cs)
@@ -1569,6 +1654,43 @@ hasn't been re-pointed at the dominator tree yet) took 568 ms, actually faster t
 874 ms for 25. §10's `EnumerateRetainedSet` rewire is still worth doing (an O(1) parent-pointer read
 beats a bounded BFS per candidate), but is no longer a blocking prerequisite — `PathSearchTopN` can be
 deleted now.
+
+#### Implementation notes (as shipped)
+
+`GCRootAnalysisOptions` deleted outright — all four audited fields resolved, none left as a
+tunable.
+
+- `PathSearchTopN` deleted per the M4 measurement above: root-path evidence (BFS path-type names +
+  retained-size fallback) now computed for every finding (`pathN = findings.Count`), not the top 25.
+- `TopSeverityLimit` deleted from options, but *not* uncapped uniformly — split into two concerns
+  that the original single knob conflated. `TopRootsBySeverity` (the actual returned/reported
+  finding set) is now the full list, paginated at render (`GCRootIntelligenceSectionBuilder`
+  already fed `STCompact` full lists with no row cap, so no section-builder change was needed
+  there). The owning-stack-frame-attribution enrichment
+  (`cache.TryResolveStackFrameOwner` → `FieldDescription`) stayed bounded, by a new private
+  `StackOwnerAttributionLimit = 20` constant — the source code's own comment already flagged this
+  per-thread frame walk as "too costly to run for every Stack root in the dump," and it's purely
+  cosmetic (an unenriched row loses only the "in Type.Method()" text, not any exactness-relevant
+  data: kind/type/bytes/severity are all present and correct either way).
+- `MaxBfsNodes`/`MaxBfsDepth` moved off the options surface to private constants
+  (`PathWalkMaxNodes = 500`, `PathWalkMaxDepth = 20`) in `GCRootAnalyzer.cs`, matching
+  `BoundedGraphWalk.AbsoluteMaxDepth`'s existing precedent for "internal traversal bound, not
+  user-configurable." Functionally unchanged from the prior default — this satisfies "delete with
+  the walk" in the sense of removing profile/config control over them, not in the sense of
+  replacing the walk itself.
+- **Residual, deliberately deferred:** `BoundedGraphWalk.CollectForwardTypeNames` (the forward
+  path-type-names walk feeding `RootPathFinding.PathTypeNames`) is still BFS-backed, not rewired to
+  `IDominatorTreeProvider.EnumerateRetainedSet`, even though retained *bytes* for the same findings
+  already come from the exact tree (shipped earlier, §7 of the B2 doc). The plan doc's own Q5 note
+  only unblocks `PathSearchTopN` ("no longer a *blocking* prerequisite" for that knob specifically),
+  not the walk-to-dominator-tree rewire itself, which stays explicitly "still worth doing." Retained
+  as a real BFS with the same fixed bounds as before rather than switched to
+  `EnumerateRetainedSet`, since that member's cost near the tree's root is unmeasured (see §9.14's
+  notes, where a different consumer took on that risk instead). The old
+  `RetainedSizeCandidateSelector` fallback walk (used only when the tree can't answer a target
+  exactly) is unaffected — it already only runs for tree misses.
+- Deleted the now-obsolete §11.4 M4 measurement test
+  (`GCRootAnalyzerUncappedRealDumpTests.cs`) — its result is preserved in the Q5 note above.
 
 ### 9.17 Collection — **AMBER**
 

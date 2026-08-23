@@ -9,7 +9,11 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class StaticRootSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    private const int TopRootsToShow = 8;
+    // Bounds how many roots get their own per-root "top retained types" detail sub-table — a
+    // report-structure decision (how many separate tables to render), not a row-pagination
+    // decision within one table, so it isn't subsumed by STCompact's default row pagination
+    // (§11.2 D5) the way the flat "top roots by retained bytes" table below is.
+    private const int MaxRootDetailTables = 8;
 
     public string AnalyzerName => "Static Root Leak Detection";
     public string DisplayTitle => "Static Roots";
@@ -32,14 +36,13 @@ internal sealed class StaticRootSectionBuilder : SectionBuilderBase, IAnalyzerSe
         var roots = d.TopRootsByRetainedBytes ?? [];
         if (roots.Count > 0)
         {
-            int limit = Math.Min(roots.Count, TopRootsToShow);
-            var rootRows = new List<CompactRow>(limit);
-            for (int i = 0; i < limit; i++)
+            var rootRows = new List<CompactRow>(roots.Count);
+            for (int i = 0; i < roots.Count; i++)
             {
                 var r = roots[i];
                 string bytesDisplay = FormatHelper.FormatBytes(r.TotalMemoryImpact);
                 if (r.ScanWasCapped)
-                    bytesDisplay += " (estimate — scan capped)";
+                    bytesDisplay += " (direct object only — dominator tree unavailable for this root)";
 
                 rootRows.Add(R(
                     FormatHelper.TruncateString(r.RootDescription, 90),
@@ -67,7 +70,8 @@ internal sealed class StaticRootSectionBuilder : SectionBuilderBase, IAnalyzerSe
                 blocks.Add(T($"⚠️ {alcRoots.Count} root(s) belong to non-default AppDomains — indicates potential plugin unload failure."));
             }
 
-            for (int i = 0; i < limit; i++)
+            int detailTableCount = Math.Min(roots.Count, MaxRootDetailTables);
+            for (int i = 0; i < detailTableCount; i++)
             {
                 var r = roots[i];
                 var topTypes = r.TopRetainedTypes;

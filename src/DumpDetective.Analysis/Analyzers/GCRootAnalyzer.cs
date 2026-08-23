@@ -21,20 +21,30 @@ namespace DumpDetective.Analysis.Analyzers
     /// </summary>
     public sealed class GCRootAnalyzer : IAnalyzer, IRequiresReachableGraphIndex, IRequiresDominatorTreeIndex
     {
+        // Internal traversal bounds, not user-configurable (matches BoundedGraphWalk.AbsoluteMaxDepth's
+        // precedent) — used only for the forward path-type-name walk and the retained-size fallback walk,
+        // both of which still run when the exact dominator tree can't answer a query (see docs/refactor/
+        // analysis-profile-removal-plan.md §9.16 implementation notes for why these two walks remain).
+        private const int PathWalkMaxNodes = 500;
+        private const int PathWalkMaxDepth = 20;
+
+        // Bounds the per-thread stack-frame-owner attribution enrichment (FieldDescription), not the
+        // returned finding set itself — that lookup is measured-expensive per root and purely cosmetic
+        // (unenriched rows still carry correct kind/type/bytes/severity, just no "in Type.Method()" text).
+        private const int StackOwnerAttributionLimit = 20;
+
         public string Name => "GC Root Analysis";
         public string Category => "Memory";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            GCRootAnalysisOptions options = context.AnalysisOptions.GCRootAnalysis;
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, cancellationToken).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, cancellationToken).Stamp(this));
         }
 
         private static AnalyzerDomainResult Analyze(
             ClrHeap heap,
             IHeapAnalysisCache cache,
-            GCRootAnalysisOptions options,
             CancellationToken cancellationToken)
         {
             if (cache is not HeapAnalysisCache heapCache
@@ -65,26 +75,28 @@ namespace DumpDetective.Analysis.Analyzers
             GCRootAnalysisProjectionResult projection = GCRootAnalysisProjection.Build(roots, heap, cache, aggregates, treeProvider);
 
             List<RootFinding> findings = projection.FindingsBySeverityDescending;
-            int topCount = Math.Min(findings.Count, options.TopSeverityLimit);
 
             // Mechanism B (see docs/analysis/root-field-name-index-plan.md): owning-method
             // attribution for Stack-kind roots, scoped to the severity-ranked top-N only — the
             // per-thread frame walk this triggers on first use is too costly to run for every
-            // Stack root in the dump, and the report never shows more than TopSeverityLimit rows.
-            for (int i = 0; i < topCount; i++)
+            // Stack root in the dump, and this enrichment is purely cosmetic (a missing
+            // FieldDescription loses no data — kind/type/bytes/severity are unaffected).
+            int ownerAttributionCount = Math.Min(findings.Count, StackOwnerAttributionLimit);
+            for (int i = 0; i < ownerAttributionCount; i++)
             {
                 RootFinding f = findings[i];
                 if (f.RootKind == "Stack" && cache.TryResolveStackFrameOwner(heap, f.RootAddress, out string ownerType, out string methodName))
                     findings[i] = f with { FieldDescription = $"in {ownerType}.{methodName}()" };
             }
 
-            IReadOnlyList<RootFinding> topFindings = findings.Count <= options.TopSeverityLimit
-                ? findings
-                : findings.GetRange(0, topCount);
+            IReadOnlyList<RootFinding> topFindings = findings;
 
-            // ── Step 3: BFS path tracing + retained-size estimate for top-N roots ──
+            // ── Step 3: BFS path tracing + retained-size estimate for every finding ──
+            // §9.16 (docs/refactor/analysis-profile-removal-plan.md): PathSearchTopN deleted —
+            // M4 measured this as affordable (568ms uncapped vs. 874ms capped-to-25 on a real
+            // dump with 1,404 findings).
             int pathCappedCount = 0;
-            int pathN = Math.Min(findings.Count, options.PathSearchTopN);
+            int pathN = findings.Count;
 
             // §12.1: a target the dominator tree can answer exactly for needs no BFS at all — skip
             // it as a walk candidate entirely rather than spending one of RetainedSizeCandidateSelector's
@@ -106,7 +118,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             var retainedVisited = new HashSet<ulong>(capacity: Math.Min(pathN * 64, 4096));
             IReadOnlyList<RetainedSizeResult> retainedResults = RetainedSizeCandidateSelector.SelectAndCompute(
-                walkCandidates, heap, cache, retainedVisited, maxCandidatesToWalk: walkCandidates.Count, options.MaxBfsNodes, options.MaxBfsDepth, cancellationToken);
+                walkCandidates, heap, cache, retainedVisited, maxCandidatesToWalk: walkCandidates.Count, PathWalkMaxNodes, PathWalkMaxDepth, cancellationToken);
 
             var retainedByAddress = new Dictionary<ulong, RetainedSizeResult>(retainedResults.Count);
             foreach (RetainedSizeResult r in retainedResults)
@@ -119,7 +131,7 @@ namespace DumpDetective.Analysis.Analyzers
                 cancellationToken.ThrowIfCancellationRequested();
                 RootFinding f = findings[i];
 
-                var pathTypes = BoundedGraphWalk.CollectForwardTypeNames(heap, f.TargetAddress, options.MaxBfsNodes, options.MaxBfsDepth, out bool wasCapped, cancellationToken);
+                var pathTypes = BoundedGraphWalk.CollectForwardTypeNames(heap, f.TargetAddress, PathWalkMaxNodes, PathWalkMaxDepth, out bool wasCapped, cancellationToken);
 
                 if (wasCapped)
                     pathCappedCount++;

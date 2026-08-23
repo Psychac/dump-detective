@@ -65,7 +65,7 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
             compactTables.Add(STCompact(
                 "Finalizer roots",
                 new[] { CH("Target Type"), CH("Field"), CH("Est. Retained","bytes"), CH("Severity","number"), CH("Root Addr") },
-                finalizerRoots.Take(10).Select(root => R(new object?[] { root.TargetTypeName, root.FieldDescription ?? "—", root.EstimatedRetainedBytes, root.SeverityScore, $"0x{root.RootAddress:X}" })).ToArray()));
+                finalizerRoots.Select(root => R(new object?[] { root.TargetTypeName, root.FieldDescription ?? "—", root.EstimatedRetainedBytes, root.SeverityScore, $"0x{root.RootAddress:X}" })).ToArray()));
         }
 
         // ── Root paths: typed RootPathGroups slot ─────────────────────────

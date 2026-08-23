@@ -56,8 +56,8 @@ internal sealed class FinalizableObjectFindingGenerator : IFindingGenerator
                 : FindingSeverity.Warning;
 
             string estimateQualifier = r.IsRetainedEstimatePartial
-                ? " (BFS capped—partial graph; true retention may be less)"
-                : " (shared sub-graphs may be counted multiple times—upper bound)";
+                ? " (exact dominator-tree retained bytes unavailable for some entries—shallow size used instead, an underestimate)"
+                : " (exact, from the dominator tree)";
 
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,

@@ -11,7 +11,8 @@ internal sealed record FinalizerQueueEntry(
     ulong EstimatedRetainedBytes,
     bool IsDisposableType,
     bool DisposedFieldFound,
-    bool DisposedFieldValue);
+    bool DisposedFieldValue,
+    bool RetainedBytesIsExact = false);
 
 internal sealed record QueueTypeStatistic(
     string TypeName,

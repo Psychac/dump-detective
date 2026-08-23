@@ -71,7 +71,7 @@ namespace DumpDetective.Analysis.Analyzers
         {
             _scanCounter!.Tick();
 
-            if (entry.Address == 0 || _threadPoolInfo!.TaskScanLimited)
+            if (entry.Address == 0)
                 return;
 
             AsyncTypeProfile profile = ResolveAsyncTypeProfile(_heap!, entry, _profileByMethodTable!);
@@ -82,14 +82,10 @@ namespace DumpDetective.Analysis.Analyzers
                 _heap!,
                 entry.Address,
                 profile,
-                _threadPoolInfo,
+                _threadPoolInfo!,
                 _taskContinuations!,
                 ref _tasksScanned,
-                ref _totalContinuations,
-                _options!.MaxTasksToScan);
-
-            if (_tasksScanned > _options.MaxTasksToScan && _threadPoolInfo.QueuedWorkItems > 1000)
-                _threadPoolInfo.TaskScanLimited = true;
+                ref _totalContinuations);
         }
 
         public void OnHeapIndexScanCompleted(bool succeeded) => _participantScanSucceeded = succeeded;
@@ -133,7 +129,6 @@ namespace DumpDetective.Analysis.Analyzers
                 tp.PendingTasks += otherTp.PendingTasks;
                 tp.FaultedTasks += otherTp.FaultedTasks;
                 tp.CanceledTasks += otherTp.CanceledTasks;
-                tp.TaskScanLimited |= otherTp.TaskScanLimited;
 
                 _tasksScanned += other._tasksScanned;
                 _totalContinuations += other._totalContinuations;
@@ -236,12 +231,12 @@ namespace DumpDetective.Analysis.Analyzers
                         hangInfo.ThreadPoolInfo.RuntimeMaxThreads > 0 &&
                         hangInfo.ThreadPoolInfo.RuntimeQueueLength.GetValueOrDefault() > 0 &&
                         hangInfo.ThreadPoolInfo.RuntimeActiveWorkerThreads >= hangInfo.ThreadPoolInfo.RuntimeMaxThreads,
-                    hangInfo.ThreadPoolInfo.TaskScanLimited,
                     hangInfo.HealthScore,
+                    // Complete ranked lists — no report-width cap in the analyzer (§9.25 D5); the
+                    // render layer slices for display.
                     hangInfo.WaitingThreads
                         .OrderByDescending(w => w.LockCount)
                         .ThenByDescending(w => w.WaitType)
-                        .Take(10)
                         .Select(w => new WaitingThreadSnapshot(
                             w.ThreadId,
                             w.OSThreadId,
@@ -252,7 +247,6 @@ namespace DumpDetective.Analysis.Analyzers
                         .ToList(),
                     hangInfo.TaskContinuations
                         .OrderByDescending(k => k.Value)
-                        .Take(options.TopContinuationTypesToShow)
                         .Select(k => new NameCountEntry(k.Key, k.Value))
                         .ToList());
         }
@@ -316,7 +310,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             ReadRuntimeThreadPool(runtime, analysis);
             progress?.Report(new(analysis.TotalAliveThreads, "analyzing async work items"));
-            AnalyzeAsyncWork(heap, cache, analysis, options);
+            AnalyzeAsyncWork(heap, cache, analysis);
 
             analysis.HealthScore = ComputeHealthScore(analysis, options);
 
@@ -470,7 +464,7 @@ namespace DumpDetective.Analysis.Analyzers
             return null;
         }
 
-        private void AnalyzeAsyncWork(ClrHeap heap, IHeapAnalysisCache? cache, HangAnalysis analysis, HangAnalysisOptions options)
+        private void AnalyzeAsyncWork(ClrHeap heap, IHeapAnalysisCache? cache, HangAnalysis analysis)
         {
             // BeforeHeapIndexScan/OnHeapEntry already ran via the pipeline's HeapIndexScanDispatcher
             // before AnalyzeAsync executes when a heap index was available; read back the
@@ -483,12 +477,13 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             // No cache, or shared scan unavailable/failed: parallel over GC segments
-            RunParallelAsyncScan(heap, inMemoryEntries: null, analysis, options);
+            RunParallelAsyncScan(heap, inMemoryEntries: null, analysis);
         }
 
         // Unified parallel async-work scanner — drives either a flat in-memory HeapEntry[]
-        // or a per-segment ClrObject walk.  The early scan-limit is honored via a volatile flag.
-        private void RunParallelAsyncScan(ClrHeap heap, HeapEntry[]? inMemoryEntries, HangAnalysis analysis, HangAnalysisOptions options)
+        // or a per-segment ClrObject walk. Every Task-typed object's state flags are read — no
+        // scan-limit cap (§9.25).
+        private void RunParallelAsyncScan(ClrHeap heap, HeapEntry[]? inMemoryEntries, HangAnalysis analysis)
         {
             var profileByMethodTable = new ConcurrentDictionary<ulong, AsyncTypeProfile>(
                 concurrencyLevel: Environment.ProcessorCount, capacity: 64);
@@ -496,11 +491,10 @@ namespace DumpDetective.Analysis.Analyzers
 
             int queuedWorkItems = 0, totalTasks = 0, pendingTasks = 0, faultedTasks = 0, canceledTasks = 0;
             int totalContinuations = 0, tasksScanned = 0;
-            bool taskScanLimited = false;
 
             void ProcessEntry(ulong address, ulong mt)
             {
-                if (address == 0 || mt == 0 || Volatile.Read(ref taskScanLimited))
+                if (address == 0 || mt == 0)
                     return;
 
                 var entry = new HeapEntry(address, mt, 0);
@@ -527,28 +521,21 @@ namespace DumpDetective.Analysis.Analyzers
 
                 if (profile.IsTask)
                 {
-                    int scanned = Interlocked.Increment(ref tasksScanned);
+                    Interlocked.Increment(ref tasksScanned);
                     Interlocked.Increment(ref totalTasks);
 
-                    if (scanned <= options.MaxTasksToScan)
+                    var stateField = obj.Type.GetFieldByName("m_stateFlags");
+                    if (stateField != null)
                     {
-                        var stateField = obj.Type.GetFieldByName("m_stateFlags");
-                        if (stateField != null)
-                        {
-                            int stateFlags = stateField.Read<int>(obj, interior: false);
-                            bool isCompleted = (stateFlags & 0x1000000) != 0;
-                            bool isFaulted = (stateFlags & 0x200000) != 0;
-                            bool isCanceled = (stateFlags & 0x400000) != 0;
+                        int stateFlags = stateField.Read<int>(obj, interior: false);
+                        bool isCompleted = (stateFlags & 0x1000000) != 0;
+                        bool isFaulted = (stateFlags & 0x200000) != 0;
+                        bool isCanceled = (stateFlags & 0x400000) != 0;
 
-                            if (isFaulted) Interlocked.Increment(ref faultedTasks);
-                            else if (isCanceled) Interlocked.Increment(ref canceledTasks);
-                            else if (!isCompleted) Interlocked.Increment(ref pendingTasks);
-                        }
+                        if (isFaulted) Interlocked.Increment(ref faultedTasks);
+                        else if (isCanceled) Interlocked.Increment(ref canceledTasks);
+                        else if (!isCompleted) Interlocked.Increment(ref pendingTasks);
                     }
-
-                    // Honor scan limit: signal remaining threads to skip task processing
-                    if (scanned > options.MaxTasksToScan && Volatile.Read(ref queuedWorkItems) > 1000)
-                        Volatile.Write(ref taskScanLimited, true);
                 }
 
                 if (profile.IsContinuation)
@@ -589,8 +576,7 @@ namespace DumpDetective.Analysis.Analyzers
                 TotalTasks = totalTasks,
                 PendingTasks = pendingTasks,
                 FaultedTasks = faultedTasks,
-                CanceledTasks = canceledTasks,
-                TaskScanLimited = taskScanLimited
+                CanceledTasks = canceledTasks
             };
             analysis.TaskContinuations = new Dictionary<string, int>(taskContinuations, StringComparer.Ordinal);
             analysis.TotalContinuations = totalContinuations;
@@ -626,8 +612,7 @@ namespace DumpDetective.Analysis.Analyzers
             ThreadPoolAnalysis threadPool,
             Dictionary<string, int> taskContinuations,
             ref int tasksScanned,
-            ref int totalContinuations,
-            int maxTasksToScan)
+            ref int totalContinuations)
         {
             ClrObject obj = heap.GetObject(objectAddress);
             if (!obj.IsValid || obj.Type == null)
@@ -643,23 +628,20 @@ namespace DumpDetective.Analysis.Analyzers
                 tasksScanned++;
                 threadPool.TotalTasks++;
 
-                if (tasksScanned <= maxTasksToScan)
+                var stateField = obj.Type.GetFieldByName("m_stateFlags");
+                if (stateField != null)
                 {
-                    var stateField = obj.Type.GetFieldByName("m_stateFlags");
-                    if (stateField != null)
-                    {
-                        int stateFlags = stateField.Read<int>(obj, interior: false);
-                        bool isCompleted = (stateFlags & 0x1000000) != 0;
-                        bool isFaulted = (stateFlags & 0x200000) != 0;
-                        bool isCanceled = (stateFlags & 0x400000) != 0;
+                    int stateFlags = stateField.Read<int>(obj, interior: false);
+                    bool isCompleted = (stateFlags & 0x1000000) != 0;
+                    bool isFaulted = (stateFlags & 0x200000) != 0;
+                    bool isCanceled = (stateFlags & 0x400000) != 0;
 
-                        if (isFaulted)
-                            threadPool.FaultedTasks++;
-                        else if (isCanceled)
-                            threadPool.CanceledTasks++;
-                        else if (!isCompleted)
-                            threadPool.PendingTasks++;
-                    }
+                    if (isFaulted)
+                        threadPool.FaultedTasks++;
+                    else if (isCanceled)
+                        threadPool.CanceledTasks++;
+                    else if (!isCompleted)
+                        threadPool.PendingTasks++;
                 }
             }
 
@@ -722,7 +704,6 @@ namespace DumpDetective.Analysis.Analyzers
         public int PendingTasks { get; set; }
         public int FaultedTasks { get; set; }
         public int CanceledTasks { get; set; }
-        public bool TaskScanLimited { get; set; }
 
         // Runtime-sourced counters (from ClrThreadPool)
         public bool RuntimeInitialized { get; set; }

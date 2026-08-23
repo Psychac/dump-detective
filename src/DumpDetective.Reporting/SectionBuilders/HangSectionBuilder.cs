@@ -10,6 +10,11 @@ namespace DumpDetective.Reporting.SectionBuilders;
 /// <summary>D2 — Hang &amp; Blocking. Source: <see cref="HangDomainResult"/>.</summary>
 internal sealed class HangSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
+    // Report-width display limits (§9.25 D5) — the analyzer emits complete, uncapped waiting-thread
+    // and continuation-type data; these are render-layer-only slicing constants.
+    private const int TopWaitingThreadsToShow = 10;
+    private const int TopContinuationTypesToShow = 5;
+
     public string AnalyzerName => "Hang Analysis";
     public string DisplayTitle => "Hang & Blocking";
     public int SortOrder => 200;
@@ -76,8 +81,9 @@ internal sealed class HangSectionBuilder : SectionBuilderBase, IAnalyzerSectionB
 
         if (d.TopWaitingThreads is { Count: > 0 })
         {
-            var rows = new List<TableRow>(d.TopWaitingThreads.Count);
-            for (int i = 0; i < d.TopWaitingThreads.Count; i++)
+            int limit = Math.Min(d.TopWaitingThreads.Count, TopWaitingThreadsToShow);
+            var rows = new List<TableRow>(limit);
+            for (int i = 0; i < limit; i++)
             {
                 WaitingThreadSnapshot t = d.TopWaitingThreads[i];
                 rows.Add(Row(
@@ -118,8 +124,9 @@ internal sealed class HangSectionBuilder : SectionBuilderBase, IAnalyzerSectionB
 
         if (d.TopContinuationTypes is { Count: > 0 })
         {
-            var rows = new List<TableRow>(d.TopContinuationTypes.Count);
-            for (int i = 0; i < d.TopContinuationTypes.Count; i++)
+            int limit = Math.Min(d.TopContinuationTypes.Count, TopContinuationTypesToShow);
+            var rows = new List<TableRow>(limit);
+            for (int i = 0; i < limit; i++)
                 rows.Add(Row(Cell(d.TopContinuationTypes[i].Name), Cell(d.TopContinuationTypes[i].Count.ToString("N0"), d.TopContinuationTypes[i].Count)));
             compactTables.Add(STCompact("Top continuation types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }

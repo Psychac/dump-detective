@@ -29,13 +29,13 @@ public sealed class HangAnalyzerHeapIndexScanTests
         HangAnalyzer primary = new();
         SeedParticipantState(primary,
             queuedWorkItems: 3, totalTasks: 10, pendingTasks: 4, faultedTasks: 1, canceledTasks: 2,
-            taskScanLimited: false, tasksScanned: 10, totalContinuations: 5,
+            tasksScanned: 10, totalContinuations: 5,
             taskContinuations: new());
 
         HangAnalyzer worker = new();
         SeedParticipantState(worker,
             queuedWorkItems: 2, totalTasks: 8, pendingTasks: 3, faultedTasks: 0, canceledTasks: 1,
-            taskScanLimited: false, tasksScanned: 8, totalContinuations: 3,
+            tasksScanned: 8, totalContinuations: 3,
             taskContinuations: new());
 
         ((IParallelHeapIndexScanParticipant)primary).MergePartial([worker]);
@@ -46,23 +46,8 @@ public sealed class HangAnalyzerHeapIndexScanTests
         tp.PendingTasks.Should().Be(7);
         tp.FaultedTasks.Should().Be(1);
         tp.CanceledTasks.Should().Be(3);
-        tp.TaskScanLimited.Should().BeFalse();
         GetTasksScanned(primary).Should().Be(18);
         GetTotalContinuations(primary).Should().Be(8);
-    }
-
-    [Fact]
-    public void MergePartial_OrsTaskScanLimited()
-    {
-        HangAnalyzer primary = new();
-        SeedParticipantState(primary, taskScanLimited: false);
-
-        HangAnalyzer worker = new();
-        SeedParticipantState(worker, taskScanLimited: true);
-
-        ((IParallelHeapIndexScanParticipant)primary).MergePartial([worker]);
-
-        GetThreadPoolInfo(primary).TaskScanLimited.Should().BeTrue();
     }
 
     [Fact]
@@ -132,7 +117,6 @@ public sealed class HangAnalyzerHeapIndexScanTests
         int pendingTasks = 0,
         int faultedTasks = 0,
         int canceledTasks = 0,
-        bool taskScanLimited = false,
         int tasksScanned = 0,
         int totalContinuations = 0,
         Dictionary<string, int>? taskContinuations = null,
@@ -146,8 +130,7 @@ public sealed class HangAnalyzerHeapIndexScanTests
             TotalTasks = totalTasks,
             PendingTasks = pendingTasks,
             FaultedTasks = faultedTasks,
-            CanceledTasks = canceledTasks,
-            TaskScanLimited = taskScanLimited
+            CanceledTasks = canceledTasks
         };
         SetField(t, analyzer, "_threadPoolInfo", tp);
         SetField(t, analyzer, "_tasksScanned", tasksScanned);

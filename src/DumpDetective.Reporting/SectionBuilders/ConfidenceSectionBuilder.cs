@@ -105,7 +105,7 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
         var limitationRows = new List<TableRow>();
         AddLimitation(limitationRows, "Retention", results.Get<DominatorDomainResult>() is DominatorDomainResult retention && (retention.SkippedReferenceAddresses > 0 || retention.ObjectScanCapped || retention.ReferenceCountingSkipped), BuildRetentionText(results.Get<DominatorDomainResult>()));
         AddLimitation(limitationRows, "GC roots", results.Get<GCRootDomainResult>() is GCRootDomainResult gcRoot && (gcRoot.PathSearchCapped || gcRoot.PathSearchCappedCount > 0), BuildRootText(results.Get<GCRootDomainResult>()));
-        AddLimitation(limitationRows, "Hang / task scan", results.Get<HangDomainResult>() is HangDomainResult hang && (!hang.RuntimeThreadPoolDataAvailable || hang.TaskScanLimited), BuildHangText(results.Get<HangDomainResult>()));
+        AddLimitation(limitationRows, "Hang / task scan", results.Get<HangDomainResult>() is HangDomainResult hang && !hang.RuntimeThreadPoolDataAvailable, BuildHangText(results.Get<HangDomainResult>()));
         AddLimitation(limitationRows, "Async tasks", results.Get<AsyncTaskDomainResult>() is AsyncTaskDomainResult asyncTasks && asyncTasks.TaskScanLimited, BuildAsyncTaskText(results.Get<AsyncTaskDomainResult>()));
 
         if (limitationRows.Count > 0)
@@ -177,9 +177,6 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
 
         if (!hang.RuntimeThreadPoolDataAvailable)
             return "Runtime thread-pool data was not available; thread-pool health may be approximate.";
-
-        if (hang.TaskScanLimited)
-            return "Task scanning was limited; queued work items and continuation totals may be partial.";
 
         return "Thread-pool and task metrics are bounded.";
     }

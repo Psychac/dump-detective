@@ -12,7 +12,7 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 22 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
+**Implementation progress: 23 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
 §9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph, §9.8 LohFragmentation, §9.9
 SegmentReservation, §9.10 Jit, §9.11 Array, §9.12 String (partial — AMBER, not GREEN; see its
 implementation notes for what's deliberately still deferred), §9.13 AsyncStateMachine, §9.14
@@ -31,7 +31,10 @@ own double-applying bug found in D8; the reservoir-sampled "other threads" featu
 complete deterministic `STCompact` table rather than left capped or deleted outright), §9.24
 ThreadStackCluster (6-frame lossy signature deleted — cluster identity is now the whole stack, free
 once §9.23's unbounded frame capture landed; found and fixed a dead always-`false` `Truncated` render
-flag in passing) (§9.6's orphaned
+flag in passing), §9.25 Hang (`MaxTasksToScan` was corrupting `PendingTasks`/`FaultedTasks`/
+`CanceledTasks` past the cap, not just report width; found the real waiting-thread display cap was a
+hardcoded `.Take(10)` masquerading behind the already-dead `TopWaitingThreadsPerGroup` option)
+(§9.6's orphaned
 `DependentHandleAnalysisOptions` was also deleted alongside GCHandle — not a separate registered
 analyzer, per the row-4 cross-reference below).** See each section and the §7 verdict table for what
 shipped in each.
@@ -327,7 +330,7 @@ radius is a single cosmetic report field, not root exactness.
 | 22 | *(= Dominator, row 18)* | — | — | — | "Retention" is **not a separate analyzer** — `RetentionOptions` belongs to `DominatorAnalyzer`. Originally audited as a second, duplicate row; findings (`RootPathLargeFanoutThreshold` exclusion, `MaxLeakScanObjects` vs. 87M-object heap, etc.) merged into §9.18. |
 | 23 | Thread | non-heap | **GREEN** ✅ DONE | 9 of 10 (1 kept, `PrewarmCacheInBackground`) | §9.23 — a **third** tier system (`AdaptForSize`) deleted along with its double-applying bug; unbounded stack walk via a named 100K sentinel, not `int.MaxValue`; reservoir-sampled "other threads" redesigned into a complete deterministic `STCompact` table |
 | 24 | ThreadStackCluster | non-heap | **GREEN** ✅ DONE | 6 of 7 (1 kept, `MinClusterSize`; `ProduceClusterExports` stays pending D6's deferred cross-cutting move) | §9.24 — 6-frame signatures no longer merge genuinely different stacks; fixed a dead always-false `Truncated` render flag found in passing |
-| 25 | Hang | non-heap | **GREEN** | 3 of 5 | §9.25 — 2 more semantics-by-tier thresholds |
+| 25 | Hang | non-heap | **GREEN** ✅ DONE | 4 of 5 (1 kept, `HighThreadPoolThreshold`) | §9.25 — `MaxTasksToScan` corrupted `PendingTasks`/`FaultedTasks`/`CanceledTasks` past the cap, not just report width; found the real waiting-thread cap was a hardcoded `.Take(10)`, not the dead `TopWaitingThreadsPerGroup` option |
 | 26 | Crash | non-heap | **GREEN** | 8 of 8 | §9.26 — **already implements the §10 render-layer pattern**; use as reference |
 | 27 | Memory | non-heap | **GREEN** | 1 of 6 | §9.27 — tier changes the *ranking function*, not just the row count |
 | 28 | HeapTopology | non-heap | **GREEN** | 1 of 1 | §9.28 — a literal exact/not-exact switch, defaulting to **not** |
@@ -2409,7 +2412,7 @@ these threads doing," that is the headline number.
 
 ---
 
-### 9.25 Hang — **GREEN**
+### 9.25 Hang — **GREEN** ✅ IMPLEMENTED
 
 [HangAnalysisOptions.cs](../../src/DumpDetective.Core/Options/HangAnalysisOptions.cs)
 
@@ -2425,6 +2428,40 @@ One semantics-by-tier threshold remains live for §3.1 after V4: `HighThreadPool
 150 vs 60). **`LongWaitThreshold`'s apparent tier variance (5 vs 8 vs 3 seconds) turned out to be
 inert** — `HangAnalyzer.cs` never reads it (§11.3 V4), so no dump's hang diagnosis ever actually
 depended on it.
+
+#### Implementation notes (as shipped)
+
+- **`MaxTasksToScan` deleted, and it was a genuine Q7 defect, not just a display cap.** Both scan
+  paths (`AnalyzeHeapObjectByAddress`, the shared-heap-index-scan participant path, and
+  `RunParallelAsyncScan`'s `ProcessEntry`, the standalone-invocation fallback) always incremented
+  `TotalTasks`/`tasksScanned` unconditionally, but only read each Task's `m_stateFlags` field —
+  and therefore only counted it into `PendingTasks`/`FaultedTasks`/`CanceledTasks` — while
+  `tasksScanned <= MaxTasksToScan`. So `TotalTasks` was always exact but the three state-bucket
+  counts silently undercounted past the cap, the same "cap corrupts a total, not just report width"
+  shape as Boxing's `TotalBoxedObjects` (§9.1). Each Task object needs exactly one extra field read
+  regardless of heap size — no `Top-N` selection, no per-object list — so removing the cap is a flat
+  per-Task-object cost, not a new asymptotic class.
+- **The `TaskScanLimited` flag and its `queuedWorkItems > 1000` early-exit died with the cap** —
+  deleted from `ThreadPoolAnalysis`, the `MergePartial` OR-merge, `HangDomainResult`, and the
+  confidence-reduction branch in `ConfidenceSectionBuilder` (`BuildHangText`/the "Hang / task scan"
+  limitation row now only fires on `!RuntimeThreadPoolDataAvailable`). Distinct from
+  `AsyncTaskDomainResult.TaskScanLimited` (§9.29, a different analyzer, not touched here).
+- **The real `TopWaitingThreadsPerGroup`-shaped cap was a hardcoded `.Take(10)`, not the option
+  itself.** V4 already confirmed `TopWaitingThreadsPerGroup` is dead code — this pass found *why* it
+  looked plausible: `Analyze()`'s `WaitingThreadSnapshot` list construction had a literal `.Take(10)`
+  standing in for it. Deleted the `.Take(10)` (and `TopContinuationTypesToShow`'s `.Take()` in the
+  same method) so `HangDomainResult.TopWaitingThreads`/`TopContinuationTypes` carry the complete
+  ranked lists; `HangSectionBuilder` gained matching render-layer constants
+  (`TopWaitingThreadsToShow = 10`, `TopContinuationTypesToShow = 5`) preserving today's display
+  defaults without any exactness cost upstream.
+- **`HighThreadPoolThreshold` is the sole surviving option**, matching D4's "shakiest" flag (ignores
+  machine core count/workload) — kept at its Balanced value of 100 per D4's decision to defer
+  recalibration to field data rather than re-derive it now.
+- **Test fallout:** `HangAnalyzerHeapIndexScanTests.cs`'s `MergePartial_OrsTaskScanLimited` deleted
+  (tested the now-gone OR-merge); `MergePartial_SumsThreadPoolHeapScanCounters` trimmed to drop its
+  `taskScanLimited`/`TaskScanLimited` parameter and assertion, keeping the rest of the merge-counter
+  coverage intact. `ConfigurationResolver`'s `BuildHangAnalysisFromConfig` rewritten to the
+  section-overrides-on-`new HangAnalysisOptions()` pattern used by every other `Preset`-deletion row.
 
 ---
 

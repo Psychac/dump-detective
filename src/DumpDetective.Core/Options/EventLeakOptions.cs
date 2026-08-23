@@ -2,16 +2,16 @@ namespace DumpDetective.Core.Options;
 
 public sealed class EventLeakOptions
 {
-    public int MinSubscribers { get; init; } = 0;
-
     /// <summary>
-    /// When true, scan all MulticastDelegate event fields regardless of subscriber count.
-    /// Enables the full subscription graph view (§12.1). Default off for performance.
+    /// Bounded top-K capacity used during the streaming heap scan itself (see
+    /// <c>EventLeakAnalyzer.AddToAccumulator</c>) — not a post-hoc display truncation of an
+    /// already-complete list. Determines which instances of a group survive in
+    /// <c>GroupAccumulator.TopInstances</c> as the scan progresses; the group-level roll-ups
+    /// (<c>AllSubscriberTypeCounts</c> etc.) already cover every instance regardless of this cap.
+    /// Kept as a real work-scoping threshold — see §9.19 implementation notes in
+    /// docs/refactor/analysis-profile-removal-plan.md for why (same pattern as Collection's
+    /// <c>TopWastefulCollectionsToShow</c> and Dominator's <c>TopHighlyReferencedObjectsToShow</c>).
     /// </summary>
-    public bool IncludeNonLeakingEvents { get; init; } = false;
-
-    // Presentation / analysis tuning
-    public int TopSubscriberTypesToShow { get; init; } = 5;
     public int TopDetailedInstancesPerGroup { get; init; } = 5;
 
     // Severity scoring — existing signals
@@ -33,53 +33,39 @@ public sealed class EventLeakOptions
     // bonus for subscribers that appear to have very few incoming references
     public int SeverityLowIncomingRefsBonus { get; init; } = 8;
 
-    // Partial reverse-validation (Step 6): heap-scan per subscriber to count incoming refs.
-    // DISABLED by default — extremely expensive on large heaps (25 GB+, 87 M objects).
-    // Only enable for targeted post-analysis on small suspect sets.
+    /// <summary>
+    /// Partial reverse-validation (Step 6): per-subscriber incoming-reference check. DISABLED by
+    /// default — <c>EventLeakAnalyzer.CountIncomingRefs</c> still samples the first ~500 objects
+    /// from <c>heap.EnumerateObjects()</c> rather than using the disk-backed reverse-edge index,
+    /// so on a large heap it is both expensive and largely inaccurate (the sampled objects are
+    /// essentially arbitrary relative to the target). See §9.19 implementation notes in
+    /// docs/refactor/analysis-profile-removal-plan.md — fixing this to use
+    /// <c>IBackwardReferenceProvider</c> for an exact O(1) lookup is a real, scoped follow-up, not
+    /// done in this pass (it requires threading the provider through
+    /// <c>EventLeakFastScanner</c>'s per-object hot path, which currently has no cache reference).
+    /// </summary>
     public bool EnableLowIncomingRefsCheck { get; init; } = false;
 
-    // Lifetime mismatch: max subscriber objects to probe for generation per event instance
+    /// <summary>
+    /// Max subscribers probed for the (deferred, see <see cref="EnableLowIncomingRefsCheck"/>)
+    /// incoming-refs signal only — <c>EventLeakAnalyzer.CheckLifetimeMismatch</c>'s generation-based
+    /// lifetime-mismatch check probes every subscriber unconditionally now (an O(1) segment lookup
+    /// per subscriber, cheap regardless of scale, so no cap was needed there).
+    /// </summary>
     public int LifetimeMismatchProbeLimit { get; init; } = 50;
     // Minimum fraction (0.0–1.0) of probed Gen0/Gen1 subscribers to declare a mismatch
     public double LifetimeMismatchGen01Threshold { get; init; } = 0.5;
 
-    // Diagnostics: when true, the analyzer will emit timing counters for hotspots.
-    public bool EnableDiagnostics { get; init; } = true;
-
     // Publisher qualification: minimum subscribers for an object to be considered a publisher
     public int PublisherSubscriberThreshold { get; init; } = 1;
 
-    // Bounded evidence enrichment (design §4.2): only the top-N groups by TotalSubscribers
-    // get a root-path BFS attempt; the rest keep their cheap RootHint only.
-    public int MaxGroupsToEnrich { get; init; } = 25;
-    // Wall-clock budget for the entire enrichment loop across all enriched instances.
+    /// <summary>
+    /// Wall-clock budget for the root-path evidence-enrichment loop across all leak instances.
+    /// The only time-based budget in the options surface — see §9.19 implementation notes in
+    /// docs/refactor/analysis-profile-removal-plan.md. Every instance is now eligible for
+    /// enrichment (in severity-priority order, since the caller pre-sorts descending); this budget
+    /// alone governs how much of that work actually runs, replacing the deleted
+    /// <c>MaxGroupsToEnrich</c> group-count pre-filter.
+    /// </summary>
     public int MaxEvidenceEnrichmentMs { get; init; } = 2000;
-
-    public static EventLeakOptions Preset(AnalysisProfile profile) => profile switch
-    {
-        AnalysisProfile.Fast => new EventLeakOptions
-        {
-            MinSubscribers = 3,
-            IncludeNonLeakingEvents = false,
-            TopSubscriberTypesToShow = 3,
-            TopDetailedInstancesPerGroup = 3,
-            EnableDiagnostics = false,
-            PublisherSubscriberThreshold = 2,
-            MaxGroupsToEnrich = 10
-        },
-        AnalysisProfile.Full => new EventLeakOptions
-        {
-            MinSubscribers = 0,
-            IncludeNonLeakingEvents = true,
-            TopSubscriberTypesToShow = 20,
-            TopDetailedInstancesPerGroup = 20,
-            EnableDiagnostics = true,
-            PublisherSubscriberThreshold = 1,
-            MaxGroupsToEnrich = 100
-        },
-        _ => new EventLeakOptions(),
-    };
-
-    public static EventLeakOptions Default { get; } = Preset(AnalysisProfile.Balanced);
-
 }

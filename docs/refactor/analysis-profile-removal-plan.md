@@ -12,16 +12,20 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 17 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
+**Implementation progress: 19 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
 §9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph, §9.8 LohFragmentation, §9.9
 SegmentReservation, §9.10 Jit, §9.11 Array, §9.12 String (partial — AMBER, not GREEN; see its
 implementation notes for what's deliberately still deferred), §9.13 AsyncStateMachine, §9.14
 StaticRootLeak, §9.15 FinalizableObject, §9.16 GCRoot, §9.20 ReferenceChain (partial — moved from
 RED to AMBER, not GREEN; see its implementation notes for the search-layer caps deliberately kept),
 §9.17 Collection (partial — AMBER; the `Profile`-branch fix landed, two knobs recategorized as
-real work-scoping thresholds and kept) (§9.6's orphaned `DependentHandleAnalysisOptions` was also
-deleted alongside GCHandle — not a separate registered analyzer, per the row-4 cross-reference
-below).** See each section and the §7 verdict table for what shipped in each.
+real work-scoping thresholds and kept), §9.18 Dominator (only one confirmed-dead field deleted;
+`Preset`/`Default` removed and all kept fields stopped tier-varying), §9.19 EventLeak (partial —
+AMBER; `MaxGroupsToEnrich` fully deleted thanks to the existing wall-clock budget, but
+`EnableLowIncomingRefsCheck`'s underlying correctness bug documented and deliberately left for a
+follow-up) (§9.6's orphaned `DependentHandleAnalysisOptions` was also deleted alongside GCHandle —
+not a separate registered analyzer, per the row-4 cross-reference below).** See each section and
+the §7 verdict table for what shipped in each.
 
 > **Correction (roster built from the wrong source):** the audit was originally built by walking
 > `src/DumpDetective.Core/Options/`, not the analyzer registry — so any analyzer with no dedicated
@@ -307,8 +311,8 @@ radius is a single cosmetic report field, not root exactness.
 | 15 | FinalizableObject | retained-size | **GREEN** ✅ DONE | 5 of 5 | §9.15 — the fourth private BFS copy (`BfsEstimateRetained`) deleted outright, replaced by `TryGetRetainedBytes`; options class deleted |
 | 16 | GCRoot | retained-size | **GREEN** ✅ DONE | 4 of 4 (2 hardcoded, not deleted) | §9.16 — `PathSearchTopN` deleted per M4; `MaxBfsDepth`/`MaxBfsNodes` moved off the profile surface to internal constants (dominator-tree rewire for the path-type-name walk itself stays deferred, see notes) |
 | 17 | Collection | retained-size | **AMBER** ⚠️ PARTIAL | 6 of 9 (2 recategorized to Category 5, kept) | §9.17 — `Profile`/`AnalysisProfile` branch replaced and deleted; `TopWastefulCollectionsToShow`/`PathAnalysisTopN` recategorized as real in-scan work-scoping thresholds, not display caps; the embedded `ReferenceChainOptions` turned out to be entirely dead (analyzer reads the top-level one instead) and was deleted; inherits §9.20's residual AMBER for root-path descriptions |
-| 18 | Dominator | retained-size | **GREEN** | 0 | §9.18 — already exact; owns `RetentionOptions` exclusively (see row 22 note); its own flags were *deliberately* kept off the profile system |
-| 19 | EventLeak | root-path | **AMBER** | 5 of 16 | §9.19 — holds the codebase's **only wall-clock budget**; useful precedent |
+| 18 | Dominator | retained-size | **GREEN** ✅ DONE | 1 of 8 (7 recategorized/already-resolved, kept) | §9.18 — already exact; owns `RetentionOptions` exclusively (see row 22 note); only confirmed-dead `TopFinalizerTypesToShow` deleted; `Preset`/`Default` deleted, all kept fields stopped tier-varying |
+| 19 | EventLeak | root-path | **AMBER** ⚠️ PARTIAL | 8 of 10 (`MinSubscribers` also deleted, a correction; `EnableLowIncomingRefsCheck` deliberately deferred) | §9.19 — wall-clock budget let `MaxGroupsToEnrich` be fully deleted (rare win); found `CountIncomingRefs` is not just slow but wrong (arbitrary 500-object sample) — documented, not fixed this pass |
 | 20 | ReferenceChain | root-path | **AMBER** ⚠️ PARTIAL (was RED) | 5 of 8 (+3 dead `ExecutionPolicy`/CLI knobs found and deleted) | §9.20 — parallel profile enum deleted, no longer RED; `LargeFanoutThreshold`/`MaxCandidateNodes`/`MaxRootExpansionDepth` recategorized and kept (real search-layer caps, not the now-resolved index-layer one) — real hub fan-in measured up to 10.76M keeps this AMBER |
 | 21 | TimerLeak | root-path | **AMBER** | 0 (no options class) | §9.21 — no knobs of its own; inherits every shared traversal bound |
 | 22 | *(= Dominator, row 18)* | — | — | — | "Retention" is **not a separate analyzer** — `RetentionOptions` belongs to `DominatorAnalyzer`. Originally audited as a second, duplicate row; findings (`RootPathLargeFanoutThreshold` exclusion, `MaxLeakScanObjects` vs. 87M-object heap, etc.) merged into §9.18. |
@@ -1783,7 +1787,7 @@ neither work nor rows — they are execution policy. Keep them; just stop varyin
 
 ---
 
-### 9.18 Dominator — **GREEN** (mostly nothing to do)
+### 9.18 Dominator — **GREEN** ✅ IMPLEMENTED (mostly nothing to do)
 
 [DominatorAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/DominatorAnalyzer.cs) ·
 [RetentionOptions.cs](../../src/DumpDetective.Core/Options/RetentionOptions.cs)
@@ -1847,9 +1851,78 @@ anything Category 4 needs after the migration.
 `ExactDominatorTreeMemoryBudgetBytes` is a **Category 3 memory bound and must be kept.** It is the
 one cap in the codebase that is doing exactly the right job.
 
+#### Implementation notes (as shipped)
+
+**Audit table was partly stale before this pass even started** — two rows had already been
+resolved by earlier, non-§9-sequence work:
+- `ExactDominatorTreeMemoryBudgetBytes` — **already deleted**, not "keep." Per
+  [dominator-tree-phase1-integration.md §5](../analysis/phase1-redesigns/dominator-tree-phase1-integration.md):
+  "Budget removed, not recalibrated" — the calibrated byte-cost model was fit to two dumps under a
+  memory profile that predated Stage A/B sharing a walk, and its abort path risked leaving Stage
+  A's reverse-edge index silently incomplete. Replaced by two root-cause fixes (isolated try/catch
+  around the walk phase, `ChunkedBuffer<T>.Add` throwing before overflowing `int.MaxValue`) instead
+  of a heuristic. Confirmed gone from `RetentionOptions.cs` — no action needed here, just noting the
+  audit table was written before this shipped.
+- `MaxLeakScanObjects`'s Q7 concern ("2.3% of an 87M-object heap gets scanned") — **the concern
+  itself no longer applies to the primary path.** `DominatorAnalyzer.BuildLeakSignalsFromReverseIndex`
+  (the reverse-index-backed leak-signal pass, now the default whenever a reverse index exists — i.e.
+  effectively always) is exhaustive by construction, per its own code comment: "there's no per-object
+  ClrMD work to budget via `MaxLeakScanObjects`... the scan is exhaustive over every recorded child...
+  never capped." `MaxLeakScanObjects`/`MaxReferenceAddresses` only still apply to
+  `AnalyzeObjectsPass`, the live-heap fallback used solely when no reverse index is available (rare,
+  degraded mode) — kept there as a legitimate fallback safety valve, documented as such in the
+  options class now. Both fields are *also* separately reused as the BFS-breadth bound
+  (`maxBreadth`) for the top-K retained-size walks — a second, legitimate, unrelated use, also kept.
+
+**Confirmed-dead knob deleted:** `TopFinalizerTypesToShow` — grep confirmed zero references in
+`DominatorAnalyzer.cs` or anywhere else (matches the original V4 audit finding exactly). Deleted
+from `RetentionOptions` and both non-Balanced presets.
+
+**Audit-inconsistency resolved: `MaxRootPathCandidateNodes`/`MaxRootPathCandidateDepth`/
+`MaxRootPathExpansionDepth` recategorized from Category 4 ("delete with the dominator-lookup move")
+to Category 5, joining `RootPathLargeFanoutThreshold` under the same D3 reasoning the audit had
+already applied to that one field.** All four fields populate the *same* `RootPathSearchLimits`
+struct at the *same* call site (`PopulateEvidence`) for the *same* purpose — a purely decorative
+root-path-evidence-text search, not the reported retained-byte numbers (which come from the exact
+dominator tree independently). D3 already concluded removing the fanout threshold "risks
+multi-million-node single-query blowups... for a purely cosmetic payoff" and chose to keep it; the
+audit table just never noticed the other three fields of the same struct were subject to identical
+reasoning and needed the same conclusion. Fixed the inconsistency rather than deleting three of
+four fields from one struct and leaving it half-bounded.
+
+**`TopHighlyReferencedObjectsToShow` recategorized from Category 1 ("move to render") to Category
+5 ("keep, real work-scoping threshold") — the same audit-blind-spot pattern already found in
+Collection (§9.17) and ReferenceChain (§9.20).** Confirmed via code: it sizes the in-scan top-K
+`PriorityQueue` in `BuildLeakSignalsFromReverseIndex`, and separately determines how many
+candidates get an expensive per-item retained-size BFS walk (`Analyze`'s `topCount`) and root-path
+evidence search (`PopulateEvidence`) — not a post-hoc display truncation of an already-complete
+list. This is the **third** instance of this exact pattern found this session; worth treating as a
+recurring blind spot in the original audit rather than three coincidences, same as the "configured
+value ≠ applied value" pattern called out repeatedly earlier in this document.
+
+**Profile variance stopped for the whole class, matching every other migrated section.**
+`RetentionOptions.Preset`/`Default` deleted; all remaining fields (`TopHighlyReferencedObjectsToShow`,
+`HighReferenceThreshold`, `MaxReferenceAddresses`, `MaxLeakScanObjects`,
+`MaxRootPathCandidateNodes`/`CandidateDepth`/`ExpansionDepth`, `RootPathLargeFanoutThreshold`,
+`EnableExactDominatorTree`) collapsed to single plain-field defaults at their former Balanced
+values — none of them were deleted, but none vary by tier anymore either.
+`ConfigurationResolver.BuildMemoryLeakFromConfig` switched to the section/options-override
+Preset-bypass pattern used throughout this effort.
+
+**Net result: zero deletions beyond the one confirmed-dead field, because the audit's other seven
+"action" items were either already resolved outside this pass, or turned out — on inspection — to
+be legitimate kept thresholds under reasoning the audit itself had already established for a
+sibling field.** This is the first section this session where "mostly nothing to do" held up
+almost exactly as originally assessed.
+
+Test suite: 642 passed, 22 skipped, 0 failed. Three `ConfigurationResolverTests.cs` tests that
+asserted profile-scaled `RetentionOptions` values (`TopHighlyReferencedObjectsToShow`,
+`MaxLeakScanObjects`, `HighReferenceThreshold`) were updated to the new single-tier defaults —
+expected fallout of deleting profile variance, not a regression.
+
 ---
 
-### 9.19 EventLeak — **AMBER**
+### 9.19 EventLeak — **AMBER** ⚠️ PARTIALLY IMPLEMENTED
 
 [EventLeakAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/EventLeakAnalyzer.cs) ·
 [EventLeakOptions.cs](../../src/DumpDetective.Core/Options/EventLeakOptions.cs)
@@ -1886,6 +1959,80 @@ large heaps (25 GB+, 87 M objects)."* That comment also gives us a hard number f
 — **87 M objects** — worth carrying into the Q5 estimates. Under exactness this check becomes
 affordable *only* if served from the reverse index rather than a heap scan; treat it as part of the
 §10 workstream, not a flag flip.
+
+#### Implementation notes (as shipped)
+
+**`MaxGroupsToEnrich` deleted — genuinely resolvable, unlike most Category-4 "delete with the
+dominator move" items elsewhere, because this analyzer already has the alternative safety
+mechanism the rest of the plan wants everywhere: the wall-clock budget.** `PopulateEvidence`'s
+`MaxEvidenceEnrichmentMs` guard already bounds total enrichment time regardless of how many groups
+are eligible; the group-count pre-filter was therefore a redundant second bound, not a load-bearing
+one. Deleted `BuildEnrichmentGroupKeys` and its four dedicated unit tests; every leak instance is
+now enrichment-eligible, processed in the caller's existing severity-descending order, with the
+time budget as the sole remaining safety valve — a strictly better shape (priority order + time
+budget, not an arbitrary group-count cutoff) than what was there before.
+
+**`IncludeNonLeakingEvents` hard-coded to always-true, `MinSubscribers` deleted (not kept) — a
+correction to the original audit.** The audit categorized `MinSubscribers` as Category 5 "keep,"
+independent of `IncludeNonLeakingEvents`'s "hard-code true." But grep showed `MinSubscribers` had
+exactly one behavior: `if (!includeNonLeaking && subs.Count < minSubs) continue;` in both
+`EventLeakFastScanner.ProcessInstanceFields` and `EventLeakAnalyzer.SweepRegistryStatics` — a real
+completeness filter (silently dropping events below the threshold), not a severity/display concern.
+Hard-coding `includeNonLeaking = true` makes that filter permanently unreachable, which makes
+`MinSubscribers` dead by construction. Deleted both together rather than leaving a config field with
+zero remaining behavior.
+
+**`TopDetailedInstancesPerGroup` recategorized from Category 1 ("move to render") to Category 5
+("keep, real work-scoping threshold") — the fourth instance of this exact pattern found this
+session** (after Collection §9.17, ReferenceChain §9.20, Dominator §9.18). Confirmed via code:
+`AddToAccumulator` uses it to size `GroupAccumulator.TopInstances`, a genuine in-scan top-K
+structure with min-replacement, populated during the streaming heap pass — not a post-hoc
+truncation. `TopSubscriberTypesToShow` and `EnableDiagnostics` deleted outright — grep confirmed
+zero references anywhere outside the options class, matching the original V4 audit finding exactly
+for both.
+
+**Real bug found and partially fixed: `LifetimeMismatchProbeLimit` bounded two unrelated
+operations with very different cost profiles, and the audit's blanket "Category 3, delete" applied
+cleanly to only one of them.**
+- `CheckLifetimeMismatch`/`CheckLifetimeMismatchDirect`'s generation check reads
+  `SegmentKindMapper.ResolveGeneration`/an equivalent direct segment lookup — an O(1) operation
+  regardless of heap scale. **Uncapped**: both now probe every subscriber, not a capped sample —
+  a genuine, low-risk exactness win, since this check runs unconditionally (not gated by any
+  toggle).
+- `HasLowIncomingRefsSignal` (only reachable when `EnableLowIncomingRefsCheck` is explicitly
+  enabled) calls `CountIncomingRefs`, which turned out to be **not just slow but wrong**:
+  it samples the *first* ~500 objects from `heap.EnumerateObjects()` in arbitrary enumeration
+  order and checks each for a reference to the target — on an 87M-object heap this is essentially
+  never the real referrer. Fixing this properly means rewiring it through
+  `IBackwardReferenceProvider.TryGetParents` for an exact O(1) lookup, which now exists and is used
+  throughout this codebase — but `EventLeakFastScanner` (the per-object hot-path scanner this
+  check runs from) currently has no cache/provider reference at all, and this check runs once per
+  *every* detected leak instance during the main scan, not a bounded top-N like the evidence-search
+  cases resolved elsewhere this session. Given the plumbing cost and the lack of a wall-clock-scale
+  measurement for "reverse-index lookup × every leak instance across a 25GB heap," this was judged
+  out of scope for this pass — **left broken, but the bug is now documented in the options class
+  itself** (`EnableLowIncomingRefsCheck`'s XML doc) so it doesn't need rediscovering. `LifetimeMismatchProbeLimit`
+  kept on the options class solely because this deferred path still needs it.
+- `EnableLowIncomingRefsCheck` itself: kept as an opt-in toggle, default unchanged (`false`) — not
+  hard-coded true, unlike `IncludeNonLeakingEvents`, precisely because of the above.
+
+**Profile variance stopped, matching every other migrated section.** `EventLeakOptions.Preset`/
+`Default` deleted; `TopDetailedInstancesPerGroup`, the six `Severity*Bonus` fields,
+`SeveritySubscriberLogScale`, `SeverityLowIncomingRefsBonus`, `EnableLowIncomingRefsCheck`,
+`LifetimeMismatchProbeLimit`, `LifetimeMismatchGen01Threshold`, `PublisherSubscriberThreshold`, and
+`MaxEvidenceEnrichmentMs` all collapsed to single plain-field defaults at their former Balanced
+values. `ConfigurationResolver.BuildEventLeakFromConfig` switched to the Preset-bypass pattern.
+`StartupValidator.ValidateEventLeakOptions` deleted outright — its only check
+(`MinSubscribers >= 0`) no longer has a field to validate.
+
+**Two more confirmed-dead CLI-only knobs found and deleted, same bar as §9.20's discoveries:**
+`--reference-chain-*`'s siblings this time — `--event-leak-min-subscribers` (`RootCommandBuilder`
+option + `AnalysisCommandRequest`/`CliArguments` plumbing) had zero consumers anywhere; it was
+threaded from the CLI parser into the request record and then never read again.
+
+Test suite: 638 passed (4 fewer than before — the deleted `BuildEnrichmentGroupKeys` tests), 22
+skipped, 0 failed. Several `ConfigurationResolverTests.cs` assertions exercising the old
+profile-scaled/toggle-gated behavior were updated to the new single-tier, always-inclusive defaults.
 
 ---
 

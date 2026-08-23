@@ -2,55 +2,71 @@ namespace DumpDetective.Core.Options;
 
 public sealed class RetentionOptions
 {
-    public int TopFinalizerTypesToShow { get; init; } = 10;
+    /// <summary>
+    /// Number of top highly-referenced objects/types to carry through the analyzer. Bounds real
+    /// work, not just display rows: it sizes the in-scan top-K accumulator in
+    /// <c>DominatorAnalyzer.BuildLeakSignalsFromReverseIndex</c> and determines how many
+    /// candidates get an expensive per-item retained-size BFS walk and root-path evidence search
+    /// in <c>Analyze</c>/<c>PopulateRetainedBytes</c>/<c>PopulateEvidence</c> — see §9.18
+    /// implementation notes in docs/refactor/analysis-profile-removal-plan.md for why this stayed
+    /// a Category-5 kept threshold rather than moving to the render layer.
+    /// </summary>
     public int TopHighlyReferencedObjectsToShow { get; init; } = 15;
 
     public int HighReferenceThreshold { get; init; } = 50;
+
+    /// <summary>
+    /// Memory bound on the incoming-reference-count dictionary. Only applies to
+    /// <c>DominatorAnalyzer.AnalyzeObjectsPass</c>'s live-heap fallback, used when no disk-backed
+    /// reverse-edge index is available — the primary, reverse-index-backed path
+    /// (<c>BuildLeakSignalsFromReverseIndex</c>) is exhaustive by construction and never applies
+    /// this cap.
+    /// </summary>
     public int MaxReferenceAddresses { get; init; } = 1_000_000;
 
     /// <summary>
     /// Maximum number of objects subjected to full reference-field enumeration during
     /// the incoming-reference-count pass. Each traced object requires at least one
     /// <c>heap.GetObject()</c> call against the dump file, which is the primary
-    /// bottleneck on large (multi-GB) dumps.
-    /// Default: 2 000 000. Set to 0 to disable the limit (only safe on small dumps).
-    /// When the limit is reached, ObjectScanCapped is set to true in the retention analyzer result.
-    /// is set to <c>true</c> and a confidence note is emitted in the report.
+    /// bottleneck on large (multi-GB) dumps. Set to 0 to disable the limit (only safe on small
+    /// dumps). Like <see cref="MaxReferenceAddresses"/>, only applies to
+    /// <c>DominatorAnalyzer.AnalyzeObjectsPass</c>'s live-heap fallback path — the primary
+    /// reverse-index-backed leak-signal pass is exhaustive, never capped. Also reused as the BFS
+    /// breadth bound (<c>maxBreadth</c>) for the top-K retained-size walks in
+    /// <c>Analyze</c>/<c>PopulateRetainedBytes</c>, a legitimate per-candidate safety bound
+    /// distinct from its fallback-pass meaning above.
     /// </summary>
     public int MaxLeakScanObjects { get; init; } = 2_000_000;
 
     /// <summary>
-    /// Maximum number of candidate nodes explored during root path search.
-    /// Limits the breadth of the BFS when searching for GC root paths.
-    /// Default: 5 000. Set higher for more thorough evidence collection.
+    /// Maximum number of candidate nodes explored during the "highly referenced objects" root-path
+    /// evidence search in <c>PopulateEvidence</c>. Kept alongside <see cref="RootPathLargeFanoutThreshold"/>
+    /// under the same D3 reasoning (§9.18): this bounds a purely decorative evidence-path search —
+    /// the analyzer's actual reported retained-byte totals come from the exact dominator tree,
+    /// computed independently, so a truncated search only costs a confidence downgrade
+    /// (<c>searchTruncated</c>), never a wrong number.
     /// </summary>
     public int MaxRootPathCandidateNodes { get; init; } = 5_000;
 
-    /// <summary>
-    /// Maximum depth (hops from root) explored during candidate search phase of root path finding.
-    /// Default: 8.
-    /// </summary>
+    /// <summary>Depth companion to <see cref="MaxRootPathCandidateNodes"/> — same D3 reasoning.</summary>
     public int MaxRootPathCandidateDepth { get; init; } = 8;
 
-    /// <summary>
-    /// Maximum depth explored when expanding from a root node towards the target object.
-    /// Default: 12.
-    /// </summary>
+    /// <summary>Depth companion to <see cref="MaxRootPathCandidateNodes"/> — same D3 reasoning.</summary>
     public int MaxRootPathExpansionDepth { get; init; } = 12;
 
     /// <summary>
-    /// Fanout threshold above which a reference path is considered "large" and skipped
-    /// to avoid exploring extremely high-connectivity clusters.
-    /// Default: 100.
+    /// Fanout threshold above which a reference path is considered "large" and skipped, to avoid
+    /// exploring extremely high-connectivity clusters (static caches, singletons, interned
+    /// strings) during the evidence-path search in <c>PopulateEvidence</c>. Resolved by D3: kept
+    /// as-is — removing it risks a multi-million-node single-query blowup for a purely cosmetic
+    /// payoff (see <see cref="MaxRootPathCandidateNodes"/>'s remarks).
     /// </summary>
     public int RootPathLargeFanoutThreshold { get; init; } = 100;
 
     /// <summary>
     /// §D9 (docs/analysis/phase1-redesigns/dominator-tree-lengauer-tarjan.md): enables the exact
-    /// Lengauer-Tarjan dominator-tree computation. Deliberately <b>not</b> branched per
-    /// <see cref="AnalysisProfile"/> in <see cref="Preset"/> below — the profile system is expected
-    /// to be simplified/consolidated later, and this flag is meant to stay independent of whatever
-    /// shape it ends up in. Default <c>true</c>: exact mode is attempted by default.
+    /// Lengauer-Tarjan dominator-tree computation. Default <c>true</c>: exact mode is attempted by
+    /// default.
     ///
     /// <para>No memory-usage budget gates this (removed —
     /// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §10.8's "review the
@@ -64,35 +80,4 @@ public sealed class RetentionOptions
     /// completed.</para>
     /// </summary>
     public bool EnableExactDominatorTree { get; init; } = true;
-
-    public static RetentionOptions Preset(AnalysisProfile profile) => profile switch
-    {
-        AnalysisProfile.Fast => new RetentionOptions
-        {
-            TopFinalizerTypesToShow = 5,
-            TopHighlyReferencedObjectsToShow = 8,
-            HighReferenceThreshold = 75,
-            MaxReferenceAddresses = 250_000,
-            MaxLeakScanObjects = 500_000,
-            MaxRootPathCandidateNodes = 2_000,
-            MaxRootPathCandidateDepth = 6,
-            MaxRootPathExpansionDepth = 8,
-            RootPathLargeFanoutThreshold = 50
-        },
-        AnalysisProfile.Full => new RetentionOptions
-        {
-            TopFinalizerTypesToShow = 25,
-            TopHighlyReferencedObjectsToShow = 40,
-            HighReferenceThreshold = 30,
-            MaxReferenceAddresses = 2_000_000,
-            MaxLeakScanObjects = 5_000_000,
-            MaxRootPathCandidateNodes = 10_000,
-            MaxRootPathCandidateDepth = 12,
-            MaxRootPathExpansionDepth = 16,
-            RootPathLargeFanoutThreshold = 200
-        },
-        _ => new RetentionOptions()
-    };
-
-    public static RetentionOptions Default { get; } = Preset(AnalysisProfile.Balanced);
 }

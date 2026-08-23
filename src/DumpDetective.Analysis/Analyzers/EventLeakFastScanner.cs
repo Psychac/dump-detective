@@ -208,8 +208,6 @@ internal sealed class EventLeakFastScanner
         ref int eventsScanned)
     {
         bool hadField = false;
-        int minSubs = options.MinSubscribers;
-        bool includeNonLeaking = options.IncludeNonLeakingEvents;
         // entry is the publisher itself, so its generation is already known from the
         // Phase 1 disk-backed index — no segment lookup needed here at all.
         int publisherGen = entry.Generation;
@@ -232,7 +230,6 @@ internal sealed class EventLeakFastScanner
             buf.Clear();
             ExtractSubscribersDirect(delegateAddr, buf);
             if (buf.Count == 0) continue;
-            if (!includeNonLeaking && buf.Count < minSubs) continue;
 
             // Filter noise/compiler-generated publisher types but do NOT require Gen2.
             // Gen2 is a useful severity signal but excluding Gen0/Gen1 publishers removes a
@@ -516,13 +513,14 @@ internal sealed class EventLeakFastScanner
         }
     }
 
+    // §9.19 (docs/refactor/analysis-profile-removal-plan.md): probes every subscriber, not a
+    // capped sample — each generation lookup is an O(1) segment lookup, cheap regardless of scale.
     private bool CheckLifetimeMismatchDirect(List<SubscriberInfo> subscribers, EventLeakOptions options)
     {
         if (subscribers.Count == 0) return false;
-        int probeLimit = Math.Min(subscribers.Count, options.LifetimeMismatchProbeLimit);
         int gen01Count = 0;
         int probed = 0;
-        for (int i = 0; i < subscribers.Count && probed < probeLimit; i++)
+        for (int i = 0; i < subscribers.Count; i++)
         {
             ulong addr = subscribers[i].Address;
             if (addr == 0 || subscribers[i].Type == StringConstants.StaticMethodSubscriber) continue;

@@ -11,7 +11,6 @@ internal sealed record CliArguments(
     int? MaxDuplicateStringLength,
     int? MinDuplicateStringCount,
     int? MaxReferenceAddresses,
-    int? EventLeakMinSubscribers,
     bool EnableMemoryDiagnostics,
     bool EnablePerformanceDiagnostics,
     ReportFormat? ReportFormat,

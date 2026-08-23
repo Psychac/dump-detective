@@ -91,7 +91,6 @@ internal sealed class StartupValidator
         ValidateRetentionOptions(options.MemoryLeak, errors);
         ValidateStringAnalysisOptions(options.StringAnalysis, errors);
         ValidateReferenceChainOptions(options.ReferenceChain, errors);
-        ValidateEventLeakOptions(options.EventLeak, errors);
 
         var overlap = options.IncludeAnalyzers.Intersect(options.ExcludeAnalyzers, StringComparer.OrdinalIgnoreCase);
         if (overlap.Any())
@@ -158,11 +157,4 @@ internal sealed class StartupValidator
         }
     }
 
-    private static void ValidateEventLeakOptions(EventLeakOptions options, List<string> errors)
-    {
-        if (options.MinSubscribers < 0)
-        {
-            errors.Add("EventLeak.MinSubscribers must be zero or greater.");
-        }
-    }
 }

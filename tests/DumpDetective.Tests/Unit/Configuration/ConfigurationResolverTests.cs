@@ -126,7 +126,7 @@ public sealed class ConfigurationResolverTests
 
             AnalysisCommandRequest request = CreateRequest(configPath: configPath) with { DumpPath = null, OutputFormat = ReportFormat.Html };
             ConfigurationResolver resolver = new();
-            RetentionOptions balancedMemoryLeak = RetentionOptions.Preset(AnalysisProfile.Balanced);
+            RetentionOptions balancedMemoryLeak = new RetentionOptions();
             ReferenceChainOptions balancedReferenceChain = new ReferenceChainOptions();
 
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
@@ -154,9 +154,9 @@ public sealed class ConfigurationResolverTests
 
             AnalysisCommandRequest request = CreateRequest(configPath: configPath) with { OutputFormat = ReportFormat.Html };
             ConfigurationResolver resolver = new();
-            RetentionOptions balancedMemoryLeak = RetentionOptions.Preset(AnalysisProfile.Balanced);
+            RetentionOptions balancedMemoryLeak = new RetentionOptions();
             ReferenceChainOptions balancedReferenceChain = new ReferenceChainOptions();
-            EventLeakOptions balancedEventLeak = EventLeakOptions.Preset(AnalysisProfile.Balanced);
+            EventLeakOptions balancedEventLeak = new EventLeakOptions();
 
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
@@ -164,7 +164,7 @@ public sealed class ConfigurationResolverTests
             resolved.DumpPath.Should().Be("C:/dumps/from-config.dmp");
             resolved.MemoryLeak.HighReferenceThreshold.Should().Be(balancedMemoryLeak.HighReferenceThreshold);
             resolved.ReferenceChain.TopCount.Should().Be(balancedReferenceChain.TopCount);
-            resolved.EventLeak.MinSubscribers.Should().Be(balancedEventLeak.MinSubscribers);
+            resolved.EventLeak.TopDetailedInstancesPerGroup.Should().Be(balancedEventLeak.TopDetailedInstancesPerGroup);
             resolved.Report.Format.Should().Be(ReportFormat.Html);
         }
         finally
@@ -312,13 +312,12 @@ public sealed class ConfigurationResolverTests
 
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
-            resolved.MemoryLeak.TopHighlyReferencedObjectsToShow.Should().Be(40);
-            resolved.MemoryLeak.MaxLeakScanObjects.Should().Be(5_000_000);
+            resolved.MemoryLeak.TopHighlyReferencedObjectsToShow.Should().Be(15);
+            resolved.MemoryLeak.MaxLeakScanObjects.Should().Be(2_000_000);
 
             resolved.ReferenceChain.MaxRootExpansionDepth.Should().Be(12);
 
-            resolved.EventLeak.IncludeNonLeakingEvents.Should().BeTrue();
-            resolved.EventLeak.TopDetailedInstancesPerGroup.Should().Be(20);
+            resolved.EventLeak.TopDetailedInstancesPerGroup.Should().Be(5);
         }
         finally
         {
@@ -348,13 +347,12 @@ public sealed class ConfigurationResolverTests
 
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
-            resolved.MemoryLeak.HighReferenceThreshold.Should().Be(30);
-            resolved.MemoryLeak.TopHighlyReferencedObjectsToShow.Should().Be(40);
+            resolved.MemoryLeak.HighReferenceThreshold.Should().Be(50);
+            resolved.MemoryLeak.TopHighlyReferencedObjectsToShow.Should().Be(15);
 
             resolved.ReferenceChain.TopCount.Should().Be(10);
 
-            resolved.EventLeak.MinSubscribers.Should().Be(0);
-            resolved.EventLeak.IncludeNonLeakingEvents.Should().BeTrue();
+            resolved.EventLeak.TopDetailedInstancesPerGroup.Should().Be(5);
         }
         finally
         {
@@ -387,7 +385,7 @@ public sealed class ConfigurationResolverTests
 
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
-            resolved.MemoryLeak.TopHighlyReferencedObjectsToShow.Should().Be(8);
+            resolved.MemoryLeak.TopHighlyReferencedObjectsToShow.Should().Be(15);
             resolved.StringAnalysis.MinDuplicateStringCount.Should().Be(11);
         }
         finally
@@ -452,8 +450,7 @@ public sealed class ConfigurationResolverTests
 
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
-            resolved.EventLeak.IncludeNonLeakingEvents.Should().BeTrue();
-            resolved.EventLeak.TopDetailedInstancesPerGroup.Should().Be(20);
+            resolved.EventLeak.TopDetailedInstancesPerGroup.Should().Be(5);
         }
         finally
         {
@@ -484,7 +481,6 @@ public sealed class ConfigurationResolverTests
             MaxDuplicateStringLength: 222,
             MinDuplicateStringCount: 9,
             MaxReferenceAddresses: 333,
-            EventLeakMinSubscribers: 3,
             EnableMemoryDiagnostics: false,
             EnablePerformanceDiagnostics: true);
     }

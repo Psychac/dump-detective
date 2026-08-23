@@ -17,7 +17,6 @@ internal sealed record AnalysisCommandRequest(
     int? MaxDuplicateStringLength,
     int? MinDuplicateStringCount,
     int? MaxReferenceAddresses,
-    int? EventLeakMinSubscribers,
     bool EnableMemoryDiagnostics,
     bool EnablePerformanceDiagnostics,
     ReportStyleVersion? ReportStyleVersion = null,

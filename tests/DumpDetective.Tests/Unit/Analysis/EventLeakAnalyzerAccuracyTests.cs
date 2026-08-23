@@ -274,67 +274,6 @@ public sealed class EventLeakAnalyzerAccuracyTests
     }
 
     // -----------------------------------------------------------------------
-    // Phase 1 — bounded evidence enrichment (design §4.2)
-    // -----------------------------------------------------------------------
-
-    private static EventGroupInfo MakeGroup(string publisherType, string fieldName, bool isStatic = false) =>
-        new() { PublisherType = publisherType, EventFieldName = fieldName, IsStatic = isStatic };
-
-    [Fact]
-    public void BuildEnrichmentGroupKeys_TakesOnlyTheHeadOfTheSortedList()
-    {
-        // groupedLeaks is expected to already be sorted by TotalSubscribers descending
-        // (FindEventLeaks' contract) — the bound is purely positional.
-        var groups = new List<EventGroupInfo>
-        {
-            MakeGroup("App.A", "Changed"),
-            MakeGroup("App.B", "Changed"),
-            MakeGroup("App.C", "Changed"),
-        };
-
-        var keys = EventLeakAnalyzer.BuildEnrichmentGroupKeys(groups, 2);
-
-        keys.Should().HaveCount(2);
-        keys.Should().Contain(("App.A", "Changed", false));
-        keys.Should().Contain(("App.B", "Changed", false));
-        keys.Should().NotContain(("App.C", "Changed", false));
-    }
-
-    [Fact]
-    public void BuildEnrichmentGroupKeys_BoundExceedsGroupCount_ReturnsAllGroups()
-    {
-        var groups = new List<EventGroupInfo> { MakeGroup("App.A", "Changed") };
-
-        var keys = EventLeakAnalyzer.BuildEnrichmentGroupKeys(groups, 25);
-
-        keys.Should().ContainSingle().Which.Should().Be(("App.A", "Changed", false));
-    }
-
-    [Fact]
-    public void BuildEnrichmentGroupKeys_ZeroBound_ReturnsEmpty()
-    {
-        var groups = new List<EventGroupInfo> { MakeGroup("App.A", "Changed") };
-
-        var keys = EventLeakAnalyzer.BuildEnrichmentGroupKeys(groups, maxGroupsToEnrich: 0);
-
-        keys.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void BuildEnrichmentGroupKeys_StaticAndInstanceGroupsWithSameNameAreDistinctKeys()
-    {
-        var groups = new List<EventGroupInfo>
-        {
-            MakeGroup("App.A", "Changed", isStatic: false),
-            MakeGroup("App.A", "Changed", isStatic: true),
-        };
-
-        var keys = EventLeakAnalyzer.BuildEnrichmentGroupKeys(groups, maxGroupsToEnrich: 1);
-
-        keys.Should().ContainSingle().Which.Should().Be(("App.A", "Changed", false));
-    }
-
-    // -----------------------------------------------------------------------
     // Phase 1 — Tier 1 retained bytes fold correctness (design §4.4, audit #3)
     // -----------------------------------------------------------------------
 

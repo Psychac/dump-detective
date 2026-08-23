@@ -306,9 +306,10 @@ namespace DumpDetective.Analysis.Analyzers
 
             _logger?.LogDebug("EventLeakAnalyzer.BuildSnapshots: {ElapsedSeconds:F2}s", __sw.Elapsed.TotalSeconds);
             __sw.Restart();
-            // groupedLeaks is already sorted by TotalSubscribers descending (FindEventLeaks).
-            var enrichmentGroupKeys = BuildEnrichmentGroupKeys(groupedLeaks, options.MaxGroupsToEnrich);
-            PopulateEvidence(heap, cache, topLeakInstances, enrichmentGroupKeys, options, _logger);
+            // Every instance is enrichment-eligible now (§9.19) — topLeakInstances is already
+            // sorted by severity descending, so MaxEvidenceEnrichmentMs's wall-clock budget alone
+            // governs how much of the priority-ordered work actually completes.
+            PopulateEvidence(heap, cache, topLeakInstances, options, _logger);
             _logger?.LogDebug("EventLeakAnalyzer.PopulateEvidence: {ElapsedSeconds:F2}s", __sw.Elapsed.TotalSeconds);
 
             __sw.Restart();
@@ -403,24 +404,6 @@ namespace DumpDetective.Analysis.Analyzers
             return entries;
         }
 
-        /// <summary>
-        /// Selects the head of the (already-sorted-by-TotalSubscribers-descending) group list
-        /// as the enrichment set for <see cref="PopulateEvidence"/> (design §4.2). Pure and
-        /// heap-free so it can be unit tested against a hand-built group list.
-        /// </summary>
-        internal static HashSet<(string PublisherType, string EventFieldName, bool IsStatic)> BuildEnrichmentGroupKeys(
-            List<EventGroupInfo> groupedLeaksSortedDesc, int maxGroupsToEnrich)
-        {
-            int count = Math.Min(groupedLeaksSortedDesc.Count, Math.Max(0, maxGroupsToEnrich));
-            var keys = new HashSet<(string, string, bool)>(count);
-            for (int i = 0; i < count; i++)
-            {
-                var g = groupedLeaksSortedDesc[i];
-                keys.Add((g.PublisherType, g.EventFieldName, g.IsStatic));
-            }
-            return keys;
-        }
-
         private static List<EvidenceSignal> BuildInstanceSignals(EventLeakInstanceSnapshot inst)
         {
             var signals = new List<EvidenceSignal>
@@ -440,16 +423,15 @@ namespace DumpDetective.Analysis.Analyzers
         private const int EventLeakEvidenceSchemaVersion = 1;
 
         /// <summary>
-        /// Bounded evidence enrichment (design §4.2/§4.3). Only instances belonging to
-        /// <paramref name="enrichmentGroupKeys"/> (the top <c>MaxGroupsToEnrich</c> groups)
-        /// get a root-path BFS attempt; the rest keep <see cref="EventLeakInstanceSnapshot.RootHint"/>
-        /// as their only evidence. A wall-clock guard bounds the total BFS time across the
-        /// enrichment set, and a per-instance guard skips the BFS entirely when a cheap
-        /// RootHint is already known.
+        /// Evidence enrichment (design §4.2/§4.3, §9.19). Every instance is eligible for a
+        /// root-path BFS attempt, processed in <paramref name="topLeakInstances"/>'s existing
+        /// severity-descending order — a global wall-clock guard
+        /// (<see cref="EventLeakOptions.MaxEvidenceEnrichmentMs"/>) bounds the total BFS time
+        /// across the run, and a per-instance guard skips the BFS entirely when a cheap RootHint
+        /// is already known.
         /// </summary>
         private static void PopulateEvidence(
             ClrHeap heap, IHeapAnalysisCache? cache, List<EventLeakInstanceSnapshot> topLeakInstances,
-            HashSet<(string PublisherType, string EventFieldName, bool IsStatic)> enrichmentGroupKeys,
             EventLeakOptions options, ILogger<EventLeakAnalyzer>? logger)
         {
             if (cache is null || topLeakInstances.Count == 0)
@@ -479,18 +461,7 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 EventLeakInstanceSnapshot inst = topLeakInstances[i];
                 string? sampleSubscriberHint = string.IsNullOrWhiteSpace(inst.RootHint) ? null : inst.RootHint;
-                var key = (inst.PublisherType, inst.EventFieldName, inst.IsStatic);
                 List<EvidenceSignal> signals = BuildInstanceSignals(inst);
-
-                // Groups beyond MaxGroupsToEnrich never attempt a search at all.
-                if (!enrichmentGroupKeys.Contains(key))
-                {
-                    topLeakInstances[i] = inst with
-                    {
-                        Evidence = new EventLeakEvidence(EventLeakEvidenceSchemaVersion, null, sampleSubscriberHint, false, signals)
-                    };
-                    continue;
-                }
 
                 // Global wall-clock budget exhausted: keep RootHint only, marked distinctly from
                 // RootPathFinder's own (BFS-internal) searchTruncated meaning.
@@ -1055,8 +1026,6 @@ namespace DumpDetective.Analysis.Analyzers
             CancellationToken cancellationToken,
             IProgress<AnalyzerProgressReport>? progress = null)
         {
-            int minSubs = options.MinSubscribers;
-            bool includeNonLeaking = options.IncludeNonLeakingEvents;
             var disposableTypeCache = registry.DisposableTypeCache;
             var sw = System.Diagnostics.Stopwatch.StartNew();
             int typesChecked = 0;
@@ -1089,7 +1058,6 @@ namespace DumpDetective.Analysis.Analyzers
 
                     var subs = GetStaticEventSubscribers(heap, sField, appDomains);
                     if (subs.Count == 0) continue;
-                    if (!includeNonLeaking && subs.Count < minSubs) continue;
 
                     bool mismatch = CheckLifetimeMismatch(heap, 2, subs, options);
                     var leak = CreateLeakInfo(
@@ -1536,18 +1504,17 @@ namespace DumpDetective.Analysis.Analyzers
 
         /// <summary>
         /// Returns true when a publisher is retaining predominantly younger subscribers —
-        /// i.e. publisherGeneration == 2 and many subscribers are Gen0/Gen1.
-        /// Probes at most <see cref="EventLeakOptions.LifetimeMismatchProbeLimit"/> subscribers
-        /// to keep the cost bounded.
+        /// i.e. publisherGeneration == 2 and many subscribers are Gen0/Gen1. Probes every
+        /// subscriber (§9.19) — each generation lookup is an O(1) segment lookup, cheap
+        /// regardless of scale, so no cap was needed.
         /// </summary>
         internal static bool CheckLifetimeMismatch(ClrHeap heap, int publisherGeneration, List<SubscriberInfo> subscribers, EventLeakOptions options)
         {
             if (publisherGeneration != 2) return false;
             if (subscribers.Count == 0) return false;
-            int probeLimit = Math.Min(subscribers.Count, options.LifetimeMismatchProbeLimit);
             int gen01Count = 0;
             int probed = 0;
-            for (int i = 0; i < subscribers.Count && probed < probeLimit; i++)
+            for (int i = 0; i < subscribers.Count; i++)
             {
                 ulong addr = subscribers[i].Address;
                 if (addr == 0 || subscribers[i].Type == StringConstants.StaticMethodSubscriber) continue;

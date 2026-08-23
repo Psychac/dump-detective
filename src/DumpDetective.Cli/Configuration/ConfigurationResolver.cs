@@ -31,9 +31,9 @@ internal sealed class ConfigurationResolver
 
         bool usedConfigFile = fileModel is not null;
 
-        RetentionOptions memoryLeak = Resolve(usedConfigFile, BuildMemoryLeakFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, RetentionOptions.Preset), fileModel, request);
+        RetentionOptions memoryLeak = Resolve(usedConfigFile, BuildMemoryLeakFromConfig, _ => new RetentionOptions(), fileModel, request);
         ReferenceChainOptions refChain = Resolve(usedConfigFile, BuildReferenceChainFromConfig, _ => new ReferenceChainOptions(), fileModel, request);
-        EventLeakOptions eventLeak = Resolve(usedConfigFile, BuildEventLeakFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, EventLeakOptions.Preset), fileModel, request);
+        EventLeakOptions eventLeak = Resolve(usedConfigFile, BuildEventLeakFromConfig, _ => new EventLeakOptions(), fileModel, request);
         DiagnosticsOptions diagnostics = Resolve(usedConfigFile, BuildDiagnosticsFromConfig, AnalyzerOptionsBuilder.BuildDiagnosticsFromCli, fileModel, request);
         ReportOptions report = Resolve(usedConfigFile, BuildReportFromConfig, AnalyzerOptionsBuilder.BuildReportFromCli, fileModel, request);
         ExecutionPolicy executionPolicy = BuildExecutionPolicy(fileModel, memoryLeak);
@@ -190,11 +190,14 @@ internal sealed class ConfigurationResolver
     }
 
     private static RetentionOptions BuildMemoryLeakFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "MemoryLeak",
-            config.MemoryLeak,
-            RetentionOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "MemoryLeak", out JsonElement section))
+            return ApplySectionOverrides(new RetentionOptions(), section);
+
+        return config.MemoryLeak is null
+            ? new RetentionOptions()
+            : ApplyOptionsOverrides(new RetentionOptions(), config.MemoryLeak);
+    }
 
 
 
@@ -211,11 +214,14 @@ internal sealed class ConfigurationResolver
 
 
     private static EventLeakOptions BuildEventLeakFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "EventLeak",
-            config.EventLeak,
-            EventLeakOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "EventLeak", out JsonElement section))
+            return ApplySectionOverrides(new EventLeakOptions(), section);
+
+        return config.EventLeak is null
+            ? new EventLeakOptions()
+            : ApplyOptionsOverrides(new EventLeakOptions(), config.EventLeak);
+    }
 
 
 

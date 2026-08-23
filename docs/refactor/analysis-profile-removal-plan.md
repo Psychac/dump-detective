@@ -12,7 +12,7 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 20 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
+**Implementation progress: 21 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
 §9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph, §9.8 LohFragmentation, §9.9
 SegmentReservation, §9.10 Jit, §9.11 Array, §9.12 String (partial — AMBER, not GREEN; see its
 implementation notes for what's deliberately still deferred), §9.13 AsyncStateMachine, §9.14
@@ -26,9 +26,12 @@ AMBER; `MaxGroupsToEnrich` fully deleted thanks to the existing wall-clock budge
 follow-up), §9.21 TimerLeak (had no `AnalysisOptions` knobs to begin with; found and fixed a dead
 `ITypedResourceInstanceSampler` implementation outside the original audit scope — a bogus `Generation`
 sentinel and a fully-unconsumed sample payload — and wired the sample data into the report instead of
-deleting it) (§9.6's orphaned `DependentHandleAnalysisOptions` was also deleted alongside GCHandle —
-not a separate registered analyzer, per the row-4 cross-reference below).** See each section and
-the §7 verdict table for what shipped in each.
+deleting it), §9.23 Thread (a third size-tier scaling system, `AdaptForSize`, deleted along with its
+own double-applying bug found in D8; the reservoir-sampled "other threads" feature redesigned into a
+complete deterministic `STCompact` table rather than left capped or deleted outright) (§9.6's orphaned
+`DependentHandleAnalysisOptions` was also deleted alongside GCHandle — not a separate registered
+analyzer, per the row-4 cross-reference below).** See each section and the §7 verdict table for what
+shipped in each.
 
 > **Correction (roster built from the wrong source):** the audit was originally built by walking
 > `src/DumpDetective.Core/Options/`, not the analyzer registry — so any analyzer with no dedicated
@@ -319,7 +322,7 @@ radius is a single cosmetic report field, not root exactness.
 | 20 | ReferenceChain | root-path | **AMBER** ⚠️ PARTIAL (was RED) | 5 of 8 (+3 dead `ExecutionPolicy`/CLI knobs found and deleted) | §9.20 — parallel profile enum deleted, no longer RED; `LargeFanoutThreshold`/`MaxCandidateNodes`/`MaxRootExpansionDepth` recategorized and kept (real search-layer caps, not the now-resolved index-layer one) — real hub fan-in measured up to 10.76M keeps this AMBER |
 | 21 | TimerLeak | root-path | **GREEN** ✅ DONE | 0 (no options class) | §9.21 — no knobs of its own; inherits every shared traversal bound; found and fixed a dead `ITypedResourceInstanceSampler` implementation (bogus `Generation` sentinel, unconsumed sample payload) outside the original audit and wired the sample into the report |
 | 22 | *(= Dominator, row 18)* | — | — | — | "Retention" is **not a separate analyzer** — `RetentionOptions` belongs to `DominatorAnalyzer`. Originally audited as a second, duplicate row; findings (`RootPathLargeFanoutThreshold` exclusion, `MaxLeakScanObjects` vs. 87M-object heap, etc.) merged into §9.18. |
-| 23 | Thread | non-heap | **AMBER** | 8 of 10 | §9.23 — a **third** tier system (`AdaptForSize`); scans 8 frames per thread |
+| 23 | Thread | non-heap | **GREEN** ✅ DONE | 9 of 10 (1 kept, `PrewarmCacheInBackground`) | §9.23 — a **third** tier system (`AdaptForSize`) deleted along with its double-applying bug; unbounded stack walk via a named 100K sentinel, not `int.MaxValue`; reservoir-sampled "other threads" redesigned into a complete deterministic `STCompact` table |
 | 24 | ThreadStackCluster | non-heap | **GREEN** | 6 of 7 | §9.24 — 6-frame signatures merge genuinely different stacks |
 | 25 | Hang | non-heap | **GREEN** | 3 of 5 | §9.25 — 2 more semantics-by-tier thresholds |
 | 26 | Crash | non-heap | **GREEN** | 8 of 8 | §9.26 — **already implements the §10 render-layer pattern**; use as reference |
@@ -2215,7 +2218,7 @@ count/total changed — this is additive report detail, not an exactness fix to 
 > **9.22 removed** — was a duplicate audit of the same analyzer covered in §9.18 (Dominator). See the
 > roster correction near the top of this document.
 
-### 9.23 Thread — **AMBER**
+### 9.23 Thread — **GREEN** ✅ IMPLEMENTED
 
 [ThreadAnalysisOptions.cs](../../src/DumpDetective.Core/Options/ThreadAnalysisOptions.cs)
 
@@ -2264,6 +2267,71 @@ guard.
 **Q7 — thread snapshots are randomly sampled.** `SamplingSeed` exists to make the sample
 *deterministic*, not complete — the same "make truncation reproducible" workaround as Boxing's
 determinism sort (§9.1) and Module's (§9.3). Third instance.
+
+#### Implementation notes (as shipped)
+
+- **Every knob in the table above is gone except `PrewarmCacheInBackground`.** `ThreadAnalysisOptions`
+  shrank to that one field; `Preset`/`Default`/`AdaptForSize` deleted outright (D8's double-applying
+  bug — §11.6 F8 — is moot once the method itself is gone). `ConfigurationResolver`'s
+  `BuildThreadAnalysisFromConfig` rewritten to the section-overrides-on-`new ThreadAnalysisOptions()`
+  one-off pattern established by GCGeneration/SegmentReservation (§9.4/§9.9), not the Boxing-style
+  bespoke rewrite — same shape, no CLI-flags-only fallback existed for Thread to replace.
+- **`MaxFramesForThreadScan`/`MaxStackRootsToCount` become "walk the whole stack," not
+  `int.MaxValue`.** `ThreadAnalyzer.UnboundedFrameCount = 100_000` is a named sentinel, not a true
+  unbounded value — chosen because M8 (§11.4) measured that exact figure end-to-end on a real dump at
+  2 ms, and because `ThreadStackScanDispatcher.Run` pre-sizes a reused `List<ClrStackFrame>` with it;
+  an `int.MaxValue` capacity hint there would repeat F10's (§11.6) `OutOfMemoryException` bug for a
+  different collection. `GetRequiredFrameCount` (every `IThreadStackScanParticipant`, not just Thread)
+  now requests this sentinel unconditionally — `ComputeEffectiveMaxFramesForSnapshot`'s
+  Full-mode-doubles-the-window logic is gone with it, since there's no longer a window to double: every
+  alive thread's whole captured stack feeds wait-pattern/hotspot/async-chain detection directly.
+- **`AsyncChainDetectionMode` deleted per D9** — `Disabled`/`CountOnly` collapse away;
+  `CountMoveNextDepth` runs unconditionally for every alive thread, and the async-chain thread
+  count/max depth are always computed from the (now unbounded) captured stack — no more "widen the
+  window in place if Full" branch, since the window was never narrowed to begin with.
+- **`MaxThreadsToCaptureSnapshots` deletion makes `TopLockedThreads`/`TopBlockedThreads`/
+  `ThreadsWithActiveExceptions`/finalizer-frame lists complete**, matching D5: `BuildDomainResult`
+  materializes every thread in each category, `ThreadSectionBuilder`'s existing `STCompact` calls
+  already had no `.Take()` truncation of their own, so no render-layer change was needed there — only
+  the analyzer-side cap came out.
+- **`MaxTopHotspots` deletion → complete ranked hotspot lists**, same shape as every other Category-1
+  move in this doc — `TopFrameHotspots`/`TopActiveThreadHotspots` are sorted and emitted whole; no
+  `Top*ToShow` render-layer constant was added per D5's amendment (`STCompact`'s uniform default page
+  size applies).
+- **The reservoir-sampled "Sampled threads" feature was redesigned, not just uncapped — flagged as a
+  judgment call, not a mechanical deletion.** The audit table above says "delete" for
+  `MaxSampledStackSnapshots`/`SamplingSeed` without D3's later per-consumer nuance (§11.2 D3 came from
+  auditing ReferenceChain/TimerLeak's evidence sampling, after this row). Two options existed:
+  (a) keep it a small illustrative sample of "everything else" like TimerLeak/GCRoot's evidence paths, or
+  (b) follow Category 2 literally and make it a complete, deterministic population. Chose **(b)**,
+  consistent with this row's own audit verdict and every other Category-2 knob in this doc: every alive
+  thread not already captured by locks/blocked/exceptions is now included, unconditionally, no RNG.
+  `ThreadCategorization.SampledThreads` renamed to `OtherThreads` to match (no serialization impact —
+  `ThreadDomainResult` never reaches JSON, same D2-established pattern). Because this list is no longer
+  capped, rendering it as one `NamedStackTrace` block per thread (the old mechanism) would flood the
+  report on a busy process with hundreds of "boring" threads — so it was **also migrated onto
+  `STCompact`** (D5's mechanism) as a new "Other threads" table, rather than keeping the old
+  one-block-per-thread narrative rendering. `SampledSnapshotCount`/`CapturedSnapshotCount`/
+  `SamplingCapacity`/`SamplingSeed` deleted from `ThreadDomainResult` outright — none were read anywhere
+  outside `ThreadSectionBuilder`'s now-deleted `sampled_snapshots`/`sampling_capacity`/`sampling_seed`
+  key-metric block, and none fed a total.
+- **`ComputeSamplerCapacity`, `ReservoirSampler<T>`, and `SampleCandidateIndices` deleted outright** —
+  `ReservoirSampler<T>` had no other caller in `src` once Thread stopped using it.
+  `AnalyzerExecutionService.BuildContext`'s dump-path-hash seed-derivation block (a `SHA256`-based
+  "auto-derive `SamplingSeed` when zero" step, its own `TODO: need to evaluate the need for this`) is
+  gone with it — there's no seed left to derive.
+- **Test fallout, larger than most rows because Thread had the most preset/sampling-specific test
+  coverage of any analyzer audited so far:** deleted `ThreadAnalysisOptionsTests.cs` (pure `Preset`
+  behavior, per §8 item 8), `AdaptivePresetTests.cs` and `ThreadAnalyzerSamplerCapacityTests.cs` (both
+  tested the now-deleted `AdaptForSize`/`ComputeSamplerCapacity`), `PresetBehaviorTests.cs` (§8 item 8,
+  Thread was its only remaining subject), `ThreadAnalyzerSamplingTests.cs` (tested
+  `SampleCandidateIndices`), `ReservoirSamplerTests.cs`, and `RunAnalyzersPipelineStageTests.cs` (both
+  tests exercised the deleted seed-derivation-from-dump-path behavior; no other assertions in that file
+  survived it). Trimmed `ThreadAsyncChainTests.cs` to keep only its still-valid
+  `CountMoveNextDepthFromSignatures` test. Deleted
+  `ThreadUncappedRealDumpTests.cs` (§11.4 M8's own real-dump test) — its capped-vs-uncapped comparison
+  has nothing left to compare now that the caps are gone; the measurement it recorded stays in §11.4 as
+  a historical record.
 
 ---
 

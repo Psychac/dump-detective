@@ -6,8 +6,6 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 
-using System.Security.Cryptography;
-using System.Text;
 using DumpDetective.Cli.Services;
 using DumpDetective.Cli.Diagnostics;
 using DumpDetective.Cli.Models;
@@ -24,33 +22,6 @@ internal sealed class AnalyzerExecutionService(FindingGenerationPipeline finding
         IHeapAnalysisCache heapCache,
         IReadOnlyList<IAnalyzer> activeAnalyzers)
     {
-        // TODO: need to evaluate the need for this.
-        // The idea is that if the user doesn't specify a sampling seed,
-        // we derive one from the dump path to ensure deterministic behavior across runs on
-        // the same dump.
-        ThreadAnalysisOptions? threadOptions = resolved.ThreadAnalysis;
-        if (threadOptions != null && threadOptions.SamplingSeed == 0)
-        {
-            byte[] pathBytes = Encoding.UTF8.GetBytes(loadContext.DumpPath ?? string.Empty);
-            byte[] hash = SHA256.HashData(pathBytes);
-            int derived = BitConverter.ToInt32(hash, 0);
-            threadOptions = new ThreadAnalysisOptions
-            {
-                MaxFramesForThreadScan = threadOptions.MaxFramesForThreadScan,
-                MaxStackRootsToCount = threadOptions.MaxStackRootsToCount,
-                MaxThreadsToCaptureSnapshots = threadOptions.MaxThreadsToCaptureSnapshots,
-                IncludeStackSamples = threadOptions.IncludeStackSamples,
-                MaxSampledStackSnapshots = threadOptions.MaxSampledStackSnapshots,
-                AsyncChainDetection = threadOptions.AsyncChainDetection,
-                DetectWaitPatterns = threadOptions.DetectWaitPatterns,
-                MaxTopHotspots = threadOptions.MaxTopHotspots,
-                SamplingSeed = derived
-            };
-        }
-
-        if (threadOptions != null)
-            threadOptions = ThreadAnalysisOptions.AdaptForSize(threadOptions, heapCache.SizeTier);
-
         return new RuntimeAnalysisContext
         {
             Runtime = loadContext.Runtime,
@@ -75,7 +46,7 @@ internal sealed class AnalyzerExecutionService(FindingGenerationPipeline finding
                 ThreadStackClusterAnalysis = resolved.ThreadStackClusterAnalysis,
                 GCGenerationAnalysis = resolved.GCGenerationAnalysis,
                 SegmentReservationAnalysis = resolved.SegmentReservationAnalysis,
-                ThreadAnalysis = threadOptions ?? resolved.ThreadAnalysis,
+                ThreadAnalysis = resolved.ThreadAnalysis,
                 HangAnalysis = resolved.HangAnalysis,
                 JitAnalysis = resolved.JitAnalysis,
                 WeakReferenceAnalysis = resolved.WeakReferenceAnalysis,

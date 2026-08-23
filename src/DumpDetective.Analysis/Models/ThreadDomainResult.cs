@@ -23,7 +23,9 @@ internal sealed record ThreadDomainResult(
     IReadOnlyList<ThreadExceptionSnapshot>? ThreadsWithActiveExceptions = null,
     IReadOnlyList<NameCountEntry>? TopStackHotspots = null,
     IReadOnlyList<NameCountEntry>? TopActiveThreadHotspots = null,
-    IReadOnlyList<ThreadStateSnapshot>? SampledThreads = null,
+    // Every alive thread not already captured above (no lock, no wait/block classification, no
+    // active exception) — a deterministic complete list, not a random reservoir sample.
+    IReadOnlyList<ThreadStateSnapshot>? OtherThreads = null,
     int ThreadPoolWorkerCount = 0,
     int ThreadPoolQueueDepth = 0,
     int ThreadPoolActiveWorkers = 0,
@@ -38,11 +40,7 @@ internal sealed record ThreadDomainResult(
     IReadOnlyList<string>? FinalizerFrames = null,
     int AsyncChainThreadCount = 0,
     int MaxAsyncChainDepth = 0,
-    double BlockedThreadRatio = 0.0,
-    int SampledSnapshotCount = 0,
-    int CapturedSnapshotCount = 0,
-    int SamplingCapacity = 0,
-    int SamplingSeed = 0) : AnalyzerDomainResult;
+    double BlockedThreadRatio = 0.0) : AnalyzerDomainResult;
 
 internal sealed record ThreadStateSnapshot(
     uint ThreadId,

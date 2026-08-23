@@ -21,8 +21,7 @@ public sealed class AsyncStateMachineFindingGeneratorTests
             TotalStateMachineBytes: totalBytes,
             TopStateMachineTypes: topTypes ?? [],
             TopByCapturedSize: [],
-            SuspendedMethodMap: suspendedMethods ?? [],
-            ScanLimited: false);
+            SuspendedMethodMap: suspendedMethods ?? []);
 
     [Fact]
     public void Generate_NoAsyncVoid_NoFinding()

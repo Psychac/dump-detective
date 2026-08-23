@@ -10,10 +10,6 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    private const int TopTypeRows = 20;
-    private const int TopCaptureRows = 10;
-    private const int TopSuspendedRows = 20;
-
     public string AnalyzerName => "Async State Machine Analysis";
     public string DisplayTitle => "Async State Machines";
     public int SortOrder => 200; // §23 async state machines
@@ -33,23 +29,19 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
             ["distinct_types"] = new NumericMetricValue(d.TopStateMachineTypes.Count, MetricUnit.Count),
             ["suspended_methods"] = new NumericMetricValue(d.SuspendedMethodMap.Count, MetricUnit.Count),
         };
-        if (d.ScanLimited)
-            keyMetrics["scan_limit_reached"] = new EnumMetricValue("Yes — type candidate cap hit; results may be partial");
 
         if (d.TopStateMachineTypes.Count > 0)
         {
             blocks.Add(T("Each entry represents a distinct suspended async method. " +
                           "High counts for the same method indicate fire-and-forget patterns or unbounded parallelism."));
-            int limit = Math.Min(d.TopStateMachineTypes.Count, TopTypeRows);
             compactTables.Add(STCompact(
                 "Top async state machine types by instance count",
                 new[] { CH("Type Name"), CH("Originating Method"), CH("Declaring Type"), CH("Count","number"), CH("Total Size","bytes"), CH("Dominant State"), CH("State Distribution"), CH("Ref Fields","number"), CH("Gen2 Count","number"), CH("Gen2 %","percent"), CH("Async Void") },
-                BuildTypeRows(d.TopStateMachineTypes, limit).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+                BuildTypeRows(d.TopStateMachineTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
             blocks.Add(T("State values indicate the suspend position in the async method: " +
                          "-2 = completed, -1 = not started, 0 = suspended at first await, 1 = suspended at second await, and so on. " +
-                         "Dominant State and State Distribution are sampled from up to a bounded number of instances per type " +
-                         "(not the sample instance alone); distribution is blank for types beyond the histogram sampling limit."));
+                         "Dominant State and State Distribution are computed from every instance of each detected type."));
         }
 
         if (d.TopByCapturedSize.Count > 0)
@@ -57,22 +49,20 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
             blocks.Add(T("Async methods capture all variables referenced across await boundaries. " +
                           "Instances with large captured closures may indicate long-lived objects being retained unintentionally. " +
                           "Note: the captured reference bytes count is shallow (direct references only, not transitive closure) and counts objects even if referenced by multiple state machines; it is an estimate of closure size, not unique waste."));
-            int limit = Math.Min(d.TopByCapturedSize.Count, TopCaptureRows);
             compactTables.Add(STCompact(
                 "Top async state machine instances by captured reference bytes",
                 new[] { CH("Address"), CH("Type Name"), CH("Captured Ref Bytes (shallow)","bytes"), CH("Large Captures") },
-                BuildCaptureRows(d.TopByCapturedSize, limit).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+                BuildCaptureRows(d.TopByCapturedSize).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.SuspendedMethodMap.Count > 0)
         {
             blocks.Add(T("Methods with the most suspended instances. " +
                           "High counts for a single method typically indicate fire-and-forget usage or long-running awaits."));
-            int limit = Math.Min(d.SuspendedMethodMap.Count, TopSuspendedRows);
             compactTables.Add(STCompact(
                 "Suspended async methods by instance count",
                 new[] { CH("Declaring Type"), CH("Method Name"), CH("Suspended Count","number"), CH("Total Size","bytes") },
-                BuildSuspendedRows(d.SuspendedMethodMap, limit).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+                BuildSuspendedRows(d.SuspendedMethodMap).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         return new AnalyzerDetailSection(
@@ -81,10 +71,10 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
             CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
-    private static List<TableRow> BuildTypeRows(IReadOnlyList<StateMachineTypeProfile> types, int limit)
+    private static List<TableRow> BuildTypeRows(IReadOnlyList<StateMachineTypeProfile> types)
     {
-        var rows = new List<TableRow>(limit);
-        for (int i = 0; i < limit; i++)
+        var rows = new List<TableRow>(types.Count);
+        for (int i = 0; i < types.Count; i++)
         {
             StateMachineTypeProfile t = types[i];
             rows.Add(new TableRow([
@@ -110,10 +100,10 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
         return string.Join(", ", distribution.Select(d => $"{d.State}: {d.Count:N0}"));
     }
 
-    private static List<TableRow> BuildCaptureRows(IReadOnlyList<HighCaptureStateMachine> captures, int limit)
+    private static List<TableRow> BuildCaptureRows(IReadOnlyList<HighCaptureStateMachine> captures)
     {
-        var rows = new List<TableRow>(limit);
-        for (int i = 0; i < limit; i++)
+        var rows = new List<TableRow>(captures.Count);
+        for (int i = 0; i < captures.Count; i++)
         {
             HighCaptureStateMachine c = captures[i];
             string largeCapturesText = c.LargeCaptures.Count > 0
@@ -129,10 +119,10 @@ internal sealed class AsyncStateMachineSectionBuilder : SectionBuilderBase, IAna
         return rows;
     }
 
-    private static List<TableRow> BuildSuspendedRows(IReadOnlyList<SuspendedMethodEntry> entries, int limit)
+    private static List<TableRow> BuildSuspendedRows(IReadOnlyList<SuspendedMethodEntry> entries)
     {
-        var rows = new List<TableRow>(limit);
-        for (int i = 0; i < limit; i++)
+        var rows = new List<TableRow>(entries.Count);
+        for (int i = 0; i < entries.Count; i++)
         {
             SuspendedMethodEntry e = entries[i];
             rows.Add(new TableRow([

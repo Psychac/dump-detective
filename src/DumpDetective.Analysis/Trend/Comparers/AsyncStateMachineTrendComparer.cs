@@ -9,9 +9,8 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not AsyncStateMachineDomainResult r) return [];
-            // TotalGen2Count is summed over all candidate types (TypeCandidateLimit), matching the
-            // scope of TotalStateMachines — using TopStateMachineTypes (TopTypeLimit) here would
-            // understate the fraction whenever candidate types exceed TopTypeLimit.
+            // TotalGen2Count is summed over the same population as TotalStateMachines
+            // (every detected state-machine type), so the fraction below is exact.
             double gen2Fraction = r.TotalStateMachines == 0 ? 0.0 : r.TotalGen2Count * 100.0 / r.TotalStateMachines;
             return
             [

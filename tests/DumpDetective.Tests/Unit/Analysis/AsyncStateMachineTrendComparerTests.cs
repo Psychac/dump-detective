@@ -35,7 +35,6 @@ public sealed class AsyncStateMachineTrendComparerTests
             ],
             TopByCapturedSize: [],
             SuspendedMethodMap: [],
-            ScanLimited: false,
             TotalGen2Count: gen2Count);
 
     [Fact]
@@ -104,12 +103,12 @@ public sealed class AsyncStateMachineTrendComparerTests
     [Fact]
     public void ExtractMetrics_UsesTotalGen2Count_NotTopStateMachineTypesSum()
     {
-        // P1-7 regression test: TotalGen2Count is a domain-level aggregate over ALL candidate
-        // types (bounded by TypeCandidateLimit), independent of TopStateMachineTypes (bounded by
-        // TopTypeLimit). Previously the comparer summed Gen2Count over TopStateMachineTypes only,
-        // which understated the fraction whenever candidates exceeded TopTypeLimit. Here
-        // TopStateMachineTypes sums to 150 but TotalGen2Count (the correct source) is 400 — if the
-        // comparer regressed to summing from TopStateMachineTypes, this test would fail.
+        // P1-7 regression test: TotalGen2Count is a domain-level aggregate over every detected
+        // state-machine type, independent of the TopStateMachineTypes sample list below.
+        // Previously the comparer summed Gen2Count over TopStateMachineTypes only, which could
+        // understate the fraction. Here TopStateMachineTypes sums to 150 but TotalGen2Count
+        // (the correct source) is 400 — if the comparer regressed to summing from
+        // TopStateMachineTypes, this test would fail.
         var comparer = new AsyncStateMachineTrendComparer();
         var result = new AsyncStateMachineDomainResult(
             TotalStateMachines: 1000,
@@ -155,7 +154,6 @@ public sealed class AsyncStateMachineTrendComparerTests
             ],
             TopByCapturedSize: [],
             SuspendedMethodMap: [],
-            ScanLimited: true,
             TotalGen2Count: 400);
 
         var metrics = comparer.ExtractMetrics(result);

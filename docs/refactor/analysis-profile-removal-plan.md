@@ -12,10 +12,10 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 11 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
+**Implementation progress: 12 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
 §9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph, §9.8 LohFragmentation, §9.9
 SegmentReservation, §9.10 Jit, §9.11 Array, §9.12 String (partial — AMBER, not GREEN; see its
-implementation notes for what's deliberately still deferred) (§9.6's orphaned
+implementation notes for what's deliberately still deferred), §9.13 AsyncStateMachine (§9.6's orphaned
 `DependentHandleAnalysisOptions` was also deleted alongside GCHandle — not a separate registered
 analyzer, per the row-4 cross-reference below).** See each section and the §7 verdict table for what
 shipped in each.
@@ -299,7 +299,7 @@ radius is a single cosmetic report field, not root exactness.
 | 10 | Jit | aggregator | **GREEN** ✅ DONE | 3 of 4 | §9.10 — one cap corrupts **six** accumulators; worst Q7 so far; render layer also hardcoded a stale 64 KB flag threshold, fixed |
 | 11 | Array | sampling | **GREEN** ✅ DONE | 5 of 6 | §9.11 — `WastedBytes` is an extrapolation of an extrapolation of one sample object; also found an orphaned dead-code reader and an obsolete `ScanLimited` field |
 | 12 | String | sampling | **AMBER** ⚠️ PARTIAL | 9 of 16 (+`MaxDedupUnique`, a non-`StringAnalysisOptions` cap) | §9.12 — the 9 safely-removable knobs are gone (incl. the real Q7 cap, `MaxStringsToDedup`); full exact dedup still needs a restructured hash-count pass, not shipped this pass |
-| 13 | AsyncStateMachine | sampling | **GREEN** | 5-6 of 7 | §9.13 — a domain-result comment already documents its own corrupted sum |
+| 13 | AsyncStateMachine | sampling | **GREEN** ✅ DONE | 6 of 7 | §9.13 — a domain-result comment already documented its own corrupted sum; the per-type histogram cap was replaced with an exact-count early-exit instead of being dropped outright |
 | 14 | StaticRootLeak | retained-size | **AMBER** | 4 of 6 | §9.14 — `MaxRetainedObjectsToScan` materializes a Dictionary; needs dominator tree |
 | 15 | FinalizableObject | retained-size | **AMBER** | 5 of 5 | §9.15 — a **fourth** private copy of bounded-BFS retained estimation |
 | 16 | GCRoot | retained-size | **AMBER** | 4 of 4 | §9.16 — `MaxBfsDepth = 30` at Full is silently clamped to 20 |
@@ -1350,7 +1350,7 @@ option survives as a guard rather than being deleted alongside `MaxDedupUnique`.
 
 ---
 
-### 9.13 AsyncStateMachine — **GREEN**
+### 9.13 AsyncStateMachine — **GREEN** ✅ IMPLEMENTED
 
 [AsyncStateMachineAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/AsyncStateMachineAnalyzer.cs) ·
 [AsyncStateMachineAnalysisOptions.cs](../../src/DumpDetective.Core/Options/AsyncStateMachineAnalysisOptions.cs)
@@ -1392,6 +1392,52 @@ directly above) needs a dump with a large state-machine population to measure th
 cost directly; estimated (not measured) at hundreds of ms to low seconds even at that scale.
 
 **Q3 — no risk.** Histogram state is a per-type state-value counter, O(types x distinct states).
+
+#### Implementation notes (as shipped)
+
+All six knobs deleted from `AsyncStateMachineAnalysisOptions`; only `LargeCaptureThresholdBytes`
+(Category 5, kept) remains as a plain field initializer, no `Preset`/`Default`.
+
+- `TypeCandidateLimit` deleted: `candidates` in `AsyncStateMachineAnalyzer.cs` now holds every
+  type flagged `IsAsyncStateMachineType`, no cap and no `scanLimited`/`skippedTypeCount`/
+  `skippedBytes` bookkeeping.
+- `TopTypeLimit` deleted: the `i < typeLimit` gate that previously only built profiles for the
+  top-N candidates is gone; every candidate gets a `pendingProfiles` entry (moved to render —
+  the section builder already fed `STCompact`'s default 20-row pagination, per §11.2 D5).
+- `HistogramTopTypeLimit` deleted: the suspend-state histogram second pass now tracks every
+  type in `pendingProfiles` that has a resolvable `<>1__state` field, not just the top 10.
+- `HistogramInstanceCapPerType` deleted, but the early-exit optimization was **preserved**
+  rather than dropped: instead of an arbitrary per-type cap, `histogramRemaining[mt]` is seeded
+  from the type's *exact* `TypeAggregates` instance count (`p.Count`). Once that many instances
+  of a type have been seen, the counter naturally reaches zero and the type stops being
+  tracked — the second heap pass still exits early via `typesStillOpen == 0` once every type is
+  exhausted, but now the histogram is complete rather than sampled.
+- `SuspendedMethodMapLimit` / `TopCapturedSizeEntries` deleted (Category 1, moved to render):
+  `AsyncStateMachineSectionBuilder.cs`'s three `BuildXRows` helpers no longer take a `limit`
+  parameter and iterate the full analyzer-returned list; the local `TopTypeRows`/`TopCaptureRows`/
+  `TopSuspendedRows` consts and their `Math.Min`/`RemoveRange` truncation were removed.
+- `AsyncStateMachineDomainResult.ScanLimited`, `SkippedTypeCount`, `SkippedBytesFraction` deleted
+  (permanently-false/zero vestiges, same pattern as prior sections). `TotalGen2Count`'s comment
+  updated — it's summed over the *same* population as `TotalStateMachines` now, so
+  `AsyncStateMachineTrendComparer`'s gen2-fraction calculation is exact rather than an
+  understatement whenever candidates exceeded `TopTypeLimit`.
+- `ConfidenceSectionBuilder.cs`: removed the "Async state machines" `AddLimitation` row and
+  `BuildAsyncStateText` helper (mirrors the Array §9.11 removal). `AsyncTaskDomainResult`'s
+  separate `TaskScanLimited` row is untouched — that analyzer hasn't been migrated yet.
+- `ConfigurationResolver.cs`: `BuildAsyncStateMachineAnalysisFromConfig` switched from the
+  generic `BuildAnalyzerOptionsFromConfig<T>(..., Preset)` helper to the section/options-override
+  Preset-bypass pattern (same as Array/Boxing), and the CLI-request fallback now constructs
+  `new AsyncStateMachineAnalysisOptions()` directly instead of routing through
+  `AnalyzerOptionsBuilder.BuildBalancedPresetFromCli`.
+- Deleted `AsyncStateMachineUncappedRealDumpTests.cs` (§11.4 M2 measurement) — with
+  `HistogramTopTypeLimit`/`HistogramInstanceCapPerType`/`TypeCandidateLimit` gone there is no
+  capped baseline left to compare against; the measurement it produced is preserved above in the
+  Q5 note.
+- `StateDistribution`'s top-3-states-only truncation (`sorted.RemoveRange(3, ...)` in the
+  analyzer) was **not** part of the audited knob table and was left as-is — it's a per-instance
+  display-shape decision, not a scan-completeness cap, and every instance is still counted into
+  the underlying histogram before the top-3 slice is taken.
+- Test suite: 642 passed, 25 skipped, 0 failed after this change.
 
 ### 9.14-9.16 preamble: group 3 shares one root cause
 

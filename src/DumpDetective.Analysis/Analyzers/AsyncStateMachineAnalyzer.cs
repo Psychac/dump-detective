@@ -22,14 +22,10 @@ namespace DumpDetective.Analysis.Analyzers
     /// analysis to one object access per type.
     ///
     /// The suspend-state histogram (<c>DominantState</c>/<c>StateDistribution</c>) needs more
-    /// than one sample per type, so it runs a second bounded pass over
+    /// than one sample per type, so it runs a second exact pass over
     /// <c>IHeapAnalysisCache.EnumerateIndexedEntriesAsTuples</c> (the disk-backed object index —
-    /// falls back to a live heap walk only when no disk index exists), scoped to the top
-    /// <see cref="AsyncStateMachineAnalysisOptions.HistogramTopTypeLimit"/> types and capped at
-    /// <see cref="AsyncStateMachineAnalysisOptions.HistogramInstanceCapPerType"/> instances/type.
-    ///
-    /// Bounded: top <see cref="TypeCandidateLimit"/> state machine types by count are
-    /// analysed; only top <see cref="TopTypeLimit"/> appear in the report output.
+    /// falls back to a live heap walk only when no disk index exists), covering every detected
+    /// state-machine type and every instance.
     /// </summary>
     public sealed class AsyncStateMachineAnalyzer : IAnalyzer
     {
@@ -57,14 +53,11 @@ namespace DumpDetective.Analysis.Analyzers
                 typeAggregates = idx.TypeAggregates;
 
             if (typeAggregates is null)
-                return new AsyncStateMachineDomainResult(0, 0, [], [], [], false);
+                return new AsyncStateMachineDomainResult(0, 0, [], [], []);
 
             // ── Step 1: Identify async state machine types from TypeAggregates ─────
             // Pattern: <MethodName>d__N in the type name (last component of full name)
             var candidates = new List<(ulong Mt, TypeAggregateIndexEntry Entry)>(32);
-            bool scanLimited = false;
-            int skippedTypeCount = 0;
-            ulong skippedBytes = 0;
 
             foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in typeAggregates)
             {
@@ -74,21 +67,11 @@ namespace DumpDetective.Analysis.Analyzers
                 if ((kv.Value.Flags & TypeAggregateFlags.IsAsyncStateMachineType) == 0)
                     continue;
 
-                if (candidates.Count < options.TypeCandidateLimit)
-                {
-                    candidates.Add((kv.Key, kv.Value));
-                }
-                else
-                {
-                    // Already at limit; this and all remaining types are skipped
-                    scanLimited = true;
-                    skippedTypeCount++;
-                    skippedBytes += kv.Value.TotalSize;
-                }
+                candidates.Add((kv.Key, kv.Value));
             }
 
             if (candidates.Count == 0)
-                return new AsyncStateMachineDomainResult(0, 0, [], [], [], false);
+                return new AsyncStateMachineDomainResult(0, 0, [], [], []);
 
             // Sort by count descending
             candidates.Sort(static (a, b) => b.Entry.Count.CompareTo(a.Entry.Count));
@@ -106,12 +89,11 @@ namespace DumpDetective.Analysis.Analyzers
 
             // ── Step 3: Field metadata + sample-based analysis ───────────────────
             // Read ClrType.Fields and the SampleAddress for each candidate type.
-            int typeLimit = Math.Min(candidates.Count, options.TopTypeLimit);
             var pendingProfiles = new List<(ulong Mt, string TypeName, string OriginatingMethod, string DeclaringType,
                 int Count, ulong TotalBytes, int SampleStateValue, int ReferenceFieldCount, long Gen2Count,
-                double Gen2Fraction, bool IsAsyncVoid)>(typeLimit);
+                double Gen2Fraction, bool IsAsyncVoid)>(candidates.Count);
             var highCaptures = new List<(ulong Address, string TypeName, ulong CapturedBytes, List<string> LargeCaptures)>(16);
-            var stateFieldByMt = new Dictionary<ulong, ClrInstanceField?>(typeLimit);
+            var stateFieldByMt = new Dictionary<ulong, ClrInstanceField?>(candidates.Count);
 
             for (int i = 0; i < candidates.Count; i++)
             {
@@ -192,41 +174,35 @@ namespace DumpDetective.Analysis.Analyzers
 
                 double gen2Fraction = entry.Count > 0 ? entry.Gen2Count / (double)entry.Count : 0.0;
                 bool isAsyncVoid = IsAsyncVoidStateMachine(clrType);
-                if (i < typeLimit)
-                {
-                    pendingProfiles.Add((
-                        Mt: mt,
-                        TypeName: clrType.Name ?? $"MT:0x{mt:X}",
-                        OriginatingMethod: methodName,
-                        DeclaringType: declaringType,
-                        Count: (int)Math.Min(entry.Count, int.MaxValue),
-                        TotalBytes: entry.TotalSize,
-                        SampleStateValue: sampleStateValue,
-                        ReferenceFieldCount: refFieldCount,
-                        Gen2Count: entry.Gen2Count,
-                        Gen2Fraction: gen2Fraction,
-                        IsAsyncVoid: isAsyncVoid));
-                    stateFieldByMt[mt] = stateField;
-                }
+                pendingProfiles.Add((
+                    Mt: mt,
+                    TypeName: clrType.Name ?? $"MT:0x{mt:X}",
+                    OriginatingMethod: methodName,
+                    DeclaringType: declaringType,
+                    Count: (int)Math.Min(entry.Count, int.MaxValue),
+                    TotalBytes: entry.TotalSize,
+                    SampleStateValue: sampleStateValue,
+                    ReferenceFieldCount: refFieldCount,
+                    Gen2Count: entry.Gen2Count,
+                    Gen2Fraction: gen2Fraction,
+                    IsAsyncVoid: isAsyncVoid));
+                stateFieldByMt[mt] = stateField;
             }
 
             // ── Step 3b: Suspend-state histogram ──────────────────────────────────
             // TypeAggregates only retain one SampleAddress per type, so the state
-            // distribution requires a second bounded heap pass, scoped to the top
-            // HistogramTopTypeLimit types and capped at HistogramInstanceCapPerType
-            // instances per type.
-            int histogramTypeCount = Math.Min(pendingProfiles.Count, options.HistogramTopTypeLimit);
-            var histogramMts = new HashSet<ulong>(histogramTypeCount);
-            var histograms = new Dictionary<ulong, Dictionary<int, int>>(histogramTypeCount);
-            var histogramRemaining = new Dictionary<ulong, int>(histogramTypeCount);
-            for (int i = 0; i < histogramTypeCount; i++)
+            // distribution requires a second exact heap pass, covering every detected
+            // state-machine type and every instance.
+            var histogramMts = new HashSet<ulong>(pendingProfiles.Count);
+            var histograms = new Dictionary<ulong, Dictionary<int, int>>(pendingProfiles.Count);
+            var histogramRemaining = new Dictionary<ulong, int>(pendingProfiles.Count);
+            foreach (var p in pendingProfiles)
             {
-                ulong mt = pendingProfiles[i].Mt;
-                if (stateFieldByMt.TryGetValue(mt, out ClrInstanceField? sf) && sf is not null)
+                if (stateFieldByMt.TryGetValue(p.Mt, out ClrInstanceField? sf) && sf is not null)
                 {
-                    histogramMts.Add(mt);
-                    histograms[mt] = new Dictionary<int, int>(8);
-                    histogramRemaining[mt] = options.HistogramInstanceCapPerType;
+                    histogramMts.Add(p.Mt);
+                    histograms[p.Mt] = new Dictionary<int, int>(8);
+                    histogramRemaining[p.Mt] = p.Count;
                 }
             }
 
@@ -306,9 +282,8 @@ namespace DumpDetective.Analysis.Analyzers
 
             // ── Step 4: TopByCapturedSize ─────────────────────────────────────────
             highCaptures.Sort(static (a, b) => b.CapturedBytes.CompareTo(a.CapturedBytes));
-            int captureLimit = Math.Min(highCaptures.Count, options.TopCapturedSizeEntries);
-            var topByCapturedSize = new List<HighCaptureStateMachine>(captureLimit);
-            for (int i = 0; i < captureLimit; i++)
+            var topByCapturedSize = new List<HighCaptureStateMachine>(highCaptures.Count);
+            for (int i = 0; i < highCaptures.Count; i++)
             {
                 (ulong addr, string typeName, ulong captured, List<string> captures) = highCaptures[i];
                 topByCapturedSize.Add(new HighCaptureStateMachine(
@@ -338,10 +313,6 @@ namespace DumpDetective.Analysis.Analyzers
                 suspendedMap.Add(new SuspendedMethodEntry(kv.Key.Item1, kv.Key.Item2, (int)Math.Min(kv.Value.Count, int.MaxValue), kv.Value.Bytes));
 
             suspendedMap.Sort(static (a, b) => b.SuspendedCount.CompareTo(a.SuspendedCount));
-            if (suspendedMap.Count > options.SuspendedMethodMapLimit)
-                suspendedMap.RemoveRange(options.SuspendedMethodMapLimit, suspendedMap.Count - options.SuspendedMethodMapLimit);
-
-            double skippedBytesFraction = totalBytes > 0 ? skippedBytes / (double)totalBytes : 0.0;
 
             return new AsyncStateMachineDomainResult(
                 TotalStateMachines: (int)Math.Min(totalCount, int.MaxValue),
@@ -349,10 +320,7 @@ namespace DumpDetective.Analysis.Analyzers
                 TopStateMachineTypes: topTypes,
                 TopByCapturedSize: topByCapturedSize,
                 SuspendedMethodMap: suspendedMap,
-                ScanLimited: scanLimited,
-                TotalGen2Count: totalGen2Count,
-                SkippedTypeCount: skippedTypeCount,
-                SkippedBytesFraction: skippedBytesFraction);
+                TotalGen2Count: totalGen2Count);
         }
 
         public void Dispose() { }

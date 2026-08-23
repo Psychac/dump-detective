@@ -107,7 +107,6 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
         AddLimitation(limitationRows, "GC roots", results.Get<GCRootDomainResult>() is GCRootDomainResult gcRoot && (gcRoot.PathSearchCapped || gcRoot.PathSearchCappedCount > 0), BuildRootText(results.Get<GCRootDomainResult>()));
         AddLimitation(limitationRows, "Hang / task scan", results.Get<HangDomainResult>() is HangDomainResult hang && (!hang.RuntimeThreadPoolDataAvailable || hang.TaskScanLimited), BuildHangText(results.Get<HangDomainResult>()));
         AddLimitation(limitationRows, "Async tasks", results.Get<AsyncTaskDomainResult>() is AsyncTaskDomainResult asyncTasks && asyncTasks.TaskScanLimited, BuildAsyncTaskText(results.Get<AsyncTaskDomainResult>()));
-        AddLimitation(limitationRows, "Async state machines", results.Get<AsyncStateMachineDomainResult>() is AsyncStateMachineDomainResult asyncState && asyncState.ScanLimited, BuildAsyncStateText(results.Get<AsyncStateMachineDomainResult>()));
 
         if (limitationRows.Count > 0)
         {
@@ -193,16 +192,6 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
         return asyncTasks.TaskScanLimited
             ? "Async task scanning hit its cap; orphan and continuation totals may be partial."
             : "Async task scan completed within the configured cap.";
-    }
-
-    private static string BuildAsyncStateText(AsyncStateMachineDomainResult? asyncState)
-    {
-        if (asyncState is null)
-            return "No async state-machine result available.";
-
-        return asyncState.ScanLimited
-            ? "Async state-machine type scan was capped; top-type and capture summaries may be partial."
-            : "Async state-machine scan completed within the configured cap.";
     }
 
 }

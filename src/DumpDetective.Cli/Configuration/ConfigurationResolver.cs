@@ -32,17 +32,17 @@ internal sealed class ConfigurationResolver
         bool usedConfigFile = fileModel is not null;
 
         RetentionOptions memoryLeak = Resolve(usedConfigFile, BuildMemoryLeakFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, RetentionOptions.Preset), fileModel, request);
-        ReferenceChainOptions refChain = Resolve(usedConfigFile, BuildReferenceChainFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, ReferenceChainOptions.Preset), fileModel, request);
+        ReferenceChainOptions refChain = Resolve(usedConfigFile, BuildReferenceChainFromConfig, _ => new ReferenceChainOptions(), fileModel, request);
         EventLeakOptions eventLeak = Resolve(usedConfigFile, BuildEventLeakFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, EventLeakOptions.Preset), fileModel, request);
         DiagnosticsOptions diagnostics = Resolve(usedConfigFile, BuildDiagnosticsFromConfig, AnalyzerOptionsBuilder.BuildDiagnosticsFromCli, fileModel, request);
         ReportOptions report = Resolve(usedConfigFile, BuildReportFromConfig, AnalyzerOptionsBuilder.BuildReportFromCli, fileModel, request);
-        ExecutionPolicy executionPolicy = BuildExecutionPolicy(fileModel, memoryLeak, refChain);
+        ExecutionPolicy executionPolicy = BuildExecutionPolicy(fileModel, memoryLeak);
         CrashAnalysisOptions crash = Resolve(usedConfigFile, BuildCrashFromConfig, req => AnalyzerOptionsBuilder.BuildValidatedBalancedPresetFromCli(req, CrashAnalysisOptions.Preset, CrashAnalysisOptions.Validate), fileModel, request);
         AsyncTaskAnalysisOptions asyncTaskAnalysis = Resolve(usedConfigFile, BuildAsyncTaskAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, AsyncTaskAnalysisOptions.Preset), fileModel, request);
         AsyncStateMachineAnalysisOptions asyncStateMachineAnalysis = Resolve(usedConfigFile, BuildAsyncStateMachineAnalysisFromConfig, _ => new AsyncStateMachineAnalysisOptions(), fileModel, request);
         ArrayAnalysisOptions arrayAnalysis = Resolve(usedConfigFile, BuildArrayAnalysisFromConfig, _ => new ArrayAnalysisOptions(), fileModel, request);
         BoxingAnalysisOptions boxingAnalysis = Resolve(usedConfigFile, BuildBoxingAnalysisFromConfig, _ => new BoxingAnalysisOptions(), fileModel, request);
-        CollectionAnalysisOptions collection = Resolve(usedConfigFile, BuildCollectionFromConfig, req => AnalyzerOptionsBuilder.BuildValidatedBalancedPresetFromCli(req, CollectionAnalysisOptions.Preset, CollectionAnalysisOptions.Validate), fileModel, request);
+        CollectionAnalysisOptions collection = Resolve(usedConfigFile, BuildCollectionFromConfig, _ => CollectionAnalysisOptions.Validate(new CollectionAnalysisOptions()), fileModel, request);
         StringAnalysisOptions stringAnalysis = Resolve(usedConfigFile, BuildStringAnalysisFromConfig, AnalyzerOptionsBuilder.BuildStringAnalysisFromCli, fileModel, request);
         HeapTopologyAnalysisOptions heapTopology = Resolve(usedConfigFile, BuildHeapTopologyAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, HeapTopologyAnalysisOptions.Preset), fileModel, request);
         AllocationPatternAnalysisOptions allocationPatternAnalysis = Resolve(usedConfigFile, BuildAllocationPatternAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, AllocationPatternAnalysisOptions.Preset), fileModel, request);
@@ -199,11 +199,14 @@ internal sealed class ConfigurationResolver
 
 
     private static ReferenceChainOptions BuildReferenceChainFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "ReferenceChain",
-            config.ReferenceChain,
-            ReferenceChainOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "ReferenceChain", out JsonElement section))
+            return ApplySectionOverrides(new ReferenceChainOptions(), section);
+
+        return config.ReferenceChain is null
+            ? new ReferenceChainOptions()
+            : ApplyOptionsOverrides(new ReferenceChainOptions(), config.ReferenceChain);
+    }
 
 
 
@@ -259,8 +262,7 @@ internal sealed class ConfigurationResolver
 
     private static ExecutionPolicy BuildExecutionPolicy(
         CliConfigurationFileModel? config,
-        RetentionOptions memoryLeak,
-        ReferenceChainOptions referenceChain)
+        RetentionOptions memoryLeak)
     {
         ExecutionPolicyModel? policy = config?.ExecutionPolicy;
 
@@ -268,7 +270,6 @@ internal sealed class ConfigurationResolver
         {
             MaxLeakScanObjects = PositiveOrNull(policy?.MaxLeakScanObjects) ?? memoryLeak.MaxLeakScanObjects,
             MaxReferenceAddresses = PositiveOrNull(policy?.MaxReferenceAddresses) ?? memoryLeak.MaxReferenceAddresses,
-            ReferenceChainMaxPathDepth = PositiveOrNull(policy?.ReferenceChainMaxPathDepth) ?? referenceChain.MaxPathDepth
         };
     }
 
@@ -282,9 +283,7 @@ internal sealed class ConfigurationResolver
             modern = modernSection.Deserialize<CollectionAnalysisOptionsModel>();
         CollectionAnalysisOptionsModel? model = MergeCollectionModel(primary: modern, fallback: legacy);
 
-        AnalysisProfile profile = ResolveAnalyzerProfile(model?.Profile, config.Profile);
-        CollectionAnalysisOptions preset = CollectionAnalysisOptions.Preset(profile);
-        CollectionAnalysisOptions effective = CollectionAnalysisOptions.ApplyOverrides(preset, model);
+        CollectionAnalysisOptions effective = CollectionAnalysisOptions.ApplyOverrides(new CollectionAnalysisOptions(), model);
         effective = CollectionAnalysisOptions.Validate(effective);
 
         return effective;
@@ -626,14 +625,11 @@ internal sealed class ConfigurationResolver
 
         return new CollectionAnalysisOptionsModel
         {
-            Profile = primary.Profile ?? fallback.Profile,
             WasteThresholdBytes = primary.WasteThresholdBytes ?? fallback.WasteThresholdBytes,
             TopWastefulCollectionsToShow = primary.TopWastefulCollectionsToShow ?? fallback.TopWastefulCollectionsToShow,
             MaxDegreeOfParallelism = primary.MaxDegreeOfParallelism ?? fallback.MaxDegreeOfParallelism,
-            IncludeQueueAnalysis = primary.IncludeQueueAnalysis ?? fallback.IncludeQueueAnalysis,
             SurfaceProbingExceptions = primary.SurfaceProbingExceptions ?? fallback.SurfaceProbingExceptions,
             PathAnalysisTopN = primary.PathAnalysisTopN ?? fallback.PathAnalysisTopN,
-            ReferenceChainOptions = primary.ReferenceChainOptions ?? fallback.ReferenceChainOptions,
             SerializeHeapAccess = primary.SerializeHeapAccess ?? fallback.SerializeHeapAccess,
         };
     }

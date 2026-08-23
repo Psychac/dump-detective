@@ -20,22 +20,18 @@ namespace DumpDetective.Analysis.Analyzers
             cancellationToken.ThrowIfCancellationRequested();
 
             ReferenceChainOptions options = context.AnalysisOptions.ReferenceChain;
-            ExecutionPolicy policy = context.AnalysisOptions.ExecutionPolicy;
 
-            return ValueTask.FromResult(AnalyzeTopTypes(context.Heap, context.Cache, options, policy, context.Progress, cancellationToken).Stamp(this));
+            return ValueTask.FromResult(AnalyzeTopTypes(context.Heap, context.Cache, options, context.Progress, cancellationToken).Stamp(this));
         }
 
         internal AnalyzerDomainResult AnalyzeTopTypes(ClrHeap heap, IHeapAnalysisCache cache, ReferenceChainOptions options)
         {
-            return AnalyzeTopTypes(heap, cache, options, ExecutionPolicy.Default, progress: null, CancellationToken.None);
+            return AnalyzeTopTypes(heap, cache, options, progress: null, CancellationToken.None);
         }
 
-        private AnalyzerDomainResult AnalyzeTopTypes(ClrHeap heap, IHeapAnalysisCache cache, ReferenceChainOptions options, ExecutionPolicy policy, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
+        private AnalyzerDomainResult AnalyzeTopTypes(ClrHeap heap, IHeapAnalysisCache cache, ReferenceChainOptions options, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
         {
-            int topCount = options.TopCount > 0 ? options.TopCount : options.FallbackTopCount;
-            bool skipArrays = options.SkipArrays;
-            int largeFanoutThreshold = options.LargeFanoutThreshold > 0 ? options.LargeFanoutThreshold : 100;
-            var knownLeakPatterns = options.KnownLeakTypePatterns ?? Array.Empty<string>();
+            int topCount = options.TopCount;
 
             // Use cached type statistics instead of re-enumerating
             progress?.Report(new(0, "building type index"));
@@ -94,7 +90,7 @@ namespace DumpDetective.Analysis.Analyzers
                         sampleType = sampleMetadata.TypeName ?? StringConstants.UnknownType;
                         sampleSize = sampleMetadata.Size;
 
-                        hasGcRoot = TryFindAnyRootPath(heap, provider, prioritizedRoots, sampleAddress.Value, options, policy, telemetry, cache.TryGetReverseIndexProvider(), cache, cancellationToken, out rootKind, out path, out pathHops, out searchTruncated);
+                        hasGcRoot = TryFindAnyRootPath(heap, provider, prioritizedRoots, sampleAddress.Value, options, telemetry, cache.TryGetReverseIndexProvider(), cache, cancellationToken, out rootKind, out path, out pathHops, out searchTruncated);
                         if (hasGcRoot)
                         {
                             retainedSamples++;
@@ -146,7 +142,7 @@ namespace DumpDetective.Analysis.Analyzers
             var provider = new ReferenceGraph(heap);
             var options = new ReferenceChainOptions();
             var telemetry = new TelemetryCounters();
-            return TryFindAnyRootPath(heap, provider, prioritizedRoots, objectAddress, options, ExecutionPolicy.Default, telemetry, cache.TryGetReverseIndexProvider(), cache, CancellationToken.None, out _, out _, out _, out _);
+            return TryFindAnyRootPath(heap, provider, prioritizedRoots, objectAddress, options, telemetry, cache.TryGetReverseIndexProvider(), cache, CancellationToken.None, out _, out _, out _, out _);
         }
 
         private bool TryFindAnyRootPath(
@@ -155,7 +151,6 @@ namespace DumpDetective.Analysis.Analyzers
             IReadOnlyList<(string RootKind, ulong Address)> roots,
             ulong objectAddress,
             ReferenceChainOptions options,
-            ExecutionPolicy policy,
             TelemetryCounters telemetry,
             IBackwardReferenceProvider? reverseIndexProvider,
             IHeapAnalysisCache? cache,
@@ -173,22 +168,20 @@ namespace DumpDetective.Analysis.Analyzers
             if (!TryGetValidObject(heap, objectAddress, out _))
                 return false;
 
-            // All modes route through the bounded bidirectional search — Fast mode differs only
-            // in its (smaller) resolved candidate-set/depth limits, set via ReferenceChainOptions.
-            // A separate unbounded per-root BFS used to back Fast mode; removed because it scaled
-            // with GC root count instead of a shared bounded budget (see
-            // docs/analysis/root-path-search-blast-radius.md).
-            return TryFindAnyRootPath_Bidirectional(heap, provider, roots, objectAddress, options, policy, telemetry, reverseIndexProvider, cache, cancellationToken, out rootKind, out path, out pathHops, out searchTruncated);
+            // Single bounded bidirectional search strategy — the former SearchMode
+            // Fast/Balanced/Deep parallel-profile enum was deleted (§9.20); a separate unbounded
+            // per-root BFS used to back Fast mode; removed because it scaled with GC root count
+            // instead of a shared bounded budget (see docs/analysis/root-path-search-blast-radius.md).
+            return TryFindAnyRootPath_Bidirectional(heap, provider, roots, objectAddress, options, telemetry, reverseIndexProvider, cache, cancellationToken, out rootKind, out path, out pathHops, out searchTruncated);
         }
 
-        // ── Bidirectional bounded search (all modes) ────────────────────────────
+        // ── Bidirectional bounded search ─────────────────────────────────────────
         private bool TryFindAnyRootPath_Bidirectional(
             ClrHeap heap,
             ReferenceGraph provider,
             IReadOnlyList<(string RootKind, ulong Address)> roots,
             ulong objectAddress,
             ReferenceChainOptions options,
-            ExecutionPolicy policy,
             TelemetryCounters telemetry,
             IBackwardReferenceProvider? reverseIndexProvider,
             IHeapAnalysisCache? cache,
@@ -207,9 +200,9 @@ namespace DumpDetective.Analysis.Analyzers
             // all types, reducing redundant ClrMD calls for objects referenced by multiple types.
             var limits = new RootPathSearchLimits
             {
-                MaxCandidateNodes = options.ResolvedMaxCandidateNodes,
-                MaxCandidateDepth = options.ResolvedMaxCandidateDepth,
-                MaxRootExpansionDepth = options.ResolvedMaxRootExpansionDepth,
+                MaxCandidateNodes = options.MaxCandidateNodes,
+                MaxCandidateDepth = options.MaxCandidateDepth,
+                MaxRootExpansionDepth = options.MaxRootExpansionDepth,
                 LargeFanoutThreshold = options.LargeFanoutThreshold,
             };
 
@@ -218,7 +211,7 @@ namespace DumpDetective.Analysis.Analyzers
                 provider,
                 limits,
                 telemetry.AsProxy(),
-                type => IsNoisyType(type, options.SkipArrays),
+                IsNoisyType,
                 type => IsKnownLeakType(type, options.KnownLeakTypePatterns),
                 reverseIndexProvider,
                 cache);
@@ -271,7 +264,10 @@ namespace DumpDetective.Analysis.Analyzers
             return new ObjectMetadata(true, obj.Type?.Name, obj.Size);
         }
 
-        internal static bool IsNoisyType(ClrType? type, bool skipArrays)
+        // §9.20 (docs/refactor/analysis-profile-removal-plan.md): arrays are never treated as
+        // noise — confirmed by V3/§11.3 that skipping them was real traversal pruning, not a
+        // presentation concern, so excluding them would risk missing genuine retention chains.
+        internal static bool IsNoisyType(ClrType? type)
         {
             if (type is null)
                 return false;
@@ -280,15 +276,7 @@ namespace DumpDetective.Analysis.Analyzers
             if (string.IsNullOrEmpty(name))
                 return false;
 
-            // Skip System.String and System.Object
-            if (name == "System.String" || name == "System.Object")
-                return true;
-
-            // Optionally skip arrays
-            if (skipArrays && type.IsArray)
-                return true;
-
-            return false;
+            return name == "System.String" || name == "System.Object";
         }
 
         internal static bool IsKnownLeakType(ClrType? type, IReadOnlyList<string> knownLeakPatterns)

@@ -9,9 +9,6 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class ReferenceChainSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    private const int MaxTraces = 10;
-    private const int MaxChains = 5;
-
     public string AnalyzerName => "Reference Chain Analysis";
     public int SortOrder => 60;
 
@@ -33,8 +30,7 @@ internal sealed class ReferenceChainSectionBuilder : SectionBuilderBase, IAnalyz
         var typeTraces = new List<TypeSampleTrace>();
         if (traces.Count > 0)
         {
-            int limit = Math.Min(traces.Count, MaxTraces);
-            for (int i = 0; i < limit; i++)
+            for (int i = 0; i < traces.Count; i++)
             {
                 var trace = traces[i];
                 string status = trace.HasGcRoot
@@ -63,8 +59,7 @@ internal sealed class ReferenceChainSectionBuilder : SectionBuilderBase, IAnalyz
         var chains = d.SampleReferenceChains ?? [];
         if (chains.Count > 0)
         {
-            int chainLimit = Math.Min(chains.Count, MaxChains);
-            for (int i = 0; i < chainLimit; i++)
+            for (int i = 0; i < chains.Count; i++)
             {
                 var hops = chains[i]
                     .Split([" → ", " -> "], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -83,9 +78,8 @@ internal sealed class ReferenceChainSectionBuilder : SectionBuilderBase, IAnalyz
         var retainedTypes = d.RetainedTypeNames ?? [];
         if (retainedTypes.Count > 0)
         {
-            var rtRows = new List<TableRow>(Math.Min(retainedTypes.Count, 8));
-            int rtLimit = Math.Min(retainedTypes.Count, 8);
-            for (int i = 0; i < rtLimit; i++)
+            var rtRows = new List<TableRow>(retainedTypes.Count);
+            for (int i = 0; i < retainedTypes.Count; i++)
                 rtRows.Add(new TableRow([Cell(FormatHelper.TruncateString(retainedTypes[i], 80))]));
             compactTables.Add(STCompact("Retained types", new[] { CH("Type") }, rtRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }

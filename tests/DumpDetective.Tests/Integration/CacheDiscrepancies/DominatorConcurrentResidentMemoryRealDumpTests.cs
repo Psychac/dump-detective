@@ -73,7 +73,7 @@ public sealed class DominatorConcurrentResidentMemoryRealDumpTests(ITestOutputHe
                 ReferenceChain = new ReferenceChainOptions(),
                 EventLeak = new EventLeakOptions(),
                 Diagnostics = diagnostics,
-                Collection = CollectionAnalysisOptions.Default,
+                Collection = new CollectionAnalysisOptions(),
             },
             Diagnostics = diagnostics,
             DiagnosticsSink = NullAnalysisDiagnosticsSink.Instance,

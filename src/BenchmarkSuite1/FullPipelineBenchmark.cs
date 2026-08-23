@@ -70,7 +70,7 @@ public class FullPipelineBenchmark
             ReferenceChain = new ReferenceChainOptions(),
             EventLeak = new EventLeakOptions(),
             Diagnostics = diagnostics,
-            Collection = CollectionAnalysisOptions.Default,
+            Collection = new CollectionAnalysisOptions(),
         };
 
         _context = new RuntimeAnalysisContext

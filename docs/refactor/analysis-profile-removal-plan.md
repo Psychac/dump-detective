@@ -12,14 +12,16 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 15 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
+**Implementation progress: 17 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
 §9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph, §9.8 LohFragmentation, §9.9
 SegmentReservation, §9.10 Jit, §9.11 Array, §9.12 String (partial — AMBER, not GREEN; see its
 implementation notes for what's deliberately still deferred), §9.13 AsyncStateMachine, §9.14
-StaticRootLeak, §9.15 FinalizableObject, §9.16 GCRoot (§9.6's orphaned
-`DependentHandleAnalysisOptions` was also deleted alongside GCHandle — not a separate registered
-analyzer, per the row-4 cross-reference below).** See each section and the §7 verdict table for what
-shipped in each.
+StaticRootLeak, §9.15 FinalizableObject, §9.16 GCRoot, §9.20 ReferenceChain (partial — moved from
+RED to AMBER, not GREEN; see its implementation notes for the search-layer caps deliberately kept),
+§9.17 Collection (partial — AMBER; the `Profile`-branch fix landed, two knobs recategorized as
+real work-scoping thresholds and kept) (§9.6's orphaned `DependentHandleAnalysisOptions` was also
+deleted alongside GCHandle — not a separate registered analyzer, per the row-4 cross-reference
+below).** See each section and the §7 verdict table for what shipped in each.
 
 > **Correction (roster built from the wrong source):** the audit was originally built by walking
 > `src/DumpDetective.Core/Options/`, not the analyzer registry — so any analyzer with no dedicated
@@ -304,10 +306,10 @@ radius is a single cosmetic report field, not root exactness.
 | 14 | StaticRootLeak | retained-size | **GREEN** ✅ DONE | 4 of 4 (2 kept, Category 5) | §9.14 — §10's dominator provider shipped; `MaxRetainedObjectsToScan`/`SampleRetainedObjectsToInspect`/`MaxRootsToReport`/`TopRetainedTypesToReport` all resolved via `EnumerateRetainedSet` + render-layer pagination |
 | 15 | FinalizableObject | retained-size | **GREEN** ✅ DONE | 5 of 5 | §9.15 — the fourth private BFS copy (`BfsEstimateRetained`) deleted outright, replaced by `TryGetRetainedBytes`; options class deleted |
 | 16 | GCRoot | retained-size | **GREEN** ✅ DONE | 4 of 4 (2 hardcoded, not deleted) | §9.16 — `PathSearchTopN` deleted per M4; `MaxBfsDepth`/`MaxBfsNodes` moved off the profile surface to internal constants (dominator-tree rewire for the path-type-name walk itself stays deferred, see notes) |
-| 17 | Collection | retained-size | **AMBER** | 4 of 9 | §9.17 — the only analyzer reading `AnalysisProfile` at runtime |
+| 17 | Collection | retained-size | **AMBER** ⚠️ PARTIAL | 6 of 9 (2 recategorized to Category 5, kept) | §9.17 — `Profile`/`AnalysisProfile` branch replaced and deleted; `TopWastefulCollectionsToShow`/`PathAnalysisTopN` recategorized as real in-scan work-scoping thresholds, not display caps; the embedded `ReferenceChainOptions` turned out to be entirely dead (analyzer reads the top-level one instead) and was deleted; inherits §9.20's residual AMBER for root-path descriptions |
 | 18 | Dominator | retained-size | **GREEN** | 0 | §9.18 — already exact; owns `RetentionOptions` exclusively (see row 22 note); its own flags were *deliberately* kept off the profile system |
 | 19 | EventLeak | root-path | **AMBER** | 5 of 16 | §9.19 — holds the codebase's **only wall-clock budget**; useful precedent |
-| 20 | ReferenceChain | root-path | **RED** | 6 of 10 | §9.20 — a **second, parallel profile enum**; Q6-gated on `MaxParentsPerChild` |
+| 20 | ReferenceChain | root-path | **AMBER** ⚠️ PARTIAL (was RED) | 5 of 8 (+3 dead `ExecutionPolicy`/CLI knobs found and deleted) | §9.20 — parallel profile enum deleted, no longer RED; `LargeFanoutThreshold`/`MaxCandidateNodes`/`MaxRootExpansionDepth` recategorized and kept (real search-layer caps, not the now-resolved index-layer one) — real hub fan-in measured up to 10.76M keeps this AMBER |
 | 21 | TimerLeak | root-path | **AMBER** | 0 (no options class) | §9.21 — no knobs of its own; inherits every shared traversal bound |
 | 22 | *(= Dominator, row 18)* | — | — | — | "Retention" is **not a separate analyzer** — `RetentionOptions` belongs to `DominatorAnalyzer`. Originally audited as a second, duplicate row; findings (`RootPathLargeFanoutThreshold` exclusion, `MaxLeakScanObjects` vs. 87M-object heap, etc.) merged into §9.18. |
 | 23 | Thread | non-heap | **AMBER** | 8 of 10 | §9.23 — a **third** tier system (`AdaptForSize`); scans 8 frames per thread |
@@ -1692,7 +1694,7 @@ tunable.
 - Deleted the now-obsolete §11.4 M4 measurement test
   (`GCRootAnalyzerUncappedRealDumpTests.cs`) — its result is preserved in the Q5 note above.
 
-### 9.17 Collection — **AMBER**
+### 9.17 Collection — **AMBER** ⚠️ PARTIALLY IMPLEMENTED
 
 [CollectionAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/CollectionAnalyzer.cs) ·
 [CollectionAnalysisOptions.cs](../../src/DumpDetective.Core/Options/CollectionAnalysisOptions.cs)
@@ -1722,6 +1724,62 @@ be exact before ReferenceChain is (§9.20).
 
 **Concurrency knobs are not in scope.** `MaxDegreeOfParallelism` and `SerializeHeapAccess` bound
 neither work nor rows — they are execution policy. Keep them; just stop varying them by tier.
+
+#### Implementation notes (as shipped)
+
+- **`Profile`/`AnalysisProfile` branch replaced exactly as prescribed.**
+  `options.Profile == AnalysisProfile.Fast` → `options.PathAnalysisTopN <= 0` in
+  `CollectionAnalyzer.PopulateRootDescriptions`; provably equivalent since the deleted `Fast`
+  preset always set `PathAnalysisTopN = 0`. `Profile` field, `Preset`/`Default`, and
+  `CollectionAnalysisOptionsModel.Profile` all deleted; `ConfigurationResolver.BuildCollectionFromConfig`
+  switched to the by-now-standard `ApplyOverrides(new CollectionAnalysisOptions(), model)` pattern
+  (no more `ResolveAnalyzerProfile`/`Preset` call).
+- **`TopWastefulCollectionsToShow` and `PathAnalysisTopN` recategorized from Category 1/4 ("move
+  to render" / "delete with the dominator move") to Category 5 ("keep, real work-scoping
+  thresholds") — a judgment call made in this pass, overriding the original audit.** Confirmed via
+  code, not assumption: `TopWastefulCollectionsToShow` sizes `AddToTopWasteful`'s bounded top-K
+  accumulator *during* the streaming per-segment scan (`_topCapacity = Math.Max(1,
+  Math.Max(TopWastefulCollectionsToShow, PathAnalysisTopN))`), not a post-hoc truncation of an
+  already-complete list — the scan cannot retain every wasteful collection found across a 25GB
+  heap in memory, so a bounded top-K selection during the single pass is the CLAUDE.md-mandated
+  streaming pattern, not a silent-truncation defect. `PathAnalysisTopN` bounds how many of those
+  top items get an expensive per-item `RootPathFinder` search — the same "bounds real work, not
+  display rows" shape as ReferenceChain's own `TopCount` (§9.20), and StaticRootLeak's now-deleted
+  `MaxRootsToReport` before it turned out full-population computation was actually affordable
+  there (§9.14) — the difference here is the underlying per-item work (a graph search) is
+  expensive enough that doing it unconditionally for the whole wasteful-collection population
+  isn't the same easy win. Neither knob was deleted; both stay, no longer tier-varying.
+- **`IncludeQueueAnalysis` hard-coded to always-true** (deleted from options): both call sites
+  (`OnHeapEntry`'s single-threaded path and `RunParallelCollectionAnalysis`'s parallel path) had
+  `if (kind == CollectionKind.Queue && !_options.IncludeQueueAnalysis) return;` — removed outright,
+  queue analysis always runs now.
+- **`ReferenceChainOptions` (nested) — turned out to be entirely dead, not just "blocked."**
+  Caught after this section first shipped: `CollectionAnalyzer.PopulateRootDescriptions`'s
+  `RootPathFinder` search is actually configured from `_refChainOptions`, populated in
+  `AnalyzeAsync` from the **top-level** `context.AnalysisOptions.ReferenceChain` — the same shared
+  `ReferenceChainOptions` instance `ReferenceChainAnalyzer` itself uses — never from
+  `CollectionAnalysisOptions.ReferenceChainOptions`. Grepped every read site to confirm: the
+  embedded property was only ever *written* (config merge in `ApplyOverrides`/`Validate`/
+  `MergeCollectionModel`), never *read* by the analyzer. Deleted outright — property, its config
+  model field, and its three merge/override call sites — same "confirmed no consumer anywhere" bar
+  as `DependentHandleAnalysisOptions` (§9.6) and this section's own already-deleted `Profile`.
+  Collection's root-path descriptions still inherit §9.20's residual AMBER limitation
+  (`LargeFanoutThreshold`/`MaxCandidateNodes`/`MaxRootExpansionDepth` kept as real search-layer
+  caps on the shared `ReferenceChainOptions`) — that part of the original note still holds, just
+  via the correct (top-level) options instance rather than the dead embedded copy.
+- `WasteThresholdBytes`/`SurfaceProbingExceptions`/`MaxDegreeOfParallelism`/`SerializeHeapAccess`
+  kept exactly as audited (Category 5 / orthogonal execution policy), just no longer tier-varying
+  now that `Preset`/`Default` are gone.
+- No section-builder/finding-generator/trend-comparer changes needed — none referenced the deleted
+  fields or added a redundant display-layer cap.
+- Test suite: 642 passed, 22 skipped, 0 failed. Two `ConfigurationResolverTests.cs` tests that
+  asserted profile-scaled `Collection.PathAnalysisTopN`/`Collection.Profile` were updated to the
+  new single-tier default (5) — expected fallout of deleting profile variance for this analyzer,
+  not a regression.
+- **Not touched, out of scope:** `BenchmarkSuite1` has pre-existing compile drift from earlier,
+  already-shipped sections (e.g. `ModuleAnalysisOptions.Default`, deleted in §9.3) — it has never
+  been part of this effort's build/test verification loop across any of the 17 sections implemented
+  so far, so fixing its accumulated drift is a separate cleanup, not folded into this section.
 
 ---
 
@@ -1831,7 +1889,7 @@ affordable *only* if served from the reverse index rather than a heap scan; trea
 
 ---
 
-### 9.20 ReferenceChain — **RED**
+### 9.20 ReferenceChain — **AMBER** ⚠️ PARTIALLY IMPLEMENTED (was RED, no longer RED)
 
 [ReferenceChainAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/ReferenceChainAnalyzer.cs) ·
 [ReferenceChainOptions.cs](../../src/DumpDetective.Core/Options/ReferenceChainOptions.cs)
@@ -1870,6 +1928,77 @@ regardless of how many knobs are deleted.
 | `SkipArrays` | true | pruning | **confirmed by V3/§11.3: real traversal pruning, not presentation** — force `false`, folded into D1's exact-search work |
 | `TopCount` / `FallbackTopCount` | 5 / 10 | 1 — rows | move to render |
 | `KnownLeakTypePatterns` | 3 patterns | 5 — heuristic | keep; identical in all three presets (pure duplication) |
+
+#### Implementation notes (as shipped)
+
+**Reason #1 (parallel profile system) — fully resolved.** `ReferenceChainSearchMode` enum and its
+`Preset`/`Default`/three `Resolved*` mode-dependent properties deleted outright.
+`ReferenceChainOptions` collapsed to plain fields at their former Balanced-preset values — the
+codebase always ran through `IndexBackedBidirectionalSearch` when a reverse-edge index is
+available anyway (which, per Stage A now always being built, is effectively always), so the mode
+enum never actually selected between two live implementations — it only varied numeric budgets by
+tier, which the plan's own §1 goal explicitly wants stopped.
+
+**Reason #2 (Q6, graph completeness) — the specific blocker (§6.2's `MaxParentsPerChild`) is
+resolved, but a related, undocumented one remains, and that's why this stays AMBER, not GREEN.**
+§6.2 shipped: the reverse-edge index has no fan-in cap (confirmed in
+[dominator-tree-phase1-integration.md §3](../analysis/phase1-redesigns/dominator-tree-phase1-integration.md)
+— `MaxParentsPerChild` deleted outright, real measured worst-case hub fan-in 346K on a 3.3GB dump,
+10.76M on a 25.6GB dump). But `LargeFanoutThreshold` is a **separate** cap, at the *search* layer,
+not the *index* layer — [IndexBackedBidirectionalSearch.cs](../../src/DumpDetective.Analysis/Traversal/IndexBackedBidirectionalSearch.cs)'s
+forward/backward neighbor generators both stop expanding a node past `LargeFanoutThreshold`
+matches, even though the underlying index could answer for all of them. The 10.76M-fan-in
+measurement above is exactly why this can't simply be deleted: an on-demand, per-query search
+hitting a hub that large would need to materialize 10.76 million neighbors in a single BFS step,
+for a query that runs a handful of times per analysis (once per `TopCount` type sample) — a
+fundamentally different cost profile than the index build (a one-time linear pass). `MaxCandidateNodes`
+and `MaxRootExpansionDepth` (the search's own node/depth budget) are kept for the same reason.
+**None of these three were deleted; they were recategorized from the original audit's "Category 4,
+delete with the strategy collapse" to Category 5 (real, kept, semantic search-budget thresholds)**
+— a judgment call made in this pass, not the original audit's assumption. So "the true shortest
+reference chain" still isn't guaranteed: a shorter path could exist through a fanout-pruned hub, or
+beyond the node/depth budget. This is why the analyzer moves from RED to **AMBER**, not GREEN.
+- `SkipArrays` deleted per V3/§11.3's explicit instruction ("force false... real traversal pruning,
+  not presentation"). `IsNoisyType` no longer takes a `skipArrays` parameter; arrays are never
+  treated as noise now (previously excluded whenever the option was `true`, including at both
+  non-Fast presets already, but *not* consistently — deleting it makes the behavior uniform and
+  matches the source doc's "fold into D1's exact-search work" verdict).
+- `MaxPathDepth` — a **newly-discovered dead knob**, not part of the original audit table (which
+  only covered fields actually read by `ReferenceChainAnalyzer`). Confirmed via grep: set in all
+  three presets, forwarded into `ExecutionPolicy.ReferenceChainMaxPathDepth` by
+  `ConfigurationResolver.BuildExecutionPolicy`, but that `ExecutionPolicy` field (and its two
+  siblings, `ReferenceChainFastModeMaxDepth`/`ReferenceChainMaxPathSearchObjects`) were never read
+  by any analyzer — the `ExecutionPolicy policy` parameter threaded through
+  `ReferenceChainAnalyzer.AnalyzeTopTypes`/`TryFindAnyRootPath`/`TryFindAnyRootPath_Bidirectional`
+  was entirely unused. Deleted all three `ExecutionPolicy` fields, the unused `policy` parameter
+  threading, and the two CLI-only flags that fed them
+  (`--reference-chain-top-count`/`--reference-chain-max-path-search-objects`, and their
+  `AnalysisCommandRequest`/`CliArguments`/`RootCommandBuilder` plumbing) — same "confirmed no
+  consumer anywhere" bar used for `DependentHandleAnalysisOptions` (§9.6) and
+  `TopFinalizerTypesToShow` (§9.18).
+- `TopCount` **recategorized from Category 1 ("rows, move to render") to Category 5 ("keep, it's a
+  work-scoping choice")** — another judgment call overriding the original audit. Unlike a typical
+  display-row cap, `TopCount` bounds how many top-by-size types get an expensive bidirectional
+  graph search run at all; removing it would mean running that search for potentially thousands of
+  distinct heap types, not just re-displaying an already-cheap, already-complete computation.
+  `FallbackTopCount` deleted — it was purely the companion to `TopCount`'s old "0 means use
+  fallback" sentinel pattern, dead once `TopCount` became a plain non-zero default.
+- `KnownLeakTypePatterns` kept as audited (Category 5).
+- Section builder (`ReferenceChainSectionBuilder.cs`): removed `MaxTraces`/`MaxChains`/the
+  retained-types-8 local caps — analyzer output is already bounded by the small `TopCount` default,
+  so these were a redundant second truncation layer (§11.2 D5). The analyzer's own
+  `sampleReferenceChains.Count < 5` cap (a handful of illustrative example chains for narrative
+  text, not the core per-type data) was left alone — same category as AsyncStateMachine's top-3-
+  states truncation (§9.13), a display-shape decision rather than a completeness cap.
+- `CollectionAnalysisOptions`'s three presets (its embedded `ReferenceChainOptions`) updated to
+  drop the now-deleted `SearchMode`/`MaxPathDepth` fields — required to compile, not a behavior
+  change beyond what this section already did. `CollectionAnalyzer.PopulateRootDescriptions`
+  updated for the `Resolved*` → plain-field rename and the `SkipArrays` deletion. Collection's own
+  audit (§9.17) is a separate pass.
+- Test suite: 642 passed, 22 skipped, 0 failed. Several `ConfigurationResolverTests.cs` assertions
+  that exercised the old profile-scaling behavior (`SearchMode`, tier-varying `TopCount`/
+  `MaxRootExpansionDepth`) were updated to match the new single-tier defaults — this is expected
+  fallout of deleting profile variance, not a regression.
 
 ---
 

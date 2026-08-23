@@ -127,7 +127,7 @@ public sealed class ConfigurationResolverTests
             AnalysisCommandRequest request = CreateRequest(configPath: configPath) with { DumpPath = null, OutputFormat = ReportFormat.Html };
             ConfigurationResolver resolver = new();
             RetentionOptions balancedMemoryLeak = RetentionOptions.Preset(AnalysisProfile.Balanced);
-            ReferenceChainOptions balancedReferenceChain = ReferenceChainOptions.Preset(AnalysisProfile.Balanced);
+            ReferenceChainOptions balancedReferenceChain = new ReferenceChainOptions();
 
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
@@ -155,7 +155,7 @@ public sealed class ConfigurationResolverTests
             AnalysisCommandRequest request = CreateRequest(configPath: configPath) with { OutputFormat = ReportFormat.Html };
             ConfigurationResolver resolver = new();
             RetentionOptions balancedMemoryLeak = RetentionOptions.Preset(AnalysisProfile.Balanced);
-            ReferenceChainOptions balancedReferenceChain = ReferenceChainOptions.Preset(AnalysisProfile.Balanced);
+            ReferenceChainOptions balancedReferenceChain = new ReferenceChainOptions();
             EventLeakOptions balancedEventLeak = EventLeakOptions.Preset(AnalysisProfile.Balanced);
 
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
@@ -258,8 +258,7 @@ public sealed class ConfigurationResolverTests
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
             resolved.Crash.MaxOriginalStackFramesToPrint.Should().Be(40);
-            resolved.Collection.Profile.Should().Be(DumpDetective.Core.Options.AnalysisProfile.Full);
-            resolved.Collection.PathAnalysisTopN.Should().Be(15);
+            resolved.Collection.PathAnalysisTopN.Should().Be(5);
         }
         finally
         {
@@ -286,7 +285,6 @@ public sealed class ConfigurationResolverTests
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
             resolved.Crash.TopDetailedExceptionInstances.Should().Be(25);
-            resolved.Collection.Profile.Should().Be(DumpDetective.Core.Options.AnalysisProfile.Balanced);
             resolved.Collection.PathAnalysisTopN.Should().Be(5);
         }
         finally
@@ -317,8 +315,7 @@ public sealed class ConfigurationResolverTests
             resolved.MemoryLeak.TopHighlyReferencedObjectsToShow.Should().Be(40);
             resolved.MemoryLeak.MaxLeakScanObjects.Should().Be(5_000_000);
 
-            resolved.ReferenceChain.SearchMode.Should().Be(ReferenceChainSearchMode.Deep);
-            resolved.ReferenceChain.MaxRootExpansionDepth.Should().Be(25);
+            resolved.ReferenceChain.MaxRootExpansionDepth.Should().Be(12);
 
             resolved.EventLeak.IncludeNonLeakingEvents.Should().BeTrue();
             resolved.EventLeak.TopDetailedInstancesPerGroup.Should().Be(20);
@@ -354,8 +351,7 @@ public sealed class ConfigurationResolverTests
             resolved.MemoryLeak.HighReferenceThreshold.Should().Be(30);
             resolved.MemoryLeak.TopHighlyReferencedObjectsToShow.Should().Be(40);
 
-            resolved.ReferenceChain.TopCount.Should().Be(20);
-            resolved.ReferenceChain.SearchMode.Should().Be(ReferenceChainSearchMode.Deep);
+            resolved.ReferenceChain.TopCount.Should().Be(10);
 
             resolved.EventLeak.MinSubscribers.Should().Be(0);
             resolved.EventLeak.IncludeNonLeakingEvents.Should().BeTrue();
@@ -424,7 +420,6 @@ public sealed class ConfigurationResolverTests
 
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
-            resolved.ReferenceChain.SearchMode.Should().Be(DumpDetective.Core.Options.ReferenceChainSearchMode.Fast);
             resolved.ReferenceChain.TopCount.Should().Be(9);
         }
         finally
@@ -489,8 +484,6 @@ public sealed class ConfigurationResolverTests
             MaxDuplicateStringLength: 222,
             MinDuplicateStringCount: 9,
             MaxReferenceAddresses: 333,
-            ReferenceChainTopCount: 6,
-            ReferenceChainMaxPathSearchObjects: 444,
             EventLeakMinSubscribers: 3,
             EnableMemoryDiagnostics: false,
             EnablePerformanceDiagnostics: true);

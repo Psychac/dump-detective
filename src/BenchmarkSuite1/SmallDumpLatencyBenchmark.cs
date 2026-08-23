@@ -63,7 +63,7 @@ public class SmallDumpLatencyBenchmark
             ReferenceChain = new ReferenceChainOptions(),
             EventLeak = new EventLeakOptions(),
             Diagnostics = diagnostics,
-            Collection = CollectionAnalysisOptions.Default,
+            Collection = new CollectionAnalysisOptions(),
         };
 
         var context = new RuntimeAnalysisContext

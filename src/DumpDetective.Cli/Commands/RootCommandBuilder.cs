@@ -36,8 +36,6 @@ internal sealed class RootCommandBuilder
     private readonly Option<int?> _maxDuplicateStringLengthOption = new("--max-duplicate-string-length");
     private readonly Option<int?> _minDuplicateStringCountOption = new("--min-duplicate-string-count");
     private readonly Option<int?> _maxReferenceAddressesOption = new("--max-reference-addresses");
-    private readonly Option<int?> _referenceChainTopCountOption = new("--reference-chain-top-count");
-    private readonly Option<int?> _referenceChainMaxPathSearchObjectsOption = new("--reference-chain-max-path-search-objects");
     private readonly Option<int?> _eventLeakMinSubscribersOption = new("--event-leak-min-subscribers");
 
     // TODO: Need to investigate why there is separate memory and performance diagnostics options
@@ -86,8 +84,6 @@ internal sealed class RootCommandBuilder
             _maxDuplicateStringLengthOption,
             _minDuplicateStringCountOption,
             _maxReferenceAddressesOption,
-            _referenceChainTopCountOption,
-            _referenceChainMaxPathSearchObjectsOption,
             _eventLeakMinSubscribersOption,
             _memoryDiagnosticsOption,
             _performanceDiagnosticsOption,
@@ -121,8 +117,6 @@ internal sealed class RootCommandBuilder
             parseResult.GetValue(_maxDuplicateStringLengthOption),
             parseResult.GetValue(_minDuplicateStringCountOption),
             parseResult.GetValue(_maxReferenceAddressesOption),
-            parseResult.GetValue(_referenceChainTopCountOption),
-            parseResult.GetValue(_referenceChainMaxPathSearchObjectsOption),
             parseResult.GetValue(_eventLeakMinSubscribersOption),
             parseResult.GetValue(_memoryDiagnosticsOption),
             parseResult.GetValue(_performanceDiagnosticsOption),

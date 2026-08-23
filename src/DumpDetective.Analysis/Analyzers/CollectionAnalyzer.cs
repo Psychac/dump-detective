@@ -85,19 +85,19 @@ namespace DumpDetective.Analysis.Analyzers
         public string Category => "Memory";
 
         public CollectionAnalyzer()
-            : this(CollectionAnalysisOptions.Default, logger: null)
+            : this(new CollectionAnalysisOptions(), logger: null)
         {
         }
 
         /// <summary>Constructor for DI/factory use — options are read from the analysis context at run time.</summary>
         public CollectionAnalyzer(ILogger<CollectionAnalyzer>? logger)
-            : this(CollectionAnalysisOptions.Default, logger)
+            : this(new CollectionAnalysisOptions(), logger)
         {
         }
 
         public CollectionAnalyzer(CollectionAnalysisOptions options, ILogger<CollectionAnalyzer>? logger = null)
         {
-            _options = options ?? CollectionAnalysisOptions.Default;
+            _options = options ?? new CollectionAnalysisOptions();
             _logger = logger;
         }
 
@@ -298,10 +298,6 @@ namespace DumpDetective.Analysis.Analyzers
 
             // SortedSet<T> is a red-black tree, not array-backed; exclude from waste analysis to avoid misleading fill rates
             if (kind == CollectionKind.SortedSet)
-                return;
-
-            // Honor the IncludeQueueAnalysis option
-            if (kind == CollectionKind.Queue && !_options.IncludeQueueAnalysis)
                 return;
 
             if (kind == CollectionKind.Dictionary)
@@ -586,10 +582,6 @@ namespace DumpDetective.Analysis.Analyzers
 
                 // SortedSet<T> is a red-black tree, not array-backed; exclude from waste analysis to avoid misleading fill rates
                 if (kind == CollectionKind.SortedSet)
-                    return;
-
-                // Honor the IncludeQueueAnalysis option
-                if (kind == CollectionKind.Queue && !_options.IncludeQueueAnalysis)
                     return;
 
                 // determine generation and increment per-kind generation counter. Prefer the
@@ -1160,7 +1152,7 @@ namespace DumpDetective.Analysis.Analyzers
         // Balanced/Deep only: uses RootPathFinder BFS for items still missing a description.
         private void PopulateRootDescriptions(ClrHeap heap, IHeapAnalysisCache? cache, List<WastefulCollection> wastefulList, CollectionAnalysisOptions options, ReferenceChainOptions? refChainOptions)
         {
-            if (wastefulList.Count == 0 || options.Profile == AnalysisProfile.Fast || cache is null || refChainOptions is null)
+            if (wastefulList.Count == 0 || options.PathAnalysisTopN <= 0 || cache is null || refChainOptions is null)
                 return;
 
             int topN = Math.Min(options.PathAnalysisTopN, wastefulList.Count);
@@ -1178,9 +1170,9 @@ namespace DumpDetective.Analysis.Analyzers
 
                 var limits = new RootPathSearchLimits
                 {
-                    MaxCandidateNodes = refChainOptions.ResolvedMaxCandidateNodes,
-                    MaxCandidateDepth = refChainOptions.ResolvedMaxCandidateDepth,
-                    MaxRootExpansionDepth = refChainOptions.ResolvedMaxRootExpansionDepth,
+                    MaxCandidateNodes = refChainOptions.MaxCandidateNodes,
+                    MaxCandidateDepth = refChainOptions.MaxCandidateDepth,
+                    MaxRootExpansionDepth = refChainOptions.MaxRootExpansionDepth,
                     LargeFanoutThreshold = refChainOptions.LargeFanoutThreshold,
                 };
 
@@ -1197,7 +1189,7 @@ namespace DumpDetective.Analysis.Analyzers
                         provider,
                         limits,
                         telemetry.AsProxy(),
-                        type => ReferenceChainAnalyzer.IsNoisyType(type, refChainOptions.SkipArrays),
+                        ReferenceChainAnalyzer.IsNoisyType,
                         type => ReferenceChainAnalyzer.IsKnownLeakType(type, refChainOptions.KnownLeakTypePatterns),
                         reverseIndexProvider,
                         cache);

@@ -77,9 +77,6 @@ internal sealed class ExecutionPolicyModel
 {
     public int? MaxLeakScanObjects { get; init; }
     public int? MaxReferenceAddresses { get; init; }
-    public int? ReferenceChainMaxPathDepth { get; init; }
-    public int? ReferenceChainFastModeMaxDepth { get; init; }
-    public int? ReferenceChainMaxPathSearchObjects { get; init; }
 }
 
 [JsonSourceGenerationOptions(

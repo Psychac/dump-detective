@@ -35,7 +35,6 @@ internal sealed class AnalyzerExecutionService(FindingGenerationPipeline finding
                 Diagnostics = resolved.Diagnostics,
                 ExecutionPolicy = resolved.ExecutionPolicy,
                 Crash = resolved.Crash,
-                AsyncTaskAnalysis = resolved.AsyncTaskAnalysis,
                 AsyncStateMachineAnalysis = resolved.AsyncStateMachineAnalysis,
                 ArrayAnalysis = resolved.ArrayAnalysis,
                 BoxingAnalysis = resolved.BoxingAnalysis,

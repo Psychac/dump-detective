@@ -18,7 +18,6 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
     // OnHeapEntry; consumed by LoadTaskEntries once the shared index scan has completed.
     private HashSet<ulong>? _taskMts;
     private List<(ulong Address, ulong Mt, int StateFlags)>? _participantEntries;
-    private int _participantMaxTasksToScan;
     // Set by OnHeapIndexScanCompleted — the single source of truth for whether
     // _participantEntries is trustworthy. Avoids re-deriving "did the shared scan run"
     // from a second cache.TryGetHeapIndex call in LoadTaskEntries.
@@ -31,7 +30,6 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
     // BeforeHeapIndexScan — bounded by distinct type count, not object count.
     private HashSet<ulong>? _tcsMts;
     private List<(ulong Address, ulong Mt)>? _participantTcsEntries;
-    private int _participantMaxTcsToScan;
 
     // IValueTaskSource candidate collection — same rides-the-shared-scan approach as _tcsMts
     // above. Unlike TCS (a name-prefix check), detection here requires per-type interface
@@ -40,7 +38,6 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
     // during BeforeHeapIndexScan (once per distinct type) for direct reuse in Phase 2.
     private HashSet<ulong>? _vtsMts;
     private List<(ulong Address, ulong Mt)>? _participantVtsEntries;
-    private int _participantMaxVtsToScan;
     private Dictionary<ulong, ClrInstanceField>? _vtsCoreFieldByMt;
 
     // Field cache by MethodTable to avoid repeated ClrMD lookups per type
@@ -50,9 +47,9 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
     // Pool of reusable buffers for enumerating List<object> multi-continuation elements,
     // indexed by recursion depth level. A single shared buffer isn't safe here because a
     // nested List<object> (fan-out below fan-out) would recurse into TryReadListElements
-    // again and clear the buffer the outer frame is still iterating. Pool size is bounded
-    // by MaxContinuationDepth and reused across the whole task scan — no steady-state
-    // per-node allocation once warmed up.
+    // again and clear the buffer the outer frame is still iterating. Grows on demand (bounded
+    // by MaxContinuationNodesToVisitPerTask, the true traversal budget) and is reused across
+    // the whole task scan — no steady-state per-node allocation once warmed up.
     private List<List<ClrObject>>? _continuationListBufferPool;
 
     // Per-task record of which immediate child was chosen as the deepest branch at each
@@ -99,16 +96,12 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        AsyncTaskAnalysisOptions options = context.AnalysisOptions.AsyncTaskAnalysis;
-        return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, options, cancellationToken).Stamp(this));
+        return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, cancellationToken).Stamp(this));
     }
 
     // Resets per-entry accumulator fields ahead of the shared heap-index scan pass.
     public void BeforeHeapIndexScan(AnalysisContext context)
     {
-        _participantMaxTasksToScan = context.AnalysisOptions.AsyncTaskAnalysis.MaxTasksToScan;
-        _participantMaxTcsToScan = context.AnalysisOptions.AsyncTaskAnalysis.MaxTcsToScan;
-        _participantMaxVtsToScan = context.AnalysisOptions.AsyncTaskAnalysis.MaxVtsToScan;
         _participantEntries = new List<(ulong, ulong, int)>(capacity: 1024);
         _participantTcsEntries = new List<(ulong, ulong)>(capacity: 64);
         _participantVtsEntries = new List<(ulong, ulong)>(capacity: 64);
@@ -160,24 +153,21 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
 
     public void OnHeapEntry(in HeapEntry entry)
     {
-        if (_taskMts is not null && _participantEntries!.Count < _participantMaxTasksToScan
-            && _taskMts.Contains(entry.MethodTable))
+        if (_taskMts is not null && _taskMts.Contains(entry.MethodTable))
         {
-            _participantEntries.Add((entry.Address, entry.MethodTable, 0)); // StateFlags resolved in Phase 2
+            _participantEntries!.Add((entry.Address, entry.MethodTable, 0)); // StateFlags resolved in Phase 2
             return;
         }
 
-        if (_tcsMts is not null && _participantTcsEntries!.Count < _participantMaxTcsToScan
-            && _tcsMts.Contains(entry.MethodTable))
+        if (_tcsMts is not null && _tcsMts.Contains(entry.MethodTable))
         {
-            _participantTcsEntries.Add((entry.Address, entry.MethodTable));
+            _participantTcsEntries!.Add((entry.Address, entry.MethodTable));
             return;
         }
 
-        if (_vtsMts is not null && _participantVtsEntries!.Count < _participantMaxVtsToScan
-            && _vtsMts.Contains(entry.MethodTable))
+        if (_vtsMts is not null && _vtsMts.Contains(entry.MethodTable))
         {
-            _participantVtsEntries.Add((entry.Address, entry.MethodTable));
+            _participantVtsEntries!.Add((entry.Address, entry.MethodTable));
         }
     }
 
@@ -185,11 +175,10 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
 
     public IHeapIndexScanParticipant CreateWorkerInstance() => new AsyncTaskAnalyzer();
 
-    // Each worker (including this instance, which owns range 0) scans its own range uncapped
-    // relative to the others — OnHeapEntry's _participantMaxTasksToScan guard already caps
-    // every worker at the full limit, not a divided share, so no worker starves itself if
-    // matches cluster in one address range. Re-sort the union by address and trim to the
-    // true global cap here, once, after every worker has finished.
+    // Each worker (including this instance, which owns range 0) scans its own address range —
+    // matches from every worker are unioned here, then re-sorted by address once, after every
+    // worker has finished, so downstream consumption sees index order regardless of which
+    // worker found which entry.
     public void MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
     {
         foreach (IHeapIndexScanParticipant p in partials)
@@ -203,43 +192,31 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                 _participantVtsEntries!.AddRange(other._participantVtsEntries);
         }
 
-        _participantEntries = _participantEntries!
-            .OrderBy(e => e.Address)
-            .Take(_participantMaxTasksToScan)
-            .ToList();
-
-        _participantTcsEntries = _participantTcsEntries!
-            .OrderBy(e => e.Address)
-            .Take(_participantMaxTcsToScan)
-            .ToList();
-
-        _participantVtsEntries = _participantVtsEntries!
-            .OrderBy(e => e.Address)
-            .Take(_participantMaxVtsToScan)
-            .ToList();
+        _participantEntries = _participantEntries!.OrderBy(e => e.Address).ToList();
+        _participantTcsEntries = _participantTcsEntries!.OrderBy(e => e.Address).ToList();
+        _participantVtsEntries = _participantVtsEntries!.OrderBy(e => e.Address).ToList();
     }
 
     private AnalyzerDomainResult Analyze(
         ClrHeap heap,
         IHeapAnalysisCache? cache,
         IProgress<AnalyzerProgressReport>? progress,
-        AsyncTaskAnalysisOptions options,
         CancellationToken ct)
     {
         // ── Step 1: Resolve task entries (TaskIndex.bin fast path or heap fallback) ──────
         progress?.Report(new(0, "loading task index"));
 
-        var taskEntries = LoadTaskEntries(heap, cache, progress, options, ct);
+        var taskEntries = LoadTaskEntries(heap, cache, progress, ct);
         int total = taskEntries.Count;
 
         // TaskCompletionSource and IValueTaskSource entries are independent of task-scan results
         // (a heap could in principle have TCS/VTS instances even when the task scan finds none),
         // so both run regardless of the early-return below.
-        var tcsEntries = LoadTcsEntries(heap, cache, progress, options, ct);
-        var tcsResult = AnalyzeTaskCompletionSources(heap, tcsEntries, options, ct);
+        var tcsEntries = LoadTcsEntries(heap, cache, progress, ct);
+        var tcsResult = AnalyzeTaskCompletionSources(heap, tcsEntries, ct);
 
-        var vtsEntries = LoadVtsEntries(heap, cache, progress, options, ct);
-        var vtsResult = AnalyzeValueTaskSources(heap, vtsEntries, options, ct);
+        var vtsEntries = LoadVtsEntries(heap, cache, progress, ct);
+        var vtsResult = AnalyzeValueTaskSources(heap, vtsEntries, ct);
 
         if (total == 0)
         {
@@ -254,7 +231,6 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                 TotalTaskContinuations: 0,
                 MaxContinuationDepth: 0,
                 AvgContinuationDepth: 0.0,
-                TaskScanLimited: false,
                 TopPendingTaskTypes: [],
                 TopFaultedTaskTypes: [],
                 TopContinuationTypes: [],
@@ -274,16 +250,12 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                 TotalTaskCompletionSources: tcsResult.TotalTcs,
                 UnresolvedTaskCompletionSources: tcsResult.UnresolvedTcs,
                 UnresolvedTcsGen2Count: tcsResult.UnresolvedTcsGen2Count,
-                TcsScanLimited: tcsResult.TcsScanLimited,
                 TopUnresolvedTaskCompletionSources: tcsResult.TopUnresolved,
                 TotalValueTaskSources: vtsResult.TotalVts,
                 PendingValueTaskSources: vtsResult.PendingVts,
                 PendingVtsGen2Count: vtsResult.PendingVtsGen2Count,
-                VtsScanLimited: vtsResult.VtsScanLimited,
                 TopPendingValueTaskSources: vtsResult.TopPending);
         }
-
-        bool taskScanLimited = total >= options.MaxTasksToScan;
 
         // ── Step 2: Classify task states ─────────────────────────────────────────────────
         progress?.Report(new(0, "classifying task states", $"0 / {total:N0} tasks"));
@@ -419,13 +391,10 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                     if (isOrphan && !isCompleted && !isCanceled)
                     {
                         orphaned++;
-                        if (orphanedSnapshots.Count < options.TopOrphanedToShow)
-                        {
-                            string? resultType = ExtractResultType(typeName);
-                            ulong size = taskObj.Size;
-                            (string? exceptionType, string? exceptionMessage) = ExtractFaultedTaskException(taskObj);
-                            orphanedSnapshots.Add(new OrphanedTaskSnapshot(address, typeName, resultType, size, exceptionType, exceptionMessage));
-                        }
+                        string? resultType = ExtractResultType(typeName);
+                        ulong size = taskObj.Size;
+                        (string? exceptionType, string? exceptionMessage) = ExtractFaultedTaskException(taskObj);
+                        orphanedSnapshots.Add(new OrphanedTaskSnapshot(address, typeName, resultType, size, exceptionType, exceptionMessage));
                     }
 
                     // BFS chain depth — true branching traversal. When m_continuationObject
@@ -441,7 +410,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                         int nodeBudget = MaxContinuationNodesToVisitPerTask;
 
                         int depth = ExploreContinuation(
-                            continuationObj, visited, address, options.MaxContinuationDepth, ref nodeBudget, depthLevel: 0,
+                            continuationObj, visited, address, ref nodeBudget, depthLevel: 0,
                             continuationCount, fanoutTypeCount, ref totalContinuations, ref multiContinuationNodes, ref maxFanOut,
                             ref cycleDetected, _bestHopSelections);
 
@@ -492,7 +461,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
 
         double avgDepth = depthSampleCount > 0 ? (double)totalDepthSum / depthSampleCount : 0.0;
 
-        var faultedProfiles = BuildFaultedTaskTypeProfiles(faultedTypeCount, faultedTypeExceptions, options.TopTypesToShow);
+        var faultedProfiles = BuildFaultedTaskTypeProfiles(faultedTypeCount, faultedTypeExceptions);
 
         return new AsyncTaskDomainResult(
             TotalTasks: total,
@@ -505,32 +474,29 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             TotalTaskContinuations: totalContinuations,
             MaxContinuationDepth: maxDepth,
             AvgContinuationDepth: avgDepth,
-            TaskScanLimited: taskScanLimited,
-            TopPendingTaskTypes: BuildTopN(pendingTypeCount, options.TopTypesToShow),
-            TopFaultedTaskTypes: BuildTopN(faultedTypeCount, options.TopTypesToShow),
-            TopContinuationTypes: BuildTopN(continuationCount, options.TopTypesToShow),
+            TopPendingTaskTypes: BuildSorted(pendingTypeCount),
+            TopFaultedTaskTypes: BuildSorted(faultedTypeCount),
+            TopContinuationTypes: BuildSorted(continuationCount),
             TopOrphanedTasks: orphanedSnapshots,
             TopDeepestChains: deepestChains.OrderByDescending(chain => chain.Depth).ToArray(),
             FaultedTaskExceptionHistograms: faultedProfiles,
             MultiContinuationNodeCount: multiContinuationNodes,
             MaxContinuationFanOut: maxFanOut,
-            TopContinuationFanoutTypes: BuildTopN(fanoutTypeCount, options.TopTypesToShow),
+            TopContinuationFanoutTypes: BuildSorted(fanoutTypeCount),
             DepthSampleCount: depthSampleCount,
             CycleDetected: cycleDetected,
             PendingGen0: pendingGen0,
             PendingGen1: pendingGen1,
             PendingGen2: pendingGen2,
             PendingLOH: pendingLOH,
-            TopPendingTaskTypesByBytes: BuildTopNByBytes(pendingTypeBytes, options.TopTypesToShow),
+            TopPendingTaskTypesByBytes: BuildSortedByBytes(pendingTypeBytes),
             TotalTaskCompletionSources: tcsResult.TotalTcs,
             UnresolvedTaskCompletionSources: tcsResult.UnresolvedTcs,
             UnresolvedTcsGen2Count: tcsResult.UnresolvedTcsGen2Count,
-            TcsScanLimited: tcsResult.TcsScanLimited,
             TopUnresolvedTaskCompletionSources: tcsResult.TopUnresolved,
             TotalValueTaskSources: vtsResult.TotalVts,
             PendingValueTaskSources: vtsResult.PendingVts,
             PendingVtsGen2Count: vtsResult.PendingVtsGen2Count,
-            VtsScanLimited: vtsResult.VtsScanLimited,
             TopPendingValueTaskSources: vtsResult.TopPending);
     }
 
@@ -538,14 +504,13 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
 
     /// <summary>
     /// Loads task entries from <c>TaskIndex.bin</c> if available, otherwise falls back to
-    /// a filtered heap scan using <see cref="TypeAggregateFlags.IsTaskType"/>.
-    /// Returns at most <see cref="MaxTasksToScan"/> entries (scan-limit respected).
+    /// a filtered heap scan using <see cref="TypeAggregateFlags.IsTaskType"/>. Returns the
+    /// complete population — no scan cap.
     /// </summary>
     private List<(ulong Address, ulong Mt, int StateFlags)> LoadTaskEntries(
         ClrHeap heap,
         IHeapAnalysisCache? cache,
         IProgress<AnalyzerProgressReport>? progress,
-        AsyncTaskAnalysisOptions options,
         CancellationToken ct)
     {
         // Fast path: TaskIndex.bin exists
@@ -554,9 +519,9 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             // Memory-backed mode: InMemoryTaskCandidates was collected during Phase 1 at zero
             // extra scanning cost — use it directly to avoid an O(N_total) scan of InMemoryEntries.
             if (heapIndex.InMemoryTaskCandidates is { Length: > 0 } inMemCandidates)
-                return ConvertInMemoryTaskCandidates(inMemCandidates, options.MaxTasksToScan);
+                return ConvertInMemoryTaskCandidates(inMemCandidates);
 
-            var entries = TaskIndexReader.ReadTaskIndexFile(heapIndex.IndexPath, options.MaxTasksToScan, ct);
+            var entries = TaskIndexReader.ReadTaskIndexFile(heapIndex.IndexPath, ct);
             if (entries != null)
             {
                 if (entries.Count > 0)
@@ -570,18 +535,17 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             // participant-accumulated state instead of re-scanning the index. If the shared
             // scan failed partway (isolated by the dispatcher), _participantEntries may be
             // incomplete, so fall back to a raw heap scan instead of trusting it.
-            return _participantScanSucceeded ? (_participantEntries ?? []) : ScanRawHeapForTasks(heap, progress, options.MaxTasksToScan, ct);
+            return _participantScanSucceeded ? (_participantEntries ?? []) : ScanRawHeapForTasks(heap, progress, ct);
         }
 
         // No cache — full heap scan
-        return ScanRawHeapForTasks(heap, progress, options.MaxTasksToScan, ct);
+        return ScanRawHeapForTasks(heap, progress, ct);
     }
 
-    private static List<(ulong, ulong, int)> ConvertInMemoryTaskCandidates((ulong Addr, ulong Mt)[] candidates, int maxTasksToScan)
+    private static List<(ulong, ulong, int)> ConvertInMemoryTaskCandidates((ulong Addr, ulong Mt)[] candidates)
     {
-        int cap = Math.Min(candidates.Length, maxTasksToScan);
-        var result = new List<(ulong, ulong, int)>(cap);
-        for (int i = 0; i < cap; i++)
+        var result = new List<(ulong, ulong, int)>(candidates.Length);
+        for (int i = 0; i < candidates.Length; i++)
             result.Add((candidates[i].Addr, candidates[i].Mt, 0)); // StateFlags resolved in Phase 2
         return result;
     }
@@ -589,7 +553,6 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
     private static List<(ulong, ulong, int)> ScanRawHeapForTasks(
         ClrHeap heap,
         IProgress<AnalyzerProgressReport>? progress,
-        int maxTasksToScan,
         CancellationToken ct)
     {
         var result = new List<(ulong, ulong, int)>(capacity: 512);
@@ -619,8 +582,6 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             int stateFlags = stateField != null ? stateField.Read<int>(obj, interior: false) : 0;
 
             result.Add((obj.Address, mt, stateFlags));
-            if (result.Count >= maxTasksToScan)
-                break;
         }
 
         scanCounter.Complete();
@@ -640,23 +601,21 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         ClrHeap heap,
         IHeapAnalysisCache? cache,
         IProgress<AnalyzerProgressReport>? progress,
-        AsyncTaskAnalysisOptions options,
         CancellationToken ct)
     {
         if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out _))
         {
             return _participantScanSucceeded
                 ? (_participantTcsEntries ?? [])
-                : ScanRawHeapForTcs(heap, progress, options.MaxTcsToScan, ct);
+                : ScanRawHeapForTcs(heap, progress, ct);
         }
 
-        return ScanRawHeapForTcs(heap, progress, options.MaxTcsToScan, ct);
+        return ScanRawHeapForTcs(heap, progress, ct);
     }
 
     private static List<(ulong, ulong)> ScanRawHeapForTcs(
         ClrHeap heap,
         IProgress<AnalyzerProgressReport>? progress,
-        int maxTcsToScan,
         CancellationToken ct)
     {
         var result = new List<(ulong, ulong)>(capacity: 64);
@@ -675,8 +634,6 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                 continue;
 
             result.Add((obj.Address, obj.Type.MethodTable));
-            if (result.Count >= maxTcsToScan)
-                break;
         }
 
         scanCounter.Complete();
@@ -694,23 +651,21 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         ClrHeap heap,
         IHeapAnalysisCache? cache,
         IProgress<AnalyzerProgressReport>? progress,
-        AsyncTaskAnalysisOptions options,
         CancellationToken ct)
     {
         if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out _))
         {
             return _participantScanSucceeded
                 ? (_participantVtsEntries ?? [])
-                : ScanRawHeapForVts(heap, progress, options.MaxVtsToScan, ct);
+                : ScanRawHeapForVts(heap, progress, ct);
         }
 
-        return ScanRawHeapForVts(heap, progress, options.MaxVtsToScan, ct);
+        return ScanRawHeapForVts(heap, progress, ct);
     }
 
     private static List<(ulong, ulong)> ScanRawHeapForVts(
         ClrHeap heap,
         IProgress<AnalyzerProgressReport>? progress,
-        int maxVtsToScan,
         CancellationToken ct)
     {
         var result = new List<(ulong, ulong)>(capacity: 64);
@@ -738,8 +693,6 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             }
 
             result.Add((obj.Address, mt));
-            if (result.Count >= maxVtsToScan)
-                break;
         }
 
         scanCounter.Complete();
@@ -750,7 +703,6 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         int TotalVts,
         int PendingVts,
         int PendingVtsGen2Count,
-        bool VtsScanLimited,
         IReadOnlyList<PendingValueTaskSourceSnapshot> TopPending);
 
     /// <summary>
@@ -764,13 +716,11 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
     private VtsAnalysisResult AnalyzeValueTaskSources(
         ClrHeap heap,
         List<(ulong Address, ulong Mt)> vtsEntries,
-        AsyncTaskAnalysisOptions options,
         CancellationToken ct)
     {
         if (vtsEntries.Count == 0)
-            return new VtsAnalysisResult(0, 0, 0, false, []);
+            return new VtsAnalysisResult(0, 0, 0, []);
 
-        bool vtsScanLimited = vtsEntries.Count >= options.MaxVtsToScan;
         int pendingVts = 0;
         int pendingVtsGen2 = 0;
         var pendingSnapshots = new List<PendingValueTaskSourceSnapshot>(capacity: 32);
@@ -823,25 +773,21 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
 
         // Same bounded-population rationale as AnalyzeTaskCompletionSources: a full sort of the
         // pending subset is cheap here. Strongest leak signal first: old-generation residency,
-        // then size within that tier.
+        // then size within that tier. Complete population, no Top-N cap — the render layer
+        // slices for display.
         pendingSnapshots.Sort((a, b) =>
         {
             int genCompare = b.Generation.CompareTo(a.Generation);
             return genCompare != 0 ? genCompare : b.Size.CompareTo(a.Size);
         });
 
-        IReadOnlyList<PendingValueTaskSourceSnapshot> topPending = pendingSnapshots.Count > options.TopPendingVtsToShow
-            ? pendingSnapshots.GetRange(0, options.TopPendingVtsToShow)
-            : pendingSnapshots;
-
-        return new VtsAnalysisResult(vtsEntries.Count, pendingVts, pendingVtsGen2, vtsScanLimited, topPending);
+        return new VtsAnalysisResult(vtsEntries.Count, pendingVts, pendingVtsGen2, pendingSnapshots);
     }
 
     private readonly record struct TcsAnalysisResult(
         int TotalTcs,
         int UnresolvedTcs,
         int UnresolvedTcsGen2Count,
-        bool TcsScanLimited,
         IReadOnlyList<UnresolvedTcsSnapshot> TopUnresolved);
 
     /// <summary>
@@ -854,13 +800,11 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
     private TcsAnalysisResult AnalyzeTaskCompletionSources(
         ClrHeap heap,
         List<(ulong Address, ulong Mt)> tcsEntries,
-        AsyncTaskAnalysisOptions options,
         CancellationToken ct)
     {
         if (tcsEntries.Count == 0)
-            return new TcsAnalysisResult(0, 0, 0, false, []);
+            return new TcsAnalysisResult(0, 0, 0, []);
 
-        bool tcsScanLimited = tcsEntries.Count >= options.MaxTcsToScan;
         int unresolvedTcs = 0;
         int unresolvedTcsGen2 = 0;
         var unresolvedSnapshots = new List<UnresolvedTcsSnapshot>(capacity: 32);
@@ -904,21 +848,18 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                 Generation: generation));
         }
 
-        // Bounded population (TCS instance counts are a bounded resource, capped further by
-        // MaxTcsToScan) — a full sort of the unresolved subset is cheap, no need for the
-        // maintained-threshold partial-sort pattern used elsewhere for large populations.
-        // Strongest leak signal first: old-generation residency, then size within that tier.
+        // Bounded population (TCS instance counts are a bounded resource) — a full sort of the
+        // unresolved subset is cheap, no need for the maintained-threshold partial-sort pattern
+        // used elsewhere for large populations. Strongest leak signal first: old-generation
+        // residency, then size within that tier. Complete population, no Top-N cap — the render
+        // layer slices for display.
         unresolvedSnapshots.Sort((a, b) =>
         {
             int genCompare = b.Generation.CompareTo(a.Generation);
             return genCompare != 0 ? genCompare : b.Size.CompareTo(a.Size);
         });
 
-        IReadOnlyList<UnresolvedTcsSnapshot> topUnresolved = unresolvedSnapshots.Count > options.TopUnresolvedTcsToShow
-            ? unresolvedSnapshots.GetRange(0, options.TopUnresolvedTcsToShow)
-            : unresolvedSnapshots;
-
-        return new TcsAnalysisResult(tcsEntries.Count, unresolvedTcs, unresolvedTcsGen2, tcsScanLimited, topUnresolved);
+        return new TcsAnalysisResult(tcsEntries.Count, unresolvedTcs, unresolvedTcsGen2, unresolvedSnapshots);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -1035,7 +976,6 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         ClrObject node,
         HashSet<ulong> visited,
         ulong rootTaskAddress,
-        int remainingDepth,
         ref int nodeBudget,
         int depthLevel,
         Dictionary<string, int> continuationCount,
@@ -1046,7 +986,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         ref bool rootCycleDetected,
         Dictionary<ulong, ClrObject> bestHopSelections)
     {
-        if (remainingDepth <= 0 || !node.IsValid || node.Address == 0 || nodeBudget <= 0)
+        if (!node.IsValid || node.Address == 0 || nodeBudget <= 0)
             return 0;
 
         if (!visited.Add(node.Address))
@@ -1076,7 +1016,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                     IncrementCount(fanoutTypeCount, elem.Type.Name ?? string.Empty);
 
                 int elemDepth = ExploreContinuation(
-                    elem, visited, rootTaskAddress, remainingDepth, ref nodeBudget, depthLevel + 1,
+                    elem, visited, rootTaskAddress, ref nodeBudget, depthLevel + 1,
                     continuationCount, fanoutTypeCount, ref totalContinuations, ref multiContinuationNodes, ref maxFanOut,
                     ref rootCycleDetected, bestHopSelections);
 
@@ -1110,7 +1050,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         bestHopSelections[node.Address] = next;
 
         int childDepth = ExploreContinuation(
-            next, visited, rootTaskAddress, remainingDepth - 1, ref nodeBudget, depthLevel + 1,
+            next, visited, rootTaskAddress, ref nodeBudget, depthLevel + 1,
             continuationCount, fanoutTypeCount, ref totalContinuations, ref multiContinuationNodes, ref maxFanOut,
             ref rootCycleDetected, bestHopSelections);
 
@@ -1239,16 +1179,15 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
 
     private static IReadOnlyList<FaultedTaskTypeProfile> BuildFaultedTaskTypeProfiles(
         Dictionary<string, int> faultedCounts,
-        Dictionary<string, Dictionary<string, int>> faultedExceptions,
-        int topTypesToShow)
+        Dictionary<string, Dictionary<string, int>> faultedExceptions)
     {
-        var topFaulted = BuildTopN(faultedCounts, topTypesToShow);
+        var topFaulted = BuildSorted(faultedCounts);
         var profiles = new List<FaultedTaskTypeProfile>(capacity: topFaulted.Count);
 
         foreach (var entry in topFaulted)
         {
             var exceptionHistogram = faultedExceptions.TryGetValue(entry.Name, out var exceptionCounts)
-                ? BuildTopN(exceptionCounts, topTypesToShow)
+                ? BuildSorted(exceptionCounts)
                 : (IReadOnlyList<NameCountEntry>)[];
 
             profiles.Add(new FaultedTaskTypeProfile(entry.Name, entry.Count, exceptionHistogram));
@@ -1257,103 +1196,28 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         return profiles;
     }
 
-    private static IReadOnlyList<NameCountEntry> BuildTopN(Dictionary<string, int> counts, int topTypesToShow)
+    // Complete population, descending by count — no Top-N cap. Per-type dictionaries are bounded
+    // by distinct type count (small relative to instance count), so a full sort is cheap; the
+    // render layer slices for display.
+    private static IReadOnlyList<NameCountEntry> BuildSorted(Dictionary<string, int> counts)
     {
         if (counts.Count == 0) return [];
 
-        var result = new List<NameCountEntry>(capacity: Math.Min(counts.Count, topTypesToShow));
-        int threshold = 0;
-
-        // Find top-N without LINQ — sort only if we must
-        if (counts.Count <= topTypesToShow)
-        {
-            foreach (var kvp in counts)
-                result.Add(new(kvp.Key, kvp.Value));
-            result.Sort((a, b) => b.Count.CompareTo(a.Count));
-            return result;
-        }
-
-        // Partial sort: track min in top-N bucket
+        var result = new List<NameCountEntry>(counts.Count);
         foreach (var kvp in counts)
-        {
-            if (result.Count < topTypesToShow)
-            {
-                result.Add(new(kvp.Key, kvp.Value));
-                if (kvp.Value < threshold || result.Count == 1)
-                    threshold = kvp.Value;
-
-                // After fill phase completes, sync threshold to the actual minimum
-                // in the filled result before proceeding to replacements.
-                if (result.Count == topTypesToShow)
-                {
-                    threshold = int.MaxValue;
-                    for (int i = 0; i < result.Count; i++)
-                        if (result[i].Count < threshold) threshold = result[i].Count;
-                }
-            }
-            else if (kvp.Value > threshold)
-            {
-                // Replace the entry with the lowest count
-                int minIdx = 0;
-                for (int i = 1; i < result.Count; i++)
-                    if (result[i].Count < result[minIdx].Count) minIdx = i;
-                result[minIdx] = new(kvp.Key, kvp.Value);
-                threshold = int.MaxValue;
-                for (int i = 0; i < result.Count; i++)
-                    if (result[i].Count < threshold) threshold = result[i].Count;
-            }
-        }
+            result.Add(new(kvp.Key, kvp.Value));
         result.Sort((a, b) => b.Count.CompareTo(a.Count));
         return result;
     }
 
-    private static IReadOnlyList<NameSizeCountEntry> BuildTopNByBytes(
-        Dictionary<string, (long TotalBytes, int Count)> byteCounts, int topTypesToShow)
+    private static IReadOnlyList<NameSizeCountEntry> BuildSortedByBytes(
+        Dictionary<string, (long TotalBytes, int Count)> byteCounts)
     {
         if (byteCounts.Count == 0) return [];
 
-        var result = new List<NameSizeCountEntry>(capacity: Math.Min(byteCounts.Count, topTypesToShow));
-        long threshold = 0;
-
-        // Find top-N without LINQ — sort only if we must
-        if (byteCounts.Count <= topTypesToShow)
-        {
-            foreach (var kvp in byteCounts)
-                result.Add(new(kvp.Key, kvp.Value.TotalBytes, kvp.Value.Count));
-            result.Sort((a, b) => b.TotalBytes.CompareTo(a.TotalBytes));
-            return result;
-        }
-
-        // Partial sort: track min in top-N bucket
+        var result = new List<NameSizeCountEntry>(byteCounts.Count);
         foreach (var kvp in byteCounts)
-        {
-            if (result.Count < topTypesToShow)
-            {
-                result.Add(new(kvp.Key, kvp.Value.TotalBytes, kvp.Value.Count));
-                if (kvp.Value.TotalBytes < threshold || result.Count == 1)
-                    threshold = kvp.Value.TotalBytes;
-
-                // After fill phase completes, sync threshold to the actual minimum
-                // in the filled result before proceeding to replacements.
-                if (result.Count == topTypesToShow)
-                {
-                    threshold = long.MaxValue;
-                    for (int i = 0; i < result.Count; i++)
-                        if (result[i].TotalBytes < threshold) threshold = result[i].TotalBytes;
-                }
-            }
-            else if (kvp.Value.TotalBytes > threshold)
-            {
-                // Replace the entry with the lowest total bytes
-                int minIdx = 0;
-                for (int i = 1; i < result.Count; i++)
-                    if (result[i].TotalBytes < result[minIdx].TotalBytes) minIdx = i;
-                result[minIdx] = new(kvp.Key, kvp.Value.TotalBytes, kvp.Value.Count);
-                threshold = long.MaxValue;
-                for (int i = 0; i < result.Count; i++)
-                    if (result[i].TotalBytes < threshold) threshold = result[i].TotalBytes;
-            }
-        }
+            result.Add(new(kvp.Key, kvp.Value.TotalBytes, kvp.Value.Count));
         result.Sort((a, b) => b.TotalBytes.CompareTo(a.TotalBytes));
         return result;
     }

@@ -12,7 +12,6 @@ internal static class TaskIndexReader
 
     public static List<(ulong Address, ulong Mt, int StateFlags)>? ReadTaskIndexFile(
         string containerPath,
-        int maxTasksToScan,
         CancellationToken cancellationToken)
     {
         try
@@ -32,11 +31,10 @@ internal static class TaskIndexReader
                 return null;
 
             long recordCount = header.RecordCount;
-            int cap = (int)Math.Min(recordCount, maxTasksToScan);
-            var result = new List<(ulong, ulong, int)>(capacity: cap);
+            var result = new List<(ulong, ulong, int)>(capacity: (int)Math.Min(recordCount, int.MaxValue));
 
             Span<byte> rec = stackalloc byte[TaskRecordSize];
-            for (long i = 0; i < recordCount && result.Count < maxTasksToScan; i++)
+            for (long i = 0; i < recordCount; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (stream.ReadAtLeast(rec, TaskRecordSize, throwOnEndOfStream: false) < TaskRecordSize)

@@ -22,7 +22,7 @@ public sealed class AsyncTaskAnalyzerHeapIndexScanTests
     public void OnHeapEntry_OnlyAccumulatesEntries_WhoseMethodTableIsFlaggedAsTaskType()
     {
         AsyncTaskAnalyzer analyzer = new();
-        AnalysisContext context = CreateContext(maxTasksToScan: 100);
+        AnalysisContext context = CreateContext();
 
         analyzer.BeforeHeapIndexScan(context);
         analyzer.OnHeapEntry(new HeapEntry(0x1000, TaskMt, 100));
@@ -35,30 +35,15 @@ public sealed class AsyncTaskAnalyzerHeapIndexScanTests
     }
 
     [Fact]
-    public void OnHeapEntry_RespectsMaxTasksToScan()
-    {
-        AsyncTaskAnalyzer analyzer = new();
-        AnalysisContext context = CreateContext(maxTasksToScan: 2);
-
-        analyzer.BeforeHeapIndexScan(context);
-        analyzer.OnHeapEntry(new HeapEntry(0x1000, TaskMt, 100));
-        analyzer.OnHeapEntry(new HeapEntry(0x1100, TaskMt, 100));
-        analyzer.OnHeapEntry(new HeapEntry(0x1200, TaskMt, 100));
-
-        var entries = GetParticipantEntries(analyzer);
-        entries.Should().HaveCount(2);
-    }
-
-    [Fact]
     public void OnHeapEntry_AccumulatesTcsEntries_WhenMethodTableIsInTcsMtSet()
     {
         // BeforeHeapIndexScan's TCS-name resolution needs a live ClrHeap (not mockable in this
         // test setup), so _tcsMts is injected directly via reflection after BeforeHeapIndexScan
-        // resets it — this isolates the OnHeapEntry/cap-enforcement mechanics under test from
-        // the ClrMD-dependent name resolution, which has no unit-testable seam of its own.
+        // resets it — this isolates OnHeapEntry's mechanics under test from the ClrMD-dependent
+        // name resolution, which has no unit-testable seam of its own.
         const ulong TcsMt = 0x4000;
         AsyncTaskAnalyzer analyzer = new();
-        AnalysisContext context = CreateContext(maxTasksToScan: 100);
+        AnalysisContext context = CreateContext();
 
         analyzer.BeforeHeapIndexScan(context);
         SetTcsMts(analyzer, [TcsMt]);
@@ -78,28 +63,11 @@ public sealed class AsyncTaskAnalyzerHeapIndexScanTests
     }
 
     [Fact]
-    public void OnHeapEntry_RespectsMaxTcsToScan()
-    {
-        const ulong TcsMt = 0x4000;
-        AsyncTaskAnalyzer analyzer = new();
-        AnalysisContext context = CreateContext(maxTasksToScan: 100, maxTcsToScan: 1);
-
-        analyzer.BeforeHeapIndexScan(context);
-        SetTcsMts(analyzer, [TcsMt]);
-
-        analyzer.OnHeapEntry(new HeapEntry(0x2000, TcsMt, 50));
-        analyzer.OnHeapEntry(new HeapEntry(0x2100, TcsMt, 50));
-
-        var tcsEntries = GetParticipantTcsEntries(analyzer);
-        tcsEntries.Should().HaveCount(1);
-    }
-
-    [Fact]
-    public void MergePartial_MergesTcsWorkerEntries_SortsByAddress_AndTrimsToGlobalCap()
+    public void MergePartial_MergesTcsWorkerEntries_SortsByAddress()
     {
         const ulong TcsMt = 0x4000;
         AsyncTaskAnalyzer primary = new();
-        AnalysisContext context = CreateContext(maxTasksToScan: 100, maxTcsToScan: 3);
+        AnalysisContext context = CreateContext();
 
         primary.BeforeHeapIndexScan(context);
         SetTcsMts(primary, [TcsMt]);
@@ -115,7 +83,7 @@ public sealed class AsyncTaskAnalyzerHeapIndexScanTests
         primary.MergePartial([worker]);
 
         var merged = GetParticipantTcsEntries(primary);
-        merged.Select(e => e.Address).Should().Equal(0x1000UL, 0x2000UL, 0x3000UL);
+        merged.Select(e => e.Address).Should().Equal(0x1000UL, 0x2000UL, 0x3000UL, 0x4000UL);
     }
 
     [Fact]
@@ -126,7 +94,7 @@ public sealed class AsyncTaskAnalyzerHeapIndexScanTests
         // ClrHeap, so _vtsMts is injected directly to isolate OnHeapEntry's mechanics.
         const ulong VtsMt = 0x5000;
         AsyncTaskAnalyzer analyzer = new();
-        AnalysisContext context = CreateContext(maxTasksToScan: 100);
+        AnalysisContext context = CreateContext();
 
         analyzer.BeforeHeapIndexScan(context);
         SetVtsMts(analyzer, [VtsMt]);
@@ -145,28 +113,11 @@ public sealed class AsyncTaskAnalyzerHeapIndexScanTests
     }
 
     [Fact]
-    public void OnHeapEntry_RespectsMaxVtsToScan()
-    {
-        const ulong VtsMt = 0x5000;
-        AsyncTaskAnalyzer analyzer = new();
-        AnalysisContext context = CreateContext(maxTasksToScan: 100, maxVtsToScan: 1);
-
-        analyzer.BeforeHeapIndexScan(context);
-        SetVtsMts(analyzer, [VtsMt]);
-
-        analyzer.OnHeapEntry(new HeapEntry(0x5000, VtsMt, 80));
-        analyzer.OnHeapEntry(new HeapEntry(0x5100, VtsMt, 80));
-
-        var vtsEntries = GetParticipantVtsEntries(analyzer);
-        vtsEntries.Should().HaveCount(1);
-    }
-
-    [Fact]
-    public void MergePartial_MergesVtsWorkerEntries_SortsByAddress_AndTrimsToGlobalCap()
+    public void MergePartial_MergesVtsWorkerEntries_SortsByAddress()
     {
         const ulong VtsMt = 0x5000;
         AsyncTaskAnalyzer primary = new();
-        AnalysisContext context = CreateContext(maxTasksToScan: 100, maxVtsToScan: 3);
+        AnalysisContext context = CreateContext();
 
         primary.BeforeHeapIndexScan(context);
         SetVtsMts(primary, [VtsMt]);
@@ -182,18 +133,17 @@ public sealed class AsyncTaskAnalyzerHeapIndexScanTests
         primary.MergePartial([worker]);
 
         var merged = GetParticipantVtsEntries(primary);
-        merged.Select(e => e.Address).Should().Equal(0x1000UL, 0x2000UL, 0x3000UL);
+        merged.Select(e => e.Address).Should().Equal(0x1000UL, 0x2000UL, 0x3000UL, 0x4000UL);
     }
 
     [Fact]
-    public void MergePartial_MergesWorkerEntries_SortsByAddress_AndTrimsToGlobalCap()
+    public void MergePartial_MergesWorkerEntries_SortsByAddress()
     {
-        // maxTasksToScan caps each worker individually (uncapped relative to the others), so
-        // simulate two workers whose own local order is not address-sorted relative to each
-        // other — the merge's re-sort, not either worker's own order, is what must make the
-        // final trim to the global cap correct.
+        // Simulate two workers whose own local order is not address-sorted relative to each
+        // other — the merge's re-sort, not either worker's own order, is what must produce the
+        // final index-order sequence.
         AsyncTaskAnalyzer primary = new();
-        AnalysisContext context = CreateContext(maxTasksToScan: 3);
+        AnalysisContext context = CreateContext();
 
         primary.BeforeHeapIndexScan(context);
         primary.OnHeapEntry(new HeapEntry(0x3000, TaskMt, 100));
@@ -207,10 +157,10 @@ public sealed class AsyncTaskAnalyzerHeapIndexScanTests
         primary.MergePartial([worker]);
 
         var merged = GetParticipantEntries(primary);
-        merged.Select(e => e.Address).Should().Equal(0x1000UL, 0x2000UL, 0x3000UL);
+        merged.Select(e => e.Address).Should().Equal(0x1000UL, 0x2000UL, 0x3000UL, 0x4000UL);
     }
 
-    private static AnalysisContext CreateContext(int maxTasksToScan, int maxTcsToScan = 100, int maxVtsToScan = 100)
+    private static AnalysisContext CreateContext()
     {
         HeapAnalysisCache cache = new();
 
@@ -244,15 +194,7 @@ public sealed class AsyncTaskAnalyzerHeapIndexScanTests
         {
             Runtime = null!,
             Cache = cache,
-            AnalysisOptions = new AnalysisOptions
-            {
-                AsyncTaskAnalysis = new AsyncTaskAnalysisOptions
-                {
-                    MaxTasksToScan = maxTasksToScan,
-                    MaxTcsToScan = maxTcsToScan,
-                    MaxVtsToScan = maxVtsToScan
-                }
-            }
+            AnalysisOptions = new AnalysisOptions(),
         };
     }
 

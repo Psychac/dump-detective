@@ -40,7 +40,7 @@ public class TaskIndexReaderTests : IDisposable
         WriteTaskContainerWithRecords(containerPath, testRecords);
 
         // Act
-        var result = TaskIndexReader.ReadTaskIndexFile(containerPath, maxTasksToScan: 100, CancellationToken.None);
+        var result = TaskIndexReader.ReadTaskIndexFile(containerPath, CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();
@@ -54,38 +54,11 @@ public class TaskIndexReaderTests : IDisposable
     }
 
     [Fact]
-    public void ReadTaskIndexFile_MaxTasksToScan_LimitsResult()
-    {
-        // Arrange
-        string containerPath = Path.Combine(_testDir, "tasks-limited.bin");
-        var testRecords = new (ulong Address, ulong Mt, int StateFlags)[]
-        {
-            (0x1000, 0x2000, 0),
-            (0x1001, 0x2000, 0),
-            (0x1002, 0x2001, 0),
-            (0x1003, 0x2001, 0),
-            (0x1004, 0x2000, 0),
-        };
-
-        WriteTaskContainerWithRecords(containerPath, testRecords);
-
-        // Act
-        var result = TaskIndexReader.ReadTaskIndexFile(containerPath, maxTasksToScan: 3, CancellationToken.None);
-
-        // Assert
-        result.Should().NotBeNull();
-        result!.Count.Should().Be(3);
-        result[0].Address.Should().Be(0x1000);
-        result[1].Address.Should().Be(0x1001);
-        result[2].Address.Should().Be(0x1002);
-    }
-
-    [Fact]
     public void ReadTaskIndexFile_InvalidContainer_ReturnsNull()
     {
         string invalidPath = Path.Combine(_testDir, "nonexistent.bin");
 
-        var result = TaskIndexReader.ReadTaskIndexFile(invalidPath, maxTasksToScan: 100, CancellationToken.None);
+        var result = TaskIndexReader.ReadTaskIndexFile(invalidPath, CancellationToken.None);
 
         result.Should().BeNull();
     }
@@ -98,7 +71,7 @@ public class TaskIndexReaderTests : IDisposable
         WriteTaskContainerWithBadMagic(containerPath);
 
         // Act
-        var result = TaskIndexReader.ReadTaskIndexFile(containerPath, maxTasksToScan: 100, CancellationToken.None);
+        var result = TaskIndexReader.ReadTaskIndexFile(containerPath, CancellationToken.None);
 
         // Assert
         result.Should().BeNull();
@@ -112,7 +85,7 @@ public class TaskIndexReaderTests : IDisposable
         WriteTaskContainerWithRecords(containerPath, Array.Empty<(ulong, ulong, int)>());
 
         // Act
-        var result = TaskIndexReader.ReadTaskIndexFile(containerPath, maxTasksToScan: 100, CancellationToken.None);
+        var result = TaskIndexReader.ReadTaskIndexFile(containerPath, CancellationToken.None);
 
         // Assert
         result.Should().NotBeNull();

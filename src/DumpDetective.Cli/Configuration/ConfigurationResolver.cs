@@ -38,7 +38,6 @@ internal sealed class ConfigurationResolver
         ReportOptions report = Resolve(usedConfigFile, BuildReportFromConfig, AnalyzerOptionsBuilder.BuildReportFromCli, fileModel, request);
         ExecutionPolicy executionPolicy = BuildExecutionPolicy(fileModel, memoryLeak);
         CrashAnalysisOptions crash = Resolve(usedConfigFile, BuildCrashFromConfig, _ => new CrashAnalysisOptions(), fileModel, request);
-        AsyncTaskAnalysisOptions asyncTaskAnalysis = Resolve(usedConfigFile, BuildAsyncTaskAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, AsyncTaskAnalysisOptions.Preset), fileModel, request);
         AsyncStateMachineAnalysisOptions asyncStateMachineAnalysis = Resolve(usedConfigFile, BuildAsyncStateMachineAnalysisFromConfig, _ => new AsyncStateMachineAnalysisOptions(), fileModel, request);
         ArrayAnalysisOptions arrayAnalysis = Resolve(usedConfigFile, BuildArrayAnalysisFromConfig, _ => new ArrayAnalysisOptions(), fileModel, request);
         BoxingAnalysisOptions boxingAnalysis = Resolve(usedConfigFile, BuildBoxingAnalysisFromConfig, _ => new BoxingAnalysisOptions(), fileModel, request);
@@ -102,7 +101,6 @@ internal sealed class ConfigurationResolver
             diagnostics,
             report,
             crash,
-            asyncTaskAnalysis,
             asyncStateMachineAnalysis,
             arrayAnalysis,
             boxingAnalysis,
@@ -302,13 +300,6 @@ internal sealed class ConfigurationResolver
             ? new CrashAnalysisOptions()
             : ApplyOptionsOverrides(new CrashAnalysisOptions(), config.Crash);
     }
-
-    private static AsyncTaskAnalysisOptions BuildAsyncTaskAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "AsyncTask",
-            config.AsyncTaskAnalysis,
-            AsyncTaskAnalysisOptions.Preset);
 
     private static AsyncStateMachineAnalysisOptions BuildAsyncStateMachineAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
     {

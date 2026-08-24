@@ -22,7 +22,6 @@ internal sealed class CliConfigurationFileModel
     public EventLeakOptions? EventLeak { get; init; }
     public DiagnosticsOptions? Diagnostics { get; init; }
     public CrashAnalysisOptions? Crash { get; init; }
-    public AsyncTaskAnalysisOptions? AsyncTaskAnalysis { get; init; }
     public AsyncStateMachineAnalysisOptions? AsyncStateMachineAnalysis { get; init; }
     public ArrayAnalysisOptions? ArrayAnalysis { get; init; }
     public BoxingAnalysisOptions? BoxingAnalysis { get; init; }
@@ -86,7 +85,6 @@ internal sealed class ExecutionPolicyModel
 [JsonSerializable(typeof(AnalyzerOptionsModel))]
 [JsonSerializable(typeof(ExecutionPolicyModel))]
 [JsonSerializable(typeof(CrashAnalysisOptions))]
-[JsonSerializable(typeof(AsyncTaskAnalysisOptions))]
 [JsonSerializable(typeof(AsyncStateMachineAnalysisOptions))]
 [JsonSerializable(typeof(ArrayAnalysisOptions))]
 [JsonSerializable(typeof(BoxingAnalysisOptions))]

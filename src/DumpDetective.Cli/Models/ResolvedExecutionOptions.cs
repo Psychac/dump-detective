@@ -13,7 +13,6 @@ internal sealed record ResolvedExecutionOptions(
     DiagnosticsOptions Diagnostics,
     ReportOptions Report,
     CrashAnalysisOptions Crash,
-    AsyncTaskAnalysisOptions AsyncTaskAnalysis,
     AsyncStateMachineAnalysisOptions AsyncStateMachineAnalysis,
     ArrayAnalysisOptions ArrayAnalysis,
     BoxingAnalysisOptions BoxingAnalysis,

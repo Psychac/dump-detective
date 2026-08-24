@@ -12,7 +12,7 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 26 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
+**Implementation progress: 27 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
 §9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph, §9.8 LohFragmentation, §9.9
 SegmentReservation, §9.10 Jit, §9.11 Array, §9.12 String (partial — AMBER, not GREEN; see its
 implementation notes for what's deliberately still deferred), §9.13 AsyncStateMachine, §9.14
@@ -44,7 +44,12 @@ internal constant instead of deleting it outright), §9.28 HeapTopology (deleted
 `CountSohObjects`, and the whole options class; SOH is now never walked per-object — its exact count
 is derived for free as `Phase1TotalObjectCount - LohCount - PohCount - FrozenCount` using the already-
 exact Phase 1 total, per M6's identified free alternative, rather than the 10.2s live walk that
-`CountSohObjects = true` used to trigger)
+`CountSohObjects = true` used to trigger), §9.29 AsyncTask (deleted the options class and all three
+scan caps per M7's measured 311ms delta; deleted `MaxContinuationDepth` and let the pre-existing
+per-task node budget be the only traversal bound; moved all four `Top*ToShow` caps to the render
+layer, following the Boxing/WeakReference/EventLeak precedent of per-type lists staying fully
+unbounded in the domain result while per-instance snapshot lists get a `private const` render-layer
+cap in the section builder)
 (§9.6's orphaned
 `DependentHandleAnalysisOptions` was also deleted alongside GCHandle — not a separate registered
 analyzer, per the row-4 cross-reference below).** See each section and the §7 verdict table for what
@@ -345,7 +350,7 @@ radius is a single cosmetic report field, not root exactness.
 | 26 | Crash | non-heap | **GREEN** ✅ DONE | 7 of 8 (1 kept, `MaxExceptionsPerType` — corrects the row's own "8 of 8" claim) | §9.26 — already implements the §10 render-layer pattern for 7 knobs; `MaxExceptionsPerType` gates real per-object stack-trace/inner-exception extraction and was kept |
 | 27 | Memory | non-heap | **GREEN** ✅ DONE | 5 of 6 (1 kept, `LohThresholdBytes`) | §9.27 — deleted the weighted quota-merge selection entirely (stronger than "keep, fix one value"); found `TopTypesCount` also bounds a real per-type retained-size BFS, corrected and re-scoped to an internal constant rather than deleted outright |
 | 28 | HeapTopology | non-heap | **GREEN** ✅ DONE | 1 of 1 | §9.28 — a literal exact/not-exact switch, defaulting to **not**; shipped as free arithmetic derivation instead of the live walk |
-| 29 | AsyncTask | non-heap | **GREEN** | 8 of 8 | §9.29 — options class deleted outright |
+| 29 | AsyncTask | non-heap | **GREEN** ✅ DONE | 8 of 8 | §9.29 — options class deleted outright |
 | 30 | AllocationPattern | — | **AMBER** | ~8 of 12 | §9.30 — three enums; the tier changes the *algorithm* |
 | 31 | WeakReference | — | **GREEN** | 2 of 5 | §9.31 — `HandleScanCap` truncates the handle table, not a derived list |
 | 32 | DbConnection | typed-resource | **GREEN** | 1 of 2 | §9.32-9.34 — **no options class at all**; bounds are `private const`, never preset-varied |
@@ -2721,6 +2726,58 @@ truncates continuation-chain walks, which is how orphaned tasks are identified i
 unconditionally during Phase 1, not gated on which analyzers are active — `LoadTaskEntries` reads it
 back rather than falling to a live `heap.EnumerateObjects()` scan. Measured on a real dump: uncapped
 vs. capped delta was 311 ms against a shared ~4.4s baseline, negligible. Safe to delete.
+
+#### Implementation notes (as shipped)
+
+- **Options class deleted outright**, same wiring-surface shape as ObjectShape/HeapTopology:
+  removed from `AnalysisOptions`, `ResolvedExecutionOptions` (positional record, so every
+  construction site needed the arg dropped), `CliConfigurationModels` (property + `[JsonSerializable]`
+  roster entry), `ConfigurationResolver` (variable, builder method, call site), and
+  `AnalyzerExecutionService`.
+- **The three scan caps are simply gone** — `OnHeapEntry` unconditionally accumulates every
+  Task/TCS/VTS-typed entry the shared heap-index scan pass finds (no more
+  `_participantEntries.Count < cap` guard), `MergePartial` re-sorts the union by address without a
+  trailing `.Take(cap)`, `TaskIndexReader.ReadTaskIndexFile` reads the whole `TaskIndex.bin` file, and
+  the raw-heap-scan fallbacks (`ScanRawHeapForTasks`/`Tcs`/`Vts`) no longer `break` early. Consequently
+  `TaskScanLimited`/`TcsScanLimited`/`VtsScanLimited` became permanently-`false` dead fields once their
+  triggering cap was gone — deleted from `AsyncTaskDomainResult`, along with their `AsyncAnalysisSectionBuilder`
+  warning blocks and the now-vacuous "Async tasks" row in `ConfidenceSectionBuilder`'s bounded-scan
+  table (mirrors how WeakReference's already-dead `AbsoluteDeadCountThreshold` was treated).
+- **`MaxContinuationDepth` deleted; the pre-existing node budget is the only remaining traversal
+  bound.** `ExploreContinuation` no longer takes a `remainingDepth` parameter — its stop condition is
+  now just `nodeBudget <= 0` (the existing `MaxContinuationNodesToVisitPerTask = 2_000` global
+  per-task cap, an internal constant untouched by this change, not a profile-varied knob). This is
+  the Category-4 guidance applied loosely: there's no dominator tree/reverse index to re-point at for
+  a task's own continuation graph, so "delete the traversal budget, keep the existing wall-clock/byte
+  bound" reduces to deleting the redundant depth cap and trusting the node budget that was already
+  there.
+- **The four `Top*ToShow` knobs moved to the render layer, per §11.2 D5's amendment — not to a new
+  section-builder-local cap.** First pass wrongly reintroduced exactly the pattern D5's amendment
+  (post-§9.7) already corrected: added `private const int TopTypesToShow`/`TopSnapshotsToShow` to
+  `AsyncAnalysisSectionBuilder` and sliced with `Math.Min(list.Count, cap)` before feeding `STCompact`,
+  plus a manual "(showing N of M)" title suffix — the same "options surface nobody uses, just moved
+  from `AnalysisOptions` to section-builder locals instead of eliminated" defect D5 named. Corrected:
+  the analyzer emits the complete population for all eight `Top*` lists — the four per-distinct-type
+  dictionaries (pending/faulted/continuation/fanout type counts, bounded by type diversity not
+  instance count) via `BuildSorted`/`BuildSortedByBytes` (replacing the old partial-sort
+  `BuildTopN`/`BuildTopNByBytes`), and the three per-instance snapshot lists (orphaned tasks,
+  unresolved TCS, pending VTS) with no cap in the classify loop — and every `STCompact` call in
+  `AsyncAnalysisSectionBuilder` now takes the full list with no explicit `rowLimit` argument, falling
+  through to `STCompact`'s uniform default (20) exactly like every other section builder post-D5. The
+  manual "(showing N of M)" title suffixes were removed too — that's what the client-side pagination
+  UI (full sort/filter/page-size selector over the complete delivered dataset) already shows for
+  every other table; duplicating it server-side per-table was the same needless-ceremony D5 flagged.
+- **Did not pursue the cross-referenced "collapse 8 Top* lists into one raw per-task-type table"
+  restructuring.** That's a genuine design question (which dimensions to key by, whether per-instance
+  and per-type populations even belong in one table) requiring the lead-finding-dedup doc's fuller
+  context — out of scope for a knob-deletion pass; flagged here for a deliberate follow-up rather than
+  folded in speculatively.
+- **Deleted the two M7 discrepancy tests** that measured the removed caps directly:
+  `AsyncTaskUncappedRealDumpTests.cs` (the delta-vs-baseline benchmark this section's Q2 cites) and
+  the corresponding `ReadTaskIndexFile_MaxTasksToScan_LimitsResult` unit test. Rewrote
+  `AsyncTaskAnalyzerHeapIndexScanTests.cs`'s cap-enforcement tests
+  (`OnHeapEntry_RespectsMax*ToScan`) as no-op-removed and renamed the `MergePartial_*` tests to drop
+  "AndTrimsToGlobalCap" — they now assert address-order merging only.
 
 ---
 

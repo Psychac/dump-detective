@@ -60,7 +60,6 @@ internal sealed record AsyncTaskDomainResult(
     int TotalTaskContinuations,
     int MaxContinuationDepth,
     double AvgContinuationDepth,
-    bool TaskScanLimited,
     IReadOnlyList<NameCountEntry> TopPendingTaskTypes,
     IReadOnlyList<NameCountEntry> TopFaultedTaskTypes,
     IReadOnlyList<NameCountEntry> TopContinuationTypes,
@@ -80,10 +79,8 @@ internal sealed record AsyncTaskDomainResult(
     int TotalTaskCompletionSources = 0,
     int UnresolvedTaskCompletionSources = 0,
     int UnresolvedTcsGen2Count = 0,
-    bool TcsScanLimited = false,
     IReadOnlyList<UnresolvedTcsSnapshot>? TopUnresolvedTaskCompletionSources = default,
     int TotalValueTaskSources = 0,
     int PendingValueTaskSources = 0,
     int PendingVtsGen2Count = 0,
-    bool VtsScanLimited = false,
     IReadOnlyList<PendingValueTaskSourceSnapshot>? TopPendingValueTaskSources = default) : AnalyzerDomainResult;

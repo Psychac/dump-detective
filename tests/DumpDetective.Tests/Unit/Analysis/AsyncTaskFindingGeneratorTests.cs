@@ -119,7 +119,6 @@ public sealed class AsyncTaskFindingGeneratorTests
             TotalTaskContinuations: total * 2,
             MaxContinuationDepth: maxDepth,
             AvgContinuationDepth: avgDepth,
-            TaskScanLimited: false,
             TopPendingTaskTypes: [],
             TopFaultedTaskTypes: [],
             TopContinuationTypes: [],

@@ -77,7 +77,6 @@ public sealed class StartupValidatorTests
             Diagnostics: new DiagnosticsOptions(),
             Report: new ReportOptions { Format = ReportFormat.Text },
             Crash: new CrashAnalysisOptions(),
-            AsyncTaskAnalysis: new AsyncTaskAnalysisOptions(),
             AsyncStateMachineAnalysis: new AsyncStateMachineAnalysisOptions(),
             ArrayAnalysis: new ArrayAnalysisOptions(),
             BoxingAnalysis: new BoxingAnalysisOptions(),

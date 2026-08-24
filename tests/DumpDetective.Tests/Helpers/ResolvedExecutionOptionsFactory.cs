@@ -18,7 +18,6 @@ internal static class ResolvedExecutionOptionsFactory
             Diagnostics: new DumpDetective.Core.Options.DiagnosticsOptions(),
             Report: new DumpDetective.Core.Options.ReportOptions(),
             Crash: new DumpDetective.Core.Options.CrashAnalysisOptions(),
-            AsyncTaskAnalysis: new DumpDetective.Core.Options.AsyncTaskAnalysisOptions(),
             AsyncStateMachineAnalysis: new DumpDetective.Core.Options.AsyncStateMachineAnalysisOptions(),
             ArrayAnalysis: new DumpDetective.Core.Options.ArrayAnalysisOptions(),
             BoxingAnalysis: new DumpDetective.Core.Options.BoxingAnalysisOptions(),

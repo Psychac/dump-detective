@@ -106,7 +106,6 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
         AddLimitation(limitationRows, "Retention", results.Get<DominatorDomainResult>() is DominatorDomainResult retention && (retention.SkippedReferenceAddresses > 0 || retention.ObjectScanCapped || retention.ReferenceCountingSkipped), BuildRetentionText(results.Get<DominatorDomainResult>()));
         AddLimitation(limitationRows, "GC roots", results.Get<GCRootDomainResult>() is GCRootDomainResult gcRoot && (gcRoot.PathSearchCapped || gcRoot.PathSearchCappedCount > 0), BuildRootText(results.Get<GCRootDomainResult>()));
         AddLimitation(limitationRows, "Hang / task scan", results.Get<HangDomainResult>() is HangDomainResult hang && !hang.RuntimeThreadPoolDataAvailable, BuildHangText(results.Get<HangDomainResult>()));
-        AddLimitation(limitationRows, "Async tasks", results.Get<AsyncTaskDomainResult>() is AsyncTaskDomainResult asyncTasks && asyncTasks.TaskScanLimited, BuildAsyncTaskText(results.Get<AsyncTaskDomainResult>()));
 
         if (limitationRows.Count > 0)
         {
@@ -179,16 +178,6 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
             return "Runtime thread-pool data was not available; thread-pool health may be approximate.";
 
         return "Thread-pool and task metrics are bounded.";
-    }
-
-    private static string BuildAsyncTaskText(AsyncTaskDomainResult? asyncTasks)
-    {
-        if (asyncTasks is null)
-            return "No async task result available.";
-
-        return asyncTasks.TaskScanLimited
-            ? "Async task scanning hit its cap; orphan and continuation totals may be partial."
-            : "Async task scan completed within the configured cap.";
     }
 
 }

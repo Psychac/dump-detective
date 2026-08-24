@@ -8,7 +8,6 @@ public sealed record AnalysisOptions
     public DiagnosticsOptions Diagnostics { get; init; } = new();
     public ExecutionPolicy ExecutionPolicy { get; init; } = ExecutionPolicy.Default;
     public CrashAnalysisOptions Crash { get; init; } = new();
-    public AsyncTaskAnalysisOptions AsyncTaskAnalysis { get; init; } = new();
     public AsyncStateMachineAnalysisOptions AsyncStateMachineAnalysis { get; init; } = new();
     public ArrayAnalysisOptions ArrayAnalysis { get; init; } = new();
     public BoxingAnalysisOptions BoxingAnalysis { get; init; } = new();

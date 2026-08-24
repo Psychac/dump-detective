@@ -36,7 +36,7 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
                 Recommendation: "Inspect the deepest chain table below. Deep chains can indicate async deadlocks or unbounded recursive continuations.",
                 ConfidenceSymbol: "●●●●",
                 ConfidenceScore: 0.85,
-                Caveats: asyncTasks.TaskScanLimited ? ["Task scan was limited; chain depth may be underestimated."] : []);
+                Caveats: []);
         }
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
@@ -158,11 +158,7 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
                     Cell(snapshot.ExceptionMessage is null ? "—" : FormatHelper.TruncateString(snapshot.ExceptionMessage, 80))));
             }
 
-            string orphanedTableTitle = "Orphaned tasks";
-            if (asyncTasks.TopOrphanedTasks.Count < asyncTasks.OrphanedTasks)
-                orphanedTableTitle += $" (showing {asyncTasks.TopOrphanedTasks.Count} of {asyncTasks.OrphanedTasks})";
-
-            compactTables.Add(STCompact(orphanedTableTitle,
+            compactTables.Add(STCompact("Orphaned tasks",
                 new[] { CH("Address"), CH("Task Type"), CH("Result Type"), CH("Size","bytes"), CH("Exception Type"), CH("Exception Message") },
                 rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
@@ -180,11 +176,7 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
                     Cell(snapshot.Generation == 3 ? "LOH" : $"Gen{snapshot.Generation}", snapshot.Generation)));
             }
 
-            string tcsTableTitle = "Unresolved TaskCompletionSource instances";
-            if (unresolvedTcs.Count < asyncTasks.UnresolvedTaskCompletionSources)
-                tcsTableTitle += $" (showing {unresolvedTcs.Count} of {asyncTasks.UnresolvedTaskCompletionSources})";
-
-            compactTables.Add(STCompact(tcsTableTitle,
+            compactTables.Add(STCompact("Unresolved TaskCompletionSource instances",
                 new[] { CH("Address"), CH("Type"), CH("Size","bytes"), CH("Generation") },
                 rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
@@ -202,23 +194,10 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
                     Cell(snapshot.Generation == 3 ? "LOH" : $"Gen{snapshot.Generation}", snapshot.Generation)));
             }
 
-            string vtsTableTitle = "Pending IValueTaskSource instances";
-            if (pendingVts.Count < asyncTasks.PendingValueTaskSources)
-                vtsTableTitle += $" (showing {pendingVts.Count} of {asyncTasks.PendingValueTaskSources})";
-
-            compactTables.Add(STCompact(vtsTableTitle,
+            compactTables.Add(STCompact("Pending IValueTaskSource instances",
                 new[] { CH("Address"), CH("Type"), CH("Size","bytes"), CH("Generation") },
                 rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
-
-        if (asyncTasks.TaskScanLimited)
-            blocks.Add(T("Task scanning was limited; orphan and continuation totals may be partial."));
-
-        if (asyncTasks.TcsScanLimited)
-            blocks.Add(T("TaskCompletionSource scanning was limited; unresolved counts may be partial."));
-
-        if (asyncTasks.VtsScanLimited)
-            blocks.Add(T("IValueTaskSource scanning was limited; pending counts may be partial."));
 
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,

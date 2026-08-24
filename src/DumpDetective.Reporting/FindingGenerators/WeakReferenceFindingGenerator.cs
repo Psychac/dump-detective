@@ -78,7 +78,6 @@ internal sealed class WeakReferenceFindingGenerator : IFindingGenerator
         }
 
         // Summary finding (always).
-        string scanNote = r.ScanCapped ? $" (scan capped at {r.ScanCapUsed:N0} handles)" : string.Empty;
         FindingSeverity summarySeverity = FindingSeverity.Info;
         for (int i = 0; i < signals.Count; i++)
         {
@@ -93,7 +92,7 @@ internal sealed class WeakReferenceFindingGenerator : IFindingGenerator
             Category: "Memory",
             Severity: summarySeverity,
             Title: "Weak reference overview",
-            Evidence: $"Total weak handles: {r.TotalWeakHandles:N0}{scanNote}. " +
+            Evidence: $"Total weak handles: {r.TotalWeakHandles:N0}. " +
                       $"Alive targets: {r.AliveWeakTargets:N0}, dead: {r.DeadWeakTargets:N0} " +
                       $"({r.DeadTargetRatio:P1}). " +
                       $"WeakReference objects: {r.WeakReferenceObjectCount:N0} " +

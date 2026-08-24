@@ -50,7 +50,7 @@ internal sealed class ConfigurationResolver
         ThreadAnalysisOptions threadAnalysis = Resolve(usedConfigFile, BuildThreadAnalysisFromConfig, _ => new ThreadAnalysisOptions(), fileModel, request);
         HangAnalysisOptions hangAnalysis = Resolve(usedConfigFile, BuildHangAnalysisFromConfig, _ => new HangAnalysisOptions(), fileModel, request);
         JitAnalysisOptions jitAnalysis = Resolve(usedConfigFile, BuildJitAnalysisFromConfig, _ => new JitAnalysisOptions(), fileModel, request);
-        WeakReferenceAnalysisOptions weakReferenceAnalysis = Resolve(usedConfigFile, BuildWeakReferenceAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, WeakReferenceAnalysisOptions.Preset), fileModel, request);
+        WeakReferenceAnalysisOptions weakReferenceAnalysis = Resolve(usedConfigFile, BuildWeakReferenceAnalysisFromConfig, _ => new WeakReferenceAnalysisOptions(), fileModel, request);
         ModuleAnalysisOptions moduleAnalysis = Resolve(usedConfigFile, BuildModuleAnalysisFromConfig, _ => new ModuleAnalysisOptions(), fileModel, request);
         GCHandleAnalysisOptions gcHandleAnalysis = Resolve(usedConfigFile, BuildGCHandleAnalysisFromConfig, _ => new GCHandleAnalysisOptions(), fileModel, request);
         StaticRootLeakAnalysisOptions staticRootLeakAnalysis = Resolve(usedConfigFile, BuildStaticRootLeakAnalysisFromConfig, _ => new StaticRootLeakAnalysisOptions(), fileModel, request);
@@ -412,11 +412,14 @@ internal sealed class ConfigurationResolver
     }
 
     private static WeakReferenceAnalysisOptions BuildWeakReferenceAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "WeakReference",
-            config.WeakReferenceAnalysis,
-            WeakReferenceAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "WeakReference", out JsonElement section))
+            return ApplySectionOverrides(new WeakReferenceAnalysisOptions(), section);
+
+        return config.WeakReferenceAnalysis is null
+            ? new WeakReferenceAnalysisOptions()
+            : ApplyOptionsOverrides(new WeakReferenceAnalysisOptions(), config.WeakReferenceAnalysis);
+    }
 
     private static ModuleAnalysisOptions BuildModuleAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
     {

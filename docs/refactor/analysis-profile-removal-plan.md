@@ -12,7 +12,7 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 28 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
+**Implementation progress: 29 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
 §9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph, §9.8 LohFragmentation, §9.9
 SegmentReservation, §9.10 Jit, §9.11 Array, §9.12 String (partial — AMBER, not GREEN; see its
 implementation notes for what's deliberately still deferred), §9.13 AsyncStateMachine, §9.14
@@ -46,17 +46,27 @@ is derived for free as `Phase1TotalObjectCount - LohCount - PohCount - FrozenCou
 exact Phase 1 total, per M6's identified free alternative, rather than the 10.2s live walk that
 `CountSohObjects = true` used to trigger), §9.29 AsyncTask (deleted the options class and all three
 scan caps per M7's measured 311ms delta; deleted `MaxContinuationDepth` and let the pre-existing
-per-task node budget be the only traversal bound; moved all four `Top*ToShow` caps to the render
-layer per §11.2 D5's amendment — the analyzer emits every `Top*` list complete/unbounded and every
-`STCompact` call takes no explicit `rowLimit`, falling through to the client's own uniform default
-pagination, not a new section-builder-local cap), §9.30 AllocationPattern (resolved by D7: collapsed
+per-task node budget be the only traversal bound; deleted all four `Top*ToShow` knobs per §11.2 D5's
+amendment — the analyzer emits every `Top*` list complete/unbounded and every `STCompact` call takes
+no explicit `rowLimit`, so the client sees and can page/sort/filter the full data; nothing is
+truncated anywhere in the pipeline, `rowLimit` only sets the pagination widget's initial page size),
+§9.30 AllocationPattern (resolved by D7: collapsed
 `SelectionMode`/`ScanStrategy`/`SelectionPriority` to the one correct algorithm — `CompositeScore`
 ranking, classify-every-candidate-first bucketing — deleted `MaxScanItemsAbsolute`/`ScanMultiplier`/
 `TopTypeLimit` entirely rather than keeping any of them as a scan or row cap; also deleted
 `EmitTransient`/`EmitShortish`/`EmitLongLived`, unreachable once nothing sets them false without
 profiles, and `LohThresholdBytes`, dead code found via a V4-style grep — the options class survives
 as a plain 7-constant POCO — the Category-5 thresholds/weights that were never actually the
-`ScanStrategy`/`Mode`/`Priority` problem)
+`ScanStrategy`/`Mode`/`Priority` problem), §9.31 WeakReference (AMBER→GREEN once implemented: deleted
+`HandleScanCap` and passed `int.MaxValue` to `HandleSnapshotProvider.CreateMemoryReader`, matching
+GCHandleAnalyzer's already-shipped precedent; deleted `WeakRefProbeSampleLimit` — it bounded a
+per-distinct-MT probe, not a per-instance scan, so it was never buying anything; deleted the dead
+`AbsoluteDeadCountThreshold` per V4; deleted `TopTypeLimit` and made its three lists full/uncapped
+per §11.2 D5, including deleting `WeakReferenceSectionBuilder`'s own local `TopTypesToShow`/`.Take()`
+pre-truncation (a real cap — it dropped rows before they ever reached `STCompact`) — the same
+D5-violating pattern §9.29's first pass introduced and then had to correct, caught here before
+shipping instead of after; `ProduceRawExports` stays on the options class, unmoved, per D6's explicit
+deferral)
 (§9.6's orphaned
 `DependentHandleAnalysisOptions` was also deleted alongside GCHandle — not a separate registered
 analyzer, per the row-4 cross-reference below).** See each section and the §7 verdict table for what
@@ -359,7 +369,7 @@ radius is a single cosmetic report field, not root exactness.
 | 28 | HeapTopology | non-heap | **GREEN** ✅ DONE | 1 of 1 | §9.28 — a literal exact/not-exact switch, defaulting to **not**; shipped as free arithmetic derivation instead of the live walk |
 | 29 | AsyncTask | non-heap | **GREEN** ✅ DONE | 8 of 8 | §9.29 — options class deleted outright |
 | 30 | AllocationPattern | — | **GREEN** ✅ DONE (was AMBER) | 13 of 13 | §9.30 — three enums collapsed to one algorithm via D7; no more tier-varies-the-algorithm defect, so AMBER resolves to GREEN once implemented |
-| 31 | WeakReference | — | **GREEN** | 2 of 5 | §9.31 — `HandleScanCap` truncates the handle table, not a derived list |
+| 31 | WeakReference | — | **GREEN** ✅ DONE | 4 of 5 (1 kept, `ProduceRawExports`, deferred to D6's cross-cutting move) | §9.31 — `HandleScanCap` truncates the handle table, not a derived list |
 | 32 | DbConnection | typed-resource | **GREEN** | 1 of 2 | §9.32-9.34 — **no options class at all**; bounds are `private const`, never preset-varied |
 | 33 | WcfChannel | typed-resource | **GREEN** | 1 of 2 | §9.33 — same shape; caps faulted-channel detection specifically |
 | 34 | HttpObject | typed-resource | **GREEN** | 1 of 2 | §9.34 — headline counts already exact; only the drill-down sample is capped |
@@ -2882,7 +2892,7 @@ sixth instance of *configured ≠ applied* (§11.6).
 
 ---
 
-### 9.31 WeakReference — **GREEN**
+### 9.31 WeakReference — **GREEN** ✅ IMPLEMENTED
 
 [WeakReferenceAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/WeakReferenceAnalyzer.cs) ·
 [WeakReferenceAnalysisOptions.cs](../../src/DumpDetective.Core/Options/WeakReferenceAnalysisOptions.cs)
@@ -2908,6 +2918,54 @@ cap" — so full exactness is already one config value away, just not the defaul
 Array's `SampleStride` (§9.11): an estimate presented as a count.
 
 **Q3 — no risk.** `TargetTypeHits`/`WeakHandleKinds` are O(distinct types) dictionaries.
+
+#### Implementation notes (as shipped)
+
+- **`HandleScanCap` deleted.** Both `totalWeakHandles > options.HandleScanCap` break-and-flag sites
+  (in-memory snapshot branch and disk/live-reader branch) removed. The live-mode fallback reader
+  (`HandleSnapshotProvider.CreateMemoryReader`, only reached when no Phase 1 index exists at all) now
+  gets `int.MaxValue` instead of the cap — the same pattern `GCHandleAnalyzer` (§9.5, already GREEN)
+  already used for its own call to the identical helper, confirmed by reading it before making this
+  change rather than inventing a new convention. The disk-backed reader (`HandleSnapshot.bin`) and
+  the Phase-1-memory-backed `InMemoryHandleSnapshot` were both already unconditional/full — same
+  "confirmed index-backed" shape M7 (§11.4) established for `TaskIndex.bin`.
+- **`WeakRefProbeSampleLimit` deleted.** Re-reading the loop clarified Q7's own note: this bounds the
+  number of *distinct WeakReference&lt;T&gt;-shaped MethodTables* probed (one Phase-1 sample address
+  read per MT), not a per-instance scan — the same O(distinct types) shape as `TargetTypeHits`/
+  `WeakHandleKinds` (Q3), so the cap was never buying anything measurable. Removed the `probeLimit`/
+  `probesDone` bookkeeping entirely; every candidate MT's sample is now probed unconditionally.
+- **`AbsoluteDeadCountThreshold` deleted per V4** — confirmed zero references in
+  `WeakReferenceAnalyzer.cs` again before deleting; `WeakReferenceFindingGenerator.cs` already has its
+  own independent hardcoded `const int absoluteDeadCountThreshold = 10_000`, unaffected by this
+  deletion (the two were never connected).
+- **`TopTypeLimit` deleted; `WeakHandleKinds`/`TopWeakTargetTypes`/`TopStaleWrapperHolderTypes` now
+  emit the complete sorted population** (`BuildTopEntries(dict, take)` → `BuildSorted(dict)`, dropping
+  the `.Take(take)`). **`WeakReferenceSectionBuilder` needed a real fix, not just a no-op pass-through:**
+  it already had its own `private const int TopTypesToShow = 15;` with a `.Take(TopTypesToShow)` before
+  every `STCompact` call — exactly the §11.2 D5-violating "cap moved from `AnalysisOptions` to a
+  section-builder local instead of eliminated" pattern that §9.29's first implementation pass
+  introduced fresh and had to walk back. Deleted the const and both `.Take()` calls here too, so all
+  three tables now fall through to `STCompact`'s uniform default (`rowLimit = 20`), consistent with
+  every other post-D5 section builder.
+- **`ScanCapped`/`ScanCapUsed` deleted from `WeakReferenceDomainResult`** — permanently-`false`/
+  meaningless once the cap was gone, same treatment as AsyncTask's `*ScanLimited` fields (§9.29).
+  Removed the corresponding `⚠ Handle scan was capped...` block from `WeakReferenceSectionBuilder`
+  and the `scanNote`/`ScanCapUsed` interpolation from `WeakReferenceFindingGenerator`'s summary
+  finding. No `ConfidenceSectionBuilder` coupling existed to clean up (checked; WeakReference was
+  never wired into its bounded-scan table).
+- **`ProduceRawExports` left in place, unmoved — D6's destination (`ReportOptions`) is decided but the
+  move itself is an explicitly deferred cross-cutting change** shared with
+  `StringAnalysisOptions.ProduceRawExports`/`ThreadStackClusterAnalysisOptions.ProduceClusterExports`
+  (§9.24 already left its own copy in place with the same rationale comment) — matched that precedent
+  exactly rather than doing a one-off partial move here.
+- **Options class collapses to a single property** (`ProduceRawExports`) — `Preset`/`Default`/
+  `AnalysisProfile` dependency removed; `ConfigurationResolver`'s `BuildWeakReferenceAnalysisFromConfig`
+  rewritten from the generic `BuildAnalyzerOptionsFromConfig` (took a now-deleted `Preset` delegate) to
+  the `ApplySectionOverrides`/`ApplyOptionsOverrides` shape.
+- **Deleted `WeakReferenceOptionsTests.cs` outright** per §8 item 8's residual-cleanup list — every
+  test in the file asserted preset values for now-deleted knobs, nothing else was in it. Updated
+  `WeakReferenceFindingGeneratorTests.cs`'s `BuildResult` helper to drop the two deleted positional
+  fields.
 
 ---
 

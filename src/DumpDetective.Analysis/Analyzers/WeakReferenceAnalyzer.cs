@@ -66,7 +66,6 @@ namespace DumpDetective.Analysis.Analyzers
             int totalWeakHandles = 0;
             int aliveWeakTargets = 0;
             int deadWeakTargets = 0;
-            bool scanCapped = false;
 
             // §9 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): a genuine
             // enhancement, not a fix — WeakReferenceObjectBytes already honestly reports the
@@ -124,7 +123,6 @@ namespace DumpDetective.Analysis.Analyzers
                     {
                         totalWeakHandles++;
                         IncrementDict(weakHandleKinds, KindToName(rec.Kind));
-                        if (totalWeakHandles > options.HandleScanCap) { scanCapped = true; break; }
 
                         ulong addr = rec.Addr;
                         if (addr == 0)
@@ -179,7 +177,7 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     reader = HandleSnapshotProvider.CreateFromDiskIfExists(heapIndex.IndexPath);
                 }
-                reader ??= HandleSnapshotProvider.CreateMemoryReader(runtime, heap, options.HandleScanCap);
+                reader ??= HandleSnapshotProvider.CreateMemoryReader(runtime, heap, int.MaxValue);
 
                 var scanCounter = new ObjectScanCounter("scanning weak and dependent handles", progress,
                     reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
@@ -198,7 +196,6 @@ namespace DumpDetective.Analysis.Analyzers
                             {
                                 totalWeakHandles++;
                                 IncrementDict(weakHandleKinds, KindToName(rec.Kind));
-                                if (totalWeakHandles > options.HandleScanCap) { scanCapped = true; break; }
 
                                 ulong addr = rec.Address;
                                 if (addr == 0)
@@ -281,13 +278,12 @@ namespace DumpDetective.Analysis.Analyzers
                         weakRefMtEntries.Add((kv.Key, kv.Value));
                 }
 
-                int probeLimit = options.WeakRefProbeSampleLimit <= 0 ? int.MaxValue : options.WeakRefProbeSampleLimit;
-                int probesDone = 0;
-
+                // Probes every distinct WeakReference<T>-shaped MT's Phase 1 sample address — bounded
+                // by distinct type count (a handful in practice), not instance count. The former
+                // WeakRefProbeSampleLimit cap bounded this same small population, buying nothing.
                 foreach ((ulong mt, TypeAggregateIndexEntry entry) in weakRefMtEntries)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (probesDone >= probeLimit) break;
 
                     weakRefObjCount += (int)Math.Min(entry.Count, int.MaxValue);
                     weakRefObjBytes += entry.TotalSize;
@@ -301,7 +297,6 @@ namespace DumpDetective.Analysis.Analyzers
                     if (mHandleField is null) continue;
 
                     nint handleValue = mHandleField.Read<nint>(entry.SampleAddress, interior: false);
-                    probesDone++;
                     if (handleValue == 0)
                     {
                         staleWrapperCount += (int)Math.Min(entry.Count, int.MaxValue);
@@ -373,7 +368,6 @@ namespace DumpDetective.Analysis.Analyzers
                             aliveWeakTargets,
                             deadWeakTargets,
                             dependentHandleDeadKeyCount,
-                            scanCapped,
                             sampleRecords
                         };
                         string prettyJson = System.Text.Json.JsonSerializer.Serialize(summary, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
@@ -396,23 +390,21 @@ namespace DumpDetective.Analysis.Analyzers
                 ? 0.0
                 : (double)deadWeakTargets / totalWeakHandles;
 
-            var topTargetTypes = BuildTopEntries(targetTypeHits, options.TopTypeLimit);
-            var topStaleTypes = BuildTopEntries(staleHolderTypeHits, options.TopTypeLimit);
+            var topTargetTypes = BuildSorted(targetTypeHits);
+            var topStaleTypes = BuildSorted(staleHolderTypeHits);
 
             return new WeakReferenceDomainResult(
                 TotalWeakHandles: totalWeakHandles,
                 AliveWeakTargets: aliveWeakTargets,
                 DeadWeakTargets: deadWeakTargets,
                 DeadTargetRatio: deadRatio,
-                WeakHandleKinds: BuildTopEntries(weakHandleKinds, options.TopTypeLimit),
+                WeakHandleKinds: BuildSorted(weakHandleKinds),
                 WeakReferenceObjectCount: weakRefObjCount,
                 WeakReferenceObjectBytes: weakRefObjBytes,
                 StaleWrapperCount: staleWrapperCount,
                 TopWeakTargetTypes: topTargetTypes,
                 TopStaleWrapperHolderTypes: topStaleTypes,
                 DependentHandleDeadKeyCount: dependentHandleDeadKeyCount,
-                ScanCapped: scanCapped,
-                ScanCapUsed: options.HandleScanCap,
                 PhaseBFallbackUsed: phaseBFallbackUsed,
                 PhaseBSkipped: phaseBSkipped,
                 Artifacts: rawExports,
@@ -443,12 +435,12 @@ namespace DumpDetective.Analysis.Analyzers
             };
         }
 
-        private static List<NameCountEntry> BuildTopEntries(Dictionary<string, int> source, int take)
+        // Complete population, descending by count — no Top-N cap (§11.2 D5); the render layer
+        // slices for display. Dictionaries here are O(distinct types), cheap to sort in full.
+        private static List<NameCountEntry> BuildSorted(Dictionary<string, int> source)
         {
-            var list = new List<NameCountEntry>(Math.Min(source.Count, take));
-            foreach (KeyValuePair<string, int> kv in source
-                         .OrderByDescending(static x => x.Value)
-                         .Take(take))
+            var list = new List<NameCountEntry>(source.Count);
+            foreach (KeyValuePair<string, int> kv in source.OrderByDescending(static x => x.Value))
             {
                 list.Add(new NameCountEntry(kv.Key, kv.Value));
             }

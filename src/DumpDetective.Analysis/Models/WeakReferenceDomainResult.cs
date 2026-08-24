@@ -16,8 +16,6 @@ internal sealed record WeakReferenceDomainResult(
     IReadOnlyList<NameCountEntry> TopWeakTargetTypes,
     IReadOnlyList<NameCountEntry> TopStaleWrapperHolderTypes,
     int DependentHandleDeadKeyCount,
-    bool ScanCapped,
-    int ScanCapUsed,
     bool PhaseBFallbackUsed,
     bool PhaseBSkipped,
     IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? Artifacts = null,

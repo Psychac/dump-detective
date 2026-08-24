@@ -11,8 +11,6 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    private const int TopTypesToShow = 15;
-
     public string AnalyzerName => "Weak Reference Analysis";
     public string DisplayTitle => "Weak References";
     public int SortOrder => 720;
@@ -42,13 +40,10 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
         else if (d.PhaseBFallbackUsed)
             blocks.Add(T("ℹ Phase B (WeakReference Analysis) used fallback heap scan (heap index unavailable). Results are accurate but computation may be slower on large heaps."));
 
-        if (d.ScanCapped)
-            blocks.Add(T("⚠ Handle scan was capped at 50 000 entries — totals may be underestimated."));
-
         if (d.WeakHandleKinds.Count > 0)
         {
             var rows = new List<TableRow>(d.WeakHandleKinds.Count);
-            foreach (NameCountEntry e in d.WeakHandleKinds.Take(TopTypesToShow))
+            foreach (NameCountEntry e in d.WeakHandleKinds)
                 rows.Add(new TableRow([Cell(e.Name), Cell($"{e.Count:N0}", e.Count)]));
             compactTables.Add(STCompact("Weak handle kinds", new[] { CH("Kind"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
@@ -56,7 +51,7 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
         if (d.TopWeakTargetTypes.Count > 0)
         {
             var rows = new List<TableRow>(d.TopWeakTargetTypes.Count);
-            foreach (NameCountEntry e in d.TopWeakTargetTypes.Take(TopTypesToShow))
+            foreach (NameCountEntry e in d.TopWeakTargetTypes)
                 rows.Add(new TableRow([Cell(e.Name), Cell($"{e.Count:N0}", e.Count)]));
             compactTables.Add(STCompact("Top alive weak target types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
@@ -64,7 +59,7 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
         if (d.TopStaleWrapperHolderTypes.Count > 0)
         {
             var rows = new List<TableRow>(d.TopStaleWrapperHolderTypes.Count);
-            foreach (NameCountEntry e in d.TopStaleWrapperHolderTypes.Take(TopTypesToShow))
+            foreach (NameCountEntry e in d.TopStaleWrapperHolderTypes)
                 rows.Add(new TableRow([Cell(e.Name), Cell($"{e.Count:N0}", e.Count)]));
             compactTables.Add(STCompact("Top stale wrapper holder types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }

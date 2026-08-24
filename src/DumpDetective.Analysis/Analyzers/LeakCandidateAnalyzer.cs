@@ -151,12 +151,8 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
             return StringComparer.Ordinal.Compare(a.TypeName, b.TypeName);
         });
 
-        int topCount = Math.Min(30, candidates.Count);
-        var topCandidates = new List<LeakCandidateRecord>(topCount);
-        for (int i = 0; i < topCount; i++)
-            topCandidates.Add(candidates[i]);
-
-        return new LeakCandidateDomainResult(candidates.Count, topCandidates, byClass, true);
+        // Complete ranked population, no Top-N cap (§11.2 D5) — the render layer paginates.
+        return new LeakCandidateDomainResult(candidates.Count, candidates, byClass, true);
     }
 
     private static LeakClass Classify(

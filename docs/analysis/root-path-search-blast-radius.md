@@ -4,6 +4,18 @@
 > See also: [eventleak-populateevidence-root-search-perf.md](eventleak-populateevidence-root-search-perf.md),
 > [dominatoranalyzer-populateevidence-root-search-perf.md](dominatoranalyzer-populateevidence-root-search-perf.md)
 > — the two real, profiled instances of this bug that triggered this audit.
+>
+> **Superseded note (2026-08-24):** the `AnalysisProfile.Fast` exposure described below (§ "A
+> structurally identical bug in a separate implementation") is resolved — see §9.20/D1 of
+> [analysis-profile-removal-plan.md](../refactor/analysis-profile-removal-plan.md).
+> `ReferenceChainSearchMode` (and `TryFindAnyRootPath_Fast`, the vulnerable per-root-BFS
+> implementation) were deleted outright; `ReferenceChainAnalyzer` now uses a single bounded
+> bidirectional search strategy unconditionally, with no `AnalysisProfile`/tier dependency left to
+> select it. `MaxCandidateNodes`/`MaxCandidateDepth`/`MaxRootExpansionDepth`/`LargeFanoutThreshold`
+> are kept as real (non-tier-varying) limits — see `ReferenceChainOptions.cs`'s own comments — which
+> is why the analyzer stays AMBER rather than GREEN in that section, independent of this doc's
+> concern. The four `SampleRootPathFinder.TryFindSampleRootPath` call sites below are a separate,
+> still-open exposure not addressed by that pass.
 
 ## Why this audit exists
 

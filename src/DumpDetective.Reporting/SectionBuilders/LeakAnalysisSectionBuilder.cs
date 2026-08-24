@@ -14,7 +14,11 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
     public string DisplayTitle => "Leak Candidates";
     public int SortOrder => 100;
 
-    private const int TopCandidateCount = 30;
+    // LeakCandidateCards render as rich narrative cards (score, explanation, GC/LOH impact notes),
+    // not table rows — unlike STCompact, the client has no card-pagination affordance, so this
+    // bounds report verbosity the same way an inline-prose truncation would (§11.2 D5's carve-out).
+    // The STCompact table below carries the complete ranked population instead.
+    private const int MaxLeakCandidateCards = 30;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is LeakCandidateDomainResult;
 
@@ -97,7 +101,7 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
                 compactTables.Add(STCompact(
                 "Top leak candidates by suspicion score",
                     new[] { CH("Type"), CH("Score","number"), CH("Severity"), CH("Class"), CH("Total Size","bytes"), CH("Instances","number"), CH("Gen2%", "number", "percent"), CH("Root Kind"), CH("Finalizable"), CH("Container"), CH("Ref Ratio", "number", "ratio") },
-                leak.TopCandidates.Take(TopCandidateCount).Select(candidate => R(new object?[] {
+                leak.TopCandidates.Select(candidate => R(new object?[] {
                     candidate.TypeName,
                     candidate.SuspicionScore,
                     candidate.Severity.ToString(),
@@ -116,8 +120,9 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
 
         var leakCandidateCards = new List<LeakCandidateCard>();
 
-        // Merge explanation + impact into typed cards for all high-signal candidates
-        for (int i = 0; i < leak.TopCandidates.Count; i++)
+        // Merge explanation + impact into typed cards for the highest-signal candidates
+        int cardCount = Math.Min(leak.TopCandidates.Count, MaxLeakCandidateCards);
+        for (int i = 0; i < cardCount; i++)
         {
             LeakCandidateRecord candidate = leak.TopCandidates[i];
             string impactBand = GetImpactBand(candidate.TotalSize);

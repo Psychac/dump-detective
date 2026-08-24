@@ -2,14 +2,6 @@ using System;
 
 namespace DumpDetective.Core.Options
 {
-    public enum AnalysisProfile
-    {
-        Fast = 0,
-        Balanced = 1,
-        Full = 2,
-        Deep = Full,
-    }
-
     /// <summary>
     /// Options that control how the <see cref="DumpDetective.Analysis.Analyzers.CollectionAnalyzer"/> runs and reports findings.
     /// This class centralizes thresholds and performance-related configuration so they can be

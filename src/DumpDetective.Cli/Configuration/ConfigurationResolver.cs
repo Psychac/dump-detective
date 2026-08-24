@@ -2,6 +2,7 @@ using DumpDetective.Cli.Commands;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Options;
 using DumpDetective.Cli.Configuration;
+using DumpDetective.Cli.Console;
 using DumpDetective.Cli.Services;
 using DumpDetective.Cli.Models;
 
@@ -176,6 +177,8 @@ internal sealed class ConfigurationResolver
         serializerOptions.Converters.Add(new JsonStringEnumConverter());
 
         string json = File.ReadAllText(configPath);
+        WarnIfLegacyProfileKeyPresent(json);
+
         CliConfigurationFileModel? model = JsonSerializer.Deserialize<CliConfigurationFileModel>(json, serializerOptions);
         if (model is null)
         {
@@ -183,6 +186,38 @@ internal sealed class ConfigurationResolver
         }
 
         return model;
+    }
+
+    // The AnalysisProfile tier system (Fast/Balanced/Full) was removed — every analyzer now runs
+    // exact, uncapped analysis unconditionally, so CliConfigurationFileModel no longer has a
+    // Profile property at all. A legacy top-level "Profile" key would otherwise be silently
+    // dropped by the deserializer with no signal to the user that it stopped doing anything —
+    // warn instead.
+    private static void WarnIfLegacyProfileKeyPresent(string json)
+    {
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(json, new JsonDocumentOptions
+            {
+                CommentHandling = JsonCommentHandling.Skip,
+                AllowTrailingCommas = true
+            });
+
+            foreach (JsonProperty prop in doc.RootElement.EnumerateObject())
+            {
+                if (string.Equals(prop.Name, "Profile", StringComparison.OrdinalIgnoreCase))
+                {
+                    ConsoleUx.Warning("Config key 'Profile' is deprecated and no longer has any effect — every " +
+                        "analyzer now runs exact, uncapped analysis by default. Remove it, or override specific " +
+                        "analyzer settings under the 'Analyzers' section instead.");
+                    return;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // Malformed JSON is reported by the real Deserialize call below with a clearer error.
+        }
     }
 
     private static RetentionOptions BuildMemoryLeakFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
@@ -481,11 +516,6 @@ internal sealed class ConfigurationResolver
         return Path.ChangeExtension(dumpPath, extension);
     }
 
-    private static AnalysisProfile ResolveAnalyzerProfile(string? analyzerProfile, string? globalProfile)
-        => ConfigurationParseHelpers.ParseAnalysisProfile(analyzerProfile)
-           ?? ConfigurationParseHelpers.ParseAnalysisProfile(globalProfile)
-           ?? AnalysisProfile.Balanced;
-
     private static bool TryGetAnalyzerSection(CliConfigurationFileModel config, string analyzerName, out JsonElement section)
     {
         section = default;
@@ -502,20 +532,6 @@ internal sealed class ConfigurationResolver
         }
 
         return false;
-    }
-
-    private static string? GetAnalyzerProfile(JsonElement section)
-    {
-        if (section.ValueKind != JsonValueKind.Object)
-            return null;
-
-        foreach (JsonProperty prop in section.EnumerateObject())
-        {
-            if (string.Equals(prop.Name, "Profile", StringComparison.OrdinalIgnoreCase) && prop.Value.ValueKind == JsonValueKind.String)
-                return prop.Value.GetString();
-        }
-
-        return null;
     }
 
     private static T ApplySectionOverrides<T>(T baseOptions, JsonElement section) where T : class
@@ -558,41 +574,6 @@ internal sealed class ConfigurationResolver
 
         T? merged = baseObj.Deserialize<T>();
         return merged ?? baseOptions;
-    }
-
-    private static T BuildAnalyzerOptionsFromConfig<T>(
-        CliConfigurationFileModel config,
-        string analyzerName,
-        T? legacyOptions,
-        Func<AnalysisProfile, T> createPreset) where T : class, new()
-    {
-        if (TryGetAnalyzerSection(config, analyzerName, out JsonElement section))
-        {
-            AnalysisProfile profile = ResolveAnalyzerProfile(GetAnalyzerProfile(section), config.Profile);
-            T preset = createPreset(profile);
-            return ApplySectionOverrides(preset, section);
-        }
-
-        AnalysisProfile globalProfile = ResolveAnalyzerProfile(analyzerProfile: null, config.Profile);
-        T fallbackPreset = createPreset(globalProfile);
-        return legacyOptions is null
-            ? fallbackPreset
-            : ApplyOptionsOverrides(fallbackPreset, legacyOptions);
-    }
-
-    private static AnalysisProfile? ParseAnalysisProfile(string? raw)
-    {
-        if (string.IsNullOrWhiteSpace(raw))
-            return null;
-
-        return raw.Trim().ToLowerInvariant() switch
-        {
-            "fast" => AnalysisProfile.Fast,
-            "balanced" => AnalysisProfile.Balanced,
-            "full" => AnalysisProfile.Full,
-            "deep" => AnalysisProfile.Full,
-            _ => throw new ArgumentException($"Invalid Analysis Profile value '{raw}' in config.")
-        };
     }
 
     private static CollectionAnalysisOptionsModel? MergeCollectionModel(CollectionAnalysisOptionsModel? primary, CollectionAnalysisOptionsModel? fallback)

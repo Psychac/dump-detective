@@ -12,7 +12,12 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 32 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
+**Implementation progress: 33 of 33 registered analyzers done — every analyzer in the roster has been
+through this pass. 29 are fully GREEN; four remain deliberately AMBER (§9.12 String, §9.17 Collection,
+§9.19 EventLeak, §9.20 ReferenceChain) where a real restructuring (a streaming hash-count pass, a
+dominator-tree rewire, a documented-but-unfixed `CountIncomingRefs` correctness bug, and exact
+bidirectional search respectively) was intentionally deferred past this pass rather than shipped
+half-done — see each section's implementation notes for what's left and why. §9.1 Boxing, §9.2 ObjectShape,
 §9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph, §9.8 LohFragmentation, §9.9
 SegmentReservation, §9.10 Jit, §9.11 Array, §9.12 String (partial — AMBER, not GREEN; see its
 implementation notes for what's deliberately still deferred), §9.13 AsyncStateMachine, §9.14
@@ -74,7 +79,14 @@ and the `MaxStateSamplesPerType`/`TopSampleCap` interface members entirely rathe
 as inert zeros; every `Top*`/`StateScanCapped`/`InstanceScanCapped` field and render-layer caveat that
 existed only to describe the cap's effect deleted downstream through both finding generators and two
 section builders; `DbConnectionAnalyzer.BuildTopPools`'s independent hardcoded `.Take(10)` — a second,
-analyzer-local cap over the now-uncapped pool population — found and deleted in the same pass)
+analyzer-local cap over the now-uncapped pool population — found and deleted in the same pass), §9.35
+LeakCandidate (deleted the analyzer's `Math.Min(30, candidates.Count)` post-hoc slice — `TopCandidates`
+is now the complete ranked population; found and deleted a second, redundant cap on top of it —
+`LeakAnalysisSectionBuilder` had its own local `TopCandidateCount = 30` `.Take()` before the same
+`STCompact` call, the identical double-truncation shape found elsewhere in this doc; kept one
+narrow, explicitly-justified render-layer cap for `LeakCandidateCards` specifically, since unlike
+`STCompact` tables the card UI has no client-side pagination affordance — same treatment D5 gives
+inline-prose truncations, applied to a different non-tabular widget)
 (§9.6's orphaned
 `DependentHandleAnalysisOptions` was also deleted alongside GCHandle — not a separate registered
 analyzer, per the row-4 cross-reference below).** See each section and the §7 verdict table for what
@@ -93,6 +105,12 @@ shipped in each.
 > added below as group 6. **Lesson for any future re-audit: enumerate from the module catalog, not
 > from the options folder.**
 Supersedes: the earlier profile-only removal plan (profile deletion is now a subset of this work, see §2)
+
+**Status (2026-08-24): this plan is complete.** All 33 registered analyzers have been through the
+per-analyzer exactness pass (§9) — 29 fully GREEN, 4 deliberately-deferred AMBER (§9.12 String,
+§9.17 Collection, §9.19 EventLeak, §9.20 ReferenceChain) — and §8's residual profile-only cleanup
+(the `AnalysisProfile` enum, resolver plumbing, dead parsers, config keys, tests, and docs) is done.
+The `AnalysisProfile` system no longer exists anywhere in `src`.
 
 ---
 
@@ -381,17 +399,66 @@ radius is a single cosmetic report field, not root exactness.
 | 32 | DbConnection | typed-resource | **GREEN** ✅ DONE | 2 of 2 | §9.32-9.34 — **no options class at all**; bounds are `private const`, never preset-varied |
 | 33 | WcfChannel | typed-resource | **GREEN** ✅ DONE | 2 of 2 | §9.33 — same shape; caps faulted-channel detection specifically |
 | 34 | HttpObject | typed-resource | **GREEN** ✅ DONE | 2 of 2 | §9.34 — headline counts already exact; only the drill-down sample is capped |
-| 35 | LeakCandidate | typed-resource | **GREEN** | 1 of 1 | §9.35 — already index-backed and exact; a template for "built right from the start" |
+| 35 | LeakCandidate | typed-resource | **GREEN** ✅ DONE | 1 of 1 | §9.35 — already index-backed and exact; a template for "built right from the start" |
 
 > Rows 4 and 22 are cross-references, not distinct analyzers (roster correction, top of document) —
 > **33 real rows for 33 registered analyzers.**
 
 ---
 
-## 8. Residual profile-only cleanup (not emergent from the audit)
+## 8. Residual profile-only cleanup (not emergent from the audit) — ✅ DONE
 
 These do not fall out of any analyzer's exactness work and must be done explicitly, after the audit
 retires the per-analyzer `Preset()` methods.
+
+**Implementation notes (as shipped):**
+
+- **Items 2, 3, 5, 7 were already resolved incidentally** by earlier per-analyzer work (§9.17
+  Collection deleted `CollectionAnalysisOptions.Profile`/`CollectionAnalysisOptionsModel.Profile`
+  and the `options.Profile == AnalysisProfile.Fast` runtime check outright rather than rewriting the
+  predicate as originally planned; `RetentionOptions.cs`'s stale `<see cref="AnalysisProfile"/>` was
+  already gone). Verified each by grep before assuming, not by trusting the plan's stale line numbers.
+- **Item 1's "dead duplicate" (`ConfigurationResolver.ParseAnalysisProfile`) plus the entire cluster
+  it sat next to (`ResolveAnalyzerProfile`, `GetAnalyzerProfile`, the generic
+  `BuildAnalyzerOptionsFromConfig<T>`, and `AnalyzerOptionsBuilder.BuildBalancedPresetFromCli`/
+  `BuildValidatedBalancedPresetFromCli`) had all become fully dead** by the time every analyzer's
+  `Preset()` was retired in §9 — zero remaining callers, confirmed by grep before deleting each.
+  Deleted as one cluster rather than item-by-item.
+- **Item 4 (collapse the resolver plumbing) was subsumed by the above** — nothing separate to do
+  once the dead cluster was gone.
+- **Item 6 (delete the enum + `CliConfigurationFileModel.Profile`), done, with the deprecation
+  warning implemented literally rather than skipped:** deleting the `Profile` property means System.Text.Json
+  silently drops an unrecognized `"Profile"` key with no signal to the user — added
+  `ConfigurationResolver.WarnIfLegacyProfileKeyPresent`, which parses the raw config JSON with
+  `JsonDocument` (independent of the strongly-typed model, specifically so the property could be
+  fully deleted rather than kept around just to detect it) and emits a `ConsoleUx.Warning` naming
+  the replacement (the `Analyzers` section) when a legacy `"Profile"` key is found at the root,
+  before falling through to normal resolution.
+- **Item 8, rewritten rather than deleted where real coverage existed.** `PresetBehaviorTests.cs`,
+  `StringAnalyzerOptionsTests.cs`, and `ThreadAnalysisOptionsTests.cs` no longer existed (removed
+  during §9.12/§9.23's own implementation passes). `ThreadStackClusterAnalyzerOptionsTests.cs` had
+  already been repurposed to test something unrelated (artifact carrying) — nothing to change.
+  `WeakReferenceOptionsTests.cs` was deleted outright (§9.31 — every test in it asserted deleted
+  preset values). `ConfigurationResolverTests.cs`'s six profile-tier tests were replaced with tests
+  matching present reality: a legacy `"Profile"` key is ignored and doesn't throw (including on
+  invalid values, which used to `throw ArgumentException`), and field overrides still work
+  regardless of legacy `"Profile"` keys anywhere in the config. No `Collection.Profile` assertions
+  remained to delete (already gone).
+- **Item 9 — all five docs annotated with a dated "Superseded note"** pointing at the relevant §9
+  subsection, rather than rewritten in place: `allocation-pattern-analyzer-audit.md` (the
+  cross-profile-comparison confusion this predates is moot once there's only one algorithm),
+  `crash-analyzer-audit.md` (also confirmed Bug 1, adjacent to the profile mention, is independently
+  already fixed), `dominator-tree-implementation-plan.md` and `dominator-tree-lengauer-tarjan.md`
+  (D9's prediction that exact-mode gating would stay independent of the tier system held exactly as
+  designed), and `root-path-search-blast-radius.md` (confirmed the `AnalysisProfile.Fast`-triggered
+  exposure it describes — `ReferenceChainSearchMode`/`TryFindAnyRootPath_Fast` — no longer exists,
+  while flagging that the doc's other four `SampleRootPathFinder` call sites are a separate,
+  still-open concern this pass didn't touch). Each claim was verified against current source before
+  writing the note, not assumed from the original audit text.
+- **Done-check re-run clean**: `grep -rn "AnalysisProfile" src tests` (excluding this plan doc and
+  the new explanatory comments/doc notes above, which are expected) returns nothing live;
+  `Preset(AnalysisProfile`, `ParseAnalysisProfile`, `ResolveAnalyzerProfile`/`GetAnalyzerProfile`,
+  and `options.Profile` all return zero matches in `src`.
 
 1. **Delete the dead duplicate parser** — `ConfigurationResolver.ParseAnalysisProfile`
    ([:608-621](../../src/DumpDetective.Cli/Configuration/ConfigurationResolver.cs#L608-L621)).
@@ -3107,7 +3174,7 @@ right, only the drill-down sample is bounded.
 
 ---
 
-### 9.35 LeakCandidate — **GREEN**, no options class, and not gated on §6.2
+### 9.35 LeakCandidate — **GREEN** ✅ IMPLEMENTED, no options class, and not gated on §6.2
 
 [LeakCandidateAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/LeakCandidateAnalyzer.cs)
 (`internal sealed`, `IDeferredAnalyzer`)
@@ -3127,6 +3194,43 @@ int topCount = Math.Min(30, /* candidates.Count */);
 — `context.CompletedRunResults?.GetResult<GCHandleDomainResult>()` — rather than re-deriving pinned
 /dependent-handle target types itself. That is the composition pattern the retained-size accessor
 (B2) should follow: build once, consume by reference, not by re-scanning.
+
+#### Implementation notes (as shipped)
+
+- **Deleted the `Math.Min(30, candidates.Count)` slice; `LeakCandidateDomainResult.TopCandidates` is
+  now the complete ranked population** — `candidates` (already sorted by suspicion score, then size,
+  then type name) is returned directly with no intermediate copy.
+- **Found a second, redundant cap while implementing that the original audit didn't call out**:
+  `LeakAnalysisSectionBuilder` had its own local `private const int TopCandidateCount = 30;` with a
+  `.Take(TopCandidateCount)` immediately before the `STCompact` call that renders these same
+  candidates — a genuine double-truncation (the domain result was already capped at 30, then the
+  render layer re-capped the same 30 down to whatever `STCompact`'s pagination would've shown
+  anyway), the same "Mechanism-1/Mechanism-2 mix" shape §9.1 Boxing found. Deleted; the table now
+  gets the full list with no explicit `rowLimit`, falling through to `STCompact`'s uniform default,
+  matching every other section builder post-D5.
+- **`LeakCandidateCards` — the one deliberate exception, and why it's not a D5 violation.** Unlike
+  `STCompact`/`CompactTable`, the `LeakCandidateCard` rendering path
+  ([report.renderers.sections.js:724-731](../../src/DumpDetective.Reporting/Templates/report.renderers.sections.js#L724))
+  has no client-side pagination — every card in the array is rendered into the DOM directly. Once
+  `TopCandidates` stopped being pre-capped at 30, feeding the full list into card generation would
+  have silently uncapped a UI widget that was never designed to browse hundreds of rich cards
+  (score, explanation text, GC/LOH impact notes) the way a table can. Added `MaxLeakCandidateCards
+  = 30` as a section-builder-local constant specifically for the card-building loop, with a comment
+  explaining the distinction — this is the same category of decision D5 makes for inline-prose
+  truncations (a genuinely non-tabular, non-paginated display mechanism gets a small bounded
+  constant instead of being forced into `CompactTable` or left silently unbounded), just applied to
+  a card widget instead of a sentence. The `STCompact` table one block above these cards still shows
+  the complete, exact population — nothing about the underlying data or the `TotalCandidates`/
+  per-class counts is capped, only how many narrative cards get built.
+- **No dedicated `LeakCandidateAnalyzer` unit tests existed to update** — matches the "already
+  index-backed and exact, a template for built right from the start" description; the existing
+  `LeakCandidateFindingGeneratorTests.cs` tests construct `LeakCandidateDomainResult` directly and
+  needed no changes (they don't exercise the deleted slice).
+- **This closes out §9 — all 33 registered analyzers have now been through this pass** (29 GREEN, 4
+  deliberately-deferred AMBER: §9.12 String, §9.17 Collection, §9.19 EventLeak, §9.20 ReferenceChain).
+  §11.5's ordering constraints are all satisfied by the order analyzers were implemented in. §8's
+  residual profile-only cleanup (dead parsers, the enum's home, resolver plumbing, config keys) is
+  the only work item this plan describes that hasn't been executed yet.
 
 ---
 

@@ -8,15 +8,6 @@ namespace DumpDetective.Cli.Configuration;
 
 internal static class AnalyzerOptionsBuilder
 {
-    public static T BuildBalancedPresetFromCli<T>(
-        AnalysisCommandRequest _,
-        Func<AnalysisProfile, T> presetFactory)
-        where T : class
-    {
-        T preset = presetFactory(AnalysisProfile.Balanced);
-        return preset;
-    }
-
     // Special-case: allow CLI to override a couple of StringAnalysis options that don't go
     // through the (now deleted) profile/preset system.
     public static StringAnalysisOptions BuildStringAnalysisFromCli(AnalysisCommandRequest request)
@@ -35,16 +26,6 @@ internal static class AnalyzerOptionsBuilder
             ProduceRawExports = s.ProduceRawExports,
             MinDuplicateCharLength = s.MinDuplicateCharLength
         };
-    }
-
-    public static T BuildValidatedBalancedPresetFromCli<T>(
-        AnalysisCommandRequest _,
-        Func<AnalysisProfile, T> presetFactory,
-        Func<T, T> validate)
-        where T : class
-    {
-        T preset = presetFactory(AnalysisProfile.Balanced);
-        return validate(preset);
     }
 
     public static DiagnosticsOptions BuildDiagnosticsFromCli(AnalysisCommandRequest request)

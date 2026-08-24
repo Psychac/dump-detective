@@ -12,6 +12,13 @@ see Phase 4/6 below. Report integration (swapping the P2-4 sub-table's heuristic
 `ExactRetainedBytes`) was originally deferred past "ship dark" but has since landed too — see
 Phase 7.
 
+> **Superseded note (2026-08-24):** the `AnalysisProfile` tier system mentioned in Phase 4 below
+> (`AnalysisProfile.Preset(...)`) has since been deleted entirely — see §9.18 of
+> [analysis-profile-removal-plan.md](../../refactor/analysis-profile-removal-plan.md). D9's
+> prediction that `EnableExactDominatorTree` would stay independent of it held: `Preset`/`Default`
+> were removed from `RetentionOptions` and every kept field stopped tier-varying, exactly as
+> anticipated here.
+
 **Order matters**: D5 must land before the rest is meaningfully testable end-to-end, since it's the
 edge source everything downstream consumes. Phases below are numbered in build order, not decision
 number order.

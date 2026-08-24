@@ -7,8 +7,17 @@
 > **Protocol**: [phase1-analyzer-architecture-review.md](phase1-analyzer-architecture-review.md)
 >
 > **Date**: 2026-07-28
-
----
+>
+> **Superseded note (2026-08-24):** the `AnalysisProfile` tier system referenced in Bug 1 below no
+> longer exists — see §9.26 of
+> [analysis-profile-removal-plan.md](../../refactor/analysis-profile-removal-plan.md).
+> `CrashAnalysisOptions` no longer varies `MaxOriginalStackFramesToPrint`/
+> `MaxCurrentThreadFramesToPrint`/`TopCrashThreadCandidates` by tier (seven of eight knobs were
+> deleted outright; `MaxExceptionsPerType` was kept as a fixed constant) — the "Full requests 40,
+> Fast requests 12" framing is moot. Bug 1 itself (`BuildCrashThreadSnapshots`'s static wrapper
+> using `new CrashAnalyzer()` instead of the running instance's options) is confirmed fixed as of
+> the same pass — `BuildDomainResult` now calls the instance method `BuildCrashThreadSnapshotsImpl`
+> directly (`CrashAnalyzer.cs:338`), and the static wrapper no longer exists.
 
 ## Audit Area 1 â€” Role & Opportunity Assessment
 

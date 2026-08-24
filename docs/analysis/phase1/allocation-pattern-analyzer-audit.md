@@ -14,6 +14,18 @@
 > P0–P3 roadmap (18 items) is fully resolved — see [Resolved History](#resolved-history) at the
 > bottom. This document supersedes the previous roadmap; only findings that are new or still
 > outstanding as of this re-audit are tracked below.
+>
+> **Superseded note (2026-08-24):** the `AnalysisProfile` tier system (Fast/Balanced/Full) referenced
+> below no longer exists — see §9.30 of
+> [analysis-profile-removal-plan.md](../../refactor/analysis-profile-removal-plan.md).
+> `SelectionMode`/`ScanStrategy`/`SelectionPriority` collapsed to one algorithm (`CompositeScore`
+> ranking, classify-every-candidate-first), so every dump now produces the same selection regardless
+> of any tier a user might still configure — the "two reports differ because of a tier" concern this
+> doc raises below is moot. `TryGetTypeName` is now called once per distinct type across the *entire*
+> population (not a `scanLimit`-bounded prefix), matching the same O(distinct-types), one-cached-lookup
+> shape already accepted as negligible for Boxing/ObjectShape elsewhere in this codebase — the
+> "resolves names before final selection" issue below is superseded, not fixed as originally
+> recommended.
 
 ---
 

@@ -1,4 +1,3 @@
-using DumpDetective.Core.Options;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Enums;
 
@@ -41,19 +40,4 @@ internal static class ConfigurationParseHelpers
     public static int? PositiveOrNull(int? value) => value is > 0 ? value : null;
 
     public static int? NonNegativeOrNull(int? value) => value is >= 0 ? value : null;
-
-    public static AnalysisProfile? ParseAnalysisProfile(string? raw)
-    {
-        if (string.IsNullOrWhiteSpace(raw))
-            return null;
-
-        return raw.Trim().ToLowerInvariant() switch
-        {
-            "fast" => AnalysisProfile.Fast,
-            "balanced" => AnalysisProfile.Balanced,
-            "full" => AnalysisProfile.Full,
-            "deep" => AnalysisProfile.Full,
-            _ => throw new ArgumentException($"Invalid Analysis Profile value '{raw}' in config.")
-        };
-    }
 }

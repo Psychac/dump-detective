@@ -73,6 +73,7 @@ async function bootstrap() {
   const rightRail = document.getElementById('report-right-rail-content');
   const rightRailHost = document.getElementById('report-right-rail');
   if (rightRailHost) rightRailHost.hidden = true;
+  document.body.classList.remove('has-right-rail');
   const renderMode = String((doc && doc.renderMode) || '').toLowerCase();
   const reportContent = document.getElementById('report-content');
   const hasPreRenderedContent = renderMode === 'prerendered'
@@ -91,26 +92,27 @@ async function bootstrap() {
   }
 
   const executive = R.buildExecutiveSummary(doc);
-  if (executive) main.appendChild(executive);
+  if (executive) {
+    if (hasPreRenderedContent && reportContent) {
+      const preRenderedScorecard = reportContent.querySelector('#health-scorecard, .health-scorecard');
+      if (preRenderedScorecard && preRenderedScorecard.parentElement === reportContent) {
+        reportContent.insertBefore(executive, preRenderedScorecard.nextSibling);
+      } else {
+        reportContent.insertBefore(executive, reportContent.firstChild);
+      }
+    } else {
+      main.appendChild(executive);
+    }
+  }
 
   const actionQueue = R.buildActionQueuePanel(doc);
   if (actionQueue) {
-    if (isV2 && rightRail) {
-      rightRail.appendChild(actionQueue);
-      if (rightRailHost) rightRailHost.hidden = false;
-    } else {
-      main.appendChild(actionQueue);
-    }
+    main.appendChild(actionQueue);
   }
 
   const forensicsRail = R.buildForensicsRailPanel(doc);
   if (forensicsRail) {
-    if (isV2 && rightRail) {
-      rightRail.appendChild(forensicsRail);
-      if (rightRailHost) rightRailHost.hidden = false;
-    } else {
-      main.appendChild(forensicsRail);
-    }
+    main.appendChild(forensicsRail);
   }
 
   const globalSearch = R.buildGlobalSearchBar(doc);

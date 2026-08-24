@@ -59,10 +59,10 @@ internal sealed class AnalyzerOptionsModel
 
 internal sealed class ReportOptionsModel
 {
-    public ReportFormat Format { get; init; } = ReportFormat.Html;
-    public ReportStyleVersion StyleVersion { get; init; } = ReportStyleVersion.V1;
-    public bool PreRender { get; init; } = false;
-    public bool SeparateJson { get; init; } = false;
+    public ReportFormat? Format { get; init; }
+    public ReportStyleVersion? StyleVersion { get; init; }
+    public bool? PreRender { get; init; }
+    public bool? SeparateJson { get; init; }
 }
 
 internal sealed class IndexingOptionsModel

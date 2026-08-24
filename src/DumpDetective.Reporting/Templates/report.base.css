@@ -211,9 +211,13 @@ body {
 
 body.report-style-v2 .page-shell {
   display: grid;
-  grid-template-columns: 288px minmax(0, 1fr) 320px;
+  grid-template-columns: 288px minmax(0, 1fr);
   gap: var(--space-4);
   align-items: start;
+}
+
+body.report-style-v2.has-right-rail .page-shell {
+  grid-template-columns: 288px minmax(0, 1fr) 320px;
 }
 
 body.report-style-v2 .report-navbar {
@@ -232,9 +236,13 @@ body.report-style-v2 main#main {
 }
 
 body.report-style-v2 .report-right-rail {
-  display: block;
+  display: none;
   position: sticky;
   top: var(--space-4);
+}
+
+body.report-style-v2.has-right-rail .report-right-rail {
+  display: block;
 }
 
 body.report-style-v2 .report-right-rail[hidden] {
@@ -390,7 +398,11 @@ body.report-style-v2 .anchor-flash {
     grid-template-columns: 260px minmax(0, 1fr);
   }
 
-  body.report-style-v2 .report-right-rail {
+  body.report-style-v2.has-right-rail .page-shell {
+    grid-template-columns: 260px minmax(0, 1fr);
+  }
+
+  body.report-style-v2.has-right-rail .report-right-rail {
     position: static;
     grid-column: 1 / -1;
     order: 3;
@@ -407,7 +419,7 @@ body.report-style-v2 .anchor-flash {
     max-height: none;
   }
 
-  body.report-style-v2 .report-right-rail {
+  body.report-style-v2.has-right-rail .report-right-rail {
     position: static;
   }
 }

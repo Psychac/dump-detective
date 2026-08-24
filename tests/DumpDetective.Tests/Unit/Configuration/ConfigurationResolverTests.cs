@@ -78,6 +78,45 @@ public sealed class ConfigurationResolverTests
     }
 
     [Fact]
+    public void Resolve_ShouldNotLetPartialReportObjectShadowTopLevelReportStyle()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string configPath = Path.Combine(tempDirectory, "config.json");
+            File.WriteAllText(configPath, """
+            {
+              "DumpPath": "C:/dumps/from-config.dmp",
+              "ReportStyleVersion": "v2",
+              "Report": {
+                "Format": "Html"
+              }
+            }
+            """);
+
+            AnalysisCommandRequest request = CreateRequest(configPath: configPath) with
+            {
+                DumpPath = null,
+                OutputFormat = ReportFormat.Html,
+                ReportStyleVersion = ReportStyleVersion.V1,
+                PreRender = true,
+                SeparateJson = true
+            };
+            ConfigurationResolver resolver = new();
+
+            ResolvedExecutionOptions resolved = resolver.Resolve(request);
+
+            resolved.Report.StyleVersion.Should().Be(ReportStyleVersion.V2);
+            resolved.Report.PreRender.Should().BeTrue();
+            resolved.Report.SeparateJson.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Resolve_ShouldUseCliReportStyle_WhenConfigMissingStyle()
     {
         string tempDirectory = CreateTempDirectory();

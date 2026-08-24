@@ -165,6 +165,122 @@ public sealed class HtmlRendererCssTests
     }
 
     [Fact]
+    public void Render_V2Style_KeepsActionPanelsInMainFlowByDefault()
+    {
+        var serializer = new ReportSerializer();
+        var finding = new InsightFinding(
+            Analyzer: "RetentionAnalyzer",
+            Category: "Memory",
+            Severity: FindingSeverity.Warning,
+            Title: "Potential retention",
+            Evidence: "Object growth observed",
+            Recommendation: "Investigate root path",
+            Tags: ["memory"],
+            Fingerprint: "retention-1");
+
+        var fakeRun = new AnalyzerRunResult(
+            "RetentionAnalyzer",
+            AnalyzerExecutionStatus.Success,
+            TimeSpan.FromMilliseconds(1),
+            new GenericAnalyzerDomainResult(),
+            null,
+            null,
+            Findings: [finding]);
+
+        AnalysisReportDocument doc = serializer.Serialize(
+            "dump.dmp",
+            new[] { fakeRun },
+            TimeSpan.FromSeconds(0.5),
+            new DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
+            new DefaultSectionBuilderFactory().CreateReportBuilders());
+
+        var renderer = new HtmlReportRenderer();
+        string html = renderer.Render(doc, new HtmlRenderSettings(PreRender: false, StyleVersion: ReportStyleVersion.V2));
+
+        html.Should().Contain("main.appendChild(actionQueue);");
+        html.Should().Contain("main.appendChild(forensicsRail);");
+        html.Should().NotContain("rightRail.appendChild(actionQueue);");
+        html.Should().NotContain("rightRail.appendChild(forensicsRail);");
+        html.Should().Contain("body.report-style-v2.has-right-rail .page-shell");
+    }
+
+    [Fact]
+    public void Render_PreRenderedHealthScorecard_UsesCardGridMarkup()
+    {
+        var serializer = new ReportSerializer();
+        var finding = new InsightFinding(
+            Analyzer: "RetentionAnalyzer",
+            Category: "Memory",
+            Severity: FindingSeverity.Warning,
+            Title: "Potential retention",
+            Evidence: "Object growth observed",
+            Recommendation: "Investigate root path",
+            Tags: ["memory"],
+            Fingerprint: "retention-1");
+
+        var fakeRun = new AnalyzerRunResult(
+            "RetentionAnalyzer",
+            AnalyzerExecutionStatus.Success,
+            TimeSpan.FromMilliseconds(1),
+            new GenericAnalyzerDomainResult(),
+            null,
+            null,
+            Findings: [finding]);
+
+        AnalysisReportDocument doc = serializer.Serialize(
+            "dump.dmp",
+            new[] { fakeRun },
+            TimeSpan.FromSeconds(0.5),
+            new DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
+            new DefaultSectionBuilderFactory().CreateReportBuilders());
+
+        var renderer = new HtmlReportRenderer();
+        string html = renderer.Render(doc, new HtmlRenderSettings(PreRender: true, StyleVersion: ReportStyleVersion.V1));
+
+        html.Should().Contain("health-scorecard__banner");
+        html.Should().Contain("health-scorecard__grid");
+        html.Should().Contain("health-domain-row");
+        html.Should().NotContain("<section class=\"section-card health-scorecard\"><h2>Health Summary</h2>");
+    }
+
+    [Fact]
+    public void Render_PreRenderedMode_InsertsExecutiveSummaryAfterHealthScorecard()
+    {
+        var serializer = new ReportSerializer();
+        var finding = new InsightFinding(
+            Analyzer: "RetentionAnalyzer",
+            Category: "Memory",
+            Severity: FindingSeverity.Warning,
+            Title: "Potential retention",
+            Evidence: "Object growth observed",
+            Recommendation: "Investigate root path",
+            Tags: ["memory"],
+            Fingerprint: "retention-1");
+
+        var fakeRun = new AnalyzerRunResult(
+            "RetentionAnalyzer",
+            AnalyzerExecutionStatus.Success,
+            TimeSpan.FromMilliseconds(1),
+            new GenericAnalyzerDomainResult(),
+            null,
+            null,
+            Findings: [finding]);
+
+        AnalysisReportDocument doc = serializer.Serialize(
+            "dump.dmp",
+            new[] { fakeRun },
+            TimeSpan.FromSeconds(0.5),
+            new DefaultSectionBuilderFactory().CreateAnalyzerBuilders(),
+            new DefaultSectionBuilderFactory().CreateReportBuilders());
+
+        var renderer = new HtmlReportRenderer();
+        string html = renderer.Render(doc, new HtmlRenderSettings(PreRender: true, StyleVersion: ReportStyleVersion.V1));
+
+        html.Should().Contain("const preRenderedScorecard = reportContent.querySelector('#health-scorecard, .health-scorecard');");
+        html.Should().Contain("reportContent.insertBefore(executive, preRenderedScorecard.nextSibling);");
+    }
+
+    [Fact]
     public void Render_ContainsKeyboardAndCollapsibleAriaHooks()
     {
         var serializer = new ReportSerializer();

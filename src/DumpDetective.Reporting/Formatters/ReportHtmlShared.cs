@@ -112,75 +112,241 @@ internal static class ReportHtmlShared
             return string.Empty;
 
         var sb = new StringBuilder();
-        sb.AppendLine("<section class=\"section-card health-scorecard\"><h2>Health Summary</h2>");
-        bool hasTrendData = scorecard.Domains.Values.Any(d => d.Change.HasValue);
-        bool hasHistory   = hasTrendData && scorecard.Domains.Values.Any(d => d.SeverityHistory is { Count: > 2 });
-        sb.Append("<table>");
-        if (hasTrendData)
+        sb.AppendLine("<section class=\"section-card health-scorecard\" id=\"health-scorecard\" data-component-id=\"health-scorecard\">");
+        sb.AppendLine("<span class=\"section-anchor-legacy\" id=\"sec-health\" aria-hidden=\"true\"></span>");
+
+        DomainSeverity overallSeverity = scorecard.OverallSeverity;
+        string overallCss = SeverityCss(overallSeverity);
+        sb.AppendLine($"<div class=\"health-scorecard__banner health-scorecard__banner--{overallCss}\">");
+        sb.AppendLine("<div class=\"health-scorecard__banner-left\">");
+        sb.AppendLine("<span class=\"health-scorecard__banner-title\">Health Summary</span>");
+        sb.AppendLine($"<span class=\"health-scorecard__banner-verdict\">{Enc(SeverityMark(overallSeverity))}&nbsp;{Enc(SeverityLabel(overallSeverity))}</span>");
+        sb.AppendLine("</div>");
+
+        if (scorecard.Trend is { } trend)
         {
-            if (hasHistory)
-                sb.AppendLine("<thead><tr><th scope=\"col\">Domain</th><th scope=\"col\">Baseline</th><th scope=\"col\">Progression</th><th scope=\"col\">Current</th><th scope=\"col\">Change</th><th scope=\"col\">Movement</th><th scope=\"col\">Critical</th><th scope=\"col\">Warning</th></tr></thead><tbody>");
-            else
-                sb.AppendLine("<thead><tr><th scope=\"col\">Domain</th><th scope=\"col\">Baseline</th><th scope=\"col\">Current</th><th scope=\"col\">Change</th><th scope=\"col\">Movement</th><th scope=\"col\">Critical</th><th scope=\"col\">Warning</th></tr></thead><tbody>");
-            foreach (var entry in scorecard.Domains.Values)
-            {
-                string cur = entry.Severity.ToString();
-                string bas = entry.BaselineSeverity?.ToString() ?? "—";
-                string chg = entry.Change switch
-                {
-                    DomainSeverityChange.Regressed  => "⬆ Regressed",
-                    DomainSeverityChange.Improved   => "⬇ Improved",
-                    DomainSeverityChange.NewDomain  => "🆕 New",
-                    DomainSeverityChange.Removed    => "🗑 Removed",
-                    _                               => "= Stable"
-                };
-                string chgCss = entry.Change switch
-                {
-                    DomainSeverityChange.Regressed => "trend-regressed",
-                    DomainSeverityChange.Improved  => "trend-improved",
-                    _                              => string.Empty
-                };
-                string sevCss = $"health-severity health-severity-{cur.ToLowerInvariant()}";
-
-                string movementHtml = "";
-                if (entry.VelocityScore is double v)
-                {
-                    string state;
-                    string cls;
-                    if (v > 0.1) { state = "\u25b2\u00a0accel."; cls = "health-domain-move--accelerating"; }
-                    else if (v < -0.1) { state = "\u25bc\u00a0recov."; cls = "health-domain-move--recovering"; }
-                    else { state = "\u2192\u00a0stable"; cls = "health-domain-move--stable"; }
-                    string vol = entry.VolatilityScore is double volv ? volv.ToString("F2") : "\u2014";
-                    string conf = entry.ConfidenceTrend is not null ? $" \u00b7 conf: {entry.ConfidenceTrend}" : "";
-                    movementHtml = $"<span class=\"health-domain-move {cls}\" role=\"status\" aria-label=\"Momentum\" title=\"\u0394v={v:F2} \u00b7 \u03c3={vol}{conf}\">{Enc(state)}</span>";
-                }
-
-                if (hasHistory)
-                {
-                    string progression = RenderSeverityProgressionHtml(entry.SeverityHistory);
-                    sb.AppendLine($"<tr><td>{Enc(entry.Domain)}</td><td>{Enc(bas)}</td><td class=\"health-progression\">{progression}</td><td class=\"{sevCss}\">{Enc(cur)}</td><td class=\"{chgCss}\">{Enc(chg)}</td><td>{movementHtml}</td><td>{entry.CriticalCount}</td><td>{entry.WarningCount}</td></tr>");
-                }
-                else
-                {
-                    sb.AppendLine($"<tr><td>{Enc(entry.Domain)}</td><td>{Enc(bas)}</td><td class=\"{sevCss}\">{Enc(cur)}</td><td class=\"{chgCss}\">{Enc(chg)}</td><td>{movementHtml}</td><td>{entry.CriticalCount}</td><td>{entry.WarningCount}</td></tr>");
-                }
-            }
+            RenderTrendBannerStats(sb, trend);
         }
         else
         {
-            sb.AppendLine("<thead><tr><th scope=\"col\">Domain</th><th scope=\"col\">Severity</th><th scope=\"col\">Critical</th><th scope=\"col\">Warning</th></tr></thead><tbody>");
-            foreach (var entry in scorecard.Domains.Values)
-            {
-                string severity = entry.Severity.ToString();
-                string severityCss = $"health-severity health-severity-{severity.ToLowerInvariant()}";
-                sb.AppendLine($"<tr><td>{Enc(entry.Domain)}</td><td class=\"{severityCss}\">{Enc(severity)}</td><td>{entry.CriticalCount}</td><td>{entry.WarningCount}</td></tr>");
-            }
+            RenderSingleDumpBannerStats(sb, scorecard.Domains.Values);
         }
-        sb.AppendLine("</tbody></table>");
-        sb.AppendLine($"<div class=\"health-scorecard__overall\">Overall severity: {Enc(scorecard.OverallSeverity.ToString())}</div>");
+
+        sb.AppendLine("</div>");
+
+        bool hasTrendData = scorecard.Domains.Values.Any(static d => d.Change.HasValue);
+        bool hasHistory = hasTrendData && scorecard.Domains.Values.Any(static d => d.SeverityHistory is { Count: > 2 });
+        if (hasHistory)
+        {
+            int snapshotCount = 0;
+            foreach (DomainHealthEntry entry in scorecard.Domains.Values)
+            {
+                if (entry.SeverityHistory is { Count: > 2 } history)
+                {
+                    snapshotCount = history.Count;
+                    break;
+                }
+            }
+
+            sb.AppendLine("<div class=\"health-scorecard__legend\">");
+            sb.AppendLine("<span class=\"health-scorecard__legend-bar\"><span class=\"health-timeline-seg health-timeline-seg--ok\"></span><span class=\"health-timeline-seg health-timeline-seg--warning\"></span><span class=\"health-timeline-seg health-timeline-seg--critical\"></span></span>");
+            sb.AppendLine($"<span class=\"health-scorecard__legend-text\">Severity trend bar - Base -> D{snapshotCount} ({snapshotCount} dumps)</span>");
+            sb.AppendLine("</div>");
+        }
+
+        sb.AppendLine("<div class=\"health-scorecard__grid\" role=\"list\">");
+        foreach (DomainHealthEntry entry in scorecard.Domains.Values)
+        {
+            if (hasTrendData)
+                RenderTrendHealthCard(sb, entry);
+            else
+                RenderSingleDumpHealthRow(sb, entry);
+        }
+        sb.AppendLine("</div>");
         sb.AppendLine("</section>");
         return sb.ToString();
     }
+
+    private static void RenderTrendBannerStats(StringBuilder sb, TrendSummary trend)
+    {
+        if (trend.DomainsRegressed <= 0 && trend.DomainsImproved <= 0 && trend.NetCriticalChange == 0 && trend.NetWarningChange == 0)
+            return;
+
+        sb.AppendLine("<div class=\"health-scorecard__banner-right\">");
+        if (trend.DomainsRegressed > 0) RenderBannerStat(sb, "Regressed", trend.DomainsRegressed, "regressed");
+        if (trend.DomainsImproved > 0) RenderBannerStat(sb, "Improved", trend.DomainsImproved, "improved");
+        if (trend.NetCriticalChange != 0) RenderBannerStat(sb, "Critical Δ", trend.NetCriticalChange, "critical", signed: true);
+        if (trend.NetWarningChange != 0) RenderBannerStat(sb, "Warning Δ", trend.NetWarningChange, "warning", signed: true);
+        sb.AppendLine("</div>");
+    }
+
+    private static void RenderSingleDumpBannerStats(StringBuilder sb, IEnumerable<DomainHealthEntry> entries)
+    {
+        int totalCritical = 0;
+        int totalWarning = 0;
+        foreach (DomainHealthEntry entry in entries)
+        {
+            totalCritical += entry.CriticalCount;
+            totalWarning += entry.WarningCount;
+        }
+
+        if (totalCritical <= 0 && totalWarning <= 0)
+            return;
+
+        sb.AppendLine("<div class=\"health-scorecard__banner-right\">");
+        if (totalCritical > 0) RenderBannerStat(sb, "Critical", totalCritical, "critical");
+        if (totalWarning > 0) RenderBannerStat(sb, "Warning", totalWarning, "warning");
+        sb.AppendLine("</div>");
+    }
+
+    private static void RenderBannerStat(StringBuilder sb, string label, int value, string modifier, bool signed = false)
+    {
+        string display = signed && value > 0 ? $"+{value}" : value.ToString(CultureInfo.InvariantCulture);
+        sb.AppendLine($"<div class=\"health-scorecard__banner-stat health-scorecard__banner-stat--{modifier}\"><span class=\"health-scorecard__banner-stat-label\">{Enc(label)}</span><span class=\"health-scorecard__banner-stat-value\">{Enc(display)}</span></div>");
+    }
+
+    private static void RenderSingleDumpHealthRow(StringBuilder sb, DomainHealthEntry entry)
+    {
+        string severityCss = SeverityCss(entry.Severity);
+        sb.Append($"<div class=\"health-domain-row health-domain-row--{severityCss}\" role=\"listitem\">");
+        sb.Append($"<span class=\"health-domain-row__name\">{Enc(entry.Domain)}</span>");
+        sb.Append($"<span class=\"health-domain-row__pill health-domain-row__pill--{severityCss}\">{Enc(SeverityMark(entry.Severity))}&nbsp;{Enc(SeverityLabel(entry.Severity))}</span>");
+        if (entry.CriticalCount > 0 || entry.WarningCount > 0)
+        {
+            var parts = new List<string>(2);
+            if (entry.CriticalCount > 0) parts.Add($"{entry.CriticalCount.ToString(CultureInfo.InvariantCulture)}&nbsp;crit");
+            if (entry.WarningCount > 0) parts.Add($"{entry.WarningCount.ToString(CultureInfo.InvariantCulture)}&nbsp;warn");
+            sb.Append($"<span class=\"health-domain-row__counts\">{string.Join("&ensp;&middot;&ensp;", parts)}</span>");
+        }
+        sb.AppendLine("</div>");
+    }
+
+    private static void RenderTrendHealthCard(StringBuilder sb, DomainHealthEntry entry)
+    {
+        string severityCss = SeverityCss(entry.Severity);
+        sb.AppendLine($"<div class=\"health-domain-card health-domain-card--{severityCss}\" role=\"listitem\">");
+        sb.AppendLine("<div class=\"health-domain-card__head\">");
+        sb.AppendLine($"<span class=\"health-domain-card__name\">{Enc(entry.Domain)}</span>");
+        if (entry.Change.HasValue)
+        {
+            (string label, string css) = ChangeInfo(entry.Change.Value);
+            sb.AppendLine($"<span class=\"health-domain-card__change health-domain-card__change--{css}\">{Enc(label)}</span>");
+        }
+        if (entry.VelocityScore is double velocity)
+            RenderMovementPill(sb, entry, velocity);
+        sb.AppendLine("</div>");
+
+        if (entry.SeverityHistory is { Count: > 2 } history)
+            RenderSeverityTimeline(sb, history);
+        else if (entry.BaselineSeverity.HasValue)
+            RenderSeverityTransition(sb, entry.BaselineSeverity.Value, entry.Severity);
+
+        sb.Append("<div class=\"health-domain-card__foot\">");
+        sb.Append($"<span class=\"health-domain-card__sev health-domain-card__sev--{severityCss}\">{Enc(SeverityMark(entry.Severity))}&nbsp;{Enc(SeverityLabel(entry.Severity))}</span>");
+        RenderDeltaChips(sb, entry);
+        sb.AppendLine("</div>");
+        sb.AppendLine("</div>");
+    }
+
+    private static void RenderMovementPill(StringBuilder sb, DomainHealthEntry entry, double velocity)
+    {
+        string label;
+        string modifier;
+        if (velocity > 0.1) { label = "▲&nbsp;accel."; modifier = "accelerating"; }
+        else if (velocity < -0.1) { label = "▼&nbsp;recov."; modifier = "recovering"; }
+        else { label = "→&nbsp;stable"; modifier = "stable"; }
+
+        string volatility = entry.VolatilityScore is double value ? value.ToString("F2", CultureInfo.InvariantCulture) : "—";
+        string confidence = entry.ConfidenceTrend is not null ? $" · conf: {entry.ConfidenceTrend}" : string.Empty;
+        sb.AppendLine($"<span class=\"health-domain-move health-domain-move--{modifier}\" role=\"status\" aria-label=\"Momentum: {modifier}\" title=\"Δv={velocity.ToString("F2", CultureInfo.InvariantCulture)} · σ={Enc(volatility + confidence)}\">{label}</span>");
+    }
+
+    private static void RenderSeverityTimeline(StringBuilder sb, IReadOnlyList<DomainSeverity> history)
+    {
+        sb.AppendLine("<div class=\"health-domain-card__timeline-wrap\">");
+        sb.AppendLine("<div class=\"health-domain-card__timeline\">");
+        for (int i = 0; i < history.Count; i++)
+        {
+            DomainSeverity severity = history[i];
+            string role = i == 0 ? "Baseline" : i == history.Count - 1 ? "Current" : "Dump";
+            sb.AppendLine($"<span class=\"health-timeline-seg health-timeline-seg--{SeverityCss(severity)}\" title=\"{role} #{i + 1} - {Enc(SeverityLabel(severity))}\"></span>");
+        }
+        sb.AppendLine("</div>");
+        sb.AppendLine("<div class=\"health-domain-card__timeline-indices\">");
+        for (int i = 0; i < history.Count; i++)
+        {
+            string cls = i == 0 ? " health-timeline-idx--first" : string.Empty;
+            string label = i == 0 ? "Base" : $"D{i + 1}";
+            sb.AppendLine($"<span class=\"health-timeline-idx{cls}\">{label}</span>");
+        }
+        sb.AppendLine("</div>");
+        sb.AppendLine("</div>");
+    }
+
+    private static void RenderSeverityTransition(StringBuilder sb, DomainSeverity baselineSeverity, DomainSeverity currentSeverity)
+    {
+        sb.AppendLine("<div class=\"health-domain-card__transition\">");
+        sb.AppendLine($"<span class=\"health-domain-card__trans-sev health-domain-card__trans-sev--{SeverityCss(baselineSeverity)}\" title=\"Baseline\">{Enc(SeverityLabel(baselineSeverity))}</span>");
+        sb.AppendLine("<span class=\"health-domain-card__trans-arrow\">-&gt;</span>");
+        sb.AppendLine($"<span class=\"health-domain-card__trans-sev health-domain-card__trans-sev--{SeverityCss(currentSeverity)} health-domain-card__trans-sev--current\" title=\"Current\">{Enc(SeverityLabel(currentSeverity))}</span>");
+        sb.AppendLine("</div>");
+    }
+
+    private static void RenderDeltaChips(StringBuilder sb, DomainHealthEntry entry)
+    {
+        if ((entry.DeltaCritical is null or 0) && (entry.DeltaWarning is null or 0))
+            return;
+
+        sb.Append("<span class=\"health-domain-deltas\">");
+        if (entry.DeltaCritical is int criticalDelta and not 0)
+            RenderDeltaChip(sb, criticalDelta, "crit", "Criticals", entry.BaselineCriticalCount, entry.CriticalCount, entry.PeakCriticalCount, entry.PeakCriticalSnapshotIndex);
+        if (entry.DeltaWarning is int warningDelta and not 0)
+            RenderDeltaChip(sb, warningDelta, "warn", "Warnings", entry.BaselineWarningCount, entry.WarningCount, entry.PeakWarningCount, entry.PeakWarningSnapshotIndex);
+        sb.Append("</span>");
+    }
+
+    private static void RenderDeltaChip(StringBuilder sb, int delta, string modifier, string noun, int? baseline, int current, int? peak, int? peakIndex)
+    {
+        string direction = delta > 0 ? "up" : "down";
+        string displayDelta = delta > 0 ? $"+{delta}" : delta.ToString(CultureInfo.InvariantCulture);
+        int baselineValue = baseline ?? 0;
+        string title = $"{noun}: {baselineValue.ToString(CultureInfo.InvariantCulture)} -> {current.ToString(CultureInfo.InvariantCulture)} ({displayDelta})";
+        if (peak.HasValue && peakIndex.HasValue && peak.Value > Math.Max(baselineValue, current))
+            title += $" - peak {peak.Value.ToString(CultureInfo.InvariantCulture)} at D{peakIndex.Value + 1}";
+        string ariaLabel = delta > 0 ? $"{noun} increased by {Math.Abs(delta).ToString(CultureInfo.InvariantCulture)}" : $"{noun} decreased by {Math.Abs(delta).ToString(CultureInfo.InvariantCulture)}";
+        sb.Append($"<span class=\"delta-chip delta-chip--{modifier} delta-chip--{direction}\" title=\"{Enc(title)}\" aria-label=\"{Enc(ariaLabel)}\">{Enc(displayDelta)}&nbsp;{Enc(modifier)}</span>");
+    }
+
+    private static string SeverityCss(DomainSeverity severity)
+        => severity switch
+        {
+            DomainSeverity.Critical => "critical",
+            DomainSeverity.Warning => "warning",
+            DomainSeverity.OK => "ok",
+            _ => "unknown"
+        };
+
+    private static string SeverityLabel(DomainSeverity severity)
+        => severity == DomainSeverity.OK ? "OK" : severity.ToString();
+
+    private static string SeverityMark(DomainSeverity severity)
+        => severity switch
+        {
+            DomainSeverity.Critical => "●",
+            DomainSeverity.Warning => "●",
+            DomainSeverity.OK => "✓",
+            _ => "○"
+        };
+
+    private static (string Label, string Css) ChangeInfo(DomainSeverityChange change)
+        => change switch
+        {
+            DomainSeverityChange.Improved => ("↑ Improved", "improved"),
+            DomainSeverityChange.Regressed => ("↓ Regressed", "regressed"),
+            DomainSeverityChange.NewDomain => ("★ New", "new"),
+            DomainSeverityChange.Removed => ("✕ Removed", "resolved"),
+            _ => ("→ Stable", "stable")
+        };
 
     public static void RenderTableHtml(TableBlock tbl, StringBuilder sb)
     {

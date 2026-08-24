@@ -283,8 +283,12 @@ namespace DumpDetective.Analysis.Cache
 
         public bool TryGetTypeName(ClrHeap heap, ulong methodTable, out string? typeName)
         {
-            typeName = null;
-            
+            // Reuse names StatisticsCache already resolved for this exact MethodTable population
+            // (GCGenerationAnalyzer always warms it before this is called) instead of re-touching
+            // ClrMD/DAC for every type.
+            if (_statisticsCache.TryGetTypeName(methodTable, out typeName))
+                return true;
+
             // Try TypeMetadataCache first to see if we've already extracted this type's metadata
             if (_typeMetadataCache.TryGet(methodTable, out _))
             {

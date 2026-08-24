@@ -335,7 +335,7 @@ insufficient for production use.
 | P2-1 | Add dominant-cluster %-of-alive to `ThreadStackClusterTrendComparer` | Improvement | Medium | Low | High | Improvement | ✅ Done |
 | P2-2 | Add `ManagedThreadId` to `ThreadClusterSnapshot` to enable per-cluster `!clrstack` correlation | Improvement | Medium | Low | High | Improvement | ✅ Done |
 | P2-3 | Emit MaxClusters-cap-reached advisory in report when `filteredClusters.Length >= options.MaxClusters` | Improvement | Low | Trivial | High | Improvement | ✅ Done |
-| P2-4 | Add frame-level hotspot histogram (top frames by cross-cluster frequency) | Improvement | High | Medium | High | Improvement |
+| P2-4 | Add frame-level hotspot histogram (top frames by cross-cluster frequency) | Improvement | High | Medium | High | Improvement | ✅ Done |
 | P2-5 | Enforce invariant `TopSignaturesToShow <= TopClustersToShow` in options (or remove `TopClusterSignatures` blocks when `TopClusters` is populated) | Improvement | Medium | Low | High | Improvement | ✅ Done |
 | P3-1 | Framework pattern label heuristics (identify threadpool-idle, GC, finalizer signatures) | Improvement | Medium | Medium | Medium | Improvement |
 | P3-2 | Cluster tree / shared-prefix representation for report output | Evolution | High | High | Medium | Evolution |

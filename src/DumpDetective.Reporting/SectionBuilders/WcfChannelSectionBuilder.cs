@@ -82,9 +82,6 @@ internal sealed class WcfChannelSectionBuilder : SectionBuilderBase, IAnalyzerSe
             compactTables.Add(STCompact("Faulted channel instances", new[] { CH("Type"), CH("Address"), CH("State"), CH("Remote Endpoint") }, faultRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
-        if (d.StateScanCapped)
-            blocks.Add(new TextBlock("Note: state sampling was capped. State-based counts may be lower than actual totals."));
-
         return new AnalyzerDetailSection(AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
             CompactTables: compactTables.Count > 0 ? compactTables : null);

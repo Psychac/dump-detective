@@ -86,9 +86,7 @@ public sealed class WcfChannelAnalyzerHeapIndexScanTests
             .SetValue(analyzer, stats);
 
         // Seed an empty sampler so MergePartial doesn't null-deref.
-        Type samplerType = typeof(InstanceStateSampler<WcfChannelSnapshot>);
-        var sampler = samplerType.GetConstructor(new[] { typeof(int), typeof(int) })!
-            .Invoke(new object[] { 500, 50 });
+        var sampler = new InstanceStateSampler<WcfChannelSnapshot>();
         typeof(WcfChannelAnalyzer)
             .GetField("_sampler", BindingFlags.NonPublic | BindingFlags.Instance)!
             .SetValue(analyzer, sampler);

@@ -112,9 +112,6 @@ internal sealed class DbConnectionSectionBuilder : SectionBuilderBase, IAnalyzer
             blocks.Add(new TextBlock(genNote));
         }
 
-        if (d.StateScanCapped)
-            blocks.Add(new TextBlock("Note: state sampling was capped. Counts above may be lower than actual totals."));
-
         return new AnalyzerDetailSection(AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
             CompactTables: compactTables.Count > 0 ? compactTables : null);

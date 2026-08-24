@@ -20,12 +20,6 @@ public sealed class HttpObjectAnalyzer : IAnalyzer, IHeapIndexScanParticipant, I
     public string Name => "HTTP Object Analysis";
     public string Category => "Infrastructure";
 
-    private const int MaxStateSamples = 500;
-    private const int TopHttpClientSampleCap = 20;
-
-    public int MaxStateSamplesPerType => MaxStateSamples;
-    public int TopSampleCap => TopHttpClientSampleCap;
-
     public bool IsCandidateType(string typeName) => ClassifyType(typeName) != HttpObjectCategory.None;
 
     // Classifies a type name into one of the HTTP object categories.
@@ -173,7 +167,7 @@ public sealed class HttpObjectAnalyzer : IAnalyzer, IHeapIndexScanParticipant, I
                 // Try to sample this HttpClient instance if sampler is available
                 if (sampler is not null && _heap is not null)
                 {
-                    HttpClientSnapshot? snap = TypedResourceScanDriver.TryGetSample(this, sampler, _heap, in entry, typeName);
+                    HttpClientSnapshot? snap = TypedResourceScanDriver.TryGetSample(this, _heap, in entry, typeName);
                     if (snap is not null)
                         sampler.AddTopSample(snap);
                 }
@@ -248,10 +242,9 @@ public sealed class HttpObjectAnalyzer : IAnalyzer, IHeapIndexScanParticipant, I
             ServicePointCount:        totalServicePoint,
             TotalBytes:               totalBytes,
             ByType:                   byType,
-            TopHttpClients:           _sampler?.TopSamples ?? [],
-            InstanceScanCapped:       _sampler?.ScanCapped ?? false);
+            TopHttpClients:           _sampler?.TopSamples ?? []);
     }
 
     private static HttpObjectDomainResult Empty() =>
-        new(false, 0, 0, 0, 0, 0, 0, 0, [], [], false);
+        new(false, 0, 0, 0, 0, 0, 0, 0, [], []);
 }

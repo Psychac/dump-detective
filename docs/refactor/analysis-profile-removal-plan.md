@@ -12,7 +12,7 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 29 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
+**Implementation progress: 32 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
 §9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph, §9.8 LohFragmentation, §9.9
 SegmentReservation, §9.10 Jit, §9.11 Array, §9.12 String (partial — AMBER, not GREEN; see its
 implementation notes for what's deliberately still deferred), §9.13 AsyncStateMachine, §9.14
@@ -66,7 +66,15 @@ per §11.2 D5, including deleting `WeakReferenceSectionBuilder`'s own local `Top
 pre-truncation (a real cap — it dropped rows before they ever reached `STCompact`) — the same
 D5-violating pattern §9.29's first pass introduced and then had to correct, caught here before
 shipping instead of after; `ProduceRawExports` stays on the options class, unmoved, per D6's explicit
-deferral)
+deferral), §9.32-9.34 the typed-resource quartet — DbConnection/WcfChannel/HttpObject (deleted
+`MaxStateSamplesPerType` outright per D10, not raised, confirmed cheap by M9's real-dump measurement;
+collapsed the shared `InstanceStateSampler<T>`'s reserve-then-sample gate and per-type/per-list caps
+into a plain unbounded accumulator, deleting `TryReserveSample`/`ScanCapped`/the two-arg constructor
+and the `MaxStateSamplesPerType`/`TopSampleCap` interface members entirely rather than leaving them
+as inert zeros; every `Top*`/`StateScanCapped`/`InstanceScanCapped` field and render-layer caveat that
+existed only to describe the cap's effect deleted downstream through both finding generators and two
+section builders; `DbConnectionAnalyzer.BuildTopPools`'s independent hardcoded `.Take(10)` — a second,
+analyzer-local cap over the now-uncapped pool population — found and deleted in the same pass)
 (§9.6's orphaned
 `DependentHandleAnalysisOptions` was also deleted alongside GCHandle — not a separate registered
 analyzer, per the row-4 cross-reference below).** See each section and the §7 verdict table for what
@@ -370,9 +378,9 @@ radius is a single cosmetic report field, not root exactness.
 | 29 | AsyncTask | non-heap | **GREEN** ✅ DONE | 8 of 8 | §9.29 — options class deleted outright |
 | 30 | AllocationPattern | — | **GREEN** ✅ DONE (was AMBER) | 13 of 13 | §9.30 — three enums collapsed to one algorithm via D7; no more tier-varies-the-algorithm defect, so AMBER resolves to GREEN once implemented |
 | 31 | WeakReference | — | **GREEN** ✅ DONE | 4 of 5 (1 kept, `ProduceRawExports`, deferred to D6's cross-cutting move) | §9.31 — `HandleScanCap` truncates the handle table, not a derived list |
-| 32 | DbConnection | typed-resource | **GREEN** | 1 of 2 | §9.32-9.34 — **no options class at all**; bounds are `private const`, never preset-varied |
-| 33 | WcfChannel | typed-resource | **GREEN** | 1 of 2 | §9.33 — same shape; caps faulted-channel detection specifically |
-| 34 | HttpObject | typed-resource | **GREEN** | 1 of 2 | §9.34 — headline counts already exact; only the drill-down sample is capped |
+| 32 | DbConnection | typed-resource | **GREEN** ✅ DONE | 2 of 2 | §9.32-9.34 — **no options class at all**; bounds are `private const`, never preset-varied |
+| 33 | WcfChannel | typed-resource | **GREEN** ✅ DONE | 2 of 2 | §9.33 — same shape; caps faulted-channel detection specifically |
+| 34 | HttpObject | typed-resource | **GREEN** ✅ DONE | 2 of 2 | §9.34 — headline counts already exact; only the drill-down sample is capped |
 | 35 | LeakCandidate | typed-resource | **GREEN** | 1 of 1 | §9.35 — already index-backed and exact; a template for "built right from the start" |
 
 > Rows 4 and 22 are cross-references, not distinct analyzers (roster correction, top of document) —
@@ -2969,7 +2977,7 @@ Array's `SampleStride` (§9.11): an estimate presented as a count.
 
 ---
 
-### 9.32-9.34 preamble: the typed-resource quartet
+### 9.32-9.34 preamble: the typed-resource quartet — ✅ IMPLEMENTED
 
 DbConnection, WcfChannel, HttpObject and (already audited) TimerLeak share infrastructure that never
 surfaced from the options-folder walk, because **none of the four have an `AnalysisOptions` class at
@@ -3000,9 +3008,61 @@ the other 100 fall into neither bucket, silently. This directly undercounts exac
 these analyzers exist to catch: connection-pool exhaustion, leaked HTTP handlers, faulted WCF
 channels. Candidate discovery itself is exact (index-backed); only the state breakdown is capped.
 
+#### Implementation notes (as shipped, shared across §9.32-9.34)
+
+- **`MaxStateSamplesPerType` deleted outright, per D10 — not promoted to an instance field, not
+  raised.** M9's real-dump measurement (§11.4) found the quartet's real resource-instance
+  populations (503 DB connections, 1,210 WCF channels, 102 HTTP objects) never came close to
+  binding the 500-per-type cap, elapsed 1-109ms — confirms D10's "expect cheap" framing with real
+  nonzero data. Deleting the cap therefore costs nothing measurable.
+- **The shared `InstanceStateSampler<TSnapshot>` collapsed to a plain unbounded accumulator** —
+  `TryReserveSample`, `_perTypeSamples`, `_capped`/`ScanCapped`, and the two-arg
+  (`maxSamplesPerType`, `topNCap`) constructor all deleted; `AddTopSample` now just appends
+  unconditionally. `ITypedResourceInstanceSampler<TSnapshot>`'s `MaxStateSamplesPerType`/
+  `TopSampleCap` properties deleted from the interface — not left as ignored members. This also
+  simplified `TypedResourceScanDriver.TryGetSample`, which previously enforced "reserve a slot,
+  then sample" — with no reservation left to enforce, it's now a thin one-line forwarder to
+  `ITypedResourceInstanceSampler<T>.TrySample` (kept only to avoid an explicit interface cast at
+  each of the three call sites).
+- **The four `Top*` detail-table lists (`TopOpenConnections`, `TopFaultedChannels`,
+  `TopHttpClients`) now hold the complete matching population** (every open connection, every
+  faulted channel, every HttpClient instance) — no `TopSampleCap`/`TopOpenCap`/`TopFaultedCap`/
+  `TopHttpClientSampleCap` constant survives anywhere. `DbConnectionSectionBuilder`/
+  `WcfChannelSectionBuilder` already fed these lists into `STCompact` with no explicit `rowLimit`,
+  so no render-layer change was needed there (same "already on the D5 shape" finding as
+  AllocationPattern, §9.30) — confirmed by inspection before touching the analyzers, not assumed.
+- **Found and fixed a second, independent cap while implementing:** `DbConnectionAnalyzer.BuildTopPools`
+  had its own hardcoded `.Take(10)` over the pool-grouped connection data — a cap that only became
+  visible once `TopOpenConnections` (its input) stopped being pre-truncated at 50. Deleted; the pool
+  summary is now the complete ranked list, same D5 treatment as everything else.
+- **`ScanCapped`/`StateScanCapped`/`InstanceScanCapped` deleted from all three domain results** —
+  permanently-`false` once their triggering cap was gone, same treatment as AsyncTask's
+  `*ScanLimited` (§9.29) and WeakReference's `ScanCapped` (§9.31). Removed the corresponding
+  "state sampling was capped" blocks from `DbConnectionSectionBuilder`/`WcfChannelSectionBuilder`,
+  the `stateCaveat` string and severity-downgrade branches from `DbConnectionFindingGenerator`
+  (`WcfChannelFindingGenerator`/`HttpObjectFindingGenerator` never referenced these fields to begin
+  with — confirmed, not assumed). `HttpObjectSectionBuilder` never rendered `TopHttpClients` or
+  `InstanceScanCapped` at all — a pre-existing gap independent of this pass, left alone rather than
+  fixed as an unrelated scope addition.
+- **Left the inline-prose truncations alone**, per D5's explicit carve-out: `DbConnectionFindingGenerator.BuildTypeBreakdown`
+  and `WcfChannelFindingGenerator.BuildFaultedBreakdown`/`BuildEndpointSummary` each cap a
+  comma-separated name list embedded in a sentence (`shown < 3`) — prose-length choices, not a
+  hidden-data concern, so they stay as small analyzer-local constants rather than being forced into
+  a table.
+- **Found in passing, left alone (out of scope):** `SqlTransactionDomainResult`/`SqlCommandDomainResult`
+  and their `StateScanCapped` fields in `InfrastructureDomainModels.cs` are produced by no
+  registered analyzer anywhere in `src` — fully orphaned models, unrelated to this pass's scope.
+  Flagging for a future cleanup rather than deleting speculatively here.
+- **Deleted the obsolete M9 discrepancy test** (`TypedResourceQuartetRealDumpTests.cs`) — it existed
+  specifically to measure whether the now-deleted 500-per-type cap ever bound on a real dump; the
+  question it answered no longer applies once the cap is gone. Rewrote `InstanceStateSamplerTests.cs`
+  (every test asserted `TryReserveSample`/`ScanCapped` behavior, now deleted) and
+  `WcfChannelAnalyzerHeapIndexScanTests.cs`'s `SeedTypeStats` helper (reflection-based two-arg
+  sampler construction → direct parameterless `new()`).
+
 ---
 
-### 9.32 DbConnection — **GREEN**
+### 9.32 DbConnection — **GREEN** ✅ IMPLEMENTED
 
 [DbConnectionAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/DbConnectionAnalyzer.cs)
 
@@ -3018,7 +3078,7 @@ dump's population. Low risk, but confirm the count before assuming.
 
 ---
 
-### 9.33 WcfChannel — **GREEN**
+### 9.33 WcfChannel — **GREEN** ✅ IMPLEMENTED
 
 [WcfChannelAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/WcfChannelAnalyzer.cs)
 
@@ -3032,7 +3092,7 @@ service with a channel-faulting storm past 500 instances of one channel type rep
 
 ---
 
-### 9.34 HttpObject — **GREEN**
+### 9.34 HttpObject — **GREEN** ✅ IMPLEMENTED
 
 [HttpObjectAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/HttpObjectAnalyzer.cs)
 

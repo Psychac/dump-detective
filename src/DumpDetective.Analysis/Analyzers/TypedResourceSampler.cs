@@ -58,74 +58,27 @@ internal static class TypedResourceCandidateScanner
 }
 
 /// <summary>
-/// Shared per-instance capped state-field sampling for the two members of the typed-resource
-/// quartet that read a runtime state field per instance (<c>DbConnectionAnalyzer</c>,
-/// <c>WcfChannelAnalyzer</c>). Caps state-field reads per MethodTable (ClrMD field access is
-/// costly at heap scale) and holds a bounded top-N list of "interesting" instance snapshots
-/// the caller decides to keep (e.g. open connections, faulted channels).
+/// Shared per-instance state-field sampling for the two members of the typed-resource quartet
+/// that read a runtime state field per instance (<c>DbConnectionAnalyzer</c>,
+/// <c>WcfChannelAnalyzer</c>). Holds the complete list of "interesting" instance snapshots the
+/// caller decides to keep (e.g. open connections, faulted channels) — no per-type or per-list cap
+/// (docs/refactor/analysis-profile-removal-plan.md §9.32-9.34 preamble, D10 §11.2): candidate
+/// discovery already confirmed this population is bounded by real resource-instance count, always
+/// a small fraction of a heap's population, so nothing here needs bounding.
 /// </summary>
 internal sealed class InstanceStateSampler<TSnapshot>
 {
-    private readonly int _maxSamplesPerType;
-    private readonly int _topNCap;
-    private readonly Dictionary<ulong, int> _perTypeSamples = new();
-    private readonly List<TSnapshot> _topSamples;
-    private bool _capped;
-
-    public InstanceStateSampler(int maxSamplesPerType, int topNCap)
-    {
-        _maxSamplesPerType = maxSamplesPerType;
-        _topNCap = topNCap;
-        _topSamples = new List<TSnapshot>(topNCap);
-    }
+    private readonly List<TSnapshot> _topSamples = new();
 
     public IReadOnlyList<TSnapshot> TopSamples => _topSamples;
-    public bool ScanCapped => _capped;
+
+    public void AddTopSample(TSnapshot snapshot) => _topSamples.Add(snapshot);
 
     /// <summary>
-    /// Reserves a state-field read slot for <paramref name="methodTable"/> if its per-type cap
-    /// hasn't been reached yet. Returns false (and marks the scan capped) once the cap is hit —
-    /// callers should skip the field read for this entry when this returns false.
+    /// Merges samples from <paramref name="other"/> into this instance. Called once per worker
+    /// partial after a parallel heap-index scan completes.
     /// </summary>
-    public bool TryReserveSample(ulong methodTable)
-    {
-        _perTypeSamples.TryGetValue(methodTable, out int count);
-        if (count >= _maxSamplesPerType)
-        {
-            _capped = true;
-            return false;
-        }
-
-        _perTypeSamples[methodTable] = count + 1;
-        return true;
-    }
-
-    public void AddTopSample(TSnapshot snapshot)
-    {
-        if (_topSamples.Count < _topNCap)
-            _topSamples.Add(snapshot);
-    }
-
-    /// <summary>
-    /// Merges top samples and per-type counts from <paramref name="other"/> into this instance.
-    /// Called once per worker partial after a parallel heap-index scan completes.
-    /// Appends samples until <c>_topNCap</c> is reached (all samples are equal priority for
-    /// WcfChannel/DbConnection — the cap merely limits report verbosity).
-    /// </summary>
-    internal void MergeFrom(InstanceStateSampler<TSnapshot> other)
-    {
-        _capped |= other._capped;
-
-        foreach (TSnapshot sample in other._topSamples)
-            if (_topSamples.Count < _topNCap)
-                _topSamples.Add(sample);
-
-        foreach (var kvp in other._perTypeSamples)
-        {
-            _perTypeSamples.TryGetValue(kvp.Key, out int existing);
-            _perTypeSamples[kvp.Key] = existing + kvp.Value;
-        }
-    }
+    internal void MergeFrom(InstanceStateSampler<TSnapshot> other) => _topSamples.AddRange(other._topSamples);
 
     /// <summary>
     /// Reads the first matching <c>int</c>-backed field (tried in order) off the object at

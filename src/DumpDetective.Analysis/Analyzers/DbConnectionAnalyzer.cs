@@ -22,10 +22,6 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
     public string Name => "DB Connection Analysis";
     public string Category => "Infrastructure";
 
-    // Max per-object state reads to cap ClrMD field access cost on large heaps.
-    private const int MaxStateSamples = 500;
-    private const int TopOpenCap = 50;
-
     // ADO.NET ConnectionState enum values
     private const int StateOpen      = 1;
     private const int StateClosed    = 0;
@@ -48,9 +44,6 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
     // Candidate type must end in "Connection" (covers SqlConnection, NpgsqlConnection, etc.)
     public bool IsCandidateType(string typeName) =>
         TypeNamePatternMatcher.HasPrefixAndSuffixOrContains(typeName, ConnectionNamespacePrefixes, "Connection", null);
-
-    public int MaxStateSamplesPerType => MaxStateSamples;
-    public int TopSampleCap => TopOpenCap;
 
     // Field names to try in order when reading connection state
     private static readonly string[] StateFieldNames = ["_connectionState", "_state", "m_connectionState"];
@@ -209,8 +202,7 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
         if (!typeStats.TryGetValue(entry.MethodTable, out var ts)) return;
         string typeName = ts.Name;
 
-        // Read state field (capped per type, gated via TryGetSample's reserve-then-sample order)
-        DbConnectionSnapshot? snap = TypedResourceScanDriver.TryGetSample(this, sampler, _heap!, in entry, typeName);
+        DbConnectionSnapshot? snap = TypedResourceScanDriver.TryGetSample(this, _heap!, in entry, typeName);
 
         // Tally state and generation
         int open = ts.Open; int closed = ts.Closed; int broken = ts.Broken; int other = ts.Other; int unknown = ts.Unknown;
@@ -294,13 +286,12 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
             Gen0OpenConnections: totalGen0Open,
             ByType:              byType,
             TopOpenConnections:  topOpenConnections,
-            TopPools:            topPools,
-            StateScanCapped:     _sampler?.ScanCapped ?? false);
+            TopPools:            topPools);
     }
 
     // §9 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): the biggest gap
-    // found in that audit — DbConnectionSnapshot carried no size field of any kind. Only ever
-    // applied to the already-capped TopSampleCap list.
+    // found in that audit — DbConnectionSnapshot carried no size field of any kind. Applied to
+    // the complete open-connection population (§9.32, D5) — no longer a capped list.
     private IReadOnlyList<DbConnectionSnapshot> WithRetainedBytes(IReadOnlyList<DbConnectionSnapshot> snapshots)
     {
         IDominatorTreeProvider? treeProvider = _cache?.TryGetDominatorTreeProvider();
@@ -334,9 +325,9 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
             }
         }
 
+        // Complete ranked population, no Top-N cap (§11.2 D5) — the render layer paginates.
         var topPools = poolGroups
             .OrderByDescending(kvp => kvp.Value.Open)
-            .Take(10)
             .Select(kvp => new PoolSummary(kvp.Key, kvp.Value.Open, kvp.Value.Total))
             .ToList();
 
@@ -344,5 +335,5 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
     }
 
     private static DbConnectionDomainResult Empty() =>
-        new(false, 0, 0, 0, 0, 0, 0, 0, 0, [], [], [], false);
+        new(false, 0, 0, 0, 0, 0, 0, 0, 0, [], [], []);
 }

@@ -21,9 +21,6 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
     public string Name => "WCF Channel Analysis";
     public string Category => "Infrastructure";
 
-    private const int MaxStateSamples = 500;
-    private const int TopFaultedCap = 50;
-
     // CommunicationState enum values
     private const int StateOpening = 1;
     private const int StateOpened  = 2;
@@ -46,9 +43,6 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
 
     private static bool IsFactoryType(string typeName) =>
         TypeNamePatternMatcher.HasPrefixAndSuffixOrContains(typeName, FactoryNamespaces, ".ChannelFactory", FactoryContainsTokens);
-
-    public int MaxStateSamplesPerType => MaxStateSamples;
-    public int TopSampleCap => TopFaultedCap;
 
     private static readonly string[] StateFieldNames = ["_state", "state", "communicationState"];
     private static readonly string[] RemoteAddressFieldNames = ["_remoteAddress", "_via", "remoteAddress", "via"];
@@ -242,7 +236,7 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
         if (!candidateMts.ContainsKey(entry.MethodTable)) return;
         if (!typeStats.TryGetValue(entry.MethodTable, out var ts)) return;
 
-        WcfChannelSnapshot? snap = TypedResourceScanDriver.TryGetSample(this, sampler, _heap!, in entry, ts.Name);
+        WcfChannelSnapshot? snap = TypedResourceScanDriver.TryGetSample(this, _heap!, in entry, ts.Name);
 
         int opening = ts.Opening; int opened = ts.Opened; int faulted = ts.Faulted; int closing = ts.Closing; int closed = ts.Closed; int other = ts.Other;
         if (snap is not null)
@@ -306,7 +300,6 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
             OtherChannels:    totalOther,
             ByType:           byType,
             TopFaultedChannels: WithRetainedBytes(_sampler?.TopSamples ?? []),
-            StateScanCapped:  _sampler?.ScanCapped ?? false,
             FactoryCount:     _factoryCount,
             TotalBytes:       totalBytes);
     }
@@ -314,7 +307,8 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
     // §9 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): the biggest gap
     // found in that audit — WcfChannelSnapshot carried no size field of any kind, so "100 faulted
     // channels retaining 50KB each" and "100 faulted channels retaining 200 bytes each" were
-    // indistinguishable. Only ever applied to the already-capped TopSampleCap list.
+    // indistinguishable. Applied to the complete faulted-channel population (§9.33, D5) — no
+    // longer a capped list.
     private IReadOnlyList<WcfChannelSnapshot> WithRetainedBytes(IReadOnlyList<WcfChannelSnapshot> snapshots)
     {
         IDominatorTreeProvider? treeProvider = _cache?.TryGetDominatorTreeProvider();
@@ -343,5 +337,5 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
     };
 
     private static WcfChannelDomainResult Empty() =>
-        new(false, 0, 0, 0, 0, 0, 0, 0, [], [], false);
+        new(false, 0, 0, 0, 0, 0, 0, 0, [], []);
 }

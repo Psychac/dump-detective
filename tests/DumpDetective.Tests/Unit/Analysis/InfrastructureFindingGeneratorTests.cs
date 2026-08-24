@@ -22,7 +22,7 @@ public sealed class InfrastructureFindingGeneratorTests
     public void DbConnection_NoFindings_WhenNotFound()
     {
         var gen = new DbConnectionFindingGenerator();
-        var result = new DbConnectionDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, [], [], [], false);
+        var result = new DbConnectionDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, [], [], []);
         gen.CanGenerate(result).Should().BeTrue();
         gen.Generate(result).Should().BeEmpty();
     }
@@ -69,8 +69,8 @@ public sealed class InfrastructureFindingGeneratorTests
     public void DbConnection_CanGenerate_OnlyForDbConnectionDomainResult()
     {
         var gen = new DbConnectionFindingGenerator();
-        gen.CanGenerate(new DbConnectionDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, [], [], [], false)).Should().BeTrue();
-        gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [], false)).Should().BeFalse();
+        gen.CanGenerate(new DbConnectionDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, [], [], [])).Should().BeTrue();
+        gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [])).Should().BeFalse();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -81,7 +81,7 @@ public sealed class InfrastructureFindingGeneratorTests
     public void WcfChannel_NoFindings_WhenNotPresent()
     {
         var gen = new WcfChannelFindingGenerator();
-        var result = new WcfChannelDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [], false);
+        var result = new WcfChannelDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], []);
         gen.Generate(result).Should().BeEmpty();
     }
 
@@ -138,7 +138,7 @@ public sealed class InfrastructureFindingGeneratorTests
     public void HttpObject_NoFindings_WhenNotFound()
     {
         var gen = new HttpObjectFindingGenerator();
-        var result = new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [], false);
+        var result = new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], []);
         gen.Generate(result).Should().BeEmpty();
     }
 
@@ -199,8 +199,8 @@ public sealed class InfrastructureFindingGeneratorTests
     public void HttpObject_CanGenerate_OnlyForHttpObjectDomainResult()
     {
         var gen = new HttpObjectFindingGenerator();
-        gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [], false)).Should().BeTrue();
-        gen.CanGenerate(new WcfChannelDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [], false)).Should().BeFalse();
+        gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [])).Should().BeTrue();
+        gen.CanGenerate(new WcfChannelDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [])).Should().BeFalse();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -249,7 +249,7 @@ public sealed class InfrastructureFindingGeneratorTests
     {
         var gen = new TimerLeakFindingGenerator();
         gen.CanGenerate(new TimerLeakDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, [])).Should().BeTrue();
-        gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [], false)).Should().BeFalse();
+        gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [])).Should().BeFalse();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -274,8 +274,7 @@ public sealed class InfrastructureFindingGeneratorTests
             Gen0OpenConnections: 0,
             ByType: summary,
             TopOpenConnections: [],
-            TopPools: [],
-            StateScanCapped: false);
+            TopPools: []);
     }
 
     private static WcfChannelDomainResult WcfResult(int total, int opened, int faulted, int closed, int other = 0, int opening = 0, int closing = 0)
@@ -294,8 +293,7 @@ public sealed class InfrastructureFindingGeneratorTests
             ClosedChannels: closed,
             OtherChannels: other,
             ByType: summary,
-            TopFaultedChannels: [],
-            StateScanCapped: false);
+            TopFaultedChannels: []);
     }
 
     private static HttpObjectDomainResult HttpResult(
@@ -318,8 +316,7 @@ public sealed class InfrastructureFindingGeneratorTests
             ServicePointCount: servicePoints,
             TotalBytes: byType.Aggregate(0UL, (sum, t) => sum + t.TotalBytes),
             ByType: byType,
-            TopHttpClients: [],
-            InstanceScanCapped: false);
+            TopHttpClients: []);
     }
 
     private static TimerLeakDomainResult TimerResult(

@@ -54,8 +54,7 @@ internal sealed record DbConnectionDomainResult(
     int Gen0OpenConnections,
     IReadOnlyList<DbConnectionTypeSummary> ByType,
     IReadOnlyList<DbConnectionSnapshot> TopOpenConnections,
-    IReadOnlyList<PoolSummary> TopPools,
-    bool StateScanCapped) : DumpDetective.Core.Models.AnalyzerDomainResult;
+    IReadOnlyList<PoolSummary> TopPools) : DumpDetective.Core.Models.AnalyzerDomainResult;
 
 // ── SQL Transaction ───────────────────────────────────────────────────────────
 
@@ -161,7 +160,6 @@ internal sealed record WcfChannelDomainResult(
     int OtherChannels,
     IReadOnlyList<WcfChannelTypeSummary> ByType,
     IReadOnlyList<WcfChannelSnapshot> TopFaultedChannels,
-    bool StateScanCapped,
     int FactoryCount = 0,
     ulong TotalBytes = 0) : DumpDetective.Core.Models.AnalyzerDomainResult;
 
@@ -197,8 +195,7 @@ internal sealed record HttpObjectDomainResult(
     int ServicePointCount,
     ulong TotalBytes,
     IReadOnlyList<HttpObjectTypeSummary> ByType,
-    IReadOnlyList<HttpClientSnapshot> TopHttpClients,
-    bool InstanceScanCapped) : DumpDetective.Core.Models.AnalyzerDomainResult;
+    IReadOnlyList<HttpClientSnapshot> TopHttpClients) : DumpDetective.Core.Models.AnalyzerDomainResult;
 
 // ── Timer Objects ───────────────────────────────────────────────────────────
 

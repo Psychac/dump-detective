@@ -34,7 +34,7 @@
 ### Unexpected Functionality
 
 - The `Analyze(ClrRuntime)` / `Analyze(ClrRuntime, IProgress<>)` overloads are dead-code helpers left over from pre-pipeline development. They bypass caching, ignore options, and skip `Stamp`. Should be removed.
-- `ModuleProbe.ProbeAssemblyIdentity` uses `System.Reflection` on the live `ClrModule` object to discover metadata-retrieval methods. This is fragile across ClrMD minor versions and runs in a hot `foreach` loop inside `AnalyzeModules` (once per conflict candidate). The reflection cost is bounded by `versionConflicts` candidate count but the approach is unnecessarily opaque.
+- ~~`ModuleProbe.ProbeAssemblyIdentity` uses `System.Reflection` on the live `ClrModule` object to discover metadata-retrieval methods.~~ **Fixed:** the reflection block was dead code — `ClrModule` in ClrMD 4.0.732401 has no `GetMetadata`/`GetMetaData`/`Metadata*` members, so the lookup always missed and fell through to the file-hash fallback. Removed; the overload now delegates straight to the file-based probe.
 
 ### Architectural Observations
 
@@ -112,8 +112,8 @@
 | **Gen2/LOH bytes per module** | Distinguishes "live" leak pressure modules from incidentally large ones | Low — data is in the index |
 | **Module load count per AppDomain** (duplicate loads) | Detects re-loading of same module into multiple domains | Low |
 | **Native image (NGen/R2R) vs JIT-compiled ratio** | `module.IsPEFile` is available but `IsReadyToRun` / `IsNgen` is not surfaced | Medium |
-| **`AssemblyLoadContext` name per module** | High-value in .NET 5+ microservices — determines which ALC loaded each module and whether it is collectible | Low–Medium via reflection on ClrMD objects |
-| **Top types per heavy module** | "The top 3 types in `Newtonsoft.Json.dll` are X, Y, Z consuming N MB" — directly actionable | Medium |
+| ~~**`AssemblyLoadContext` name per module**~~ ✅ Done | High-value in .NET 5+ microservices — determines which ALC loaded each module and whether it is collectible | Low, via public `ClrType.AssemblyLoadContextAddress` + `ClrObject.TryReadStringField` — no reflection needed |
+| ~~**Top types per heavy module**~~ ✅ Done | "The top 10 types in `Newtonsoft.Json.dll` are X, Y, Z consuming N MB" — directly actionable | Medium |
 | **Cross-domain module sharing stats** | How many modules are loaded >1 time across domains | Low |
 | **Anonymous module type names (sampled)** | Dynamic modules are anonymous but their types are enumeratable — sampling 3–5 type names would explain their origin | Medium |
 | **Module age / load sequence index** | Modules loaded late (by ordinal position) are candidates for lazy-load or startup-time issues | Low |
@@ -172,7 +172,7 @@ The conflict detection algorithm:
 
 **Risk 1: Unknown identities are silently annotated but not reported as a finding.** A module with no version, no PKT, no file-hash appearing multiple times is annotated `(Unknown identity)` in `AssemblyName` but doesn't appear in `VersionConflictGroups`. This is correct defensively, but there is no finding or warning informing the engineer.
 
-**Risk 2: `ModuleProbe.ProbeAssemblyIdentity(ClrModule, string)` uses reflection to find metadata methods.** If ClrMD provides a method named `GetMetadata` returning a non-byte array type, the `try { metaHash = ComputeHashHex((byte[])arr); } catch { }` path will silently swallow a `InvalidCastException` and return an identity without a hash. The conflict detection then falls back to name+version only, which may under-detect conflicts.
+**Risk 2 (resolved): `ModuleProbe.ProbeAssemblyIdentity(ClrModule, string)` used reflection to find metadata methods.** Investigation confirmed ClrMD 4.0.732401's `ClrModule` never exposed a `GetMetadata`-shaped member — the reflection lookup always missed and the code silently fell through to the file-hash-only path on every call. The reflection block has been removed; the overload now delegates directly to the file-based probe. Residual limitation: without disk access to the module file, conflict detection still falls back to name+version only, which may under-detect conflicts — this is now an explicit, documented limitation rather than a silent one.
 
 **Risk 3: Module deduplication is by address only.** `processedModuleAddresses.Add(module.Address)` ensures each address is visited once. If a `ClrModule` is somehow re-enumerated (e.g. via an enumeration bug in ClrMD), a zero address would be skipped correctly. However, if two different physical assemblies are mapped to the same address (unusual but possible in re-used address space after unload), they would be collapsed into one entry.
 
@@ -226,7 +226,7 @@ Dominators by namespace/assembly — the closest analog to `TopModulesByHeapMemo
 1. Assembly reference table (`AssemblyRef`) inspection — "what version does this module require?"
 2. JIT compilation stats by module (method count, bytes of JIT'd code) — available in SOS via `!dumpmodule`.
 3. Module-specific static root attribution — which statics in a given module are holding the most memory.
-4. `AssemblyLoadContext` isolation information (.NET 5+).
+4. ~~`AssemblyLoadContext` isolation information (.NET 5+).~~ Done — see P3 roadmap.
 
 ---
 
@@ -253,7 +253,7 @@ Dominators by namespace/assembly — the closest analog to `TopModulesByHeapMemo
 - Conflict evidence lacks version strings and domain context.
 - `ExcludedModuleCount > 0` has no finding.
 - No Gen2/LOH per-module breakdown despite data availability in index.
-- `ModuleProbe` uses fragile reflection across ClrMD API surface.
+- ~~`ModuleProbe` uses fragile reflection across ClrMD API surface.~~ Fixed — dead reflection block removed (see P2 roadmap).
 
 ---
 
@@ -269,14 +269,14 @@ Dominators by namespace/assembly — the closest analog to `TopModulesByHeapMemo
 | **P1** ✅ | Add Gen2 + LOH bytes columns to `ModuleHeapStats` and the heap-footprint table — data is in the index | Area 4 | High | Low | High | Improvement |
 | **P1** ✅ | In `Balanced` preset, set `PreferIndexOnly = true` or add a guard to skip type enumeration when no heap index exists and all results would be zero | Area 5 | Medium | Low | High | Improvement |
 | **P2** ✅ | Expose `Tags` and `Order` on `ModuleAnalyzer` (`["modules","runtime","assemblies"]`, order ~60) | Area 1 | Low | Low | High | Improvement |
-| **P2** | Replace `ModuleProbe` reflection with direct `ClrModule.MetadataImport` API once confirmed available in target ClrMD version | Area 3/6 | Medium | Medium | Medium | Improvement |
+| **P2** ✅ | ~~Replace `ModuleProbe` reflection with direct `ClrModule.MetadataImport` API once confirmed available in target ClrMD version~~ — confirmed no such API exists in ClrMD 4.0.732401 (`MetadataReader` is internal, wraps an internal `IAbstractMetadataReader` with no `AssemblyRef` surface); removed the dead reflection block instead, since it never resolved against the real `ClrModule` members | Area 3/6 | Medium | Low | High | Improvement |
 | **P2** ✅ | Add `IsThreadSafe` declaration (currently `false` by interface default; document explicitly) | Area 1 | Low | Low | High | Improvement |
 | **P2** ✅ | Emit "unknown-identity duplicate modules" as a `Warning` finding rather than silently annotating `AssemblyName` | Area 6 | Medium | Low | High | Improvement |
 | **P2** ✅ | Add a summary text block to `ModuleSectionBuilder` enumerating totals before tables | Area 2 | Medium | Low | High | Improvement |
-| **P3** | Expose `AssemblyLoadContext` name per module (via reflection on ClrMD, .NET 5+) | Area 4/7 | High | Medium | Medium | Evolution |
-| **P3** | Expose top-N types per heavy module as a sub-table ("top types in heaviest module") | Area 4 | High | Medium | High | Improvement |
-| **P3** | Cross-domain duplicate load detection — module loaded in >1 domain flagged as a finding | Area 4 | Medium | Low | High | Improvement |
-| **P3** | `AssemblyRef` table inspection via `MetadataImport` — "required version" vs "loaded version" per module | Area 4/7 | High | High | Medium | Evolution |
+| **P3** ✅ | ~~Expose `AssemblyLoadContext` name per module (via reflection on ClrMD, .NET 5+)~~ — implemented without reflection: `ClrType.AssemblyLoadContextAddress` (a real, public ClrMD API) resolves the owning ALC's heap address for a representative type per module, then `ClrObject.TryReadStringField("_name", ...)` (also public ClrMD) reads its display name; results cached by ALC address since most modules share the Default context. `LoadedModuleSnapshot` now carries `AssemblyLoadContextName`/`HasAssemblyLoadContext`/`IsCollectibleAssemblyLoadContext`, surfaced as a "Load Context" column in "Top modules by size" | Area 4/7 | High | Low | High | Improvement |
+| **P3** ✅ | Expose top-N types per heavy module as a sub-table ("top types in heaviest module") — implemented as `ModuleHeapStats.TopTypes`/`ModuleTypeUsage`: `ModuleAggregator` maintains a bounded (10), sorted-by-`TotalSize` list per module clearing `HeavyModuleWarningThresholdBytes` via a second bounded pass over `TypeAggregates`; `ModuleAnalyzer` resolves type names via `runtime.GetTypeByMethodTable` only for that bounded heavy-module method-table set; `ModuleSectionBuilder` renders a flat "Top types in heaviest modules" sub-table. Verified against a real dump via `ModuleAnalyzerTopTypesRealDumpTests` | Area 4 | High | Medium | High | Improvement |
+| **P3** ✅ | Cross-domain duplicate load detection — module loaded in >1 domain flagged as a finding | Area 4 | Medium | Low | High | Improvement — implemented as `CrossDomainModuleLoad` (module file name, domain count, size), tracked in `AnalyzeAppDomains` per-domain module loop (keyed by file name since each domain gets its own `ClrModule` address for the same file), excluding framework/BCL modules (`System.*`, `Microsoft.*`, `mscorlib.dll`, etc.) via `IsFrameworkModule`. Surfaced as an Info/Warning finding (Warning when ≥3 domains or size ≥ `HeavyModuleWarningThresholdBytes`) and a "Cross-domain module loads" report table. Verified via new `ModuleFindingGeneratorTests` unit tests |
+| **P3** ✅ | `AssemblyRef` table inspection via `MetadataImport` — "required version" vs "loaded version" per module | Area 4/7 | High | High | Medium | Evolution — feasible without `MetadataImport` (confirmed internal, no public `AssemblyRef` surface): `ClrModule.MetadataAddress`/`MetadataLength` are public and point at the same raw ECMA-335 metadata root the DAC reads from. New `AssemblyRefProbe` reads that blob via `IMemoryReader.Read` and parses it directly with `System.Reflection.Metadata.MetadataReaderProvider.FromMetadataImage` (shared-framework API, no COM interop, no `unsafe` code). `AnalyzeModules` now cross-checks every non-dynamic module's `AssemblyRef` requirements against every loaded assembly's version (bounded by new `ModuleAnalysisOptions.MaxModulesForAssemblyRefAudit`, default 1000, with a warning if the cap is hit), surfaced as `AssemblyRefVersionMismatch` entries, a Warning finding, and an "AssemblyRef version mismatches" report table. Verified via `AssemblyRefProbeTests` (parses this test assembly's own real metadata, including a corrupt-bytes case) and `ModuleFindingGeneratorTests` |
 
 ---
 
@@ -291,7 +291,7 @@ Dominators by namespace/assembly — the closest analog to `TopModulesByHeapMemo
    - Aligning `HeavyModuleWarningThresholdBytes` in findings (P0, trivial).
 
 3. **Platform evolution opportunities?**
-   - `AssemblyLoadContext` awareness is an increasingly important diagnostic dimension for .NET 5+ applications using plugin architectures and Blazor/hot-reload scenarios.
+   - ~~`AssemblyLoadContext` awareness is an increasingly important diagnostic dimension for .NET 5+ applications using plugin architectures and Blazor/hot-reload scenarios.~~ Now implemented (P3).
    - A `ModuleInfoIndex` (disk-backed, shared across analyzers) would eliminate the dual-enumeration pattern and let `ExceptionAnalyzer` and `TypeSystemSectionBuilder` consume pre-indexed module data without live ClrMD calls.
 
 4. **Highest engineering return?** P0+P1 fixes together require ~1–2 days of work and would raise the effective diagnostic quality of the module section substantially, particularly for version-conflict investigation workflows which are the most common use of this analyzer in production incident reviews.

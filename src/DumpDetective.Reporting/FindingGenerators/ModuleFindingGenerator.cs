@@ -1,3 +1,5 @@
+using System.Linq;
+
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
@@ -134,6 +136,63 @@ internal sealed class ModuleFindingGenerator : IFindingGenerator
                 Tags: ["anonymous-module", "dynamic", "memory"],
                 MetricValue: r.AnonymousModuleCount,
                 MetricUnit: "modules"));
+        }
+
+        // ── Cross-domain module loads ───────────────────────────────────────────────
+        if (r.CrossDomainModuleLoads is { Count: > 0 } crossDomainLoads)
+        {
+            bool anyHeavyOrWidelyLoaded = crossDomainLoads.Any(m =>
+                m.DomainCount >= 3 || m.Size >= r.HeavyModuleWarningThresholdBytes);
+
+            var topEntries = new System.Text.StringBuilder();
+            int detailCount = Math.Min(3, crossDomainLoads.Count);
+            for (int i = 0; i < detailCount; i++)
+            {
+                var m = crossDomainLoads[i];
+                topEntries.Append($" {m.ModuleName} ({m.DomainCount} domains, {FormatHelper.FormatBytes(m.Size)})");
+                if (i < detailCount - 1) topEntries.Append(';');
+            }
+            if (crossDomainLoads.Count > 3)
+                topEntries.Append($" (+ {crossDomainLoads.Count - 3} more)");
+
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Modules",
+                Severity: anyHeavyOrWidelyLoaded ? FindingSeverity.Warning : FindingSeverity.Info,
+                Title: $"Cross-domain module loads: {crossDomainLoads.Count:N0} non-framework module(s) loaded into multiple AppDomains",
+                Evidence: $"{crossDomainLoads.Count:N0} non-framework module(s) are each loaded into more than one AppDomain, meaning a separate managed-memory copy per domain. Modules:{topEntries}",
+                Recommendation: "Verify these loads are intentional (e.g. plugin/isolation architecture) rather than accidental re-loading of the same assembly. " +
+                                 "Each additional domain load multiplies the module's static/type footprint.",
+                Tags: ["modules", "appdomain", "cross-domain", "memory"],
+                MetricValue: crossDomainLoads.Count,
+                MetricUnit: "cross-domain-modules"));
+        }
+
+        // ── AssemblyRef version mismatches (requires vs loaded) ─────────────────────
+        if (r.AssemblyRefVersionMismatches is { Count: > 0 } refMismatches)
+        {
+            var topEntries = new System.Text.StringBuilder();
+            int detailCount = Math.Min(3, refMismatches.Count);
+            for (int i = 0; i < detailCount; i++)
+            {
+                var m = refMismatches[i];
+                topEntries.Append($" {m.RequiringModule} requires {m.RequiredAssemblyName} {m.RequiredVersion} (loaded: {m.LoadedVersions})");
+                if (i < detailCount - 1) topEntries.Append(';');
+            }
+            if (refMismatches.Count > 3)
+                topEntries.Append($" (+ {refMismatches.Count - 3} more)");
+
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Dependency",
+                Severity: FindingSeverity.Warning,
+                Title: $"AssemblyRef version mismatches: {refMismatches.Count:N0} module(s) require a version different from what's loaded",
+                Evidence: $"{refMismatches.Count:N0} AssemblyRef entries request a version of another assembly that differs from every loaded version of it (implicit binding/unification).{topEntries}",
+                Recommendation: "Verify binding redirects or the runtime's assembly unification are intentional. An implicit version substitution can mask a missing dependency " +
+                                 "or introduce subtle behavior changes (e.g. MissingMethodException at a rarely-hit code path).",
+                Tags: ["modules", "dependency", "assembly-ref", "version-mismatch"],
+                MetricValue: refMismatches.Count,
+                MetricUnit: "assemblyref-mismatches"));
         }
 
         // ── Unknown-identity duplicate modules ────────────────────────────────────────

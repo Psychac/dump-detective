@@ -10,4 +10,9 @@ public sealed class ModuleAnalysisOptions
 
     // Maximum number of unique types for a module to be considered "dense"
     public int DensityAnomalyMaxTypes { get; init; } = 5;
+
+    // Maximum number of modules whose raw metadata is read to audit AssemblyRef version
+    // requirements against what's actually loaded. Bounds the cost of the metadata-blob reads on
+    // dumps with thousands of modules; excess modules are skipped and a warning is emitted.
+    public int MaxModulesForAssemblyRefAudit { get; init; } = 1000;
 }

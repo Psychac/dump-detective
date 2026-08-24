@@ -68,6 +68,10 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             for (int i = 0; i < d.TopModulesBySize.Count; i++)
             {
                 LoadedModuleSnapshot m = d.TopModulesBySize[i];
+                string alcDisplay = !m.HasAssemblyLoadContext ? "-" : m.AssemblyLoadContextName ?? "Default";
+                if (m.IsCollectibleAssemblyLoadContext)
+                    alcDisplay += " [collectible]";
+
                 rows.Add(Row(
                     Cell(FormatHelper.TruncateString(m.Name, 55)),
                     Cell(FormatHelper.TruncateString(m.AssemblyName, 55)),
@@ -75,9 +79,10 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell($"0x{m.Address:X}"),
                     Cell(FormatBytes(m.Size),  (long)Math.Min(m.Size,  long.MaxValue)),
                     Cell(m.IsDynamic  ? "Yes" : "No"),
-                    Cell(m.IsPEFile   ? "Yes" : "No")));
+                    Cell(m.IsPEFile   ? "Yes" : "No"),
+                    Cell(alcDisplay)));
             }
-            compactTables.Add(STCompact("Top modules by size", new[] { CH("Name"), CH("Assembly"), CH("Full Path"), CH("Address"), CH("Size","bytes"), CH("Dynamic"), CH("PE File") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Top modules by size", new[] { CH("Name"), CH("Assembly"), CH("Full Path"), CH("Address"), CH("Size","bytes"), CH("Dynamic"), CH("PE File"), CH("Load Context") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.ConflictDetails.Count > 0)
@@ -111,6 +116,29 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(FormatBytes(stats.LohBytes),           (long)Math.Min(stats.LohBytes, long.MaxValue))));
             }
             compactTables.Add(STCompact("Modules by heap footprint", new[] { CH("Module"), CH("Assembly"), CH("Types","number"), CH("Objects","number"), CH("Total Bytes","bytes"), CH("Gen2 Objects","number"), CH("LOH Bytes","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+
+            var topTypeRows = new List<TableRow>();
+            for (int i = 0; i < d.TopModulesByHeapMemory.Count; i++)
+            {
+                ModuleHeapStats stats = d.TopModulesByHeapMemory[i];
+                if (stats.TopTypes is not { Count: > 0 } topTypes) continue;
+
+                for (int t = 0; t < topTypes.Count; t++)
+                {
+                    ModuleTypeUsage usage = topTypes[t];
+                    topTypeRows.Add(Row(
+                        Cell(FormatHelper.TruncateString(stats.ModuleName, 45)),
+                        Cell(FormatHelper.TruncateString(usage.TypeName, 65)),
+                        Cell(usage.ObjectCount.ToString("N0"), usage.ObjectCount),
+                        Cell(FormatBytes(usage.TotalBytes), (long)Math.Min(usage.TotalBytes, long.MaxValue))));
+                }
+            }
+            if (topTypeRows.Count > 0)
+            {
+                compactTables.Add(STCompact("Top types in heaviest modules",
+                    new[] { CH("Module"), CH("Type"), CH("Objects", "number"), CH("Bytes", "bytes") },
+                    topTypeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            }
         }
 
         if (d.HeavyTypeDensityModules is { Count: > 0 })
@@ -128,6 +156,36 @@ internal sealed class ModuleSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(FormatBytes(density.BytesPerType),       (long)Math.Min(density.BytesPerType, long.MaxValue))));
             }
             compactTables.Add(STCompact("Type density", new[] { CH("Module"), CH("Assembly"), CH("Types","number"), CH("Objects","number"), CH("Bytes","bytes"), CH("Bytes/Type","bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
+        if (d.CrossDomainModuleLoads is { Count: > 0 })
+        {
+            var rows = new List<TableRow>(d.CrossDomainModuleLoads.Count);
+            for (int i = 0; i < d.CrossDomainModuleLoads.Count; i++)
+            {
+                CrossDomainModuleLoad m = d.CrossDomainModuleLoads[i];
+                rows.Add(Row(
+                    Cell(FormatHelper.TruncateString(m.ModuleName, 55)),
+                    Cell(FormatHelper.TruncateString(m.AssemblyName, 55)),
+                    Cell(m.DomainCount.ToString("N0"), m.DomainCount),
+                    Cell(FormatBytes(m.Size), (long)Math.Min(m.Size, long.MaxValue))));
+            }
+            compactTables.Add(STCompact("Cross-domain module loads", new[] { CH("Module"), CH("Assembly"), CH("Domains", "number"), CH("Size", "bytes") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
+        if (d.AssemblyRefVersionMismatches is { Count: > 0 })
+        {
+            var rows = new List<TableRow>(d.AssemblyRefVersionMismatches.Count);
+            for (int i = 0; i < d.AssemblyRefVersionMismatches.Count; i++)
+            {
+                AssemblyRefVersionMismatch m = d.AssemblyRefVersionMismatches[i];
+                rows.Add(Row(
+                    Cell(FormatHelper.TruncateString(m.RequiringModule, 45)),
+                    Cell(FormatHelper.TruncateString(m.RequiredAssemblyName, 45)),
+                    Cell(m.RequiredVersion),
+                    Cell(m.LoadedVersions)));
+            }
+            compactTables.Add(STCompact("AssemblyRef version mismatches", new[] { CH("Requiring Module"), CH("Required Assembly"), CH("Required Version"), CH("Loaded Version(s)") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.Domains is { Count: > 0 })

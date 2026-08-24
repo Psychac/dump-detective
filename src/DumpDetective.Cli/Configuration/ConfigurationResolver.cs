@@ -56,7 +56,7 @@ internal sealed class ConfigurationResolver
         ModuleAnalysisOptions moduleAnalysis = Resolve(usedConfigFile, BuildModuleAnalysisFromConfig, _ => new ModuleAnalysisOptions(), fileModel, request);
         GCHandleAnalysisOptions gcHandleAnalysis = Resolve(usedConfigFile, BuildGCHandleAnalysisFromConfig, _ => new GCHandleAnalysisOptions(), fileModel, request);
         StaticRootLeakAnalysisOptions staticRootLeakAnalysis = Resolve(usedConfigFile, BuildStaticRootLeakAnalysisFromConfig, _ => new StaticRootLeakAnalysisOptions(), fileModel, request);
-        MemoryAnalysisOptions memoryAnalysis = Resolve(usedConfigFile, BuildMemoryAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, MemoryAnalysisOptions.Preset), fileModel, request);
+        MemoryAnalysisOptions memoryAnalysis = Resolve(usedConfigFile, BuildMemoryAnalysisFromConfig, _ => new MemoryAnalysisOptions(), fileModel, request);
 
         string? configuredDumpPath = fileModel?.DumpPath;
         string? configuredBaseline = fileModel?.BaselineDumpPath;
@@ -464,11 +464,14 @@ internal sealed class ConfigurationResolver
     }
 
     private static MemoryAnalysisOptions BuildMemoryAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "Memory",
-            config.MemoryAnalysis,
-            MemoryAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "Memory", out JsonElement section))
+            return ApplySectionOverrides(new MemoryAnalysisOptions(), section);
+
+        return config.MemoryAnalysis is null
+            ? new MemoryAnalysisOptions()
+            : ApplyOptionsOverrides(new MemoryAnalysisOptions(), config.MemoryAnalysis);
+    }
 
     private static T Resolve<T>(
         bool fromFile,

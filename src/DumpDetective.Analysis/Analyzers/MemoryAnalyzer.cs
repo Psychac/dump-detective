@@ -13,6 +13,13 @@ namespace DumpDetective.Analysis.Analyzers
 {
     internal sealed class MemoryAnalyzer : IAnalyzer
     {
+        // Retained-size is a bounded BFS per candidate (RetainedSizeCandidateSelector), not a
+        // cheap lookup — computing it for every distinct type on a large heap (tens of thousands)
+        // would be a real wall-clock cost. Bounded to the largest types by shallow size, a fixed
+        // internal constant rather than a tier-varying option (§9.27) — the type *list* itself is
+        // exact and uncapped; only this expensive enrichment is scoped.
+        internal const int TypesToWalkForRetainedSize = 20;
+
         public string Name => "Memory Analysis";
         public string Category => "Memory";
         public IReadOnlyCollection<string> Tags => ["memory", "heap", "pressure"];
@@ -50,7 +57,7 @@ namespace DumpDetective.Analysis.Analyzers
             long[]? globalSizeBuckets,
             MemoryAnalysisOptions options)
         {
-            MemoryAnalysisProjectionResult projection = MemoryAnalysisProjection.Build(typeStats, globalSizeBuckets, options);
+            MemoryAnalysisProjectionResult projection = MemoryAnalysisProjection.Build(typeStats, globalSizeBuckets);
             var segmentSummaries = BuildSegmentSummaries(heap);
             double lohFragmentationRatio = CalculateLohFragmentationRatio(heap);
 
@@ -64,16 +71,22 @@ namespace DumpDetective.Analysis.Analyzers
                     ModuleName: string.IsNullOrWhiteSpace(s.ModuleName) ? null : s.ModuleName);
             }
 
-            var topTypes = new List<TypeSnapshot>(projection.SelectedTypes.Count);
+            IReadOnlyList<CachedTypeStatistics> allTypes = projection.AllTypesBySize;
+            var topTypes = new List<TypeSnapshot>(allTypes.Count);
 
             if (heap.CanWalkHeap)
             {
-                var sampleAddresses = new ulong[projection.SelectedTypes.Count];
-                var walkCandidates = new List<(ulong Address, ulong MethodTable, ulong ShallowSize)>(projection.SelectedTypes.Count);
+                // Retained-size enrichment is bounded to the largest types by shallow size — a
+                // real BFS per candidate, not affordable across every distinct type on a large
+                // heap. Every other type still gets its exact count/size/LOH data, just no
+                // EstimatedRetainedBytes.
+                int walkCount = Math.Min(allTypes.Count, TypesToWalkForRetainedSize);
+                var sampleAddresses = new ulong[walkCount];
+                var walkCandidates = new List<(ulong Address, ulong MethodTable, ulong ShallowSize)>(walkCount);
 
-                for (int i = 0; i < projection.SelectedTypes.Count; i++)
+                for (int i = 0; i < walkCount; i++)
                 {
-                    ulong sampleAddress = cache.GetSampleInstanceAddress(projection.SelectedTypes[i].TypeName) ?? 0;
+                    ulong sampleAddress = cache.GetSampleInstanceAddress(allTypes[i].TypeName) ?? 0;
                     sampleAddresses[i] = sampleAddress;
                     if (sampleAddress == 0)
                         continue;
@@ -99,16 +112,18 @@ namespace DumpDetective.Analysis.Analyzers
                 foreach (RetainedSizeResult r in retainedResults)
                     retainedByAddress[r.Address] = r.RetainedSize;
 
-                for (int i = 0; i < projection.SelectedTypes.Count; i++)
+                for (int i = 0; i < walkCount; i++)
                 {
                     ulong retained = retainedByAddress.TryGetValue(sampleAddresses[i], out ulong r) ? r : 0;
-                    topTypes.Add(ToSnapshot(projection.SelectedTypes[i], retained, sampleAddresses[i]));
+                    topTypes.Add(ToSnapshot(allTypes[i], retained, sampleAddresses[i]));
                 }
+                for (int i = walkCount; i < allTypes.Count; i++)
+                    topTypes.Add(ToSnapshot(allTypes[i], retainedBytes: 0, sampleAddress: 0));
             }
             else
             {
-                for (int i = 0; i < projection.SelectedTypes.Count; i++)
-                    topTypes.Add(ToSnapshot(projection.SelectedTypes[i], retainedBytes: 0, cache.GetSampleInstanceAddress(projection.SelectedTypes[i].TypeName) ?? 0));
+                for (int i = 0; i < allTypes.Count; i++)
+                    topTypes.Add(ToSnapshot(allTypes[i], retainedBytes: 0, cache.GetSampleInstanceAddress(allTypes[i].TypeName) ?? 0));
             }
 
             return new MemoryDomainResult(

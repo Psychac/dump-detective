@@ -12,7 +12,7 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 24 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
+**Implementation progress: 25 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
 §9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph, §9.8 LohFragmentation, §9.9
 SegmentReservation, §9.10 Jit, §9.11 Array, §9.12 String (partial — AMBER, not GREEN; see its
 implementation notes for what's deliberately still deferred), §9.13 AsyncStateMachine, §9.14
@@ -37,7 +37,10 @@ hardcoded `.Take(10)` masquerading behind the already-dead `TopWaitingThreadsPer
 Crash (corrected its own "options class deleted outright" claim — `MaxExceptionsPerType` gates real
 per-object stack-trace/inner-exception-chain extraction, kept as a fixed constant; the other seven
 knobs deleted as originally planned, plus one more confirmed-dead knob and a genuinely-uncapped live
-stack walk found in passing)
+stack walk found in passing), §9.27 Memory (deleted the weighted quota-merge type-selection entirely,
+stronger than the original "keep, fix one value" verdict for the four ranking weights; found
+`TopTypesCount` also bounds a real per-type retained-size BFS and re-scoped that one concern to an
+internal constant instead of deleting it outright)
 (§9.6's orphaned
 `DependentHandleAnalysisOptions` was also deleted alongside GCHandle — not a separate registered
 analyzer, per the row-4 cross-reference below).** See each section and the §7 verdict table for what
@@ -336,7 +339,7 @@ radius is a single cosmetic report field, not root exactness.
 | 24 | ThreadStackCluster | non-heap | **GREEN** ✅ DONE | 6 of 7 (1 kept, `MinClusterSize`; `ProduceClusterExports` stays pending D6's deferred cross-cutting move) | §9.24 — 6-frame signatures no longer merge genuinely different stacks; fixed a dead always-false `Truncated` render flag found in passing |
 | 25 | Hang | non-heap | **GREEN** ✅ DONE | 4 of 5 (1 kept, `HighThreadPoolThreshold`) | §9.25 — `MaxTasksToScan` corrupted `PendingTasks`/`FaultedTasks`/`CanceledTasks` past the cap, not just report width; found the real waiting-thread cap was a hardcoded `.Take(10)`, not the dead `TopWaitingThreadsPerGroup` option |
 | 26 | Crash | non-heap | **GREEN** ✅ DONE | 7 of 8 (1 kept, `MaxExceptionsPerType` — corrects the row's own "8 of 8" claim) | §9.26 — already implements the §10 render-layer pattern for 7 knobs; `MaxExceptionsPerType` gates real per-object stack-trace/inner-exception extraction and was kept |
-| 27 | Memory | non-heap | **GREEN** | 1 of 6 | §9.27 — tier changes the *ranking function*, not just the row count |
+| 27 | Memory | non-heap | **GREEN** ✅ DONE | 5 of 6 (1 kept, `LohThresholdBytes`) | §9.27 — deleted the weighted quota-merge selection entirely (stronger than "keep, fix one value"); found `TopTypesCount` also bounds a real per-type retained-size BFS, corrected and re-scoped to an internal constant rather than deleted outright |
 | 28 | HeapTopology | non-heap | **GREEN** | 1 of 1 | §9.28 — a literal exact/not-exact switch, defaulting to **not** |
 | 29 | AsyncTask | non-heap | **GREEN** | 8 of 8 | §9.29 — options class deleted outright |
 | 30 | AllocationPattern | — | **AMBER** | ~8 of 12 | §9.30 — three enums; the tier changes the *algorithm* |
@@ -2551,7 +2554,7 @@ for an oversight.
 
 ---
 
-### 9.27 Memory — **GREEN**
+### 9.27 Memory — **GREEN** ✅ IMPLEMENTED (cross-reference's "collapse to one table" executed, with a correction)
 
 > **Cross-reference before executing the `TopTypesCount` move (Category 1) or touching the four
 > weight knobs (Category 5):** [analyzer-pipeline-stages-and-leadfinding-dedup.md](./analyzer-pipeline-stages-and-leadfinding-dedup.md#stage-1-purity-audit--analyzer-domain-results-are-not-pure-data-either)
@@ -2578,6 +2581,54 @@ class doc says so plainly — *"Fast favors bytes/count, Full gives more room to
 So Full is not a superset of Fast. A type surfaced at Fast can be absent at Full and vice versa. This
 is a subtler §3.1 case than a threshold: the tier silently substitutes a different ranking function,
 which is the least defensible thing for a knob labelled "how thorough" to do.
+
+#### Correction: `TopTypesCount` also gates a real per-type BFS, not just report width
+
+Before executing the cross-reference's "collapse to one raw table" suggestion, tracing
+`MemoryAnalyzer.BuildDomainResult` found `TopTypesCount`/`SelectedTypes` feeds a
+`RetainedSizeCandidateSelector.SelectAndCompute` call (`maxCandidatesToWalk: walkCandidates.Count` —
+already unbounded *relative to* `SelectedTypes`, so `SelectedTypes.Count` **is** the real wall-clock
+knob) — a bounded BFS (`BoundedGraphWalk.ComputeExclusiveRetained`, breadth 10,000/depth 20) per
+candidate, not a cheap lookup. Naively deleting the cap and reporting "all distinct types" would run
+that BFS for every type on a 25GB heap (tens of thousands of distinct types), the same class of defect
+already corrected for Crash's `MaxExceptionsPerType` (§9.26) and consistent with D3's kept
+evidence-decoration caps. **Resolution: split the two concerns the cross-reference's "one raw table"
+idea conflated.** The type *list* is now genuinely complete and exact — every distinct type, no
+selection judgment at all. The expensive retained-size *enrichment* stays scoped, to a fixed
+`MemoryAnalyzer.TypesToWalkForRetainedSize = 20` internal constant (the largest types by shallow
+size) — not exposed via `MemoryAnalysisOptions`, since it has no semantic meaning to a user, purely a
+wall-clock-cost knob. This fully executes the cross-reference's recommendation (no weighted
+quota-merge selection survives) while keeping the one piece of real per-item cost bounded.
+
+#### Implementation notes (as shipped)
+
+- **The weighted quota-merge selection mechanism is deleted outright, not just de-tiered.** Given the
+  type list is now complete (every distinct type reported, sorted by total bytes descending), there is
+  no more "which N types get shown" judgment call for the four weights to bias — so
+  `TopTypesBySizeWeight`/`TopTypesByCountWeight`/`TopTypesByLohWeight`/`TopTypesByAverageSizeWeight`
+  and the `byCompositePressure`-sort/`ComputeQuota`/`AddFromRankedList` machinery in
+  `MemoryAnalysisProjection.Build` are gone entirely — a stronger resolution of Q7 than the original
+  table's "keep, fix one value" verdict (which would have kept a now-purposeless scoring function
+  around). `MemoryPressureScore`'s own composite formula (lohPressure/concentrationPressure/
+  smallObjectPressure/densityPressure) is a separate, already-untouched calculation and stays as-is.
+- **`MemoryAnalysisProjectionResult.SelectedTypes` renamed to `AllTypesBySize`** to match its new
+  semantics (was capped-and-merged, now complete-and-sorted-by-size) — internal-only record, no
+  schema/serialization impact per D2's established pattern.
+- **`LohThresholdBytes` kept, confirmed cosmetic-but-correct**: traced every use and found it's
+  `echoed into `MemoryDomainResult` for display only — the real LOH classification is a hardcoded
+  `85_000` constant in `TypeIndexBuilder.cs`, and this option was never tier-varied in the first place
+  (absent from every `Preset` branch), so there was no exactness defect here, just a redundant
+  always-correct label. `Preset`/`Default` deleted; `MemoryAnalysisOptions` now carries only this one
+  field.
+- **No render-layer change needed** — `MemoryAnalysisSectionBuilder`'s "Top types" `STCompact` table
+  already built its row limit from `d.TopTypes.Count` with no separate cap
+  (`ExecutiveSummarySectionBuilder`'s own `TopMemoryItems` slice, and `MemoryAnalyzerTrendComparer`'s
+  `.Take(10)`, were already render/trend-layer concerns operating on the full list) — this row's fix
+  was entirely upstream, in what the analyzer computes.
+- **Test fallout:** `MemoryAnalysisProjectionTests.cs`'s one test rewritten (no `MemoryAnalysisOptions`
+  parameter to `Build` anymore; asserts on `AllTypesBySize` containing all three input types sorted by
+  size, not a 2-of-3 quota-merged selection). `ConfigurationResolver`'s `BuildMemoryAnalysisFromConfig`
+  rewritten to the standard section-overrides-on-`new MemoryAnalysisOptions()` pattern.
 
 ---
 

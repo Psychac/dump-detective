@@ -98,6 +98,56 @@ internal sealed class BoxingFindingGenerator : IFindingGenerator
                 MetricUnit: "objects"));
         }
 
+        // Retained (Gen2) boxing — distinguishes transient churn from boxing that survived
+        // collections and is actually contributing to steady-state memory/GC pressure.
+        if (r.TotalBoxedObjects > 1000)
+        {
+            double gen2Fraction = (double)r.TotalGen2BoxedCount / r.TotalBoxedObjects;
+            if (gen2Fraction > 0.5)
+            {
+                findings.Add(new InsightFinding(
+                    Analyzer: AnalyzerName,
+                    Category: "Memory",
+                    Severity: gen2Fraction > 0.8 ? FindingSeverity.Warning : FindingSeverity.Info,
+                    Title: "Boxed instances are predominantly Gen2 (retained)",
+                    Evidence: $"{r.TotalGen2BoxedCount:N0} of {r.TotalBoxedObjects:N0} boxed instances " +
+                              $"({gen2Fraction:P0}) are in Gen2, meaning most boxing survives collections " +
+                              "rather than being transient allocation churn.",
+                    Recommendation: "Prioritise the top boxed types by Gen2 count/fraction — these are " +
+                                    "long-lived boxes contributing to steady-state memory footprint, not " +
+                                    "just GC allocation-rate pressure.",
+                    Tags: ["boxing", "generation", "retained"],
+                    MetricValue: gen2Fraction,
+                    MetricUnit: "ratio"));
+            }
+        }
+
+        // Value types missing IEquatable<T> — equality comparisons (Dictionary/HashSet keys,
+        // List.Contains) fall back to object.Equals, boxing the value on every comparison.
+        // Enums excluded: their equality boxing is already tracked via the enum finding above.
+        var missingEquatable = r.TopBoxedTypes
+            .Where(t => !t.IsEnum && !t.HasIEquatable)
+            .OrderByDescending(t => t.TotalBoxBytes)
+            .ToList();
+        long missingEquatableInstances = missingEquatable.Sum(t => (long)t.BoxCount);
+        if (missingEquatableInstances > 1000)
+        {
+            string offenderList = string.Join(", ", missingEquatable.Take(5).Select(t => $"{t.ValueTypeName} ({t.BoxCount:N0}x)"));
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Memory",
+                Severity: FindingSeverity.Info,
+                Title: "Boxed value types missing IEquatable<T>",
+                Evidence: $"{missingEquatableInstances:N0} boxed instances across {missingEquatable.Count} value type(s) " +
+                          "do not implement IEquatable<T>, so equality comparisons box via object.Equals fallback. " +
+                          $"Top offenders: {offenderList}.",
+                Recommendation: "Implement IEquatable<T> (and matching GetHashCode) on value types used as " +
+                                "Dictionary/HashSet keys or compared via List.Contains to avoid per-comparison boxing.",
+                Tags: ["boxing", "struct", "equality"],
+                MetricValue: missingEquatableInstances,
+                MetricUnit: "objects"));
+        }
+
         // Summary finding (always).
         FindingSeverity overallSeverity = r.TotalBoxedObjects > 1_000_000 ? FindingSeverity.Critical
             : r.TotalBoxedObjects > 500_000 ? FindingSeverity.Warning

@@ -34,7 +34,20 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             ["nullable_boxed_bytes"] = new NumericMetricValue((double)d.NullableBoxedBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.NullableBoxedBytes)),
             ["oversized_value_types"] = new NumericMetricValue(d.OversizedValueTypeInstanceCount, MetricUnit.Count),
             ["aggregate_padding_waste"] = new NumericMetricValue((double)d.AggregatePaddingWasteBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.AggregatePaddingWasteBytes)),
+            ["gen2_boxed_instances"] = new NumericMetricValue(d.TotalGen2BoxedCount, MetricUnit.Count),
+            ["gen2_boxed_fraction"] = new NumericMetricValue(
+                d.TotalBoxedObjects > 0 ? (double)d.TotalGen2BoxedCount / d.TotalBoxedObjects : 0.0,
+                MetricUnit.Ratio),
         };
+
+        // Non-enum boxed types missing IEquatable<T> — enums are excluded because their equality
+        // boxing is already tracked separately via boxed_enum_instances.
+        long missingIEquatableInstances = 0;
+        foreach (BoxedTypeEntry e in d.TopBoxedTypes)
+        {
+            if (!e.IsEnum && !e.HasIEquatable) missingIEquatableInstances += e.BoxCount;
+        }
+        keyMetrics["missing_iequatable_instances"] = new NumericMetricValue(missingIEquatableInstances, MetricUnit.Count);
 
         if (d.TopBoxedTypes.Count > 0)
         {
@@ -45,9 +58,11 @@ internal sealed class BoxingSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                     Cell(e.ValueTypeName),
                     Cell($"{e.BoxCount:N0}",                       e.BoxCount),
                     Cell(FormatHelper.FormatBytes(e.TotalBoxBytes), (long)e.TotalBoxBytes),
-                    Cell(e.IsEnum ? "Yes" : "No")]));
+                    Cell(e.IsEnum ? "Yes" : "No"),
+                    Cell($"{e.Gen2Fraction:P0}",                    e.Gen2Fraction),
+                    Cell(e.HasIEquatable ? "Yes" : "No")]));
             }
-            compactTables.Add(STCompact("Top boxed types by total size", new[] { CH("Value Type"), CH("Box Count","number"), CH("Total Box Bytes","bytes"), CH("IsEnum") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Top boxed types by total size", new[] { CH("Value Type"), CH("Box Count","number"), CH("Total Box Bytes","bytes"), CH("IsEnum"), CH("Gen2 %","number","percent"), CH("IEquatable<T>") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopOversizedTypes.Count > 0)

@@ -12,7 +12,7 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 27 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
+**Implementation progress: 28 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
 §9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph, §9.8 LohFragmentation, §9.9
 SegmentReservation, §9.10 Jit, §9.11 Array, §9.12 String (partial — AMBER, not GREEN; see its
 implementation notes for what's deliberately still deferred), §9.13 AsyncStateMachine, §9.14
@@ -47,9 +47,16 @@ exact Phase 1 total, per M6's identified free alternative, rather than the 10.2s
 `CountSohObjects = true` used to trigger), §9.29 AsyncTask (deleted the options class and all three
 scan caps per M7's measured 311ms delta; deleted `MaxContinuationDepth` and let the pre-existing
 per-task node budget be the only traversal bound; moved all four `Top*ToShow` caps to the render
-layer, following the Boxing/WeakReference/EventLeak precedent of per-type lists staying fully
-unbounded in the domain result while per-instance snapshot lists get a `private const` render-layer
-cap in the section builder)
+layer per §11.2 D5's amendment — the analyzer emits every `Top*` list complete/unbounded and every
+`STCompact` call takes no explicit `rowLimit`, falling through to the client's own uniform default
+pagination, not a new section-builder-local cap), §9.30 AllocationPattern (resolved by D7: collapsed
+`SelectionMode`/`ScanStrategy`/`SelectionPriority` to the one correct algorithm — `CompositeScore`
+ranking, classify-every-candidate-first bucketing — deleted `MaxScanItemsAbsolute`/`ScanMultiplier`/
+`TopTypeLimit` entirely rather than keeping any of them as a scan or row cap; also deleted
+`EmitTransient`/`EmitShortish`/`EmitLongLived`, unreachable once nothing sets them false without
+profiles, and `LohThresholdBytes`, dead code found via a V4-style grep — the options class survives
+as a plain 7-constant POCO — the Category-5 thresholds/weights that were never actually the
+`ScanStrategy`/`Mode`/`Priority` problem)
 (§9.6's orphaned
 `DependentHandleAnalysisOptions` was also deleted alongside GCHandle — not a separate registered
 analyzer, per the row-4 cross-reference below).** See each section and the §7 verdict table for what
@@ -351,7 +358,7 @@ radius is a single cosmetic report field, not root exactness.
 | 27 | Memory | non-heap | **GREEN** ✅ DONE | 5 of 6 (1 kept, `LohThresholdBytes`) | §9.27 — deleted the weighted quota-merge selection entirely (stronger than "keep, fix one value"); found `TopTypesCount` also bounds a real per-type retained-size BFS, corrected and re-scoped to an internal constant rather than deleted outright |
 | 28 | HeapTopology | non-heap | **GREEN** ✅ DONE | 1 of 1 | §9.28 — a literal exact/not-exact switch, defaulting to **not**; shipped as free arithmetic derivation instead of the live walk |
 | 29 | AsyncTask | non-heap | **GREEN** ✅ DONE | 8 of 8 | §9.29 — options class deleted outright |
-| 30 | AllocationPattern | — | **AMBER** | ~8 of 12 | §9.30 — three enums; the tier changes the *algorithm* |
+| 30 | AllocationPattern | — | **GREEN** ✅ DONE (was AMBER) | 13 of 13 | §9.30 — three enums collapsed to one algorithm via D7; no more tier-varies-the-algorithm defect, so AMBER resolves to GREEN once implemented |
 | 31 | WeakReference | — | **GREEN** | 2 of 5 | §9.31 — `HandleScanCap` truncates the handle table, not a derived list |
 | 32 | DbConnection | typed-resource | **GREEN** | 1 of 2 | §9.32-9.34 — **no options class at all**; bounds are `private const`, never preset-varied |
 | 33 | WcfChannel | typed-resource | **GREEN** | 1 of 2 | §9.33 — same shape; caps faulted-channel detection specifically |
@@ -2781,7 +2788,7 @@ vs. capped delta was 311 ms against a shared ~4.4s baseline, negligible. Safe to
 
 ---
 
-### 9.30 AllocationPattern — **AMBER**, resolved by D7
+### 9.30 AllocationPattern — **GREEN** ✅ IMPLEMENTED (was AMBER, resolved by D7)
 
 [AllocationPatternAnalysisOptions.cs](../../src/DumpDetective.Core/Options/AllocationPatternAnalysisOptions.cs)
 
@@ -2816,6 +2823,62 @@ are set to **identical values in all three presets**. Pure duplication; promote 
 delete from the presets. `TopTypeLimit` and `ScanMultiplier` compound (`TopTypeLimit x ScanMultiplier`
 at [AllocationPatternAnalyzer.cs:173](../../src/DumpDetective.Analysis/Analyzers/AllocationPatternAnalyzer.cs#L173)) —
 sixth instance of *configured ≠ applied* (§11.6).
+
+#### Implementation notes (as shipped)
+
+- **`ScanStrategy`/`SelectionMode`/`SelectionPriority` enums deleted entirely**, per D7's per-enum
+  resolution — no runtime switch on any of them survives. `AllocationPatternAnalyzer.Analyze` now
+  builds the `metrics` list once, computes `CompositeScore` unconditionally (the only comparator),
+  and always runs the classify-first bucketing loop (previously gated on
+  `Priority == ClassificationFirst || Mixed`) — the `else` branch holding `LongLivedFirst`'s
+  scan-order-dependent single-pass incremental fill, and the `Mixed`-priority spillover block
+  (rebuilding a `spillMetrics` list and redistributing leftover candidates across deficit buckets),
+  are gone outright, not merely unreachable.
+- **`MaxScanItemsAbsolute`/`ScanMultiplier` deleted along with the `scanLimit` concept itself** — the
+  classify loop now runs over `metrics.Count` (every distinct type in `TypeAggregates`), not a
+  `TopTypeLimit x ScanMultiplier` or `MaxScanItemsAbsolute`-bounded prefix of a pre-sorted list. This
+  also **removed a full O(N log N) sort over the entire type population** that existed only to
+  establish that prefix (`metrics.Sort(comparator)` before the classify loop) — classification order
+  no longer matters once every candidate is visited, so only the three per-bucket candidate lists
+  (typically far smaller) get sorted, after classification, before being returned. Net effect:
+  cheaper than the capped version, not just more correct — the same shape M1/M3/M4/M7's real-dump
+  measurements found for every other deleted cap in this doc.
+- **`TopTypeLimit` deleted; the three bucket lists (`transient`/`shortish`/`longLived`) and
+  `highGen1Survivors` are now emitted complete, sorted, uncapped** — `.Take(options.TopTypeLimit)`
+  removed from all four. `AllocationPatternSectionBuilder` needed no change at all: every `STCompact`
+  call there already fed the full list with no explicit `rowLimit` (confirmed by inspection before
+  touching the analyzer) — it was already on the §11.2 D5 default-pagination shape ahead of this
+  work, unlike §9.29's first-pass mistake of reintroducing a local cap.
+- **`EmitTransient`/`EmitShortish`/`EmitLongLived` deleted — not part of D7's table, found while
+  implementing it.** These never saved any work (`if (!options.EmitX) x.Clear();` ran *after* the
+  classify loop had already built the list) — pure display suppression, and only `EmitShortish`
+  was ever set (`false` at Fast). With profile deletion nothing sets any of the three false anymore,
+  so the guard clauses would become permanently-inert dead code, same shape as §5's dead-knob grep
+  step and V4's findings — deleted outright rather than kept as inert flags.
+- **`LohThresholdBytes` deleted — also found while implementing, not in the original audit table.**
+  A V4-style grep (`grep -rn "LohThresholdBytes" src`) shows `AllocationPatternAnalyzer.cs` never
+  reads its own class's `LohThresholdBytes` property at all (unlike `MemoryAnalyzer`/`StringAnalyzer`,
+  which do read their own same-named properties) — dead code masquerading as a Category-5 constant.
+- **Options class survives as a 7-constant POCO** (`Gen0Weight`/`Gen2Weight`/`LohSizeWeight`,
+  `LongLivedSelectionThreshold`/`LongLivedClassificationThreshold`/`TransientClassificationThreshold`/
+  `ShortLivedSelectionThreshold`), matching the `SegmentReservationAnalysisOptions`/
+  `MemoryAnalysisOptions` shape used elsewhere for analyzers where real Category-5 knobs survive:
+  plain `init` properties with the Balanced value as the sole default, no `Preset`/`Default`/
+  `AnalysisProfile` reference, one-line D4-style rationale comments. `ConfigurationResolver`'s
+  `BuildAllocationPatternAnalysisFromConfig` was rewritten from the generic `BuildAnalyzerOptionsFromConfig`
+  (which took a now-deleted `Preset` delegate) to the `ApplySectionOverrides`/`ApplyOptionsOverrides`
+  shape already used for `SegmentReservationAnalysisOptions`/`GCGenerationAnalysisOptions`.
+- **`AllocationPatternAnalyzerTests.cs` rewritten**: deleted the three preset/enum-assertion tests
+  (`AllocationPatternAnalysisOptions_Presets_SetExpectedValues`,
+  `AllocationPatternAnalysisOptions_Presets_SetAlgorithmicDefaults`,
+  `SelectionMode_TopBySize_PicksLargestLongLived`) and the two deleted-behavior tests
+  (`EmitFlags_DisableShortish_ClearsShortishList`, `SelectionPriority_Mixed_AllowsSpilloverToFillDeficits`)
+  outright — the features they asserted no longer exist. Added
+  `AnalyzeAsync_ClassifiesEveryCandidate_NoScanCap` (500 synthetic types, asserts all 500 come back
+  classified) to cover the new no-cap behavior, and renamed
+  `SelectionPriority_ClassificationFirst_ChoosesByBuckets` to
+  `AnalyzeAsync_RanksEachBucketByCompositeScore_ClassificationFirst` since Priority/Mode are no
+  longer configurable — the test now documents the one remaining algorithm, not a choice among several.
 
 ---
 

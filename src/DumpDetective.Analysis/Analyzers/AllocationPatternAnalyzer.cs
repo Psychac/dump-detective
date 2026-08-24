@@ -128,7 +128,10 @@ namespace DumpDetective.Analysis.Analyzers
             GCPressureLevel pressure = ClassifyPressure(pressureScore);
             double promotionScore = gen2CountPct + (lohSizePct * 2.0);
 
-            // Build a metric list and sort according to SelectionMode from options
+            // Build a metric list — CompositeScore is the only selection mode (D7, §11.2): it
+            // blends Gen0%/Gen2 ratio/LOH size% into a signal aligned with "interesting allocation
+            // pattern," unlike raw count/size which just surfaces the biggest collection regardless
+            // of whether it's pathological.
             var metrics = new List<(ulong Mt, TypeAggregateIndexEntry Entry, double Gen0Pct, double Gen2Ratio, double MtLohSizePct, double CompositeScore)>(aggregates.Count);
             foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in aggregates)
             {
@@ -146,228 +149,78 @@ namespace DumpDetective.Analysis.Analyzers
                 metrics.Add((kv.Key, e, gen0Pct, gen2Ratio, mtLohSizePct, composite));
             }
 
-            // Choose comparator based on options.Mode
-            Comparison<(ulong Mt, TypeAggregateIndexEntry Entry, double Gen0Pct, double Gen2Ratio, double MtLohSizePct, double CompositeScore)> comparator = (a, b) => b.Entry.Count.CompareTo(a.Entry.Count);
-            switch (options.Mode)
-            {
-                case AllocationPatternAnalysisOptions.SelectionMode.TopByGen0Pct:
-                    comparator = (a, b) => b.Gen0Pct.CompareTo(a.Gen0Pct);
-                    break;
-                case AllocationPatternAnalysisOptions.SelectionMode.TopBySize:
-                    comparator = (a, b) => b.Entry.TotalSize.CompareTo(a.Entry.TotalSize);
-                    break;
-                case AllocationPatternAnalysisOptions.SelectionMode.CompositeScore:
-                    comparator = (a, b) => b.CompositeScore.CompareTo(a.CompositeScore);
-                    break;
-                case AllocationPatternAnalysisOptions.SelectionMode.TopByCount:
-                default:
-                    comparator = (a, b) => b.Entry.Count.CompareTo(a.Entry.Count);
-                    break;
-            }
+            Comparison<(ulong Mt, TypeAggregateIndexEntry Entry, double Gen0Pct, double Gen2Ratio, double MtLohSizePct, double CompositeScore)> comparator =
+                (a, b) => b.CompositeScore.CompareTo(a.CompositeScore);
 
-            // Calculate scan limit before sorting to enable partial sort optimization
-            int scanLimit;
-            if (options.Strategy == AllocationPatternAnalysisOptions.ScanStrategy.FullScan)
-                scanLimit = Math.Min(metrics.Count, options.MaxScanItemsAbsolute);
-            else
-                scanLimit = Math.Min(metrics.Count, options.TopTypeLimit * options.ScanMultiplier);
-
-            // For large FullScan operations, only sort the top items we need to reduce wasted sort work
-            if (options.Strategy == AllocationPatternAnalysisOptions.ScanStrategy.FullScan && metrics.Count > scanLimit * 2)
-            {
-                // Partial sort: only sort enough to guarantee we have good candidates
-                var sortLimit = Math.Min(metrics.Count, scanLimit * 2);
-                metrics.Sort(0, sortLimit, Comparer<(ulong, TypeAggregateIndexEntry, double, double, double, double)>.Create(comparator));
-            }
-            else
-                metrics.Sort(comparator);
-
-            var transient = new List<TypeAllocationProfile>(options.TopTypeLimit);
-            var shortish = new List<TypeAllocationProfile>(options.TopTypeLimit);
-            var longLived = new List<TypeAllocationProfile>(options.TopTypeLimit);
+            var transCandidates = new List<((ulong Mt, TypeAggregateIndexEntry Entry, double Gen0Pct, double Gen2Ratio, double MtLohSizePct, double CompositeScore) Metric, TypeAllocationProfile Profile)>();
+            var shortCandidates = new List<((ulong Mt, TypeAggregateIndexEntry Entry, double Gen0Pct, double Gen2Ratio, double MtLohSizePct, double CompositeScore) Metric, TypeAllocationProfile Profile)>();
+            var longCandidates = new List<((ulong Mt, TypeAggregateIndexEntry Entry, double Gen0Pct, double Gen2Ratio, double MtLohSizePct, double CompositeScore) Metric, TypeAllocationProfile Profile)>();
             var highGen1Survivors = new List<(double Gen1SurvivalRate, TypeAllocationProfile Profile)>();
 
-            progress?.Report(new AnalyzerProgressReport(0, $"scanning {scanLimit} types for allocation patterns"));
+            progress?.Report(new AnalyzerProgressReport(0, $"scanning {metrics.Count} types for allocation patterns"));
 
-            if (options.Priority == AllocationPatternAnalysisOptions.SelectionPriority.ClassificationFirst
-                || options.Priority == AllocationPatternAnalysisOptions.SelectionPriority.Mixed)
+            // Classify every candidate into its bucket first, then sort and take each bucket's
+            // own top set independently (D7, §11.2) — the only way to guarantee each table's
+            // ranking is actually correct: a single-pass incremental fill is scan-order-dependent
+            // and can silently drop a bucket's true top member if other buckets filled first.
+            for (int i = 0; i < metrics.Count; i++)
             {
-                var transCandidates = new List<((ulong Mt, TypeAggregateIndexEntry Entry, double Gen0Pct, double Gen2Ratio, double MtLohSizePct, double CompositeScore) Metric, TypeAllocationProfile Profile)>();
-                var shortCandidates = new List<((ulong Mt, TypeAggregateIndexEntry Entry, double Gen0Pct, double Gen2Ratio, double MtLohSizePct, double CompositeScore) Metric, TypeAllocationProfile Profile)>();
-                var longCandidates = new List<((ulong Mt, TypeAggregateIndexEntry Entry, double Gen0Pct, double Gen2Ratio, double MtLohSizePct, double CompositeScore) Metric, TypeAllocationProfile Profile)>();
+                cancellationToken.ThrowIfCancellationRequested();
+                if (i % 100 == 0)
+                    progress?.Report(new AnalyzerProgressReport(i * 100 / Math.Max(metrics.Count, 1), $"scanned {i}/{metrics.Count} types"));
+                var item = metrics[i];
+                ulong mt = item.Mt;
+                TypeAggregateIndexEntry e = item.Entry;
 
-                for (int i = 0; i < scanLimit; i++)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (i % 100 == 0)
-                        progress?.Report(new AnalyzerProgressReport(i * 100 / scanLimit, $"scanned {i}/{scanLimit} types"));
-                    var item = metrics[i];
-                    ulong mt = item.Mt;
-                    TypeAggregateIndexEntry e = item.Entry;
+                long mtGen0 = e.Gen0Count;
+                long mtGen1 = e.Gen1Count;
+                long mtGen2 = e.Gen2Count;
 
-                    long mtGen0 = e.Gen0Count;
-                    long mtGen1 = e.Gen1Count;
-                    long mtGen2 = e.Gen2Count;
+                double longLivedRatio = item.Gen2Ratio;
+                double typeGen0Pct = item.Gen0Pct;
+                double gen1SurvivalRate = mtGen0 > 0 ? mtGen1 / (double)mtGen0 : 0.0;
+                TypeProfile typeProfile = typeGen0Pct > options.TransientClassificationThreshold
+                    ? TypeProfile.Transient
+                    : longLivedRatio > options.LongLivedClassificationThreshold
+                        ? TypeProfile.Retained
+                        : TypeProfile.Mixed;
 
-                    double longLivedRatio = item.Gen2Ratio;
-                    double typeGen0Pct = item.Gen0Pct;
-                    double gen1SurvivalRate = mtGen0 > 0 ? mtGen1 / (double)mtGen0 : 0.0;
-                    TypeProfile typeProfile = typeGen0Pct > options.TransientClassificationThreshold
-                        ? TypeProfile.Transient
-                        : longLivedRatio > options.LongLivedClassificationThreshold
-                            ? TypeProfile.Retained
-                            : TypeProfile.Mixed;
+                string typeName = (context.Runtime is not null && heapCache.TryGetTypeName(context.Runtime.Heap, mt, out var resolvedName)) ? resolvedName : $"MT:0x{mt:x}";
 
-                    string typeName = (context.Runtime is not null && heapCache.TryGetTypeName(context.Runtime.Heap, mt, out var resolvedName)) ? resolvedName : $"MT:0x{mt:x}";
+                var entry = new TypeAllocationProfile(
+                    typeName,
+                    (int)Math.Min(int.MaxValue, mtGen0),
+                    (int)Math.Min(int.MaxValue, mtGen1),
+                    (int)Math.Min(int.MaxValue, mtGen2),
+                    longLivedRatio,
+                    typeProfile,
+                    e.TotalSize,
+                    gen1SurvivalRate,
+                    IsFinalizable: (e.Flags & TypeAggregateFlags.IsFinalizableType) != 0);
 
-                    var entry = new TypeAllocationProfile(
-                        typeName,
-                        (int)Math.Min(int.MaxValue, mtGen0),
-                        (int)Math.Min(int.MaxValue, mtGen1),
-                        (int)Math.Min(int.MaxValue, mtGen2),
-                        longLivedRatio,
-                        typeProfile,
-                        e.TotalSize,
-                        gen1SurvivalRate,
-                        IsFinalizable: (e.Flags & TypeAggregateFlags.IsFinalizableType) != 0);
+                if (gen1SurvivalRate > 0.5)
+                    highGen1Survivors.Add((gen1SurvivalRate, entry));
 
-                    if (gen1SurvivalRate > 0.5)
-                        highGen1Survivors.Add((gen1SurvivalRate, entry));
-
-                    if (longLivedRatio > options.LongLivedSelectionThreshold)
-                        longCandidates.Add((item, entry));
-                    else if (typeGen0Pct >= options.TransientClassificationThreshold)
-                        transCandidates.Add((item, entry));
-                    else if (typeGen0Pct >= options.ShortLivedSelectionThreshold)
-                        shortCandidates.Add((item, entry));
-                }
-
-                // sort each candidate set by the chosen comparator and take top-N
-                transCandidates.Sort((a, b) => comparator(a.Metric, b.Metric));
-                shortCandidates.Sort((a, b) => comparator(a.Metric, b.Metric));
-                longCandidates.Sort((a, b) => comparator(a.Metric, b.Metric));
-
-                foreach (var t in transCandidates.Take(options.TopTypeLimit)) transient.Add(t.Profile);
-                foreach (var s in shortCandidates.Take(options.TopTypeLimit)) shortish.Add(s.Profile);
-                foreach (var l in longCandidates.Take(options.TopTypeLimit)) longLived.Add(l.Profile);
-
-                // Mixed priority: if some buckets have fewer than TopTypeLimit, allow spillover
-                if (options.Priority == AllocationPatternAnalysisOptions.SelectionPriority.Mixed)
-                {
-                    int needTransient = options.TopTypeLimit - transient.Count;
-                    int needShortish = options.TopTypeLimit - shortish.Count;
-                    int needLongLived = options.TopTypeLimit - longLived.Count;
-
-                    if (needTransient > 0 || needShortish > 0 || needLongLived > 0)
-                    {
-                        var spill = new List<TypeAllocationProfile>();
-                        // collect remaining candidates from each bucket beyond the taken window
-                        spill.AddRange(transCandidates.Skip(options.TopTypeLimit).Select(x => x.Profile));
-                        spill.AddRange(shortCandidates.Skip(options.TopTypeLimit).Select(x => x.Profile));
-                        spill.AddRange(longCandidates.Skip(options.TopTypeLimit).Select(x => x.Profile));
-
-                        // sort spill by comparator using their metric (rebuild mapping)
-                        // we need metric -> profile mapping; rebuild from candidate tuples
-                        var spillMetrics = new List<((ulong Mt, TypeAggregateIndexEntry Entry, double Gen0Pct, double Gen2Ratio, double MtLohSizePct, double CompositeScore) Metric, TypeAllocationProfile Profile)>();
-                        spillMetrics.AddRange(transCandidates.Skip(options.TopTypeLimit));
-                        spillMetrics.AddRange(shortCandidates.Skip(options.TopTypeLimit));
-                        spillMetrics.AddRange(longCandidates.Skip(options.TopTypeLimit));
-
-                        spillMetrics.Sort((a, b) => comparator(a.Metric, b.Metric));
-
-                        int spIdx = 0;
-                        while ((needTransient > 0 || needShortish > 0 || needLongLived > 0) && spIdx < spillMetrics.Count)
-                        {
-                            var cand = spillMetrics[spIdx++].Profile;
-                            if (needTransient > 0)
-                            {
-                                transient.Add(cand);
-                                needTransient--;
-                                continue;
-                            }
-                            if (needShortish > 0)
-                            {
-                                shortish.Add(cand);
-                                needShortish--;
-                                continue;
-                            }
-                            if (needLongLived > 0)
-                            {
-                                longLived.Add(cand);
-                                needLongLived--;
-                                continue;
-                            }
-                        }
-                    }
-                }
-            }
-            else
-            {
-                for (int i = 0; i < scanLimit; i++)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (i % 100 == 0)
-                        progress?.Report(new AnalyzerProgressReport(i * 100 / scanLimit, $"scanned {i}/{scanLimit} types"));
-                    var item = metrics[i];
-                    ulong mt = item.Mt;
-                    TypeAggregateIndexEntry e = item.Entry;
-
-                    long mtGen0 = e.Gen0Count;
-                    long mtGen1 = e.Gen1Count;
-                    long mtGen2 = e.Gen2Count;
-
-                    double longLivedRatio = item.Gen2Ratio;
-                    double typeGen0Pct = item.Gen0Pct;
-                    double gen1SurvivalRate = mtGen0 > 0 ? mtGen1 / (double)mtGen0 : 0.0;
-                    TypeProfile typeProfile = typeGen0Pct > options.TransientClassificationThreshold
-                        ? TypeProfile.Transient
-                        : longLivedRatio > options.LongLivedClassificationThreshold
-                            ? TypeProfile.Retained
-                            : TypeProfile.Mixed;
-
-                    string typeName = (context.Runtime is not null && heapCache.TryGetTypeName(context.Runtime.Heap, mt, out var resolvedName)) ? resolvedName : $"MT:0x{mt:x}";
-
-                    var entry = new TypeAllocationProfile(
-                        typeName,
-                        (int)Math.Min(int.MaxValue, mtGen0),
-                        (int)Math.Min(int.MaxValue, mtGen1),
-                        (int)Math.Min(int.MaxValue, mtGen2),
-                        longLivedRatio,
-                        typeProfile,
-                        e.TotalSize,
-                        gen1SurvivalRate,
-                        IsFinalizable: (e.Flags & TypeAggregateFlags.IsFinalizableType) != 0);
-
-                    if (gen1SurvivalRate > 0.5)
-                        highGen1Survivors.Add((gen1SurvivalRate, entry));
-
-                    if (longLivedRatio > options.LongLivedSelectionThreshold)
-                    {
-                        if (longLived.Count < options.TopTypeLimit)
-                            longLived.Add(entry);
-                    }
-                    else if (typeGen0Pct >= options.TransientClassificationThreshold)
-                    {
-                        if (transient.Count < options.TopTypeLimit)
-                            transient.Add(entry);
-                    }
-                    else if (typeGen0Pct >= options.ShortLivedSelectionThreshold)
-                    {
-                        if (shortish.Count < options.TopTypeLimit)
-                            shortish.Add(entry);
-                    }
-                }
+                if (longLivedRatio > options.LongLivedSelectionThreshold)
+                    longCandidates.Add((item, entry));
+                else if (typeGen0Pct >= options.TransientClassificationThreshold)
+                    transCandidates.Add((item, entry));
+                else if (typeGen0Pct >= options.ShortLivedSelectionThreshold)
+                    shortCandidates.Add((item, entry));
             }
 
-            // Honor emit flags: clear lists for disabled emissions
-            if (!options.EmitTransient) transient.Clear();
-            if (!options.EmitShortish) shortish.Clear();
-            if (!options.EmitLongLived) longLived.Clear();
+            // Full ranked population, no Top-N cap — the render layer slices for display
+            // (§11.2 D5).
+            transCandidates.Sort((a, b) => comparator(a.Metric, b.Metric));
+            shortCandidates.Sort((a, b) => comparator(a.Metric, b.Metric));
+            longCandidates.Sort((a, b) => comparator(a.Metric, b.Metric));
 
-            // Sort high Gen1 survivors by survival rate (descending) and take top N
+            var transient = transCandidates.Select(t => t.Profile).ToList();
+            var shortish = shortCandidates.Select(s => s.Profile).ToList();
+            var longLived = longCandidates.Select(l => l.Profile).ToList();
+
             highGen1Survivors.Sort((a, b) => b.Gen1SurvivalRate.CompareTo(a.Gen1SurvivalRate));
             var topGen1Survivors = highGen1Survivors
-                .Take(options.TopTypeLimit)
                 .Select(x => x.Profile)
                 .ToList();
 

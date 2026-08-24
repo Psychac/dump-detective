@@ -43,7 +43,7 @@ internal sealed class ConfigurationResolver
         BoxingAnalysisOptions boxingAnalysis = Resolve(usedConfigFile, BuildBoxingAnalysisFromConfig, _ => new BoxingAnalysisOptions(), fileModel, request);
         CollectionAnalysisOptions collection = Resolve(usedConfigFile, BuildCollectionFromConfig, _ => CollectionAnalysisOptions.Validate(new CollectionAnalysisOptions()), fileModel, request);
         StringAnalysisOptions stringAnalysis = Resolve(usedConfigFile, BuildStringAnalysisFromConfig, AnalyzerOptionsBuilder.BuildStringAnalysisFromCli, fileModel, request);
-        AllocationPatternAnalysisOptions allocationPatternAnalysis = Resolve(usedConfigFile, BuildAllocationPatternAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, AllocationPatternAnalysisOptions.Preset), fileModel, request);
+        AllocationPatternAnalysisOptions allocationPatternAnalysis = Resolve(usedConfigFile, BuildAllocationPatternAnalysisFromConfig, _ => new AllocationPatternAnalysisOptions(), fileModel, request);
         ThreadStackClusterAnalysisOptions threadStackClusterAnalysis = Resolve(usedConfigFile, BuildThreadStackClusterAnalysisFromConfig, _ => new ThreadStackClusterAnalysisOptions(), fileModel, request);
         GCGenerationAnalysisOptions gcGenerationAnalysis = Resolve(usedConfigFile, BuildGCGenerationAnalysisFromConfig, _ => new GCGenerationAnalysisOptions(), fileModel, request);
         SegmentReservationAnalysisOptions segmentReservationAnalysis = Resolve(usedConfigFile, BuildSegmentReservationAnalysisFromConfig, _ => new SegmentReservationAnalysisOptions(), fileModel, request);
@@ -342,11 +342,14 @@ internal sealed class ConfigurationResolver
     }
 
     private static AllocationPatternAnalysisOptions BuildAllocationPatternAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "AllocationPattern",
-            config.AllocationPatternAnalysis,
-            AllocationPatternAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "AllocationPattern", out JsonElement section))
+            return ApplySectionOverrides(new AllocationPatternAnalysisOptions(), section);
+
+        return config.AllocationPatternAnalysis is null
+            ? new AllocationPatternAnalysisOptions()
+            : ApplyOptionsOverrides(new AllocationPatternAnalysisOptions(), config.AllocationPatternAnalysis);
+    }
 
     private static ThreadStackClusterAnalysisOptions BuildThreadStackClusterAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
     {

@@ -83,7 +83,6 @@ public sealed class StartupValidatorTests
             BoxingAnalysis: new BoxingAnalysisOptions(),
             Collection: new CollectionAnalysisOptions(),
             StringAnalysis: new StringAnalysisOptions(),
-            HeapTopology: new HeapTopologyAnalysisOptions(),
             AllocationPatternAnalysis: new AllocationPatternAnalysisOptions(),
             ThreadStackClusterAnalysis: new ThreadStackClusterAnalysisOptions(),
             GCGenerationAnalysis: new GCGenerationAnalysisOptions(),

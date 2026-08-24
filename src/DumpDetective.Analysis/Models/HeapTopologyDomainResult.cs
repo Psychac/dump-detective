@@ -58,7 +58,6 @@ internal sealed record HeapTopologyDomainResult(
     ulong LohFragmentedBytes,
     ulong PohFragmentedBytes,
     ulong FrozenFragmentedBytes,
-    bool CountSohObjects,
     IReadOnlyList<SegmentKindSummary> KindSummaries,
     IReadOnlyList<PerLogicalHeapSummary> PerLogicalHeapSummaries,
     IReadOnlyList<TypeSnapshot>? TopPohTypes = null,

@@ -44,7 +44,6 @@ internal sealed class ConfigurationResolver
         BoxingAnalysisOptions boxingAnalysis = Resolve(usedConfigFile, BuildBoxingAnalysisFromConfig, _ => new BoxingAnalysisOptions(), fileModel, request);
         CollectionAnalysisOptions collection = Resolve(usedConfigFile, BuildCollectionFromConfig, _ => CollectionAnalysisOptions.Validate(new CollectionAnalysisOptions()), fileModel, request);
         StringAnalysisOptions stringAnalysis = Resolve(usedConfigFile, BuildStringAnalysisFromConfig, AnalyzerOptionsBuilder.BuildStringAnalysisFromCli, fileModel, request);
-        HeapTopologyAnalysisOptions heapTopology = Resolve(usedConfigFile, BuildHeapTopologyAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, HeapTopologyAnalysisOptions.Preset), fileModel, request);
         AllocationPatternAnalysisOptions allocationPatternAnalysis = Resolve(usedConfigFile, BuildAllocationPatternAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, AllocationPatternAnalysisOptions.Preset), fileModel, request);
         ThreadStackClusterAnalysisOptions threadStackClusterAnalysis = Resolve(usedConfigFile, BuildThreadStackClusterAnalysisFromConfig, _ => new ThreadStackClusterAnalysisOptions(), fileModel, request);
         GCGenerationAnalysisOptions gcGenerationAnalysis = Resolve(usedConfigFile, BuildGCGenerationAnalysisFromConfig, _ => new GCGenerationAnalysisOptions(), fileModel, request);
@@ -109,7 +108,6 @@ internal sealed class ConfigurationResolver
             boxingAnalysis,
             collection,
             stringAnalysis,
-            heapTopology,
             allocationPatternAnalysis,
             threadStackClusterAnalysis,
             gcGenerationAnalysis,
@@ -351,13 +349,6 @@ internal sealed class ConfigurationResolver
             ? new StringAnalysisOptions()
             : ApplyOptionsOverrides(new StringAnalysisOptions(), config.StringAnalysis);
     }
-
-    private static HeapTopologyAnalysisOptions BuildHeapTopologyAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "HeapTopology",
-            config.HeapTopology,
-            HeapTopologyAnalysisOptions.Preset);
 
     private static AllocationPatternAnalysisOptions BuildAllocationPatternAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
         => BuildAnalyzerOptionsFromConfig(

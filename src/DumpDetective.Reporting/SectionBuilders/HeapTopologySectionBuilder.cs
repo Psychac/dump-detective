@@ -49,8 +49,7 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
         if (d.FrozenBytes > 100UL * 1024 * 1024)
             blocks.Add(T("Frozen object heap usage is above 100 MB; this often points to heavy immutable or interned data retention."));
 
-        if (!d.CountSohObjects)
-            blocks.Add(T("Note: Used bytes shown above exclude SOH because SOH object enumeration was skipped. The Gen0/Gen1/Gen2 breakdown below accounts for all SOH allocations."));
+        blocks.Add(T("Note: Used bytes shown above exclude SOH because SOH is never walked per-object; SOH object counts are derived exactly from Phase 1's heap-wide total instead. The Gen0/Gen1/Gen2 breakdown below accounts for all SOH allocations."));
 
         // Kind summary
         if (d.KindSummaries is { Count: > 0 })

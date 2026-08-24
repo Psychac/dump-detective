@@ -1,3 +1,5 @@
+using DumpDetective.Analysis.Cache;
+using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
@@ -10,8 +12,10 @@ namespace DumpDetective.Analysis.Analyzers;
 /// Classifies all managed heap segments (SOH, LOH, POH, Frozen) and produces a
 /// <see cref="HeapTopologyDomainResult"/> with per-kind size and object count totals.
 /// Operates directly on <see cref="ClrHeap.Segments"/>.
-/// Per-object counting is skipped for SOH by default (see <see cref="HeapTopologyAnalysisOptions.CountSohObjects"/>)
-/// since SOH dominates object count (87 M+ objects on large dumps) and is the main cost driver.
+/// SOH is never walked per-object (it dominates object count — 87 M+ objects on large dumps —
+/// and is the main cost driver); its exact object count is instead derived as
+/// <c>Phase1TotalObjectCount - LohCount - PohCount - FrozenCount</c>, free once Phase 1's
+/// already-exact total is available.
 /// </summary>
 public sealed class HeapTopologyAnalyzer : IAnalyzer
 {
@@ -21,11 +25,10 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
     public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var opts = context.AnalysisOptions.HeapTopology;
-        return ValueTask.FromResult(Analyze(context.Heap, context.Progress, opts.CountSohObjects, cancellationToken).Stamp(this));
+        return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, cancellationToken).Stamp(this));
     }
 
-    private static AnalyzerDomainResult Analyze(ClrHeap heap, IProgress<AnalyzerProgressReport>? progress, bool countSoh, CancellationToken cancellationToken)
+    private static AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
     {
         // heap.Segments is backed by a fixed list in ClrMD — enumerate twice rather than ToList(),
         // keeping one extra List<T> allocation off the heap for large dumps.
@@ -81,7 +84,7 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
                 _ => null
             };
 
-            int objCount = CountObjects(segment, kind, countSoh, ref totalObjectsScanned, ref used, progress, typeStats, cancellationToken);
+            int objCount = CountObjects(segment, kind, ref totalObjectsScanned, ref used, progress, typeStats, cancellationToken);
             if (logicalHeapIndex >= 0)
             {
                 if (bytesByLogicalHeap.TryGetValue(logicalHeapIndex, out ulong existingBytes))
@@ -188,6 +191,14 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
             }
         }
 
+        // Exact SOH object count, free: Phase 1's already-exact heap-wide total minus the
+        // already-cheap LOH/POH/Frozen walks above — zero additional heap traversal.
+        if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? idx))
+        {
+            long derivedSohObjects = idx.ObjectCount - lohObjects - pohObjects - frozenObjects;
+            sohObjects = derivedSohObjects > int.MaxValue ? int.MaxValue : (int)Math.Max(derivedSohObjects, 0);
+        }
+
         ulong totalCommitted = sohBytes + lohBytes + pohBytes + frozenBytes;
         ulong totalUsed = sohUsedBytes + lohUsedBytes + pohUsedBytes + frozenUsedBytes;
         ulong totalReserved = sohReserved + lohReserved + pohReserved + frozenReserved;
@@ -250,7 +261,6 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
             LohFragmentedBytes: lohFragmented,
             PohFragmentedBytes: pohFragmented,
             FrozenFragmentedBytes: frozenFragmented,
-            CountSohObjects: countSoh,
             KindSummaries: kindSummaries,
             PerLogicalHeapSummaries: logicalHeapSummaries,
             TopPohTypes: topPohTypes,
@@ -263,17 +273,17 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
     private static int CountObjects(
         ClrSegment segment,
         HeapSegmentKind kind,
-        bool countSoh,
         ref long totalObjectsScanned,
         ref ulong usedBytes,
         IProgress<AnalyzerProgressReport>? progress,
         Dictionary<string, SegmentTypeAccumulator>? typeStats = null,
         CancellationToken cancellationToken = default)
     {
-        // SOH holds the vast majority of objects on large dumps.
-        // Skip enumeration unless explicitly requested to avoid O(87M) scans.
-        if (kind == HeapSegmentKind.SmallObjectHeap && !countSoh)
-            return -1; // sentinel: "not counted" — distinguished from a genuine zero in the report
+        // SOH holds the vast majority of objects on large dumps (O(87M) on large dumps) — never
+        // walked per-object here. Its exact total is derived arithmetically after the segment loop
+        // (see Analyze) from Phase 1's already-exact heap-wide object count.
+        if (kind == HeapSegmentKind.SmallObjectHeap)
+            return -1; // sentinel: "not walked here" — the caller overwrites the SOH total via arithmetic
 
         int count = 0;
         // Only flood-report progress for LOH/POH; SOH has too many segments to flood.

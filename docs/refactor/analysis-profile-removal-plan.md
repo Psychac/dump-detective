@@ -12,7 +12,7 @@ exactness migration (§9) and ordering constraints (§11.5) are next. The goal t
 exactness/correctness, not just cap removal: every analyzer's reported numbers should be measured,
 not estimated or silently capped.
 
-**Implementation progress: 25 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
+**Implementation progress: 26 of 33 registered analyzers done — §9.1 Boxing, §9.2 ObjectShape,
 §9.3 Module, §9.4 GCGeneration, §9.5 GCHandle, §9.7 LockGraph, §9.8 LohFragmentation, §9.9
 SegmentReservation, §9.10 Jit, §9.11 Array, §9.12 String (partial — AMBER, not GREEN; see its
 implementation notes for what's deliberately still deferred), §9.13 AsyncStateMachine, §9.14
@@ -40,7 +40,11 @@ knobs deleted as originally planned, plus one more confirmed-dead knob and a gen
 stack walk found in passing), §9.27 Memory (deleted the weighted quota-merge type-selection entirely,
 stronger than the original "keep, fix one value" verdict for the four ranking weights; found
 `TopTypesCount` also bounds a real per-type retained-size BFS and re-scoped that one concern to an
-internal constant instead of deleting it outright)
+internal constant instead of deleting it outright), §9.28 HeapTopology (deleted the sole knob,
+`CountSohObjects`, and the whole options class; SOH is now never walked per-object — its exact count
+is derived for free as `Phase1TotalObjectCount - LohCount - PohCount - FrozenCount` using the already-
+exact Phase 1 total, per M6's identified free alternative, rather than the 10.2s live walk that
+`CountSohObjects = true` used to trigger)
 (§9.6's orphaned
 `DependentHandleAnalysisOptions` was also deleted alongside GCHandle — not a separate registered
 analyzer, per the row-4 cross-reference below).** See each section and the §7 verdict table for what
@@ -340,7 +344,7 @@ radius is a single cosmetic report field, not root exactness.
 | 25 | Hang | non-heap | **GREEN** ✅ DONE | 4 of 5 (1 kept, `HighThreadPoolThreshold`) | §9.25 — `MaxTasksToScan` corrupted `PendingTasks`/`FaultedTasks`/`CanceledTasks` past the cap, not just report width; found the real waiting-thread cap was a hardcoded `.Take(10)`, not the dead `TopWaitingThreadsPerGroup` option |
 | 26 | Crash | non-heap | **GREEN** ✅ DONE | 7 of 8 (1 kept, `MaxExceptionsPerType` — corrects the row's own "8 of 8" claim) | §9.26 — already implements the §10 render-layer pattern for 7 knobs; `MaxExceptionsPerType` gates real per-object stack-trace/inner-exception extraction and was kept |
 | 27 | Memory | non-heap | **GREEN** ✅ DONE | 5 of 6 (1 kept, `LohThresholdBytes`) | §9.27 — deleted the weighted quota-merge selection entirely (stronger than "keep, fix one value"); found `TopTypesCount` also bounds a real per-type retained-size BFS, corrected and re-scoped to an internal constant rather than deleted outright |
-| 28 | HeapTopology | non-heap | **GREEN** | 1 of 1 | §9.28 — a literal exact/not-exact switch, defaulting to **not** |
+| 28 | HeapTopology | non-heap | **GREEN** ✅ DONE | 1 of 1 | §9.28 — a literal exact/not-exact switch, defaulting to **not**; shipped as free arithmetic derivation instead of the live walk |
 | 29 | AsyncTask | non-heap | **GREEN** | 8 of 8 | §9.29 — options class deleted outright |
 | 30 | AllocationPattern | — | **AMBER** | ~8 of 12 | §9.30 — three enums; the tier changes the *algorithm* |
 | 31 | WeakReference | — | **GREEN** | 2 of 5 | §9.31 — `HandleScanCap` truncates the handle table, not a derived list |
@@ -2632,7 +2636,7 @@ quota-merge selection survives) while keeping the one piece of real per-item cos
 
 ---
 
-### 9.28 HeapTopology — **GREEN**, one line, large effect
+### 9.28 HeapTopology — **GREEN** ✅ IMPLEMENTED, one line, large effect
 
 [HeapTopologyAnalysisOptions.cs](../../src/DumpDetective.Core/Options/HeapTopologyAnalysisOptions.cs)
 
@@ -2653,6 +2657,36 @@ s), affordable against the ~10-minute budget but not free. Better than "set to `
 1's already-exact total object count and this analyzer's own already-cheap LOH/POH/Frozen walks — zero
 additional heap traversal, genuinely free exactness rather than a 10-second one. Delete the knob and
 options class either way; prefer the arithmetic over the live walk when implementing.
+
+#### Implementation notes (as shipped)
+
+- **Shipped the arithmetic path, not the live walk.** `HeapTopologyAnalysisOptions` (the whole file —
+  only ever held `CountSohObjects`) is deleted outright, following the same wiring-surface shape as
+  ObjectShape (§9.2): removed from `AnalysisOptions`, `CliConfigurationFileModel` (property + its
+  `[JsonSerializable]` roster entry), `ConfigurationResolver` (variable, builder method, call site),
+  `ResolvedExecutionOptions` (positional record field, so every construction site — production and
+  test — needed the arg dropped), and `AnalyzerExecutionService`.
+- **`HeapTopologyAnalyzer.Analyze` now takes `IHeapAnalysisCache` instead of a `bool`.** SOH is still
+  never walked per-object (`CountObjects` returns the `-1` sentinel unconditionally for
+  `HeapSegmentKind.SmallObjectHeap` now, not conditionally) — but after the segment loop, `sohObjects`
+  is overwritten via `idx.ObjectCount - lohObjects - pohObjects - frozenObjects` when a
+  `HeapIndexBuildResult` is available from the cache (`HeapAnalysisCache.TryGetHeapIndex`, the same
+  pattern `BoxingAnalyzer`/`ObjectShapeAnalyzer` use). When no heap index is available (e.g. a test
+  constructing the analyzer directly without a populated cache), `sohObjects` falls back to the `-1`
+  "not counted" sentinel rather than throwing — matching the existing per-logical-heap sentinel
+  behavior for segments that still can't be individually attributed.
+- **`HeapTopologyDomainResult.CountSohObjects` deleted.** With SOH object counting always exact and no
+  longer configurable, the flag had nothing left to report. `HeapTopologySectionBuilder`'s "Note: Used
+  bytes exclude SOH…" block — previously gated on `!d.CountSohObjects` — is now unconditional and
+  reworded: `UsedBytes`/fragmentation for SOH still require a real per-object walk (out of scope here,
+  §9.28 covers object *count* only) and are always `0`, independent of the now-deleted knob.
+- **Per-logical-heap and per-segment SOH breakdowns are unaffected** — those still show `N/A` for SOH,
+  same as before. Only the headline `SohObjects`/`KindSummaries` total (the Q7 "corrupts more than
+  report width" number, same class of defect as Boxing's `TotalBoxedObjects`) became exact; arithmetic
+  derivation cannot recover a per-segment split.
+- **Deleted `HeapTopologyUncappedRealDumpTests.cs`** (the M6 discrepancy benchmark) — it measured the
+  cost of `CountSohObjects = true`'s live walk, a code path that no longer exists.
+- No dedicated `HeapTopologyAnalyzer` unit tests existed to update, same as ObjectShape (§9.2).
 
 ---
 

@@ -19,7 +19,6 @@ internal sealed record ResolvedExecutionOptions(
     BoxingAnalysisOptions BoxingAnalysis,
     CollectionAnalysisOptions Collection,
     StringAnalysisOptions StringAnalysis,
-    HeapTopologyAnalysisOptions HeapTopology,
     AllocationPatternAnalysisOptions AllocationPatternAnalysis,
     ThreadStackClusterAnalysisOptions ThreadStackClusterAnalysis,
     GCGenerationAnalysisOptions GCGenerationAnalysis,

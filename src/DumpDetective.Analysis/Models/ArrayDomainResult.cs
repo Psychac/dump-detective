@@ -39,4 +39,7 @@ internal sealed record ArrayDomainResult(
     ulong LohArrayBytes,
     IReadOnlyList<ArrayTypeProfile> TopArrayTypesBySize,
     IReadOnlyList<LargeArrayEntry> TopLargeArrays,
-    IReadOnlyList<SparseArrayEntry> TopSparseArrays) : AnalyzerDomainResult;
+    IReadOnlyList<SparseArrayEntry> TopSparseArrays,
+    int PinnedArrayCount = 0,
+    ulong PinnedArrayBytes = 0,
+    IReadOnlyList<LargeArrayEntry>? TopPinnedArrays = null) : AnalyzerDomainResult;

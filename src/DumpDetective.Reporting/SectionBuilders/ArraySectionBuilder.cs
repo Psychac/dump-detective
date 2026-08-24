@@ -5,6 +5,7 @@ using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
 using System.Linq;
+using System.Numerics;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
@@ -59,6 +60,20 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
                 BuildSparseRows(d.TopSparseArrays).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
+        var topPinnedArrays = d.TopPinnedArrays ?? [];
+        if (topPinnedArrays.Count > 0)
+        {
+            blocks.Add(T("Arrays targeted by a pinned or async-pinned GC handle. The GC cannot move these " +
+                          "objects, which blocks compaction and fragments the surrounding heap segment."));
+            compactTables.Add(STCompact(
+                "Pinned array instances",
+                new[] { CH("Address"), CH("Element Type"), CH("Length","number"), CH("Rank","number"), CH("Size","bytes"), CH("Label") },
+                BuildLargeRows(topPinnedArrays).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
+        keyMetrics["pinned_array_count"] = new NumericMetricValue(d.PinnedArrayCount, MetricUnit.Count);
+        keyMetrics["pinned_array_bytes"] = new NumericMetricValue((double)d.PinnedArrayBytes, MetricUnit.Bytes);
+
         ulong totalWastedBytes = 0;
         foreach (SparseArrayEntry sparse in d.TopSparseArrays)
             totalWastedBytes += sparse.WastedBytes;
@@ -108,10 +123,21 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
         return rows;
     }
 
+    // ArrayPool<T> buckets are powers of two starting at 16 bytes; a byte[] whose length is
+    // itself a power of two at or above 128 KB is very likely an unreturned pool rental rather
+    // than an application-sized allocation (which would rarely land exactly on a bucket boundary).
+    private const int ArrayPoolMinLength = 131_072; // 128 KB
+
     private static string GetAntiPatternLabel(string elementTypeName, int length, ulong size)
     {
-        if (elementTypeName.Contains("Byte", StringComparison.OrdinalIgnoreCase) && size > 1_000_000)
-            return "byte[] > 1 MB";
+        if (elementTypeName.Contains("Byte", StringComparison.OrdinalIgnoreCase))
+        {
+            if (length >= ArrayPoolMinLength && BitOperations.IsPow2(length))
+                return "possible unreturned ArrayPool<byte> rental";
+
+            if (size > 1_000_000)
+                return "byte[] > 1 MB";
+        }
 
         if ((elementTypeName.Contains("String", StringComparison.OrdinalIgnoreCase) || elementTypeName.Contains("Object", StringComparison.OrdinalIgnoreCase))
             && length > 10_000)

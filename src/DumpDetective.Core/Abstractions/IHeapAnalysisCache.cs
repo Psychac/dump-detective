@@ -14,6 +14,13 @@ public interface IHeapAnalysisCache
     DumpSizeTier SizeTier { get; }
 
     HashSet<ulong> GetStaticRootedAddresses(ClrHeap heap);
+
+    /// <summary>
+    /// Addresses targeted by a <c>PinnedHandle</c> or <c>AsyncPinnedHandle</c> GC root. Backed by
+    /// the same Phase-1 disk root index as <see cref="GetStaticRootedAddresses"/> (falling back to
+    /// a live root walk in memory mode) — no extra heap or handle scan.
+    /// </summary>
+    HashSet<ulong> GetPinnedRootedAddresses(ClrHeap heap);
     Dictionary<ulong, (string TypeName, string FieldName, int AppDomainId)> GetStaticFieldsByRootAddress(ClrHeap heap);
 
     /// <summary>

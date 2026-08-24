@@ -8,12 +8,16 @@ namespace DumpDetective.Analysis.Cache;
 
 internal readonly record struct RootRecord(ulong TargetAddr, ulong RootAddr, byte Kind)
 {
+    private const byte PinnedHandleKind = 3;
     private const byte ThreadStaticVarKind = 9;
     private const byte StaticVarKind = 10;
+    private const byte AsyncPinnedHandleKind = 7;
 
     public string KindName => RootIndexReader.KindToString(Kind);
 
     public bool IsStatic => Kind is ThreadStaticVarKind or StaticVarKind;
+
+    public bool IsPinned => Kind is PinnedHandleKind or AsyncPinnedHandleKind;
 }
 
 /// <summary>
@@ -25,6 +29,7 @@ internal class RootSetCache
 {
     private IReadOnlyList<RootRecord>? _roots;
     private HashSet<ulong>? _staticRootedAddresses;
+    private HashSet<ulong>? _pinnedRootedAddresses;
     private Dictionary<ulong, (string TypeName, string FieldName, int AppDomainId)>? _staticFieldsByRootAddress;
     private Dictionary<ulong, (string OwnerType, string MethodName)>? _stackFrameOwnersByRootAddress;
     private IProgress<AnalyzerProgressReport>? _progress;
@@ -98,6 +103,33 @@ internal class RootSetCache
 
         _staticRootedAddresses = statics;
         return _staticRootedAddresses;
+    }
+
+    /// <summary>
+    /// Addresses targeted by a <c>PinnedHandle</c> or <c>AsyncPinnedHandle</c> GC root — the
+    /// objects a <c>GCHandle.Alloc(obj, GCHandleType.Pinned)</c> (or async-pinned I/O buffer)
+    /// prevents the GC from moving/compacting around. Reads the same Phase-1 disk root index as
+    /// <see cref="GetOrBuildRoots"/>, so this costs nothing beyond the one-time root-index read
+    /// already paid for by other consumers (e.g. <see cref="GetStaticRootedAddresses"/>).
+    /// </summary>
+    public HashSet<ulong> GetPinnedRootedAddresses(ClrHeap heap)
+    {
+        if (heap is null)
+            throw new ArgumentNullException(nameof(heap));
+
+        if (_pinnedRootedAddresses is not null)
+            return _pinnedRootedAddresses;
+
+        var roots = GetOrBuildRoots(heap);
+        var pinned = new HashSet<ulong>(capacity: 256);
+        foreach (RootRecord root in roots)
+        {
+            if (root.IsPinned)
+                pinned.Add(root.TargetAddr);
+        }
+
+        _pinnedRootedAddresses = pinned;
+        return _pinnedRootedAddresses;
     }
 
     /// <summary>

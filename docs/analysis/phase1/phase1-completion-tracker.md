@@ -54,7 +54,7 @@ P0-4 was a regression hiding behind two individually-DONE roadmap items).
 
 | # | Analyzer | P0 | P1 | P2 | P3 | Complete? |
 |---|----------|----|----|----|----|-----------|
-| 2 | **ArrayAnalyzer** | 2/2 | 5/5 | 5/5 | 0/4 | ✅ P0+P1+P2 |
+| 2 | **ArrayAnalyzer** | 2/2 | 5/5 | 5/5 | 4/4 | ✅ P0+P1+P2+P3 COMPLETE — value-type sparse detection, pinned array detection via GC handle root index, `ArrayPool<byte>` unreturned-rental heuristic, and `sparseCandidates`/`lohFallbackCandidates` capacity tuning all shipped (`array-analyzer-audit.md`) |
 | 3 | **BoxingAnalyzer** | 2/2 | 4/4 | 5/5 | 4/4 | ✅ P0+P1+P2+P3 COMPLETE — IEquatable<T> flag/finding, progress reporting, Gen2 retained-boxing wiring, and unit tests for pure helpers (`boxing-analyzer-audit.md`) |
 | 4 | **ModuleAnalyzer** | 2/2 | 5/5 | 4/5 | 0/4 | ✅ P0+P1 |
 | 5 | **ThreadStackClusterAnalyzer** | 2/2 | 5/5 | 4/5 | 0/4 | ✅ P0+P1 |
@@ -141,7 +141,7 @@ Different audits use different conventions for marking completion:
 - 13 analyzers (37%) have P0+P1 100% complete
 - HeapTopologyAnalyzer: 10 P0+P1+P2 items complete (generation breakdown, fragmentation, cancellation, variable naming, efficiency, trending, density)
 - 3 analyzers (ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer) have ALL P0+P1+P2 complete
-- BoxingAnalyzer is the only analyzer with ALL P0+P1+P2+P3 complete (4/4 P3 items, including unit test coverage for pure helper logic)
+- ArrayAnalyzer and BoxingAnalyzer are the only analyzers with ALL P0+P1+P2+P3 complete (ArrayAnalyzer 4/4 P3; BoxingAnalyzer 4/4 P3, including unit test coverage for pure helper logic)
 - GCHandleAnalyzer completed all P0 and P1 items in a single session (architecture + diagnostics)
 
 **Remaining Work:**

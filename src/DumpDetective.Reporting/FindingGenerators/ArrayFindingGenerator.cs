@@ -14,6 +14,9 @@ internal sealed class ArrayFindingGenerator : IFindingGenerator
     private const double SparseRatioThreshold = 0.70;
     private const ulong SparseWastedWarningBytes = 10_000_000UL; // 10 MB
     private const int MaxSparseFindings = 3;
+    private const int PinnedArrayWarningCount = 100;
+    private const ulong PinnedArrayWarningBytes = 50_000_000UL; // 50 MB
+    private const ulong PinnedArrayCriticalBytes = 200_000_000UL; // 200 MB
 
     public string AnalyzerName => "Array Analysis";
     public bool CanGenerate(AnalyzerDomainResult result) => result is ArrayDomainResult;
@@ -94,6 +97,34 @@ internal sealed class ArrayFindingGenerator : IFindingGenerator
                 MetricUnit: "bytes"));
 
             sparseFindingCount++;
+        }
+
+        // ── Pinned array accumulation ──────────────────────────────────────────
+        if (r.PinnedArrayCount >= PinnedArrayWarningCount || r.PinnedArrayBytes >= PinnedArrayWarningBytes)
+        {
+            FindingSeverity sev = r.PinnedArrayBytes >= PinnedArrayCriticalBytes
+                ? FindingSeverity.Critical
+                : FindingSeverity.Warning;
+
+            string topType = r.TopPinnedArrays is { Count: > 0 } pinned
+                ? pinned[0].ElementTypeName
+                : "N/A";
+
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Memory",
+                Severity: sev,
+                Title: $"Pinned array accumulation: {r.PinnedArrayCount:N0} arrays ({FormatBytes(r.PinnedArrayBytes)})",
+                Evidence: $"{r.PinnedArrayCount:N0} arrays are targeted by a pinned or async-pinned GC handle, " +
+                          $"consuming {FormatBytes(r.PinnedArrayBytes)}. Pinned objects cannot be moved by the GC, " +
+                          $"preventing compaction and fragmenting the surrounding heap segment. " +
+                          $"Largest pinned array element type: {topType}.",
+                Recommendation: "Pinned arrays are typically interop/native I/O buffers (P/Invoke, sockets, " +
+                                "overlapped I/O). Minimize pin duration, reuse buffers instead of pinning new " +
+                                "arrays repeatedly, and prefer GCHandleType.Pinned only when unavoidable.",
+                Tags: ["array", "pinned", "fragmentation", "memory"],
+                MetricValue: r.PinnedArrayBytes,
+                MetricUnit: "bytes"));
         }
 
         return findings;

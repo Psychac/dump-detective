@@ -181,6 +181,11 @@ namespace DumpDetective.Analysis.Cache
             return _rootSetCache.GetStaticRootedAddresses(heap);
         }
 
+        public HashSet<ulong> GetPinnedRootedAddresses(ClrHeap heap)
+        {
+            return _rootSetCache.GetPinnedRootedAddresses(heap);
+        }
+
         public Dictionary<ulong, (string TypeName, string FieldName, int AppDomainId)> GetStaticFieldsByRootAddress(ClrHeap heap)
         {
             return _rootSetCache.GetStaticFieldsByRootAddress(heap);

@@ -14,6 +14,8 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 new("array.total",       null, r.TotalArrayObjects, "objects", MetricTrendDirection.HigherIsWorse),
                 new("array.total.bytes", null, r.TotalArrayBytes,   "bytes",   MetricTrendDirection.HigherIsWorse),
                 new("array.loh.bytes",   null, r.LohArrayBytes,     "bytes",   MetricTrendDirection.HigherIsWorse),
+                new("array.pinned.count", null, r.PinnedArrayCount, "objects", MetricTrendDirection.HigherIsWorse),
+                new("array.pinned.bytes", null, r.PinnedArrayBytes, "bytes",   MetricTrendDirection.HigherIsWorse),
             };
 
             foreach (ArrayTypeProfile p in r.TopArrayTypesBySize)
@@ -33,6 +35,8 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 MetricDeltaHelper.Compute("array.total",       null, b.TotalArrayObjects, c.TotalArrayObjects, "objects", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("array.total.bytes", null, b.TotalArrayBytes,   c.TotalArrayBytes,   "bytes",   MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("array.loh.bytes",   null, b.LohArrayBytes,     c.LohArrayBytes,     "bytes",   MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("array.pinned.count", null, b.PinnedArrayCount, c.PinnedArrayCount, "objects", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("array.pinned.bytes", null, b.PinnedArrayBytes, c.PinnedArrayBytes, "bytes",   MetricTrendDirection.HigherIsWorse),
             ];
         }
     }

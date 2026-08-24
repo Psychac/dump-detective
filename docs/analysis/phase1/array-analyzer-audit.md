@@ -238,10 +238,10 @@ The analyzer is structurally well-designed: index-first, no heap scan for popula
 | **P2** | Deduplicate `LargeObjectIndex.bin` read with `LohFragmentationAnalyzer` via `LargeObjectTracker` | ✓ DONE | Medium — removes copy-paste binary reader | Medium | High | Evolution |
 | **P2** | Add module/assembly attribution for top array types via `ClrType.Module.Name` | ✓ DONE | Medium — directs ownership to responsible team | Low | Medium | Improvement |
 | **P2** | Add aggregate total wasted bytes summary metric for sparse section | ✓ DONE | Low-Medium — headline number for the section | Low | High | Improvement |
-| **P3** | Value-type sparse array detection for numeric types (`int[]`, `float[]`) |   | Medium — closes dotMemory gap | Medium | Medium | Improvement |
-| **P3** | Pinned array detection via GC handle root index |   | Medium — identifies SOH fragmentation risk | Medium | High | Improvement |
-| **P3** | `ArrayPool<T>` unreturned buffer heuristic (`byte[]` LOH at power-of-two sizes ≥ 128 KB) |   | Low-Medium — common production anti-pattern | Low | Low | Improvement |
-| **P3** | `sparseCandidates` initial capacity tuned to `Math.Min(typeAggregates.Count / 4, 512)` |   | Low — avoids list growth copies | Low | High | Improvement |
+| **P3** | Value-type sparse array detection for numeric types (`int[]`, `float[]`) | ✓ DONE | Medium — closes dotMemory gap | Medium | Medium | Improvement |
+| **P3** | Pinned array detection via GC handle root index | ✓ DONE | Medium — identifies SOH fragmentation risk | Medium | High | Improvement |
+| **P3** | `ArrayPool<T>` unreturned buffer heuristic (`byte[]` LOH at power-of-two sizes ≥ 128 KB) | ✓ DONE | Low-Medium — common production anti-pattern | Low | Low | Improvement |
+| **P3** | `sparseCandidates` initial capacity tuned to `Math.Min(typeAggregates.Count / 4, 512)` | ✓ DONE | Low — avoids list growth copies | Low | High | Improvement |
 
 ### Final Verdict
 

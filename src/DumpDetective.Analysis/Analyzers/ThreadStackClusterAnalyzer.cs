@@ -20,9 +20,13 @@ namespace DumpDetective.Analysis.Analyzers
         // HangAnalyzer/LockGraphAnalyzer instead of independently walking runtime.Threads.
         private Dictionary<ulong, uint>? _participantOsThreadIdByAddress;
         private Dictionary<string, StackCluster>? _participantClusters;
+        private Dictionary<string, int>? _participantFrameHistogram;
         private int _participantAliveThreads;
         private ObjectScanCounter? _participantScanCounter;
         private bool _participantScanSucceeded;
+
+        // P2-4: how many entries the frame-level hotspot histogram surfaces in the domain result.
+        private const int TopFrameHotspotsToReport = 10;
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
@@ -42,6 +46,7 @@ namespace DumpDetective.Analysis.Analyzers
         {
             _participantOsThreadIdByAddress = new Dictionary<ulong, uint>();
             _participantClusters = new Dictionary<string, StackCluster>(StringComparer.Ordinal);
+            _participantFrameHistogram = new Dictionary<string, int>(StringComparer.Ordinal);
             _participantAliveThreads = 0;
             _participantScanCounter = new ObjectScanCounter("clustering thread stacks", context.Progress, reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
             _participantScanSucceeded = false;
@@ -61,7 +66,7 @@ namespace DumpDetective.Analysis.Analyzers
                 return;
 
             _participantAliveThreads++;
-            string signature = BuildSignature(snapshot.TopFrames, thread);
+            string signature = BuildSignature(snapshot.TopFrames, thread, _participantFrameHistogram);
             AccumulateCluster(_participantClusters!, signature, thread);
         }
 
@@ -76,6 +81,7 @@ namespace DumpDetective.Analysis.Analyzers
         {
             Dictionary<ulong, uint> osThreadIdByAddress;
             Dictionary<string, StackCluster> clusters;
+            Dictionary<string, int> frameHistogram;
             int aliveThreads;
 
             if (_participantScanSucceeded)
@@ -85,6 +91,7 @@ namespace DumpDetective.Analysis.Analyzers
                 // second independent walk of runtime.Threads.
                 osThreadIdByAddress = _participantOsThreadIdByAddress!;
                 clusters = _participantClusters!;
+                frameHistogram = _participantFrameHistogram!;
                 aliveThreads = _participantAliveThreads;
             }
             else
@@ -99,6 +106,7 @@ namespace DumpDetective.Analysis.Analyzers
                 }
 
                 clusters = new Dictionary<string, StackCluster>(StringComparer.Ordinal);
+                frameHistogram = new Dictionary<string, int>(StringComparer.Ordinal);
                 aliveThreads = 0;
                 var scanCounter = new ObjectScanCounter("clustering thread stacks", progress, reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
 
@@ -110,16 +118,18 @@ namespace DumpDetective.Analysis.Analyzers
                         continue;
 
                     aliveThreads++;
-                    string signature = BuildSignature(thread.EnumerateStackTrace(), thread);
+                    string signature = BuildSignature(thread.EnumerateStackTrace(), thread, frameHistogram);
                     AccumulateCluster(clusters, signature, thread);
                 }
 
                 scanCounter.Complete();
             }
 
+            IReadOnlyList<NameCountEntry> topFrameHotspots = BuildTopFrameHotspots(frameHistogram);
+
             if (clusters.Count == 0)
             {
-                return new ThreadStackClusterDomainResult(aliveThreads, 0, 0, 0, Array.Empty<string>(), null);
+                return new ThreadStackClusterDomainResult(aliveThreads, 0, 0, 0, Array.Empty<string>(), null, TopFrameHotspots: topFrameHotspots);
             }
 
             var topClusters = clusters.Values
@@ -205,7 +215,27 @@ namespace DumpDetective.Analysis.Analyzers
                 }
             }
 
-            return new ThreadStackClusterDomainResult(aliveThreads, clusters.Count, singletonSignatures, diversity, topSignatures, topClusterSnapshots, rawExports);
+            return new ThreadStackClusterDomainResult(aliveThreads, clusters.Count, singletonSignatures, diversity, topSignatures, topClusterSnapshots, rawExports, topFrameHotspots);
+        }
+
+        // P2-4: the most frequently occurring individual frames across the entire alive-thread
+        // population (not per-cluster) — surfaces hot call sites shared by threads that otherwise
+        // cluster into different signatures (e.g. same lock-acquire frame reached via different
+        // call paths), which per-cluster signatures alone can't reveal.
+        private static IReadOnlyList<NameCountEntry> BuildTopFrameHotspots(Dictionary<string, int> frameHistogram)
+        {
+            if (frameHistogram.Count == 0)
+                return Array.Empty<NameCountEntry>();
+
+            var top = new List<KeyValuePair<string, int>>(frameHistogram);
+            top.Sort((a, b) => b.Value.CompareTo(a.Value));
+
+            int limit = Math.Min(top.Count, TopFrameHotspotsToReport);
+            var result = new List<NameCountEntry>(limit);
+            for (int i = 0; i < limit; i++)
+                result.Add(new NameCountEntry(top[i].Key, top[i].Value));
+
+            return result;
         }
 
         private static IReadOnlyList<uint> ProjectSampleOsThreadIds(IReadOnlyList<ulong> sampleThreadAddresses, IReadOnlyDictionary<ulong, uint> osThreadIdByAddress)
@@ -249,7 +279,7 @@ namespace DumpDetective.Analysis.Analyzers
         // (§9.24). A signature match now means two threads share their entire call stack, not just
         // its top N frames, so distinct threads whose stacks diverge below frame N are no longer
         // merged into the same cluster.
-        private static string BuildSignature(IEnumerable<ClrStackFrame> frames, ClrThread? thread = null)
+        private static string BuildSignature(IEnumerable<ClrStackFrame> frames, ClrThread? thread = null, Dictionary<string, int>? frameHistogram = null)
         {
             var parts = new List<string>();
 
@@ -262,7 +292,14 @@ namespace DumpDetective.Analysis.Analyzers
                 if (string.IsNullOrWhiteSpace(name))
                     continue;
 
-                parts.Add(name.Trim());
+                string trimmed = name.Trim();
+                parts.Add(trimmed);
+
+                if (frameHistogram != null)
+                {
+                    frameHistogram.TryGetValue(trimmed, out int existing);
+                    frameHistogram[trimmed] = existing + 1;
+                }
             }
 
             if (parts.Count == 0)

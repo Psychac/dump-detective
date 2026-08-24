@@ -4,6 +4,8 @@ using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
 
+using System.Linq;
+
 namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class ThreadStackClusterSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
@@ -64,6 +66,15 @@ internal sealed class ThreadStackClusterSectionBuilder : SectionBuilderBase, IAn
                 OsThreadIds: osIds,
                 Signature:   cluster.Signature,
                 Truncated:   cluster.SampleOsThreadIds.Count > idLimit));
+        }
+
+        var frameHotspots = d.TopFrameHotspots ?? [];
+        if (frameHotspots.Count > 0)
+        {
+            var hsRows = new List<TableRow>(frameHotspots.Count);
+            for (int i = 0; i < frameHotspots.Count; i++)
+                hsRows.Add(new TableRow([Cell(frameHotspots[i].Name), Cell($"{frameHotspots[i].Count:N0}", frameHotspots[i].Count)]));
+            compactTables.Add(STCompact("Top frame hotspots (cross-cluster)", new[] { CH("Frame"), CH("Count", "number") }, hsRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         // Typed Artifacts slot

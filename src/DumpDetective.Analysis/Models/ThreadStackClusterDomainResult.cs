@@ -11,7 +11,8 @@ internal sealed record ThreadStackClusterDomainResult(
     double DiversityPercent,
     IReadOnlyList<string> TopClusterSignatures,
     IReadOnlyList<ThreadClusterSnapshot>? TopClusters = null,
-    IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? Artifacts = null) : AnalyzerDomainResult;
+    IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? Artifacts = null,
+    IReadOnlyList<NameCountEntry>? TopFrameHotspots = null) : AnalyzerDomainResult;
 
 /// <summary>
 /// <paramref name="SampleOsThreadIds"/>/<paramref name="SampleManagedThreadIds"/> are the complete

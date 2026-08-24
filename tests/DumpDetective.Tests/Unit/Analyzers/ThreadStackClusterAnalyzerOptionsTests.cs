@@ -34,4 +34,20 @@ public sealed class ThreadStackClusterAnalyzerOptionsTests
             result.Artifacts[0].Analyzer.Should().Be("Test");
         }
     }
+
+    [Fact]
+    public void DomainResult_Can_Carry_TopFrameHotspots()
+    {
+        var hotspots = new[]
+        {
+            new NameCountEntry("System.Threading.Monitor.Wait(object)", 42),
+            new NameCountEntry("MyApp.Worker.Run()", 7),
+        };
+        var result = new ThreadStackClusterDomainResult(2, 1, 0, 50.0, new[] { "sig" }, TopFrameHotspots: hotspots);
+
+        result.TopFrameHotspots.Should().NotBeNull();
+        result.TopFrameHotspots!.Should().HaveCount(2);
+        result.TopFrameHotspots![0].Name.Should().Be("System.Threading.Monitor.Wait(object)");
+        result.TopFrameHotspots![0].Count.Should().Be(42);
+    }
 }

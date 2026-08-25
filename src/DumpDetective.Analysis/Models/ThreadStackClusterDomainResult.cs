@@ -12,7 +12,8 @@ internal sealed record ThreadStackClusterDomainResult(
     IReadOnlyList<string> TopClusterSignatures,
     IReadOnlyList<ThreadClusterSnapshot>? TopClusters = null,
     IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? Artifacts = null,
-    IReadOnlyList<NameCountEntry>? TopFrameHotspots = null) : AnalyzerDomainResult;
+    IReadOnlyList<NameCountEntry>? TopFrameHotspots = null,
+    IReadOnlyList<ThreadClusterTreeNode>? ClusterTreeRoots = null) : AnalyzerDomainResult;
 
 /// <summary>
 /// <paramref name="SampleOsThreadIds"/>/<paramref name="SampleManagedThreadIds"/> are the complete
@@ -27,4 +28,20 @@ internal sealed record ThreadClusterSnapshot(
     int ThreadpoolWorkerCount = 0,
     int GcCount = 0,
     int FinalizerCount = 0,
-    IReadOnlyList<int>? SampleManagedThreadIds = null);
+    IReadOnlyList<int>? SampleManagedThreadIds = null,
+    string? FrameworkPattern = null);
+
+/// <summary>
+/// P3-2: one node of the shared-prefix tree over cluster signatures, built innermost-frame-first
+/// so branches converge on shared blocking points reached via different call sites. <paramref
+/// name="Count"/> is the number of alive threads passing through this node (own leaf contribution
+/// plus all descendants). <paramref name="IsChain"/> marks a node whose <paramref name="FrameLabel"/>
+/// already represents a collapsed run of single-child ancestors (no cluster terminates along the
+/// run), keeping straight-line call paths to one node instead of one node per frame.
+/// </summary>
+internal sealed record ThreadClusterTreeNode(
+    string FrameLabel,
+    int Count,
+    IReadOnlyList<ThreadClusterTreeNode> Children,
+    bool IsChain = false,
+    int TruncatedChildCount = 0);

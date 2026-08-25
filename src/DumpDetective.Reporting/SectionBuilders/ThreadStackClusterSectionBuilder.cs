@@ -65,7 +65,8 @@ internal sealed class ThreadStackClusterSectionBuilder : SectionBuilderBase, IAn
                 ThreadCount: cluster.Count,
                 OsThreadIds: osIds,
                 Signature:   cluster.Signature,
-                Truncated:   cluster.SampleOsThreadIds.Count > idLimit));
+                Truncated:   cluster.SampleOsThreadIds.Count > idLimit,
+                FrameworkPattern: cluster.FrameworkPattern));
         }
 
         var frameHotspots = d.TopFrameHotspots ?? [];
@@ -75,6 +76,16 @@ internal sealed class ThreadStackClusterSectionBuilder : SectionBuilderBase, IAn
             for (int i = 0; i < frameHotspots.Count; i++)
                 hsRows.Add(new TableRow([Cell(frameHotspots[i].Name), Cell($"{frameHotspots[i].Count:N0}", frameHotspots[i].Count)]));
             compactTables.Add(STCompact("Top frame hotspots (cross-cluster)", new[] { CH("Frame"), CH("Count", "number") }, hsRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
+        // P3-2: typed TreeWidgets slot — shared-prefix cluster tree, rendered by the shared
+        // collapsible tree widget (docs/refactor/collapsible-tree-widget-design.md).
+        var treeWidgets = new List<TreeWidget>();
+        if (d.ClusterTreeRoots is { Count: > 0 })
+        {
+            var roots = d.ClusterTreeRoots.Select(BuildTreeNode).ToArray();
+            bool anyTruncated = roots.Any(HasTruncation);
+            treeWidgets.Add(new TreeWidget("Cluster tree (shared blocking point)", roots, anyTruncated));
         }
 
         // Typed Artifacts slot
@@ -97,6 +108,19 @@ internal sealed class ThreadStackClusterSectionBuilder : SectionBuilderBase, IAn
             KeyMetrics: keyMetrics,
             CompactTables: compactTables.Count > 0 ? compactTables : null,
             StackClusters: stackClusters.Count > 0 ? stackClusters : null,
+            TreeWidgets:   treeWidgets.Count > 0 ? treeWidgets : null,
             Artifacts:     artifacts.Count > 0 ? artifacts : null);
     }
+
+    private static TreeNode BuildTreeNode(ThreadClusterTreeNode node) =>
+        new(
+            node.FrameLabel,
+            node.Count,
+            "threads",
+            node.Children.Count > 0 ? node.Children.Select(BuildTreeNode).ToArray() : null,
+            node.TruncatedChildCount,
+            node.IsChain);
+
+    private static bool HasTruncation(TreeNode node) =>
+        node.TruncatedChildCount > 0 || (node.Children?.Any(HasTruncation) ?? false);
 }

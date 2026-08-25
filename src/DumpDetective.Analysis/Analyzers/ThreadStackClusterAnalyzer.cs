@@ -28,6 +28,24 @@ namespace DumpDetective.Analysis.Analyzers
         // P2-4: how many entries the frame-level hotspot histogram surfaces in the domain result.
         private const int TopFrameHotspotsToReport = 10;
 
+        // P3-2: shared-prefix cluster tree render-width limits — the trie itself is built from the
+        // complete filtered-cluster set, these only bound how many nodes the report renders.
+        private const int MaxTreeChildrenPerNode = 8;
+        private const int MaxTreeNodes = 400;
+
+        // P3-1: well-known framework wait/idle frames matched against a cluster's whole pipe-joined
+        // signature via ThreadWaitClassifier — these represent expected framework activity rather
+        // than application-level contention, so findings can avoid treating them as hotspots.
+        private static readonly WaitPattern[] FrameworkPatterns =
+        {
+            new("Threadpool-idle", "ThreadPoolWorkQueue", "CLR thread pool worker waiting for work"),
+            new("Threadpool-idle", "PortableThreadPool", "CLR thread pool worker waiting for work"),
+            new("GC", "<No managed frames> (GC)", "Garbage collector thread"),
+            new("Finalizer", "<No managed frames> (Finalizer)", "Finalizer thread waiting on finalization queue"),
+            new("IOCP-idle", "<No managed frames> (IOCP)", "I/O completion port thread waiting for completions"),
+            new("Threadpool-idle", "<No managed frames> (Threadpool)", "CLR thread pool worker waiting for work"),
+        };
+
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -153,8 +171,11 @@ namespace DumpDetective.Analysis.Analyzers
                     c.ThreadpoolWorkerCount,
                     c.GcCount,
                     c.FinalizerCount,
-                    c.SampleManagedThreadIds))
+                    c.SampleManagedThreadIds,
+                    ClassifyFrameworkPattern(c.Signature)))
                 .ToArray();
+
+            IReadOnlyList<ThreadClusterTreeNode> clusterTreeRoots = BuildClusterTree(filteredClusters);
 
             IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? rawExports = null;
             if (options.ProduceClusterExports)
@@ -215,7 +236,99 @@ namespace DumpDetective.Analysis.Analyzers
                 }
             }
 
-            return new ThreadStackClusterDomainResult(aliveThreads, clusters.Count, singletonSignatures, diversity, topSignatures, topClusterSnapshots, rawExports, topFrameHotspots);
+            return new ThreadStackClusterDomainResult(aliveThreads, clusters.Count, singletonSignatures, diversity, topSignatures, topClusterSnapshots, rawExports, topFrameHotspots, clusterTreeRoots);
+        }
+
+        // P3-2: builds a shared-prefix trie over cluster signatures, innermost frame first (index 0
+        // of BuildSignature's " | "-joined parts is the currently-executing frame), so branches
+        // converge on threads' shared blocking point even when reached via different call sites —
+        // information the flat per-cluster signature list can't surface on its own. See
+        // docs/refactor/collapsible-tree-widget-design.md.
+        internal static IReadOnlyList<ThreadClusterTreeNode> BuildClusterTree(IReadOnlyList<StackCluster> filteredClusters)
+        {
+            if (filteredClusters.Count == 0)
+                return Array.Empty<ThreadClusterTreeNode>();
+
+            var root = new TrieBuildNode();
+            foreach (StackCluster cluster in filteredClusters)
+            {
+                string[] frames = cluster.Signature.Split(" | ", StringSplitOptions.None);
+                TrieBuildNode node = root;
+                foreach (string frame in frames)
+                {
+                    node = GetOrAddChild(node, frame);
+                    node.Count += cluster.Count;
+                }
+                node.OwnLeafCount += cluster.Count;
+            }
+
+            int nodeBudget = MaxTreeNodes;
+            var roots = new List<ThreadClusterTreeNode>(root.Children.Count);
+            foreach (KeyValuePair<string, TrieBuildNode> child in OrderChildrenByCountDescending(root.Children))
+            {
+                if (nodeBudget <= 0)
+                    break;
+                roots.Add(ConvertTrieNode(child.Key, child.Value, ref nodeBudget));
+            }
+            return roots;
+        }
+
+        private static TrieBuildNode GetOrAddChild(TrieBuildNode node, string frame)
+        {
+            if (!node.Children.TryGetValue(frame, out TrieBuildNode? child))
+            {
+                child = new TrieBuildNode();
+                node.Children[frame] = child;
+            }
+            return child;
+        }
+
+        private static List<KeyValuePair<string, TrieBuildNode>> OrderChildrenByCountDescending(Dictionary<string, TrieBuildNode> children)
+        {
+            var ordered = new List<KeyValuePair<string, TrieBuildNode>>(children);
+            ordered.Sort((a, b) =>
+            {
+                int byCount = b.Value.Count.CompareTo(a.Value.Count);
+                return byCount != 0 ? byCount : string.CompareOrdinal(a.Key, b.Key);
+            });
+            return ordered;
+        }
+
+        private static ThreadClusterTreeNode ConvertTrieNode(string frameLabel, TrieBuildNode node, ref int nodeBudget)
+        {
+            nodeBudget--;
+
+            // Collapse straight-line runs of single-child ancestors (no cluster terminates along
+            // the way) into one chain node instead of one node per frame — real stacks are commonly
+            // 50+ frames deep and most of that depth is unbranched.
+            bool isChain = false;
+            while (node.OwnLeafCount == 0 && node.Children.Count == 1)
+            {
+                isChain = true;
+                KeyValuePair<string, TrieBuildNode> only = node.Children.First();
+                frameLabel = frameLabel + " → " + only.Key;
+                node = only.Value;
+            }
+
+            List<KeyValuePair<string, TrieBuildNode>> orderedChildren = OrderChildrenByCountDescending(node.Children);
+            var children = new List<ThreadClusterTreeNode>(Math.Min(orderedChildren.Count, MaxTreeChildrenPerNode));
+            int truncatedChildCount = 0;
+            for (int i = 0; i < orderedChildren.Count; i++)
+            {
+                if (children.Count < MaxTreeChildrenPerNode && nodeBudget > 0)
+                    children.Add(ConvertTrieNode(orderedChildren[i].Key, orderedChildren[i].Value, ref nodeBudget));
+                else
+                    truncatedChildCount++;
+            }
+
+            return new ThreadClusterTreeNode(frameLabel, node.Count, children, isChain, truncatedChildCount);
+        }
+
+        private sealed class TrieBuildNode
+        {
+            public int Count;
+            public int OwnLeafCount;
+            public Dictionary<string, TrieBuildNode> Children { get; } = new(StringComparer.Ordinal);
         }
 
         // P2-4: the most frequently occurring individual frames across the entire alive-thread
@@ -237,6 +350,11 @@ namespace DumpDetective.Analysis.Analyzers
 
             return result;
         }
+
+        // P3-1: recognizes well-known framework wait/idle signatures so findings can tell coordinated
+        // application blocking apart from expected framework noise (idle pool workers, GC, etc.).
+        internal static string? ClassifyFrameworkPattern(string signature) =>
+            ThreadWaitClassifier.ClassifySignature(signature, FrameworkPatterns)?.Category;
 
         private static IReadOnlyList<uint> ProjectSampleOsThreadIds(IReadOnlyList<ulong> sampleThreadAddresses, IReadOnlyDictionary<ulong, uint> osThreadIdByAddress)
         {
@@ -310,6 +428,8 @@ namespace DumpDetective.Analysis.Analyzers
                         return "<No managed frames> (GC)";
                     if (thread.IsFinalizer)
                         return "<No managed frames> (Finalizer)";
+                    if (thread.State.HasFlag(ClrThreadState.TS_CompletionPortThread))
+                        return "<No managed frames> (IOCP)";
                     if (thread.State.HasFlag(ClrThreadState.TS_TPWorkerThread))
                         return "<No managed frames> (Threadpool)";
                 }
@@ -319,7 +439,7 @@ namespace DumpDetective.Analysis.Analyzers
             return string.Join(" | ", parts);
         }
 
-        private sealed class StackCluster
+        internal sealed class StackCluster
         {
             public string Signature { get; }
             public int Count { get; set; }

@@ -1199,6 +1199,35 @@ thead th.sortable[aria-sort="ascending"]::after  {
 .root-path__arrow { font-size: 12px; color: #94a3b8; padding: 1px 0 1px 8px; }
 .root-path__no-refs { font-size: 11px; color: #94a3b8; font-style: italic; }
 
+/* ── Shared collapsible tree widget (docs/refactor/collapsible-tree-widget-design.md) ───── */
+.tree-widget-outer {
+  border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; margin-bottom: 8px;
+}
+.tree-widget-outer__summary {
+  padding: 8px 14px; cursor: pointer; font-size: 12.5px; font-weight: 600;
+  color: #1e293b; background: #f8fafc; list-style: none;
+}
+.tree-widget-outer__summary:hover { background: #f1f5f9; }
+.tree-widget-outer[open] > summary { border-bottom: 1px solid #e2e8f0; }
+.tree-widget { padding: 10px 14px; }
+.tree-node { margin: 2px 0; }
+.tree-node--branch > summary.tree-node__summary {
+  cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px;
+  padding: 3px 6px; border-radius: 4px; font-size: 12px; color: #334155;
+}
+.tree-node--branch > summary.tree-node__summary:hover { background: #f1f5f9; }
+.tree-node--leaf {
+  display: flex; align-items: center; gap: 6px; padding: 3px 6px; font-size: 12px; color: #475569;
+}
+.tree-node__label { word-break: break-all; }
+.tree-node--chain > summary.tree-node__label, .tree-node--chain .tree-node__label { color: #64748b; }
+.tree-node__count {
+  font-size: 10.5px; font-weight: 600; color: #0f172a; background: #eef2ff;
+  border: 1px solid #c7d2fe; border-radius: 999px; padding: 1px 7px; flex-shrink: 0;
+}
+.tree-node__children { padding-left: 20px; border-left: 1px dashed #e2e8f0; margin-left: 6px; }
+.tree-node__truncated { font-size: 11px; color: #94a3b8; font-style: italic; padding: 3px 6px; }
+
 /* ── Type trace cards ──────────────────────────────────────────────────────── */
 .type-trace-card {
   border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 6px; overflow: hidden;
@@ -1425,6 +1454,7 @@ body.high-contrast .filter-btn.active { background: #fff !important; color: #000
 .stack-cluster-card__count { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 8px; border-radius: 4px; background: #dbeafe; color: #1d4ed8; flex-shrink: 0; }
 .stack-cluster-card__osids { font-size: 11px; color: #64748b; font-family: ui-monospace, 'Cascadia Code', monospace; }
 .stack-cluster-card__truncated { font-size: 11px; color: #94a3b8; font-style: italic; }
+.stack-cluster-card__pattern { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 8px; border-radius: 4px; background: #f1f5f9; color: #475569; flex-shrink: 0; }
 .stack-cluster-card__sig { padding: 10px 14px; font-size: 11.5px; font-family: ui-monospace, 'Cascadia Code', monospace; color: #1e293b; white-space: pre-wrap; word-break: break-all; line-height: 1.5; }
 
 /* ── Artifact list ─────────────────────────────────────────────────────────── */

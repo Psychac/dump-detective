@@ -522,6 +522,7 @@ output is treated as authoritative.
 | P2 | Add narrative interpretation text for the retained/shallow ratio (e.g. "retained >> shallow → holds an external graph" vs. "retained ≈ shallow → self-contained") next to the Gen2/LOH sub-table | Medium — turns an uninterpreted number into an actionable read, negligible cost (no new data) | Trivial | High | Improvement |
 | P3 | Dedup rendered root chains by identical shape with a "×N instances — same chain" marker, once item 1 above exists | Medium — prevents the improved chain rendering from becoming noisier than today's bare-address baseline at scale | Low (once item 1 lands) | High | Improvement |
 | P3 | Shared "Next steps" `SectionBlock` convention pointing from this section to `GCRootAnalyzer`/`ReferenceChainAnalyzer` output, matching the other tool's step-numbered investigation flow | Medium — reporting-layer change, not analyzer-specific; benefits every analyzer's section, not just this one | Medium | Medium | Evolution |
+| P3 | Render the existing dominator parent/child structure (`DominatorRetainedSetAggregator`) as a browsable tree using the shared collapsible tree widget (once built for Thread Stack Cluster P3-2), instead of only a flat top-N table | High — lets engineers walk the actual dominator hierarchy interactively, closer to dotMemory/VS diagnostics | Medium (depends on shared widget) | Medium | Evolution |
 
 ### Final Verdict
 

@@ -175,12 +175,32 @@ internal sealed record StackCluster(
     int ThreadCount,
     IReadOnlyList<string> OsThreadIds,
     string Signature,
-    bool Truncated);
+    bool Truncated,
+    string? FrameworkPattern = null);
 
 /// <summary>An on-disk artifact produced by an analyzer for offline inspection.</summary>
 internal sealed record AnalyzerArtifact(
     string FileName,
     string Instructions);
+
+/// <summary>
+/// Generic node for the shared collapsible tree widget (see
+/// docs/refactor/collapsible-tree-widget-design.md). Producers own graph algorithms — chain
+/// collapsing, breadth capping — before mapping into this shape; the widget only renders it.
+/// </summary>
+internal sealed record TreeNode(
+    string Label,
+    int? Count = null,
+    string? CountUnit = null,
+    IReadOnlyList<TreeNode>? Children = null,
+    int TruncatedChildCount = 0,
+    bool IsChain = false);
+
+/// <summary>A titled group of tree roots rendered by the shared collapsible tree widget.</summary>
+internal sealed record TreeWidget(
+    string Title,
+    IReadOnlyList<TreeNode> Roots,
+    bool AnyTruncated = false);
 
 /// <summary>A per-type sample trace entry with optional parsed GC root hop chain.</summary>
 internal sealed record TypeSampleTrace(
@@ -216,7 +236,8 @@ internal sealed record AnalyzerDetailSection(
     IReadOnlyList<EventLeakGroupCard>? EventLeakGroupCards = null,       // Event leak per-group drill-down
     IReadOnlyList<EventLeakInstanceCard>? EventLeakInstanceCards = null, // Event leak per-instance drill-down
     IReadOnlyList<StackCluster>? StackClusters = null,           // Thread stack signature clusters
-    IReadOnlyList<AnalyzerArtifact>? Artifacts = null);          // On-disk artifacts produced by the analyzer
+    IReadOnlyList<AnalyzerArtifact>? Artifacts = null,           // On-disk artifacts produced by the analyzer
+    IReadOnlyList<TreeWidget>? TreeWidgets = null);               // Shared collapsible tree widget data (e.g. cluster shared-prefix tree)
 
 // Discriminated union root — each subtype carries only what it needs
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]

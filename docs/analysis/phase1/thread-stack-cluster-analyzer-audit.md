@@ -337,10 +337,10 @@ insufficient for production use.
 | P2-3 | Emit MaxClusters-cap-reached advisory in report when `filteredClusters.Length >= options.MaxClusters` | Improvement | Low | Trivial | High | Improvement | ✅ Done |
 | P2-4 | Add frame-level hotspot histogram (top frames by cross-cluster frequency) | Improvement | High | Medium | High | Improvement | ✅ Done |
 | P2-5 | Enforce invariant `TopSignaturesToShow <= TopClustersToShow` in options (or remove `TopClusterSignatures` blocks when `TopClusters` is populated) | Improvement | Medium | Low | High | Improvement | ✅ Done |
-| P3-1 | Framework pattern label heuristics (identify threadpool-idle, GC, finalizer signatures) | Improvement | Medium | Medium | Medium | Improvement |
-| P3-2 | Cluster tree / shared-prefix representation for report output | Evolution | High | High | Medium | Evolution |
-| P3-3 | Cross-reference top cluster signature with `HangAnalyzer` blocked-thread findings in `InsightEngine` | Evolution | High | Medium | Medium | Evolution |
-| P3-4 | Cluster-stability trend metric: % of top-5 signatures persisting across consecutive dumps | Evolution | Medium | Medium | Medium | Evolution |
+| P3-1 | Framework pattern label heuristics (identify threadpool-idle, GC, finalizer signatures) | Improvement | Medium | Medium | Medium | Improvement | ✅ Done |
+| P3-2 | Cluster tree / shared-prefix representation for report output, via new shared collapsible tree widget — see [collapsible-tree-widget-design.md](../../refactor/collapsible-tree-widget-design.md) | Evolution | High | High | Medium | Evolution | ✅ Done |
+| P3-3 | Cross-reference top cluster signature with `HangAnalyzer` blocked-thread findings in `InsightEngine` | Evolution | High | Medium | Medium | Evolution | ✅ Done |
+| P3-4 | Cluster-stability trend metric: % of top-5 signatures persisting across consecutive dumps | Evolution | Medium | Medium | Medium | Evolution | ✅ Done |
 
 ---
 
@@ -357,10 +357,10 @@ insufficient for production use.
    classification). Together these transform the report from a statistical summary into an
    actionable diagnostic. P0-1 is a mandatory correctness fix.
 
-3. **Platform evolution opportunities:** Cross-analyzer finding correlation (P3-3) between
-   `ThreadStackClusterAnalyzer`, `HangAnalyzer`, and `LockGraphAnalyzer` would produce a
-   qualitatively stronger thread diagnosis than any single analyzer can provide alone. This is the
-   highest-value platform-level opportunity.
+3. **Platform evolution opportunities:** Cross-analyzer finding correlation (P3-3, done) between
+   `ThreadStackClusterAnalyzer` and `HangAnalyzer` produces a qualitatively stronger thread
+   diagnosis than either analyzer alone. Extending the same correlation to a future
+   `LockGraphAnalyzer` remains the next highest-value platform-level opportunity.
 
 4. **Highest engineering return:** P0-1 + P0-2 + P1-3 require minimal effort and immediately
    close the gap between what the platform knows (cluster counts, thread types) and what it

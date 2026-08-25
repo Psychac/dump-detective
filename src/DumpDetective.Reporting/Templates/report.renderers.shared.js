@@ -5,7 +5,7 @@
 // In the production inline-bundle path the C# bundler strips all import/export
 // keywords and concatenates the files into one IIFE, so everything is in scope
 // via normal JS function hoisting.
-import { el } from './report.dom.js';
+import { el, t } from './report.dom.js';
 
 // ── Severity ranking ─────────────────────────────────────────────────────────
 export function sevRank(sev) {
@@ -153,6 +153,66 @@ export function sortFindingsBySeverity(findings) {
 
     return String((a && a.title) || '').localeCompare(String((b && b.title) || ''));
   });
+}
+
+// ── Shared collapsible tree widget ───────────────────────────────────────────
+// Generic renderer for a branching TreeNode[] (see
+// docs/refactor/collapsible-tree-widget-design.md). Producers already did chain-collapsing
+// and breadth-capping on the C# side (TreeNode.isChain / truncatedChildCount) — this only
+// renders whatever shape it's given, it does not do graph algorithms.
+function defaultFormatTreeNodeCount(node) {
+  if (node.count == null) return '';
+  var unit = node.countUnit ? ' ' + node.countUnit : '';
+  return Number(node.count).toLocaleString() + unit;
+}
+
+function buildTreeNodeElement(node, formatCount) {
+  var hasChildren = Array.isArray(node.children) && node.children.length > 0;
+  var chainClass = node.isChain ? ' tree-node--chain' : '';
+
+  if (!hasChildren) {
+    var leaf = el('div', 'tree-node tree-node--leaf' + chainClass);
+    var leafLabel = el('span', 'tree-node__label'); leafLabel.appendChild(t(node.label || ''));
+    leaf.appendChild(leafLabel);
+    var leafCount = formatCount(node);
+    if (leafCount) { var lc = el('span', 'tree-node__count'); lc.appendChild(t(leafCount)); leaf.appendChild(lc); }
+    return leaf;
+  }
+
+  var details = el('details', 'tree-node tree-node--branch' + chainClass);
+  details.setAttribute('data-collapsible', 'tree-node');
+  var summary = el('summary', 'tree-node__summary');
+  var label = el('span', 'tree-node__label'); label.appendChild(t(node.label || ''));
+  summary.appendChild(label);
+  var count = formatCount(node);
+  if (count) { var c = el('span', 'tree-node__count'); c.appendChild(t(count)); summary.appendChild(c); }
+  details.appendChild(summary);
+
+  var childrenWrap = el('div', 'tree-node__children');
+  for (var i = 0; i < node.children.length; i++) {
+    childrenWrap.appendChild(buildTreeNodeElement(node.children[i], formatCount));
+  }
+  if (node.truncatedChildCount) {
+    var more = el('div', 'tree-node__truncated');
+    more.appendChild(t('… ' + node.truncatedChildCount + ' more'));
+    childrenWrap.appendChild(more);
+  }
+  details.appendChild(childrenWrap);
+  return details;
+}
+
+// options: { widgetClass?: string, formatCount?: (node) => string }
+export function buildTreeWidget(rootNodes, options) {
+  options = options || {};
+  var widgetClass = options.widgetClass || 'tree-widget';
+  var formatCount = options.formatCount || defaultFormatTreeNodeCount;
+
+  var wrap = el('div', 'tree-widget ' + widgetClass);
+  var roots = Array.isArray(rootNodes) ? rootNodes : [];
+  for (var i = 0; i < roots.length; i++) {
+    wrap.appendChild(buildTreeNodeElement(roots[i], formatCount));
+  }
+  return wrap;
 }
 
 // ── Insight stats chip strip (used by buildDomains + buildCrossDomainInsights) ─

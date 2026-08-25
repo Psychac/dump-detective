@@ -4,6 +4,7 @@
 import { el, sevCss } from './report.dom.js';
 import { slugifyAnchor } from './report.renderers.shared.js';
 import { ensureUniqueDomId } from './report.renderers.shared.js';
+import { buildTreeWidget } from './report.renderers.shared.js';
 
 function extractCellDisplay(cellData) {
   if (cellData && cellData.display != null) return String(cellData.display);
@@ -900,6 +901,7 @@ export function buildAnalyzerSection(section, i) {
       scSum.appendChild(cntBadge);
       if (osIds) scSum.appendChild(osIds);
       if (cluster.truncated) { const tr = el('span', 'stack-cluster-card__truncated'); tr.textContent = ' (truncated)'; scSum.appendChild(tr); }
+      if (cluster.frameworkPattern) { const fp = el('span', 'stack-cluster-card__pattern'); fp.textContent = cluster.frameworkPattern; scSum.appendChild(fp); }
       scDetails.appendChild(scSum);
 
       const sig = el('div', 'stack-cluster-card__sig'); sig.textContent = cluster.signature || '';
@@ -907,6 +909,24 @@ export function buildAnalyzerSection(section, i) {
       scWrap.appendChild(scDetails);
     }
     content.appendChild(scWrap);
+  }
+
+  // ── TreeWidgets slot ──────────────────────────────────────────────────────
+  const treeWidgets = Array.isArray(section.treeWidgets) ? section.treeWidgets : [];
+  if (treeWidgets.length) {
+    const twWrap = el('div', 'typed-slot typed-slot--tree-widgets');
+    for (let twi = 0; twi < treeWidgets.length; twi++) {
+      const widget = treeWidgets[twi];
+      const twOuter = el('details', 'tree-widget-outer');
+      twOuter.setAttribute('data-collapsible', 'tree-widget');
+      const twSum = el('summary', 'tree-widget-outer__summary');
+      twSum.textContent = (widget.title || 'Tree') + (widget.anyTruncated ? '  ⚠ truncated' : '');
+      twOuter.appendChild(twSum);
+      const roots = Array.isArray(widget.roots) ? widget.roots : [];
+      twOuter.appendChild(buildTreeWidget(roots, { widgetClass: 'thread-cluster-tree' }));
+      twWrap.appendChild(twOuter);
+    }
+    content.appendChild(twWrap);
   }
 
   // ── Artifacts slot ────────────────────────────────────────────────────────

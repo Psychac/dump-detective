@@ -57,7 +57,7 @@ P0-4 was a regression hiding behind two individually-DONE roadmap items).
 | 2 | **ArrayAnalyzer** | 2/2 | 5/5 | 5/5 | 4/4 | ✅ P0+P1+P2+P3 COMPLETE — value-type sparse detection, pinned array detection via GC handle root index, `ArrayPool<byte>` unreturned-rental heuristic, and `sparseCandidates`/`lohFallbackCandidates` capacity tuning all shipped (`array-analyzer-audit.md`) |
 | 3 | **BoxingAnalyzer** | 2/2 | 4/4 | 5/5 | 4/4 | ✅ P0+P1+P2+P3 COMPLETE — IEquatable<T> flag/finding, progress reporting, Gen2 retained-boxing wiring, and unit tests for pure helpers (`boxing-analyzer-audit.md`) |
 | 4 | **ModuleAnalyzer** | 2/2 | 5/5 | 4/5 | 2/4 | ✅ P0+P1 complete; P2 80% (4/5); P3 50% (2/4) — cross-domain duplicate load detection (`CrossDomainModuleLoad`) and `AssemblyRef` required-vs-loaded version audit (`AssemblyRefProbe`, raw ECMA-335 metadata parsing) both shipped 2026-08-25; P3 remaining: native image (NGen/R2R) ratio, module load ordering |
-| 5 | **ThreadStackClusterAnalyzer** | 2/2 | 5/5 | 4/5 | 0/4 | ✅ P0+P1 |
+| 5 | **ThreadStackClusterAnalyzer** | 2/2 | 5/5 | 5/5 | 4/4 | ✅ P0+P1+P2+P3 COMPLETE — P3-3 (cross-reference dominant cluster with `HangAnalyzer` blocked threads in `InsightEngine`) shipped 2026-08-25 |
 | 6 | **SegmentReservationAnalyzer** | 1/1 | 4/4 | 7/7 | 0/4 | ✅ P0+P1+P2 |
 | 7 | **FinalizableObjectAnalyzer** | 4/4 | 2/2 | 2/8 | 0/3 | ✅ P0+P1 complete; P2 25% (2/8) |
 | 8 | **JitAnalyzer** | 2/2 | 3/3 | 0/5 | 0/4 | ✅ P0+P1 |
@@ -140,8 +140,8 @@ Different audits use different conventions for marking completion:
 **Major Wins:**
 - 13 analyzers (37%) have P0+P1 100% complete
 - HeapTopologyAnalyzer: 10 P0+P1+P2 items complete (generation breakdown, fragmentation, cancellation, variable naming, efficiency, trending, density)
-- 3 analyzers (ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer) have ALL P0+P1+P2 complete
-- ArrayAnalyzer and BoxingAnalyzer are the only analyzers with ALL P0+P1+P2+P3 complete (ArrayAnalyzer 4/4 P3; BoxingAnalyzer 4/4 P3, including unit test coverage for pure helper logic)
+- 4 analyzers (ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer, ThreadStackClusterAnalyzer) have ALL P0+P1+P2 complete
+- ArrayAnalyzer, BoxingAnalyzer, and ThreadStackClusterAnalyzer are the only analyzers with ALL P0+P1+P2+P3 complete (ArrayAnalyzer 4/4 P3; BoxingAnalyzer 4/4 P3, including unit test coverage for pure helper logic; ThreadStackClusterAnalyzer 4/4 P3, including the P3-3 cross-analyzer correlation with `HangAnalyzer`)
 - GCHandleAnalyzer completed all P0 and P1 items in a single session (architecture + diagnostics)
 
 **Remaining Work:**

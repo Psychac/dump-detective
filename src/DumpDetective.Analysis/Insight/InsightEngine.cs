@@ -54,6 +54,7 @@ internal sealed class InsightEngine
     private const int SuspendedMethodFireForgetThreshold = 100;
     private const ulong LohArrayPressureThreshold = 256UL * 1024 * 1024;  // 256 MB
     private const ulong GCRootLargeRetentionThreshold = 50UL * 1024 * 1024; // 50 MB
+    private const double ClusterHangOverlapWarningRatio = 0.60;
 
     private const string Source = "InsightEngine";
 
@@ -74,6 +75,7 @@ internal sealed class InsightEngine
         HeapTopologyDomainResult? segments = FindResult<HeapTopologyDomainResult>(runs);
         ThreadDomainResult? threads = FindResult<ThreadDomainResult>(runs);
         HangDomainResult? hang = FindResult<HangDomainResult>(runs);
+        ThreadStackClusterDomainResult? clusters = FindResult<ThreadStackClusterDomainResult>(runs);
         AsyncTaskDomainResult? asyncTasks = FindResult<AsyncTaskDomainResult>(runs);
         DominatorDomainResult? leak = FindResult<DominatorDomainResult>(runs);
         GCHandleDomainResult? handles = FindResult<GCHandleDomainResult>(runs);
@@ -107,6 +109,7 @@ internal sealed class InsightEngine
             Segments: segments,
             Threads: threads,
             Hang: hang,
+            Clusters: clusters,
             AsyncTasks: asyncTasks,
             Leak: leak,
             Handles: handles,
@@ -149,6 +152,7 @@ internal sealed class InsightEngine
         HeapTopologyDomainResult? Segments,
         ThreadDomainResult? Threads,
         HangDomainResult? Hang,
+        ThreadStackClusterDomainResult? Clusters,
         AsyncTaskDomainResult? AsyncTasks,
         DominatorDomainResult? Leak,
         GCHandleDomainResult? Handles,
@@ -219,6 +223,7 @@ internal sealed class InsightEngine
             DetectDbConnectionLeak(findings, context.DbConn, context.Crash);
             DetectWcfChannelFault(findings, context.Wcf, context.Crash);
             DetectHttpClientAccumulation(findings, context.Http);
+            DetectClusterHangCorrelation(findings, context.Clusters, context.Hang);
         }
     }
 
@@ -1568,6 +1573,103 @@ internal sealed class InsightEngine
                 MetricValue: http.TotalHttpObjects,
                 MetricUnit: "HTTP objects"));
         }
+    }
+
+    /// <summary>
+    /// Cross-references the dominant thread-stack cluster with HangAnalyzer's blocked-thread
+    /// findings. When most of the dominant cluster's threads are independently reported as
+    /// waiting by HangAnalyzer, the two single-analyzer findings describe the same bottleneck —
+    /// this promotes that overlap into one elevated, correlated finding instead of leaving the
+    /// reader to notice the connection themselves.
+    /// </summary>
+    private static void DetectClusterHangCorrelation(
+        List<InsightFinding> findings,
+        ThreadStackClusterDomainResult? clusters,
+        HangDomainResult? hang)
+    {
+        if (clusters is null || hang is null)
+            return;
+        if (clusters.TopClusters is not { Count: > 0 } topClusters)
+            return;
+        if (hang.TopWaitingThreads is not { Count: > 0 } waitingThreads)
+            return;
+
+        ThreadClusterSnapshot dominant = topClusters[0];
+        if (dominant.SampleOsThreadIds.Count == 0)
+            return;
+
+        var waitingOsThreadIds = new HashSet<uint>();
+        for (int i = 0; i < waitingThreads.Count; i++)
+            waitingOsThreadIds.Add(waitingThreads[i].OSThreadId);
+
+        int overlapCount = 0;
+        for (int i = 0; i < dominant.SampleOsThreadIds.Count; i++)
+        {
+            if (waitingOsThreadIds.Contains(dominant.SampleOsThreadIds[i]))
+                overlapCount++;
+        }
+
+        double overlapRatio = overlapCount / (double)dominant.SampleOsThreadIds.Count;
+        if (overlapRatio < ClusterHangOverlapWarningRatio)
+            return;
+
+        string? dominantWaitReason = null;
+        int dominantWaitReasonCount = 0;
+        var waitReasonCounts = new Dictionary<string, int>();
+        for (int i = 0; i < waitingThreads.Count; i++)
+        {
+            WaitingThreadSnapshot w = waitingThreads[i];
+
+            bool inCluster = false;
+            for (int j = 0; j < dominant.SampleOsThreadIds.Count; j++)
+            {
+                if (dominant.SampleOsThreadIds[j] == w.OSThreadId)
+                {
+                    inCluster = true;
+                    break;
+                }
+            }
+            if (!inCluster)
+                continue;
+
+            waitReasonCounts.TryGetValue(w.WaitReason, out int count);
+            count++;
+            waitReasonCounts[w.WaitReason] = count;
+            if (count > dominantWaitReasonCount)
+            {
+                dominantWaitReasonCount = count;
+                dominantWaitReason = w.WaitReason;
+            }
+        }
+
+        double dominantPercentOfAlive = clusters.AliveThreadCount > 0
+            ? dominant.Count * 100.0 / clusters.AliveThreadCount
+            : 0;
+
+        FindingSeverity sev = dominantPercentOfAlive >= 50
+            ? FindingSeverity.Critical
+            : FindingSeverity.Warning;
+
+        string reasonNote = dominantWaitReason is not null
+            ? $", predominantly waiting on {dominantWaitReason}"
+            : string.Empty;
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Threads",
+            Severity: sev,
+            Title: "Dominant thread-stack cluster correlates with HangAnalyzer's blocked threads",
+            Evidence: $"{overlapCount} of {dominant.SampleOsThreadIds.Count} sampled threads in the dominant " +
+                      $"stack cluster ({dominant.Count:N0} threads, {dominantPercentOfAlive:F1}% of alive threads) " +
+                      $"are also reported as waiting by the Hang analyzer{reasonNote}. " +
+                      $"Cluster signature: {dominant.Signature}",
+            Recommendation: "A large group of threads sharing an identical stack and wait state strongly " +
+                            "suggests a single contended resource or blocking call. Inspect the cluster's " +
+                            "innermost frame together with the corresponding Hang analyzer wait details to " +
+                            "identify the shared bottleneck.",
+            Tags: ["thread-cluster", "hang", "blocking", "contention"],
+            MetricValue: overlapRatio,
+            MetricUnit: "ratio"));
     }
 
     // ── Utilities (last block) ────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Models;
+using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Models;
 using FluentAssertions;
 using System.IO;
@@ -49,5 +50,91 @@ public sealed class ThreadStackClusterAnalyzerOptionsTests
         result.TopFrameHotspots!.Should().HaveCount(2);
         result.TopFrameHotspots![0].Name.Should().Be("System.Threading.Monitor.Wait(object)");
         result.TopFrameHotspots![0].Count.Should().Be(42);
+    }
+
+    [Theory]
+    [InlineData("System.Threading.ThreadPoolWorkQueue.Dispatch()", "Threadpool-idle")]
+    [InlineData("System.Threading.PortableThreadPool+WorkerThread.WorkerThreadStart()", "Threadpool-idle")]
+    [InlineData("<No managed frames> (GC)", "GC")]
+    [InlineData("<No managed frames> (Finalizer)", "Finalizer")]
+    [InlineData("<No managed frames> (IOCP)", "IOCP-idle")]
+    [InlineData("<No managed frames> (Threadpool)", "Threadpool-idle")]
+    [InlineData("MyApp.Worker.Run() | System.Threading.Monitor.Wait(object)", null)]
+    [InlineData("<No managed frames>", null)]
+    public void ClassifyFrameworkPattern_Recognizes_Known_Signatures(string signature, string? expected)
+    {
+        ThreadStackClusterAnalyzer.ClassifyFrameworkPattern(signature).Should().Be(expected);
+    }
+
+    [Fact]
+    public void ThreadClusterSnapshot_Can_Carry_FrameworkPattern()
+    {
+        var snapshot = new ThreadClusterSnapshot(500, Array.Empty<uint>(), "<No managed frames> (GC)", FrameworkPattern: "GC");
+
+        snapshot.FrameworkPattern.Should().Be("GC");
+    }
+
+    private static ThreadStackClusterAnalyzer.StackCluster MakeCluster(string signature, int count)
+    {
+        var cluster = new ThreadStackClusterAnalyzer.StackCluster(signature) { Count = count };
+        return cluster;
+    }
+
+    [Fact]
+    public void BuildClusterTree_Empty_Input_Returns_Empty()
+    {
+        ThreadStackClusterAnalyzer.BuildClusterTree(Array.Empty<ThreadStackClusterAnalyzer.StackCluster>())
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public void BuildClusterTree_Merges_Clusters_Sharing_Innermost_Frame()
+    {
+        var clusters = new[]
+        {
+            MakeCluster("Wait() | Foo()", 5),
+            MakeCluster("Wait() | Bar()", 3),
+        };
+
+        var roots = ThreadStackClusterAnalyzer.BuildClusterTree(clusters);
+
+        roots.Should().HaveCount(1);
+        var wait = roots[0];
+        wait.FrameLabel.Should().Be("Wait()");
+        wait.Count.Should().Be(8);
+        wait.IsChain.Should().BeFalse();
+        wait.Children.Should().HaveCount(2);
+        wait.Children.Should().Contain(c => c.FrameLabel == "Foo()" && c.Count == 5);
+        wait.Children.Should().Contain(c => c.FrameLabel == "Bar()" && c.Count == 3);
+    }
+
+    [Fact]
+    public void BuildClusterTree_Collapses_Unbranched_Chain_Into_One_Node()
+    {
+        var clusters = new[] { MakeCluster("Wait() | Foo() | Bar() | Baz()", 10) };
+
+        var roots = ThreadStackClusterAnalyzer.BuildClusterTree(clusters);
+
+        roots.Should().HaveCount(1);
+        var node = roots[0];
+        node.FrameLabel.Should().Be("Wait() → Foo() → Bar() → Baz()");
+        node.Count.Should().Be(10);
+        node.IsChain.Should().BeTrue();
+        node.Children.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void BuildClusterTree_Caps_Children_Per_Node_And_Reports_Truncation()
+    {
+        var clusters = new List<ThreadStackClusterAnalyzer.StackCluster>();
+        for (int i = 0; i < 10; i++)
+            clusters.Add(MakeCluster($"Wait() | Child{i}()", 10 - i));
+
+        var roots = ThreadStackClusterAnalyzer.BuildClusterTree(clusters);
+
+        roots.Should().HaveCount(1);
+        var wait = roots[0];
+        wait.Children.Should().HaveCount(8);
+        wait.TruncatedChildCount.Should().Be(2);
     }
 }

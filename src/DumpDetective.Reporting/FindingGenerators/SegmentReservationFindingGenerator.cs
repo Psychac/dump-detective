@@ -51,6 +51,25 @@ internal sealed class SegmentReservationFindingGenerator : IFindingGenerator
                 MetricUnit: "%"));
         }
 
+        // Near-empty GC regions (.NET 8+ regions-based GC) — decommit candidates.
+        if (r.IsRegionsBased && r.NearEmptyRegionCount > 0)
+        {
+            // 50 MB — below this the near-empty committed total isn't worth flagging above Info;
+            // no external standard behind this number, picked as a "worth a human looking at it" line.
+            const ulong WarningReclaimableBytesThreshold = 50 * 1024 * 1024UL;
+            bool warning = r.NearEmptyRegionCommittedBytes > WarningReclaimableBytesThreshold;
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Memory",
+                Severity: warning ? FindingSeverity.Warning : FindingSeverity.Info,
+                Title: "Near-empty GC regions detected",
+                Evidence: $"{r.NearEmptyRegionCount} region(s) below {r.NearEmptyRegionFillPctThreshold:F0}% fill, holding {FormatHelper.FormatBytes(r.NearEmptyRegionCommittedBytes)} of committed memory.",
+                Recommendation: "Regions-based GC (DATAS) can decommit near-empty regions over time; if this persists across snapshots, investigate pinned or long-lived objects preventing region evacuation.",
+                Tags: ["segments", "regions", "gc-regions", "decommit"],
+                MetricValue: (double)r.NearEmptyRegionCommittedBytes,
+                MetricUnit: "bytes"));
+        }
+
         // Summary finding (always).
         findings.Add(new InsightFinding(
             Analyzer: AnalyzerName,

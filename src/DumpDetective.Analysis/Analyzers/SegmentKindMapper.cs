@@ -19,6 +19,26 @@ internal static class SegmentKindMapper
         };
     }
 
+    /// <summary>
+    /// Maps to the per-generation <see cref="RegionGenerationKind"/>, preserving the Gen0/Gen1/Gen2
+    /// split that <see cref="Map"/> collapses. <see cref="GCSegmentKind.Generation0"/> and
+    /// <see cref="GCSegmentKind.Generation1"/> are only emitted for regions-based GC (.NET 8+); their
+    /// presence in a dump's segment list is the signal that the heap uses regions.
+    /// </summary>
+    public static RegionGenerationKind MapRegionKind(ClrSegment segment)
+    {
+        return segment.Kind switch
+        {
+            GCSegmentKind.Generation0 => RegionGenerationKind.Generation0,
+            GCSegmentKind.Generation1 => RegionGenerationKind.Generation1,
+            GCSegmentKind.Generation2 => RegionGenerationKind.Generation2,
+            GCSegmentKind.Large => RegionGenerationKind.Large,
+            GCSegmentKind.Pinned => RegionGenerationKind.Pinned,
+            GCSegmentKind.Frozen => RegionGenerationKind.Frozen,
+            _ => RegionGenerationKind.Ephemeral,
+        };
+    }
+
     public static bool IsEphemeral(ClrSegment segment)
     {
         return segment.Kind switch

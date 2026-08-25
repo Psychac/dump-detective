@@ -48,9 +48,11 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
         var reservedByKind = new Dictionary<HeapSegmentKind, ulong>();
         var committedByKind = new Dictionary<HeapSegmentKind, ulong>();
         var segmentCountByKind = new Dictionary<HeapSegmentKind, int>();
+        var regionBuckets = new Dictionary<RegionGenerationKind, RegionBucketAccumulator>(8);
 
         int totalSegmentCount = 0;
         double maxEphemeralFillPct = 0.0;
+        bool isRegionsBased = false;
         const int ProgressReportInterval = 128;
 
         foreach (ClrSegment segment in heap.Segments)
@@ -67,6 +69,9 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
             bool isEphemeral = SegmentKindMapper.IsEphemeral(segment);
             int logicalHeap = segment.SubHeap?.Index ?? 0;
             HeapSegmentKind kind = SegmentKindMapper.Map(segment);
+            RegionGenerationKind regionKind = SegmentKindMapper.MapRegionKind(segment);
+            if (regionKind is RegionGenerationKind.Generation0 or RegionGenerationKind.Generation1)
+                isRegionsBased = true;
 
             totalCommitted += committed;
             totalReserved += reserved;
@@ -101,23 +106,38 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
             else
                 committedByKind[kind] = committed;
 
-            // Ephemeral fill % = committed / segment length (object range).
+            // Fill % = committed / segment length (object range). Computed for every segment so
+            // it can feed both the ephemeral-only aggregate below and the per-region bucket stats
+            // (regions-based GC benefits from a fill % on non-ephemeral kinds too, since Gen2/LOH
+            // regions are small individually and a near-empty one is a real decommit candidate).
             double fillPct = 0.0;
-            if (isEphemeral && segment.Length > 0)
+            if (segment.Length > 0)
             {
                 fillPct = committed / (double)segment.Length * 100.0;
                 if (fillPct > 100.0) fillPct = 100.0;
+            }
+
+            if (isEphemeral)
+            {
                 ephemeralCount++;
                 ephemeralFillSum += fillPct;
                 if (fillPct > maxEphemeralFillPct) maxEphemeralFillPct = fillPct;
             }
-            else if (!isEphemeral && kind == HeapSegmentKind.SmallObjectHeap)
+            else if (kind == HeapSegmentKind.SmallObjectHeap)
             {
                 nonEphemeralSohCount++;
             }
 
+            if (!regionBuckets.TryGetValue(regionKind, out RegionBucketAccumulator? bucket))
+            {
+                bucket = new RegionBucketAccumulator();
+                regionBuckets[regionKind] = bucket;
+            }
+            bucket.Add(reserved, committed, fillPct <= options.NearEmptyRegionFillPctThreshold);
+
             segmentTable.Add(new SegmentReservationEntry(
                 Address: segment.Address,
+                EndAddress: segment.End,
                 Kind: kind,
                 CommittedBytes: committed,
                 ReservedBytes: reserved,
@@ -147,6 +167,29 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
 
         segmentTable.Sort((a, b) => b.ReservedBytes.CompareTo(a.ReservedBytes));
 
+        var regionStats = new List<RegionGenerationStats>(isRegionsBased ? regionBuckets.Count : 0);
+        int nearEmptyRegionCount = 0;
+        ulong nearEmptyRegionCommittedBytes = 0;
+        if (isRegionsBased)
+        {
+            foreach (KeyValuePair<RegionGenerationKind, RegionBucketAccumulator> kvp in regionBuckets)
+            {
+                RegionBucketAccumulator b = kvp.Value;
+                regionStats.Add(new RegionGenerationStats(
+                    Kind: kvp.Key,
+                    Count: b.Count,
+                    TotalReservedBytes: b.TotalReservedBytes,
+                    TotalCommittedBytes: b.TotalCommittedBytes,
+                    MinReservedBytes: b.Count > 0 ? b.MinReservedBytes : 0,
+                    MaxReservedBytes: b.MaxReservedBytes,
+                    NearEmptyCount: b.NearEmptyCount,
+                    NearEmptyCommittedBytes: b.NearEmptyCommittedBytes));
+                nearEmptyRegionCount += b.NearEmptyCount;
+                nearEmptyRegionCommittedBytes += b.NearEmptyCommittedBytes;
+            }
+            regionStats.Sort((a, b) => a.Kind.CompareTo(b.Kind));
+        }
+
         return new SegmentReservationDomainResult(
             TotalCommittedBytes: totalCommitted,
             TotalReservedBytes: totalReserved,
@@ -167,7 +210,14 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
             PressureRiskReason: pressureReason,
             RatioHighPressureThreshold: options.RatioHighPressureThreshold,
             RatioMediumPressureThreshold: 4.0,
-            DumpPointerSize: dumpPointerSize);
+            DumpPointerSize: dumpPointerSize,
+            IsServerGc: heap.IsServer,
+            LogicalHeapCount: reservedByHeap.Count,
+            IsRegionsBased: isRegionsBased,
+            RegionStats: regionStats,
+            NearEmptyRegionCount: nearEmptyRegionCount,
+            NearEmptyRegionCommittedBytes: nearEmptyRegionCommittedBytes,
+            NearEmptyRegionFillPctThreshold: options.NearEmptyRegionFillPctThreshold);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -179,4 +229,30 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
     /// heap are classified as Small/SOH and have non-empty <c>Generation0</c> ranges.
     /// </summary>
     // Classification helpers moved to SegmentKindMapper
+
+    /// <summary>Mutable per-<see cref="RegionGenerationKind"/> accumulator — at most 7 live instances (one per bucket).</summary>
+    private sealed class RegionBucketAccumulator
+    {
+        public int Count;
+        public ulong TotalReservedBytes;
+        public ulong TotalCommittedBytes;
+        public ulong MinReservedBytes = ulong.MaxValue;
+        public ulong MaxReservedBytes;
+        public int NearEmptyCount;
+        public ulong NearEmptyCommittedBytes;
+
+        public void Add(ulong reserved, ulong committed, bool isNearEmpty)
+        {
+            Count++;
+            TotalReservedBytes += reserved;
+            TotalCommittedBytes += committed;
+            if (reserved < MinReservedBytes) MinReservedBytes = reserved;
+            if (reserved > MaxReservedBytes) MaxReservedBytes = reserved;
+            if (isNearEmpty)
+            {
+                NearEmptyCount++;
+                NearEmptyCommittedBytes += committed;
+            }
+        }
+    }
 }

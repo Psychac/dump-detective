@@ -14,8 +14,11 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 new("jit.heap.bytes",         null, r.TotalJitHeapBytes,     "bytes",   MetricTrendDirection.HigherIsWorse),
                 new("jit.manager.count",      null, r.JitManagerCount,       "count",   MetricTrendDirection.Neutral),
                 new("jit.active.methods",     null, r.ActiveMethodsOnStacks, "methods", MetricTrendDirection.Neutral),
+                new("jit.distinct.methods",   null, r.DistinctMethodsOnStacks, "methods", MetricTrendDirection.Neutral),
                 new("jit.tiered.count",       null, r.TieredMethodCount,     "methods", MetricTrendDirection.Neutral),
                 new("jit.unmanaged.frames",   null, r.UnmanagedFrameCount,   "frames",  MetricTrendDirection.HigherIsWorse),
+                new("jit.readytorun.frames",  null, r.ReadyToRunFrameCount,  "frames",  MetricTrendDirection.Neutral),
+                new("jit.dynamic.frames",     null, r.DynamicMethodFrameCount, "frames", MetricTrendDirection.HigherIsWorse),
             ];
         }
 
@@ -27,8 +30,11 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 MetricDeltaHelper.Compute("jit.heap.bytes",       null, b.TotalJitHeapBytes,     c.TotalJitHeapBytes,     "bytes",   MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("jit.manager.count",    null, b.JitManagerCount,       c.JitManagerCount,       "count",   MetricTrendDirection.Neutral),
                 MetricDeltaHelper.Compute("jit.active.methods",   null, b.ActiveMethodsOnStacks, c.ActiveMethodsOnStacks, "methods", MetricTrendDirection.Neutral),
+                MetricDeltaHelper.Compute("jit.distinct.methods", null, b.DistinctMethodsOnStacks, c.DistinctMethodsOnStacks, "methods", MetricTrendDirection.Neutral),
                 MetricDeltaHelper.Compute("jit.tiered.count",     null, b.TieredMethodCount,     c.TieredMethodCount,     "methods", MetricTrendDirection.Neutral),
                 MetricDeltaHelper.Compute("jit.unmanaged.frames", null, b.UnmanagedFrameCount,   c.UnmanagedFrameCount,   "frames",  MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("jit.readytorun.frames",null, b.ReadyToRunFrameCount,  c.ReadyToRunFrameCount,  "frames",  MetricTrendDirection.Neutral),
+                MetricDeltaHelper.Compute("jit.dynamic.frames",   null, b.DynamicMethodFrameCount, c.DynamicMethodFrameCount, "frames", MetricTrendDirection.HigherIsWorse),
             ];
         }
     }

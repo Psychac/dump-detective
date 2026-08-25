@@ -51,6 +51,7 @@ internal sealed class InsightEngine
     private const double EphemeralFillCriticalPct = 90.0;
     private const int DynamicModuleWarning = 20;
     private const ulong JitHeapBloatThreshold = 500UL * 1024 * 1024;      // 500 MB
+    private const int JitModuleHotspotMinFrameHits = 50;
     private const int SuspendedMethodFireForgetThreshold = 100;
     private const ulong LohArrayPressureThreshold = 256UL * 1024 * 1024;  // 256 MB
     private const ulong GCRootLargeRetentionThreshold = 50UL * 1024 * 1024; // 50 MB
@@ -206,6 +207,7 @@ internal sealed class InsightEngine
             DetectDynamicAssemblyAccumulation(findings, context.AppDomains);
             DetectJitHeapBloat(findings, context.Jit, context.Threads);
             DetectBoxingGCCorrelation(findings, context.Boxing, context.GcGen);
+            DetectJitModuleHotspot(findings, context.Jit, context.AppDomains);
         }
     }
 
@@ -1066,6 +1068,90 @@ internal sealed class InsightEngine
             MetricUnit: "objects"));
     }
 
+    /// <summary>
+    /// Correlates JitAnalyzer's per-module active-frame heatmap with ModuleAnalyzer's own
+    /// per-module size/version-conflict data. Neither analyzer can produce this alone: JitAnalyzer
+    /// has no module size/conflict data, and ModuleAnalyzer never walks thread stacks.
+    /// </summary>
+    private static void DetectJitModuleHotspot(
+        List<InsightFinding> findings,
+        JitDomainResult? jit,
+        ModuleDomainResult? modules)
+    {
+        if (jit is null || modules is null || jit.TopActiveModulesByFrameHits.Count == 0)
+            return;
+
+        NameCountEntry topModule = jit.TopActiveModulesByFrameHits[0];
+        if (topModule.Count < JitModuleHotspotMinFrameHits)
+            return;
+
+        LoadedModuleSnapshot? topModuleSizeMatch = FindModuleByName(modules.TopModulesBySize, topModule.Name);
+        bool topModuleInConflict = ContainsModuleName(modules.ConflictingAssemblyNames, topModule.Name);
+
+        if (topModuleSizeMatch is null && !topModuleInConflict)
+            return; // no cross-analyzer signal beyond what JitSectionBuilder's own heatmap already shows
+
+        int rowCount = Math.Min(jit.TopActiveModulesByFrameHits.Count, 5);
+        var rows = new List<IReadOnlyList<object?>>(rowCount);
+        for (int i = 0; i < rowCount; i++)
+        {
+            NameCountEntry entry = jit.TopActiveModulesByFrameHits[i];
+            LoadedModuleSnapshot? sizeMatch = FindModuleByName(modules.TopModulesBySize, entry.Name);
+            bool inConflict = ContainsModuleName(modules.ConflictingAssemblyNames, entry.Name);
+
+            rows.Add(new object?[]
+            {
+                entry.Name,
+                entry.Count,
+                sizeMatch is not null ? FormatBytes(sizeMatch.Size) : "n/a",
+                inConflict ? "Yes" : "No",
+            });
+        }
+
+        var evidenceTable = new FindingEvidenceTable(
+            "Per-module JIT stack heatmap (top active modules)",
+            ["Module", "Active JIT Frames", "Module Size", "Version Conflict"],
+            rows);
+
+        string sizeNote = topModuleSizeMatch is not null ? $" and is {FormatBytes(topModuleSizeMatch.Size)} on disk" : string.Empty;
+        string conflictNote = topModuleInConflict ? " and is involved in an assembly version conflict" : string.Empty;
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Performance",
+            Severity: FindingSeverity.Info,
+            Title: "Module with heavy active JIT stack presence also flagged by module analysis",
+            Evidence: $"Module '{topModule.Name}' accounts for {topModule.Count:N0} active JIT stack " +
+                      $"frames{sizeNote}{conflictNote}.",
+            Recommendation: "Correlate this module's size/version-conflict status with the JIT stack " +
+                            "heatmap to prioritize ReadyToRun/NativeAOT precompilation or dependency " +
+                            "deduplication for this assembly.",
+            Tags: ["jit", "modules", "cross-analyzer"],
+            MetricValue: topModule.Count,
+            MetricUnit: "frames",
+            EvidenceTables: [evidenceTable]));
+    }
+
+    private static LoadedModuleSnapshot? FindModuleByName(IReadOnlyList<LoadedModuleSnapshot> modules, string name)
+    {
+        for (int i = 0; i < modules.Count; i++)
+        {
+            if (string.Equals(modules[i].Name, name, StringComparison.OrdinalIgnoreCase))
+                return modules[i];
+        }
+        return null;
+    }
+
+    private static bool ContainsModuleName(IReadOnlyList<string> names, string name)
+    {
+        for (int i = 0; i < names.Count; i++)
+        {
+            if (string.Equals(names[i], name, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
     // ── Utilities ─────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -1549,6 +1635,16 @@ internal sealed class InsightEngine
             ? $", predominantly waiting on {dominantWaitReason}"
             : string.Empty;
 
+        var reasonRows = new List<IReadOnlyList<object?>>(waitReasonCounts.Count);
+        foreach (KeyValuePair<string, int> kv in waitReasonCounts)
+            reasonRows.Add(new object?[] { kv.Key, kv.Value });
+        reasonRows.Sort((a, b) => ((int)b[1]!).CompareTo((int)a[1]!));
+
+        var evidenceTable = new FindingEvidenceTable(
+            "Wait reasons among overlapping threads",
+            ["Wait Reason", "Thread Count"],
+            reasonRows);
+
         findings.Add(new InsightFinding(
             Analyzer: Source,
             Category: "Threads",
@@ -1562,9 +1658,10 @@ internal sealed class InsightEngine
                             "suggests a single contended resource or blocking call. Inspect the cluster's " +
                             "innermost frame together with the corresponding Hang analyzer wait details to " +
                             "identify the shared bottleneck.",
-            Tags: ["thread-cluster", "hang", "blocking", "contention"],
+            Tags: ["thread-cluster", "hang", "blocking", "contention", "cross-analyzer"],
             MetricValue: overlapRatio,
-            MetricUnit: "ratio"));
+            MetricUnit: "ratio",
+            EvidenceTables: [evidenceTable]));
     }
 
     // ── Utilities (last block) ────────────────────────────────────────────────

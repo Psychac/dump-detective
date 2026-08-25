@@ -13,7 +13,8 @@ namespace DumpDetective.Analysis.Analyzers;
 /// All data comes from:
 ///   - <c>ClrRuntime.EnumerateJitManagers()</c> — code heap byte totals
 ///   - <c>ClrRuntime.Threads</c> stack walks — active methods, frame distribution
-///   - <c>ClrMethod.HotColdInfo</c>, <c>ClrMethod.NativeCode</c>, <c>ClrMethod.MetadataToken</c>
+///   - <c>ClrMethod.HotColdInfo</c>, <c>ClrMethod.NativeCode</c>, <c>ClrMethod.MethodDesc</c>,
+///     <c>ClrMethod.CompilationType</c>, <c>ClrModule.IsDynamic</c>
 ///
 /// No heap enumeration is performed — this is a purely runtime-metadata analyzer.
 /// </summary>
@@ -48,9 +49,16 @@ public sealed class JitAnalyzer : IAnalyzer
         int managedFrameCount = 0;
         int unmanagedFrameCount = 0;
         int activeMethodsOnStacks = 0;
+        int readyToRunFrameCount = 0;
+        int dynamicMethodFrameCount = 0;
+        int maxThreadFrameDepth = 0;
+        uint maxThreadFrameDepthOSThreadId = 0;
 
-        // Tiered detection: token → set of NativeCode addresses seen on stacks
-        var tokenToNativeCodes = new Dictionary<int, HashSet<ulong>>(capacity: 1024);
+        // Tiered detection: MethodDesc → set of NativeCode addresses seen on stacks.
+        // MethodDesc (not MetadataToken) is the key: distinct generic instantiations of the
+        // same method share a MetadataToken but get distinct MethodDescs, so keying on
+        // MethodDesc avoids conflating "generic instantiated differently" with "genuinely retiered".
+        var methodDescToNativeCodes = new Dictionary<ulong, HashSet<ulong>>(capacity: 1024);
         int tieredMethodCount = 0;
 
         // Largest-method candidates keyed by NativeCode (dedup same JIT compilation)
@@ -59,6 +67,11 @@ public sealed class JitAnalyzer : IAnalyzer
         // Top active frame types (type name → stack-hit count)
         var frameTypeCounts = new Dictionary<string, int>(
             capacity: 256, StringComparer.Ordinal);
+
+        // Top active modules (module name → stack-hit count) — keyed the same way as
+        // ClrModule.Name / LoadedModuleSnapshot.Name so this can be joined against ModuleDomainResult.
+        var moduleFrameCounts = new Dictionary<string, int>(
+            capacity: 64, StringComparer.Ordinal);
 
         IReadOnlyList<ClrThread> threads = runtime.Threads;
         for (int i = 0; i < threads.Count; i++)
@@ -85,6 +98,18 @@ public sealed class JitAnalyzer : IAnalyzer
 
                     activeMethodsOnStacks++;
 
+                    // ReadyToRun (precompiled) vs JIT-compiled frame classification. ClrMD reports
+                    // R2R methods as MethodCompilationType.Ngen — the DAC has no dedicated R2R value,
+                    // it reuses the legacy NGen classification for any precompiled-at-load-time method.
+                    if (method.CompilationType == MethodCompilationType.Ngen)
+                        readyToRunFrameCount++;
+
+                    // Dynamic codegen detection: DynamicMethod / Reflection.Emit / expression-compiled
+                    // delegates are all hosted in a dynamic module (ClrModule.IsDynamic), which is a
+                    // direct runtime signal — no need for fragile "<DynamicClass>" name pattern matching.
+                    if (method.Type?.Module?.IsDynamic == true)
+                        dynamicMethodFrameCount++;
+
                     // Track active type hotspots
                     string typeName = method.Type?.Name ?? "Unknown";
                     if (frameTypeCounts.TryGetValue(typeName, out int prev))
@@ -92,16 +117,23 @@ public sealed class JitAnalyzer : IAnalyzer
                     else
                         frameTypeCounts[typeName] = 1;
 
-                    // Tiered compilation detection: track all native codes per token
-                    int token = method.MetadataToken;
+                    // Track active module hotspots (per-module JIT stack heatmap)
+                    string moduleName = method.Type?.Module?.Name ?? "Unknown";
+                    if (moduleFrameCounts.TryGetValue(moduleName, out int prevModuleCount))
+                        moduleFrameCounts[moduleName] = prevModuleCount + 1;
+                    else
+                        moduleFrameCounts[moduleName] = 1;
+
+                    // Tiered compilation detection: track all native codes per MethodDesc
+                    ulong methodDesc = method.MethodDesc;
                     ulong nativeCode = method.NativeCode;
 
-                    if (token != 0 && nativeCode != 0)
+                    if (methodDesc != 0 && nativeCode != 0)
                     {
-                        if (!tokenToNativeCodes.TryGetValue(token, out var codes))
+                        if (!methodDescToNativeCodes.TryGetValue(methodDesc, out var codes))
                         {
                             codes = new HashSet<ulong>();
-                            tokenToNativeCodes[token] = codes;
+                            methodDescToNativeCodes[methodDesc] = codes;
                         }
                         codes.Add(nativeCode);
                     }
@@ -120,7 +152,8 @@ public sealed class JitAnalyzer : IAnalyzer
                                 typeName,
                                 nativeCode,
                                 hotSize,
-                                coldSize);
+                                coldSize,
+                                method.CompilationType);
                         }
                     }
                 }
@@ -129,11 +162,17 @@ public sealed class JitAnalyzer : IAnalyzer
                     unmanagedFrameCount++;
                 }
             }
+
+            if (frameIdx > maxThreadFrameDepth)
+            {
+                maxThreadFrameDepth = frameIdx;
+                maxThreadFrameDepthOSThreadId = thread.OSThreadId;
+            }
         }
 
-        // Identify tiered tokens (tokens with multiple distinct native codes)
+        // Identify tiered methods (MethodDescs with multiple distinct native codes)
         var tieredNativeCodes = new HashSet<ulong>();
-        foreach (var kvp in tokenToNativeCodes)
+        foreach (var kvp in methodDescToNativeCodes)
         {
             if (kvp.Value.Count > 1)
             {
@@ -143,19 +182,31 @@ public sealed class JitAnalyzer : IAnalyzer
             }
         }
 
+        // Distinct methods observed on stacks, keyed by MethodDesc (see tiering comment above for
+        // why MethodDesc rather than MetadataToken). Reuses methodDescToNativeCodes rather than a
+        // second set: its key set already is exactly "distinct methods with a resolved NativeCode".
+        int distinctMethodsOnStacks = methodDescToNativeCodes.Count;
+
         // ── Build result lists ───────────────────────────────────────────────
         var topMethods = BuildTopMethods(methodCandidates, tieredNativeCodes);
         var topFrameTypes = BuildTopFrameTypes(frameTypeCounts);
+        var topActiveModules = BuildTopFrameTypes(moduleFrameCounts);
 
         return new JitDomainResult(
             TotalJitHeapBytes: totalJitHeapBytes,
             JitManagerCount: jitManagerCount,
             ActiveMethodsOnStacks: activeMethodsOnStacks,
+            DistinctMethodsOnStacks: distinctMethodsOnStacks,
             TopLargestMethods: topMethods,
             TopActiveFrameTypes: topFrameTypes,
+            TopActiveModulesByFrameHits: topActiveModules,
             UnmanagedFrameCount: unmanagedFrameCount,
             ManagedFrameCount: managedFrameCount,
+            ReadyToRunFrameCount: readyToRunFrameCount,
+            DynamicMethodFrameCount: dynamicMethodFrameCount,
             TieredMethodCount: tieredMethodCount,
+            MaxThreadFrameDepth: maxThreadFrameDepth,
+            MaxThreadFrameDepthOSThreadId: maxThreadFrameDepthOSThreadId,
             LargeMethodThresholdBytes: options.LargeMethodThresholdBytes);
     }
 
@@ -180,8 +231,9 @@ public sealed class JitAnalyzer : IAnalyzer
         foreach (JitMethodEntry e in entries)
         {
             bool isTiered = tieredNativeCodes.Contains(e.NativeCodeAddress);
+            bool isReadyToRun = e.CompilationType == MethodCompilationType.Ngen;
             result.Add(new JitMethodSnapshot(e.Signature, e.DeclaringType,
-                e.NativeCodeAddress, e.HotSize, e.ColdSize, isTiered));
+                e.NativeCodeAddress, e.HotSize, e.ColdSize, isTiered, isReadyToRun));
         }
         return result;
     }
@@ -207,13 +259,15 @@ public sealed class JitAnalyzer : IAnalyzer
         string declaringType,
         ulong nativeCodeAddress,
         uint hotSize,
-        uint coldSize)
+        uint coldSize,
+        MethodCompilationType compilationType)
     {
         public readonly string Signature = signature;
         public readonly string DeclaringType = declaringType;
         public readonly ulong NativeCodeAddress = nativeCodeAddress;
         public readonly uint HotSize = hotSize;
         public readonly uint ColdSize = coldSize;
+        public readonly MethodCompilationType CompilationType = compilationType;
     }
 
     public void Dispose() { }

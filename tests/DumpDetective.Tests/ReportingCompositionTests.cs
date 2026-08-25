@@ -6,6 +6,8 @@ using DumpDetective.Reporting.Services;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Reporting.SectionBuilders;
 
+using System.Linq;
+
 using FluentAssertions;
 
 using Xunit;
@@ -276,6 +278,38 @@ public sealed class ReportingCompositionTests
 
         output.Should().Contain("Cross-domain correlation");
         output.Should().NotContain("Regular finding");
+    }
+
+    [Fact]
+    public void CrossDomainInsightsSection_ShouldRenderEvidenceTable_WhenFindingCarriesOne()
+    {
+        FindingEvidenceTable evidenceTable = new(
+            "Per-module JIT stack heatmap (top active modules)",
+            ["Module", "Active JIT Frames", "Module Size", "Version Conflict"],
+            [["MyApp.Plugins.dll", 200, "4.8 MB", "Yes"]]);
+
+        InsightFinding insightFinding = new(
+            Analyzer: "InsightEngine",
+            Category: "Performance",
+            Severity: FindingSeverity.Info,
+            Title: "Module with heavy active JIT stack presence also flagged by module analysis",
+            Evidence: "Module 'MyApp.Plugins.dll' accounts for 200 active JIT stack frames.",
+            Recommendation: "Correlate module size/version-conflict status with the JIT stack heatmap.",
+            Tags: ["jit", "modules", "cross-analyzer"],
+            Fingerprint: "jit-module-hotspot",
+            EvidenceTables: [evidenceTable]);
+
+        AnalyzerResultSet resultSet = new([], additionalFindings: [insightFinding]);
+        InsightsSectionBuilder builder = new();
+
+        AnalyzerDetailSection section = builder.Build(resultSet);
+
+        section.CompactTables.Should().NotBeNull();
+        section.CompactTables!.Should().ContainSingle(t => t.Title.Contains(evidenceTable.Title));
+        CompactTable table = section.CompactTables!.Single(t => t.Title.Contains(evidenceTable.Title));
+        table.Headers.Select(h => h.Name).Should().BeEquivalentTo(evidenceTable.Headers);
+        table.Rows.Should().ContainSingle();
+        table.Rows[0].Values.Should().BeEquivalentTo(evidenceTable.Rows[0]);
     }
 
     [Fact]

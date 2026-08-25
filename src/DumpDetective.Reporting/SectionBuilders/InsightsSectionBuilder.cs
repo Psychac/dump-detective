@@ -81,6 +81,9 @@ internal sealed class InsightsSectionBuilder : SectionBuilderBase, IReportSectio
                         blocks.Add(Li(finding.Tags[tagIndex]));
                 }
 
+                for (int tableIndex = 0; tableIndex < finding.EffectiveEvidenceTables.Count; tableIndex++)
+                    compactTables.Add(ToCompactTable(i + 1, finding.EffectiveEvidenceTables[tableIndex]));
+
                 blocks.Add(CollapseEnd());
 
                 if (i + 1 < findings.Count)
@@ -114,6 +117,19 @@ internal sealed class InsightsSectionBuilder : SectionBuilderBase, IReportSectio
         }
 
         return crossDomain;
+    }
+
+    private static CompactTable ToCompactTable(int findingNumber, FindingEvidenceTable table)
+    {
+        var headers = new CompactHeader[table.Headers.Count];
+        for (int i = 0; i < table.Headers.Count; i++)
+            headers[i] = CH(table.Headers[i]);
+
+        var rows = new CompactRow[table.Rows.Count];
+        for (int i = 0; i < table.Rows.Count; i++)
+            rows[i] = R(table.Rows[i].ToArray());
+
+        return STCompact($"[{findingNumber}] {table.Title}", headers, rows);
     }
 
     private static string FormatText(string label, string? value)

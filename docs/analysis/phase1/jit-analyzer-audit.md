@@ -243,12 +243,12 @@ dotMemory profiling mode shows JIT time per method. Static dump analysis cannot 
 | **P1** | ✅ Fix finding generator to emit all signals, not just the single highest-priority one | Medium — engineers lose concurrent signal context | Low | High | Improvement |
 | **P1** | ✅ Fix hardcoded "64 KB threshold" string in `JitFindingGenerator` to reflect actual `LargeMethodThresholdBytes` option value | Low | Low | High | Improvement |
 | **P1** | ✅ Add cancellation check inside the per-frame inner loop (every N frames) | Low — correctness under cancellation | Low | High | Improvement |
-| **P2** | Replace tiered count heuristic with `(module handle, token, generic context)` tuple identity; mark the count as an estimate | Medium — improves confidence | Medium | High | Improvement |
-| **P2** | Use `ClrMethod.CompilationType` to distinguish R2R vs JIT frames; remove the R2R disclaimer from the section builder and add an R2R frame fraction metric | Medium — removes misleading disclaimer, adds value | Medium | Medium | Improvement |
-| **P2** | Add per-thread max frame depth to `JitDomainResult` and report; exposes recursive/re-entrant crash patterns | Medium | Low | High | Improvement |
-| **P2** | Add `DynamicMethodFrameCount` — detect `<DynamicClass>` frames and surface a dedicated count and finding | Medium — dynamic codegen is a common code-heap growth cause | Low | Medium | Improvement |
-| **P3** | Cross-reference `TopActiveFrameTypes` with `ModuleDomainResult` to produce a per-module JIT stack heatmap | Medium | Medium | Medium | Evolution |
-| **P3** | Add method uniqueness ratio (`ActiveMethodsOnStacks / distinct signatures`) as a key metric | Low | Low | High | Improvement |
+| **P2** | ✅ Replace tiered count heuristic with `(module handle, token, generic context)` tuple identity; mark the count as an estimate | Medium — improves confidence | Medium | High | Improvement |
+| **P2** | ✅ Use `ClrMethod.CompilationType` to distinguish R2R vs JIT frames; remove the R2R disclaimer from the section builder and add an R2R frame fraction metric | Medium — removes misleading disclaimer, adds value | Medium | Medium | Improvement |
+| **P2** | ✅ Add per-thread max frame depth to `JitDomainResult` and report; exposes recursive/re-entrant crash patterns | Medium | Low | High | Improvement |
+| **P2** | ✅ Add `DynamicMethodFrameCount` — detect dynamic-module frames and surface a dedicated count and finding | Medium — dynamic codegen is a common code-heap growth cause | Low | Medium | Improvement |
+| **P3** | ✅ Cross-reference `TopActiveFrameTypes` with `ModuleDomainResult` to produce a per-module JIT stack heatmap | Medium | Medium | Medium | Evolution |
+| **P3** | ✅ Add method uniqueness ratio (`ActiveMethodsOnStacks / distinct signatures`) as a key metric | Low | Low | High | Improvement |
 
 ### Final Verdict
 

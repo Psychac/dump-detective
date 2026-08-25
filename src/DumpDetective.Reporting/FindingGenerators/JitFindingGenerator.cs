@@ -10,6 +10,7 @@ internal sealed class JitFindingGenerator : IFindingGenerator
 {
     private const ulong JitHeapBloatThreshold = 500 * 1024 * 1024; // 500 MB
     private const double HighUnmanagedFrameRatio = 0.30;            // 30 %
+    private const int DeepStackFrameThreshold = 500;                // frames
     private readonly record struct JitSignal(
         FindingSeverity Severity,
         int Priority,
@@ -76,9 +77,9 @@ internal sealed class JitFindingGenerator : IFindingGenerator
                 Severity: FindingSeverity.Info,
                 Priority: 80,
                 Title: "Tiered compilation activity detected",
-                Evidence: $"{r.TieredMethodCount:N0} method(s) observed with multiple native code " +
-                          $"addresses for the same metadata token, indicating tiered recompilation " +
-                          $"(Tier0 → Tier1). This is expected behaviour.",
+                Evidence: $"~{r.TieredMethodCount:N0} method(s) (estimate, stack-visible methods only) " +
+                          $"observed with multiple native code addresses for the same method, " +
+                          $"indicating tiered recompilation (Tier0 → Tier1). This is expected behaviour.",
                 Recommendation: "If startup-time JIT overhead is a concern, " +
                                 "consider ReadyToRun images (dotnet publish -r ... --self-contained).",
                 Tags: ["jit", "tiered-compilation"],
@@ -106,6 +107,39 @@ internal sealed class JitFindingGenerator : IFindingGenerator
                 MetricUnit: "bytes"));
         }
 
+        // Dynamic codegen detected on stacks — DynamicMethod/Reflection.Emit/expression trees.
+        if (r.DynamicMethodFrameCount > 0)
+        {
+            signals.Add(new JitSignal(
+                Severity: FindingSeverity.Info,
+                Priority: 100,
+                Title: "Dynamic codegen frames detected on thread stacks",
+                Evidence: $"{r.DynamicMethodFrameCount:N0} active frame(s) resolve to a dynamic module " +
+                          $"(DynamicMethod, AssemblyBuilder-emitted types, or compiled LINQ expression trees).",
+                Recommendation: "If the same dynamic method/expression is being generated and compiled " +
+                                "repeatedly rather than cached, this is a common source of unbounded JIT " +
+                                "code-heap growth.",
+                Tags: ["jit", "dynamic-codegen", "reflection-emit"],
+                MetricValue: r.DynamicMethodFrameCount,
+                MetricUnit: "frames"));
+        }
+
+        // Unusually deep thread stack — recursion or re-entrant call-chain signal.
+        if (r.MaxThreadFrameDepth > DeepStackFrameThreshold)
+        {
+            signals.Add(new JitSignal(
+                Severity: FindingSeverity.Warning,
+                Priority: 160,
+                Title: "Unusually deep thread stack detected",
+                Evidence: $"OS thread {r.MaxThreadFrameDepthOSThreadId} has {r.MaxThreadFrameDepth:N0} frames " +
+                          $"on its stack, exceeding the {DeepStackFrameThreshold:N0}-frame informational threshold.",
+                Recommendation: "Inspect this thread's stack for unbounded recursion or a re-entrant call chain " +
+                                 "(e.g. recursive event handlers, self-referencing visitor patterns).",
+                Tags: ["jit", "stack-depth", "recursion"],
+                MetricValue: r.MaxThreadFrameDepth,
+                MetricUnit: "frames"));
+        }
+
         FindingSeverity summarySeverity = FindingSeverity.Info;
         for (int i = 0; i < signals.Count; i++)
         {
@@ -125,7 +159,7 @@ internal sealed class JitFindingGenerator : IFindingGenerator
                       $"{r.JitManagerCount} JIT manager(s). " +
                       $"Active method frames on stacks: {r.ActiveMethodsOnStacks:N0} managed, " +
                       $"{r.UnmanagedFrameCount:N0} runtime/internal. " +
-                      $"Tiered recompilations observed: {r.TieredMethodCount:N0}.",
+                      $"Tiered recompilations observed (estimate): {r.TieredMethodCount:N0}.",
             Recommendation: signals.Count > 0
                 ? "Review the detailed JIT signals below and validate codegen/interop hotspots."
                 : "JIT footprint is within expected range.",

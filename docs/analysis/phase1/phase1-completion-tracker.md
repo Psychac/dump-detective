@@ -14,7 +14,7 @@
 | **Total P1 Identified** | 155 |
 | **P0 Implemented** | 70 |
 | **P1 Implemented** | 122 |
-| **P2 Implemented** | 22 |
+| **P2 Implemented** | 26 |
 | **Overall P0+P1 Rate** | 82.8% (192/232) |
 
 > Note: `P2 Implemented` dropped from 34 to 27 on 2026-08-15 when AsyncTaskAnalyzer's re-audit
@@ -29,6 +29,11 @@
 > Identified −2, P0 Implemented −2, P1 Identified −3 (5 removed, 2 added), P1 Implemented −5,
 > P2 Implemented −5. Renumbering artifact, not regression or lost work — the analyzer scored
 > higher on re-audit (62→82/100) than before.
+>
+> Note: JitAnalyzer's roadmap was fully closed out on 2026-08-26 (P2 0/4 → 4/4, P3 0/2 → 2/2) —
+> see updated row 8 above. `P2 Implemented` in the executive summary rose from 22 to 26 to reflect
+> the 4 newly-completed P2 items (P2 Identified was already counted at the pre-existing total, no
+> change there). JitAnalyzer is now the 6th analyzer with the entire P0–P3 roadmap complete.
 >
 > Note: FinalizableObjectAnalyzer's roadmap was fully closed out on 2026-08-25 (P2 2/8 → 3/3,
 > P3 0/3 → 3/3, plus 2 Evolution items also resolved) — see updated row 7 above. The original "2/8"
@@ -64,10 +69,10 @@ P0-4 was a regression hiding behind two individually-DONE roadmap items).
 | 2 | **ArrayAnalyzer** | 2/2 | 5/5 | 5/5 | 4/4 | ✅ P0+P1+P2+P3 COMPLETE — value-type sparse detection, pinned array detection via GC handle root index, `ArrayPool<byte>` unreturned-rental heuristic, and `sparseCandidates`/`lohFallbackCandidates` capacity tuning all shipped (`array-analyzer-audit.md`) |
 | 3 | **BoxingAnalyzer** | 2/2 | 4/4 | 5/5 | 4/4 | ✅ P0+P1+P2+P3 COMPLETE — IEquatable<T> flag/finding, progress reporting, Gen2 retained-boxing wiring, and unit tests for pure helpers (`boxing-analyzer-audit.md`) |
 | 4 | **ModuleAnalyzer** | 2/2 | 5/5 | 4/5 | 2/4 | ✅ P0+P1 complete; P2 80% (4/5); P3 50% (2/4) — cross-domain duplicate load detection (`CrossDomainModuleLoad`) and `AssemblyRef` required-vs-loaded version audit (`AssemblyRefProbe`, raw ECMA-335 metadata parsing) both shipped 2026-08-25; P3 remaining: native image (NGen/R2R) ratio, module load ordering |
-| 5 | **ThreadStackClusterAnalyzer** | 2/2 | 5/5 | 5/5 | 4/4 | ✅ P0+P1+P2+P3 COMPLETE — P3-3 (cross-reference dominant cluster with `HangAnalyzer` blocked threads in `InsightEngine`) shipped 2026-08-25 |
+| 5 | **ThreadStackClusterAnalyzer** | 2/2 | 5/5 | 5/5 | 4/4 | ✅ P0+P1+P2+P3 COMPLETE — P3-3 (cross-reference dominant cluster with `HangAnalyzer` blocked threads in `InsightEngine`) shipped 2026-08-25; 2026-08-26 follow-up: that correlation's `DetectClusterHangCorrelation` was computing a full wait-reason breakdown but only ever surfacing the single dominant reason in prose — now attaches the full breakdown as a real `CompactTable` via the new `InsightFinding.EvidenceTables` capability |
 | 6 | **SegmentReservationAnalyzer** | 1/1 | 4/4 | 7/7 | 4/4 | ✅ P0+P1+P2+P3 COMPLETE — P3-1 (`segment.End` address), P3-2 (`IsServer` flag + logical heap count), P3-3 (investigated `ClrSegment.IsEphemeral`; no such property in ClrMD 4.0.732401, existing enum-switch detection confirmed correct), and P3-4 (regions-based GC per-region statistics: `IsRegionsBased` detection, per-generation region bucket stats, near-empty region decommit-candidate finding) all shipped 2026-08-25; P3-4's regions-mode path is unverified against a real regions-based dump (`segment-reservation-analyzer-audit.md`) |
 | 7 | **FinalizableObjectAnalyzer** | 4/4 | 2/2 | 3/3 | 3/3 | ✅ P0+P1+P2+P3 COMPLETE (2026-08-25) — CriticalFinalizerObject/SafeHandle detection, `DetectKnownFinalizerQueuePatterns` relocated from InsightEngine into `FinalizableObjectFindingGenerator` (with a semantic fix: now matched against the real finalizer queue, not the Gen2 population sweep it incorrectly read before), per-entry generation field, and root-path cross-reference via `RootPathFinder` (top 10 entries by retained size) all shipped. Reservoir-sampling, partial top-K type sort, and BFS-buffer pooling items were found superseded by the prior dominator-tree/exact-data integration (`b2e8cf1`) and closed without new code; the InsightEngine trend-delta item was found redundant with the existing generic §T4 metric timeline. No pending items remain (`finalizable-object-analyzer-audit.md`) |
-| 8 | **JitAnalyzer** | 2/2 | 3/3 | 0/5 | 0/4 | ✅ P0+P1 |
+| 8 | **JitAnalyzer** | 2/2 | 3/3 | 4/4 | 2/2 | ✅ P0+P1+P2+P3 COMPLETE (2026-08-26) — P2: MethodDesc-keyed tiering (fixes generic-instantiation false positives), `ClrMethod.CompilationType` R2R/JIT frame classification, per-thread max frame depth (recursion signal), `DynamicMethodFrameCount` via `ClrModule.IsDynamic`. P3: method uniqueness ratio, and a per-module JIT stack heatmap cross-referenced against `ModuleDomainResult` via a new `InsightEngine.DetectJitModuleHotspot` correlation — which also introduced a reusable `FindingEvidenceTable`/`InsightFinding.EvidenceTables` capability so any cross-analyzer correlation can attach real `CompactTable` evidence in the Cross-Domain Insights (X1) section instead of prose-only findings (`jit-analyzer-audit.md`) |
 | 9 | **LohFragmentationAnalyzer** | 2/2 | 5/5 | 2/7 | 0/2 | ✅ P0+P1; P2-1,P2-2 done; P2-3,P2-4,P2-5 pending |
 | 10 | **MemoryAnalyzer** | 2/2 | 5/5 | 0/5 | 0/3 | ✅ P0+P1 complete |
 | 11 | **GCHandleAnalyzer** | 3/3 | 7/7 | 0/10 | 0/2 | ✅ P0+P1 complete |
@@ -147,8 +152,8 @@ Different audits use different conventions for marking completion:
 **Major Wins:**
 - 13 analyzers (37%) have P0+P1 100% complete
 - HeapTopologyAnalyzer: 10 P0+P1+P2 items complete (generation breakdown, fragmentation, cancellation, variable naming, efficiency, trending, density)
-- 5 analyzers (ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer, ThreadStackClusterAnalyzer, FinalizableObjectAnalyzer) have ALL P0+P1+P2 complete
-- ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer, ThreadStackClusterAnalyzer, and FinalizableObjectAnalyzer are the only analyzers with ALL P0+P1+P2+P3 complete (ArrayAnalyzer 4/4 P3; BoxingAnalyzer 4/4 P3, including unit test coverage for pure helper logic; SegmentReservationAnalyzer 4/4 P3, including the P3-4 regions-based GC per-region statistics evolution item; ThreadStackClusterAnalyzer 4/4 P3, including the P3-3 cross-analyzer correlation with `HangAnalyzer`; FinalizableObjectAnalyzer 3/3 P3 plus its 2 Evolution items, including root-path cross-reference via `RootPathFinder`)
+- 6 analyzers (ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer, ThreadStackClusterAnalyzer, FinalizableObjectAnalyzer, JitAnalyzer) have ALL P0+P1+P2 complete
+- ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer, ThreadStackClusterAnalyzer, FinalizableObjectAnalyzer, and JitAnalyzer are the only analyzers with ALL P0+P1+P2+P3 complete (ArrayAnalyzer 4/4 P3; BoxingAnalyzer 4/4 P3, including unit test coverage for pure helper logic; SegmentReservationAnalyzer 4/4 P3, including the P3-4 regions-based GC per-region statistics evolution item; ThreadStackClusterAnalyzer 4/4 P3, including the P3-3 cross-analyzer correlation with `HangAnalyzer`; FinalizableObjectAnalyzer 3/3 P3 plus its 2 Evolution items, including root-path cross-reference via `RootPathFinder`; JitAnalyzer 2/2 P3, including a per-module JIT stack heatmap cross-referenced with `ModuleDomainResult` via a new reusable `InsightFinding.EvidenceTables` capability)
 - GCHandleAnalyzer completed all P0 and P1 items in a single session (architecture + diagnostics)
 
 **Remaining Work:**

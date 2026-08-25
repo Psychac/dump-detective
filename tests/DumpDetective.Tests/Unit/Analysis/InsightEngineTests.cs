@@ -3,6 +3,8 @@ using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 
+using System.Linq;
+
 using FluentAssertions;
 
 using Xunit;
@@ -206,6 +208,115 @@ public sealed class InsightEngineTests
         findings.Should().NotContain(f =>
             f.Title.Contains("HangAnalyzer", StringComparison.OrdinalIgnoreCase)
             && f.Title.Contains("cluster", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Analyze_ShouldEmitCrossAnalyzerFinding_WithEvidenceTable_WhenJitHotspotModuleIsConflicted()
+    {
+        InsightEngine engine = new();
+
+        JitDomainResult jit = new(
+            TotalJitHeapBytes: 1_000_000,
+            JitManagerCount: 1,
+            ActiveMethodsOnStacks: 500,
+            DistinctMethodsOnStacks: 20,
+            TopLargestMethods: [],
+            TopActiveFrameTypes: [],
+            TopActiveModulesByFrameHits: [new NameCountEntry("MyApp.Plugins.dll", 200)],
+            UnmanagedFrameCount: 0,
+            ManagedFrameCount: 500,
+            ReadyToRunFrameCount: 0,
+            DynamicMethodFrameCount: 0,
+            TieredMethodCount: 0,
+            MaxThreadFrameDepth: 0,
+            MaxThreadFrameDepthOSThreadId: 0,
+            LargeMethodThresholdBytes: 64 * 1024);
+
+        ModuleDomainResult modules = new(
+            TotalModules: 10,
+            DynamicModules: 0,
+            UniqueModuleNames: 10,
+            VersionConflictGroups: 1,
+            ConflictingAssemblyNames: ["MyApp.Plugins.dll"],
+            TopModulesBySize: [new LoadedModuleSnapshot("MyApp.Plugins.dll", "MyApp.Plugins", "C:\\app\\MyApp.Plugins.dll", 0x1000, 5_000_000, false, true)],
+            ConflictDetails: [],
+            HeavyModuleWarningThresholdBytes: 1_000_000,
+            UnknownIdentityDuplicateModules: new HashSet<string>());
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("JIT Analysis", AnalyzerExecutionStatus.Success, jit),
+            BuildRun("Module Analysis", AnalyzerExecutionStatus.Success, modules),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("heavy active JIT stack presence", StringComparison.OrdinalIgnoreCase)
+            && f.Tags.Contains("cross-analyzer")
+            && f.EffectiveEvidenceTables.Count == 1
+            && f.EffectiveEvidenceTables[0].Rows.Count == 1);
+    }
+
+    [Fact]
+    public void Analyze_ShouldEmitEvidenceTable_WhenClusterOverlapsWithHangWaitReasons()
+    {
+        InsightEngine engine = new();
+
+        ThreadStackClusterDomainResult clusters = new(
+            AliveThreadCount: 10,
+            UniqueClusters: 1,
+            SingletonSignatures: 0,
+            DiversityPercent: 10.0,
+            TopClusterSignatures: ["Frame.A -> Frame.B"],
+            TopClusters: [new ThreadClusterSnapshot(
+                Count: 8,
+                SampleOsThreadIds: [1, 2, 3, 4],
+                Signature: "Frame.A -> Frame.B")]);
+
+        HangDomainResult hang = new(
+            TotalAliveThreads: 10,
+            WaitingThreadCount: 4,
+            ThreadsHoldingLocks: 0,
+            WaitingPercent: 40.0,
+            WaitCategoryBreakdown: new Dictionary<string, int>(),
+            TotalTaskContinuations: 0,
+            QueuedWorkItems: 0,
+            TotalTasks: 0,
+            PendingTasks: 0,
+            FaultedTasks: 0,
+            CanceledTasks: 0,
+            RuntimeThreadPoolDataAvailable: false,
+            RuntimeMinThreads: 0,
+            RuntimeMaxThreads: 0,
+            RuntimeActiveWorkerThreads: 0,
+            RuntimeIdleWorkerThreads: 0,
+            RuntimeRetiredWorkerThreads: 0,
+            RuntimeQueueLength: null,
+            RuntimeCpuUtilization: 0,
+            IsStarved: false,
+            HealthScore: 50,
+            TopWaitingThreads:
+            [
+                new WaitingThreadSnapshot(1, 1, "Monitor", "MonitorWait", 0, "Frame.A"),
+                new WaitingThreadSnapshot(2, 2, "Monitor", "MonitorWait", 0, "Frame.A"),
+                new WaitingThreadSnapshot(3, 3, "Monitor", "MonitorWait", 0, "Frame.A"),
+                new WaitingThreadSnapshot(4, 4, "SqlWait", "UserRequestWait", 0, "Frame.A"),
+            ]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Thread Stack Signature Clustering", AnalyzerExecutionStatus.Success, clusters),
+            BuildRun("Hang Analyzer", AnalyzerExecutionStatus.Success, hang),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("Dominant thread-stack cluster correlates", StringComparison.OrdinalIgnoreCase)
+            && f.EffectiveEvidenceTables.Count == 1
+            && f.EffectiveEvidenceTables[0].Rows.Count == 2
+            && f.EffectiveEvidenceTables[0].Rows[0].SequenceEqual(new object?[] { "MonitorWait", 3 }));
     }
 
     private static AnalyzerRunResult BuildRun(string analyzerName, AnalyzerExecutionStatus status, AnalyzerDomainResult? result = null)

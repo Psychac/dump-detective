@@ -26,7 +26,7 @@ public sealed class JitFindingGeneratorTests
         var gen = new JitFindingGenerator();
         var topMethods = new List<JitMethodSnapshot>
         {
-            new("Foo.Bar()", "Foo", 0x1000, 70_000, 10_000, false)
+            new("Foo.Bar()", "Foo", 0x1000, 70_000, 10_000, false, false)
         };
         var result = BuildResult(totalJitHeapBytes: 800 * 1024 * 1024, unmanagedFrames: 400, managedFrames: 200, tieredMethods: 250, topMethods: topMethods);
 
@@ -52,11 +52,17 @@ public sealed class JitFindingGeneratorTests
             TotalJitHeapBytes: totalJitHeapBytes,
             JitManagerCount: 3,
             ActiveMethodsOnStacks: managedFrames,
+            DistinctMethodsOnStacks: managedFrames,
             TopLargestMethods: topMethods,
             TopActiveFrameTypes: [],
+            TopActiveModulesByFrameHits: [],
             UnmanagedFrameCount: unmanagedFrames,
             ManagedFrameCount: managedFrames,
+            ReadyToRunFrameCount: 0,
+            DynamicMethodFrameCount: 0,
             TieredMethodCount: tieredMethods,
+            MaxThreadFrameDepth: 0,
+            MaxThreadFrameDepthOSThreadId: 0,
             LargeMethodThresholdBytes: 64 * 1024);
     }
 }

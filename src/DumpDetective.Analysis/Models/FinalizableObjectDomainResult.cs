@@ -12,7 +12,11 @@ internal sealed record FinalizerQueueEntry(
     bool IsDisposableType,
     bool DisposedFieldFound,
     bool DisposedFieldValue,
-    bool RetainedBytesIsExact = false);
+    bool RetainedBytesIsExact = false,
+    bool IsCriticalFinalizer = false,
+    int Generation = -1,
+    string? SampleRootPath = null,
+    bool RootPathSearchTruncated = false);
 
 internal sealed record QueueTypeStatistic(
     string TypeName,
@@ -29,8 +33,11 @@ internal sealed record FinalizableObjectDomainResult(
     ulong FinalizerQueueRetainedBytes,
     bool IsRetainedEstimatePartial,
     bool HasUndisposedDisposableInQueue,
+    int CriticalFinalizerQueueCount,
+    ulong CriticalFinalizerQueueBytes,
     IReadOnlyList<TypeGenerationProfile> TopFinalizableTypesByGen2Count,
     IReadOnlyList<QueueTypeStatistic> TopQueueTypesByCount,
+    IReadOnlyList<QueueTypeStatistic> TopCriticalFinalizerTypesByCount,
     IReadOnlyList<FinalizerQueueEntry> TopQueueEntriesByRetainedSize) : AnalyzerDomainResult
 {
     public double QueuePressureRatio => TotalFinalizableObjects > 0

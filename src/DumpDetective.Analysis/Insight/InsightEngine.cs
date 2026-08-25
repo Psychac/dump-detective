@@ -217,7 +217,6 @@ internal sealed class InsightEngine
             DetectEventLeakPattern(findings, context.EventLeaks, context.GcGen, context.Finalizable);
             DetectDataTableLifecyclePattern(findings, context.Finalizable, context.Memory);
             DetectKnownLeakPatterns(findings, context.Memory);
-            DetectKnownFinalizerQueuePatterns(findings, context.Finalizable);
             DetectRecurringTimeoutPattern(findings, context.Crash);
 
             DetectDbConnectionLeak(findings, context.DbConn, context.Crash);
@@ -1301,110 +1300,6 @@ internal sealed class InsightEngine
                                 "to replace runtime reflection in hot paths.",
                 Tags: ["reflection", "memory-leak", "performance", "known-pattern"],
                 MetricValue: reflectionCount,
-                MetricUnit: "objects"));
-        }
-    }
-
-    /// <summary>
-    /// Identifies well-known problematic types in the finalizer queue that indicate
-    /// specific resource management anti-patterns (abandoned threads, undisposed timers,
-    /// uncached dynamic code generation, old-style lock abandonment).
-    /// </summary>
-    private static void DetectKnownFinalizerQueuePatterns(
-        List<InsightFinding> findings,
-        FinalizableObjectDomainResult? finalizable)
-    {
-        if (finalizable is null || finalizable.TopFinalizableTypesByGen2Count.Count == 0)
-            return;
-
-        long dynamicResolverCount = 0;
-        long threadCount = 0;
-        long timerHolderCount = 0;
-        long readerWriterLockCount = 0;
-
-        for (int i = 0; i < finalizable.TopFinalizableTypesByGen2Count.Count; i++)
-        {
-            TypeGenerationProfile p = finalizable.TopFinalizableTypesByGen2Count[i];
-            long gen2 = p.Gen2Count;
-            if (gen2 == 0) continue;
-
-            if (p.TypeName.Contains("DynamicResolver", StringComparison.OrdinalIgnoreCase))
-                dynamicResolverCount += gen2;
-            else if (p.TypeName is "System.Threading.Thread")
-                threadCount += gen2;
-            else if (p.TypeName.Contains("TimerHolder", StringComparison.OrdinalIgnoreCase) ||
-                     p.TypeName.Contains("TimerQueueTimer", StringComparison.OrdinalIgnoreCase))
-                timerHolderCount += gen2;
-            else if (p.TypeName is "System.Threading.ReaderWriterLock")
-                readerWriterLockCount += gen2;
-        }
-
-        // DynamicResolver in finalizer queue — Expression.Compile / DynamicMethod without caching
-        if (dynamicResolverCount >= 50)
-        {
-            findings.Add(new InsightFinding(
-                Analyzer: Source,
-                Category: "Memory",
-                Severity: dynamicResolverCount >= 500 ? FindingSeverity.Warning : FindingSeverity.Info,
-                Title: "DynamicResolver accumulation — uncached dynamic code generation",
-                Evidence: $"{dynamicResolverCount:N0} DynamicResolver object(s) in Gen2 finalizer queue. " +
-                          "DynamicResolver is the CLR internal finalizable backing for DynamicMethod and compiled expressions.",
-                Recommendation: "Cache results of Expression.Compile<T>() and Delegate.CreateDelegate() in static fields. " +
-                                "Consider using a compile-once / reuse pattern for serializers, mappers, and validators.",
-                Tags: ["dynamic-method", "expression-compile", "finalizer", "memory-leak"],
-                MetricValue: dynamicResolverCount,
-                MetricUnit: "objects"));
-        }
-
-        // Thread objects in finalizer queue — threads abandoned without Join()
-        if (threadCount >= 20)
-        {
-            findings.Add(new InsightFinding(
-                Analyzer: Source,
-                Category: "Threads",
-                Severity: threadCount >= 100 ? FindingSeverity.Warning : FindingSeverity.Info,
-                Title: "Abandoned Thread objects in finalizer queue",
-                Evidence: $"{threadCount:N0} System.Threading.Thread object(s) in Gen2 finalizer queue. " +
-                          "Thread objects should be joined or tracked; abandonment leaves them in the finalizer queue until collection.",
-                Recommendation: "Always call thread.Join() or use a managed thread pool (Task, ThreadPool) instead of " +
-                                "raw Thread objects. Use CancellationToken to signal graceful thread exit.",
-                Tags: ["threads", "finalizer", "thread-abandonment"],
-                MetricValue: threadCount,
-                MetricUnit: "objects"));
-        }
-
-        // TimerHolder in finalizer queue — System.Threading.Timer not disposed
-        if (timerHolderCount >= 20)
-        {
-            findings.Add(new InsightFinding(
-                Analyzer: Source,
-                Category: "Memory",
-                Severity: timerHolderCount >= 100 ? FindingSeverity.Warning : FindingSeverity.Info,
-                Title: "Undisposed System.Threading.Timer instances detected",
-                Evidence: $"{timerHolderCount:N0} TimerHolder/TimerQueueTimer object(s) in Gen2 finalizer queue. " +
-                          "System.Threading.Timer has a finalizer; undisposed instances accumulate in the queue " +
-                          "and may fire callbacks after their intended lifetime.",
-                Recommendation: "Dispose System.Threading.Timer instances (timer.Dispose() or using) when they are " +
-                                "no longer needed. In .NET 6+, prefer PeriodicTimer which is designed for await loops.",
-                Tags: ["timer", "finalizer", "dispose", "memory-leak"],
-                MetricValue: timerHolderCount,
-                MetricUnit: "objects"));
-        }
-
-        // ReaderWriterLock in finalizer queue — old non-slim lock abandoned
-        if (readerWriterLockCount >= 10)
-        {
-            findings.Add(new InsightFinding(
-                Analyzer: Source,
-                Category: "Threads",
-                Severity: FindingSeverity.Warning,
-                Title: "Abandoned System.Threading.ReaderWriterLock instances detected",
-                Evidence: $"{readerWriterLockCount:N0} System.Threading.ReaderWriterLock object(s) in Gen2 finalizer queue. " +
-                          "The old (non-Slim) ReaderWriterLock has a finalizer and carries OS kernel resources.",
-                Recommendation: "Replace System.Threading.ReaderWriterLock with System.Threading.ReaderWriterLockSlim " +
-                                "which is lighter and has no finalizer. Ensure locks are not abandoned in error paths.",
-                Tags: ["reader-writer-lock", "finalizer", "threading", "legacy"],
-                MetricValue: readerWriterLockCount,
                 MetricUnit: "objects"));
         }
     }

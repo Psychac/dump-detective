@@ -1,5 +1,6 @@
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Traversal;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 
@@ -155,6 +156,10 @@ namespace DumpDetective.Analysis.Analyzers
             int queueCount = 0;
             var queueSamples = new List<(ClrObject Obj, string TypeName)>(128);
             var queueTypeCountMap = new Dictionary<string, int>();
+            var criticalFinalizerTypeCountMap = new Dictionary<string, int>();
+            var criticalFinalizerCache = new Dictionary<ulong, bool>();
+            int criticalFinalizerQueueCount = 0;
+            ulong criticalFinalizerQueueBytes = 0;
 
             foreach (ClrObject obj in heap.EnumerateFinalizableObjects())
             {
@@ -167,7 +172,18 @@ namespace DumpDetective.Analysis.Analyzers
                 queueTypeCountMap[typeName]++;
 
                 if (obj.IsValid && obj.Type is not null)
+                {
                     queueSamples.Add((obj, typeName));
+
+                    if (IsCriticalFinalizerType(obj.Type, criticalFinalizerCache, obj.Type.MethodTable))
+                    {
+                        criticalFinalizerQueueCount++;
+                        criticalFinalizerQueueBytes += obj.Size;
+                        if (!criticalFinalizerTypeCountMap.ContainsKey(typeName))
+                            criticalFinalizerTypeCountMap[typeName] = 0;
+                        criticalFinalizerTypeCountMap[typeName]++;
+                    }
+                }
             }
 
             // Build queue types by count, full list — no LINQ, manual sort
@@ -175,6 +191,14 @@ namespace DumpDetective.Analysis.Analyzers
             foreach (KeyValuePair<string, int> kv in queueTypeCountMap)
                 topQueueTypes.Add(new QueueTypeStatistic(kv.Key, kv.Value));
             topQueueTypes.Sort(static (a, b) => b.QueueCount.CompareTo(a.QueueCount));
+
+            // CriticalFinalizerObject / SafeHandle types accumulating in the queue — each entry
+            // implies an unreleased OS resource handle (socket, file descriptor, registry key, etc.)
+            // since guaranteed-finalization types are not expected to back up under normal load.
+            var topCriticalFinalizerTypes = new List<QueueTypeStatistic>(criticalFinalizerTypeCountMap.Count);
+            foreach (KeyValuePair<string, int> kv in criticalFinalizerTypeCountMap)
+                topCriticalFinalizerTypes.Add(new QueueTypeStatistic(kv.Key, kv.Value));
+            topCriticalFinalizerTypes.Sort(static (a, b) => b.QueueCount.CompareTo(a.QueueCount));
 
             // Sort by shallow size descending
             queueSamples.Sort(static (a, b) => b.Obj.Size.CompareTo(a.Obj.Size));
@@ -211,6 +235,8 @@ namespace DumpDetective.Analysis.Analyzers
                 if (isDisposable && disposedFound && !disposedValue)
                     hasUndisposedDisposable = true;
 
+                bool isCriticalFinalizer = IsCriticalFinalizerType(obj.Type, criticalFinalizerCache, mt);
+
                 ulong retained = 0;
                 bool retainedIsExact = treeProvider is not null && treeProvider.TryGetRetainedBytes(obj.Address, out retained);
                 if (!retainedIsExact)
@@ -220,6 +246,8 @@ namespace DumpDetective.Analysis.Analyzers
                 }
                 totalQueueRetained += retained;
 
+                int generation = SegmentKindMapper.ResolveGeneration(heap, obj.Address);
+
                 topEntries.Add(new FinalizerQueueEntry(
                     Address: obj.Address,
                     TypeName: typeName,
@@ -228,11 +256,15 @@ namespace DumpDetective.Analysis.Analyzers
                     IsDisposableType: isDisposable,
                     DisposedFieldFound: disposedFound,
                     DisposedFieldValue: disposedValue,
-                    RetainedBytesIsExact: retainedIsExact));
+                    RetainedBytesIsExact: retainedIsExact,
+                    IsCriticalFinalizer: isCriticalFinalizer,
+                    Generation: generation));
             }
 
             // Sort by estimated retained size descending
             topEntries.Sort(static (a, b) => b.EstimatedRetainedBytes.CompareTo(a.EstimatedRetainedBytes));
+
+            PopulateRootPaths(heap, cache, topEntries, cancellationToken);
 
             return new FinalizableObjectDomainResult(
                 TotalFinalizableObjects: (int)Math.Min(totalObjects, int.MaxValue),
@@ -245,12 +277,64 @@ namespace DumpDetective.Analysis.Analyzers
                 FinalizerQueueRetainedBytes: totalQueueRetained,
                 IsRetainedEstimatePartial: isRetainedEstimatePartial,
                 HasUndisposedDisposableInQueue: hasUndisposedDisposable,
+                CriticalFinalizerQueueCount: criticalFinalizerQueueCount,
+                CriticalFinalizerQueueBytes: criticalFinalizerQueueBytes,
                 TopFinalizableTypesByGen2Count: topTypesByGen2,
                 TopQueueTypesByCount: topQueueTypes,
+                TopCriticalFinalizerTypesByCount: topCriticalFinalizerTypes,
                 TopQueueEntriesByRetainedSize: topEntries);
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────
+
+        // Root path search is a bounded bidirectional BFS (up to a few thousand candidate
+        // nodes) per target — genuinely expensive, unlike the exhaustive-but-cheap counting
+        // above. Only the highest-impact entries (already sorted by retained size) get a
+        // "why is this alive" path; every entry still keeps its exact count/bytes/generation.
+        private const int RootPathSampleLimit = 10;
+
+        private static void PopulateRootPaths(
+            ClrHeap heap,
+            IHeapAnalysisCache cache,
+            List<FinalizerQueueEntry> topEntries,
+            CancellationToken cancellationToken)
+        {
+            if (topEntries.Count == 0)
+                return;
+
+            IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
+            if (roots.Count == 0)
+                return;
+
+            var provider = new ReferenceGraph(heap);
+            var limits = new RootPathSearchLimits
+            {
+                MaxCandidateNodes = 5_000,
+                MaxCandidateDepth = 8,
+                MaxRootExpansionDepth = 12,
+                LargeFanoutThreshold = 100,
+            };
+            var finder = new RootPathFinder(
+                heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType,
+                static _ => false, cache.TryGetReverseIndexProvider(), cache);
+
+            int sampleCount = Math.Min(topEntries.Count, RootPathSampleLimit);
+            for (int i = 0; i < sampleCount; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                FinalizerQueueEntry entry = topEntries[i];
+
+                bool found = finder.TryFindAnyRootPath(
+                    entry.Address, roots, out string? rootKind, out List<ulong>? addresses,
+                    out bool searchTruncated, out _, out _, cancellationToken);
+
+                topEntries[i] = entry with
+                {
+                    SampleRootPath = found ? RootPathSearchSupport.FormatPath(heap, rootKind!, addresses, cache) : null,
+                    RootPathSearchTruncated = searchTruncated,
+                };
+            }
+        }
 
         private static bool IsDisposableType(ClrType type, Dictionary<ulong, bool> cache, ulong methodTable)
         {
@@ -269,6 +353,29 @@ namespace DumpDetective.Analysis.Analyzers
 
             cache[methodTable] = isDisposable;
             return isDisposable;
+        }
+
+        // Walks the BaseType chain looking for CriticalFinalizerObject. Guaranteed-finalization
+        // types (SafeHandle, CriticalHandle, and their subclasses) wrap OS resource handles —
+        // sockets, file descriptors, registry keys — so a backlog of these in the finalizer
+        // queue is a stronger leak signal than an ordinary finalizable object backlog.
+        private static bool IsCriticalFinalizerType(ClrType? type, Dictionary<ulong, bool> cache, ulong methodTable)
+        {
+            if (cache.TryGetValue(methodTable, out bool result))
+                return result;
+
+            bool isCriticalFinalizer = false;
+            for (ClrType? cur = type; cur is not null; cur = cur.BaseType)
+            {
+                if (cur.Name is "System.Runtime.ConstrainedExecution.CriticalFinalizerObject")
+                {
+                    isCriticalFinalizer = true;
+                    break;
+                }
+            }
+
+            cache[methodTable] = isCriticalFinalizer;
+            return isCriticalFinalizer;
         }
 
         private static ClrInstanceField? FindDisposedField(ClrType type, Dictionary<ulong, ClrInstanceField?> cache, ulong methodTable)

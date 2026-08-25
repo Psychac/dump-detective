@@ -29,6 +29,13 @@
 > Identified −2, P0 Implemented −2, P1 Identified −3 (5 removed, 2 added), P1 Implemented −5,
 > P2 Implemented −5. Renumbering artifact, not regression or lost work — the analyzer scored
 > higher on re-audit (62→82/100) than before.
+>
+> Note: FinalizableObjectAnalyzer's roadmap was fully closed out on 2026-08-25 (P2 2/8 → 3/3,
+> P3 0/3 → 3/3, plus 2 Evolution items also resolved) — see updated row 7 above. The original "2/8"
+> and "0/3" denominators reflected an earlier, ambiguous item count for this analyzer (see Audit
+> Format Notes below); the executive-summary totals in this table were not recomputed against that
+> change since the pool composition isn't cleanly separable from the global P0/P1/P2 counts. Treat
+> this analyzer's row as authoritative over the global totals until a full recount is done.
 
 ---
 
@@ -59,7 +66,7 @@ P0-4 was a regression hiding behind two individually-DONE roadmap items).
 | 4 | **ModuleAnalyzer** | 2/2 | 5/5 | 4/5 | 2/4 | ✅ P0+P1 complete; P2 80% (4/5); P3 50% (2/4) — cross-domain duplicate load detection (`CrossDomainModuleLoad`) and `AssemblyRef` required-vs-loaded version audit (`AssemblyRefProbe`, raw ECMA-335 metadata parsing) both shipped 2026-08-25; P3 remaining: native image (NGen/R2R) ratio, module load ordering |
 | 5 | **ThreadStackClusterAnalyzer** | 2/2 | 5/5 | 5/5 | 4/4 | ✅ P0+P1+P2+P3 COMPLETE — P3-3 (cross-reference dominant cluster with `HangAnalyzer` blocked threads in `InsightEngine`) shipped 2026-08-25 |
 | 6 | **SegmentReservationAnalyzer** | 1/1 | 4/4 | 7/7 | 4/4 | ✅ P0+P1+P2+P3 COMPLETE — P3-1 (`segment.End` address), P3-2 (`IsServer` flag + logical heap count), P3-3 (investigated `ClrSegment.IsEphemeral`; no such property in ClrMD 4.0.732401, existing enum-switch detection confirmed correct), and P3-4 (regions-based GC per-region statistics: `IsRegionsBased` detection, per-generation region bucket stats, near-empty region decommit-candidate finding) all shipped 2026-08-25; P3-4's regions-mode path is unverified against a real regions-based dump (`segment-reservation-analyzer-audit.md`) |
-| 7 | **FinalizableObjectAnalyzer** | 4/4 | 2/2 | 2/8 | 0/3 | ✅ P0+P1 complete; P2 25% (2/8) |
+| 7 | **FinalizableObjectAnalyzer** | 4/4 | 2/2 | 3/3 | 3/3 | ✅ P0+P1+P2+P3 COMPLETE (2026-08-25) — CriticalFinalizerObject/SafeHandle detection, `DetectKnownFinalizerQueuePatterns` relocated from InsightEngine into `FinalizableObjectFindingGenerator` (with a semantic fix: now matched against the real finalizer queue, not the Gen2 population sweep it incorrectly read before), per-entry generation field, and root-path cross-reference via `RootPathFinder` (top 10 entries by retained size) all shipped. Reservoir-sampling, partial top-K type sort, and BFS-buffer pooling items were found superseded by the prior dominator-tree/exact-data integration (`b2e8cf1`) and closed without new code; the InsightEngine trend-delta item was found redundant with the existing generic §T4 metric timeline. No pending items remain (`finalizable-object-analyzer-audit.md`) |
 | 8 | **JitAnalyzer** | 2/2 | 3/3 | 0/5 | 0/4 | ✅ P0+P1 |
 | 9 | **LohFragmentationAnalyzer** | 2/2 | 5/5 | 2/7 | 0/2 | ✅ P0+P1; P2-1,P2-2 done; P2-3,P2-4,P2-5 pending |
 | 10 | **MemoryAnalyzer** | 2/2 | 5/5 | 0/5 | 0/3 | ✅ P0+P1 complete |
@@ -140,8 +147,8 @@ Different audits use different conventions for marking completion:
 **Major Wins:**
 - 13 analyzers (37%) have P0+P1 100% complete
 - HeapTopologyAnalyzer: 10 P0+P1+P2 items complete (generation breakdown, fragmentation, cancellation, variable naming, efficiency, trending, density)
-- 4 analyzers (ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer, ThreadStackClusterAnalyzer) have ALL P0+P1+P2 complete
-- ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer, and ThreadStackClusterAnalyzer are the only analyzers with ALL P0+P1+P2+P3 complete (ArrayAnalyzer 4/4 P3; BoxingAnalyzer 4/4 P3, including unit test coverage for pure helper logic; SegmentReservationAnalyzer 4/4 P3, including the P3-4 regions-based GC per-region statistics evolution item; ThreadStackClusterAnalyzer 4/4 P3, including the P3-3 cross-analyzer correlation with `HangAnalyzer`)
+- 5 analyzers (ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer, ThreadStackClusterAnalyzer, FinalizableObjectAnalyzer) have ALL P0+P1+P2 complete
+- ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer, ThreadStackClusterAnalyzer, and FinalizableObjectAnalyzer are the only analyzers with ALL P0+P1+P2+P3 complete (ArrayAnalyzer 4/4 P3; BoxingAnalyzer 4/4 P3, including unit test coverage for pure helper logic; SegmentReservationAnalyzer 4/4 P3, including the P3-4 regions-based GC per-region statistics evolution item; ThreadStackClusterAnalyzer 4/4 P3, including the P3-3 cross-analyzer correlation with `HangAnalyzer`; FinalizableObjectAnalyzer 3/3 P3 plus its 2 Evolution items, including root-path cross-reference via `RootPathFinder`)
 - GCHandleAnalyzer completed all P0 and P1 items in a single session (architecture + diagnostics)
 
 **Remaining Work:**
@@ -151,7 +158,7 @@ Different audits use different conventions for marking completion:
 
 **Data Quality Notes:**
 - Counts verified by manual inspection of each audit file
-- FinalizableObjectAnalyzer has 4 completed items not P0/P1-labeled (ambiguous classification)
+- FinalizableObjectAnalyzer's original roadmap had 4 completed items not P0/P1-labeled (ambiguous classification); as of 2026-08-25 its entire roadmap (P0-P3 plus Evolution items) is closed, so this ambiguity no longer affects outstanding work, only historical bookkeeping
 - CrashAnalyzer has no roadmap section found
 - All P0 and P1 implementation tracked via commit references in roadmap status columns
 
@@ -175,7 +182,7 @@ Different audits use different conventions for marking completion:
 
 A disk-backed reverse edge (parent-lookup) index now exists (`ReverseEdgeIndexReader.TryGetParents`), consumed today via `RootPathFinder`. It answers "who references this object" without a full in-memory reverse graph. Analyzers below already use it (directly or through `RootPathFinder`); the rest have **pending** audit recommendations that this index would unblock or simplify.
 
-**Already wired (via `RootPathFinder`):** CollectionAnalyzer, DominatorAnalyzer, EventLeakAnalyzer, ReferenceChainAnalyzer, StaticRootLeakDetector, TimerLeakAnalyzer.
+**Already wired (via `RootPathFinder`):** CollectionAnalyzer, DominatorAnalyzer, EventLeakAnalyzer, FinalizableObjectAnalyzer (2026-08-25), ReferenceChainAnalyzer, StaticRootLeakDetector, TimerLeakAnalyzer.
 
 | # | Analyzer | Pending item | Audit priority | Reference |
 |---|----------|---------------|-----------------|-----------|
@@ -187,8 +194,7 @@ A disk-backed reverse edge (parent-lookup) index now exists (`ReverseEdgeIndexRe
 | 6 | **StringAnalyzer** | P3-2: retention-path sampling for top duplicate strings via `RootPathFinder`; holder-type histogram from reverse index | Pending | `string-analyzer-audit.md` |
 | 7 | **DbConnectionAnalyzer** | R12: `!gcroot`-style retention path for top-N open connections via `RootPathFinder` | P3, pending | `DbConnectionAnalyzer-audit.md` |
 | 8 | **GCHandleAnalyzer** | Retention path from handle to root — currently unsupported | P2 (0/10 done) | `gchandle-analyzer-audit.md` |
-| 9 | **FinalizableObjectAnalyzer** | No root-path attribution for finalizer-queue objects (`RootIndexReader` exists but unused) | P2 pending | `finalizable-object-analyzer-audit.md` |
-| 10 | **ObjectShapeAnalyzer** | Static-field GC-root weight ignored; no retention-path attribution | P1/P2 pending | `object-shape-analyzer-audit.md` |
+| 9 | **ObjectShapeAnalyzer** | Static-field GC-root weight ignored; no retention-path attribution | P1/P2 pending | `object-shape-analyzer-audit.md` |
 
 **Explicitly ruled out:** ThreadAnalyzer P0-3 and LockGraphAnalyzer's wait-for graph — these need lock waiter→holder *thread* identity, which the object-reference reverse index does not provide (see blocker table above).
 

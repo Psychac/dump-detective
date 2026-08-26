@@ -14,6 +14,10 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
     public string DisplayTitle => "LOH & POH Fragmentation";
     public int SortOrder => 400;
 
+    // Above this share of free gaps under 1 KB, the free space is effectively unusable for any
+    // real LOH/POH allocation regardless of overall fragmentation % — worth a dedicated note.
+    private const double SmallGapDominanceThresholdPercent = 80;
+
     public bool CanHandle(AnalyzerDomainResult result) => result is LohFragmentationDomainResult;
 
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
@@ -109,6 +113,14 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
                     Cell($"{pct:F1}%")]));
             }
             compactTables.Add(STCompact("Free-gap size distribution", new[] { CH("Gap Size Range"), CH("Count","number"), CH("% of Gaps", "number", "percent") }, hRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+
+            int subKbGaps = 0;
+            for (int i = 0; i < histogram.Count; i++)
+                if (histogram[i].GapSizeRange == "< 1 KB")
+                    subKbGaps = histogram[i].GapCount;
+            double subKbPct = totalGaps == 0 ? 0 : subKbGaps * 100.0 / totalGaps;
+            if (subKbPct > SmallGapDominanceThresholdPercent)
+                blocks.Add(T($"{subKbPct:F0}% of free gaps are under 1 KB — the free space is fragmented into slivers too small to satisfy any meaningful LOH/POH allocation without compaction."));
         }
 
         var largeObjectTypes = d.TopLargeObjectTypes ?? [];

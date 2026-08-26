@@ -368,10 +368,10 @@ inconsistency (Area 2-W1) and wrong per-segment size column (Area 2-W2) are user
 | **P2** | Document or remove the unused Offset field in `LohFreeBlockIndex.bin`; reclaim 8 bytes/record or expose offset for gap-adjacency analysis | Low | Low | Medium | Improvement | ✅ DONE |
 | **P2** | Expose POH as either a separate analyzer section or an explicit excluded/included flag with reporting | High | Medium | Medium | Evolution | ✅ DONE |
 | **P2** | Add unit tests for `BuildFreeGapHistogram`, `IsLohSegment`, and the index aggregation path using synthetic data | Medium | Medium | High | Improvement | ✅ DONE |
-| **P3** | Replace `LohSegmentStats` inner class with a readonly record struct | Low | Low | High | Improvement | — |
-| **P3** | Interpret histogram output in the section builder — add a text note when gap distribution is severely small (e.g., > 80% gaps < 1 KB) | Medium | Low | Medium | Improvement | — |
-| **P3** | Add a Phase 1 type-aggregated LOH writer to enable type-grouped reporting without a fallback heap scan | High | High | Medium | Evolution | — |
-| **P3** | Evaluate exposing MT field in `LargeObjectIndex.bin` for type resolution without `heap.GetObject` overhead | Low | Low | Medium | Improvement | — |
+| **P3** | Replace `LohSegmentStats` inner class with a readonly record struct | Low | Low | High | Improvement | ✅ DONE |
+| **P3** | Interpret histogram output in the section builder — add a text note when gap distribution is severely small (e.g., > 80% gaps < 1 KB) | Medium | Low | Medium | Improvement | ✅ DONE |
+| **P3** | Add a Phase 1 type-aggregated LOH writer to enable type-grouped reporting without a fallback heap scan | High | High | Medium | Evolution | ✅ DONE (via existing `TypeAggregateIndexEntry.LohCount`/`LohSize`, not a new writer) |
+| **P3** | Evaluate exposing MT field in `LargeObjectIndex.bin` for type resolution without `heap.GetObject` overhead | Low | Low | Medium | Improvement | ✅ DONE (already resolved — `ReadTopLargeObjects` no longer exists; `LargeObjectTracker.ReadRecords` already passes `mt` to every consumer, and `LohFragmentationAnalyzer` already resolves types via `heap.GetTypeByMethodTable(mt)` with no `heap.GetObject` call) |
 
 ---
 

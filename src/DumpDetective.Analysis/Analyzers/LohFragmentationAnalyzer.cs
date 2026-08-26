@@ -364,11 +364,10 @@ namespace DumpDetective.Analysis.Analyzers
             // Step 4: Build free-gap histogram.
             var freeGapHistogram = BuildFreeGapHistogram(allFreeSizes, cancellationToken);
 
-            // Step 5: Read LargeObjectIndex.bin and resolve every record's type name — the file
-            // already only contains LOH-threshold-sized objects, so this is bounded by the same
-            // small population AccumulateSegmentObject relies on in the heap-scan path.
+            // Step 5: Read LargeObjectIndex.bin for the top-N individual-object list. This file is
+            // deliberately capped (top-100 by size, see LargeObjectTracker) — fine for a "biggest
+            // single objects" table, but not for a type-level rollup (see Step 6).
             List<LargeObjectSnapshot> topLargeObjects = [];
-            var typeAggregation = new Dictionary<string, (int Count, ulong TotalBytes)>();
             progress?.Report(new(0, "reading LargeObjectIndex.bin", null, TimeSpan.Zero));
             LargeObjectTracker.ReadRecords(heapIndex.IndexPath, (address, mt, size) => {
                 // OPT (docs/cache/cache-architecture.md Phase 5): mt is already a
@@ -380,21 +379,27 @@ namespace DumpDetective.Analysis.Analyzers
                 string typeName = type.Name ?? "Unknown";
                 if (string.Equals(typeName, "Free", StringComparison.Ordinal)) return;
                 topLargeObjects.Add(new LargeObjectSnapshot(address, typeName, size));
-
-                // Aggregate by type for type-grouped LOH consumption view.
-                if (typeAggregation.TryGetValue(typeName, out var existing))
-                    typeAggregation[typeName] = (existing.Count + 1, existing.TotalBytes + size);
-                else
-                    typeAggregation[typeName] = (1, size);
             }, cancellationToken);
 
             // Rank by size descending — the index file itself carries no size ordering.
             topLargeObjects.Sort(static (a, b) => b.Size.CompareTo(a.Size));
 
-            // Build type-aggregated LOH consumption view: top types by total bytes.
-            var typeProfiles = new List<LohTypeProfile>(typeAggregation.Count);
-            foreach ((string typeName, (int count, ulong totalBytes)) in typeAggregation)
-                typeProfiles.Add(new LohTypeProfile(typeName, count, totalBytes));
+            // Step 6: Build the type-aggregated LOH/POH consumption view from the Phase 1
+            // TypeAggregates (LohCount/LohSize) instead of LargeObjectIndex.bin's top-100 sample.
+            // TypeAggregates already covers every LOH/POH-sized object seen during the single
+            // heap-scan pass, so this is unbounded and free of the top-100 cap's size bias — a
+            // type with thousands of moderately-sized large objects no longer gets crowded out by
+            // 100 individually huge objects of other types.
+            var typeProfiles = new List<LohTypeProfile>();
+            foreach (TypeAggregateIndexEntry agg in heapIndex.TypeAggregates.Values)
+            {
+                if (agg.LohCount == 0)
+                    continue;
+                string typeName = TypeAggregateNameResolver.ResolveTypeName(heap, agg.MethodTable, agg.SampleAddress);
+                if (string.Equals(typeName, "Free", StringComparison.Ordinal))
+                    continue;
+                typeProfiles.Add(new LohTypeProfile(typeName, (int)agg.LohCount, agg.LohSize));
+            }
             typeProfiles.Sort(static (a, b) => b.TotalBytes.CompareTo(a.TotalBytes));
 
             return new LohFragmentationDomainResult(
@@ -489,43 +494,17 @@ namespace DumpDetective.Analysis.Analyzers
 
         // ── Heap-scan fallback ────────────────────────────────────────────────────
 
-        private sealed class LohSegmentStats
-        {
-            public ulong Address { get; }
-            public ulong TotalBytes { get; }
-            public ulong UsedBytes { get; }
-            public ulong FreeBytes { get; }
-            public ulong LargestFreeBlock { get; }
-            public ulong LargestFreeBlockAddress { get; }
-            public int ObjectCount { get; }
-            public int FreeObjectCount { get; }
-            public double FragmentationPercent { get; }
-            public HeapSegmentKind Kind { get; }
-
-            public LohSegmentStats(
-                ulong address,
-                ulong totalBytes,
-                ulong usedBytes,
-                ulong freeBytes,
-                ulong largestFreeBlock,
-                ulong largestFreeBlockAddress,
-                int objectCount,
-                int freeObjectCount,
-                double fragmentationPercent,
-                HeapSegmentKind kind)
-            {
-                Address = address;
-                TotalBytes = totalBytes;
-                UsedBytes = usedBytes;
-                FreeBytes = freeBytes;
-                LargestFreeBlock = largestFreeBlock;
-                LargestFreeBlockAddress = largestFreeBlockAddress;
-                ObjectCount = objectCount;
-                FreeObjectCount = freeObjectCount;
-                FragmentationPercent = fragmentationPercent;
-                Kind = kind;
-            }
-        }
+        private readonly record struct LohSegmentStats(
+            ulong Address,
+            ulong TotalBytes,
+            ulong UsedBytes,
+            ulong FreeBytes,
+            ulong LargestFreeBlock,
+            ulong LargestFreeBlockAddress,
+            int ObjectCount,
+            int FreeObjectCount,
+            double FragmentationPercent,
+            HeapSegmentKind Kind);
 
         public void Dispose() { }
     }

@@ -30,5 +30,9 @@ public sealed class MemoryAnalysisProjectionTests
         result.MemoryPressureScore.Should().BeGreaterThan(0);
         result.Top5Bytes.Should().Be(111_000);
         result.SmallObjectCount.Should().Be(100);
+        result.LohPressureScore.Should().BeGreaterThan(0);
+        result.ConcentrationPressureScore.Should().Be(100);
+        result.SmallObjectPressureScore.Should().BeGreaterThan(0);
+        result.DensityPressureScore.Should().BeGreaterThan(0);
     }
 }

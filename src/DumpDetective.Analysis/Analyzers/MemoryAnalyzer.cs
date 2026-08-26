@@ -1,5 +1,4 @@
-﻿using DumpDetective.Analysis.Cache;
-using DumpDetective.Analysis.Indexing;
+﻿using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Traversal;
 using DumpDetective.Analysis.Utilities;
@@ -29,25 +28,28 @@ namespace DumpDetective.Analysis.Analyzers
         {
             cancellationToken.ThrowIfCancellationRequested();
             MemoryAnalysisOptions options = context.AnalysisOptions.MemoryAnalysis;
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, context.Progress).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, context.Progress, cancellationToken).Stamp(this));
         }
 
         public AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache)
         {
-            return Analyze(heap, cache, new MemoryAnalysisOptions(), progress: null);
+            return Analyze(heap, cache, new MemoryAnalysisOptions(), progress: null, cancellationToken: default);
         }
 
-        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache, MemoryAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress)
+        private AnalyzerDomainResult Analyze(
+            ClrHeap heap,
+            IHeapAnalysisCache cache,
+            MemoryAnalysisOptions options,
+            IProgress<AnalyzerProgressReport>? progress,
+            CancellationToken cancellationToken)
         {
             progress?.Report(new(0, "building memory snapshot"));
             var typeStats = cache.GetOrBuildTypeStatistics(heap);
 
             // Read Phase 1 GlobalSizeBuckets if available (zero extra heap scan)
-            long[]? globalBuckets = null;
-            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
-                globalBuckets = heapIndex.GlobalSizeBuckets;
+            long[]? globalBuckets = cache.TryGetGlobalSizeBuckets();
 
-            return BuildDomainResult(heap, cache, typeStats, globalBuckets, options);
+            return BuildDomainResult(heap, cache, typeStats, globalBuckets, options, progress, cancellationToken);
         }
 
         private static MemoryDomainResult BuildDomainResult(
@@ -55,7 +57,9 @@ namespace DumpDetective.Analysis.Analyzers
             IHeapAnalysisCache cache,
             Dictionary<string, CachedTypeStatistics> typeStats,
             long[]? globalSizeBuckets,
-            MemoryAnalysisOptions options)
+            MemoryAnalysisOptions options,
+            IProgress<AnalyzerProgressReport>? progress,
+            CancellationToken cancellationToken)
         {
             MemoryAnalysisProjectionResult projection = MemoryAnalysisProjection.Build(typeStats, globalSizeBuckets);
             var segmentSummaries = BuildSegmentSummaries(heap);
@@ -101,7 +105,12 @@ namespace DumpDetective.Analysis.Analyzers
                 try
                 {
                     retainedResults = RetainedSizeCandidateSelector.SelectAndCompute(
-                        walkCandidates, heap, cache, visited, maxCandidatesToWalk: walkCandidates.Count);
+                        walkCandidates, heap, cache, visited, maxCandidatesToWalk: walkCandidates.Count,
+                        cancellationToken: cancellationToken, progress: progress);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
                 }
                 catch
                 {
@@ -144,7 +153,11 @@ namespace DumpDetective.Analysis.Analyzers
                 ObjectsPerMb: projection.ObjectsPerMb,
                 MemoryPressureScore: projection.MemoryPressureScore,
                 SegmentSummaries: segmentSummaries,
-                LohFragmentationRatio: lohFragmentationRatio);
+                LohFragmentationRatio: lohFragmentationRatio,
+                LohPressureScore: projection.LohPressureScore,
+                ConcentrationPressureScore: projection.ConcentrationPressureScore,
+                SmallObjectPressureScore: projection.SmallObjectPressureScore,
+                DensityPressureScore: projection.DensityPressureScore);
         }
 
         private static List<GCSegmentSummary> BuildSegmentSummaries(ClrHeap heap)

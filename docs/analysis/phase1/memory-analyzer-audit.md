@@ -126,6 +126,17 @@ zero heap-scan time (Phase 2 cost is O(T log T) in unique type count, not O(N) i
   size distribution for heterogeneous types, and there is no indication in the report of which
   path was taken.
 
+  > **Correction + resolved (2026-08-26):** the fallback path does not actually build a
+  > second, approximate `SizeBucketHistogram` — when `GlobalSizeBuckets` is unavailable,
+  > `MemoryAnalysisProjection.Build` leaves `histogram` as `null` entirely (verified by reading
+  > the current code); only `SmallObjectCountPercent`/`SmallObjectBytesPercent` have a real dual
+  > computation path (exact, from the bottom 3 Phase-1 buckets, vs. approximate, from per-type
+  > average size). The genuinely missing signal was that the section silently rendered nothing
+  > when the histogram was absent, with no indication of *why* or that the small-object
+  > percentages shown were the approximate variant. `MemoryAnalysisSectionBuilder` now adds an
+  > explanatory note ("Object size histogram unavailable for this run... 'Small object %' above
+  > is approximated...") whenever the histogram is null on a non-empty heap.
+
 - **Sample addresses are shown but not actionable.** The `0x{addr:X}` column in the table
   has no WinDbg-ready `!do` command hint or copy-paste assistance — a minor friction point
   for incident engineers.
@@ -217,6 +228,16 @@ Total string bytes and top string values by count are already partially captured
 summary (total bytes, duplicate %, top 5 content previews) would be high-value for many
 real-world incidents.
 
+> **Resolved (2026-08-26):** `StringAnalyzer` already owns a complete, dedicated section
+> (total bytes, `PctOfManagedHeap`, `DuplicationRatio`, top-5 duplicate previews) — duplicating
+> that data inside `MemoryDomainResult`/`MemoryAnalysisSectionBuilder` would be redundant
+> storage of an already-computed fact. Instead, `InsightEngine.DetectStringMemoryConcentration`
+> cross-references the Memory section's own top-types-by-size ranking against
+> `StringDomainResult`: when `System.String` ranks in the memory section's top 10 types **and**
+> duplication waste is significant (≥ 5 MB), it emits a finding with an evidence table of the
+> top duplicate string values — giving the memory-section reader "String is your #N largest
+> type, and here's why" without re-deriving or re-storing String Analysis's own data.
+
 **5. Pinned Object Count**
 GCHandle-pinned objects contribute to LOH fragmentation and can prevent compaction.
 `ClrRuntime.EnumerateHandles()` with `HandleKind.Pinned` is already used by the GCHandle
@@ -238,6 +259,16 @@ pool over-allocation.
 For `heap.IsServer == true`, per-heap object counts and bytes (iterating segments by their
 `IsLargeObjectSegment` and heap index) would identify unbalanced allocation across CPU heaps
 — a common root cause of elevated GC pause times.
+
+> **Superseded (2026-08-26):** This already exists — `HeapTopologyAnalyzer` computes
+> `PerLogicalHeapSummary` (per-`ClrSubHeap.Index` committed bytes, % of total, object count,
+> segment count) and `HeapTopologySectionBuilder` renders it as a "Per logical heap" table with
+> a skew warning (`maxBytes > 2× minBytes`). Building a second copy into `MemoryDomainResult`
+> would duplicate already-owned data (same anti-pattern flagged and avoided on the P2-4 string
+> heap summary item). The one genuinely open gap — exposing `ClrHeap.IsServer` itself as an
+> explicit fact, plus promoting the skew warning from an inline text block to a real
+> `InsightFinding` (severity/tags/trend-tracked) — is tracked in
+> [heap-topology-analyzer-audit.md](heap-topology-analyzer-audit.md) roadmap item #13, not here.
 
 ---
 
@@ -281,11 +312,30 @@ analyzer's only O(M × BFS) cost.
 No progress is reported between the initial `0%` report and completion, so for very large
 dumps the analyzer appears hung during retained estimation.
 
+> **Resolved (2026-08-26):** `RetainedSizeCandidateSelector.SelectAndCompute` (shared by
+> `MemoryAnalyzer`, `DominatorAnalyzer` ×2, and `GCRootAnalyzer`) now accepts an optional
+> `IProgress<AnalyzerProgressReport>?` and reports once per completed walk — cheap since it's
+> bounded by the same small `maxCandidatesToWalk` cap that already limits BFS cost.
+> `MemoryAnalyzer` now threads its own `progress` through `BuildDomainResult` into this call
+> instead of dropping it. While wiring this through, `MemoryAnalyzer` was also passing no
+> `CancellationToken` into this call at all (separate from the BFS-inner-loop gap noted below,
+> which is still open) — fixed to pass its real token, and the surrounding `catch` (which
+> previously swallowed every exception, including `OperationCanceledException`, into an empty
+> result) now rethrows cancellation instead of silently absorbing it.
+
 ### Cancellation
 
-`CancellationToken` is checked once at entry. The BFS inner loop in
-`BoundedGraphWalk.ComputeExclusiveRetained` does not check the token. On a 100 GB dump with
+`CancellationToken` is checked once per candidate in `RetainedSizeCandidateSelector.SelectAndCompute`
+(and, as of the above fix, is now actually passed in from `MemoryAnalyzer`). The BFS inner loop in
+`BoundedGraphWalk.ComputeExclusiveRetained` itself still does not check the token. On a 100 GB dump with
 a 10,000-breadth BFS over 20 types, cancellation may be delayed by seconds.
+
+> **Resolved (2026-08-26):** `ComputeExclusiveRetained` now takes an optional
+> `CancellationToken` and checks it once per dequeued BFS node (same pattern already used by
+> `CollectForwardTypeNames` in the same file), so cancellation during a single type's 10,000-node
+> walk is no longer delayed until the whole batch finishes. `RetainedSizeCandidateSelector`
+> (its only caller) now forwards its own token through. Added
+> `BoundedGraphWalkTests.ComputeExclusiveRetained_PreCancelledToken_ThrowsOperationCanceled`.
 
 ### Scalability on Large Dumps (1 GB – 100 GB)
 
@@ -437,15 +487,15 @@ dotMemory shows:
 | P1 | Promote `TotalObjects` and `LohObjects` from `int` to `long` | Medium | Low | High | Improvement | ✅ **DONE** |
 | P1 | Remove 4 redundant sort copies from `MemoryAnalysisProjection`; use composite sort for selection, linear scan for top-N bytes | Medium | Low | High | Improvement | ✅ **DONE** |
 | P1 | Label `EstimatedRetainedBytes` as approximate in section builder; add tooltip or footnote | Medium | Low | High | Improvement | ✅ **DONE** |
-| P2 | Expose `MemoryPressureScore` sub-components (LOH, concentration, small-object, density) as separate key metrics | Medium | Low | Medium | Improvement | Pending |
-| P2 | Break the `heapCache is HeapAnalysisCache` cast — surface `TryGetHeapIndex` on the `IHeapAnalysisCache` abstraction | Low | Medium | High | Improvement | Pending |
-| P2 | Add per-type generation distribution cross-reference with `GCGenerationDomainResult` in `InsightEngine` | High | Medium | High | Evolution | Pending |
-| P2 | Add string heap summary (total string bytes, top duplicates) to memory section | Medium | Medium | High | Evolution | Pending |
-| P2 | Report `Top1BytesPercent` as a named key metric; add finding when top-1 type > 40% of heap | Medium | Low | High | Improvement | Pending |
-| P3 | Report `ClrHeap.IsServer` and per-heap balance metrics for Server GC | Medium | Medium | Medium | Evolution | Pending |
-| P3 | Instrument BFS retained estimation with mid-analysis progress reports | Low | Low | High | Improvement | Pending |
-| P3 | Add `CancellationToken` check inside `BoundedGraphWalk.ComputeExclusiveRetained` | Low | Low | High | Improvement | Pending |
-| P3 | Distinguish Phase-1 (exact) vs fallback (approximate) histogram in section builder | Low | Low | High | Improvement | Pending |
+| P2 | Expose `MemoryPressureScore` sub-components (LOH, concentration, small-object, density) as separate key metrics | Medium | Low | Medium | Improvement | ✅ **DONE** |
+| P2 | Break the `heapCache is HeapAnalysisCache` cast — surface `TryGetHeapIndex` on the `IHeapAnalysisCache` abstraction | Low | Medium | High | Improvement | ✅ **DONE** |
+| P2 | Add per-type generation distribution cross-reference with `GCGenerationDomainResult` in `InsightEngine` | High | Medium | High | Evolution | ✅ **DONE** |
+| P2 | Add string heap summary (total string bytes, top duplicates) to memory section | Medium | Medium | High | Evolution | ✅ **DONE** (via `InsightEngine` cross-reference — see note below) |
+| P2 | Report `Top1BytesPercent` as a named key metric; add finding when top-1 type > 40% of heap | Medium | Low | High | Improvement | ✅ **DONE** |
+| P3 | Report `ClrHeap.IsServer` and per-heap balance metrics for Server GC | Medium | Medium | Medium | Evolution | ⚠️ **SUPERSEDED** — see note below |
+| P3 | Instrument BFS retained estimation with mid-analysis progress reports | Low | Low | High | Improvement | ✅ **DONE** |
+| P3 | Add `CancellationToken` check inside `BoundedGraphWalk.ComputeExclusiveRetained` | Low | Low | High | Improvement | ✅ **DONE** |
+| P3 | Distinguish Phase-1 (exact) vs fallback (approximate) histogram in section builder | Low | Low | High | Improvement | ✅ **DONE** |
 
 ### Final Verdict
 

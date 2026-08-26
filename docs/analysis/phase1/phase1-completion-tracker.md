@@ -14,9 +14,25 @@
 | **Total P1 Identified** | 155 |
 | **P0 Implemented** | 70 |
 | **P1 Implemented** | 122 |
-| **P2 Implemented** | 26 |
+| **P2 Implemented** | 36 |
 | **Overall P0+P1 Rate** | 82.8% (192/232) |
 
+> Note: MemoryAnalyzer's roadmap was fully closed out on 2026-08-26 (P2 0/5 → 5/5, P3 0/4 → 4/4)
+> — see updated row 10 below. `P2 Implemented` in the executive summary rose from 31 to 36 to
+> reflect the 5 newly-completed P2 items. One P3 item (`ClrHeap.IsServer`/per-heap balance
+> metrics) was found already implemented elsewhere (`HeapTopologyAnalyzer`'s
+> `PerLogicalHeapSummary`) and marked superseded-with-cross-link rather than re-implemented —
+> counted as resolved/closed for this roadmap's purposes, consistent with how
+> FinalizableObjectAnalyzer's superseded items were counted. MemoryAnalyzer is now the 8th
+> analyzer with the entire P0–P3 roadmap complete.
+>
+> Note: LohFragmentationAnalyzer's roadmap was fully closed out on 2026-08-26 (P2 2/7 → 7/7,
+> P3 0/2 → 4/4; the P3 denominator also grew from 2 to 4 as two additional P3 items were
+> identified during the closeout) — see updated row 9 below. `P2 Implemented` in the executive
+> summary rose from 26 to 31 to reflect the 5 newly-completed P2 items. LohFragmentationAnalyzer
+> (renamed "LOH & POH Fragmentation Analysis" as part of this closeout) is now the 7th analyzer
+> with the entire P0–P3 roadmap complete.
+>
 > Note: `P2 Implemented` dropped from 34 to 27 on 2026-08-15 when AsyncTaskAnalyzer's re-audit
 > fully superseded its original P0–P3 roadmap with fresh numbering (see the RE-AUDITED table
 > below) — the 7 P2 items previously counted against AsyncTaskAnalyzer's original roadmap no
@@ -74,7 +90,7 @@ P0-4 was a regression hiding behind two individually-DONE roadmap items).
 | 7 | **FinalizableObjectAnalyzer** | 4/4 | 2/2 | 3/3 | 3/3 | ✅ P0+P1+P2+P3 COMPLETE (2026-08-25) — CriticalFinalizerObject/SafeHandle detection, `DetectKnownFinalizerQueuePatterns` relocated from InsightEngine into `FinalizableObjectFindingGenerator` (with a semantic fix: now matched against the real finalizer queue, not the Gen2 population sweep it incorrectly read before), per-entry generation field, and root-path cross-reference via `RootPathFinder` (top 10 entries by retained size) all shipped. Reservoir-sampling, partial top-K type sort, and BFS-buffer pooling items were found superseded by the prior dominator-tree/exact-data integration (`b2e8cf1`) and closed without new code; the InsightEngine trend-delta item was found redundant with the existing generic §T4 metric timeline. No pending items remain (`finalizable-object-analyzer-audit.md`) |
 | 8 | **JitAnalyzer** | 2/2 | 3/3 | 4/4 | 2/2 | ✅ P0+P1+P2+P3 COMPLETE (2026-08-26) — P2: MethodDesc-keyed tiering (fixes generic-instantiation false positives), `ClrMethod.CompilationType` R2R/JIT frame classification, per-thread max frame depth (recursion signal), `DynamicMethodFrameCount` via `ClrModule.IsDynamic`. P3: method uniqueness ratio, and a per-module JIT stack heatmap cross-referenced against `ModuleDomainResult` via a new `InsightEngine.DetectJitModuleHotspot` correlation — which also introduced a reusable `FindingEvidenceTable`/`InsightFinding.EvidenceTables` capability so any cross-analyzer correlation can attach real `CompactTable` evidence in the Cross-Domain Insights (X1) section instead of prose-only findings (`jit-analyzer-audit.md`) |
 | 9 | **LohFragmentationAnalyzer** | 2/2 | 5/5 | 7/7 | 4/4 | ✅ P0+P1+P2+P3 COMPLETE (2026-08-26) — renamed to "LOH & POH Fragmentation Analysis" with a real per-kind (Large vs. Pinned) breakdown (`LohKindBreakdown`, `Kind` column) instead of just silently folding POH into LOH totals; largest-free-block address surfaced via the previously-unused `Offset` field in `LohFreeBlockIndex.bin`; `IsLohSegment`/`BuildFreeGapHistogram`/index-aggregation unit tests added; `LohSegmentStats` converted to a `readonly record struct`; histogram interpretation note when >80% of free gaps are sub-1-KB slivers; type-aggregated LOH/POH table rewired from `LargeObjectIndex.bin`'s biased top-100 sample onto the unbounded Phase 1 `TypeAggregateIndexEntry.LohCount`/`LohSize` (no new writer needed); MT-field-exposure item found already resolved by an earlier refactor (`loh-fragmentation-analyzer-audit.md`) |
-| 10 | **MemoryAnalyzer** | 2/2 | 5/5 | 0/5 | 0/3 | ✅ P0+P1 complete |
+| 10 | **MemoryAnalyzer** | 2/2 | 5/5 | 5/5 | 4/4 | ✅ P0+P1+P2+P3 COMPLETE (2026-08-26) — `MemoryPressureScore` sub-components (LOH/concentration/small-object/density) exposed as key metrics; `heapCache is HeapAnalysisCache` cast broken via new `IHeapAnalysisCache.TryGetGlobalSizeBuckets()`; per-type generation × size cross-reference and a `System.String`-duplication cross-reference both added to `InsightEngine` via the `FindingEvidenceTable` capability rather than duplicating data other analyzers already own; `Top1BytesPercent` promoted to a key metric plus a new "single type dominates the heap" finding. P3: BFS retained-size estimation now reports progress once per walked candidate (shared `RetainedSizeCandidateSelector`, also benefits DominatorAnalyzer ×2 and GCRootAnalyzer) and threads a real `CancellationToken`; `BoundedGraphWalk.ComputeExclusiveRetained` now checks cancellation per BFS node; the histogram-fallback section note was added and the audit's original premise (a separate approximate histogram) was corrected to reflect that the fallback path only affects small-object percentages, not a second histogram. The `ClrHeap.IsServer`/per-heap-balance item was found already implemented in `HeapTopologyAnalyzer` and marked superseded-with-cross-link (`memory-analyzer-audit.md`, `heap-topology-analyzer-audit.md` item #13) |
 | 11 | **GCHandleAnalyzer** | 3/3 | 7/7 | 0/10 | 0/2 | ✅ P0+P1 complete |
 | 12 | **HeapTopologyAnalyzer** | 3/3 | 4/4 | 3/7 | 0/3 | ✅ P0+P1 complete; P2 43% (3/7) |
 | 13 | **DominatorAnalyzer** | 3/3 | 5/5 | 5/6 | 0/2 | ✅ P0+P1 complete; P2 83% (5/6 done) |
@@ -152,8 +168,8 @@ Different audits use different conventions for marking completion:
 **Major Wins:**
 - 13 analyzers (37%) have P0+P1 100% complete
 - HeapTopologyAnalyzer: 10 P0+P1+P2 items complete (generation breakdown, fragmentation, cancellation, variable naming, efficiency, trending, density)
-- 6 analyzers (ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer, ThreadStackClusterAnalyzer, FinalizableObjectAnalyzer, JitAnalyzer) have ALL P0+P1+P2 complete
-- ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer, ThreadStackClusterAnalyzer, FinalizableObjectAnalyzer, and JitAnalyzer are the only analyzers with ALL P0+P1+P2+P3 complete (ArrayAnalyzer 4/4 P3; BoxingAnalyzer 4/4 P3, including unit test coverage for pure helper logic; SegmentReservationAnalyzer 4/4 P3, including the P3-4 regions-based GC per-region statistics evolution item; ThreadStackClusterAnalyzer 4/4 P3, including the P3-3 cross-analyzer correlation with `HangAnalyzer`; FinalizableObjectAnalyzer 3/3 P3 plus its 2 Evolution items, including root-path cross-reference via `RootPathFinder`; JitAnalyzer 2/2 P3, including a per-module JIT stack heatmap cross-referenced with `ModuleDomainResult` via a new reusable `InsightFinding.EvidenceTables` capability)
+- 8 analyzers (ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer, ThreadStackClusterAnalyzer, FinalizableObjectAnalyzer, JitAnalyzer, LohFragmentationAnalyzer, MemoryAnalyzer) have ALL P0+P1+P2 complete
+- ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer, ThreadStackClusterAnalyzer, FinalizableObjectAnalyzer, JitAnalyzer, LohFragmentationAnalyzer, and MemoryAnalyzer are the only analyzers with ALL P0+P1+P2+P3 complete (ArrayAnalyzer 4/4 P3; BoxingAnalyzer 4/4 P3, including unit test coverage for pure helper logic; SegmentReservationAnalyzer 4/4 P3, including the P3-4 regions-based GC per-region statistics evolution item; ThreadStackClusterAnalyzer 4/4 P3, including the P3-3 cross-analyzer correlation with `HangAnalyzer`; FinalizableObjectAnalyzer 3/3 P3 plus its 2 Evolution items, including root-path cross-reference via `RootPathFinder`; JitAnalyzer 2/2 P3, including a per-module JIT stack heatmap cross-referenced with `ModuleDomainResult` via a new reusable `InsightFinding.EvidenceTables` capability; LohFragmentationAnalyzer 4/4 P3, including converting `LohSegmentStats` to a `readonly record struct` and rewiring its type-aggregated LOH/POH table onto the unbounded Phase 1 `TypeAggregateIndexEntry` instead of a capped top-100 sample; MemoryAnalyzer 4/4 P3, including per-walk BFS progress reporting shared across 3 other analyzers via `RetainedSizeCandidateSelector`, cancellation support inside `BoundedGraphWalk.ComputeExclusiveRetained`, and one item resolved by cross-linking to `HeapTopologyAnalyzer`'s pre-existing per-logical-heap balance metrics instead of duplicating them)
 - GCHandleAnalyzer completed all P0 and P1 items in a single session (architecture + diagnostics)
 
 **Remaining Work:**

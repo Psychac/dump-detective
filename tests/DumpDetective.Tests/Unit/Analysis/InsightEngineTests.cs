@@ -319,6 +319,180 @@ public sealed class InsightEngineTests
             && f.EffectiveEvidenceTables[0].Rows[0].SequenceEqual(new object?[] { "MonitorWait", 3 }));
     }
 
+    [Fact]
+    public void Analyze_ShouldEmitEvidenceTable_WhenTopMemoryTypeIsAlmostEntirelyGen2()
+    {
+        InsightEngine engine = new();
+
+        MemoryDomainResult memory = new(
+            TotalBytes: 200_000_000,
+            LohBytes: 0,
+            LohPercent: 0,
+            TotalObjects: 1_000,
+            LohObjects: 0,
+            LohThresholdBytes: 85_000,
+            UniqueTypes: 1,
+            TopTypes: [new TypeSnapshot("MyApp.Cache.Entry", 1_000, 150_000_000, 0)]);
+
+        GCGenerationDomainResult gcGen = new(
+            Gen0Bytes: 0, Gen0Objects: 0,
+            Gen1Bytes: 0, Gen1Objects: 0,
+            Gen2Bytes: 150_000_000, Gen2Objects: 950,
+            LohBytes: 0, LohPercent: 0,
+            TotalObjects: 1_000, LohObjects: 0,
+            TopLohTypes: [],
+            PerTypeGenerationProfiles: [new TypeGenerationProfile("MyApp.Cache.Entry", 10, 40, 950, 0, 150_000_000)]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Memory Analysis", AnalyzerExecutionStatus.Success, memory),
+            BuildRun("GC Generation Analysis", AnalyzerExecutionStatus.Success, gcGen),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("long-lived", StringComparison.OrdinalIgnoreCase)
+            && f.Tags.Contains("gc-generation")
+            && f.EffectiveEvidenceTables.Count == 1
+            && f.EffectiveEvidenceTables[0].Rows.Count == 1
+            && f.EffectiveEvidenceTables[0].Rows[0][0]!.Equals("MyApp.Cache.Entry"));
+    }
+
+    [Fact]
+    public void Analyze_ShouldNotEmitMemoryGenerationCorrelation_WhenTypeIsMostlyGen0()
+    {
+        InsightEngine engine = new();
+
+        MemoryDomainResult memory = new(
+            TotalBytes: 200_000_000,
+            LohBytes: 0,
+            LohPercent: 0,
+            TotalObjects: 1_000,
+            LohObjects: 0,
+            LohThresholdBytes: 85_000,
+            UniqueTypes: 1,
+            TopTypes: [new TypeSnapshot("MyApp.Transient.Buffer", 1_000, 150_000_000, 0)]);
+
+        GCGenerationDomainResult gcGen = new(
+            Gen0Bytes: 150_000_000, Gen0Objects: 950,
+            Gen1Bytes: 0, Gen1Objects: 0,
+            Gen2Bytes: 0, Gen2Objects: 10,
+            LohBytes: 0, LohPercent: 0,
+            TotalObjects: 1_000, LohObjects: 0,
+            TopLohTypes: [],
+            PerTypeGenerationProfiles: [new TypeGenerationProfile("MyApp.Transient.Buffer", 950, 40, 10, 0, 150_000_000)]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Memory Analysis", AnalyzerExecutionStatus.Success, memory),
+            BuildRun("GC Generation Analysis", AnalyzerExecutionStatus.Success, gcGen),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().NotContain(f => f.Title.Contains("long-lived", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Analyze_ShouldEmitEvidenceTable_WhenSystemStringIsTopMemoryTypeWithDuplication()
+    {
+        InsightEngine engine = new();
+
+        MemoryDomainResult memory = new(
+            TotalBytes: 200_000_000,
+            LohBytes: 0,
+            LohPercent: 0,
+            TotalObjects: 10_000,
+            LohObjects: 0,
+            LohThresholdBytes: 85_000,
+            UniqueTypes: 2,
+            TopTypes:
+            [
+                new TypeSnapshot("MyApp.Cache.Entry", 1_000, 150_000_000, 0),
+                new TypeSnapshot("System.String", 8_000, 40_000_000, 0),
+            ]);
+
+        StringDomainResult strings = new(
+            TotalStrings: 8_000,
+            TotalStringMemoryBytes: 40_000_000,
+            SampledUniquePatterns: 1_000,
+            DuplicatePatternCount: 500,
+            DuplicateWastedBytes: 8_000_000,
+            DuplicationRatio: 0.88,
+            PctOfManagedHeap: 20.0,
+            TopDuplicates: [new DuplicateStringSnapshot("connection-string-template", 3_000, 6_000_000)],
+            VeryLongStrings: [],
+            LohStringBytes: 0,
+            InternedStringCount: 0,
+            InternedStringBytes: 0,
+            Gen2StringCount: 0,
+            Gen2StringBytes: 0,
+            StringsSampled: 8_000);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Memory Analysis", AnalyzerExecutionStatus.Success, memory),
+            BuildRun("String Analysis", AnalyzerExecutionStatus.Success, strings),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("String data is a top heap consumer", StringComparison.OrdinalIgnoreCase)
+            && f.Tags.Contains("strings")
+            && f.EffectiveEvidenceTables.Count == 1
+            && f.EffectiveEvidenceTables[0].Rows.Count == 1
+            && f.EffectiveEvidenceTables[0].Rows[0][0]!.Equals("connection-string-template"));
+    }
+
+    [Fact]
+    public void Analyze_ShouldNotEmitStringMemoryConcentration_WhenStringIsNotAmongTopMemoryTypes()
+    {
+        InsightEngine engine = new();
+
+        var topTypes = new List<TypeSnapshot>();
+        for (int i = 0; i < 15; i++)
+            topTypes.Add(new TypeSnapshot($"MyApp.Type{i}", 100, 1_000_000, 0));
+
+        MemoryDomainResult memory = new(
+            TotalBytes: 200_000_000,
+            LohBytes: 0,
+            LohPercent: 0,
+            TotalObjects: 10_000,
+            LohObjects: 0,
+            LohThresholdBytes: 85_000,
+            UniqueTypes: topTypes.Count,
+            TopTypes: topTypes);
+
+        StringDomainResult strings = new(
+            TotalStrings: 8_000,
+            TotalStringMemoryBytes: 40_000_000,
+            SampledUniquePatterns: 1_000,
+            DuplicatePatternCount: 500,
+            DuplicateWastedBytes: 8_000_000,
+            DuplicationRatio: 0.88,
+            PctOfManagedHeap: 20.0,
+            TopDuplicates: [new DuplicateStringSnapshot("connection-string-template", 3_000, 6_000_000)],
+            VeryLongStrings: [],
+            LohStringBytes: 0,
+            InternedStringCount: 0,
+            InternedStringBytes: 0,
+            Gen2StringCount: 0,
+            Gen2StringBytes: 0,
+            StringsSampled: 8_000);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Memory Analysis", AnalyzerExecutionStatus.Success, memory),
+            BuildRun("String Analysis", AnalyzerExecutionStatus.Success, strings),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().NotContain(f => f.Title.Contains("String data is a top heap consumer", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static AnalyzerRunResult BuildRun(string analyzerName, AnalyzerExecutionStatus status, AnalyzerDomainResult? result = null)
         => new(
             AnalyzerName: analyzerName,

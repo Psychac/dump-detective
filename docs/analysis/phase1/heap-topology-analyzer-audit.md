@@ -444,6 +444,17 @@ question every engineer will ask.
 | 15 | Add progress reporting for SOH scan in full mode (currently silent for 87M-object pass) | Low: operator experience only | Low | High | Improvement |
 | 16 | Use the `Unknown` enum value in `SegmentKindMapper` for unrecognized segment kinds instead of silently defaulting to SOH | Low: future-proofing | Trivial | High | Improvement |
 
+> **Cross-referenced (2026-08-26):** [memory-analyzer-audit.md](memory-analyzer-audit.md)'s
+> "Report `ClrHeap.IsServer` and per-heap balance metrics for Server GC" item was marked
+> superseded and pointed here — the balance metrics (`PerLogicalHeapSummary` + skew warning)
+> already live in this analyzer, so item #13 above is the single tracked place for the remaining
+> `IsServer` gap. Note API correction from ClrMD 4 inspection: there is no `ClrHeap.HeapCount`
+> property — use `ClrHeap.SubHeaps.Length` (each `ClrSubHeap.Index` is the logical heap index
+> already surfaced via `PerLogicalHeapSummary.LogicalHeapIndex`). Also worth folding into #13:
+> the skew warning is currently an inline text block (`blocks.Add(T(...))`) rather than a real
+> `InsightFinding`, so it has no severity/tags/`MetricValue` and isn't trend-tracked or ranked
+> alongside other findings — promoting it would be a natural companion change.
+
 ### Final Verdict
 
 1. **Is the analyzer production-ready?** Conditionally. It is safe for basic topology snapshots

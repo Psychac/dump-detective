@@ -85,7 +85,8 @@ internal static class BoundedGraphWalk
         ClrHeap heap,
         HashSet<ulong> visited,
         int maxBreadth = 10_000,
-        int maxDepth = 20)
+        int maxDepth = 20,
+        CancellationToken cancellationToken = default)
     {
         if (!root.IsValid || root.Address == 0 || root.Type is null)
             return 0;
@@ -105,6 +106,7 @@ internal static class BoundedGraphWalk
 
         while (queue.Count > 0)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             (ulong address, int depth) = queue.Dequeue();
             nodesSeen++;
 

@@ -22,7 +22,11 @@ internal sealed record MemoryAnalysisProjectionResult(
     ulong SmallObjectBytes,
     double ObjectsPerMb,
     double MemoryPressureScore,
-    double LohFragmentationRatio);
+    double LohFragmentationRatio,
+    double LohPressureScore,
+    double ConcentrationPressureScore,
+    double SmallObjectPressureScore,
+    double DensityPressureScore);
 
 internal static class MemoryAnalysisProjection
 {
@@ -148,6 +152,10 @@ internal static class MemoryAnalysisProjection
             smallObjectBytes,
             objectsPerMb,
             memoryPressureScore,
-            0);
+            0,
+            Math.Round(lohPressure * 100.0, 1),
+            Math.Round(concentrationPressure * 100.0, 1),
+            Math.Round(smallObjectPressure * 100.0, 1),
+            Math.Round(densityPressure * 100.0, 1));
     }
 }

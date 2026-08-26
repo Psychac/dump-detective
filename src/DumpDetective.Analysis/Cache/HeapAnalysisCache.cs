@@ -127,6 +127,9 @@ namespace DumpDetective.Analysis.Cache
             return _heapIndexCache.TryGetHeapIndex(out heapIndex);
         }
 
+        public long[]? TryGetGlobalSizeBuckets() =>
+            TryGetHeapIndex(out HeapIndexBuildResult? heapIndex) ? heapIndex.GlobalSizeBuckets : null;
+
         public IEnumerable<HeapEntry> EnumerateIndexedEntries() => _heapIndexCache.EnumerateIndexedEntries();
 
         public IEnumerable<HeapEntry> EnumerateIndexedEntriesRange(long startRecord, long recordCount) =>

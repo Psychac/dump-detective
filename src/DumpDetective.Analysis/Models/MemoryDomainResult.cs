@@ -22,7 +22,11 @@ public sealed record MemoryDomainResult(
     double ObjectsPerMb = 0,
     double MemoryPressureScore = 0,
     IReadOnlyList<GCSegmentSummary>? SegmentSummaries = null,
-    double LohFragmentationRatio = 0) : AnalyzerDomainResult;
+    double LohFragmentationRatio = 0,
+    double LohPressureScore = 0,
+    double ConcentrationPressureScore = 0,
+    double SmallObjectPressureScore = 0,
+    double DensityPressureScore = 0) : AnalyzerDomainResult;
 
 public sealed record GCSegmentSummary(
     string Generation,

@@ -56,6 +56,12 @@ internal sealed class InsightEngine
     private const ulong LohArrayPressureThreshold = 256UL * 1024 * 1024;  // 256 MB
     private const ulong GCRootLargeRetentionThreshold = 50UL * 1024 * 1024; // 50 MB
     private const double ClusterHangOverlapWarningRatio = 0.60;
+    private const ulong MemoryGenerationCorrelationMinBytes = 10UL * 1024 * 1024;    // 10 MB
+    private const ulong MemoryGenerationCorrelationCriticalBytes = 100UL * 1024 * 1024; // 100 MB
+    private const double MemoryGenerationCorrelationGen2FractionPct = 85.0;
+    private const int MemoryGenerationCorrelationTopTypesScanned = 30;
+    private const ulong StringMemoryCorrelationMinWastedBytes = 5UL * 1024 * 1024; // 5 MB
+    private const int StringMemoryCorrelationMaxRank = 10;
 
     private const string Source = "InsightEngine";
 
@@ -219,6 +225,8 @@ internal sealed class InsightEngine
             DetectEventLeakPattern(findings, context.EventLeaks, context.GcGen, context.Finalizable);
             DetectDataTableLifecyclePattern(findings, context.Finalizable, context.Memory);
             DetectKnownLeakPatterns(findings, context.Memory);
+            DetectMemoryTypeGenerationCorrelation(findings, context.Memory, context.GcGen);
+            DetectStringMemoryConcentration(findings, context.Memory, context.Strings);
             DetectRecurringTimeoutPattern(findings, context.Crash);
 
             DetectDbConnectionLeak(findings, context.DbConn, context.Crash);
@@ -1388,6 +1396,160 @@ internal sealed class InsightEngine
                 MetricValue: reflectionCount,
                 MetricUnit: "objects"));
         }
+    }
+
+    /// <summary>
+    /// Cross-references the memory analyzer's top types by size with the GC generation
+    /// analyzer's per-type generation distribution. Neither analyzer alone shows this: Memory
+    /// ranks types by total bytes but has no generation breakdown, while GCGeneration has the
+    /// breakdown but doesn't rank by total size. A large type that is almost entirely stuck in
+    /// Gen2 is a strong long-lived-leak candidate rather than ordinary working-set memory.
+    /// </summary>
+    private static void DetectMemoryTypeGenerationCorrelation(
+        List<InsightFinding> findings,
+        MemoryDomainResult? memory,
+        GCGenerationDomainResult? gcGen)
+    {
+        if (memory is null || gcGen is null || gcGen.PerTypeGenerationProfiles is not { Count: > 0 } profiles)
+            return;
+
+        var profileByType = new Dictionary<string, TypeGenerationProfile>(profiles.Count, StringComparer.Ordinal);
+        for (int i = 0; i < profiles.Count; i++)
+            profileByType[profiles[i].TypeName] = profiles[i];
+
+        int scanCount = Math.Min(memory.TopTypes.Count, MemoryGenerationCorrelationTopTypesScanned);
+        var matches = new List<(TypeSnapshot Snapshot, TypeGenerationProfile Profile, double Gen2FractionPct)>();
+
+        for (int i = 0; i < scanCount; i++)
+        {
+            TypeSnapshot snapshot = memory.TopTypes[i];
+            if (snapshot.TotalBytes < MemoryGenerationCorrelationMinBytes)
+                continue;
+
+            if (!profileByType.TryGetValue(snapshot.TypeName, out TypeGenerationProfile profile))
+                continue;
+
+            long totalCounted = profile.Gen0Count + profile.Gen1Count + profile.Gen2Count + profile.LohCount;
+            if (totalCounted == 0)
+                continue;
+
+            double gen2FractionPct = profile.Gen2Count * 100.0 / totalCounted;
+            if (gen2FractionPct >= MemoryGenerationCorrelationGen2FractionPct)
+                matches.Add((snapshot, profile, gen2FractionPct));
+        }
+
+        if (matches.Count == 0)
+            return;
+
+        matches.Sort(static (a, b) => b.Snapshot.TotalBytes.CompareTo(a.Snapshot.TotalBytes));
+
+        ulong worstBytes = matches[0].Snapshot.TotalBytes;
+        FindingSeverity sev = worstBytes >= MemoryGenerationCorrelationCriticalBytes
+            ? FindingSeverity.Warning
+            : FindingSeverity.Info;
+
+        int rowCount = Math.Min(matches.Count, 5);
+        var rows = new List<IReadOnlyList<object?>>(rowCount);
+        for (int i = 0; i < rowCount; i++)
+        {
+            (TypeSnapshot snapshot, TypeGenerationProfile profile, double gen2FractionPct) = matches[i];
+            rows.Add(new object?[]
+            {
+                snapshot.TypeName,
+                FormatBytes(snapshot.TotalBytes),
+                profile.Gen0Count,
+                profile.Gen1Count,
+                profile.Gen2Count,
+                profile.LohCount,
+                $"{gen2FractionPct:F1}%",
+            });
+        }
+
+        var evidenceTable = new FindingEvidenceTable(
+            "Top memory-consuming types stuck in Gen2 (size × generation cross-reference)",
+            ["Type", "Total Bytes", "Gen0", "Gen1", "Gen2", "LOH", "Gen2 %"],
+            rows);
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Memory",
+            Severity: sev,
+            Title: "Large heap types are almost entirely long-lived (Gen2)",
+            Evidence: $"{matches.Count:N0} of the top {scanCount} memory-consuming type(s) are ≥ " +
+                      $"{MemoryGenerationCorrelationGen2FractionPct:F0}% Gen2. Largest: '{matches[0].Snapshot.TypeName}' " +
+                      $"at {FormatBytes(matches[0].Snapshot.TotalBytes)} ({matches[0].Gen2FractionPct:F1}% Gen2).",
+            Recommendation: "High Gen2 residency for a top-size type usually means the instances are held by " +
+                            "long-lived roots (statics, caches, event subscriptions) rather than transient churn. " +
+                            "Cross-check the Dominator/GC Root analyzer findings for these type names to locate the " +
+                            "retaining reference chain.",
+            Tags: ["memory", "gc-generation", "cross-analyzer", "long-lived"],
+            MetricValue: (double)worstBytes,
+            MetricUnit: "bytes",
+            EvidenceTables: [evidenceTable]));
+    }
+
+    /// <summary>
+    /// Cross-references the memory analyzer's own top-types-by-size ranking with the string
+    /// analyzer's duplication data. The Memory section only ever sees <c>System.String</c> as one
+    /// more ranked type entry — it has no visibility into duplication. The String section computes
+    /// duplication in isolation and never learns whether that duplication is happening inside a
+    /// top-ranked heap consumer. Combining the two turns "String is duplicated somewhere" into
+    /// "String is your #N largest type, and here's why."
+    /// </summary>
+    private static void DetectStringMemoryConcentration(
+        List<InsightFinding> findings,
+        MemoryDomainResult? memory,
+        StringDomainResult? strings)
+    {
+        if (memory is null || strings is null || strings.TopDuplicates.Count == 0)
+            return;
+
+        if (strings.DuplicateWastedBytes < StringMemoryCorrelationMinWastedBytes)
+            return;
+
+        int stringRank = -1;
+        ulong stringTypeBytes = 0;
+        int scanCount = Math.Min(memory.TopTypes.Count, StringMemoryCorrelationMaxRank);
+        for (int i = 0; i < scanCount; i++)
+        {
+            if (string.Equals(memory.TopTypes[i].TypeName, "System.String", StringComparison.Ordinal))
+            {
+                stringRank = i + 1;
+                stringTypeBytes = memory.TopTypes[i].TotalBytes;
+                break;
+            }
+        }
+
+        if (stringRank < 0)
+            return;
+
+        int rowCount = Math.Min(strings.TopDuplicates.Count, 5);
+        var rows = new List<IReadOnlyList<object?>>(rowCount);
+        for (int i = 0; i < rowCount; i++)
+        {
+            DuplicateStringSnapshot d = strings.TopDuplicates[i];
+            rows.Add(new object?[] { d.Preview, d.Count, FormatBytes(d.WastedBytes) });
+        }
+
+        var evidenceTable = new FindingEvidenceTable(
+            "Top duplicate string values (System.String is a top memory-section consumer)",
+            ["Preview", "Occurrences", "Wasted Bytes"],
+            rows);
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Memory",
+            Severity: FindingSeverity.Info,
+            Title: "String data is a top heap consumer with significant duplication",
+            Evidence: $"System.String ranks #{stringRank} in the Memory section by size " +
+                      $"({FormatBytes(stringTypeBytes)}). {FormatBytes(strings.DuplicateWastedBytes)} of managed " +
+                      $"heap memory is wasted across {strings.DuplicatePatternCount:N0} duplicate string pattern(s).",
+            Recommendation: "Intern or cache the frequently duplicated string values below rather than allocating " +
+                            "fresh instances per request. See the String Analysis section for full duplicate detail.",
+            Tags: ["memory", "strings", "duplication", "cross-analyzer"],
+            MetricValue: (double)strings.DuplicateWastedBytes,
+            MetricUnit: "bytes",
+            EvidenceTables: [evidenceTable]));
     }
 
     /// <summary>

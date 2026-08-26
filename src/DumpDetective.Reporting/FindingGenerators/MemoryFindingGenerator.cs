@@ -45,6 +45,24 @@ internal sealed class MemoryFindingGenerator : IFindingGenerator
                 MetricUnit: "% top-5"));
         }
 
+        // Finding 2b: Single type dominates the heap (> 40% of total bytes)
+        if (r.Top1BytesPercent > 40 && r.TopTypes.Count > 0)
+        {
+            string dominantTypeName = r.TopTypes[0].TypeName;
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Memory",
+                Severity: FindingSeverity.Warning,
+                Title: "A single type dominates the managed heap",
+                Evidence: $"'{dominantTypeName}' alone accounts for {r.Top1BytesPercent:F1}% of total heap bytes " +
+                          $"({FormatBytes(r.TopTypes[0].TotalBytes)} of {FormatBytes(r.TotalBytes)}).",
+                Recommendation: "A single dominant type is a common leak signature. Cross-check this type name against " +
+                                "the Dominator/GC Root analyzer findings to identify its retaining reference chain.",
+                Tags: ["memory", "heap", "concentration", "dominant-type"],
+                MetricValue: r.Top1BytesPercent,
+                MetricUnit: "% top-1"));
+        }
+
         // Finding 3: High small-object pressure (>85% by count, indicates GC throughput risk)
         if (r.SmallObjectCountPercent > 85)
         {

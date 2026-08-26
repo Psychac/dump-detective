@@ -36,7 +36,9 @@ internal static class RetainedSizeCandidateSelector
     /// <paramref name="visited"/> set. Candidates that don't require a walk (or that don't
     /// survive the budget cut) are returned with <c>RetainedSize == ShallowSize</c> and
     /// <c>WasWalked == false</c> — never silently dropped, so caller output shape/counts stay
-    /// consistent with the input candidate list.
+    /// consistent with the input candidate list. When <paramref name="progress"/> is supplied,
+    /// reports once per completed walk (not per candidate) so callers with a large
+    /// <paramref name="maxCandidatesToWalk"/> don't appear hung mid-BFS.
     /// </summary>
     public static IReadOnlyList<RetainedSizeResult> SelectAndCompute(
         IReadOnlyList<(ulong Address, ulong MethodTable, ulong ShallowSize)> candidates,
@@ -46,7 +48,8 @@ internal static class RetainedSizeCandidateSelector
         int maxCandidatesToWalk,
         int maxBreadth = 10_000,
         int maxDepth = 20,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<AnalyzerProgressReport>? progress = null)
     {
         var results = new RetainedSizeResult[candidates.Count];
 
@@ -76,8 +79,9 @@ internal static class RetainedSizeCandidateSelector
             }
 
             ClrObject obj = heap.GetObject(address);
-            ulong retainedSize = BoundedGraphWalk.ComputeExclusiveRetained(obj, heap, visited, maxBreadth, maxDepth);
+            ulong retainedSize = BoundedGraphWalk.ComputeExclusiveRetained(obj, heap, visited, maxBreadth, maxDepth, cancellationToken);
             walked++;
+            progress?.Report(new(walked, "estimating retained size", $"{walked}/{maxCandidatesToWalk} types walked"));
 
             // A lower-than-shallow (even 0) result is legitimate: the address was already
             // claimed by an earlier candidate's walk in this batch (shared visited-set

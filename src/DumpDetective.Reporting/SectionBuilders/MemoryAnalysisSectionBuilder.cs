@@ -32,9 +32,14 @@ internal sealed class MemoryAnalysisSectionBuilder : SectionBuilderBase, IAnalyz
             ["unique_types"] = new NumericMetricValue(d.UniqueTypes, MetricUnit.Count),
             ["loh_bytes"] = new NumericMetricValue((double)d.LohBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.LohBytes)),
             ["loh_pct"] = new NumericMetricValue(d.LohPercent, MetricUnit.Percent, $"{d.LohPercent:F1}%"),
+            ["top1_share"] = new NumericMetricValue(d.Top1BytesPercent, MetricUnit.Percent, $"{d.Top1BytesPercent:F1}%"),
             ["top5_share"] = new NumericMetricValue(d.Top5BytesPercent, MetricUnit.Percent, $"{d.Top5BytesPercent:F1}%"),
             ["small_object_pct"] = new NumericMetricValue(d.SmallObjectCountPercent, MetricUnit.Percent, $"{d.SmallObjectCountPercent:F1}%"),
             ["objects_per_mb"] = new NumericMetricValue(d.ObjectsPerMb, MetricUnit.Custom, d.ObjectsPerMb.ToString("F1")),
+            ["loh_pressure_score"] = new NumericMetricValue(d.LohPressureScore, MetricUnit.Custom, d.LohPressureScore.ToString("F1")),
+            ["concentration_pressure_score"] = new NumericMetricValue(d.ConcentrationPressureScore, MetricUnit.Custom, d.ConcentrationPressureScore.ToString("F1")),
+            ["small_object_pressure_score"] = new NumericMetricValue(d.SmallObjectPressureScore, MetricUnit.Custom, d.SmallObjectPressureScore.ToString("F1")),
+            ["density_pressure_score"] = new NumericMetricValue(d.DensityPressureScore, MetricUnit.Custom, d.DensityPressureScore.ToString("F1")),
         };
 
         string pressureBand = d.MemoryPressureScore >= 75 ? "High"
@@ -94,6 +99,13 @@ internal sealed class MemoryAnalysisSectionBuilder : SectionBuilderBase, IAnalyz
                         items = histItems
                     })));
             }
+        }
+        else if (d.TotalObjects > 0)
+        {
+            blocks.Add(T("Object size histogram unavailable for this run (requires the Phase-1 " +
+                "disk-backed heap index; not built for this analysis). 'Small object %' above is " +
+                "approximated from per-type average size instead of the exact per-object histogram " +
+                "and may misrepresent heterogeneous types with a wide instance-size spread."));
         }
 
         if (d.TopTypes.Count > 0)

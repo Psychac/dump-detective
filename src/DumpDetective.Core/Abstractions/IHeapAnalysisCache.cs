@@ -88,4 +88,11 @@ public interface IHeapAnalysisCache
     /// <see cref="IThreadRetentionProvider"/> and docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §12.2.
     /// </summary>
     IThreadRetentionProvider? TryGetThreadRetentionProvider();
+
+    /// <summary>
+    /// Returns the Phase-1 disk-backed <c>GlobalSizeBuckets</c> histogram built during the single
+    /// heap-index pass, or <c>null</c> when unavailable (in-memory mode or the index wasn't built),
+    /// letting callers avoid a second heap scan to bucket objects by size.
+    /// </summary>
+    long[]? TryGetGlobalSizeBuckets();
 }

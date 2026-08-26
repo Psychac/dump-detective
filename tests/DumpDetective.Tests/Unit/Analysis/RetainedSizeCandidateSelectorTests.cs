@@ -131,6 +131,43 @@ public sealed class RetainedSizeCandidateSelectorTests
     }
 
     [Fact]
+    public void SelectAndCompute_ReportsProgress_OncePerWalkedCandidate()
+    {
+        s_byteArray = new byte[64];
+        s_wrapper = new WrapperWithReference();
+
+        using DataTarget dataTarget = DataTarget.CreateSnapshotAndAttach(Environment.ProcessId);
+        ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();
+        ClrHeap heap = runtime.Heap;
+
+        ulong byteArrayAddr = FindAddress(heap, obj => obj.Type?.IsArray == true && obj.Type.ComponentType?.Name == "System.Byte" && obj.Size >= 64);
+        ulong wrapperAddr = FindAddress(heap, obj => obj.Type?.Name?.EndsWith(nameof(WrapperWithReference), StringComparison.Ordinal) == true);
+        byteArrayAddr.Should().NotBe(0UL);
+        wrapperAddr.Should().NotBe(0UL);
+
+        ClrObject byteArrayObj = heap.GetObject(byteArrayAddr);
+        ClrObject wrapperObj = heap.GetObject(wrapperAddr);
+
+        IHeapAnalysisCache cache = NewCache();
+        var visited = new HashSet<ulong>();
+        var candidates = new List<(ulong Address, ulong MethodTable, ulong ShallowSize)>
+        {
+            (byteArrayAddr, byteArrayObj.Type!.MethodTable, byteArrayObj.Size),
+            (wrapperAddr, wrapperObj.Type!.MethodTable, wrapperObj.Size),
+        };
+
+        var reports = new List<AnalyzerProgressReport>();
+        var progress = new SynchronousProgress<AnalyzerProgressReport>(reports.Add);
+
+        RetainedSizeCandidateSelector.SelectAndCompute(
+            candidates, heap, cache, visited, maxCandidatesToWalk: 10, progress: progress);
+
+        reports.Should().ContainSingle(
+            "only the pointer-carrying wrapper is walked — the pointer-free byte[] is skipped and must not report");
+        reports[0].Phase.Should().Be("estimating retained size");
+    }
+
+    [Fact]
     public void SelectAndCompute_RespectsMaxCandidatesToWalk_RankedByShallowSizeDescending()
     {
         s_wrapper = new WrapperWithReference();
@@ -180,6 +217,11 @@ public sealed class RetainedSizeCandidateSelectorTests
     {
         private EntryPadding _entry = new() { Key = "retained-size-selector-large-key" };
         public WrapperWithReferenceLarge() { }
+    }
+
+    private sealed class SynchronousProgress<T>(Action<T> onReport) : IProgress<T>
+    {
+        public void Report(T value) => onReport(value);
     }
 
     private static ulong FindMethodTable(ClrHeap heap, Func<ClrObject, bool> predicate)

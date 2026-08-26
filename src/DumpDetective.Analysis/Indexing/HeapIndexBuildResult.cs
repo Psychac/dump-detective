@@ -87,10 +87,11 @@ internal sealed record HeapIndexBuildResult(
     /// <summary>
     /// Pre-enumerated GC handle snapshot collected during Phase 1 when memory-backed
     /// indexing is used. Mirrors the content of <c>HandleSnapshot.bin</c> in disk-backed
-    /// mode: one record per handle (Addr, MethodTable, Kind).
+    /// mode: one record per handle (Addr, MethodTable, Kind, DependentTarget). DependentTarget
+    /// (P3-3) is the secondary target address for Dependent-kind handles, 0 otherwise.
     /// Consumers: <c>WeakReferenceAnalyzer</c>, <c>GCHandleAnalyzer</c>.
     /// </summary>
-    (ulong Addr, ulong Mt, byte Kind)[]? InMemoryHandleSnapshot = null,
+    (ulong Addr, ulong Mt, byte Kind, ulong DependentTarget)[]? InMemoryHandleSnapshot = null,
     /// <summary>
     /// Non-fatal warnings emitted during satellite index file writes (disk-backed mode only).
     /// Null when all satellite files were written successfully or in memory-backed mode.

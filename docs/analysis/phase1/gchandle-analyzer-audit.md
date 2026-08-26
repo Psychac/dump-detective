@@ -293,7 +293,9 @@ It lists individual handle addresses, object addresses, and sizes. DumpDetective
 
 ### WinDbg `!finalizequeue`
 
-DumpDetective has no equivalent to `!finalizequeue` — which lists objects waiting for finalization including critical finalizers. Finalization pressure is often correlated with handle leaks (objects with finalizers that release GCHandles). This is an adjacent, high-value capability.
+> **Update (P3-1 audit, 2026-08-26):** covered by `FinalizableObjectAnalyzer`, not `GCHandleAnalyzer`. See the P3 roadmap row below.
+
+DumpDetective's `FinalizableObjectAnalyzer` covers this — it enumerates the finalization queue exhaustively via `heap.EnumerateFinalizableObjects()`, including critical-finalizer detection, undisposed-object detection, and root-path retention with exact dominator-tree bytes. Finalization pressure is often correlated with handle leaks (objects with finalizers that release GCHandles), but that correlation is a separate, still-open cross-analyzer opportunity — not a `GCHandleAnalyzer` gap.
 
 ### PerfView: GC Roots View
 
@@ -313,10 +315,10 @@ dotMemory shows the full retention path through handles to objects. DumpDetectiv
 
 | Capability | WinDbg SOS | dotMemory | DumpDetective |
 |---|---|---|---|
-| Individual handle addresses | Yes | Partial | No |
-| Finalization queue analysis | Yes | Yes | No |
-| Retention path from handle | Yes | Yes | No |
-| Per-kind pinned bytes | No | Partial | No (aggregate only) |
+| Individual handle addresses | Yes | Partial | Yes (P2-4, top-N by retained bytes) |
+| Finalization queue analysis | Yes | Yes | Yes (`FinalizableObjectAnalyzer`, separate analyzer) |
+| Retention path from handle | Yes | Yes | No (infra available via `ReverseEdgeIndexReader`/`RootPathFinder`, not yet wired into GCHandleAnalyzer — see note below) |
+| Per-kind pinned bytes | No | Partial | Yes (P2-3) |
 | Source→target dependency pairs | No | No | Yes |
 | Multi-dump trend | No | No | Yes |
 
@@ -349,14 +351,14 @@ The analyzer has good structural coverage of the GC handle domain and delivers r
 | **P1** | Move severity thresholds into `GCHandleAnalysisOptions` | Enables workload-appropriate tuning without code changes | Low | High | Improvement | ✅ DONE (P1-5) |
 | **P1** | Fix silent type-count discrepancy — add "unknown" bucket to `allTargetTypes` | Correct accounting; engineers can see how many handles had unresolvable types | Low | High | Improvement | ✅ DONE (P1-6) |
 | **P1** | Remove dead branch in `Analyze` (heapCache fast-path) — simplify to direct `resolvedSize` computation | Reduces confusion; eliminates misleading branch | Low | High | Improvement | ✅ DONE (P1-7 — removed in P0-2 refactor) |
-| **P2** | SOH vs LOH annotation for pinned targets | Reduces false positives for LOH pinning scenarios | Medium | Medium | Improvement |
-| **P2** | Add RefCounted (COM) handle finding | Covers COM interop leak scenarios | Low | Medium | Improvement |
-| **P2** | Add per-kind pinned bytes table to section builder | Richer diagnostic breakdown without new model fields | Low | Medium | Improvement |
-| **P2** | Top-N individual pinned handle addresses as optional table | Bridges to debugger follow-up without WinDbg | Medium | Medium | Improvement |
-| **P3** | Finalization queue analysis via handle table inspection | Covers finalization pressure diagnostic gap vs. WinDbg | High | Medium | Evolution |
-| **P3** | WeakShort vs WeakLong split with GC generation breakdown | Covers GC recovery rate signal | Medium | Medium | Improvement |
-| **P3** | Extend `HandleRecord` to carry dependent target address | Enables snapshot-based dependent handle analysis (removes live enumeration fallback) | Medium | High | Evolution |
-| **P3** | Add functional unit tests with fake/mocked handle data | Verifies finding thresholds and correctness in CI without a real dump | Medium | High | Improvement |
+| **P2** | SOH vs LOH annotation for pinned targets | Reduces false positives for LOH pinning scenarios | Medium | Medium | Improvement | ✅ DONE (P2-1 — `TryIsSoh` classification for Pinned/AsyncPinned targets, section table, dedicated finding) |
+| **P2** | Add RefCounted (COM) handle finding | Covers COM interop leak scenarios | Low | Medium | Improvement | ✅ DONE (P2-2 — RefCounted target-type tracking, section table, dedicated finding) |
+| **P2** | Add per-kind pinned bytes table to section builder | Richer diagnostic breakdown without new model fields | Low | Medium | Improvement | ✅ DONE (P2-3 — "Pinned retained bytes by kind" + "AsyncPinned types by retained bytes" tables, `async_pinned_retained_bytes` key metric; surfaces existing P1-2/§9 model fields, no new model fields) |
+| **P2** | Top-N individual pinned handle addresses as optional table | Bridges to debugger follow-up without WinDbg | Medium | Medium | Improvement | ✅ DONE (P2-4 — new `PinnedHandleAddressEntry` list covers both Pinned/AsyncPinned, exact full set ranked by bytes then truncated for display via `TopPinnedHandleAddressesToShow`, "Top pinned handle addresses by retained bytes" table) |
+| **P3** | Finalization queue analysis via handle table inspection | Covers finalization pressure diagnostic gap vs. WinDbg | High | Medium | Evolution | ⛔ SUPERSEDED — `FinalizableObjectAnalyzer` (`src/DumpDetective.Analysis/Analyzers/FinalizableObjectAnalyzer.cs`) already covers this via `heap.EnumerateFinalizableObjects()` (exhaustive, exact retained bytes via dominator tree), critical-finalizer detection, undisposed detection, and root-path retention. It didn't exist / wasn't cross-referenced when this row was written. No further GCHandleAnalyzer work needed here. |
+| **P3** | WeakShort vs WeakLong split with GC generation breakdown | Covers GC recovery rate signal | Medium | Medium | Improvement | ✅ DONE (P3-2 — count split via `HandlesByKind` already existed pre-audit; added Gen0/Gen1/Gen2/LOH breakdown per kind, "Weak handle targets by generation" table, and a WeakLong Gen2/LOH-concentration finding pointing at `FinalizableObjectAnalyzer` for the finalization-queue cross-check) |
+| **P3** | Extend `HandleRecord` to carry dependent target address | Enables snapshot-based dependent handle analysis (removes live enumeration fallback) | Medium | High | Evolution | ✅ DONE (P3-3 — `HandleRecord.DependentTarget` (binary format v2, RecordSize 20→28, v1 caches still readable), computed once at snapshot-write time via new shared `DependentHandleTargetResolver` instead of a second `runtime.EnumerateHandles()` pass in `GCHandleAnalyzer`; dependent-handle topology now resolved inline in the unified `ProcessHandle` streaming loop) |
+| **P3** | Add functional unit tests with fake/mocked handle data | Verifies finding thresholds and correctness in CI without a real dump | Medium | High | Improvement | ✅ DONE (P3-4 — `GCHandleFindingGeneratorTests.cs` (14 tests, pure domain-result → findings, zero ClrMD dependency) + `GCHandleAnalyzerFunctionalTests.cs` (6 tests, exercises the real `GCHandleAnalyzer.Analyze` via a disk-injected fake `HandleSnapshot.bin`, same pattern as `AnalysisPipelineTests`, `heap=null`/`runtime=null!`, no real dump) |
 
 ### Final Verdict
 

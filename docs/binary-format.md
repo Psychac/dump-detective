@@ -123,9 +123,16 @@ field names — all root data), falling back to a live heap walk until the cache
 
 ### Handles / Tasks / EventCandidates / LargeObjects / LohFreeBlocks
 Each preserves its pre-migration per-file format unchanged: 24-byte header (magic, version,
-ticks, record count) + fixed-size records — `HandleSnapshot.bin` (20-byte records: Addr,
-MethodTable, Kind), `TaskIndex.bin`, `EventCandidateIndex.bin`, `LargeObjectIndex.bin`,
-`LohFreeBlockIndex.bin`.
+ticks, record count) + fixed-size records — `TaskIndex.bin`, `EventCandidateIndex.bin`,
+`LargeObjectIndex.bin`, `LohFreeBlockIndex.bin`.
+
+`HandleSnapshot.bin` is versioned (P3-3): v1 records are 20 bytes (Addr, MethodTable, Kind, 3
+pad bytes); v2 records are 28 bytes, adding an 8-byte `DependentTarget` field — the secondary
+target address for `Dependent`-kind handles (0 for every other kind), resolved once at write
+time via `DependentHandleTargetResolver` instead of a second live `runtime.EnumerateHandles()`
+pass during analysis. `DiskHandleSnapshotReader` selects the record size from the header's
+version field, so v1 caches on disk remain readable (with `DependentTarget` defaulting to 0)
+until they're naturally rebuilt.
 
 ### StringDedup / StringDedupMeta
 `StringDedupIndex.bin` format: 12-byte header + dedup records, keyed by XxHash64 →

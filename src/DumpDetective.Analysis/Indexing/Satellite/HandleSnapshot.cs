@@ -2,7 +2,10 @@ using System;
 
 namespace DumpDetective.Analysis.Indexing.Satellite;
 
-internal readonly record struct HandleRecord(ulong Address, ulong MethodTable, byte Kind, bool IsAlive = true);
+/// <summary><paramref name="DependentTarget"/> is the secondary target address for "Dependent"
+/// kind handles (P3-3) — 0 when not a Dependent handle, unresolvable, or read from a v1 (pre-P3-3)
+/// on-disk snapshot that didn't carry it.</summary>
+internal readonly record struct HandleRecord(ulong Address, ulong MethodTable, byte Kind, bool IsAlive = true, ulong DependentTarget = 0);
 
 internal interface IHandleSnapshotReader : IDisposable
 {

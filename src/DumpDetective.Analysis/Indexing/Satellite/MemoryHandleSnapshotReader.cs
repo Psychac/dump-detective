@@ -39,7 +39,12 @@ internal sealed class MemoryHandleSnapshotReader : IHandleSnapshotReader
                 }
             }
 
-            yield return new HandleRecord(addr, mt, kind, isAlive);
+            // P3-3: resolve the dependent target inline — same live ClrHandle already in hand.
+            ulong dependentTarget = 0;
+            if (h.HandleKind == ClrHandleKind.Dependent)
+                DependentHandleTargetResolver.TryGetDependentTargetAddress(h, out dependentTarget);
+
+            yield return new HandleRecord(addr, mt, kind, isAlive, dependentTarget);
             _count++;
             if (_count > _cap) yield break;
         }

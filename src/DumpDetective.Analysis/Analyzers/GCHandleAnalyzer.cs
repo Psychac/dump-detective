@@ -1,6 +1,7 @@
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Indexing.Satellite;
+using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
@@ -41,12 +42,32 @@ namespace DumpDetective.Analysis.Analyzers
 
             var byKind = new Dictionary<string, int>(StringComparer.Ordinal);
             var pinnedTypes = new Dictionary<string, int>(StringComparer.Ordinal);
+            // P2-2: RefCounted handles back COM interop (RCW) lifetime; concentration by target
+            // type surfaces COM object leaks that would otherwise be invisible in the handle count.
+            var refCountedTypes = new Dictionary<string, int>(StringComparer.Ordinal);
+            // P2-4: individual pinned-handle addresses for debugger follow-up. Bounded by pinned
+            // handle count (already the scope of the existing per-handle byte resolution above),
+            // not heap object count, so collecting the full set before ranking is cheap.
+            var pinnedHandleAddresses = new List<PinnedHandleAddressEntry>();
             var pinnedBytesByType = new Dictionary<string, ulong>(StringComparer.Ordinal);
             var asyncPinnedBytesByType = new Dictionary<string, ulong>(StringComparer.Ordinal);
             var allTargetTypes = new Dictionary<string, int>(StringComparer.Ordinal);
             var nullTargetHandlesByKind = new Dictionary<string, int>(StringComparer.Ordinal);
             ulong totalPinnedRetainedBytes = 0;
             ulong totalAsyncPinnedRetainedBytes = 0;
+            // P2-1: SOH targets keep the GC from compacting around them; LOH/POH/Frozen targets
+            // don't (LOH is never compacted, POH objects are already pinned by construction), so
+            // only the SOH count signals an actionable compaction barrier.
+            int pinnedSohObjectCount = 0;
+            int pinnedNonSohObjectCount = 0;
+            int asyncPinnedSohObjectCount = 0;
+            int asyncPinnedNonSohObjectCount = 0;
+            // P3-2: WeakShort clears when the target becomes unreachable, even mid-finalization;
+            // WeakLong clears only after finalization completes. A WeakLong population
+            // concentrated in Gen2/LOH can indicate a finalization backlog (targets lingering,
+            // weakly-referenced, waiting for their finalizer to run).
+            int weakShortGen0Count = 0, weakShortGen1Count = 0, weakShortGen2Count = 0, weakShortLohCount = 0;
+            int weakLongGen0Count = 0, weakLongGen1Count = 0, weakLongGen2Count = 0, weakLongLohCount = 0;
             // OPT-#9: Cache method-table -> type-name to avoid one heap.GetObject call per handle
             // for handles whose target type has already been resolved. Collapses N handles of
             // the same type into a single lookup. Also reused for dependent-handle target resolution.
@@ -64,7 +85,7 @@ namespace DumpDetective.Analysis.Analyzers
             var dependentTargetTypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
             var dependentSourceTargetPairCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
-            void ProcessHandle(ulong targetAddress, ulong methodTable, byte kindByte)
+            void ProcessHandle(ulong targetAddress, ulong methodTable, byte kindByte, ulong dependentTarget = 0)
             {
                 scanCounter.Tick();
                 totalHandles++;
@@ -77,10 +98,19 @@ namespace DumpDetective.Analysis.Analyzers
                 else
                     strongLikeHandles++;
 
+                // P3-3: dependentHandleCount counts every Dependent-kind handle unconditionally
+                // (matching the prior live-enumeration pass, which incremented it before any
+                // validity check) — same heap-is-null limitation the old pass had.
+                bool isDependent = kind == "Dependent";
+                if (isDependent && heap is not null)
+                    dependentHandleCount++;
+
                 // P1-3: Track null-target handles per kind
                 if (targetAddress == 0)
                 {
                     Increment(nullTargetHandlesByKind, kind);
+                    if (isDependent && heap is not null)
+                        dependentUnresolvedTargetCount++;
                     return;
                 }
 
@@ -88,6 +118,8 @@ namespace DumpDetective.Analysis.Analyzers
                 if (typeName == null)
                 {
                     unknownTargetCount++;
+                    if (isDependent && heap is not null)
+                        dependentUnresolvedTargetCount++;
                     return;
                 }
 
@@ -96,6 +128,15 @@ namespace DumpDetective.Analysis.Analyzers
                 // P1-2: Separate AsyncPinned vs Pinned byte accounting
                 if (kind == "AsyncPinned")
                 {
+                    // P2-1: SOH vs LOH/POH/Frozen classification for the pinned target
+                    if (TryIsSoh(heap, targetAddress, out bool isSohAsync))
+                    {
+                        if (isSohAsync)
+                            asyncPinnedSohObjectCount++;
+                        else
+                            asyncPinnedNonSohObjectCount++;
+                    }
+
                     // §9: exact retained bytes when the dominator tree is available — this is what
                     // "would become collectible if this pin were released" actually means. Falls
                     // back to ResolveSize's shallow size (the target's own bytes, not what it
@@ -119,11 +160,24 @@ namespace DumpDetective.Analysis.Analyzers
                             asyncPinnedBytesByType[typeName] = existingBytes + resolvedSize;
                         else
                             asyncPinnedBytesByType[typeName] = resolvedSize;
+
+                        // P2-4: individual address entry for the top-N table
+                        pinnedHandleAddresses.Add(new PinnedHandleAddressEntry(targetAddress, typeName, resolvedSize, kind));
                     }
                 }
                 else if (kind == "Pinned")
                 {
                     Increment(pinnedTypes, typeName);
+
+                    // P2-1: SOH vs LOH/POH/Frozen classification for the pinned target
+                    if (TryIsSoh(heap, targetAddress, out bool isSohPinned))
+                    {
+                        if (isSohPinned)
+                            pinnedSohObjectCount++;
+                        else
+                            pinnedNonSohObjectCount++;
+                    }
+
                     // §9: same exact-retained-bytes preference as the AsyncPinned branch above.
                     ulong resolvedSize;
                     if (handleTreeProvider is not null && handleTreeProvider.TryGetRetainedBytes(targetAddress, out ulong exactPinnedBytes))
@@ -144,13 +198,76 @@ namespace DumpDetective.Analysis.Analyzers
                             pinnedBytesByType[typeName] = existingBytes + resolvedSize;
                         else
                             pinnedBytesByType[typeName] = resolvedSize;
+
+                        // P2-4: individual address entry for the top-N table
+                        pinnedHandleAddresses.Add(new PinnedHandleAddressEntry(targetAddress, typeName, resolvedSize, kind));
+                    }
+                }
+                else if (kind == "RefCounted")
+                {
+                    // P2-2: COM interop (RCW) target type concentration
+                    Increment(refCountedTypes, typeName);
+                }
+                else if (kind == "Dependent")
+                {
+                    // P3-3: dependent-handle topology, resolved inline from the snapshot-carried
+                    // DependentTarget instead of a second live runtime.EnumerateHandles() pass.
+                    // Source-type resolution still requires the live heap — matches the prior
+                    // live-only pass, which likewise tracked nothing when heap was null.
+                    if (heap is not null)
+                    {
+                        if (!TryResolveTypeNameStrict(heap, cache, targetAddress, methodTableNameCache, out string sourceType))
+                        {
+                            dependentUnresolvedTargetCount++;
+                        }
+                        else
+                        {
+                            Increment(dependentSourceTypeCounts, sourceType);
+
+                            if (dependentTarget == 0
+                                || !TryResolveTypeNameStrict(heap, cache, dependentTarget, methodTableNameCache, out string dependentTargetType))
+                            {
+                                dependentUnresolvedTargetCount++;
+                            }
+                            else
+                            {
+                                dependentResolvedEdgeCount++;
+                                Increment(dependentTargetTypeCounts, dependentTargetType);
+                                Increment(dependentSourceTargetPairCounts, $"{sourceType} -> {dependentTargetType}");
+                            }
+                        }
+                    }
+                }
+                else if (kind == "WeakShort" || kind == "WeakLong")
+                {
+                    // P3-2: generation breakdown for weak handle targets
+                    int generation = heap is null ? -1 : SegmentKindMapper.ResolveGeneration(heap, targetAddress);
+                    if (generation < 0)
+                    {
+                        // Unresolvable segment — no bucket to attribute to.
+                    }
+                    else if (kind == "WeakShort")
+                    {
+                        if (generation == 0) weakShortGen0Count++;
+                        else if (generation == 1) weakShortGen1Count++;
+                        else if (generation == 2) weakShortGen2Count++;
+                        else weakShortLohCount++;
+                    }
+                    else
+                    {
+                        if (generation == 0) weakLongGen0Count++;
+                        else if (generation == 1) weakLongGen1Count++;
+                        else if (generation == 2) weakLongGen2Count++;
+                        else weakLongLohCount++;
                     }
                 }
             }
 
-            // P0-2: Prefer the shared handle snapshot (disk or in-memory) built during indexing over a
-            // second runtime.EnumerateHandles() call. Dependent handle target addresses are not carried
-            // by the snapshot, so dependent edges are resolved via a bounded live-enumeration fallback below.
+            // P0-2/P3-3: Prefer the shared handle snapshot (disk or in-memory) built during
+            // indexing over a second runtime.EnumerateHandles() call. The snapshot now carries
+            // each Dependent handle's secondary target address (HandleRecord.DependentTarget,
+            // P3-3), so dependent-handle topology is resolved inline in ProcessHandle above —
+            // no separate live-enumeration pass is needed for it anymore.
             HeapIndexBuildResult? heapIndex = null;
             if (cache is HeapAnalysisCache heapCache)
                 heapCache.TryGetHeapIndex(out heapIndex);
@@ -160,7 +277,7 @@ namespace DumpDetective.Analysis.Analyzers
                 foreach (var rec in inMemHandles)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    ProcessHandle(rec.Addr, rec.Mt, rec.Kind);
+                    ProcessHandle(rec.Addr, rec.Mt, rec.Kind, rec.DependentTarget);
                 }
             }
             else
@@ -176,61 +293,36 @@ namespace DumpDetective.Analysis.Analyzers
                     using (reader)
                     {
                         foreach (HandleRecord rec in reader.EnumerateRecords(cancellationToken))
-                            ProcessHandle(rec.Address, rec.MethodTable, rec.Kind);
+                            ProcessHandle(rec.Address, rec.MethodTable, rec.Kind, rec.DependentTarget);
                     }
                 }
                 else
                 {
                     // No heap available to resolve method tables — fall back to raw enumeration.
+                    // Dependent-target resolution doesn't need the heap (it's reflection over the
+                    // live ClrHandle), so it's still available on this path.
                     foreach (ClrHandle handle in runtime.EnumerateHandles())
                     {
                         cancellationToken.ThrowIfCancellationRequested();
-                        ProcessHandle(GetTargetAddress(handle), 0, (byte)handle.HandleKind);
+                        ulong dependentTarget = 0;
+                        if (handle.HandleKind == ClrHandleKind.Dependent)
+                            DependentHandleTargetResolver.TryGetDependentTargetAddress(handle, out dependentTarget);
+                        ProcessHandle(GetTargetAddress(handle), 0, (byte)handle.HandleKind, dependentTarget);
                     }
                 }
             }
 
             scanCounter.Complete();
 
-            // Dependent handle topology requires the live handle object to resolve the secondary
-            // (dependent) target address, which the snapshot does not carry. Scope this pass to
-            // Dependent-kind handles only.
-            if (heap is not null)
-            {
-                foreach (ClrHandle handle in runtime.EnumerateHandles())
-                {
-                    if (handle.HandleKind != ClrHandleKind.Dependent)
-                        continue;
-
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    dependentHandleCount++;
-
-                    if (!TryGetHandleAddress(handle.Object, out ulong sourceAddress)
-                        || !TryResolveTypeNameStrict(heap, cache, sourceAddress, methodTableNameCache, out string sourceType))
-                    {
-                        dependentUnresolvedTargetCount++;
-                        continue;
-                    }
-
-                    Increment(dependentSourceTypeCounts, sourceType);
-
-                    if (!TryGetDependentTargetAddress(handle, out ulong dependentTargetAddress)
-                        || !TryResolveTypeNameStrict(heap, cache, dependentTargetAddress, methodTableNameCache, out string dependentTargetType))
-                    {
-                        dependentUnresolvedTargetCount++;
-                        continue;
-                    }
-
-                    dependentResolvedEdgeCount++;
-                    Increment(dependentTargetTypeCounts, dependentTargetType);
-                    Increment(dependentSourceTargetPairCounts, $"{sourceType} -> {dependentTargetType}");
-                }
-            }
-
             int pinnedHandleTargets = pinnedTypes.Values.Sum();
+            int refCountedHandleCount = refCountedTypes.Values.Sum();
             double dependentUnresolvedPercent = dependentHandleCount == 0 ? 0
                 : dependentUnresolvedTargetCount * 100.0 / dependentHandleCount;
+
+            // P2-4: rank the exact set of collected pinned-handle addresses by bytes, keep top N for display.
+            pinnedHandleAddresses.Sort(static (a, b) => b.Bytes.CompareTo(a.Bytes));
+            int topPinnedAddressCount = Math.Min(options.TopPinnedHandleAddressesToShow, pinnedHandleAddresses.Count);
+            var topPinnedHandleAddresses = pinnedHandleAddresses.GetRange(0, topPinnedAddressCount);
 
             static List<NameCountEntry> ToRankedEntries(Dictionary<string, int> source)
             {
@@ -272,9 +364,28 @@ namespace DumpDetective.Analysis.Analyzers
                 ToRankedEntries(dependentSourceTargetPairCounts),
                 PinnedRetainedBytesIsExact: pinnedExactCount > 0 && pinnedFallbackCount == 0,
                 AsyncPinnedRetainedBytesIsExact: asyncPinnedExactCount > 0 && asyncPinnedFallbackCount == 0,
+                PinnedSohObjectCount: pinnedSohObjectCount,
+                PinnedNonSohObjectCount: pinnedNonSohObjectCount,
+                AsyncPinnedSohObjectCount: asyncPinnedSohObjectCount,
+                AsyncPinnedNonSohObjectCount: asyncPinnedNonSohObjectCount,
+                RefCountedHandleCount: refCountedHandleCount,
+                TopRefCountedTargetTypes: ToRankedEntries(refCountedTypes),
+                TopPinnedHandleAddresses: topPinnedHandleAddresses,
+                WeakShortGen0Count: weakShortGen0Count,
+                WeakShortGen1Count: weakShortGen1Count,
+                WeakShortGen2Count: weakShortGen2Count,
+                WeakShortLohCount: weakShortLohCount,
+                WeakLongGen0Count: weakLongGen0Count,
+                WeakLongGen1Count: weakLongGen1Count,
+                WeakLongGen2Count: weakLongGen2Count,
+                WeakLongLohCount: weakLongLohCount,
                 TotalHandlesWarningThreshold: options.TotalHandlesWarningThreshold,
                 PinnedHandleTargetsWarningThreshold: options.PinnedHandleTargetsWarningThreshold,
                 PinnedRetainedBytesWarningThreshold: options.PinnedRetainedBytesWarningThreshold,
+                PinnedSohObjectCountWarningThreshold: options.PinnedSohObjectCountWarningThreshold,
+                RefCountedHandleCountWarningThreshold: options.RefCountedHandleCountWarningThreshold,
+                WeakLongGen2FractionWarningThreshold: options.WeakLongGen2FractionWarningThreshold,
+                WeakLongGen2MinimumCountThreshold: options.WeakLongGen2MinimumCountThreshold,
                 DependentUnresolvedPercentWarningThreshold: options.DependentUnresolvedPercentWarningThreshold);
         }
 
@@ -283,6 +394,26 @@ namespace DumpDetective.Analysis.Analyzers
         private static bool IsWeakLike(string kind)
         {
             return kind.Contains("Weak", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Resolves whether <paramref name="address"/> lives on the small object heap via a single
+        /// <c>ClrSegment</c> lookup (bounded by pinned-handle count, not heap size — same cost class as
+        /// the existing per-handle <c>ClrObject.Size</c> read). Returns false (with <paramref name="isSoh"/>
+        /// unset) when <paramref name="heap"/> is null or the address doesn't resolve to a segment.
+        /// </summary>
+        private static bool TryIsSoh(ClrHeap? heap, ulong address, out bool isSoh)
+        {
+            isSoh = false;
+            if (heap is null)
+                return false;
+
+            ClrSegment? segment = heap.GetSegmentByAddress(address);
+            if (segment is null)
+                return false;
+
+            isSoh = SegmentKindMapper.Map(segment) == HeapSegmentKind.SmallObjectHeap;
+            return true;
         }
 
         private static void Increment(Dictionary<string, int> counts, string key)
@@ -308,68 +439,6 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             return 0;
-        }
-
-        private static bool TryGetHandleAddress(object value, out ulong address)
-        {
-            address = 0;
-
-            if (value is ClrObject clrObject)
-            {
-                if (!clrObject.IsValid)
-                    return false;
-
-                address = clrObject.Address;
-                return true;
-            }
-
-            if (value is ulong targetAddress && targetAddress != 0)
-            {
-                address = targetAddress;
-                return true;
-            }
-
-            return false;
-        }
-
-        private static bool TryGetDependentTargetAddress(ClrHandle handle, out ulong targetAddress)
-        {
-            targetAddress = 0;
-
-            try
-            {
-                string[] propertyCandidates =
-                [
-                    "DependentTarget",
-                    "Target",
-                    "Secondary",
-                    "DependentObject",
-                    "Dependent"
-                ];
-
-                Type handleType = handle.GetType();
-                foreach (string propertyName in propertyCandidates)
-                {
-                    System.Reflection.PropertyInfo? property = handleType.GetProperty(propertyName, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
-                    if (property == null)
-                        continue;
-
-                    object? value = property.GetValue(handle);
-                    if (value == null)
-                        continue;
-
-                    if (TryGetHandleAddress(value, out targetAddress))
-                        return true;
-                }
-            }
-            catch (System.Reflection.TargetInvocationException)
-            {
-            }
-            catch (System.Reflection.AmbiguousMatchException)
-            {
-            }
-
-            return false;
         }
 
         private static bool TryResolveTypeNameStrict(ClrHeap heap, IHeapAnalysisCache? cache, ulong address, Dictionary<ulong, string> methodTableNameCache, out string typeName)

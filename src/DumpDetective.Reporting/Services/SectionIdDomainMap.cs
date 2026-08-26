@@ -33,6 +33,7 @@ internal static class SectionIdDomainMap
         ["Heap Topology"]              = ("GC",         "B3"),
         ["LohFragmentationAnalyzer"]   = ("GC",         "B4"),
         ["LOH Fragmentation Analysis"]  = ("GC",         "B4"),
+        ["LOH & POH Fragmentation Analysis"]  = ("GC",   "B4"),
         ["SegmentReservationAnalyzer"] = ("GC",         "B5"),
         ["Segment Reservation Analysis"] = ("GC",       "B5"),
         ["FinalizableObjectAnalyzer"]  = ("GC",         "B6"),

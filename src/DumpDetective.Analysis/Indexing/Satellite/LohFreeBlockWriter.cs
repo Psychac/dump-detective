@@ -11,6 +11,9 @@ namespace DumpDetective.Analysis.Indexing.Satellite;
 /// <remarks>
 /// Record layout (24 bytes, little-endian):
 ///   SegmentAddress (8) | Offset (8) | Size (8)
+/// Offset is the free block's byte offset from SegmentAddress; consumers reconstruct the
+/// block's absolute address as SegmentAddress + Offset (e.g. to surface the largest free
+/// block's location for further WinDbg investigation).
 /// Consumers: LohFragmentationAnalyzer
 /// Typical size: &lt; 1 MB
 /// </remarks>

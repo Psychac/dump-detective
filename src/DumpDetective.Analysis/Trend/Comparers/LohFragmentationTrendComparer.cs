@@ -4,7 +4,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
 {
     internal sealed class LohFragmentationTrendComparer : IAnalyzerTrendComparer
     {
-        public string AnalyzerName => "LOH Fragmentation Analysis";
+        public string AnalyzerName => "LOH & POH Fragmentation Analysis";
 
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
@@ -27,7 +27,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 MetricDeltaHelper.Compute("loh.fragmentation.percent", null, b.FragmentationPercent, c.FragmentationPercent, "%",        MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("loh.free.bytes",            null, b.FreeBytes,             c.FreeBytes,             "bytes",   MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("loh.total.bytes",           null, b.TotalBytes,            c.TotalBytes,            "bytes",   MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("loh.largest.free.block",    null, b.LargestFreeBlock,      c.LargestFreeBlock,      "bytes",   MetricTrendDirection.Neutral),
+                MetricDeltaHelper.Compute("loh.largest.free.block",    null, b.LargestFreeBlock,      c.LargestFreeBlock,      "bytes",   MetricTrendDirection.LowerIsWorse),
                 MetricDeltaHelper.Compute("loh.segment.count",         null, b.SegmentCount,          c.SegmentCount,          "segments",MetricTrendDirection.Neutral)
             ];
         }

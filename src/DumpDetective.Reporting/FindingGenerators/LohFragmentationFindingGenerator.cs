@@ -6,7 +6,7 @@ namespace DumpDetective.Reporting.FindingGenerators;
 
 internal sealed class LohFragmentationFindingGenerator : IFindingGenerator
 {
-    public string AnalyzerName => "LOH Fragmentation Analysis";
+    public string AnalyzerName => "LOH & POH Fragmentation Analysis";
     public bool CanGenerate(AnalyzerDomainResult result) => result is LohFragmentationDomainResult;
 
     public IReadOnlyList<InsightFinding> Generate(AnalyzerDomainResult result)
@@ -24,7 +24,7 @@ internal sealed class LohFragmentationFindingGenerator : IFindingGenerator
                 Category: "Fragmentation",
                 Severity: severity,
                 Title: "LOH fragmentation assessment",
-                Evidence: $"{r.FragmentationPercent:F1}% overall free-space fragmentation across {r.SegmentCount:N0} LOH segment(s).",
+                Evidence: $"{r.FragmentationPercent:F1}% overall free-space fragmentation across {r.SegmentCount:N0} LOH/POH segment(s).",
                 Recommendation: severity == FindingSeverity.Critical
                     ? "Investigate large object allocation churn and retention; consider compaction strategies and pooling."
                     : severity == FindingSeverity.Warning

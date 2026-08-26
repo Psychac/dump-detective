@@ -28,7 +28,7 @@ namespace DumpDetective.Analysis.Analyzers
             (104_857_600UL,  ulong.MaxValue,     "\u2265 100 MB"),
         ];
 
-        public string Name => "LOH Fragmentation Analysis";
+        public string Name => "LOH & POH Fragmentation Analysis";
         public string Category => "Memory";
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
@@ -74,6 +74,7 @@ namespace DumpDetective.Analysis.Analyzers
                 ulong totalBytes = GetSegmentTotalBytes(segment);
                 ulong freeBytes = 0;
                 ulong largestFreeBlock = 0;
+                ulong largestFreeBlockAddress = 0;
                 int objectCount = 0;
                 int freeObjectCount = 0;
 
@@ -91,6 +92,7 @@ namespace DumpDetective.Analysis.Analyzers
                         typeAggregation,
                         ref freeBytes,
                         ref largestFreeBlock,
+                        ref largestFreeBlockAddress,
                         ref objectCount,
                         ref freeObjectCount);
                 }
@@ -101,7 +103,7 @@ namespace DumpDetective.Analysis.Analyzers
                 ulong usedBytes = totalBytes > freeBytes ? totalBytes - freeBytes : 0;
 
                 double fragmentationPercent = totalBytes == 0 ? 0 : freeBytes * 100.0 / totalBytes;
-                segmentStats.Add(new LohSegmentStats(GetSegmentAddress(segment), totalBytes, usedBytes, freeBytes, largestFreeBlock, objectCount, freeObjectCount, fragmentationPercent));
+                segmentStats.Add(new LohSegmentStats(GetSegmentAddress(segment), totalBytes, usedBytes, freeBytes, largestFreeBlock, largestFreeBlockAddress, objectCount, freeObjectCount, fragmentationPercent, SegmentKindMapper.Map(segment)));
             }
 
             scanCounter.Complete();
@@ -129,8 +131,14 @@ namespace DumpDetective.Analysis.Analyzers
                 return cmp != 0 ? cmp : b.FreeBytes.CompareTo(a.FreeBytes);
             });
             var topSegments = new List<LohSegmentSnapshot>(segmentStats.Count);
+            var kindInputs = new List<(HeapSegmentKind Kind, ulong TotalBytes, ulong FreeBytes, ulong UsedBytes, ulong LargestFreeBlock)>(segmentStats.Count);
             foreach (var s in segmentStats)
-                topSegments.Add(new LohSegmentSnapshot(s.Address, s.TotalBytes, s.FragmentationPercent, s.FreeBytes, s.LargestFreeBlock));
+            {
+                topSegments.Add(new LohSegmentSnapshot(s.Address, s.TotalBytes, s.FragmentationPercent, s.FreeBytes, s.LargestFreeBlock, s.LargestFreeBlockAddress, s.Kind));
+                kindInputs.Add((s.Kind, s.TotalBytes, s.FreeBytes, s.UsedBytes, s.LargestFreeBlock));
+            }
+
+            List<LohKindBreakdown> kindBreakdown = BuildKindBreakdown(kindInputs);
 
             var freeGapHistogram = new List<FreeGapBucket>(s_gapBuckets.Length);
             for (int b = 0; b < s_gapBuckets.Length; b++)
@@ -148,7 +156,7 @@ namespace DumpDetective.Analysis.Analyzers
                 typeProfiles.Add(new LohTypeProfile(typeName, count, totalBytes));
             typeProfiles.Sort(static (a, b) => b.TotalBytes.CompareTo(a.TotalBytes));
 
-            return new LohFragmentationDomainResult(segmentStats.Count, totalAllBytes, totalFreeBytes, totalUsedBytes, totalFreeBlocks, overallFragmentation, maxFreeBlock, topSegments, freeGapHistogram, topLargeObjects, typeProfiles);
+            return new LohFragmentationDomainResult(segmentStats.Count, totalAllBytes, totalFreeBytes, totalUsedBytes, totalFreeBlocks, overallFragmentation, maxFreeBlock, topSegments, freeGapHistogram, topLargeObjects, typeProfiles, kindBreakdown);
         }
 
         private static double CalculateOverallFragmentationPercent(List<LohSegmentStats> segmentStats)
@@ -165,9 +173,45 @@ namespace DumpDetective.Analysis.Analyzers
             return totalBytes == 0 ? 0 : freeBytes * 100.0 / totalBytes;
         }
 
+        // ── LOH/POH kind breakdown ───────────────────────────────────────────────
+
+        /// <summary>
+        /// Groups per-segment stats by <see cref="HeapSegmentKind"/> (Large vs. Pinned) so the
+        /// report can distinguish LOH from POH fragmentation instead of only showing the combined
+        /// total that both heap-scan and index paths compute.
+        /// </summary>
+        internal static List<LohKindBreakdown> BuildKindBreakdown(
+            IEnumerable<(HeapSegmentKind Kind, ulong TotalBytes, ulong FreeBytes, ulong UsedBytes, ulong LargestFreeBlock)> segments)
+        {
+            var byKind = new Dictionary<HeapSegmentKind, (int Count, ulong TotalBytes, ulong FreeBytes, ulong UsedBytes, ulong LargestFreeBlock)>();
+            foreach (var s in segments)
+            {
+                if (byKind.TryGetValue(s.Kind, out var acc))
+                    byKind[s.Kind] = (
+                        acc.Count + 1,
+                        acc.TotalBytes + s.TotalBytes,
+                        acc.FreeBytes + s.FreeBytes,
+                        acc.UsedBytes + s.UsedBytes,
+                        s.LargestFreeBlock > acc.LargestFreeBlock ? s.LargestFreeBlock : acc.LargestFreeBlock);
+                else
+                    byKind[s.Kind] = (1, s.TotalBytes, s.FreeBytes, s.UsedBytes, s.LargestFreeBlock);
+            }
+
+            var result = new List<LohKindBreakdown>(byKind.Count);
+            foreach (var (kind, acc) in byKind)
+            {
+                double fragPct = acc.TotalBytes == 0 ? 0 : acc.FreeBytes * 100.0 / acc.TotalBytes;
+                result.Add(new LohKindBreakdown(kind, acc.Count, acc.TotalBytes, acc.FreeBytes, acc.UsedBytes, fragPct, acc.LargestFreeBlock));
+            }
+            result.Sort(static (a, b) => a.Kind.CompareTo(b.Kind));
+            return result;
+        }
+
         // Matches LohFreeBlockWriter.Write which indexes both Large and Pinned segments.
-        private static bool IsLohSegment(ClrSegment segment)
-            => segment.Kind == GCSegmentKind.Large || segment.Kind == GCSegmentKind.Pinned;
+        private static bool IsLohSegment(ClrSegment segment) => IsLohSegment(segment.Kind);
+
+        internal static bool IsLohSegment(GCSegmentKind kind)
+            => kind == GCSegmentKind.Large || kind == GCSegmentKind.Pinned;
 
         private static ulong GetSegmentAddress(ClrSegment segment) => segment.Start;
 
@@ -178,6 +222,7 @@ namespace DumpDetective.Analysis.Analyzers
             Dictionary<string, (int Count, ulong TotalBytes)> typeAggregation,
             ref ulong freeBytes,
             ref ulong largestFreeBlock,
+            ref ulong largestFreeBlockAddress,
             ref int objectCount,
             ref int freeObjectCount)
         {
@@ -198,7 +243,10 @@ namespace DumpDetective.Analysis.Analyzers
                 }
 
                 if (size > largestFreeBlock)
+                {
                     largestFreeBlock = size;
+                    largestFreeBlockAddress = obj.Address;
+                }
             }
             else
             {
@@ -243,6 +291,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             // Step 1: Read LOH segment committed bytes from heap metadata (no object enumeration).
             var segmentTotalBytes = new Dictionary<ulong, ulong>();
+            var segmentKinds = new Dictionary<ulong, HeapSegmentKind>();
             foreach (ClrSegment segment in heap.Segments)
             {
                 if (!IsLohSegment(segment))
@@ -250,14 +299,17 @@ namespace DumpDetective.Analysis.Analyzers
                 ulong addr = GetSegmentAddress(segment);
                 ulong bytes = GetSegmentTotalBytes(segment);
                 if (addr != 0)
+                {
                     segmentTotalBytes[addr] = bytes;
+                    segmentKinds[addr] = SegmentKindMapper.Map(segment);
+                }
             }
 
             if (segmentTotalBytes.Count == 0)
                 return new LohFragmentationDomainResult(0, 0, 0, 0, 0, 0, 0);
 
             // Step 2: Read LohFreeBlockIndex.bin.
-            var freeBySegment = new Dictionary<ulong, (ulong TotalFree, ulong Largest, int Count)>();
+            var freeBySegment = new Dictionary<ulong, (ulong TotalFree, ulong Largest, ulong LargestAddress, int Count)>();
             var allFreeSizes = new List<ulong>(capacity: 256);
             progress?.Report(new(0, "reading LohFreeBlockIndex.bin", null, TimeSpan.Zero));
             ReadFreeBlocks(heapIndex.IndexPath, freeBySegment, allFreeSizes, cancellationToken);
@@ -265,16 +317,17 @@ namespace DumpDetective.Analysis.Analyzers
             // Step 3: Compute per-segment and global stats.
             ulong totalAllBytes = 0, totalFreeBytes = 0, totalUsedBytes = 0, maxFreeBlock = 0;
             int totalFreeBlocks = 0;
-            var segStats = new List<(ulong Address, ulong TotalBytes, double FragPct, ulong FreeBytes, ulong LargestFree)>(segmentTotalBytes.Count);
+            var segStats = new List<(ulong Address, ulong TotalBytes, double FragPct, ulong FreeBytes, ulong LargestFree, ulong LargestFreeAddress, HeapSegmentKind Kind)>(segmentTotalBytes.Count);
 
             foreach ((ulong addr, ulong totalBytes) in segmentTotalBytes)
             {
-                ulong segFree = 0, segLargest = 0;
+                ulong segFree = 0, segLargest = 0, segLargestAddress = 0;
                 int segFreeCount = 0;
                 if (freeBySegment.TryGetValue(addr, out var fb))
                 {
                     segFree = fb.TotalFree;
                     segLargest = fb.Largest;
+                    segLargestAddress = fb.LargestAddress;
                     segFreeCount = fb.Count;
                 }
                 ulong segUsed = totalBytes > segFree ? totalBytes - segFree : 0;
@@ -286,7 +339,7 @@ namespace DumpDetective.Analysis.Analyzers
                 totalFreeBlocks += segFreeCount;
                 if (segLargest > maxFreeBlock) maxFreeBlock = segLargest;
 
-                segStats.Add((addr, totalBytes, fragPct, segFree, segLargest));
+                segStats.Add((addr, totalBytes, fragPct, segFree, segLargest, segLargestAddress, segmentKinds[addr]));
             }
 
             double overallFragPct = totalAllBytes == 0 ? 0 : totalFreeBytes * 100.0 / totalAllBytes;
@@ -299,8 +352,14 @@ namespace DumpDetective.Analysis.Analyzers
             });
 
             var topSegs = new List<LohSegmentSnapshot>(segStats.Count);
+            var kindInputs = new List<(HeapSegmentKind Kind, ulong TotalBytes, ulong FreeBytes, ulong UsedBytes, ulong LargestFreeBlock)>(segStats.Count);
             foreach (var s in segStats)
-                topSegs.Add(new LohSegmentSnapshot(s.Address, s.TotalBytes, s.FragPct, s.FreeBytes, s.LargestFree));
+            {
+                topSegs.Add(new LohSegmentSnapshot(s.Address, s.TotalBytes, s.FragPct, s.FreeBytes, s.LargestFree, s.LargestFreeAddress, s.Kind));
+                ulong segUsedForKind = s.TotalBytes > s.FreeBytes ? s.TotalBytes - s.FreeBytes : 0;
+                kindInputs.Add((s.Kind, s.TotalBytes, s.FreeBytes, segUsedForKind, s.LargestFree));
+            }
+            List<LohKindBreakdown> kindBreakdown = BuildKindBreakdown(kindInputs);
 
             // Step 4: Build free-gap histogram.
             var freeGapHistogram = BuildFreeGapHistogram(allFreeSizes, cancellationToken);
@@ -341,7 +400,7 @@ namespace DumpDetective.Analysis.Analyzers
             return new LohFragmentationDomainResult(
                 segmentTotalBytes.Count, totalAllBytes, totalFreeBytes, totalUsedBytes,
                 totalFreeBlocks, overallFragPct, maxFreeBlock,
-                topSegs, freeGapHistogram, topLargeObjects, typeProfiles);
+                topSegs, freeGapHistogram, topLargeObjects, typeProfiles, kindBreakdown);
         }
 
         // ── Segment metadata helpers ──────────────────────────────────────────────
@@ -354,9 +413,9 @@ namespace DumpDetective.Analysis.Analyzers
 
         // ── Index readers ─────────────────────────────────────────────────────────
 
-        private static void ReadFreeBlocks(
+        internal static void ReadFreeBlocks(
             string containerPath,
-            Dictionary<ulong, (ulong TotalFree, ulong Largest, int Count)> bySegment,
+            Dictionary<ulong, (ulong TotalFree, ulong Largest, ulong LargestAddress, int Count)> bySegment,
             List<ulong> allSizes,
             CancellationToken cancellationToken)
         {
@@ -379,14 +438,17 @@ namespace DumpDetective.Analysis.Analyzers
                             break;
 
                         ulong segAddr = BinaryPrimitives.ReadUInt64LittleEndian(rec);
-                        // offset field at [8..16) is unused for aggregation
+                        ulong offset = BinaryPrimitives.ReadUInt64LittleEndian(rec[8..]);
                         ulong size = BinaryPrimitives.ReadUInt64LittleEndian(rec[16..]);
+                        ulong address = segAddr + offset;
 
                         allSizes.Add(size);
                         if (bySegment.TryGetValue(segAddr, out var ex))
-                            bySegment[segAddr] = (ex.TotalFree + size, size > ex.Largest ? size : ex.Largest, ex.Count + 1);
+                            bySegment[segAddr] = size > ex.Largest
+                                ? (ex.TotalFree + size, size, address, ex.Count + 1)
+                                : (ex.TotalFree + size, ex.Largest, ex.LargestAddress, ex.Count + 1);
                         else
-                            bySegment[segAddr] = (size, size, 1);
+                            bySegment[segAddr] = (size, size, address, 1);
                     }
                 }
             }
@@ -399,7 +461,7 @@ namespace DumpDetective.Analysis.Analyzers
 
         // ── Free-gap histogram ────────────────────────────────────────────────────
 
-        private static List<FreeGapBucket> BuildFreeGapHistogram(List<ulong> allFreeSizes, CancellationToken cancellationToken = default)
+        internal static List<FreeGapBucket> BuildFreeGapHistogram(List<ulong> allFreeSizes, CancellationToken cancellationToken = default)
         {
             if (allFreeSizes.Count == 0) return [];
 
@@ -434,9 +496,11 @@ namespace DumpDetective.Analysis.Analyzers
             public ulong UsedBytes { get; }
             public ulong FreeBytes { get; }
             public ulong LargestFreeBlock { get; }
+            public ulong LargestFreeBlockAddress { get; }
             public int ObjectCount { get; }
             public int FreeObjectCount { get; }
             public double FragmentationPercent { get; }
+            public HeapSegmentKind Kind { get; }
 
             public LohSegmentStats(
                 ulong address,
@@ -444,18 +508,22 @@ namespace DumpDetective.Analysis.Analyzers
                 ulong usedBytes,
                 ulong freeBytes,
                 ulong largestFreeBlock,
+                ulong largestFreeBlockAddress,
                 int objectCount,
                 int freeObjectCount,
-                double fragmentationPercent)
+                double fragmentationPercent,
+                HeapSegmentKind kind)
             {
                 Address = address;
                 TotalBytes = totalBytes;
                 UsedBytes = usedBytes;
                 FreeBytes = freeBytes;
                 LargestFreeBlock = largestFreeBlock;
+                LargestFreeBlockAddress = largestFreeBlockAddress;
                 ObjectCount = objectCount;
                 FreeObjectCount = freeObjectCount;
                 FragmentationPercent = fragmentationPercent;
+                Kind = kind;
             }
         }
 

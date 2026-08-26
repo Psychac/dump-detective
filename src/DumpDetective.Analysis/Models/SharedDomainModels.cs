@@ -9,7 +9,9 @@ public sealed record LohSegmentSnapshot(
     ulong TotalBytes,
     double FragmentationPercent,
     ulong FreeBytes,
-    ulong LargestFreeBlock);
+    ulong LargestFreeBlock,
+    ulong LargestFreeBlockAddress,
+    HeapSegmentKind Kind);
 
 /// <summary>One bucket in the free-gap size histogram for LOH fragmentation analysis.</summary>
 /// <param name="GapSizeRange">Human-readable size range, e.g. "1 KB – 64 KB".</param>

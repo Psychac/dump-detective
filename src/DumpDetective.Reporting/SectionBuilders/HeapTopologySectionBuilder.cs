@@ -26,6 +26,8 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
             ["total_segments"] = new NumericMetricValue(d.TotalSegments, MetricUnit.Count),
+            ["gc_mode"] = new TextMetricValue(d.IsServerGc ? "Server" : "Workstation"),
+            ["logical_heap_count"] = new NumericMetricValue(d.LogicalHeapCount, MetricUnit.Count),
             ["committed_bytes"] = new NumericMetricValue((double)d.TotalCommittedBytes, MetricUnit.Bytes, FormatBytes(d.TotalCommittedBytes)),
             ["used_bytes"] = new NumericMetricValue((double)d.TotalUsedBytes, MetricUnit.Bytes, FormatBytes(d.TotalUsedBytes)),
             ["reserved_bytes"] = new NumericMetricValue((double)d.TotalReservedBytes, MetricUnit.Bytes, FormatBytes(d.TotalReservedBytes)),
@@ -49,7 +51,7 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
         if (d.FrozenBytes > 100UL * 1024 * 1024)
             blocks.Add(T("Frozen object heap usage is above 100 MB; this often points to heavy immutable or interned data retention."));
 
-        blocks.Add(T("Note: Used bytes shown above exclude SOH because SOH is never walked per-object; SOH object counts are derived exactly from Phase 1's heap-wide total instead. The Gen0/Gen1/Gen2 breakdown below accounts for all SOH allocations."));
+        blocks.Add(T("Note: SOH is never walked per-object; SOH object count and used/fragmented bytes are derived exactly from Phase 1's heap-wide totals instead. When Phase 1's index is unavailable, SOH object count shows N/A and SOH fragmentation is reported as 0 rather than a misleading estimate."));
 
         // Kind summary
         if (d.KindSummaries is { Count: > 0 })
@@ -74,13 +76,10 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
         if (d.PerLogicalHeapSummaries.Count > 0)
         {
             var rows = new List<TableRow>(d.PerLogicalHeapSummaries.Count);
-            ulong maxBytes = 0, minBytes = ulong.MaxValue;
             for (int i = 0; i < d.PerLogicalHeapSummaries.Count; i++)
             {
                 PerLogicalHeapSummary heap = d.PerLogicalHeapSummaries[i];
                 double share = d.TotalCommittedBytes == 0 ? 0.0 : heap.Bytes * 100.0 / d.TotalCommittedBytes;
-                if (heap.Bytes > maxBytes) maxBytes = heap.Bytes;
-                if (heap.Bytes < minBytes) minBytes = heap.Bytes;
                 rows.Add(Row(
                     Cell(heap.LogicalHeapIndex.ToString("N0"), heap.LogicalHeapIndex),
                     Cell(FormatBytes(heap.Bytes), (long)Math.Min(heap.Bytes, long.MaxValue)),
@@ -89,8 +88,8 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
                     Cell(heap.SegmentCount.ToString("N0"), heap.SegmentCount)));
             }
             compactTables.Add(STCompact("Per logical heap", new[] { CH("Heap"), CH("Committed Bytes","bytes"), CH("% of Total", "number", "percent"), CH("Objects","number"), CH("Segments","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
-            if (d.PerLogicalHeapSummaries.Count > 1 && minBytes > 0 && maxBytes > minBytes * 2)
-                blocks.Add(T("Warning: Logical heaps are skewed: largest heap is more than 2x the smallest."));
+            // Skew is reported as a proper InsightFinding by HeapTopologyFindingGenerator (severity,
+            // tags, MetricValue, trend-tracked) instead of an inline text block here.
         }
 
         // Top segments by size

@@ -15,7 +15,16 @@ internal static class SegmentKindMapper
             GCSegmentKind.Large => HeapSegmentKind.LargeObjectHeap,
             GCSegmentKind.Pinned => HeapSegmentKind.PinnedObjectHeap,
             GCSegmentKind.Frozen => HeapSegmentKind.Frozen,
-            _ => HeapSegmentKind.SmallObjectHeap,
+            // Generation2 and the classic non-regions Ephemeral segment both hold SOH content.
+            GCSegmentKind.Generation2 => HeapSegmentKind.SmallObjectHeap,
+            GCSegmentKind.Ephemeral => HeapSegmentKind.SmallObjectHeap,
+            // Generation0/Generation1 (regions-based GC) segments are ephemeral SOH too.
+            GCSegmentKind.Generation0 => HeapSegmentKind.SmallObjectHeap,
+            GCSegmentKind.Generation1 => HeapSegmentKind.SmallObjectHeap,
+            // Anything else is a genuinely unrecognized segment kind — most likely a corrupted
+            // dump or a newer ClrMD enum member this mapper hasn't been updated for. Do not
+            // silently fold it into SOH; callers must handle HeapSegmentKind.Unknown explicitly.
+            _ => HeapSegmentKind.Unknown,
         };
     }
 

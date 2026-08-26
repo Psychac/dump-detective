@@ -14,9 +14,31 @@
 | **Total P1 Identified** | 155 |
 | **P0 Implemented** | 70 |
 | **P1 Implemented** | 122 |
-| **P2 Implemented** | 40 |
+| **P2 Implemented** | 42 |
 | **Overall P0+P1 Rate** | 82.8% (192/232) |
 
+> Note: HeapTopologyAnalyzer's roadmap was fully closed out on 2026-08-27 (P2 3/7 → 5/5 — the
+> tracker's prior "3/7" denominator was stale; the audit doc itself only ever defined 5 numbered
+> P2 items (#8-#12), all now done; P3 0/3 → 4/4, denominator also corrected from 3 to 4 to match
+> the audit doc's #13-#16) — see updated row 12 below. `P2 Implemented` in the executive summary
+> rose from 40 to 42 to reflect the net 2 additional P2 completions once the denominator was
+> corrected. P2 covered a `SegmentTypeAccumulator` struct-copy fix, trend comparer SOH/reserved/gap
+> tracking, a segment object-density column, per-kind (SOH/Frozen) fragmentation findings with
+> correct attribution (which also surfaced and fixed a pre-existing bug where `SohFragmentedBytes`
+> always reported ~100%), and a shared `SegmentSummary`/`SegmentSummaryCache` that eliminates the
+> duplicated segment-classification pass against `SegmentReservationAnalyzer` (scoped in
+> `docs/refactor/heap-segment-shared-pass-plan.md` before implementation). P3 covered exposing
+> `ClrHeap.IsServer`/`SubHeaps.Length` (plus promoting the logical-heap skew check from an inline
+> text block to a real trend-tracked `InsightFinding`), widening `HeapSegmentSnapshot.ObjectCount`
+> and the SOH/LOH/POH/Frozen aggregate counters from `int` to `long`, and using
+> `HeapSegmentKind.Unknown` for genuinely unrecognized segment kinds instead of silently folding
+> them into SOH (a real Audit-Area-6 correctness risk, not just a hygiene item). One P3 item
+> ("add progress reporting for a full SOH scan") was found not applicable — the codebase no longer
+> has any SOH full-scan mode to report progress for (SOH's object count/used bytes are always
+> derived arithmetically, never walked) — and marked superseded rather than re-implemented,
+> consistent with how other analyzers' superseded items were counted. HeapTopologyAnalyzer is now
+> the 10th analyzer with the entire P0–P3 roadmap complete.
+>
 > Note: GCHandleAnalyzer's roadmap was fully closed out on 2026-08-26 (P2 0/4 → 4/4, P3 0/4 → 4/4)
 > — see updated row 11 below. `P2 Implemented` in the executive summary rose from 36 to 40 to
 > reflect the 4 newly-completed P2 items. P2 covered SOH-vs-LOH pinned-target classification with
@@ -107,7 +129,7 @@ P0-4 was a regression hiding behind two individually-DONE roadmap items).
 | 9 | **LohFragmentationAnalyzer** | 2/2 | 5/5 | 7/7 | 4/4 | ✅ P0+P1+P2+P3 COMPLETE (2026-08-26) — renamed to "LOH & POH Fragmentation Analysis" with a real per-kind (Large vs. Pinned) breakdown (`LohKindBreakdown`, `Kind` column) instead of just silently folding POH into LOH totals; largest-free-block address surfaced via the previously-unused `Offset` field in `LohFreeBlockIndex.bin`; `IsLohSegment`/`BuildFreeGapHistogram`/index-aggregation unit tests added; `LohSegmentStats` converted to a `readonly record struct`; histogram interpretation note when >80% of free gaps are sub-1-KB slivers; type-aggregated LOH/POH table rewired from `LargeObjectIndex.bin`'s biased top-100 sample onto the unbounded Phase 1 `TypeAggregateIndexEntry.LohCount`/`LohSize` (no new writer needed); MT-field-exposure item found already resolved by an earlier refactor (`loh-fragmentation-analyzer-audit.md`) |
 | 10 | **MemoryAnalyzer** | 2/2 | 5/5 | 5/5 | 4/4 | ✅ P0+P1+P2+P3 COMPLETE (2026-08-26) — `MemoryPressureScore` sub-components (LOH/concentration/small-object/density) exposed as key metrics; `heapCache is HeapAnalysisCache` cast broken via new `IHeapAnalysisCache.TryGetGlobalSizeBuckets()`; per-type generation × size cross-reference and a `System.String`-duplication cross-reference both added to `InsightEngine` via the `FindingEvidenceTable` capability rather than duplicating data other analyzers already own; `Top1BytesPercent` promoted to a key metric plus a new "single type dominates the heap" finding. P3: BFS retained-size estimation now reports progress once per walked candidate (shared `RetainedSizeCandidateSelector`, also benefits DominatorAnalyzer ×2 and GCRootAnalyzer) and threads a real `CancellationToken`; `BoundedGraphWalk.ComputeExclusiveRetained` now checks cancellation per BFS node; the histogram-fallback section note was added and the audit's original premise (a separate approximate histogram) was corrected to reflect that the fallback path only affects small-object percentages, not a second histogram. The `ClrHeap.IsServer`/per-heap-balance item was found already implemented in `HeapTopologyAnalyzer` and marked superseded-with-cross-link (`memory-analyzer-audit.md`, `heap-topology-analyzer-audit.md` item #13) |
 | 11 | **GCHandleAnalyzer** | 3/3 | 7/7 | 4/4 | 4/4 | ✅ P0+P1+P2+P3 COMPLETE (2026-08-26) — P2: SOH vs LOH pinned-target classification (`TryIsSoh`) with a dedicated compaction-barrier finding, RefCounted (COM interop) handle concentration finding, per-kind pinned-bytes report tables (surfacing existing P1-2 model fields), top-N individual pinned handle addresses ranked by retained bytes. P3: "finalization queue" gap found already covered by the separate `FinalizableObjectAnalyzer` (marked superseded, not re-implemented); WeakShort/WeakLong Gen0-2/LOH generation breakdown with a finalization-backlog finding; `HandleRecord.DependentTarget` (binary format v1→v2) lets dependent-handle topology resolve inline in the main streaming pass instead of a second `runtime.EnumerateHandles()` call; functional unit tests added (`GCHandleFindingGeneratorTests`, `GCHandleAnalyzerFunctionalTests`) using a disk-injected fake handle snapshot, no real dump required (`gchandle-analyzer-audit.md`) |
-| 12 | **HeapTopologyAnalyzer** | 3/3 | 4/4 | 3/7 | 0/3 | ✅ P0+P1 complete; P2 43% (3/7) |
+| 12 | **HeapTopologyAnalyzer** | 3/3 | 4/4 | 5/5 | 4/4 | ✅ P0+P1+P2+P3 COMPLETE (2026-08-27) — P2: `SegmentTypeAccumulator` struct-copy fix, trend comparer SOH/reserved/reservation-gap tracking, segment object-density column, per-kind (SOH/Frozen) fragmentation findings with correct attribution (also fixed a pre-existing bug where `SohFragmentedBytes` always reported ~100%), and a shared `SegmentSummary`/`SegmentSummaryCache` eliminating the duplicated segment-classification pass against `SegmentReservationAnalyzer` (scoped in `docs/refactor/heap-segment-shared-pass-plan.md` first). P3: `ClrHeap.IsServer`/`SubHeaps.Length` exposed (plus the logical-heap skew check promoted from an inline text block to a real trend-tracked `InsightFinding`), `HeapSegmentSnapshot.ObjectCount` and the SOH/LOH/POH/Frozen aggregate counters widened `int`→`long`, and `HeapSegmentKind.Unknown` now used for genuinely unrecognized segment kinds instead of silently folding them into SOH. One P3 item (SOH full-scan progress reporting) found not applicable — no SOH full-scan mode exists in the current codebase — and marked superseded (`heap-topology-analyzer-audit.md`) |
 | 13 | **DominatorAnalyzer** | 3/3 | 5/5 | 5/6 | 0/2 | ✅ P0+P1 complete; P2 83% (5/6 done) |
 | 14 | **CollectionAnalyzer** | 3/3 | 5/5 | 0/8 | 0/5 | ✅ P0+P1 complete |
 | 15 | **StringAnalyzer** | 3/3 | 5/5 | 0/8 | 0/5 | ✅ P0+P1 complete |
@@ -174,7 +196,7 @@ Different audits use different conventions for marking completion:
 - **WeakReferenceAnalyzer**: `Status | ✅ Done (commit)` or `Pending`
 - **SegmentReservationAnalyzer**: `Status | ✅ DONE (commit) |`
 - **FinalizableObjectAnalyzer**: Unlabeled `✅ DONE` items + labeled P1/P2 pending
-- **HeapTopologyAnalyzer**: No status column (no DONE markers)
+- **HeapTopologyAnalyzer**: `Status | ✅ DONE |` (status column added 2026-08-27; previously had none)
 
 ---
 
@@ -182,14 +204,13 @@ Different audits use different conventions for marking completion:
 
 **Major Wins:**
 - 13 analyzers (37%) have P0+P1 100% complete
-- HeapTopologyAnalyzer: 10 P0+P1+P2 items complete (generation breakdown, fragmentation, cancellation, variable naming, efficiency, trending, density)
-- 9 analyzers (ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer, ThreadStackClusterAnalyzer, FinalizableObjectAnalyzer, JitAnalyzer, LohFragmentationAnalyzer, MemoryAnalyzer, GCHandleAnalyzer) have ALL P0+P1+P2 complete
-- ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer, ThreadStackClusterAnalyzer, FinalizableObjectAnalyzer, JitAnalyzer, LohFragmentationAnalyzer, MemoryAnalyzer, and GCHandleAnalyzer are the only analyzers with ALL P0+P1+P2+P3 complete (ArrayAnalyzer 4/4 P3; BoxingAnalyzer 4/4 P3, including unit test coverage for pure helper logic; SegmentReservationAnalyzer 4/4 P3, including the P3-4 regions-based GC per-region statistics evolution item; ThreadStackClusterAnalyzer 4/4 P3, including the P3-3 cross-analyzer correlation with `HangAnalyzer`; FinalizableObjectAnalyzer 3/3 P3 plus its 2 Evolution items, including root-path cross-reference via `RootPathFinder`; JitAnalyzer 2/2 P3, including a per-module JIT stack heatmap cross-referenced with `ModuleDomainResult` via a new reusable `InsightFinding.EvidenceTables` capability; LohFragmentationAnalyzer 4/4 P3, including converting `LohSegmentStats` to a `readonly record struct` and rewiring its type-aggregated LOH/POH table onto the unbounded Phase 1 `TypeAggregateIndexEntry` instead of a capped top-100 sample; MemoryAnalyzer 4/4 P3, including per-walk BFS progress reporting shared across 3 other analyzers via `RetainedSizeCandidateSelector`, cancellation support inside `BoundedGraphWalk.ComputeExclusiveRetained`, and one item resolved by cross-linking to `HeapTopologyAnalyzer`'s pre-existing per-logical-heap balance metrics instead of duplicating them; GCHandleAnalyzer 4/4 P2 and 4/4 P3, including a binary-format version bump (`HandleSnapshot.bin` v1→v2) to carry dependent-handle targets inline instead of a second live enumeration pass, and one P3 item found already covered by the separate `FinalizableObjectAnalyzer`)
+- 10 analyzers (ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer, ThreadStackClusterAnalyzer, FinalizableObjectAnalyzer, JitAnalyzer, LohFragmentationAnalyzer, MemoryAnalyzer, GCHandleAnalyzer, HeapTopologyAnalyzer) have ALL P0+P1+P2 complete
+- ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer, ThreadStackClusterAnalyzer, FinalizableObjectAnalyzer, JitAnalyzer, LohFragmentationAnalyzer, MemoryAnalyzer, GCHandleAnalyzer, and HeapTopologyAnalyzer are the only analyzers with ALL P0+P1+P2+P3 complete (ArrayAnalyzer 4/4 P3; BoxingAnalyzer 4/4 P3, including unit test coverage for pure helper logic; SegmentReservationAnalyzer 4/4 P3, including the P3-4 regions-based GC per-region statistics evolution item; ThreadStackClusterAnalyzer 4/4 P3, including the P3-3 cross-analyzer correlation with `HangAnalyzer`; FinalizableObjectAnalyzer 3/3 P3 plus its 2 Evolution items, including root-path cross-reference via `RootPathFinder`; JitAnalyzer 2/2 P3, including a per-module JIT stack heatmap cross-referenced with `ModuleDomainResult` via a new reusable `InsightFinding.EvidenceTables` capability; LohFragmentationAnalyzer 4/4 P3, including converting `LohSegmentStats` to a `readonly record struct` and rewiring its type-aggregated LOH/POH table onto the unbounded Phase 1 `TypeAggregateIndexEntry` instead of a capped top-100 sample; MemoryAnalyzer 4/4 P3, including per-walk BFS progress reporting shared across 3 other analyzers via `RetainedSizeCandidateSelector`, cancellation support inside `BoundedGraphWalk.ComputeExclusiveRetained`, and one item resolved by cross-linking to `HeapTopologyAnalyzer`'s pre-existing per-logical-heap balance metrics instead of duplicating them; GCHandleAnalyzer 4/4 P2 and 4/4 P3, including a binary-format version bump (`HandleSnapshot.bin` v1→v2) to carry dependent-handle targets inline instead of a second live enumeration pass, and one P3 item found already covered by the separate `FinalizableObjectAnalyzer`; HeapTopologyAnalyzer 5/5 P2 and 4/4 P3, including a shared `SegmentSummary`/`SegmentSummaryCache` that eliminates the segment-enumeration duplication with `SegmentReservationAnalyzer` — the last remaining "platform-level opportunity" noted below — and one P3 item found not applicable since the SOH full-scan mode it targeted no longer exists in the codebase)
 
 **Remaining Work:**
 - 9 analyzers (26%) have zero P0/P1 implementation
 - High-impact blockers: LeakCandidateAnalyzer, ThreadAnalyzer (7-8 items each)
-- Platform-level opportunity: HeapTopologyAnalyzer + SegmentReservationAnalyzer share segment enumeration code (P2 evolution)
+- ~~Platform-level opportunity: HeapTopologyAnalyzer + SegmentReservationAnalyzer share segment enumeration code (P2 evolution)~~ — resolved 2026-08-27 via `SegmentSummary`/`SegmentSummaryCache` (see `docs/refactor/heap-segment-shared-pass-plan.md`)
 
 **Data Quality Notes:**
 - Counts verified by manual inspection of each audit file

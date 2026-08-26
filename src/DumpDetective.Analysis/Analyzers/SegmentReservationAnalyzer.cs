@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Cache;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
@@ -55,8 +56,18 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
         bool isRegionsBased = false;
         const int ProgressReportInterval = 128;
 
-        foreach (ClrSegment segment in heap.Segments)
+        // Shared with HeapTopologyAnalyzer — see docs/refactor/heap-segment-shared-pass-plan.md.
+        // Falls back to a local classification pass when the cache isn't the concrete
+        // HeapAnalysisCache (e.g. a bare IHeapAnalysisCache test double).
+        IReadOnlyList<SegmentSummary> summaries = context.Cache is HeapAnalysisCache heapCache
+            ? heapCache.GetOrBuildSegmentSummaries(heap)
+            : SegmentSummaryCache.Build(heap);
+
+        for (int summaryIndex = 0; summaryIndex < summaries.Count; summaryIndex++)
         {
+            SegmentSummary summary = summaries[summaryIndex];
+            ClrSegment segment = summary.Segment;
+
             // Mid-loop cancellation check and progress reporting (every 128 segments).
             if ((totalSegmentCount % ProgressReportInterval) == 0)
             {
@@ -64,12 +75,12 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
                 progress?.Report(new(totalSegmentCount, "analyzing segment reservation", $"{totalSegmentCount} segments processed"));
             }
 
-            ulong committed = SegmentKindMapper.GetCommittedBytes(segment);
-            ulong reserved = SegmentKindMapper.GetReservedBytes(segment);
-            bool isEphemeral = SegmentKindMapper.IsEphemeral(segment);
-            int logicalHeap = segment.SubHeap?.Index ?? 0;
-            HeapSegmentKind kind = SegmentKindMapper.Map(segment);
-            RegionGenerationKind regionKind = SegmentKindMapper.MapRegionKind(segment);
+            ulong committed = summary.CommittedBytes;
+            ulong reserved = summary.ReservedBytes;
+            bool isEphemeral = summary.IsEphemeral;
+            int logicalHeap = summary.LogicalHeapIndex >= 0 ? summary.LogicalHeapIndex : 0;
+            HeapSegmentKind kind = summary.Kind;
+            RegionGenerationKind regionKind = summary.RegionKind;
             if (regionKind is RegionGenerationKind.Generation0 or RegionGenerationKind.Generation1)
                 isRegionsBased = true;
 

@@ -16,7 +16,7 @@ internal sealed record HeapSegmentSnapshot(
     ulong ReservedBytes,
     HeapSegmentKind Kind,
     int Generation,
-    int ObjectCount,
+    long ObjectCount,
     ulong Gen0Bytes = 0,
     ulong Gen1Bytes = 0,
     ulong Gen2Bytes = 0);
@@ -24,14 +24,14 @@ internal sealed record HeapSegmentSnapshot(
 internal sealed record SegmentKindSummary(
     HeapSegmentKind Kind,
     int SegmentCount,
-    int ObjectCount,
+    long ObjectCount,
     ulong TotalBytes,
     ulong ReservedBytes);
 
 internal sealed record PerLogicalHeapSummary(
     int LogicalHeapIndex,
     ulong Bytes,
-    int ObjectCount,
+    long ObjectCount,
     int SegmentCount);
 
 internal sealed record HeapTopologyDomainResult(
@@ -58,6 +58,8 @@ internal sealed record HeapTopologyDomainResult(
     ulong LohFragmentedBytes,
     ulong PohFragmentedBytes,
     ulong FrozenFragmentedBytes,
+    bool IsServerGc,
+    int LogicalHeapCount,
     IReadOnlyList<SegmentKindSummary> KindSummaries,
     IReadOnlyList<PerLogicalHeapSummary> PerLogicalHeapSummaries,
     IReadOnlyList<TypeSnapshot>? TopPohTypes = null,

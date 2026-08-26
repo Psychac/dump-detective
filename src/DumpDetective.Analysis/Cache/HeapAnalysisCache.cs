@@ -26,6 +26,7 @@ namespace DumpDetective.Analysis.Cache
         // is preferred by `TryGetHeapIndex`.
         private HeapIndexBuildResult? _heapIndex;
         private readonly StatisticsCache _statisticsCache;
+        private readonly SegmentSummaryCache _segmentSummaryCache = new();
         private readonly RootSetCache _rootSetCache;
         private readonly ReverseIndexCache _reverseIndexCache;
         private readonly ForwardIndexCache _forwardIndexCache;
@@ -202,6 +203,11 @@ namespace DumpDetective.Analysis.Cache
         public Dictionary<string, CachedTypeStatistics> GetOrBuildTypeStatistics(ClrHeap heap)
         {
             return _statisticsCache.GetOrBuildTypeStatistics(heap);
+        }
+
+        public IReadOnlyList<SegmentSummary> GetOrBuildSegmentSummaries(ClrHeap heap)
+        {
+            return _segmentSummaryCache.GetOrBuild(heap);
         }
 
         private static bool TryHydrateTypeStatisticsFromIndex(

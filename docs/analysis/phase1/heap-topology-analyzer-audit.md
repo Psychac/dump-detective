@@ -432,17 +432,61 @@ question every engineer will ask.
 | 8 | Change `SegmentTypeAccumulator` from mutable struct in Dictionary to a class, or use `CollectionsMarshal.GetValueRefOrAddDefault` to eliminate redundant copy | Low-medium on large POH | Low | High | Improvement | ✅ DONE |
 | 9 | Extend `HeapTopologyTrendComparer` to track SOH bytes, total reserved, and reservation gap | Medium: enables VM growth trending | Low | High | Improvement | ✅ DONE |
 | 10 | Add segment object-density column (objects / committed MB) to the top-segments table | Medium: distinguishes dense vs. sparse segments | Low | Medium | Improvement | ✅ DONE |
-| 11 | Add per-kind fragmentation to `HeapTopologyFindingGenerator` with correct attribution | Medium | Medium | High | Improvement |
-| 12 | Share the segment enumeration loop with `SegmentReservationAnalyzer` via a shared segment-summary type or merge the passes | Medium: eliminates duplicated work on large dumps | High | Medium | Evolution |
+| 11 | Add per-kind fragmentation to `HeapTopologyFindingGenerator` with correct attribution | Medium | Medium | High | Improvement | ✅ DONE |
+| 12 | Share the segment enumeration loop with `SegmentReservationAnalyzer` via a shared segment-summary type or merge the passes — scoped and implemented per [heap-segment-shared-pass-plan.md](../../refactor/heap-segment-shared-pass-plan.md) | Medium: eliminates duplicated classification logic; perf win is secondary since segment counts are small | Medium (revised down from High — see plan) | Medium | Evolution | ✅ DONE |
 
 #### P3 — Low
 
 | # | Recommendation | Impact | Difficulty | Confidence | Classification |
 |---|---|---|---|---|---|
-| 13 | Expose `ClrHeap.IsServer` and `ClrHeap.HeapCount` in the result and section | Low: diagnostic context | Trivial | High | Improvement |
-| 14 | Change `HeapSegmentSnapshot.ObjectCount` and aggregated counters from `int` to `long` | Low: avoids theoretical overflow on extreme POH | Low | Medium | Improvement |
-| 15 | Add progress reporting for SOH scan in full mode (currently silent for 87M-object pass) | Low: operator experience only | Low | High | Improvement |
-| 16 | Use the `Unknown` enum value in `SegmentKindMapper` for unrecognized segment kinds instead of silently defaulting to SOH | Low: future-proofing | Trivial | High | Improvement |
+| 13 | Expose `ClrHeap.IsServer` and `ClrHeap.HeapCount` in the result and section | Low: diagnostic context | Trivial | High | Improvement | ✅ DONE |
+| 14 | Change `HeapSegmentSnapshot.ObjectCount` and aggregated counters from `int` to `long` | Low: avoids theoretical overflow on extreme POH | Low | Medium | Improvement | ✅ DONE |
+| 15 | Add progress reporting for SOH scan in full mode (currently silent for 87M-object pass) | Low: operator experience only | Low | High | Improvement | ⛔ N/A — superseded, see note below |
+| 16 | Use the `Unknown` enum value in `SegmentKindMapper` for unrecognized segment kinds instead of silently defaulting to SOH | Low: future-proofing | Trivial | High | Improvement | ✅ DONE |
+
+> **Note (2026-08-27, item #11):** Implementing SOH/Frozen fragmentation findings surfaced a
+> pre-existing data bug: `SohFragmentedBytes` was always equal to `SohBytes` (i.e. reported as
+> ~100% fragmented) because SOH is never walked per-object, so `sohUsedBytes` stayed 0. Fixed by
+> deriving `sohUsedBytes` exactly from Phase 1's `TypeAggregates.TotalSize` sum minus the
+> LOH/POH/Frozen used-byte walks — the same free-derivation pattern already used for `sohObjects`.
+> When Phase 1's index is unavailable, `SohFragmentedBytes` now reports 0 (unknown) rather than a
+> misleading 100%. `HeapTopologyFindingGenerator` now emits SOH fragmentation findings (attributed
+> to pinned-handle compaction blocking, not manual LOH-style compaction) and Frozen fragmentation
+> findings (informational — frozen data is never collected, so free space there is address-space
+> overhead, not reclaimable garbage).
+
+> **Note (2026-08-27, items #13/#14):** `HeapTopologyDomainResult` now carries `IsServerGc`
+> (`ClrHeap.IsServer`) and `LogicalHeapCount` (`ClrHeap.SubHeaps.Length` — there is no
+> `ClrHeap.HeapCount`), surfaced as `gc_mode`/`logical_heap_count` key metrics in the report
+> section, matching the convention `SegmentReservationSectionBuilder` already used for `gc_mode`.
+> The logical-heap skew check — previously an inline `blocks.Add(T(...))` text block with no
+> severity/tags/`MetricValue` — is now a real `InsightFinding` in `HeapTopologyFindingGenerator`
+> (severity `Warning`, `MetricValue` = skew ratio), so it's trend-tracked and ranked like every
+> other finding. Separately, `HeapSegmentSnapshot.ObjectCount`, `SegmentKindSummary.ObjectCount`,
+> `PerLogicalHeapSummary.ObjectCount`, and the SOH/LOH/POH/Frozen aggregate counters in
+> `HeapTopologyAnalyzer` (`sohObjects`, `lohObjects`, etc.) are now `long` instead of `int`,
+> removing the `int.MaxValue` clamp that used to sit on the derived SOH object count. All 361
+> `Unit.Analysis` tests pass unchanged.
+
+> **Note (2026-08-27, items #15/#16):** Item #15 is **not applicable** — verified against the
+> current codebase there is no `CountSohObjects` flag or any other "full scan" toggle anywhere in
+> `HeapTopologyAnalyzer` or its options; `CountObjects` unconditionally returns the `-1` sentinel
+> for `HeapSegmentKind.SmallObjectHeap` and SOH's exact object count/used bytes are always derived
+> arithmetically from Phase 1's index (see the P0-2/#2 and #11 notes above). The "full mode" this
+> item describes was superseded by that architectural decision before this audit pass, so adding
+> progress reporting for a SOH walk that can no longer happen would be dead code — declining rather
+> than implementing it.
+>
+> Item #16 is done: `SegmentKindMapper.Map` now explicitly enumerates every known `GCSegmentKind`
+> (`Generation0/1/2`, `Ephemeral`, `Large`, `Pinned`, `Frozen`) and only falls back to
+> `HeapSegmentKind.Unknown` for a value it doesn't recognize — no longer silently treating a
+> corrupted/unrecognized segment as SOH (this was also flagged as Audit Area 6 risk #1). Unknown
+> segments now get their own tracked bucket in `HeapTopologyAnalyzer` (count/bytes/reserved/used/
+> fragmented, folded into `TotalCommittedBytes`/`TotalUsedBytes`/`TotalReservedBytes` and into the
+> SOH-used-bytes derivation so they're no longer double-counted into SOH), appear as a normal row
+> in the Kind Summary table, and — if any are present — surface a dedicated Warning finding in
+> `HeapTopologyFindingGenerator` calling out likely dump corruption or an unhandled ClrMD version.
+> All 361 `Unit.Analysis` tests pass unchanged.
 
 > **Cross-referenced (2026-08-26):** [memory-analyzer-audit.md](memory-analyzer-audit.md)'s
 > "Report `ClrHeap.IsServer` and per-heap balance metrics for Server GC" item was marked

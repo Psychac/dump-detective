@@ -344,7 +344,7 @@ public sealed class ReportingCompositionTests
             Gen2Pct: 100,
             PerTypeGenerationProfiles:
             [
-                new TypeGenerationProfile("Demo.Type", 1, 2, 3, 0, 1024, false)
+                new TypeGenerationProfile("Demo.Type", 1, 2, 3, 0, 1024, IsFinalizable: false, Gen2Bytes: 0)
             ]);
 
         ObjectShapeAnalyzerDomainResult shape = new(

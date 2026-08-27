@@ -1,4 +1,4 @@
-namespace DumpDetective.Core.Enums;
+﻿namespace DumpDetective.Core.Enums;
 
 /// <summary>
 /// Shared enum describing kinds of collections recognized by the analyzers.
@@ -14,5 +14,7 @@ public enum CollectionKind
     HashSet,
     SortedList,
     SortedSet,
-    Queue
+    Queue,
+    ImmutableArray,
+    ImmutableArrayBuilder
 }

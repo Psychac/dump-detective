@@ -574,11 +574,15 @@ eliminates all multi-core benefit.
 
 | # | Recommendation | Impact | Difficulty | Confidence | Class |
 |---|---|---|---|---|---|
-| P2-1 | **Surface per-kind wasted bytes in `CollectionDomainResult`** — add `WasteBytesByKind : IReadOnlyDictionary<CollectionKind, ulong>` to enable per-kind wasted-memory trending and per-kind findings. | Richer trend comparisons | Low | High | Improvement |
-| P2-2 | **Add `System.Collections.Immutable` namespace** to `BclCollectionNamespacePrefixes`; add dedicated `ImmutableArray<T>` probe (single `_array` field, count = `_array.Length`, waste = 0 unless builder-pattern detection). | New collection type coverage | Medium | Medium | Improvement |
+| P2-1 | **Surface per-kind wasted bytes in `CollectionDomainResult`** — add `WasteBytesByKind : IReadOnlyDictionary<CollectionKind, ulong>` to enable per-kind wasted-memory trending and per-kind findings. | Richer trend comparisons | Low | High | Improvement | ✅ DONE |
+| P2-2 | **Add `System.Collections.Immutable` namespace** to `BclCollectionNamespacePrefixes`; add dedicated `ImmutableArray<T>` probe (single `_array` field, count = `_array.Length`, waste = 0 unless builder-pattern detection). | New collection type coverage | Medium | Medium | Improvement | ✅ DONE |
 | P2-3 | **Per-collection resize recommendation** — add a `Recommendation` field to `WastefulCollectionSnapshot` (e.g., "Call TrimExcess()", "Construct with initial capacity X", "Unreachable — no fix needed"). Populate in the finding generator. | Actionability for engineers | Low | Medium | Improvement |
 | P2-4 | **Seal `CollectionAnalyzer`** and remove `public void Dispose() { }` override (redundant with default interface implementation). Override `Tags` = `["collections"]` and `Order` = `240`. | Code hygiene, prevents accidental subclass breaking `CreateWorkerInstance` | Low | High | Improvement |
 | P2-5 | **Consolidate `AnalyzeQueue`/`AnalyzeHashSet` field discovery** — remove uncached `FindFirstArrayField` / `FindFieldByNameContains*` calls; route all field resolution through `GetOrBuildFieldLayout` to ensure field lookups are cached on first call. | Eliminates redundant `ClrType.Fields` enumeration per object | Low | High | Improvement | ✅ DONE |
+
+> **P2-1 note (2026-08-27):** while wiring per-kind bytes into the report, the participant (dispatcher/disk) path was found to still derive `WasteCountsByKind`/`WasteBytesByKind` from the `_topCapacity`-trimmed wasteful list — i.e. the P0-1 defect survived on that path and undercounted every kind. Both paths now accumulate per-kind counts and bytes during the scan and share a single `BuildKindDictionary` helper.
+
+> **P2-2 note (2026-08-27):** implemented as two new `CollectionKind` values — `ImmutableArray` (inventory-only, waste is always 0 since the boxed struct's backing array is exactly `Length`) and `ImmutableArrayBuilder` (probed via the existing `AnalyzeList` reader, since `Builder`'s `_elements`/`_count` shape matches `List<T>`'s field-layout fallback resolution exactly). The two duplicate kind-classification implementations (`ResolveCollectionKind` / `ResolveCollectionKindConcurrent`) were collapsed onto one shared, unit-tested `ClassifyCollectionTypeName`, closing a drift risk the P2-1 pass had already found once on the waste-accumulator side.
 
 #### P3 — Low
 

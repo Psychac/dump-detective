@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Pipeline;
@@ -142,6 +142,46 @@ public sealed class CollectionAnalyzerHeapIndexScanTests
         result[CollectionKind.HashSet].Should().Equal([5, 0, 0, 0]);
     }
 
+    [Fact]
+    public void MergePartial_SumsWasteCountsAndBytesPerKind()
+    {
+        int kindCount = Enum.GetValues(typeof(CollectionKind)).Length;
+
+        int[] primaryCounts = new int[kindCount];
+        ulong[] primaryBytes = new ulong[kindCount];
+        primaryCounts[(int)CollectionKind.Dictionary] = 3;
+        primaryBytes[(int)CollectionKind.Dictionary] = 3_000;
+        primaryCounts[(int)CollectionKind.List] = 1;
+        primaryBytes[(int)CollectionKind.List] = 500;
+
+        CollectionAnalyzer primary = new();
+        SeedParticipantState(primary, new CollectionStatistics(),
+            wasteCountByKind: primaryCounts, wasteBytesByKind: primaryBytes);
+
+        int[] workerCounts = new int[kindCount];
+        ulong[] workerBytes = new ulong[kindCount];
+        workerCounts[(int)CollectionKind.Dictionary] = 2;
+        workerBytes[(int)CollectionKind.Dictionary] = 1_000;
+        workerCounts[(int)CollectionKind.Queue] = 4;
+        workerBytes[(int)CollectionKind.Queue] = 8_000;
+
+        CollectionAnalyzer worker = new();
+        SeedParticipantState(worker, new CollectionStatistics(),
+            wasteCountByKind: workerCounts, wasteBytesByKind: workerBytes);
+
+        ((IParallelHeapIndexScanParticipant)primary).MergePartial([worker]);
+
+        int[] mergedCounts = GetField<int[]>(primary, "_wasteCountByKind");
+        ulong[] mergedBytes = GetField<ulong[]>(primary, "_wasteBytesByKind");
+
+        mergedCounts[(int)CollectionKind.Dictionary].Should().Be(5);
+        mergedBytes[(int)CollectionKind.Dictionary].Should().Be(4_000ul);
+        mergedCounts[(int)CollectionKind.List].Should().Be(1);
+        mergedBytes[(int)CollectionKind.List].Should().Be(500ul);
+        mergedCounts[(int)CollectionKind.Queue].Should().Be(4);
+        mergedBytes[(int)CollectionKind.Queue].Should().Be(8_000ul);
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────────────────────
 
     private static void SeedParticipantState(
@@ -152,9 +192,14 @@ public sealed class CollectionAnalyzerHeapIndexScanTests
         int wastefulCount = 0,
         ulong totalWasted = 0,
         Dictionary<ulong, CollectionKind>? methodTableKinds = null,
-        Dictionary<CollectionKind, int[]>? generationCounts = null)
+        Dictionary<CollectionKind, int[]>? generationCounts = null,
+        int[]? wasteCountByKind = null,
+        ulong[]? wasteBytesByKind = null)
     {
+        int kindCount = Enum.GetValues(typeof(CollectionKind)).Length;
         Type t = typeof(CollectionAnalyzer);
+        SetField(t, analyzer, "_wasteCountByKind", wasteCountByKind ?? new int[kindCount]);
+        SetField(t, analyzer, "_wasteBytesByKind", wasteBytesByKind ?? new ulong[kindCount]);
         SetField(t, analyzer, "_stats", stats);
         SetField(t, analyzer, "_topCapacity", topCapacity);
         SetField(t, analyzer, "_wasteful", wasteful ?? new List<WastefulCollection>());

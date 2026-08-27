@@ -1,4 +1,4 @@
-using DumpDetective.Core.Models;
+﻿using DumpDetective.Core.Models;
 
 namespace DumpDetective.Analysis.Models;
 
@@ -22,7 +22,9 @@ internal sealed record CollectionDomainResult(
     IReadOnlyList<WastefulCollectionSnapshot>? TopWastefulCollections = null,
     IReadOnlyDictionary<CollectionKind, int>? WasteCountsByKind = null,
     IReadOnlyDictionary<CollectionKind, ulong>? WasteBytesByKind = null,
-    IReadOnlyList<CollectionGenerationStats>? GenerationBreakdown = null
+    IReadOnlyList<CollectionGenerationStats>? GenerationBreakdown = null,
+    int ImmutableArrays = 0,
+    int ImmutableArrayBuilders = 0
 ) : AnalyzerDomainResult;
 internal sealed record WastefulCollectionSnapshot(
     string Type,

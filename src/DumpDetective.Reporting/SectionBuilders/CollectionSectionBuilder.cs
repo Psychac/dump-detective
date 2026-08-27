@@ -1,4 +1,4 @@
-using DumpDetective.Core.Models;
+﻿using DumpDetective.Core.Models;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
@@ -32,6 +32,8 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
             ["arraylists"] = new NumericMetricValue(d.ArrayLists, MetricUnit.Count),
             ["sortedlists"] = new NumericMetricValue(d.SortedLists, MetricUnit.Count),
             ["sortedsets"] = new NumericMetricValue(d.SortedSets, MetricUnit.Count),
+            ["immutable_arrays"] = new NumericMetricValue(d.ImmutableArrays, MetricUnit.Count),
+            ["immutable_array_builders"] = new NumericMetricValue(d.ImmutableArrayBuilders, MetricUnit.Count),
             ["wasteful_collections"] = new NumericMetricValue(d.WastefulCollectionCount, MetricUnit.Count),
             ["total_wasted_memory"] = new NumericMetricValue((double)d.TotalWastedMemory, MetricUnit.Bytes, FormatHelper.FormatBytes(d.TotalWastedMemory)),
         };
@@ -45,16 +47,39 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
             new([Cell("Stack<T>"),    Cell($"{d.Stacks:N0}",       d.Stacks)]),
             new([Cell("SortedList"),  Cell($"{d.SortedLists:N0}",  d.SortedLists)]),
             new([Cell("SortedSet"),   Cell($"{d.SortedSets:N0}",   d.SortedSets)]),
-            new([Cell("ArrayList"),   Cell($"{d.ArrayLists:N0}",   d.ArrayLists)])
+            new([Cell("ArrayList"),   Cell($"{d.ArrayLists:N0}",   d.ArrayLists)]),
+            new([Cell("ImmutableArray"),         Cell($"{d.ImmutableArrays:N0}",        d.ImmutableArrays)]),
+            new([Cell("ImmutableArray.Builder"), Cell($"{d.ImmutableArrayBuilders:N0}", d.ImmutableArrayBuilders)])
         };
         compactTables.Add(STCompact("Collection inventory", new[] { CH("Kind"), CH("Count","number") }, inventoryRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
         if (d.WasteCountsByKind is { Count: > 0 })
         {
-            var wasteKindRows = new List<TableRow>(d.WasteCountsByKind.Count);
-            foreach (var kvp in d.WasteCountsByKind)
-                wasteKindRows.Add(new TableRow([Cell(kvp.Key.ToString()), Cell($"{kvp.Value:N0}", kvp.Value)]));
-            compactTables.Add(STCompact("Wasteful collections by kind", new[] { CH("Kind"), CH("Wasteful Count","number") }, wasteKindRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            var wasteBytesByKind = d.WasteBytesByKind ?? new Dictionary<CollectionKind, ulong>();
+            var wasteKinds = new List<CollectionKind>(d.WasteCountsByKind.Keys);
+            wasteKinds.Sort((a, b) =>
+            {
+                wasteBytesByKind.TryGetValue(a, out ulong aBytes);
+                wasteBytesByKind.TryGetValue(b, out ulong bBytes);
+                int byBytes = bBytes.CompareTo(aBytes);
+                return byBytes != 0 ? byBytes : string.CompareOrdinal(a.ToString(), b.ToString());
+            });
+
+            var wasteKindRows = new List<TableRow>(wasteKinds.Count);
+            foreach (var kind in wasteKinds)
+            {
+                int count = d.WasteCountsByKind[kind];
+                wasteBytesByKind.TryGetValue(kind, out ulong bytes);
+                double shareOfTotal = d.TotalWastedMemory > 0 ? (double)bytes / d.TotalWastedMemory * 100.0 : 0.0;
+                wasteKindRows.Add(new TableRow([
+                    Cell(kind.ToString()),
+                    Cell($"{count:N0}", count),
+                    Cell(FormatHelper.FormatBytes(bytes), (long)Math.Min(bytes, (ulong)long.MaxValue)),
+                    Cell($"{shareOfTotal:F1}%", shareOfTotal)]));
+            }
+            compactTables.Add(STCompact("Wasteful collections by kind",
+                new[] { CH("Kind"), CH("Wasteful Count","number"), CH("Wasted","bytes"), CH("Share of Waste") },
+                wasteKindRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         var topWasteful = d.TopWastefulCollections ?? [];

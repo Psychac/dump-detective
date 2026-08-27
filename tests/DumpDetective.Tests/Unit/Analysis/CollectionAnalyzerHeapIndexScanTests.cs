@@ -13,6 +13,17 @@ namespace DumpDetective.Tests.Unit.Analysis;
 public sealed class CollectionAnalyzerHeapIndexScanTests
 {
     [Fact]
+    public void Tags_And_Order_MatchFeatureModuleCatalogRegistration()
+    {
+        // DefaultAnalyzerFeatureModuleCatalog registers Order 240 / Tags ["collections"]
+        // independently of the interface defaults — these must stay in sync.
+        CollectionAnalyzer analyzer = new();
+
+        analyzer.Tags.Should().BeEquivalentTo(["collections"]);
+        analyzer.Order.Should().Be(240);
+    }
+
+    [Fact]
     public void CreateWorkerInstance_ReturnsFreshCollectionAnalyzer()
     {
         CollectionAnalyzer primary = new();

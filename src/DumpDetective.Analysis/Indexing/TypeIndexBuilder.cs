@@ -51,7 +51,7 @@ internal sealed class TypeIndexBuilder
             {
                 case 0: aggregate.Gen0Count++; break;
                 case 1: aggregate.Gen1Count++; break;
-                case 2: aggregate.Gen2Count++; break;
+                case 2: aggregate.Gen2Count++; aggregate.Gen2TotalSize += entry.Size; break;
                     // generation == -1 (unknown) or 3 (LOH fallback) — no per-gen increment
             }
         }
@@ -89,6 +89,7 @@ internal sealed class TypeIndexBuilder
             aggregate.Gen0Count += otherAgg.Gen0Count;
             aggregate.Gen1Count += otherAgg.Gen1Count;
             aggregate.Gen2Count += otherAgg.Gen2Count;
+            aggregate.Gen2TotalSize += otherAgg.Gen2TotalSize;
         }
 
         // Merge size buckets.
@@ -113,7 +114,8 @@ internal sealed class TypeIndexBuilder
                 aggregate.Gen0Count,
                 aggregate.Gen1Count,
                 aggregate.Gen2Count,
-                aggregate.Flags);
+                aggregate.Flags,
+                aggregate.Gen2TotalSize);
         }
 
         return result;
@@ -141,6 +143,7 @@ internal sealed class TypeIndexBuilder
         public int Gen0Count;
         public int Gen1Count;
         public int Gen2Count;
+        public ulong Gen2TotalSize;
         public TypeAggregateFlags Flags;
     }
 }

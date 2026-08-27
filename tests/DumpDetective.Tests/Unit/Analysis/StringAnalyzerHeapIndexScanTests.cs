@@ -115,7 +115,46 @@ public sealed class StringAnalyzerHeapIndexScanTests
         GetVeryLongStrings(primary).Should().HaveCount(2);
     }
 
+    [Fact]
+    public void MergePartial_DownsamplesLengthSamples_WhenConcatExceedsCap()
+    {
+        const int Cap = 100_000;
+        StringAnalyzer primary = new();
+        SeedState(primary, dedupActive: true, lengthSamples: MakeLengthSamples(60_000));
+
+        StringAnalyzer workerA = new();
+        SeedState(workerA, dedupActive: true, lengthSamples: MakeLengthSamples(60_000));
+
+        StringAnalyzer workerB = new();
+        SeedState(workerB, dedupActive: true, lengthSamples: MakeLengthSamples(60_000));
+
+        ((IParallelHeapIndexScanParticipant)primary).MergePartial([workerA, workerB]);
+
+        GetField<List<int>>(primary, "_indexScanLengthSamples")!.Should().HaveCount(Cap);
+    }
+
+    [Fact]
+    public void MergePartial_KeepsAllLengthSamples_WhenConcatUnderCap()
+    {
+        StringAnalyzer primary = new();
+        SeedState(primary, dedupActive: true, lengthSamples: MakeLengthSamples(3));
+
+        StringAnalyzer worker = new();
+        SeedState(worker, dedupActive: true, lengthSamples: MakeLengthSamples(2));
+
+        ((IParallelHeapIndexScanParticipant)primary).MergePartial([worker]);
+
+        GetField<List<int>>(primary, "_indexScanLengthSamples")!.Should().HaveCount(5);
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
+
+    private static List<int> MakeLengthSamples(int count)
+    {
+        var list = new List<int>(count);
+        for (int i = 0; i < count; i++) list.Add(i);
+        return list;
+    }
 
     private static object MakeFingerprint(ulong hash, int length, char first, char last) =>
         Activator.CreateInstance(FingerprintType, hash, length, first, last)!;
@@ -141,7 +180,8 @@ public sealed class StringAnalyzerHeapIndexScanTests
         object? stringStats = null,
         Dictionary<string, int>? buckets = null,
         List<LongStringEntry>? veryLongStrings = null,
-        int stringsRead = 0)
+        int stringsRead = 0,
+        List<int>? lengthSamples = null)
     {
         Type t = typeof(StringAnalyzer);
         Set(t, analyzer, "_indexScanDedupActive", dedupActive);
@@ -149,7 +189,7 @@ public sealed class StringAnalyzerHeapIndexScanTests
 
         Set(t, analyzer, "_indexScanStringStats", stringStats ?? Activator.CreateInstance(StatsDictType)!);
         Set(t, analyzer, "_indexScanMethodTableDupCounts", new Dictionary<ulong, int>());
-        Set(t, analyzer, "_indexScanLengthSamples", new List<int>());
+        Set(t, analyzer, "_indexScanLengthSamples", lengthSamples ?? new List<int>());
         Set(t, analyzer, "_indexScanLengthBuckets", buckets ?? new Dictionary<string, int>(StringComparer.Ordinal));
         Set(t, analyzer, "_indexScanVeryLongStrings", veryLongStrings ?? new List<LongStringEntry>());
         Set(t, analyzer, "_indexScanStringsRead", stringsRead);

@@ -426,6 +426,8 @@ public sealed class InsightEngineTests
             LohStringBytes: 0,
             InternedStringCount: 0,
             InternedStringBytes: 0,
+            Gen0StringCount: 0,
+            Gen1StringCount: 0,
             Gen2StringCount: 0,
             Gen2StringBytes: 0,
             StringsSampled: 8_000);
@@ -478,6 +480,8 @@ public sealed class InsightEngineTests
             LohStringBytes: 0,
             InternedStringCount: 0,
             InternedStringBytes: 0,
+            Gen0StringCount: 0,
+            Gen1StringCount: 0,
             Gen2StringCount: 0,
             Gen2StringBytes: 0,
             StringsSampled: 8_000);
@@ -491,6 +495,78 @@ public sealed class InsightEngineTests
         IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
 
         findings.Should().NotContain(f => f.Title.Contains("String data is a top heap consumer", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Analyze_ShouldEmitPinnedStringLeak_WhenPinnedStringBytesExceedThreshold()
+    {
+        InsightEngine engine = new();
+
+        GCHandleDomainResult handles = new(
+            TotalHandles: 10_000,
+            StrongLikeHandles: 9_000,
+            WeakLikeHandles: 900,
+            PinnedHandleTargets: 100,
+            TopPinnedTargetTypes: [new NameCountEntry("System.String", 50)],
+            TopPinnedObjectsBySize: [new NameBytesEntry("System.String", 5_000_000)]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("GC Handle Analysis", AnalyzerExecutionStatus.Success, handles),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("Pinned strings detected", StringComparison.OrdinalIgnoreCase)
+            && f.Tags.Contains("strings")
+            && f.Tags.Contains("pinning"));
+    }
+
+    [Fact]
+    public void Analyze_ShouldNotEmitPinnedStringLeak_WhenPinnedStringBytesBelowThreshold()
+    {
+        InsightEngine engine = new();
+
+        GCHandleDomainResult handles = new(
+            TotalHandles: 10_000,
+            StrongLikeHandles: 9_000,
+            WeakLikeHandles: 900,
+            PinnedHandleTargets: 5,
+            TopPinnedTargetTypes: [new NameCountEntry("System.String", 2)],
+            TopPinnedObjectsBySize: [new NameBytesEntry("System.String", 100)]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("GC Handle Analysis", AnalyzerExecutionStatus.Success, handles),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().NotContain(f => f.Title.Contains("Pinned strings detected", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Analyze_ShouldNotEmitPinnedStringLeak_WhenNoStringsArePinned()
+    {
+        InsightEngine engine = new();
+
+        GCHandleDomainResult handles = new(
+            TotalHandles: 10_000,
+            StrongLikeHandles: 9_000,
+            WeakLikeHandles: 900,
+            PinnedHandleTargets: 200,
+            TopPinnedTargetTypes: [new NameCountEntry("MyApp.Buffer", 200)],
+            TopPinnedObjectsBySize: [new NameBytesEntry("MyApp.Buffer", 50_000_000)]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("GC Handle Analysis", AnalyzerExecutionStatus.Success, handles),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().NotContain(f => f.Title.Contains("Pinned strings detected", StringComparison.OrdinalIgnoreCase));
     }
 
     private static AnalyzerRunResult BuildRun(string analyzerName, AnalyzerExecutionStatus status, AnalyzerDomainResult? result = null)

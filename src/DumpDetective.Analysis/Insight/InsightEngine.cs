@@ -62,6 +62,8 @@ internal sealed class InsightEngine
     private const int MemoryGenerationCorrelationTopTypesScanned = 30;
     private const ulong StringMemoryCorrelationMinWastedBytes = 5UL * 1024 * 1024; // 5 MB
     private const int StringMemoryCorrelationMaxRank = 10;
+    private const ulong PinnedStringLeakMinBytes = 1UL * 1024 * 1024;   // 1 MB
+    private const ulong PinnedStringLeakCriticalBytes = 20UL * 1024 * 1024; // 20 MB
 
     private const string Source = "InsightEngine";
 
@@ -227,6 +229,7 @@ internal sealed class InsightEngine
             DetectKnownLeakPatterns(findings, context.Memory);
             DetectMemoryTypeGenerationCorrelation(findings, context.Memory, context.GcGen);
             DetectStringMemoryConcentration(findings, context.Memory, context.Strings);
+            DetectPinnedStringLeak(findings, context.Handles);
             DetectRecurringTimeoutPattern(findings, context.Crash);
 
             DetectDbConnectionLeak(findings, context.DbConn, context.Crash);
@@ -1550,6 +1553,61 @@ internal sealed class InsightEngine
             MetricValue: (double)strings.DuplicateWastedBytes,
             MetricUnit: "bytes",
             EvidenceTables: [evidenceTable]));
+    }
+
+    /// <summary>
+    /// P2-4 (string-analyzer-audit.md): pinned System.String detection. Reuses the handle
+    /// classification GCHandleAnalyzer already performs during its single EnumerateHandles()
+    /// pass — rather than a second, redundant handle-table scan inside StringAnalyzer — and
+    /// looks for "System.String" among the ranked pinned-target-type breakdown.
+    /// </summary>
+    private static void DetectPinnedStringLeak(
+        List<InsightFinding> findings,
+        GCHandleDomainResult? handles)
+    {
+        if (handles is null) return;
+
+        ulong pinnedBytes = FindBytes(handles.TopPinnedObjectsBySize, "System.String")
+            + FindBytes(handles.TopAsyncPinnedObjectsBySize, "System.String");
+        if (pinnedBytes < PinnedStringLeakMinBytes)
+            return;
+
+        int pinnedCount = FindCount(handles.TopPinnedTargetTypes, "System.String");
+        FindingSeverity severity = pinnedBytes >= PinnedStringLeakCriticalBytes
+            ? FindingSeverity.Critical
+            : FindingSeverity.Warning;
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Memory",
+            Severity: severity,
+            Title: "Pinned strings detected — blocking GC compaction",
+            Evidence: $"{pinnedCount:N0} pinned System.String handle target(s) totaling {FormatBytes(pinnedBytes)}.",
+            Recommendation: "Pinning managed strings (e.g. via GCHandle.Alloc(pin: true) for P/Invoke marshalling) " +
+                            "prevents the GC from compacting the small object heap around them. Free pinned string " +
+                            "handles as soon as the interop call returns, or use Marshal.StringToHGlobalAnsi/Unicode " +
+                            "(which copies into unmanaged memory) instead of pinning the managed string itself.",
+            Tags: ["strings", "pinning", "gc", "handles", "cross-analyzer"],
+            MetricValue: (double)pinnedBytes,
+            MetricUnit: "bytes"));
+
+        static ulong FindBytes(IReadOnlyList<NameBytesEntry>? entries, string name)
+        {
+            if (entries is null) return 0;
+            foreach (NameBytesEntry e in entries)
+                if (string.Equals(e.Name, name, StringComparison.Ordinal))
+                    return e.Bytes;
+            return 0;
+        }
+
+        static int FindCount(IReadOnlyList<NameCountEntry>? entries, string name)
+        {
+            if (entries is null) return 0;
+            foreach (NameCountEntry e in entries)
+                if (string.Equals(e.Name, name, StringComparison.Ordinal))
+                    return e.Count;
+            return 0;
+        }
     }
 
     /// <summary>

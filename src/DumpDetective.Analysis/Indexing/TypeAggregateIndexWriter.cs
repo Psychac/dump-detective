@@ -13,12 +13,12 @@ namespace DumpDetective.Analysis.Indexing;
 /// <remarks>
 /// File layout (little-endian throughout, offsets shown assuming BucketCount=8):
 /// <code>
-///   [  0 –  23]  IndexHeader (24 B)  Magic=0x47415954, Version=3, RecordCount=numTypes
+///   [  0 –  23]  IndexHeader (24 B)  Magic=0x47415954, Version=4, RecordCount=numTypes
 ///   [ 24 –  31]  ObjectCount (8 B)   total objects from the scan
 ///   [ 32 –  63]  ExtraHeader (32 B)  BucketCount(4)+ModuleCount(4)+ShapeCount(4)+Pad(4)+
 ///                                   Reserved(8)+Reserved(8)
 ///   [ 64 – 127]  SizeBuckets (64 B)  BucketCount × 8-byte signed counters
-///   [128 –   …]  TypeEntry records   numTypes × 68 B each (see TypeAggregateIndexEntry doc)
+///   [128 –   …]  TypeEntry records   numTypes × 88 B each (see TypeAggregateIndexEntry doc)
 ///   [  … –   …]  ShapeEntry records  ShapeCount × 16 B each (MT(8)+Ref(2)+Val(2)+Pad(4))
 ///   [  … –  ∞]  Module records      variable: Id(4)+NameLen(2)+AsmLen(2)+Name(N)+Asm(M)
 /// </code>
@@ -32,12 +32,15 @@ internal static class TypeAggregateIndexWriter
 {
     // File magic: "TYAG" = Type Aggregate Index
     internal const int Magic = 0x47415954;
-    internal const int Version = 3;
+    // Bumped 3 -> 4 when Gen2TotalSize was added to TypeEntry (P2-3). Older TypeAggregateIndex.bin
+    // files fail the header-version check in TypeAggregateIndexReader and are rebuilt via a full
+    // heap rescan — the same policy used for every prior bump of this format.
+    internal const int Version = 4;
 
     // TypeAggregateIndexEntry binary record — must match the layout in the doc comment of
     // TypeAggregateIndexEntry.cs: MT(8)+ModuleId(4)+Count(8)+TotalSize(8)+LohCount(8)+
-    // LohSize(8)+SampleAddress(8)+Gen0Count(8)+Gen1Count(8)+Gen2Count(8)+Flags(1)+Pad(3)
-    internal const int TypeEntrySize = 80;
+    // LohSize(8)+SampleAddress(8)+Gen0Count(8)+Gen1Count(8)+Gen2Count(8)+Gen2TotalSize(8)+Flags(1)+Pad(3)
+    internal const int TypeEntrySize = 88;
 
     // TypeShapeEntry binary record: MT(8)+RefFields(2)+ValFields(2)+Pad(4)
     internal const int ShapeEntrySize = 16;
@@ -201,8 +204,9 @@ internal static class TypeAggregateIndexWriter
         BinaryPrimitives.WriteInt64LittleEndian(span[52..], e.Gen0Count);    //  8 → total 60
         BinaryPrimitives.WriteInt64LittleEndian(span[60..], e.Gen1Count);    //  8 → total 68
         BinaryPrimitives.WriteInt64LittleEndian(span[68..], e.Gen2Count);    //  8 → total 76
-        span[76] = (byte)e.Flags;                                              //  1 → total 77
-        span[77] = span[78] = span[79] = 0;                                    //  3 → total 80
+        BinaryPrimitives.WriteUInt64LittleEndian(span[76..], e.Gen2TotalSize); //  8 → total 84
+        span[84] = (byte)e.Flags;                                              //  1 → total 85
+        span[85] = span[86] = span[87] = 0;                                    //  3 → total 88
     }
 
     private static void WriteShapeEntry(Span<byte> span, ulong mt, TypeShapeEntry s)

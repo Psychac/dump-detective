@@ -24,7 +24,8 @@ internal static class AnalyzerOptionsBuilder
             MaxDuplicateStringLength = request.MaxDuplicateStringLength ?? s.MaxDuplicateStringLength,
             MinDuplicateStringCount = request.MinDuplicateStringCount ?? s.MinDuplicateStringCount,
             ProduceRawExports = s.ProduceRawExports,
-            MinDuplicateCharLength = s.MinDuplicateCharLength
+            MinDuplicateCharLength = s.MinDuplicateCharLength,
+            RetentionPathSampleCount = s.RetentionPathSampleCount
         };
     }
 

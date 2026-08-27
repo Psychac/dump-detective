@@ -34,6 +34,18 @@ internal sealed record DuplicateStringSnapshot(
     int AvgSize = 0,
     string? SamplingSource = null);
 
+/// <summary>
+/// GC root-path search result for one sample instance of a duplicate string pattern (P3-2,
+/// string-analyzer-audit.md) — answers "why is this duplicated value still alive."
+/// </summary>
+internal sealed record DuplicateStringRetentionPath(
+    string Preview,
+    ulong SampleAddress,
+    bool HasGcRoot,
+    /// <summary>Formatted "RootKind: Type@0xAddr -> ... -> Type@0xAddr" chain; null when no root was found.</summary>
+    string? RootPath,
+    bool SearchTruncated);
+
 internal sealed record StringDomainResult(
     int TotalStrings,
     ulong TotalStringMemoryBytes,
@@ -59,7 +71,17 @@ internal sealed record StringDomainResult(
     ulong LohStringBytes,
     int InternedStringCount,
     ulong InternedStringBytes,
+    long Gen0StringCount,
+    long Gen1StringCount,
     long Gen2StringCount,
+    /// <summary>
+    /// Exact total bytes of Gen2-resident string instances, summed from
+    /// <see cref="DumpDetective.Analysis.Indexing.TypeAggregateIndexEntry.Gen2TotalSize"/> during
+    /// Phase 1. Prior to that field's introduction this was estimated as
+    /// <c>Gen2Count * (TotalSize / Count)</c> (a per-type average size applied uniformly to Gen2
+    /// instances) — now exact, including for types whose Gen2 instances differ in size from their
+    /// Gen0/Gen1 counterparts.
+    /// </summary>
     ulong Gen2StringBytes,
     int StringsSampled,
     double SamplingCoverage = 0.0,
@@ -69,4 +91,8 @@ internal sealed record StringDomainResult(
     /// <summary>Top object types by total string bytes they reference (not duplicate strings, all strings)</summary>
     IReadOnlyList<(string TypeName, ulong TotalBytes)>? TopStringOwnerTypes = null,
     DistributionSummary? Distribution = null,
-    IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? Artifacts = null) : AnalyzerDomainResult;
+    IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? Artifacts = null,
+    /// <summary>GC root-path search results for the top duplicate patterns by wasted bytes (P3-2,
+    /// string-analyzer-audit.md), bounded by <see cref="Core.Options.StringAnalysisOptions.RetentionPathSampleCount"/>.
+    /// Null when sampling was disabled or no cache-backed root/reverse-index provider was available.</summary>
+    IReadOnlyList<DuplicateStringRetentionPath>? TopDuplicateRetentionPaths = null) : AnalyzerDomainResult;

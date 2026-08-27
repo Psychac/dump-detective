@@ -1,5 +1,6 @@
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Traversal;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
@@ -70,6 +71,10 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
     // beyond this many instances is subsampled via reservoir sampling — see AccumulateStringOwnerType).
     // Totals are extrapolated from the sample average against the type's real count.
     private const int MaxSamplesPerOwnerType = 2000;
+    // Per-worker cap for length-percentile sampling (see FingerprintAddress); MergePartial
+    // downsamples back to this bound after concatenating worker results, since plain
+    // concatenation across N parallel workers would otherwise grow unbounded with worker count.
+    private const int MaxLengthSamples = 100_000;
     private bool _indexScanOwnerTypesActive;
     private FieldLayoutCache? _indexScanFieldCache;
     private Dictionary<ulong, int[]>? _indexScanStringOwnerFieldIndices; // owner MT -> string field indices
@@ -170,7 +175,7 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
         _indexScanMaxUnique = stringOptions.MaxUniqueStringTracking;
         _indexScanStringStats = new Dictionary<StringFingerprint, StringLeakInfo>(capacity: 1024);
         _indexScanMethodTableDupCounts = new Dictionary<ulong, int>(capacity: 64);
-        _indexScanLengthSamples = new List<int>(capacity: 100_000);
+        _indexScanLengthSamples = new List<int>(capacity: MaxLengthSamples);
         _indexScanLengthBuckets = new Dictionary<string, int>(StringComparer.Ordinal)
         {
             ["0-15"] = 0,
@@ -441,6 +446,21 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
             // Very-long-string list: concat (no ordering required).
             longStrings.AddRange(other._indexScanVeryLongStrings!);
         }
+
+        // Each worker already caps its own samples at MaxLengthSamples (see FingerprintAddress),
+        // but plain concatenation across N workers still grows unbounded with worker count. Downsample
+        // back to the cap via uniform random selection — lengthSamples only feeds percentile estimates,
+        // so an unbiased random subset preserves the same statistical validity as the per-worker cap.
+        if (lengthSamples.Count > MaxLengthSamples)
+        {
+            var rng = new Random();
+            for (int i = 0; i < MaxLengthSamples; i++)
+            {
+                int j = i + rng.Next(lengthSamples.Count - i);
+                (lengthSamples[i], lengthSamples[j]) = (lengthSamples[j], lengthSamples[i]);
+            }
+            lengthSamples.RemoveRange(MaxLengthSamples, lengthSamples.Count - MaxLengthSamples);
+        }
     }
 
     /// <summary>
@@ -455,7 +475,7 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
         ulong totalManagedBytes = GetTotalManagedBytes(context);
         List<(ulong Start, ulong End)> fohSegments = BuildFohSegments(context.Heap);
 
-        return ValueTask.FromResult(Analyze(context.Heap, context.Cache, stringOptions, totalManagedBytes, fohSegments, context.Progress).Stamp(this));
+        return ValueTask.FromResult(Analyze(context.Heap, context.Cache, stringOptions, totalManagedBytes, fohSegments, context.Progress, cancellationToken).Stamp(this));
     }
 
     /// <summary>
@@ -468,7 +488,8 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
         StringAnalysisOptions stringOptions,
         ulong totalManagedBytes,
         List<(ulong Start, ulong End)> fohSegments,
-        IProgress<AnalyzerProgressReport>? progress)
+        IProgress<AnalyzerProgressReport>? progress,
+        CancellationToken cancellationToken = default)
     {
         var totalStopwatch = Stopwatch.StartNew();
 
@@ -489,22 +510,16 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
         int totalStrings = 0;
         ulong totalStringMemory = 0;
         ulong lohStringBytes = 0;
+        long gen0StringCount = 0;
+        long gen1StringCount = 0;
         long gen2StringCount = 0;
         ulong gen2StringBytes = 0;
         var veryLongStrings = new List<LongStringEntry>(capacity: 16);
 
         if (typeAggregates is not null && stringMts.Count > 0)
         {
-            foreach (ulong mt in stringMts)
-            {
-                if (!typeAggregates.TryGetValue(mt, out TypeAggregateIndexEntry entry)) continue;
-                totalStrings += (int)Math.Min(entry.Count, int.MaxValue);
-                totalStringMemory += entry.TotalSize;
-                lohStringBytes += entry.LohSize;
-                gen2StringCount += entry.Gen2Count;
-                if (entry.Count > 0)
-                    gen2StringBytes += (ulong)entry.Gen2Count * (entry.TotalSize / (ulong)entry.Count);
-            }
+            (totalStrings, totalStringMemory, lohStringBytes, gen0StringCount, gen1StringCount, gen2StringCount, gen2StringBytes) =
+                AggregateStringTypeStats(typeAggregates, stringMts);
             progress?.Report(new(totalStrings, "string stats from index", $"{totalStrings:N0} strings, {FormatBytes(totalStringMemory)} total"));
         }
 
@@ -533,7 +548,7 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
         int stringsSampled = 0;
         string? dedupSource = null;
         // length sampling structures
-        var lengthSamples = new List<int>(capacity: 100_000);
+        var lengthSamples = new List<int>(capacity: MaxLengthSamples);
         var lengthBuckets = new Dictionary<string, int>(StringComparer.Ordinal)
         {
             ["0-15"] = 0,
@@ -653,17 +668,8 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
         int duplicatePatternCount = 0;
         ulong duplicateWastedBytes = 0;
 
-        var duplicates = new List<StringLeakInfo>();
-
-        int minCount = stringOptions.MinDuplicateStringCount;
-        foreach (StringLeakInfo info in stringStats.Values)
-        {
-            if (info.Count <= minCount) continue;
-            duplicatePatternCount++;
-            ulong wasted = info.TotalSize * (ulong)(info.Count - 1) / (ulong)info.Count;
-            duplicateWastedBytes += wasted;
-            duplicates.Add(info);
-        }
+        List<StringLeakInfo> duplicates = SelectDuplicates(
+            stringStats.Values, stringOptions.MinDuplicateStringCount, out duplicatePatternCount, out duplicateWastedBytes);
 
         // Prepare a map from dominant method-table -> type name for snapshots
         var mtToName = new Dictionary<ulong, string?>(methodTableDupCounts.Count);
@@ -671,6 +677,9 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
             mtToName[mt] = heap.GetTypeByMethodTable(mt)?.Name;
 
         IReadOnlyList<DuplicateStringSnapshot> topDuplicates = BuildDuplicateSnapshots(duplicates, mtToName);
+
+        IReadOnlyList<DuplicateStringRetentionPath>? retentionPaths = BuildRetentionPaths(
+            heap, cache, topDuplicates, stringOptions.RetentionPathSampleCount, cancellationToken);
 
         // Build frequency buckets from stringStats
         var freqBuckets = new Dictionary<string, int>(StringComparer.Ordinal)
@@ -1001,6 +1010,8 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
             LohStringBytes: lohStringBytes,
             InternedStringCount: internedStringCount,
             InternedStringBytes: internedStringBytes,
+            Gen0StringCount: gen0StringCount,
+            Gen1StringCount: gen1StringCount,
             Gen2StringCount: gen2StringCount,
             Gen2StringBytes: gen2StringBytes,
             StringsSampled: stringsSampled,
@@ -1010,7 +1021,78 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
             TopDuplicateTypes: topDuplicateTypes,
             TopStringOwnerTypes: topStringOwnerTypes,
             Distribution: distribution,
-            Artifacts: rawExports);
+            Artifacts: rawExports,
+            TopDuplicateRetentionPaths: retentionPaths);
+    }
+
+    /// <summary>
+    /// P3-2 (string-analyzer-audit.md): runs a bounded GC root-path search (via the shared
+    /// <see cref="RootPathFinder"/>/<see cref="RootPathSearchSupport"/> infrastructure other
+    /// leak-focused analyzers already use) for one sample instance of each of the top
+    /// <paramref name="sampleCount"/> duplicate patterns by wasted bytes — answers "why is this
+    /// duplicated value still alive" without walking the whole heap for every pattern.
+    /// </summary>
+    private static IReadOnlyList<DuplicateStringRetentionPath>? BuildRetentionPaths(
+        ClrHeap heap,
+        IHeapAnalysisCache? cache,
+        IReadOnlyList<DuplicateStringSnapshot> topDuplicates,
+        int sampleCount,
+        CancellationToken cancellationToken)
+    {
+        if (cache is null || topDuplicates.Count == 0 || sampleCount <= 0) return null;
+
+        IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
+
+        var provider = new ReferenceGraph(heap);
+
+        // Same bounded budget TimerLeakAnalyzer/StaticRootLeakDetector use for their evidence
+        // root-path searches — see PopulateEvidence in TimerLeakAnalyzer.cs for the reasoning
+        // (real limits, not a legacy-only fallback, even with the reverse index available).
+        var limits = new RootPathSearchLimits
+        {
+            MaxCandidateNodes = 5_000,
+            MaxCandidateDepth = 8,
+            MaxRootExpansionDepth = 12,
+            LargeFanoutThreshold = 100,
+        };
+        var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry,
+            RootPathSearchSupport.IsNoisyType, static _ => false, cache.TryGetReverseIndexProvider(), cache);
+
+        IReadOnlyList<(DuplicateStringSnapshot Duplicate, ulong Address)> candidates =
+            SelectRetentionPathCandidates(topDuplicates, sampleCount);
+
+        var results = new List<DuplicateStringRetentionPath>(candidates.Count);
+        foreach ((DuplicateStringSnapshot dup, ulong address) in candidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            bool found = finder.TryFindAnyRootPath(address, roots, out string? rootKind, out List<ulong>? addresses, out bool searchTruncated, out _, out _, cancellationToken);
+            string? rootPath = found ? RootPathSearchSupport.FormatPath(heap, rootKind!, addresses, cache) : null;
+
+            results.Add(new DuplicateStringRetentionPath(dup.Preview, address, found, rootPath, searchTruncated));
+        }
+
+        return results.Count > 0 ? results : null;
+    }
+
+    /// <summary>
+    /// Picks up to <paramref name="sampleCount"/> duplicate patterns (in the order supplied —
+    /// callers pass a wasted-bytes-descending list) that have a resolvable sample address,
+    /// pairing each with the address a root-path search should target. Pure selection logic,
+    /// split out from <see cref="BuildRetentionPaths"/> so it's testable without a live
+    /// <see cref="ClrHeap"/>/<see cref="IHeapAnalysisCache"/>.
+    /// </summary>
+    private static IReadOnlyList<(DuplicateStringSnapshot Duplicate, ulong Address)> SelectRetentionPathCandidates(
+        IReadOnlyList<DuplicateStringSnapshot> topDuplicates, int sampleCount)
+    {
+        var candidates = new List<(DuplicateStringSnapshot, ulong)>(Math.Min(sampleCount, topDuplicates.Count));
+        for (int i = 0; i < topDuplicates.Count && candidates.Count < sampleCount; i++)
+        {
+            DuplicateStringSnapshot dup = topDuplicates[i];
+            if (dup.SampleAddresses is null || dup.SampleAddresses.Count == 0) continue;
+            candidates.Add((dup, dup.SampleAddresses[0]));
+        }
+        return candidates;
     }
 
     // Display preview length — a render concern, not a memory or exactness cap. The value
@@ -1069,7 +1151,7 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
 
         // record length samples and buckets (bounded)
         int charLen = value.Length;
-        if (lengthSamples is not null && lengthSamples.Count < 100_000) lengthSamples.Add(charLen);
+        if (lengthSamples is not null && lengthSamples.Count < MaxLengthSamples) lengthSamples.Add(charLen);
         if (lengthBuckets is not null)
         {
             string key = charLen switch
@@ -1124,15 +1206,8 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
     {
         if (stringOptions.MaxDuplicateStringLength <= 0) return true;
         if (size <= 26) return true; // empty/very small strings
-        try
-        {
-            ulong estChars = (size - 26) / 2;
-            return estChars <= (ulong)stringOptions.MaxDuplicateStringLength;
-        }
-        catch
-        {
-            return false;
-        }
+        ulong estChars = (size - 26) / 2;
+        return estChars <= (ulong)stringOptions.MaxDuplicateStringLength;
     }
 
     /// <summary>
@@ -1153,6 +1228,64 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
     private static int ComputeUniqueCount(Dictionary<StringFingerprint, StringLeakInfo> stringStats)
     {
         return stringStats.Count;
+    }
+
+    /// <summary>
+    /// Aggregate string-type totals (count, bytes, LOH, and per-generation counts) from
+    /// Phase 1's <see cref="TypeAggregateIndexEntry"/> index — zero heap I/O.
+    /// </summary>
+    private static (int TotalStrings, ulong TotalStringMemory, ulong LohStringBytes,
+        long Gen0StringCount, long Gen1StringCount, long Gen2StringCount, ulong Gen2StringBytes)
+        AggregateStringTypeStats(
+            IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> typeAggregates,
+            IReadOnlySet<ulong> stringMts)
+    {
+        int totalStrings = 0;
+        ulong totalStringMemory = 0;
+        ulong lohStringBytes = 0;
+        long gen0StringCount = 0;
+        long gen1StringCount = 0;
+        long gen2StringCount = 0;
+        ulong gen2StringBytes = 0;
+
+        foreach (ulong mt in stringMts)
+        {
+            if (!typeAggregates.TryGetValue(mt, out TypeAggregateIndexEntry entry)) continue;
+            totalStrings += (int)Math.Min(entry.Count, int.MaxValue);
+            totalStringMemory += entry.TotalSize;
+            lohStringBytes += entry.LohSize;
+            gen0StringCount += entry.Gen0Count;
+            gen1StringCount += entry.Gen1Count;
+            gen2StringCount += entry.Gen2Count;
+            gen2StringBytes += entry.Gen2TotalSize;
+        }
+
+        return (totalStrings, totalStringMemory, lohStringBytes, gen0StringCount, gen1StringCount, gen2StringCount, gen2StringBytes);
+    }
+
+    /// <summary>
+    /// Select string patterns whose occurrence count meets <paramref name="minCount"/> and
+    /// compute their total wasted bytes (bytes beyond the first occurrence of each pattern).
+    /// </summary>
+    private static List<StringLeakInfo> SelectDuplicates(
+        Dictionary<StringFingerprint, StringLeakInfo>.ValueCollection stats,
+        int minCount,
+        out int duplicatePatternCount,
+        out ulong duplicateWastedBytes)
+    {
+        var duplicates = new List<StringLeakInfo>();
+        duplicatePatternCount = 0;
+        duplicateWastedBytes = 0;
+
+        foreach (StringLeakInfo info in stats)
+        {
+            if (info.Count < minCount) continue;
+            duplicatePatternCount++;
+            duplicateWastedBytes += info.TotalSize * (ulong)(info.Count - 1) / (ulong)info.Count;
+            duplicates.Add(info);
+        }
+
+        return duplicates;
     }
 
     /// <summary>Format a byte count as a human-readable string.</summary>
@@ -1208,7 +1341,7 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
         // Fallback: sum segment committed memory.
         ulong totalBytes = 0;
         foreach (ClrSegment segment in context.Heap.Segments)
-            totalBytes += (ulong)(segment.End - segment.Start);
+            totalBytes += SegmentKindMapper.GetCommittedBytes(segment);
         return totalBytes;
     }
 

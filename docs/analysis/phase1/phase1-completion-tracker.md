@@ -14,86 +14,8 @@
 | **Total P1 Identified** | 155 |
 | **P0 Implemented** | 70 |
 | **P1 Implemented** | 122 |
-| **P2 Implemented** | 42 |
+| **P2 Implemented** | 48 |
 | **Overall P0+P1 Rate** | 82.8% (192/232) |
-
-> Note: HeapTopologyAnalyzer's roadmap was fully closed out on 2026-08-27 (P2 3/7 → 5/5 — the
-> tracker's prior "3/7" denominator was stale; the audit doc itself only ever defined 5 numbered
-> P2 items (#8-#12), all now done; P3 0/3 → 4/4, denominator also corrected from 3 to 4 to match
-> the audit doc's #13-#16) — see updated row 12 below. `P2 Implemented` in the executive summary
-> rose from 40 to 42 to reflect the net 2 additional P2 completions once the denominator was
-> corrected. P2 covered a `SegmentTypeAccumulator` struct-copy fix, trend comparer SOH/reserved/gap
-> tracking, a segment object-density column, per-kind (SOH/Frozen) fragmentation findings with
-> correct attribution (which also surfaced and fixed a pre-existing bug where `SohFragmentedBytes`
-> always reported ~100%), and a shared `SegmentSummary`/`SegmentSummaryCache` that eliminates the
-> duplicated segment-classification pass against `SegmentReservationAnalyzer` (scoped in
-> `docs/refactor/heap-segment-shared-pass-plan.md` before implementation). P3 covered exposing
-> `ClrHeap.IsServer`/`SubHeaps.Length` (plus promoting the logical-heap skew check from an inline
-> text block to a real trend-tracked `InsightFinding`), widening `HeapSegmentSnapshot.ObjectCount`
-> and the SOH/LOH/POH/Frozen aggregate counters from `int` to `long`, and using
-> `HeapSegmentKind.Unknown` for genuinely unrecognized segment kinds instead of silently folding
-> them into SOH (a real Audit-Area-6 correctness risk, not just a hygiene item). One P3 item
-> ("add progress reporting for a full SOH scan") was found not applicable — the codebase no longer
-> has any SOH full-scan mode to report progress for (SOH's object count/used bytes are always
-> derived arithmetically, never walked) — and marked superseded rather than re-implemented,
-> consistent with how other analyzers' superseded items were counted. HeapTopologyAnalyzer is now
-> the 10th analyzer with the entire P0–P3 roadmap complete.
->
-> Note: GCHandleAnalyzer's roadmap was fully closed out on 2026-08-26 (P2 0/4 → 4/4, P3 0/4 → 4/4)
-> — see updated row 11 below. `P2 Implemented` in the executive summary rose from 36 to 40 to
-> reflect the 4 newly-completed P2 items. P2 covered SOH-vs-LOH pinned-target classification with
-> a dedicated compaction-barrier finding, RefCounted (COM interop) handle concentration, per-kind
-> pinned-bytes report tables, and top-N individual pinned handle addresses. P3 covered a
-> WeakShort/WeakLong Gen0-2/LOH generation breakdown with a finalization-backlog finding, and a
-> binary-format version bump (`HandleSnapshot.bin` v1→v2, `HandleRecord.DependentTarget`) so
-> dependent-handle topology resolves inline instead of a second live `runtime.EnumerateHandles()`
-> pass, plus new functional unit tests (`GCHandleFindingGeneratorTests`,
-> `GCHandleAnalyzerFunctionalTests`) exercising the analyzer via a disk-injected fake handle
-> snapshot with no real dump required. One P3 item ("finalization queue analysis") was found
-> already covered by the separate `FinalizableObjectAnalyzer` and marked superseded rather than
-> re-implemented, consistent with how other analyzers' superseded items were counted.
-> GCHandleAnalyzer is now the 9th analyzer with the entire P0–P3 roadmap complete.
->
-> Note: MemoryAnalyzer's roadmap was fully closed out on 2026-08-26 (P2 0/5 → 5/5, P3 0/4 → 4/4)
-> — see updated row 10 below. `P2 Implemented` in the executive summary rose from 31 to 36 to
-> reflect the 5 newly-completed P2 items. One P3 item (`ClrHeap.IsServer`/per-heap balance
-> metrics) was found already implemented elsewhere (`HeapTopologyAnalyzer`'s
-> `PerLogicalHeapSummary`) and marked superseded-with-cross-link rather than re-implemented —
-> counted as resolved/closed for this roadmap's purposes, consistent with how
-> FinalizableObjectAnalyzer's superseded items were counted. MemoryAnalyzer is now the 8th
-> analyzer with the entire P0–P3 roadmap complete.
->
-> Note: LohFragmentationAnalyzer's roadmap was fully closed out on 2026-08-26 (P2 2/7 → 7/7,
-> P3 0/2 → 4/4; the P3 denominator also grew from 2 to 4 as two additional P3 items were
-> identified during the closeout) — see updated row 9 below. `P2 Implemented` in the executive
-> summary rose from 26 to 31 to reflect the 5 newly-completed P2 items. LohFragmentationAnalyzer
-> (renamed "LOH & POH Fragmentation Analysis" as part of this closeout) is now the 7th analyzer
-> with the entire P0–P3 roadmap complete.
->
-> Note: `P2 Implemented` dropped from 34 to 27 on 2026-08-15 when AsyncTaskAnalyzer's re-audit
-> fully superseded its original P0–P3 roadmap with fresh numbering (see the RE-AUDITED table
-> below) — the 7 P2 items previously counted against AsyncTaskAnalyzer's original roadmap no
-> longer exist as a distinct roadmap; its re-audit roadmap has 0/4 P2 items done under the new
-> numbering. This is a renumbering artifact, not regression or lost work.
->
-> Note: All totals dropped again on 2026-08-15 when AllocationPatternAnalyzer's re-audit
-> superseded its original P0–P3 roadmap (P0 2/2, P1 5/5, P2 5/6 — all counted as done) with a
-> fresh roadmap (P0 0/0, P1 0/2, P2 0/3) — see the RE-AUDITED table below. Net change: P0
-> Identified −2, P0 Implemented −2, P1 Identified −3 (5 removed, 2 added), P1 Implemented −5,
-> P2 Implemented −5. Renumbering artifact, not regression or lost work — the analyzer scored
-> higher on re-audit (62→82/100) than before.
->
-> Note: JitAnalyzer's roadmap was fully closed out on 2026-08-26 (P2 0/4 → 4/4, P3 0/2 → 2/2) —
-> see updated row 8 above. `P2 Implemented` in the executive summary rose from 22 to 26 to reflect
-> the 4 newly-completed P2 items (P2 Identified was already counted at the pre-existing total, no
-> change there). JitAnalyzer is now the 6th analyzer with the entire P0–P3 roadmap complete.
->
-> Note: FinalizableObjectAnalyzer's roadmap was fully closed out on 2026-08-25 (P2 2/8 → 3/3,
-> P3 0/3 → 3/3, plus 2 Evolution items also resolved) — see updated row 7 above. The original "2/8"
-> and "0/3" denominators reflected an earlier, ambiguous item count for this analyzer (see Audit
-> Format Notes below); the executive-summary totals in this table were not recomputed against that
-> change since the pool composition isn't cleanly separable from the global P0/P1/P2 counts. Treat
-> this analyzer's row as authoritative over the global totals until a full recount is done.
 
 ---
 
@@ -132,7 +54,7 @@ P0-4 was a regression hiding behind two individually-DONE roadmap items).
 | 12 | **HeapTopologyAnalyzer** | 3/3 | 4/4 | 5/5 | 4/4 | ✅ P0+P1+P2+P3 COMPLETE (2026-08-27) — P2: `SegmentTypeAccumulator` struct-copy fix, trend comparer SOH/reserved/reservation-gap tracking, segment object-density column, per-kind (SOH/Frozen) fragmentation findings with correct attribution (also fixed a pre-existing bug where `SohFragmentedBytes` always reported ~100%), and a shared `SegmentSummary`/`SegmentSummaryCache` eliminating the duplicated segment-classification pass against `SegmentReservationAnalyzer` (scoped in `docs/refactor/heap-segment-shared-pass-plan.md` first). P3: `ClrHeap.IsServer`/`SubHeaps.Length` exposed (plus the logical-heap skew check promoted from an inline text block to a real trend-tracked `InsightFinding`), `HeapSegmentSnapshot.ObjectCount` and the SOH/LOH/POH/Frozen aggregate counters widened `int`→`long`, and `HeapSegmentKind.Unknown` now used for genuinely unrecognized segment kinds instead of silently folding them into SOH. One P3 item (SOH full-scan progress reporting) found not applicable — no SOH full-scan mode exists in the current codebase — and marked superseded (`heap-topology-analyzer-audit.md`) |
 | 13 | **DominatorAnalyzer** | 3/3 | 5/5 | 5/6 | 0/2 | ✅ P0+P1 complete; P2 83% (5/6 done) |
 | 14 | **CollectionAnalyzer** | 3/3 | 5/5 | 0/8 | 0/5 | ✅ P0+P1 complete |
-| 15 | **StringAnalyzer** | 3/3 | 5/5 | 0/8 | 0/5 | ✅ P0+P1 complete |
+| 15 | **StringAnalyzer** | 3/3 | 5/5 | 6/6 | 4/4 | ✅ P0+P1+P2+P3 COMPLETE (2026-08-27) — P2: `MinDuplicateStringCount` off-by-one fix, post-merge downsample cap on `_indexScanLengthSamples` (bounds unbounded growth across N parallel workers), `GetTotalManagedBytes` fallback switched from reserved to committed segment bytes, Gen0/Gen1 string counts added alongside Gen2, and a binary-format change (`TypeAggregateIndexEntry` v3→v4, new `Gen2TotalSize` field) replacing an averaged Gen2-bytes estimate with an exact per-type sum. P3: prefix clustering of duplicate string patterns (report-layer only), a dynamic confidence band driven by `SamplingCoverage` via the shared `ConfidenceScoring` helper, a dead `try/catch` removed, and retention-path sampling for the top duplicate patterns via the shared `RootPathFinder`/`RootPathSearchSupport` infrastructure (`TimerLeakAnalyzer.PopulateEvidence`'s template), gated by new `StringAnalysisOptions.RetentionPathSampleCount`. Pinned-string detection was implemented as a cross-analyzer `InsightEngine` rule reusing `GCHandleAnalyzer`'s already-computed pinned-bytes breakdown instead of a redundant second handle-table scan (`string-analyzer-audit.md`) |
 | 16 | **CrashAnalyzer** | 2/2 | 5/5 | 1/6 | 0/2 | ✅ P0+P1 complete; P2 17% (1/6) |
 | 17 | **GCGenerationAnalyzer** | 3/3 | 4/4 | 4/5 | 0/3 | ✅ P0+P1 complete; P2 80% (4/5) |
 | 18 | **WeakReferenceAnalyzer** | 2/2 | 4/4 | 4/5 | 0/4 | ✅ P0+P1 complete; P2 80% (4/5) |
@@ -204,8 +126,8 @@ Different audits use different conventions for marking completion:
 
 **Major Wins:**
 - 13 analyzers (37%) have P0+P1 100% complete
-- 10 analyzers (ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer, ThreadStackClusterAnalyzer, FinalizableObjectAnalyzer, JitAnalyzer, LohFragmentationAnalyzer, MemoryAnalyzer, GCHandleAnalyzer, HeapTopologyAnalyzer) have ALL P0+P1+P2 complete
-- ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer, ThreadStackClusterAnalyzer, FinalizableObjectAnalyzer, JitAnalyzer, LohFragmentationAnalyzer, MemoryAnalyzer, GCHandleAnalyzer, and HeapTopologyAnalyzer are the only analyzers with ALL P0+P1+P2+P3 complete (ArrayAnalyzer 4/4 P3; BoxingAnalyzer 4/4 P3, including unit test coverage for pure helper logic; SegmentReservationAnalyzer 4/4 P3, including the P3-4 regions-based GC per-region statistics evolution item; ThreadStackClusterAnalyzer 4/4 P3, including the P3-3 cross-analyzer correlation with `HangAnalyzer`; FinalizableObjectAnalyzer 3/3 P3 plus its 2 Evolution items, including root-path cross-reference via `RootPathFinder`; JitAnalyzer 2/2 P3, including a per-module JIT stack heatmap cross-referenced with `ModuleDomainResult` via a new reusable `InsightFinding.EvidenceTables` capability; LohFragmentationAnalyzer 4/4 P3, including converting `LohSegmentStats` to a `readonly record struct` and rewiring its type-aggregated LOH/POH table onto the unbounded Phase 1 `TypeAggregateIndexEntry` instead of a capped top-100 sample; MemoryAnalyzer 4/4 P3, including per-walk BFS progress reporting shared across 3 other analyzers via `RetainedSizeCandidateSelector`, cancellation support inside `BoundedGraphWalk.ComputeExclusiveRetained`, and one item resolved by cross-linking to `HeapTopologyAnalyzer`'s pre-existing per-logical-heap balance metrics instead of duplicating them; GCHandleAnalyzer 4/4 P2 and 4/4 P3, including a binary-format version bump (`HandleSnapshot.bin` v1→v2) to carry dependent-handle targets inline instead of a second live enumeration pass, and one P3 item found already covered by the separate `FinalizableObjectAnalyzer`; HeapTopologyAnalyzer 5/5 P2 and 4/4 P3, including a shared `SegmentSummary`/`SegmentSummaryCache` that eliminates the segment-enumeration duplication with `SegmentReservationAnalyzer` — the last remaining "platform-level opportunity" noted below — and one P3 item found not applicable since the SOH full-scan mode it targeted no longer exists in the codebase)
+- 11 analyzers (ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer, ThreadStackClusterAnalyzer, FinalizableObjectAnalyzer, JitAnalyzer, LohFragmentationAnalyzer, MemoryAnalyzer, GCHandleAnalyzer, HeapTopologyAnalyzer, StringAnalyzer) have ALL P0+P1+P2 complete
+- ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer, ThreadStackClusterAnalyzer, FinalizableObjectAnalyzer, JitAnalyzer, LohFragmentationAnalyzer, MemoryAnalyzer, GCHandleAnalyzer, HeapTopologyAnalyzer, and StringAnalyzer are the only analyzers with ALL P0+P1+P2+P3 complete (ArrayAnalyzer 4/4 P3; BoxingAnalyzer 4/4 P3, including unit test coverage for pure helper logic; SegmentReservationAnalyzer 4/4 P3, including the P3-4 regions-based GC per-region statistics evolution item; ThreadStackClusterAnalyzer 4/4 P3, including the P3-3 cross-analyzer correlation with `HangAnalyzer`; FinalizableObjectAnalyzer 3/3 P3 plus its 2 Evolution items, including root-path cross-reference via `RootPathFinder`; JitAnalyzer 2/2 P3, including a per-module JIT stack heatmap cross-referenced with `ModuleDomainResult` via a new reusable `InsightFinding.EvidenceTables` capability; LohFragmentationAnalyzer 4/4 P3, including converting `LohSegmentStats` to a `readonly record struct` and rewiring its type-aggregated LOH/POH table onto the unbounded Phase 1 `TypeAggregateIndexEntry` instead of a capped top-100 sample; MemoryAnalyzer 4/4 P3, including per-walk BFS progress reporting shared across 3 other analyzers via `RetainedSizeCandidateSelector`, cancellation support inside `BoundedGraphWalk.ComputeExclusiveRetained`, and one item resolved by cross-linking to `HeapTopologyAnalyzer`'s pre-existing per-logical-heap balance metrics instead of duplicating them; GCHandleAnalyzer 4/4 P2 and 4/4 P3, including a binary-format version bump (`HandleSnapshot.bin` v1→v2) to carry dependent-handle targets inline instead of a second live enumeration pass, and one P3 item found already covered by the separate `FinalizableObjectAnalyzer`; HeapTopologyAnalyzer 5/5 P2 and 4/4 P3, including a shared `SegmentSummary`/`SegmentSummaryCache` that eliminates the segment-enumeration duplication with `SegmentReservationAnalyzer` — the last remaining "platform-level opportunity" noted below — and one P3 item found not applicable since the SOH full-scan mode it targeted no longer exists in the codebase; StringAnalyzer 6/6 P2 and 4/4 P3, including a binary-format version bump (`TypeAggregateIndexEntry` v3→v4) replacing an averaged Gen2-bytes estimate with an exact sum, and retention-path sampling for the top duplicate patterns via the shared `RootPathFinder` infrastructure)
 
 **Remaining Work:**
 - 9 analyzers (26%) have zero P0/P1 implementation
@@ -238,7 +160,7 @@ Different audits use different conventions for marking completion:
 
 A disk-backed reverse edge (parent-lookup) index now exists (`ReverseEdgeIndexReader.TryGetParents`), consumed today via `RootPathFinder`. It answers "who references this object" without a full in-memory reverse graph. Analyzers below already use it (directly or through `RootPathFinder`); the rest have **pending** audit recommendations that this index would unblock or simplify.
 
-**Already wired (via `RootPathFinder`):** CollectionAnalyzer, DominatorAnalyzer, EventLeakAnalyzer, FinalizableObjectAnalyzer (2026-08-25), ReferenceChainAnalyzer, StaticRootLeakDetector, TimerLeakAnalyzer.
+**Already wired (via `RootPathFinder`):** CollectionAnalyzer, DominatorAnalyzer, EventLeakAnalyzer, FinalizableObjectAnalyzer (2026-08-25), ReferenceChainAnalyzer, StaticRootLeakDetector, StringAnalyzer (2026-08-27), TimerLeakAnalyzer.
 
 | # | Analyzer | Pending item | Audit priority | Reference |
 |---|----------|---------------|-----------------|-----------|
@@ -247,10 +169,13 @@ A disk-backed reverse edge (parent-lookup) index now exists (`ReverseEdgeIndexRe
 | 3 | **AsyncTaskAnalyzer** | Item 6: orphaned task GC root path sampling via `RootPathFinder` | P1/P2, pending | `async-task-analyzer-audit.md` |
 | 4 | **CrashAnalyzer** | E-1: exception retention paths for Gen2 exceptions via reverse-reference index | P2, pending | `crash-analyzer-audit.md` |
 | 5 | **WeakReferenceAnalyzer** | P3-2: "held only via weak reference" flag — join `WeakTarget` addresses against reverse index for strong-incoming-edge check | Pending | `weak-reference-analyzer-audit.md` |
-| 6 | **StringAnalyzer** | P3-2: retention-path sampling for top duplicate strings via `RootPathFinder`; holder-type histogram from reverse index | Pending | `string-analyzer-audit.md` |
-| 7 | **DbConnectionAnalyzer** | R12: `!gcroot`-style retention path for top-N open connections via `RootPathFinder` | P3, pending | `DbConnectionAnalyzer-audit.md` |
-| 8 | **GCHandleAnalyzer** | Retention path from handle to root — currently unsupported | Not an item in the audit's own roadmap table (all 4 P2 + 4 P3 items there are now done); this is a distinct, still-unscoped opportunity noted separately in `gchandle-analyzer-audit.md`'s reverse-index blockquote | `gchandle-analyzer-audit.md` |
-| 9 | **ObjectShapeAnalyzer** | Static-field GC-root weight ignored; no retention-path attribution | P1/P2 pending | `object-shape-analyzer-audit.md` |
+| 6 | **DbConnectionAnalyzer** | R12: `!gcroot`-style retention path for top-N open connections via `RootPathFinder` | P3, pending | `DbConnectionAnalyzer-audit.md` |
+| 7 | **GCHandleAnalyzer** | Retention path from handle to root — currently unsupported | Not an item in the audit's own roadmap table (all 4 P2 + 4 P3 items there are now done); this is a distinct, still-unscoped opportunity noted separately in `gchandle-analyzer-audit.md`'s reverse-index blockquote | `gchandle-analyzer-audit.md` |
+| 8 | **ObjectShapeAnalyzer** | Static-field GC-root weight ignored; no retention-path attribution | P1/P2 pending | `object-shape-analyzer-audit.md` |
+
+> **StringAnalyzer resolved (2026-08-27):** P3-2 (retention-path sampling for top duplicate
+> patterns via `RootPathFinder`) shipped — see `string-analyzer-audit.md`. Moved to "already wired"
+> above.
 
 **Explicitly ruled out:** ThreadAnalyzer P0-3 and LockGraphAnalyzer's wait-for graph — these need lock waiter→holder *thread* identity, which the object-reference reverse index does not provide (see blocker table above).
 

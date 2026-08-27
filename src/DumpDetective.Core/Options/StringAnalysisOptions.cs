@@ -46,4 +46,12 @@ public sealed class StringAnalysisOptions
     /// When true emit raw CSV/JSON/NDJSON exports of duplicate findings to the report artifacts.
     /// </summary>
     public bool ProduceRawExports { get; init; } = false;
+
+    /// <summary>
+    /// Number of top duplicate patterns (by wasted bytes) to run a GC root-path search for (P3-2,
+    /// string-analyzer-audit.md). Each search is a bounded but real traversal — this caps the
+    /// number of searches performed, not the amount of duplicate data reported. Set to 0 to
+    /// disable retention-path sampling entirely.
+    /// </summary>
+    public int RetentionPathSampleCount { get; init; } = 5;
 }

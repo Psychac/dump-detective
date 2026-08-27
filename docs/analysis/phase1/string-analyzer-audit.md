@@ -301,18 +301,22 @@ Type-level object count and size grouping. No duplicate content detection.
 | **P1-3** | Add top-types-by-total-string-bytes breakdown (not just duplicate types) | Improvement | High | Medium | High | ✅ DONE |
 | **P1-4** | Fix `estimatedInterningSaving` — remove misleading metric | Improvement | Medium | Low | High | ✅ DONE |
 | **P1-5** | Cap `VeryLongStrings` list (e.g., top 1,000 by size) to prevent unbounded growth | Improvement | Medium | Low | High | ✅ DONE |
-| **P2-1** | Fix `MinDuplicateStringCount` off-by-one (`< minCount` instead of `<= minCount`) | Improvement | Low | Low | High |
-| **P2-2** | Add Gen0/Gen1 string counts to result model | Improvement | Medium | Medium | Medium |
-| **P2-3** | Document / annotate `Gen2StringBytes` as approximate; extend `TypeAggregateIndexEntry` to carry `Gen2TotalSize` | Evolution | Medium | Medium | High |
-| **P2-4** | Add pinned string detection via `ClrRuntime.EnumerateHandles()` | Improvement | High | Low | High |
-| **P2-5** | Cap merged `_indexScanLengthSamples` post-merge to prevent unbounded growth in parallel scenarios | Improvement | Low | Low | High |
-| **P2-6** | Fix `GetTotalManagedBytes` fallback to use `segment.CommittedMemory` | Improvement | Low | Low | High |
-| **P3-1** | Add string prefix clustering to group top duplicate patterns by common prefix | Improvement | Medium | Medium | Medium |
-| **P3-2** | Add retention-path sampling for top-N duplicate patterns (leverages `RootPathFinder`) | Evolution | High | High | Medium |
-| **P3-3** | Confidence band in `StringSectionBuilder` should be dynamic based on `SamplingCoverage` | Improvement | Medium | Low | High |
-| **P3-4** | Remove dead `try/catch` in `IsStringSizeInBounds` | Improvement | Low | Low | High |
+| **P2-1** | Fix `MinDuplicateStringCount` off-by-one (`< minCount` instead of `<= minCount`) | Improvement | Low | Low | High | ✅ DONE |
+| **P2-2** | Add Gen0/Gen1 string counts to result model | Improvement | Medium | Medium | Medium | ✅ DONE |
+| **P2-3** | Document / annotate `Gen2StringBytes` as approximate; extend `TypeAggregateIndexEntry` to carry `Gen2TotalSize` | Evolution | Medium | Medium | High | ✅ DONE |
+| **P2-4** | Add pinned string detection via `ClrRuntime.EnumerateHandles()` | Improvement | High | Low | High | ✅ DONE |
+| **P2-5** | Cap merged `_indexScanLengthSamples` post-merge to prevent unbounded growth in parallel scenarios | Improvement | Low | Low | High | ✅ DONE |
+| **P2-6** | Fix `GetTotalManagedBytes` fallback to use `segment.CommittedMemory` | Improvement | Low | Low | High | ✅ DONE |
+| **P3-1** | Add string prefix clustering to group top duplicate patterns by common prefix | Improvement | Medium | Medium | Medium | ✅ DONE |
+| **P3-2** | Add retention-path sampling for top-N duplicate patterns (leverages `RootPathFinder`) | Evolution | High | High | Medium | ✅ DONE |
+| **P3-3** | Confidence band in `StringSectionBuilder` should be dynamic based on `SamplingCoverage` | Improvement | Medium | Low | High | ✅ DONE |
+| **P3-4** | Remove dead `try/catch` in `IsStringSizeInBounds` | Improvement | Low | Low | High | ✅ DONE |
 
 > **Reverse index available (2026-08-12):** `RootPathFinder` (P3-2) and the "reverse reference index"/"holder-type analysis" mentioned above (Area 4, Infrastructure Recommendations) are both implemented — `ReverseEdgeIndexReader.TryGetParents`, already consumed by CollectionAnalyzer/DominatorAnalyzer/EventLeakAnalyzer/ReferenceChainAnalyzer/StaticRootLeakDetector/TimerLeakAnalyzer. See `docs/analysis/phase1/phase1-completion-tracker.md` § Reverse Edge Index — Consumer Opportunities.
+
+> **P2-4 implementation note (2026-08-27):** implemented as a cross-analyzer `InsightEngine` rule (`DetectPinnedStringLeak`) rather than a second `ClrRuntime.EnumerateHandles()` scan inside `StringAnalyzer`. `GCHandleAnalyzer` already performs the handle enumeration and exposes a full (uncapped) per-target-type pinned-bytes/pinned-count breakdown in `GCHandleDomainResult` (`TopPinnedObjectsBySize`/`TopPinnedTargetTypes`); the new rule looks up `"System.String"` in that breakdown, avoiding a redundant handle-table walk.
+
+> **P3-2 implementation note (2026-08-27):** implemented via the shared `RootPathFinder`/`RootPathSearchSupport` infrastructure (`TimerLeakAnalyzer.PopulateEvidence` was the closest template), gated by new `StringAnalysisOptions.RetentionPathSampleCount` (default 5 — bounds the number of *searches*, not the amount of duplicate data reported, same category as `ReferenceChainOptions.TopCount`). New `StringDomainResult.TopDuplicateRetentionPaths`, rendered as a "Duplicate string retention paths" table. The candidate-selection logic (`SelectRetentionPathCandidates`) is unit tested; the `RootPathFinder` traversal itself is not — no other analyzer using this same infrastructure (e.g. `ReferenceChainAnalyzer`) has unit tests either, since a live `ClrHeap`/reference graph isn't practically fakeable. Coverage for the traversal itself comes from real-dump discrepancy tests only.
 
 ---
 

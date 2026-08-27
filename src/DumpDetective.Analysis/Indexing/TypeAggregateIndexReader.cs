@@ -296,8 +296,9 @@ internal static class TypeAggregateIndexReader
         long g0 = BinaryPrimitives.ReadInt64LittleEndian(span[52..]);
         long g1 = BinaryPrimitives.ReadInt64LittleEndian(span[60..]);
         long g2 = BinaryPrimitives.ReadInt64LittleEndian(span[68..]);
-        var flags = (TypeAggregateFlags)span[76];
+        ulong g2TotalSize = BinaryPrimitives.ReadUInt64LittleEndian(span[76..]);
+        var flags = (TypeAggregateFlags)span[84];
 
-        return new TypeAggregateIndexEntry(mt, modId, count, tSize, lohCnt, lohSz, sAddr, g0, g1, g2, flags);
+        return new TypeAggregateIndexEntry(mt, modId, count, tSize, lohCnt, lohSz, sAddr, g0, g1, g2, flags, g2TotalSize);
     }
 }

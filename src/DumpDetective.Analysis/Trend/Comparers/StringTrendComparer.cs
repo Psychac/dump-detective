@@ -19,6 +19,8 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 new("string.duplication.ratio", null, r.DuplicationRatio, "ratio", MetricTrendDirection.HigherIsWorse),
                 new("string.loh.bytes", null, r.LohStringBytes, "bytes", MetricTrendDirection.HigherIsWorse),
                 new("string.pct.heap", null, r.PctOfManagedHeap, "%", MetricTrendDirection.HigherIsWorse),
+                new("string.gen0.count", null, r.Gen0StringCount, "objects", MetricTrendDirection.Neutral),
+                new("string.gen1.count", null, r.Gen1StringCount, "objects", MetricTrendDirection.Neutral),
                 new("string.gen2.count", null, r.Gen2StringCount, "objects", MetricTrendDirection.HigherIsWorse),
             };
 
@@ -41,6 +43,8 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 MetricDeltaHelper.Compute("string.duplication.ratio", null, b.DuplicationRatio, c.DuplicationRatio, "ratio", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("string.loh.bytes", null, b.LohStringBytes, c.LohStringBytes, "bytes", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("string.pct.heap", null, b.PctOfManagedHeap, c.PctOfManagedHeap, "%", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("string.gen0.count", null, b.Gen0StringCount, c.Gen0StringCount, "objects", MetricTrendDirection.Neutral),
+                MetricDeltaHelper.Compute("string.gen1.count", null, b.Gen1StringCount, c.Gen1StringCount, "objects", MetricTrendDirection.Neutral),
                 MetricDeltaHelper.Compute("string.gen2.count", null, b.Gen2StringCount, c.Gen2StringCount, "objects", MetricTrendDirection.HigherIsWorse),
             ];
         }

@@ -108,7 +108,11 @@ old per-section header entirely — there is no separate `ObjectIndex.bin` file 
 ### TypeAggregates
 `TypeAggregateIndex.bin`-format payload: extended header + one record per type
 (`MethodTable | Count | TotalSize`, plus module registry, global size buckets, and type-shape
-cache). Presence enables a fast-path that skips a full heap rescan on subsequent runs.
+cache). Presence enables a fast-path that skips a full heap rescan on subsequent runs. Per-type
+records are 88 bytes (`TypeAggregateIndexWriter.Version = 4`, bumped from 3 when `Gen2TotalSize`
+— the exact summed size of a type's non-LOH Gen2 instances — was added after `Gen2Count`; see
+[docs/analysis/phase1/string-analyzer-audit.md § P2-3](analysis/phase1/string-analyzer-audit.md)).
+Older v3 files fail the header-version check and are rebuilt via a full heap rescan.
 
 ### Roots (v2, current)
 24-byte header + 20-byte fixed root records, plus a variable-length trailer — one record per

@@ -313,14 +313,14 @@ dotMemory shows generation distribution, LOH objects, survivor counts, and fragm
 | P2-1 | **Add Gen0 allocation pressure finding.** When Gen0Objects > 40% of TotalObjects, emit a Warning with top Gen0 types. This signals high allocation rate that may degrade GC throughput. | Medium — actionable for throughput investigations | Low | High | Improvement | ✅ DONE (commit 9947f2c) |
 | P2-2 | **Add `IsThreadSafe`, `Tags`, and `Order` explicitly.** Current defaults work but are inconsistent with other analyzers in the suite. | Low | Low | High | Improvement | ✅ DONE (commit ee670c5) |
 | P2-3 | **Add trend metrics for Gen0 and Gen1 bytes** to `GCGenerationTrendComparer`. Currently only Gen2 and LOH are tracked. The absence of Gen0 trend makes allocation pressure invisible in multi-dump comparisons. | Medium | Low | High | Improvement | ✅ DONE (commit 732ec5e) |
-| P2-4 | **Rank TypeGenerationProfile by Gen2 bytes (not Count) when byte data is available.** Count-based ranking can over-represent small high-count types. Byte-based ranking surfaces memory-heavy accumulators first. | Medium — better actionability for memory investigations | Low | Medium | Improvement |
+| P2-4 | **Rank TypeGenerationProfile by Gen2 bytes (not Count) when byte data is available.** Count-based ranking can over-represent small high-count types. Byte-based ranking surfaces memory-heavy accumulators first. | Medium — better actionability for memory investigations | Low | Medium | Improvement | ✅ DONE — added `Gen2Bytes` to `TypeGenerationProfile`; `GCGenerationAnalyzer` ranks by exact `Gen2TotalSize` with count fallback for pre-v4 indices; finding-generator evidence, per-type table, and `InsightEngine`'s memory×generation correlation all switched to byte-based selection/fraction |
 | P2-5 | **Document `LohThresholdBytes` removal/implementation outcome in options class.** | Low | Low | High | Improvement | ✅ DONE (commit 5dcbcf2) |
 
 #### P3 — Low
 
 | # | Recommendation | Impact | Difficulty | Confidence | Classification |
 |---|---|---|---|---|---|
-| P3-1 | **Compute `SohTotal` (Gen0+Gen1+Gen2 bytes) as a named metric.** Makes LOH-vs-SOH ratio explicit without requiring callers to sum three fields. | Low | Low | High | Improvement |
+| P3-1 | **Compute `SohTotal` (Gen0+Gen1+Gen2 bytes) as a named metric.** Makes LOH-vs-SOH ratio explicit without requiring callers to sum three fields. | Low | Low | High | Improvement | ✅ DONE — `SohTotal` computed property added to `GCGenerationDomainResult`, exposed as `soh_total_bytes` key metric in `GCPressureSectionBuilder` |
 | P3-2 | **Remove the public `Analyze(ClrHeap, IHeapAnalysisCache)` overload.** It bypasses progress reporting and exists only for the test path. Replace with a test-scoped helper. | Low — cleanup | Low | Medium | Improvement |
 | P3-3 | **Add a GC segment map diagnostic** showing segment count, committed memory, and ephemeral segment utilization. | Medium | High | Medium | Evolution |
 | P3-4 | **Emit finalizable-in-Gen2 count as a cross-reference** to `FinalizableObjectAnalyzer`. This connects a signal that currently exists silently in the profiles. | Low | Low | High | Evolution |

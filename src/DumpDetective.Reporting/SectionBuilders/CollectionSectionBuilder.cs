@@ -105,10 +105,11 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
                     Cell(c.ElementSize > 0 ? FormatHelper.FormatBytes(c.ElementSize) : "—", c.ElementSize > 0 ? (long)Math.Min(c.ElementSize, (ulong)long.MaxValue) : null),
                     Cell(c.SizeEstimateConfidence),
                     Cell(c.DetectionMethod),
-                    Cell(c.RootDescription ?? "—")]));
+                    Cell(c.RootDescription ?? "—"),
+                    Cell(c.Recommendation)]));
             }
             compactTables.Add(STCompact("Wasteful collections",
-                new[] { CH("Type"), CH("Kind"), CH("Count","number"), CH("Capacity","number"), CH("Fill Rate"), CH("Wasted","bytes"), CH("Head","number"), CH("Tail","number"), CH("Largest Free Gap"), CH("Free Segments","number"), CH("Element Type"), CH("Element Size","bytes"), CH("Confidence"), CH("Method"), CH("Root") },
+                new[] { CH("Type"), CH("Kind"), CH("Count","number"), CH("Capacity","number"), CH("Fill Rate"), CH("Wasted","bytes"), CH("Head","number"), CH("Tail","number"), CH("Largest Free Gap"), CH("Free Segments","number"), CH("Element Type"), CH("Element Size","bytes"), CH("Confidence"), CH("Method"), CH("Root"), CH("Recommendation") },
                 wcRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             if (topWasteful.Count > limit)
             {

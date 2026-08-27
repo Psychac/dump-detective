@@ -151,7 +151,8 @@ namespace DumpDetective.Analysis.Analyzers
                     w.SizeEstimateConfidence,
                     w.DetectionMethod,
                     w.RootDescription,
-                    retainedBytes));
+                    retainedBytes,
+                    BuildResizeRecommendation(w.Kind, w.Count, w.Capacity, w.FillRate)));
             }
 
             var domainResult = new CollectionDomainResult(
@@ -293,6 +294,35 @@ namespace DumpDetective.Analysis.Analyzers
                     }
                 }
             }
+        }
+
+        // Below this ratio the collection is essentially empty relative to its capacity, which
+        // usually means the caller over-estimated the initial size rather than the collection
+        // having simply shrunk after churn — right-sizing the constructor call fixes the cause,
+        // where TrimExcess only fixes the current symptom.
+        private const double SparseFillRateThreshold = 10.0;
+
+        /// <summary>
+        /// Always a concrete capacity fix for the given collection, never a reachability claim —
+        /// <see cref="WastefulCollection.RootDescription"/> only reflects a budget-limited search
+        /// (see <see cref="PopulateRootDescriptions"/>), not proof the collection is unreachable.
+        /// </summary>
+        internal static string BuildResizeRecommendation(CollectionKind kind, int count, int capacity, double fillRate)
+        {
+            string trimApi = kind switch
+            {
+                CollectionKind.ArrayList => "TrimToSize()",
+                CollectionKind.ImmutableArrayBuilder => "ToImmutable()",
+                _ => "TrimExcess()",
+            };
+
+            if (kind == CollectionKind.ImmutableArrayBuilder)
+                return $"Call Builder.{trimApi} once population is complete to release the over-allocated backing array.";
+
+            if (fillRate < SparseFillRateThreshold && capacity > 0)
+                return $"Construct with an initial capacity near {count:N0} instead of the observed {capacity:N0} — this collection is populated far below its allocated capacity.";
+
+            return $"Call {trimApi} once population is complete to release unused capacity.";
         }
 
         private static Dictionary<CollectionKind, int> BuildKindDictionary(int[] countsByKind)

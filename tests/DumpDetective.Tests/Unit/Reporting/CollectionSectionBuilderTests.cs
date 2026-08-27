@@ -14,7 +14,8 @@ public sealed class CollectionSectionBuilderTests
     private static CollectionDomainResult BuildResult(
         ulong totalWasted,
         Dictionary<CollectionKind, int>? countsByKind,
-        Dictionary<CollectionKind, ulong>? bytesByKind) =>
+        Dictionary<CollectionKind, ulong>? bytesByKind,
+        IReadOnlyList<WastefulCollectionSnapshot>? topWastefulCollections = null) =>
         new(
             TotalCollections: 100,
             Dictionaries: 20,
@@ -27,11 +28,37 @@ public sealed class CollectionSectionBuilderTests
             Queues: 10,
             TotalWastedMemory: totalWasted,
             WastefulCollectionCount: 6,
+            TopWastefulCollections: topWastefulCollections,
             WasteCountsByKind: countsByKind,
             WasteBytesByKind: bytesByKind);
 
     private static CompactTable WasteByKindTable(AnalyzerDetailSection section) =>
         section.CompactTables!.Single(t => t.Title == "Wasteful collections by kind");
+
+    private static CompactTable WastefulCollectionsTable(AnalyzerDetailSection section) =>
+        section.CompactTables!.Single(t => t.Title == "Wasteful collections");
+
+    [Fact]
+    public void Build_WastefulCollectionsTable_IncludesRecommendationColumn()
+    {
+        var snapshot = new WastefulCollectionSnapshot(
+            Type: "System.Collections.Generic.Dictionary`2",
+            Kind: CollectionKind.Dictionary,
+            Count: 800,
+            Capacity: 1000,
+            FillRate: 80.0,
+            WastedMemory: 8_000,
+            Address: 0x1000,
+            Recommendation: "Call TrimExcess() once population is complete to release unused capacity.");
+
+        var result = BuildResult(totalWasted: 8_000, countsByKind: null, bytesByKind: null,
+            topWastefulCollections: [snapshot]);
+
+        CompactTable table = WastefulCollectionsTable(new CollectionSectionBuilder().Build(result));
+
+        table.Headers.Select(h => h.Name).Should().Contain("Recommendation");
+        table.Rows[0].Values[^1].Should().Be(snapshot.Recommendation);
+    }
 
     [Fact]
     public void Build_PerKindTable_IncludesWastedBytesAndShare()

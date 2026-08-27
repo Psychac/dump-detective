@@ -47,4 +47,9 @@ internal sealed record WastefulCollectionSnapshot(
     /// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md) — what freeing it
     /// would actually free, distinct from <see cref="WastedMemory"/>'s over-capacity estimate.
     /// Null when the exact tree wasn't available.</summary>
-    ulong? RetainedBytes = null);
+    ulong? RetainedBytes = null,
+    /// <summary>Actionable fix for this specific collection's over-capacity (e.g. "Call
+    /// TrimExcess()", "Construct with initial capacity ~N"). Always a concrete capacity fix —
+    /// reachability is never asserted here since <see cref="RootDescription"/> only reflects a
+    /// budget-limited search, not proof the collection is actually unreachable.</summary>
+    string Recommendation = "");

@@ -23,9 +23,10 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
         var (confidenceScore, caveats) = ConfidenceScoring.Compute(0.75,
             ConfidenceScoring.F(d.ObjectScanCapped, 0.15, "Object scan was capped; retention counts may be partial."),
             ConfidenceScoring.F(d.ReferenceCountingSkipped, 0.20, "Reference counting was skipped; results are estimated."),
-            ConfidenceScoring.F(d.SkippedReferenceAddresses > 0, 0.10, $"{d.SkippedReferenceAddresses:N0} reference addresses were skipped."));
+            ConfidenceScoring.F(d.ApproximatedReferenceAddresses > 0, 0.10, $"{d.ApproximatedReferenceAddresses:N0} reference addresses have approximated (bounded-error) counts."));
 
         var compactTables = new List<CompactTable>();
+        var treeWidgets = new List<TreeWidget>();
         var blocks = new List<SectionBlock>
         {
             BuildConfidenceBand(confidenceScore,
@@ -47,7 +48,7 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
             ["max_bfs_depth"] = new NumericMetricValue(d.MaxDepth, MetricUnit.Count),
             ["highly_referenced_objects"] = new NumericMetricValue(d.HighlyReferencedObjectCount, MetricUnit.Count),
             ["top_retained_total"] = new NumericMetricValue((double)Math.Min(d.TopHighlyReferencedTotalBytes, long.MaxValue), MetricUnit.Bytes, FormatBytes(d.TopHighlyReferencedTotalBytes)),
-            ["skipped_ref_addresses"] = new NumericMetricValue(d.SkippedReferenceAddresses, MetricUnit.Count),
+            ["approximated_ref_addresses"] = new NumericMetricValue(d.ApproximatedReferenceAddresses, MetricUnit.Count),
         };
 
         if (d.TopDominatorTypes.Count > 0)
@@ -115,6 +116,24 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
                             type.LohBytes > 0 ? type.LohBytes : null,
                             retained > 0 ? retained : null);
                     }).ToArray()));
+
+                // P3-3: per-type dominance chain (A dominates B dominates ... dominates the
+                // sample object), reusing the shared collapsible tree widget
+                // (docs/refactor/collapsible-tree-widget-design.md — this is its third planned
+                // adopter). Scoped to the Gen2/LOH sub-table only, same deliberate scoping as
+                // Audit Area 8 item 1 — not every table gets a chain.
+                if (d.DominatorChainsByTypeName is { Count: > 0 } chainsByTypeName)
+                {
+                    var chainRoots = new List<TreeNode>(gen2LohTypes.Length);
+                    foreach (TypeSnapshot type in gen2LohTypes)
+                    {
+                        if (chainsByTypeName.TryGetValue(type.TypeName, out IReadOnlyList<DominatorChainHop>? chain) && chain.Count > 0)
+                            chainRoots.Add(BuildDominatorChainNode(chain, 0));
+                    }
+
+                    if (chainRoots.Count > 0)
+                        treeWidgets.Add(new TreeWidget("Gen2 / LOH dominance chains", chainRoots));
+                }
             }
         }
 
@@ -157,7 +176,8 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
             SortOrder: SortOrder,
             Blocks: blocks,
             KeyMetrics: keyMetrics,
-            CompactTables: compactTables.Count > 0 ? compactTables : null);
+            CompactTables: compactTables.Count > 0 ? compactTables : null,
+            TreeWidgets: treeWidgets.Count > 0 ? treeWidgets : null);
     }
 
     private static new string FormatRatio(ulong retained, ulong shallow)
@@ -165,4 +185,20 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
 
     private static new double RatioValue(ulong retained, ulong shallow)
         => shallow == 0 ? 0.0 : (double)retained / shallow;
+
+    // P3-3: converts a root-most-first DominatorChainHop list into nested single-child TreeNodes.
+    // Retained bytes are baked into the label text rather than TreeNode.Count (int?) — retained
+    // bytes routinely exceed int.MaxValue on large heaps, and Count would silently overflow.
+    private TreeNode BuildDominatorChainNode(IReadOnlyList<DominatorChainHop> hops, int index)
+    {
+        DominatorChainHop hop = hops[index];
+        bool isSentinel = hop.Address == 0;
+        string label = isSentinel ? hop.TypeName : $"{hop.TypeName} — {FormatBytes(hop.RetainedBytes)} retained";
+
+        TreeNode? child = index + 1 < hops.Count ? BuildDominatorChainNode(hops, index + 1) : null;
+        return new TreeNode(
+            Label: label,
+            Children: child is not null ? new[] { child } : null,
+            IsChain: true);
+    }
 }

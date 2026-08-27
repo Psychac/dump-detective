@@ -1,5 +1,6 @@
 using System.Diagnostics;
 
+using DumpDetective.Analysis.Algorithms;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Diagnostics;
 using DumpDetective.Analysis.Indexing;
@@ -104,9 +105,15 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
         // the heuristic built it, same safety property "ship dark" (Phase 5) established.
         if (options.EnableExactDominatorTree && result is DominatorDomainResult heuristicResult)
         {
-            IReadOnlyDictionary<string, ulong>? exactByType = TryReadExactDominatorTree(context.Heap, context.Cache, heuristicResult, diag, cancellationToken);
-            if (exactByType is not null)
-                result = heuristicResult with { ExactRetainedBytesByTypeName = exactByType };
+            ExactDominatorData exact = TryReadExactDominatorTree(context.Heap, context.Cache, heuristicResult, options, diag, cancellationToken);
+            if (exact.RetainedBytesByTypeName is not null || exact.ChainsByTypeName is not null)
+            {
+                result = heuristicResult with
+                {
+                    ExactRetainedBytesByTypeName = exact.RetainedBytesByTypeName ?? heuristicResult.ExactRetainedBytesByTypeName,
+                    DominatorChainsByTypeName = exact.ChainsByTypeName ?? heuristicResult.DominatorChainsByTypeName,
+                };
+            }
         }
 
         if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: exact path done", Console.Out);
@@ -124,10 +131,15 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
     /// not gated on for this run, or Stage B failed to persist) degrades exactly like the old
     /// cap-exceeded/exception outcomes did: `result` stays exactly as the heuristic built it.
     /// </summary>
-    private IReadOnlyDictionary<string, ulong>? TryReadExactDominatorTree(
+    private readonly record struct ExactDominatorData(
+        IReadOnlyDictionary<string, ulong>? RetainedBytesByTypeName,
+        IReadOnlyDictionary<string, IReadOnlyList<DominatorChainHop>>? ChainsByTypeName);
+
+    private ExactDominatorData TryReadExactDominatorTree(
         ClrHeap heap,
         IHeapAnalysisCache cache,
         DominatorDomainResult heuristicResult,
+        RetentionOptions options,
         bool diag,
         CancellationToken cancellationToken)
     {
@@ -138,13 +150,14 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
             if (provider is null)
             {
                 if (diag) _logger?.LogInformation("Exact dominator tree unavailable for this run; heuristic result is unaffected.");
-                return null;
+                return default;
             }
 
             // Only resolve type names the report will actually display (the Gen2/LOH sub-table's
             // candidates, already computed by the heuristic pass above) — resolving every unique
             // MethodTable's name would be wasted work for types the report never shows.
             Dictionary<string, ulong>? exactByTypeName = null;
+            Dictionary<string, IReadOnlyList<DominatorChainHop>>? chainsByTypeName = null;
             foreach (TypeSnapshot candidate in heuristicResult.TopDominatorTypes)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -158,6 +171,15 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
                     exactByTypeName ??= new Dictionary<string, ulong>(StringComparer.Ordinal);
                     exactByTypeName[candidate.TypeName] = exactRetained;
                 }
+
+                // P3-3: dominance chain (A dominates B dominates ... dominates this type's sample
+                // object) — walks the same disk-backed tree, no extra data structure needed.
+                IReadOnlyList<DominatorChainHop> chain = BuildDominatorChain(heap, provider, sample.Address, options.MaxDominatorChainDepth);
+                if (chain.Count > 0)
+                {
+                    chainsByTypeName ??= new Dictionary<string, IReadOnlyList<DominatorChainHop>>(StringComparer.Ordinal);
+                    chainsByTypeName[candidate.TypeName] = chain;
+                }
             }
 
             if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: exact rollup read from disk", Console.Out);
@@ -170,7 +192,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
                     stopwatch.ElapsedMilliseconds, provider.TotalRetainedBytes, heuristicResult.TotalEstimatedRetainedBytes);
             }
 
-            return exactByTypeName;
+            return new ExactDominatorData(exactByTypeName, chainsByTypeName);
         }
         catch (OperationCanceledException)
         {
@@ -181,8 +203,47 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
             _logger?.LogWarning(ex,
                 "Reading the exact dominator tree failed after {ElapsedMs:N0} ms; heuristic result is unaffected.",
                 stopwatch.ElapsedMilliseconds);
-            return null;
+            return default;
         }
+    }
+
+    // P3-3: walks IDominatorTreeProvider.TryGetImmediateDominator from `sampleAddress` up toward
+    // the virtual root (dominatorAddress == 0), collecting one hop per ancestor. Ordered root-most
+    // first, sample leaf last — the natural "A holds B holds ... holds your object" reading order.
+    // `maxDepth` is a safety bound, not a display truncation (see RetentionOptions.MaxDominatorChainDepth's
+    // remarks): a real dominator tree's depth is bounded only by the longest single-parent chain in
+    // the heap (e.g. a linked list), and each hop costs one heap.GetObject() dump-file read.
+    internal static IReadOnlyList<DominatorChainHop> BuildDominatorChain(
+        ClrHeap heap,
+        IDominatorTreeProvider provider,
+        ulong sampleAddress,
+        int maxDepth)
+    {
+        var ascending = new List<DominatorChainHop>(capacity: 8);
+        ulong current = sampleAddress;
+
+        for (int depth = 0; depth < maxDepth; depth++)
+        {
+            ClrObject obj = heap.GetObject(current);
+            string typeName = obj.IsValid && obj.Type?.Name is string name ? name : StringConstants.UnknownType;
+            provider.TryGetRetainedBytes(current, out ulong retainedBytes);
+            ascending.Add(new DominatorChainHop(typeName, current, retainedBytes));
+
+            if (!provider.TryGetImmediateDominator(current, out ulong parent) || parent == 0)
+            {
+                ascending.Reverse();
+                return ascending;
+            }
+
+            current = parent;
+        }
+
+        // Safety cap reached before the walk reached the virtual root — the chain is deeper than
+        // maxDepth (e.g. a long linked list). Append a sentinel (Address 0, never a real object
+        // address) so callers render "chain continues" instead of a chain that looks complete.
+        ascending.Add(new DominatorChainHop($"… chain continues beyond {maxDepth} hops", 0, 0));
+        ascending.Reverse();
+        return ascending;
     }
 
     private static LeakSignals BuildLeakSignalsFromReverseIndex(
@@ -236,7 +297,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
         // no per-object ClrMD work to budget via MaxLeakScanObjects, since the whole pass is
         // sequential index reads, not live heap resolution — so the scan is exhaustive over
         // every recorded child, by construction, never capped.
-        return new LeakSignals(highlyReferencedCount, SkippedReferenceAddresses: 0, results, ObjectScanCapped: false, FanInHistogram: BuildFanInHistogram(fanInCounts));
+        return new LeakSignals(highlyReferencedCount, ApproximatedReferenceAddresses: 0, results, ObjectScanCapped: false, FanInHistogram: BuildFanInHistogram(fanInCounts));
     }
 
     private static DominatorDomainResult Analyze(
@@ -311,7 +372,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
                 MaxBreadth = options.MaxLeakScanObjects,
                 MaxDepth = 20,
                 HighlyReferencedObjectCount = signals.HighlyReferencedObjectCount,
-                SkippedReferenceAddresses = signals.SkippedReferenceAddresses,
+                ApproximatedReferenceAddresses = signals.ApproximatedReferenceAddresses,
                 TopHighlyReferencedObjects = topHighlyReferencedObjects,
                 ObjectScanCapped = signals.ObjectScanCapped,
                 TopRetentionTypes = topRetentionTypes,
@@ -402,7 +463,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
             MaxBreadth: maxBreadth,
             MaxDepth: MaxDepth,
             HighlyReferencedObjectCount: signals.HighlyReferencedObjectCount,
-            SkippedReferenceAddresses: signals.SkippedReferenceAddresses,
+            ApproximatedReferenceAddresses: signals.ApproximatedReferenceAddresses,
             TopHighlyReferencedObjects: topHighlyReferencedObjects,
             ObjectScanCapped: signals.ObjectScanCapped,
             TopRetentionTypes: topRetentionTypes,
@@ -417,8 +478,8 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
     // runs the same reference-counting pass directly over the live heap (or an in-memory index).
     private static LeakSignals AnalyzeObjectsPass(ClrHeap heap, IHeapAnalysisCache? cache, RetentionOptions options, ExecutionPolicy policy, IProgress<AnalyzerProgressReport>? progress)
     {
-        var referenceCount = new Dictionary<ulong, int>(capacity: 4096);
-        long skippedReferenceAddresses = 0;
+        var referenceCount = new SpaceSavingCounter<ulong>(policy.MaxReferenceAddresses);
+        long approximatedReferenceAddresses = 0;
         bool objectScanCapped = false;
 
         // MaxLeakScanObjects caps the number of heap.GetObject() + field-walk calls, which are
@@ -445,7 +506,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
                 break;
             }
 
-            CountIncomingReferencesByAddress(heap, objectAddress, referenceCount, policy.MaxReferenceAddresses, ref skippedReferenceAddresses);
+            CountIncomingReferencesByAddress(heap, objectAddress, referenceCount, ref approximatedReferenceAddresses);
             objectsTraced++;
         }
 
@@ -457,7 +518,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
 
         return new LeakSignals(
             highlyReferencedCount,
-            skippedReferenceAddresses,
+            approximatedReferenceAddresses,
             topHighlyReferencedObjects,
             objectScanCapped,
             FanInHistogram: fanInHistogram);
@@ -486,29 +547,32 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
         }
     }
 
-    private static int CountHighlyReferencedObjects(Dictionary<ulong, int> referenceCount, RetentionOptions options, out List<FanInBucket> fanInHistogram)
+    private static int CountHighlyReferencedObjects(SpaceSavingCounter<ulong> referenceCount, RetentionOptions options, out List<FanInBucket> fanInHistogram)
     {
         // OPT-#8: Replace LINQ .Count(predicate) with a plain foreach to avoid boxed IEnumerator allocation.
         // Fan-in histogram is built in the same pass to avoid a second full-dictionary iteration.
         int threshold = options.HighReferenceThreshold;
         int count = 0;
         int[] fanInCounts = new int[s_fanInBuckets.Length];
-        foreach (KeyValuePair<ulong, int> kvp in referenceCount)
+        foreach ((ulong _, int entryCount, int _) in referenceCount.Entries)
         {
-            if (kvp.Value > threshold)
+            if (entryCount > threshold)
                 count++;
-            AddToFanInHistogram(fanInCounts, kvp.Value);
+            AddToFanInHistogram(fanInCounts, entryCount);
         }
         fanInHistogram = BuildFanInHistogram(fanInCounts);
         return count;
     }
 
+    // Admission into `referenceCount` (a SpaceSavingCounter) is order-independent by
+    // construction — see docs/analysis/phase1/dominator-analyzer-audit.md Area 6 item 3 and
+    // SpaceSavingCounter's own doc comment — so unlike the fixed-capacity dictionary this
+    // replaced, no address's increments are ever silently dropped based on scan position.
     private static void CountIncomingReferencesByAddress(
         ClrHeap heap,
         ulong sourceAddress,
-        Dictionary<ulong, int> referenceCount,
-        int maxReferenceAddresses,
-        ref long skippedReferenceAddresses)
+        SpaceSavingCounter<ulong> referenceCount,
+        ref long approximatedReferenceAddresses)
     {
         if (sourceAddress == 0)
             return;
@@ -533,8 +597,8 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
                 for (int i = 0; i < len; i++)
                 {
                     ClrObject element = arr.GetObjectValue(i);
-                    if (element.IsValid && element.Address != 0)
-                        AccumulateReference(element.Address, referenceCount, maxReferenceAddresses, ref skippedReferenceAddresses);
+                    if (element.IsValid && element.Address != 0 && referenceCount.Offer(element.Address))
+                        approximatedReferenceAddresses++;
                 }
             }
             return;
@@ -553,42 +617,21 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
                 continue;
 
             ClrObject value = field.ReadObject(sourceObject.Address, interior: false);
-            if (value.IsValid && value.Address != 0)
-                AccumulateReference(value.Address, referenceCount, maxReferenceAddresses, ref skippedReferenceAddresses);
+            if (value.IsValid && value.Address != 0 && referenceCount.Offer(value.Address))
+                approximatedReferenceAddresses++;
         }
     }
 
-    // Extracted to keep CountIncomingReferencesByAddress concise; the JIT inlines this at the call sites.
-    private static void AccumulateReference(
-        ulong address,
-        Dictionary<ulong, int> referenceCount,
-        int maxReferenceAddresses,
-        ref long skippedReferenceAddresses)
-    {
-        if (referenceCount.TryGetValue(address, out int count))
-        {
-            referenceCount[address] = count + 1;
-        }
-        else if (referenceCount.Count < maxReferenceAddresses)
-        {
-            referenceCount[address] = 1;
-        }
-        else
-        {
-            skippedReferenceAddresses++;
-        }
-    }
-
-    private static IReadOnlyList<HighlyReferencedObjectSnapshot> ExtractHighlyReferencedObjects(ClrHeap heap, IHeapAnalysisCache? cache, Dictionary<ulong, int> referenceCount, RetentionOptions options)
+    private static IReadOnlyList<HighlyReferencedObjectSnapshot> ExtractHighlyReferencedObjects(ClrHeap heap, IHeapAnalysisCache? cache, SpaceSavingCounter<ulong> referenceCount, RetentionOptions options)
     {
         int threshold = options.HighReferenceThreshold;
-        // Heuristic: for small dictionaries the LINQ-based path is faster (no heap overhead).
+        // Heuristic: for small tables the LINQ-based path is faster (no heap overhead).
         const int LinqFastPathThreshold = 50_000;
-        if (referenceCount.Count <= LinqFastPathThreshold)
+        if (referenceCount.TrackedCount <= LinqFastPathThreshold)
         {
-            var topAddresses = referenceCount
-                .Where(kvp => kvp.Value > threshold)
-                .OrderByDescending(kvp => kvp.Value)
+            var topAddresses = referenceCount.Entries
+                .Where(e => e.Count > threshold)
+                .OrderByDescending(e => e.Count)
                 .Take(options.TopHighlyReferencedObjectsToShow)
                 .ToArray();
 
@@ -598,7 +641,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
             var results = new List<HighlyReferencedObjectSnapshot>(topAddresses.Length);
             foreach (var top in topAddresses)
             {
-                HighlyReferencedObjectSnapshot? snapshot = CreateHighlyReferencedObjectSnapshot(heap, cache, top.Key, top.Value);
+                HighlyReferencedObjectSnapshot? snapshot = CreateHighlyReferencedObjectSnapshot(heap, cache, top.Key, top.Count);
                 if (snapshot is null)
                     continue;
 
@@ -609,14 +652,14 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
         }
 
         // Use a fixed-size min-heap (PriorityQueue) to track top K addresses by incoming reference count for large inputs.
-        var pq = new PriorityQueue<KeyValuePair<ulong, int>, int>(options.TopHighlyReferencedObjectsToShow + 1);
+        var pq = new PriorityQueue<(ulong Address, int Count), int>(options.TopHighlyReferencedObjectsToShow + 1);
 
-        foreach (KeyValuePair<ulong, int> kvp in referenceCount)
+        foreach ((ulong address, int entryCount, int _) in referenceCount.Entries)
         {
-            if (kvp.Value <= threshold)
+            if (entryCount <= threshold)
                 continue;
 
-            pq.Enqueue(kvp, kvp.Value);
+            pq.Enqueue((address, entryCount), entryCount);
             if (pq.Count > options.TopHighlyReferencedObjectsToShow)
                 pq.Dequeue(); // evict smallest
         }
@@ -625,7 +668,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
             return Array.Empty<HighlyReferencedObjectSnapshot>();
 
         // Drain pq into a list (ascending), then build snapshots and reverse to descending.
-        var buffer = new List<KeyValuePair<ulong, int>>(pq.Count);
+        var buffer = new List<(ulong Address, int Count)>(pq.Count);
         while (pq.Count > 0)
             buffer.Add(pq.Dequeue());
 
@@ -633,8 +676,8 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
         var final = new List<HighlyReferencedObjectSnapshot>(buffer.Count);
         for (int i = buffer.Count - 1; i >= 0; i--)
         {
-            var kvp = buffer[i];
-            HighlyReferencedObjectSnapshot? snapshot = CreateHighlyReferencedObjectSnapshot(heap, cache, kvp.Key, kvp.Value);
+            var entry = buffer[i];
+            HighlyReferencedObjectSnapshot? snapshot = CreateHighlyReferencedObjectSnapshot(heap, cache, entry.Address, entry.Count);
             if (snapshot is null)
                 continue;
 
@@ -793,7 +836,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
 
     private readonly record struct LeakSignals(
         int HighlyReferencedObjectCount,
-        long SkippedReferenceAddresses,
+        long ApproximatedReferenceAddresses,
         IReadOnlyList<HighlyReferencedObjectSnapshot> TopHighlyReferencedObjects,
         bool ObjectScanCapped = false,
         bool ReferenceCountingSkipped = false,

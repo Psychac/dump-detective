@@ -103,7 +103,7 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
         blocks.Add(T("Measured = 1.0, High-confidence heuristic = 0.8, Partial/bounded = 0.5, Speculative < 0.5."));
 
         var limitationRows = new List<TableRow>();
-        AddLimitation(limitationRows, "Retention", results.Get<DominatorDomainResult>() is DominatorDomainResult retention && (retention.SkippedReferenceAddresses > 0 || retention.ObjectScanCapped || retention.ReferenceCountingSkipped), BuildRetentionText(results.Get<DominatorDomainResult>()));
+        AddLimitation(limitationRows, "Retention", results.Get<DominatorDomainResult>() is DominatorDomainResult retention && (retention.ApproximatedReferenceAddresses > 0 || retention.ObjectScanCapped || retention.ReferenceCountingSkipped), BuildRetentionText(results.Get<DominatorDomainResult>()));
         AddLimitation(limitationRows, "GC roots", results.Get<GCRootDomainResult>() is GCRootDomainResult gcRoot && (gcRoot.PathSearchCapped || gcRoot.PathSearchCappedCount > 0), BuildRootText(results.Get<GCRootDomainResult>()));
         AddLimitation(limitationRows, "Hang / task scan", results.Get<HangDomainResult>() is HangDomainResult hang && !hang.RuntimeThreadPoolDataAvailable, BuildHangText(results.Get<HangDomainResult>()));
 
@@ -150,10 +150,10 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
             return "Incoming-reference counting was skipped because the disk-backed index would make full reverse counting too expensive.";
 
         if (retention.ObjectScanCapped)
-            return $"Incoming-reference counting hit the scan cap after {retention.SkippedReferenceAddresses:N0} skipped addresses; highly-referenced-object counts may be partial.";
+            return "Incoming-reference counting hit the object-scan cap (MaxLeakScanObjects); highly-referenced-object counts may be partial.";
 
-        if (retention.SkippedReferenceAddresses > 0)
-            return $"Reference counting skipped {retention.SkippedReferenceAddresses:N0} addresses; retention counts may be partial.";
+        if (retention.ApproximatedReferenceAddresses > 0)
+            return $"Reference counting approximated {retention.ApproximatedReferenceAddresses:N0} addresses' counts (bounded-error, not dropped) after the tracking-table capacity was reached.";
 
         return "Retention metrics are bounded but available.";
     }

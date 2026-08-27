@@ -81,17 +81,17 @@ internal sealed class DominatorFindingGenerator : IFindingGenerator
             }
         }
 
-        if (r.SkippedReferenceAddresses > 0)
+        if (r.ApproximatedReferenceAddresses > 0)
         {
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
                 Category: "Diagnostics",
                 Severity: FindingSeverity.Info,
                 Title: "Reference tracking was capped",
-                Evidence: $"Skipped {r.SkippedReferenceAddresses:N0} references because the tracking limit was reached.",
-                Recommendation: "Increase MaxReferenceAddresses for deeper incoming-reference coverage.",
+                Evidence: $"{r.ApproximatedReferenceAddresses:N0} references have approximated, bounded-error counts because the tracking limit was reached (Space-Saving admission — never dropped entirely).",
+                Recommendation: "Increase MaxReferenceAddresses for exact incoming-reference coverage on more addresses.",
                 Tags: ["analysis-quality", "references"],
-                MetricValue: r.SkippedReferenceAddresses,
+                MetricValue: r.ApproximatedReferenceAddresses,
                 MetricUnit: "references"));
         }
 

@@ -10,7 +10,16 @@ internal sealed record DominatorDomainResult(
     int MaxBreadth = 0,
     int MaxDepth = 20,
     int HighlyReferencedObjectCount = 0,
-    long SkippedReferenceAddresses = 0,
+    /// <summary>
+    /// Number of times the fallback incoming-reference-count pass's
+    /// <c>SpaceSavingCounter</c> had to approximate — evict the current globally
+    /// lowest-count tracked address and re-admit a newly seen address starting from that
+    /// evicted count, once its capacity (<see cref="DumpDetective.Core.Options.RetentionOptions.MaxReferenceAddresses"/>)
+    /// was reached. Approximated addresses still have a bounded-error count (never an
+    /// under-count), unlike a plain fixed-capacity dictionary that would have dropped them
+    /// entirely. Always 0 on the primary reverse-index-backed path, which is exhaustive.
+    /// </summary>
+    long ApproximatedReferenceAddresses = 0,
     IReadOnlyList<HighlyReferencedObjectSnapshot>? TopHighlyReferencedObjects = null,
     /// <summary>
     /// True when the incoming-reference-count pass stopped early because the number of
@@ -61,7 +70,19 @@ internal sealed record DominatorDomainResult(
     /// unchanged. Only covers the type names already present in <see cref="TopDominatorTypes"/> (the
     /// report never displays more than that), not every reachable type.
     /// </summary>
-    IReadOnlyDictionary<string, ulong>? ExactRetainedBytesByTypeName = null) : AnalyzerDomainResult;
+    IReadOnlyDictionary<string, ulong>? ExactRetainedBytesByTypeName = null,
+    /// <summary>
+    /// Per-type dominance chain (P3-3): for each type name already present in
+    /// <see cref="TopDominatorTypes"/>, the ancestor chain from the topmost dominator down to
+    /// the type's sample object, walked via <c>IDominatorTreeProvider.TryGetImmediateDominator</c>
+    /// starting at that type's sample address. Ordered root-most first, sample leaf last. Null
+    /// (or missing a given type name) exactly when <see cref="ExactRetainedBytesByTypeName"/> is
+    /// — same "exact tree unavailable this run" fallback. Bounded by
+    /// <see cref="DumpDetective.Core.Options.RetentionOptions.MaxDominatorChainDepth"/>; a chain
+    /// that hits that cap ends with a synthetic "chain continues" hop (<c>Address == 0</c>)
+    /// rather than silently looking complete.
+    /// </summary>
+    IReadOnlyDictionary<string, IReadOnlyList<DominatorChainHop>>? DominatorChainsByTypeName = null) : AnalyzerDomainResult;
 
 internal sealed record HighlyReferencedObjectSnapshot(ulong Address, string TypeName, ulong Size, int IncomingReferences, ulong EstimatedRetainedBytes = 0, Evidence? Evidence = null);
 
@@ -72,3 +93,6 @@ internal sealed record RetentionTypeSnapshot(
     long TotalIncomingReferences,
     int MaxIncomingReferences,
     ulong EstimatedRetainedBytes = 0);
+
+/// <summary>One hop in a dominance chain (P3-3) — see <see cref="DominatorDomainResult.DominatorChainsByTypeName"/>.</summary>
+internal sealed record DominatorChainHop(string TypeName, ulong Address, ulong RetainedBytes);

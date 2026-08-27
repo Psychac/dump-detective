@@ -80,4 +80,18 @@ public sealed class RetentionOptions
     /// completed.</para>
     /// </summary>
     public bool EnableExactDominatorTree { get; init; } = true;
+
+    /// <summary>
+    /// Safety bound (not a display truncation) on how many immediate-dominator hops
+    /// <c>DominatorAnalyzer</c> walks via <c>IDominatorTreeProvider.TryGetImmediateDominator</c>
+    /// when building a per-type dominance chain for the Gen2/LOH sub-table. A real dominator
+    /// tree's depth is bounded only by the longest single-parent chain in the heap — a linked
+    /// list, queue, or continuation chain can make this arbitrarily deep (up to the reachable
+    /// object count), and each hop costs one <c>heap.GetObject()</c> dump-file read, so this
+    /// exists purely to guard against a pathological chain turning a decorative diagnostic into
+    /// an unbounded-runtime walk. Set generously above any depth expected on a normal object
+    /// graph; hitting it is itself a signal (surfaced as a trailing "chain continues" entry)
+    /// rather than a silent truncation.
+    /// </summary>
+    public int MaxDominatorChainDepth { get; init; } = 64;
 }

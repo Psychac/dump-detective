@@ -96,9 +96,13 @@ widget exists:
 1. Thread Stack Cluster Analyzer P3-2 — first consumer, drives the initial widget shape.
 2. GC Root Analyzer `RootPathGroups` — collapse shared-suffix chains once the widget exists
    (tracked as a new P3 row in [gcroot-analyzer-audit.md](../analysis/phase1/gcroot-analyzer-audit.md)).
-3. Dominator Analyzer dominator-tree rendering — render the existing parent/child structure
-   as a tree instead of a flat table (tracked as a new P3 row in
-   [dominator-analyzer-audit.md](../analysis/phase1/dominator-analyzer-audit.md)).
+3. Dominator Analyzer dominator-tree rendering — **✅ DONE 2026-08-27**, third adopter: per-type
+   dominance chains (P3-3, `DominatorAnalyzer.BuildDominatorChain` walking
+   `IDominatorTreeProvider.TryGetImmediateDominator`) rendered via `buildTreeWidget` in the
+   Gen2/LOH sub-table. Scoped to one chain per candidate row (each hop its own `TreeNode`,
+   `IsChain: true`), not a merged multi-branch tree across candidates — see
+   [dominator-analyzer-audit.md](../analysis/phase1/dominator-analyzer-audit.md) P3 roadmap for
+   the follow-up note.
 
 Do not force items 2 and 3 into the same change as item 1 — land the widget against its
 first real consumer, confirm it holds up, then adopt elsewhere.

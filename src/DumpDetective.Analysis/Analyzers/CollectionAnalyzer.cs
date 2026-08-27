@@ -214,7 +214,7 @@ namespace DumpDetective.Analysis.Analyzers
             foreach (CollectionKind k in Enum.GetValues(typeof(CollectionKind)))
                 _generationCounts[k] = new int[4];
 
-            _scanCounter = new ObjectScanCounter("scanning collections", _progress);
+            _scanCounter = new ObjectScanCounter("scanning collections", _progress, total: TryGetTotalObjectCountHint(_cache));
             _wastefulCount = 0;
             _totalWasted = 0;
             _wasteCountByKind = new int[CollectionKindCount];
@@ -594,6 +594,7 @@ namespace DumpDetective.Analysis.Analyzers
             ulong[] wasteBytesByKind = new ulong[kindCount];
             long scanned = 0;
             const long progressInterval = 50_000;
+            long? totalObjectsHint = TryGetTotalObjectCountHint(cache) ?? inMemoryEntries?.Length;
             var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, _options.MaxDegreeOfParallelism), CancellationToken = cancellationToken };
             // ClrMD heap/field reads are not reliably thread-safe under this analyzer's
             // parallel per-entry execution. Serialize if configured, otherwise allow concurrent access.
@@ -638,7 +639,7 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 long s = Interlocked.Increment(ref scanned);
                 if (s % progressInterval == 0)
-                    progress?.Report(new(s, "scanning collections"));
+                    progress?.Report(new(s, "scanning collections", FormatScanPercent(s, totalObjectsHint)));
                 CollectionKind kind;
                 if (heapLock != null)
                 {
@@ -989,6 +990,21 @@ namespace DumpDetective.Analysis.Analyzers
         /// Shared by both scan paths so a new kind can never be recognized by one and missed by the
         /// other. Pure function of the name — callers screen out arrays before calling.
         /// </summary>
+        /// <summary>
+        /// Total object count from the disk-backed heap index header (Phase 1's single scan
+        /// pass), when available — lets progress reporting show a percentage instead of a raw,
+        /// meaningless-without-context count. Null in in-memory mode or when the index wasn't
+        /// built (caller should fall back to any total it already knows, e.g. an in-memory
+        /// entries array length).
+        /// </summary>
+        private static long? TryGetTotalObjectCountHint(IHeapAnalysisCache? cache) =>
+            cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? idx) && idx.ObjectCount > 0
+                ? idx.ObjectCount
+                : null;
+
+        internal static string? FormatScanPercent(long scanned, long? total) =>
+            total is > 0 ? $"{Math.Min(100.0, scanned * 100.0 / total.Value):F0}%" : null;
+
         internal static CollectionKind ClassifyCollectionTypeName(string typeName)
         {
             // ImmutableArray<T>.Builder is the one nested type worth probing: it is the only

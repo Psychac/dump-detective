@@ -588,12 +588,16 @@ eliminates all multi-core benefit.
 
 > **P2-4 note (2026-08-28):** `Tags`/`Order` were previously only correct via `DefaultAnalyzerFeatureModuleCatalog`'s separate registration (240 / ["collections"]) — the `IAnalyzer` interface defaults (`0` / `[]`) silently disagreed. Now both agree by construction; a regression test asserts they stay in sync.
 
+> **P3-1 note (2026-08-28):** deferred — discussed with the user and confirmed not a real bottleneck. `AddToTopWasteful` only runs against the already-filtered wasteful subset (not the full heap scan), and `TopWastefulCollectionsToShow` defaults to 50 (clamped to 10,000); the O(capacity) linear scan is negligible unless someone explicitly configures a very large top-N alongside a dump with a correspondingly large wasteful-collection count. A hand-rolled min-heap is meaningfully more error-prone (tie-handling, root-replacement sift-down, capacity 0/1 edge cases) than the scan it would replace, so revisit only if a real profiled scenario shows this on the hot path.
+
+> **P3-2 note (2026-08-28):** implemented generically on the shared `ObjectScanCounter` (new optional `total` constructor parameter) rather than as a `CollectionAnalyzer`-only hack, so any of the ~20 other analyzers already using it get the same percentage-in-Detail behavior for free just by passing a total — fully backward compatible (`total: null` preserves the exact prior raw-count-only behavior). `CollectionAnalyzer` feeds it from `HeapAnalysisCache.TryGetHeapIndex(...).ObjectCount` on the disk/participant scan path, falling back to the in-memory entries array length on the parallel path when the disk index/cache isn't available. The raw `ScannedCount` field is untouched — the percentage is only added to `Detail` (e.g. `"42% · 3 wasteful"`), so no downstream consumer of raw counts breaks.
+
 #### P3 — Low
 
 | # | Recommendation | Impact | Difficulty | Confidence | Class |
 |---|---|---|---|---|---|
-| P3-1 | **Replace `AddToTopWasteful` linear scan with a fixed-size min-heap** for `topCapacity > 50` use cases. | Negligible at topCapacity=100; relevant if top-N grows to 1 000+ | Medium | Medium | Improvement |
-| P3-2 | **Progress reporting: accept total-object-count hint** from the index header and report percentage instead of raw count. | Better UX on large dumps | Low | Medium | Improvement |
+| P3-1 | **Replace `AddToTopWasteful` linear scan with a fixed-size min-heap** for `topCapacity > 50` use cases. | Negligible at topCapacity=100; relevant if top-N grows to 1 000+ | Medium | Medium | Improvement | ⏸️ DEFERRED |
+| P3-2 | **Progress reporting: accept total-object-count hint** from the index header and report percentage instead of raw count. | Better UX on large dumps | Low | Medium | Improvement | ✅ DONE |
 | P3-3 | **Separate Queue columns in section builder** — render head/tail/free-segment columns only in a Queue-specific sub-table; remove these columns from the shared wasteful-collections table. | Report readability | Low | High | Improvement |
 | P3-4 | **"Owner type" via partial reverse index** — for top-5 collections, query the partial reverse reference index to surface the immediate referrer type name (owner hint without full BFS). | Quick ownership signal at low cost | Medium | Low | Evolution |
 | P3-5 | **Per-element-type wasted memory aggregation** — group top `WastefulCollection` items by `ElementType` and surface total wasted bytes per element type. | Unique diagnostic; actionable for allocation refactoring | Medium | Medium | Improvement |

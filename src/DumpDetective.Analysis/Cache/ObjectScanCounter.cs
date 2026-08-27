@@ -15,6 +15,10 @@ namespace DumpDetective.Analysis.Cache
         private readonly long _reportEveryElapsedTicks;
         private readonly Stopwatch _stopwatch;
         private readonly IProgress<AnalyzerProgressReport>? _progress;
+        // Total object-count hint (e.g. from the disk index header) used to render a percentage
+        // instead of a raw scanned count. Null when no caller-supplied hint is available — the
+        // counter falls back to raw-count reporting exactly as before.
+        private readonly long? _total;
 
         private long _scanned;
         private long _nextCountReport;
@@ -27,7 +31,8 @@ namespace DumpDetective.Analysis.Cache
             string phase,
             IProgress<AnalyzerProgressReport>? progress = null,
             int reportEveryObjects = 250_000,
-            TimeSpan? reportEveryElapsed = null)
+            TimeSpan? reportEveryElapsed = null,
+            long? total = null)
         {
             _phase = phase;
             _progress = progress;
@@ -36,6 +41,7 @@ namespace DumpDetective.Analysis.Cache
             _stopwatch = Stopwatch.StartNew();
             _nextCountReport = _reportEveryObjects;
             _lastReportTicks = 0;
+            _total = total is > 0 ? total : null;
         }
 
         public void Tick(string? detail = null)
@@ -136,12 +142,28 @@ namespace DumpDetective.Analysis.Cache
         }
 
         public void Report(string? detail = null) =>
-            _progress?.Report(new AnalyzerProgressReport(Interlocked.Read(ref _scanned), _phase, detail));
+            _progress?.Report(new AnalyzerProgressReport(Interlocked.Read(ref _scanned), _phase, WithPercent(detail)));
 
         public void Complete(string? detail = null)
         {
             _stopwatch.Stop();
-            _progress?.Report(new AnalyzerProgressReport(Interlocked.Read(ref _scanned), _phase, detail));
+            _progress?.Report(new AnalyzerProgressReport(Interlocked.Read(ref _scanned), _phase, WithPercent(detail)));
+        }
+
+        /// <summary>
+        /// Prefixes <paramref name="detail"/> with a "{pct}%" computed against the caller-supplied
+        /// <see cref="_total"/> hint, or returns <paramref name="detail"/> unchanged when no hint
+        /// was given — the raw scanned count already flows through
+        /// <see cref="AnalyzerProgressReport.ScannedCount"/> regardless.
+        /// </summary>
+        private string? WithPercent(string? detail)
+        {
+            if (_total is not > 0)
+                return detail;
+
+            double pct = Math.Min(100.0, Interlocked.Read(ref _scanned) * 100.0 / _total.Value);
+            string pctText = $"{pct:F0}%";
+            return string.IsNullOrEmpty(detail) ? pctText : $"{pctText} · {detail}";
         }
     }
 }

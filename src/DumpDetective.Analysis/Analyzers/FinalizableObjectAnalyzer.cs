@@ -144,6 +144,7 @@ namespace DumpDetective.Analysis.Analyzers
                     Gen2Count: e.Gen2Count,
                     LohCount: (int)Math.Min(e.LohCount, int.MaxValue),
                     TotalBytes: e.TotalSize,
+                    Gen2Bytes: e.Gen2TotalSize,
                     IsFinalizable: true));
             }
 

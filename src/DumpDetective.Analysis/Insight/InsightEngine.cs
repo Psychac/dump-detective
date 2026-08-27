@@ -1407,6 +1407,9 @@ internal sealed class InsightEngine
     /// ranks types by total bytes but has no generation breakdown, while GCGeneration has the
     /// breakdown but doesn't rank by total size. A large type that is almost entirely stuck in
     /// Gen2 is a strong long-lived-leak candidate rather than ordinary working-set memory.
+    /// The Gen2 fraction is computed from exact Gen2 bytes when the heap index provides them
+    /// (P2-4), falling back to instance-count fraction for older indices — a byte-based fraction
+    /// catches types whose surviving instances are disproportionately large.
     /// </summary>
     private static void DetectMemoryTypeGenerationCorrelation(
         List<InsightFinding> findings,
@@ -1436,7 +1439,13 @@ internal sealed class InsightEngine
             if (totalCounted == 0)
                 continue;
 
-            double gen2FractionPct = profile.Gen2Count * 100.0 / totalCounted;
+            // Prefer the exact byte-based Gen2 fraction (P2-4) over the count-based one: a type
+            // whose Gen2 instances happen to be much larger than its Gen0/Gen1 instances — e.g. a
+            // growing collection that keeps reallocating bigger backing arrays as it survives GCs —
+            // can look mild by count while actually retaining most of its bytes in Gen2.
+            double gen2FractionPct = profile.Gen2Bytes > 0 && profile.TotalBytes > 0
+                ? profile.Gen2Bytes * 100.0 / profile.TotalBytes
+                : profile.Gen2Count * 100.0 / totalCounted;
             if (gen2FractionPct >= MemoryGenerationCorrelationGen2FractionPct)
                 matches.Add((snapshot, profile, gen2FractionPct));
         }
@@ -1464,13 +1473,14 @@ internal sealed class InsightEngine
                 profile.Gen1Count,
                 profile.Gen2Count,
                 profile.LohCount,
+                profile.Gen2Bytes > 0 ? FormatBytes(profile.Gen2Bytes) : "-",
                 $"{gen2FractionPct:F1}%",
             });
         }
 
         var evidenceTable = new FindingEvidenceTable(
             "Top memory-consuming types stuck in Gen2 (size × generation cross-reference)",
-            ["Type", "Total Bytes", "Gen0", "Gen1", "Gen2", "LOH", "Gen2 %"],
+            ["Type", "Total Bytes", "Gen0", "Gen1", "Gen2", "LOH", "Gen2 Bytes", "Gen2 %"],
             rows);
 
         findings.Add(new InsightFinding(

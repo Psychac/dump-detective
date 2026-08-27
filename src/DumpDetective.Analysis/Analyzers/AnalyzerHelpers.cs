@@ -10,9 +10,16 @@ namespace DumpDetective.Analysis.Analyzers;
 internal static class AnalyzerHelpers
 {
     /// <summary>
-    /// Computes exact per-generation byte totals directly from heap segments.
+    /// Computes exact per-generation byte totals directly from heap segments, excluding LOH/POH.
+    /// Uses <see cref="ClrSegment.Generation0"/>/<see cref="ClrSegment.Generation1"/>/
+    /// <see cref="ClrSegment.Generation2"/> sub-range lengths on every SOH-kind segment rather than
+    /// attributing a whole segment's committed bytes to one generation: a classic (non-regions)
+    /// <see cref="GCSegmentKind.Ephemeral"/> segment holds the Gen0/Gen1 budget plus the tail of
+    /// Gen2 all in one segment, so lumping its full committed size into Gen2 (as this method used
+    /// to do) overstates Gen2 and zeroes out Gen0/Gen1 whenever a dump has no separate
+    /// regions-based Generation0/Generation1 segments — which is every classic-GC dump. This is
+    /// the same per-segment split <see cref="Cache.SegmentSummaryCache"/> already uses.
     /// This is the authoritative method and should be preferred over approximations.
-    /// Uses segment.Kind to classify segments by generation (0/1/2), excluding LOH/POH.
     /// </summary>
     public static void ComputeExactGenBytes(
         ClrHeap heap,
@@ -26,26 +33,12 @@ internal static class AnalyzerHelpers
 
         foreach (ClrSegment segment in heap.Segments)
         {
-            ulong committedBytes = SegmentKindMapper.GetCommittedBytes(segment);
-            if (committedBytes == 0) continue;
+            if (SegmentKindMapper.Map(segment) != HeapSegmentKind.SmallObjectHeap)
+                continue;
 
-            switch (segment.Kind)
-            {
-                case GCSegmentKind.Generation0:
-                    gen0Bytes += committedBytes;
-                    break;
-                case GCSegmentKind.Generation1:
-                    gen1Bytes += committedBytes;
-                    break;
-                case GCSegmentKind.Generation2:
-                    gen2Bytes += committedBytes;
-                    break;
-                case GCSegmentKind.Ephemeral:
-                    // Ephemeral can contain Gen0/Gen1 — use per-object classification.
-                    // For simplicity, attribute to Gen2 (most conservative approach).
-                    gen2Bytes += committedBytes;
-                    break;
-            }
+            gen0Bytes += SegmentKindMapper.GetRangeLength(segment.Generation0);
+            gen1Bytes += SegmentKindMapper.GetRangeLength(segment.Generation1);
+            gen2Bytes += SegmentKindMapper.GetRangeLength(segment.Generation2);
         }
     }
 

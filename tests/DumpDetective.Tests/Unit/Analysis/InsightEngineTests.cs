@@ -395,6 +395,56 @@ public sealed class InsightEngineTests
     }
 
     [Fact]
+    public void Analyze_ShouldUseByteBasedGen2Fraction_WhenGen2BytesAvailable()
+    {
+        // Instance count alone puts Gen2 residency at 60% (600 of 1,000 instances) — below the
+        // 85% correlation threshold. But those 600 Gen2 instances are much larger on average
+        // (140,000,000 of 150,000,000 total bytes = 93.3%), so the byte-based fraction (P2-4)
+        // should surface the finding even though the count-based fraction would not.
+        InsightEngine engine = new();
+
+        MemoryDomainResult memory = new(
+            TotalBytes: 200_000_000,
+            LohBytes: 0,
+            LohPercent: 0,
+            TotalObjects: 1_000,
+            LohObjects: 0,
+            LohThresholdBytes: 85_000,
+            UniqueTypes: 1,
+            TopTypes: [new TypeSnapshot("MyApp.Cache.GrowingBuffer", 1_000, 150_000_000, 0)]);
+
+        GCGenerationDomainResult gcGen = new(
+            Gen0Bytes: 10_000_000, Gen0Objects: 400,
+            Gen1Bytes: 0, Gen1Objects: 0,
+            Gen2Bytes: 140_000_000, Gen2Objects: 600,
+            LohBytes: 0, LohPercent: 0,
+            TotalObjects: 1_000, LohObjects: 0,
+            TopLohTypes: [],
+            PerTypeGenerationProfiles:
+            [
+                new TypeGenerationProfile(
+                    "MyApp.Cache.GrowingBuffer",
+                    Gen0Count: 400, Gen1Count: 0, Gen2Count: 600, LohCount: 0,
+                    TotalBytes: 150_000_000, Gen2Bytes: 140_000_000)
+            ]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Memory Analysis", AnalyzerExecutionStatus.Success, memory),
+            BuildRun("GC Generation Analysis", AnalyzerExecutionStatus.Success, gcGen),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("long-lived", StringComparison.OrdinalIgnoreCase)
+            && f.Tags.Contains("gc-generation")
+            && f.EffectiveEvidenceTables.Count == 1
+            && f.EffectiveEvidenceTables[0].Rows[0][0]!.Equals("MyApp.Cache.GrowingBuffer")
+            && f.EffectiveEvidenceTables[0].Rows[0][7]!.Equals("93.3%"));
+    }
+
+    [Fact]
     public void Analyze_ShouldEmitEvidenceTable_WhenSystemStringIsTopMemoryTypeWithDuplication()
     {
         InsightEngine engine = new();

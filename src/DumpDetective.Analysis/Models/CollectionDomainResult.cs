@@ -60,4 +60,11 @@ internal sealed record WastefulCollectionSnapshot(
     /// TrimExcess()", "Construct with initial capacity ~N"). Always a concrete capacity fix —
     /// reachability is never asserted here since <see cref="RootDescription"/> only reflects a
     /// budget-limited search, not proof the collection is actually unreachable.</summary>
-    string Recommendation = "");
+    string Recommendation = "",
+    /// <summary>Immediate-parent hint from one reverse-index lookup (P3-4) — cheaper than
+    /// <see cref="RootDescription"/>'s full BFS and populated independently of it. Null when no
+    /// reverse index was available or the object has no recorded parents. When the object has
+    /// more than one recorded parent (or the index truncated its parent list), this reports the
+    /// ambiguity explicitly (e.g. "3 referrers, e.g. CacheManager") rather than picking one
+    /// arbitrary parent and presenting it as the definitive owner.</summary>
+    string? OwnerTypeHint = null);

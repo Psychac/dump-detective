@@ -133,10 +133,11 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
                     Cell(c.SizeEstimateConfidence),
                     Cell(c.DetectionMethod),
                     Cell(c.RootDescription ?? "—"),
+                    Cell(c.OwnerTypeHint ?? "—"),
                     Cell(c.Recommendation)]));
             }
             compactTables.Add(STCompact("Wasteful collections",
-                new[] { CH("Type"), CH("Kind"), CH("Count","number"), CH("Capacity","number"), CH("Fill Rate"), CH("Wasted","bytes"), CH("Element Type"), CH("Element Size","bytes"), CH("Confidence"), CH("Method"), CH("Root"), CH("Recommendation") },
+                new[] { CH("Type"), CH("Kind"), CH("Count","number"), CH("Capacity","number"), CH("Fill Rate"), CH("Wasted","bytes"), CH("Element Type"), CH("Element Size","bytes"), CH("Confidence"), CH("Method"), CH("Root"), CH("Owner (hint)"), CH("Recommendation") },
                 wcRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             if (topWasteful.Count > limit)
             {

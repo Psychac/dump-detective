@@ -159,7 +159,8 @@ namespace DumpDetective.Analysis.Analyzers
                     w.DetectionMethod,
                     w.RootDescription,
                     retainedBytes,
-                    BuildResizeRecommendation(w.Kind, w.Count, w.Capacity, w.FillRate)));
+                    BuildResizeRecommendation(w.Kind, w.Count, w.Capacity, w.FillRate),
+                    w.OwnerTypeHint));
             }
 
             var domainResult = new CollectionDomainResult(
@@ -1282,6 +1283,50 @@ namespace DumpDetective.Analysis.Analyzers
         // Populate root descriptions for the top-N items only, after the scan is complete.
         // This avoids the catastrophic O(n * heap-walk) cost of doing it per item during scanning.
         // Balanced/Deep only: uses RootPathFinder BFS for items still missing a description.
+        /// <summary>
+        /// One indexed "who points at this?" lookup (P3-4, docs/analysis/phase1/collection-analyzer-audit.md)
+        /// — not a traversal, so it's cheap enough to run for every top-N item regardless of
+        /// <see cref="RootPathFinder"/>'s BFS outcome. The reverse index has no notion of which
+        /// parent is the "real" owner when an object has more than one, so a single arbitrary
+        /// parent is never reported as if it were definitive — ambiguity (multiple parents, or a
+        /// truncated result the index couldn't fully extract) is surfaced explicitly instead.
+        /// </summary>
+        private static string? ResolveOwnerTypeHint(ClrHeap heap, IHeapAnalysisCache cache, IBackwardReferenceProvider? reverseIndexProvider, ulong address)
+        {
+            if (reverseIndexProvider is null)
+                return null;
+
+            if (!reverseIndexProvider.TryGetParents(address, out IReadOnlyList<ulong> parents, out bool truncated) || parents.Count == 0)
+                return null;
+
+            return FormatOwnerTypeHint(parents.Count, truncated, ResolveTypeName(heap, cache, parents[0]));
+        }
+
+        /// <summary>
+        /// Ambiguity-handling logic isolated from the reverse-index/ClrHeap lookups above so it's
+        /// directly unit-testable — the reverse index has no notion of which parent is the "real"
+        /// owner, so a count &gt; 1 (or a truncated extraction) is always surfaced explicitly
+        /// rather than silently reporting one arbitrary parent as definitive.
+        /// </summary>
+        internal static string? FormatOwnerTypeHint(int parentCount, bool truncated, string? firstOwnerType)
+        {
+            if (firstOwnerType is null)
+                return null;
+
+            if (parentCount == 1 && !truncated)
+                return firstOwnerType;
+
+            // truncated means the index hit its fanout cap extracting parents — parentCount is a
+            // lower bound on the real total, not the true count, so mark it as such.
+            string countLabel = truncated ? $"{parentCount}+" : parentCount.ToString();
+            return $"{countLabel} referrers, e.g. {firstOwnerType}";
+        }
+
+        private static string? ResolveTypeName(ClrHeap heap, IHeapAnalysisCache cache, ulong address) =>
+            cache.TryGetObjectMetadata(heap, address, out ulong methodTable, out _)
+                ? heap.GetTypeByMethodTable(methodTable)?.Name
+                : null;
+
         private void PopulateRootDescriptions(ClrHeap heap, IHeapAnalysisCache? cache, List<WastefulCollection> wastefulList, CollectionAnalysisOptions options, ReferenceChainOptions? refChainOptions)
         {
             if (wastefulList.Count == 0 || options.PathAnalysisTopN <= 0 || cache is null || refChainOptions is null)
@@ -1313,6 +1358,11 @@ namespace DumpDetective.Analysis.Analyzers
                 for (int i = 0; i < topN; i++)
                 {
                     var item = wastefulList[i];
+
+                    // Independent of the BFS below — a single indexed lookup, not a traversal —
+                    // so it's still worth having even when the deep search times out or misses.
+                    item.OwnerTypeHint = ResolveOwnerTypeHint(heap, cache, reverseIndexProvider, item.Address);
+
                     if (!string.IsNullOrEmpty(item.RootDescription))
                         continue;
 
@@ -1883,6 +1933,9 @@ namespace DumpDetective.Analysis.Analyzers
         public string SizeEstimateConfidence { get; set; } = "Unknown";
         public string DetectionMethod { get; set; } = string.Empty;
         public string? RootDescription { get; set; }
+        /// <summary>Immediate-parent hint from a single reverse-index lookup — cheap alternative
+        /// to <see cref="RootDescription"/>'s full BFS. See <see cref="CollectionAnalyzer.PopulateRootDescriptions"/>.</summary>
+        public string? OwnerTypeHint { get; set; }
         public int? FreeEntryCount { get; set; }
         // Queue-specific diagnostics
         public int? Head { get; set; }

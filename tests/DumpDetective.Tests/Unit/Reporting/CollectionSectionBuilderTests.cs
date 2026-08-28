@@ -180,6 +180,50 @@ public sealed class CollectionSectionBuilderTests
     }
 
     [Fact]
+    public void Build_WastefulCollectionsTable_IncludesOwnerHintColumn()
+    {
+        var snapshot = new WastefulCollectionSnapshot(
+            Type: "System.Collections.Generic.Dictionary`2",
+            Kind: CollectionKind.Dictionary,
+            Count: 800,
+            Capacity: 1000,
+            FillRate: 80.0,
+            WastedMemory: 8_000,
+            Address: 0x1000,
+            OwnerTypeHint: "3 referrers, e.g. MyApp.CacheManager");
+
+        var result = BuildResult(totalWasted: 8_000, countsByKind: null, bytesByKind: null,
+            topWastefulCollections: [snapshot]);
+
+        CompactTable table = WastefulCollectionsTable(new CollectionSectionBuilder().Build(result));
+
+        int ownerColumnIndex = table.Headers.ToList().FindIndex(h => h.Name == "Owner (hint)");
+        ownerColumnIndex.Should().BeGreaterThanOrEqualTo(0);
+        table.Rows[0].Values[ownerColumnIndex].Should().Be(snapshot.OwnerTypeHint);
+    }
+
+    [Fact]
+    public void Build_NoOwnerTypeHint_RendersDash()
+    {
+        var snapshot = new WastefulCollectionSnapshot(
+            Type: "System.Collections.Generic.Dictionary`2",
+            Kind: CollectionKind.Dictionary,
+            Count: 800,
+            Capacity: 1000,
+            FillRate: 80.0,
+            WastedMemory: 8_000,
+            Address: 0x1000);
+
+        var result = BuildResult(totalWasted: 8_000, countsByKind: null, bytesByKind: null,
+            topWastefulCollections: [snapshot]);
+
+        CompactTable table = WastefulCollectionsTable(new CollectionSectionBuilder().Build(result));
+
+        int ownerColumnIndex = table.Headers.ToList().FindIndex(h => h.Name == "Owner (hint)");
+        table.Rows[0].Values[ownerColumnIndex].Should().Be("—");
+    }
+
+    [Fact]
     public void Build_PerKindTable_IncludesWastedBytesAndShare()
     {
         var result = BuildResult(

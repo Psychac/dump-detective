@@ -80,6 +80,11 @@ namespace DumpDetective.Analysis.Analyzers
         private ulong _totalWasted;
         private int[]? _wasteCountByKind;
         private ulong[]? _wasteBytesByKind;
+        // ElementType is free-form (unbounded cardinality), unlike CollectionKind's small fixed
+        // enum, so this can't use the array-indexed accumulator pattern above — but it's only
+        // ever touched from RecordWasteful, i.e. bounded by wastefulCount, not total heap objects.
+        private Dictionary<string, int>? _wasteCountByElementType;
+        private Dictionary<string, ulong>? _wasteBytesByElementType;
         // Set by OnHeapIndexScanCompleted — the single source of truth for whether the
         // participant-accumulated state above is trustworthy. Avoids re-deriving "did the
         // shared scan run" from a second cache.TryGetHeapIndex call in AnalyzeCollections.
@@ -174,7 +179,9 @@ namespace DumpDetective.Analysis.Analyzers
                 collectionStats.WasteBytesByKind,
                 collectionStats.GenerationBreakdown,
                 collectionStats.ImmutableArrays,
-                collectionStats.ImmutableArrayBuilders);
+                collectionStats.ImmutableArrayBuilders,
+                collectionStats.WasteCountsByElementType,
+                collectionStats.WasteBytesByElementType);
 
             if (collectionStats.TotalCollections == 0)
             {
@@ -219,6 +226,8 @@ namespace DumpDetective.Analysis.Analyzers
             _totalWasted = 0;
             _wasteCountByKind = new int[CollectionKindCount];
             _wasteBytesByKind = new ulong[CollectionKindCount];
+            _wasteCountByElementType = new Dictionary<string, int>();
+            _wasteBytesByElementType = new Dictionary<string, ulong>();
         }
 
         /// <summary>
@@ -267,6 +276,8 @@ namespace DumpDetective.Analysis.Analyzers
                     _wasteCountByKind![i] += other._wasteCountByKind![i];
                     _wasteBytesByKind![i] += other._wasteBytesByKind![i];
                 }
+
+                MergeElementTypeWaste(_wasteCountByElementType!, _wasteBytesByElementType!, other._wasteCountByElementType!, other._wasteBytesByElementType!);
 
                 // Merge wasteful collections: drain other's list via AddToTopWasteful so the
                 // combined set is trimmed to _topCapacity as we go — avoids allocating a
@@ -356,7 +367,36 @@ namespace DumpDetective.Analysis.Analyzers
             _totalWasted += waste.WastedMemory;
             _wasteCountByKind![(int)kind]++;
             _wasteBytesByKind![(int)kind] += waste.WastedMemory;
+            AccumulateElementTypeWaste(_wasteCountByElementType!, _wasteBytesByElementType!, waste.ElementType, waste.WastedMemory);
             AddToTopWasteful(wasteful, waste, _topCapacity);
+        }
+
+        // "" is WastefulCollection.ElementType's default when the component type couldn't be
+        // resolved (see AnalyzeList/AnalyzeHashSet/etc.) — bucket it under one readable label
+        // instead of a blank dictionary key/report row.
+        private const string UnknownElementTypeLabel = "(unknown)";
+
+        internal static void AccumulateElementTypeWaste(Dictionary<string, int> counts, Dictionary<string, ulong> bytes, string elementType, ulong wastedMemory)
+        {
+            string key = string.IsNullOrEmpty(elementType) ? UnknownElementTypeLabel : elementType;
+            counts.TryGetValue(key, out int count);
+            counts[key] = count + 1;
+            bytes.TryGetValue(key, out ulong total);
+            bytes[key] = total + wastedMemory;
+        }
+
+        private static void MergeElementTypeWaste(Dictionary<string, int> destCounts, Dictionary<string, ulong> destBytes, Dictionary<string, int> srcCounts, Dictionary<string, ulong> srcBytes)
+        {
+            foreach (var kv in srcCounts)
+            {
+                destCounts.TryGetValue(kv.Key, out int count);
+                destCounts[kv.Key] = count + kv.Value;
+            }
+            foreach (var kv in srcBytes)
+            {
+                destBytes.TryGetValue(kv.Key, out ulong total);
+                destBytes[kv.Key] = total + kv.Value;
+            }
         }
 
         private void OnHeapEntry(in HeapEntry entry)
@@ -563,6 +603,8 @@ namespace DumpDetective.Analysis.Analyzers
             // list is trimmed to _topCapacity and would undercount every kind.
             stats.WasteCountsByKind = BuildKindDictionary(_wasteCountByKind!);
             stats.WasteBytesByKind = BuildKindDictionary(_wasteBytesByKind!);
+            stats.WasteCountsByElementType = _wasteCountByElementType!;
+            stats.WasteBytesByElementType = _wasteBytesByElementType!;
 
             // Post-scan root descriptions for top-N — never per-item during the scan.
             PopulateRootDescriptions(heap, cache, stats.WastefulCollections, _options, _refChainOptions);
@@ -592,6 +634,8 @@ namespace DumpDetective.Analysis.Analyzers
             int wasteUnder1Kb = 0, waste1To10Kb = 0, waste10To100Kb = 0, waste100KbTo1Mb = 0, wasteAtLeast1Mb = 0;
             int[] wasteCountByKind = new int[kindCount];
             ulong[] wasteBytesByKind = new ulong[kindCount];
+            var wasteCountByElementType = new Dictionary<string, int>();
+            var wasteBytesByElementType = new Dictionary<string, ulong>();
             long scanned = 0;
             const long progressInterval = 50_000;
             long? totalObjectsHint = TryGetTotalObjectCountHint(cache) ?? inMemoryEntries?.Length;
@@ -627,6 +671,8 @@ namespace DumpDetective.Analysis.Analyzers
                     local.WasteCountByKind[kindIndex]++;
                     local.WasteBytesByKind[kindIndex] += wasteBytes;
                 }
+
+                AccumulateElementTypeWaste(local.WasteCountByElementType, local.WasteBytesByElementType, waste.ElementType, wasteBytes);
 
                 AddToTopWasteful(local.TopWasteful, waste, topCapacity);
             }
@@ -911,6 +957,8 @@ namespace DumpDetective.Analysis.Analyzers
                     wasteBytesByKind[i] += local.WasteBytesByKind[i];
                 }
 
+                MergeElementTypeWaste(wasteCountByElementType, wasteBytesByElementType, local.WasteCountByElementType, local.WasteBytesByElementType);
+
                 for (int i = 0; i < local.TopWasteful.Count; i++)
                     AddToTopWasteful(wastefulList, local.TopWasteful[i], topCapacity);
             }
@@ -937,7 +985,9 @@ namespace DumpDetective.Analysis.Analyzers
                 WastefulCollectionCount = wastefulCount,
                 TotalWastedMemory = totalWastedMemory,
                 WasteCountsByKind = wasteCountDict,
-                WasteBytesByKind = wasteByteDict
+                WasteBytesByKind = wasteByteDict,
+                WasteCountsByElementType = wasteCountByElementType,
+                WasteBytesByElementType = wasteBytesByElementType
             };
 
             // materialize generation breakdown
@@ -1772,6 +1822,8 @@ namespace DumpDetective.Analysis.Analyzers
             public readonly List<WastefulCollection> TopWasteful;
             public readonly int[] WasteCountByKind;
             public readonly ulong[] WasteBytesByKind;
+            public readonly Dictionary<string, int> WasteCountByElementType;
+            public readonly Dictionary<string, ulong> WasteBytesByElementType;
             public int WastefulCount;
             public ulong TotalWastedMemory;
             public int WasteUnder1Kb;
@@ -1785,6 +1837,8 @@ namespace DumpDetective.Analysis.Analyzers
                 TopWasteful = new List<WastefulCollection>(topCapacity);
                 WasteCountByKind = new int[kindCount];
                 WasteBytesByKind = new ulong[kindCount];
+                WasteCountByElementType = new Dictionary<string, int>();
+                WasteBytesByElementType = new Dictionary<string, ulong>();
             }
         }
 
@@ -1810,6 +1864,8 @@ namespace DumpDetective.Analysis.Analyzers
         public List<WastefulCollection> WastefulCollections { get; set; } = new();
         public IReadOnlyDictionary<CollectionKind, int> WasteCountsByKind { get; set; } = new Dictionary<CollectionKind, int>();
         public IReadOnlyDictionary<CollectionKind, ulong> WasteBytesByKind { get; set; } = new Dictionary<CollectionKind, ulong>();
+        public IReadOnlyDictionary<string, int> WasteCountsByElementType { get; set; } = new Dictionary<string, int>();
+        public IReadOnlyDictionary<string, ulong> WasteBytesByElementType { get; set; } = new Dictionary<string, ulong>();
         public IReadOnlyList<CollectionGenerationStats>? GenerationBreakdown { get; set; }
     }
 

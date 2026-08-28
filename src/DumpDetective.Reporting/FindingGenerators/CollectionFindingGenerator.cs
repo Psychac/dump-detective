@@ -40,7 +40,21 @@ internal sealed class CollectionFindingGenerator : IFindingGenerator
                 dominantWasteKind = kindsByWaste[0];
         }
 
-        string evidence = $"{r.TotalCollections:N0} collections scanned; estimated unused capacity {FormatHelper.FormatBytes(r.TotalWastedMemory)} across {r.WastefulCollectionCount:N0} wasteful collections{perKindBreakdown}.";
+        // Dominant element type, ordered by wasted bytes — a narrower, often more actionable
+        // signal than kind alone (e.g. "List<byte[]>" vs. "List<CacheEntry>" both show as List).
+        string dominantElementTypeNote = string.Empty;
+        if (r.WasteCountsByElementType is { Count: > 0 })
+        {
+            var wasteBytesByElementType = r.WasteBytesByElementType ?? new Dictionary<string, ulong>();
+            string topElementType = r.WasteCountsByElementType.Keys
+                .OrderByDescending(t => wasteBytesByElementType.TryGetValue(t, out ulong bytes) ? bytes : 0UL)
+                .ThenBy(t => t, StringComparer.Ordinal)
+                .First();
+            wasteBytesByElementType.TryGetValue(topElementType, out ulong topElementBytes);
+            dominantElementTypeNote = $" Dominant wasted element type: {topElementType} ({FormatHelper.FormatBytes(topElementBytes)}).";
+        }
+
+        string evidence = $"{r.TotalCollections:N0} collections scanned; estimated unused capacity {FormatHelper.FormatBytes(r.TotalWastedMemory)} across {r.WastefulCollectionCount:N0} wasteful collections{perKindBreakdown}.{dominantElementTypeNote}";
 
         string recommendation = severity == FindingSeverity.Warning
             ? "Trim long-lived collections and initialize with realistic capacities."

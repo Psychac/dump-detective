@@ -193,6 +193,30 @@ public sealed class CollectionAnalyzerHeapIndexScanTests
         mergedBytes[(int)CollectionKind.Queue].Should().Be(8_000ul);
     }
 
+    [Fact]
+    public void MergePartial_SumsWasteCountsAndBytesPerElementType()
+    {
+        CollectionAnalyzer primary = new();
+        SeedParticipantState(primary, new CollectionStatistics(),
+            wasteCountByElementType: new() { ["System.String"] = 3 },
+            wasteBytesByElementType: new() { ["System.String"] = 3_000 });
+
+        CollectionAnalyzer worker = new();
+        SeedParticipantState(worker, new CollectionStatistics(),
+            wasteCountByElementType: new() { ["System.String"] = 2, ["System.Int32"] = 4 },
+            wasteBytesByElementType: new() { ["System.String"] = 1_000, ["System.Int32"] = 8_000 });
+
+        ((IParallelHeapIndexScanParticipant)primary).MergePartial([worker]);
+
+        var mergedCounts = GetField<Dictionary<string, int>>(primary, "_wasteCountByElementType");
+        var mergedBytes = GetField<Dictionary<string, ulong>>(primary, "_wasteBytesByElementType");
+
+        mergedCounts["System.String"].Should().Be(5);
+        mergedBytes["System.String"].Should().Be(4_000ul);
+        mergedCounts["System.Int32"].Should().Be(4);
+        mergedBytes["System.Int32"].Should().Be(8_000ul);
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────────────────────
 
     private static void SeedParticipantState(
@@ -205,12 +229,16 @@ public sealed class CollectionAnalyzerHeapIndexScanTests
         Dictionary<ulong, CollectionKind>? methodTableKinds = null,
         Dictionary<CollectionKind, int[]>? generationCounts = null,
         int[]? wasteCountByKind = null,
-        ulong[]? wasteBytesByKind = null)
+        ulong[]? wasteBytesByKind = null,
+        Dictionary<string, int>? wasteCountByElementType = null,
+        Dictionary<string, ulong>? wasteBytesByElementType = null)
     {
         int kindCount = Enum.GetValues(typeof(CollectionKind)).Length;
         Type t = typeof(CollectionAnalyzer);
         SetField(t, analyzer, "_wasteCountByKind", wasteCountByKind ?? new int[kindCount]);
         SetField(t, analyzer, "_wasteBytesByKind", wasteBytesByKind ?? new ulong[kindCount]);
+        SetField(t, analyzer, "_wasteCountByElementType", wasteCountByElementType ?? new Dictionary<string, int>());
+        SetField(t, analyzer, "_wasteBytesByElementType", wasteBytesByElementType ?? new Dictionary<string, ulong>());
         SetField(t, analyzer, "_stats", stats);
         SetField(t, analyzer, "_topCapacity", topCapacity);
         SetField(t, analyzer, "_wasteful", wasteful ?? new List<WastefulCollection>());

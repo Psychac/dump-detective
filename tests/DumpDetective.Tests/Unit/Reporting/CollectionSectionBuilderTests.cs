@@ -15,7 +15,9 @@ public sealed class CollectionSectionBuilderTests
         ulong totalWasted,
         Dictionary<CollectionKind, int>? countsByKind,
         Dictionary<CollectionKind, ulong>? bytesByKind,
-        IReadOnlyList<WastefulCollectionSnapshot>? topWastefulCollections = null) =>
+        IReadOnlyList<WastefulCollectionSnapshot>? topWastefulCollections = null,
+        Dictionary<string, int>? countsByElementType = null,
+        Dictionary<string, ulong>? bytesByElementType = null) =>
         new(
             TotalCollections: 100,
             Dictionaries: 20,
@@ -30,7 +32,39 @@ public sealed class CollectionSectionBuilderTests
             WastefulCollectionCount: 6,
             TopWastefulCollections: topWastefulCollections,
             WasteCountsByKind: countsByKind,
-            WasteBytesByKind: bytesByKind);
+            WasteBytesByKind: bytesByKind,
+            WasteCountsByElementType: countsByElementType,
+            WasteBytesByElementType: bytesByElementType);
+
+    private static CompactTable? WasteByElementTypeTable(AnalyzerDetailSection section) =>
+        section.CompactTables!.SingleOrDefault(t => t.Title == "Wasted memory by element type");
+
+    [Fact]
+    public void Build_ElementTypeTable_IncludesWastedBytesAndShare_OrderedDescending()
+    {
+        var result = BuildResult(
+            totalWasted: 10_000,
+            countsByKind: null,
+            bytesByKind: null,
+            countsByElementType: new() { ["System.String"] = 2, ["System.Int32"] = 4 },
+            bytesByElementType: new() { ["System.String"] = 8_000, ["System.Int32"] = 2_000 });
+
+        CompactTable table = WasteByElementTypeTable(new CollectionSectionBuilder().Build(result))!;
+
+        table.Headers.Select(h => h.Name).Should().Equal("Element Type", "Wasteful Count", "Wasted", "Share of Waste");
+        table.Rows.Select(r => r.Values[0]).Should().Equal("System.String", "System.Int32");
+        table.Rows[0].Values[1].Should().Be(2L);
+        table.Rows[0].Values[2].Should().Be(8_000L);
+        table.Rows[0].Values[3].Should().Be(80.0);
+    }
+
+    [Fact]
+    public void Build_NoElementTypeData_OmitsElementTypeTable()
+    {
+        var result = BuildResult(totalWasted: 0, countsByKind: null, bytesByKind: null);
+
+        WasteByElementTypeTable(new CollectionSectionBuilder().Build(result)).Should().BeNull();
+    }
 
     private static CompactTable WasteByKindTable(AnalyzerDetailSection section) =>
         section.CompactTables!.Single(t => t.Title == "Wasteful collections by kind");

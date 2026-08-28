@@ -24,7 +24,15 @@ internal sealed record CollectionDomainResult(
     IReadOnlyDictionary<CollectionKind, ulong>? WasteBytesByKind = null,
     IReadOnlyList<CollectionGenerationStats>? GenerationBreakdown = null,
     int ImmutableArrays = 0,
-    int ImmutableArrayBuilders = 0
+    int ImmutableArrayBuilders = 0,
+    /// <summary>Wasteful-collection count grouped by element type (e.g. "System.String"),
+    /// computed from the exact scan-time accumulators — not derived from the capped top-N list,
+    /// which would undercount every element type (see the P2-1 fix for the same bug on
+    /// <see cref="WasteCountsByKind"/>).</summary>
+    IReadOnlyDictionary<string, int>? WasteCountsByElementType = null,
+    /// <summary>Wasted bytes grouped by element type, same accumulation source as
+    /// <see cref="WasteCountsByElementType"/>.</summary>
+    IReadOnlyDictionary<string, ulong>? WasteBytesByElementType = null
 ) : AnalyzerDomainResult;
 internal sealed record WastefulCollectionSnapshot(
     string Type,

@@ -13,7 +13,9 @@ public sealed class CollectionFindingGeneratorTests
 {
     private static CollectionDomainResult BuildResult(
         Dictionary<CollectionKind, int>? countsByKind,
-        Dictionary<CollectionKind, ulong>? bytesByKind) =>
+        Dictionary<CollectionKind, ulong>? bytesByKind,
+        Dictionary<string, int>? countsByElementType = null,
+        Dictionary<string, ulong>? bytesByElementType = null) =>
         new(
             TotalCollections: 100,
             Dictionaries: 20,
@@ -27,7 +29,9 @@ public sealed class CollectionFindingGeneratorTests
             TotalWastedMemory: 10_000,
             WastefulCollectionCount: 6,
             WasteCountsByKind: countsByKind,
-            WasteBytesByKind: bytesByKind);
+            WasteBytesByKind: bytesByKind,
+            WasteCountsByElementType: countsByElementType,
+            WasteBytesByElementType: bytesByElementType);
 
     [Fact]
     public void Generate_Evidence_ListsKindsByWastedBytesDescending()
@@ -62,5 +66,27 @@ public sealed class CollectionFindingGeneratorTests
         InsightFinding finding = new CollectionFindingGenerator().Generate(BuildResult(null, null)).Single();
 
         finding.Evidence.Should().NotContain("(");
+    }
+
+    [Fact]
+    public void Generate_Evidence_NamesElementTypeDominatingWastedBytes()
+    {
+        var result = BuildResult(
+            countsByKind: null,
+            bytesByKind: null,
+            countsByElementType: new() { ["System.String"] = 2, ["System.Int32"] = 50 },
+            bytesByElementType: new() { ["System.String"] = 9_000, ["System.Int32"] = 1_000 });
+
+        InsightFinding finding = new CollectionFindingGenerator().Generate(result).Single();
+
+        finding.Evidence.Should().Contain("Dominant wasted element type: System.String");
+    }
+
+    [Fact]
+    public void Generate_NoElementTypeData_OmitsDominantElementTypeNote()
+    {
+        InsightFinding finding = new CollectionFindingGenerator().Generate(BuildResult(null, null)).Single();
+
+        finding.Evidence.Should().NotContain("Dominant wasted element type");
     }
 }

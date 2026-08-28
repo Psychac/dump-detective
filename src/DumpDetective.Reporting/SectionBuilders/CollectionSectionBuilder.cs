@@ -82,6 +82,37 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
                 wasteKindRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
+        if (d.WasteCountsByElementType is { Count: > 0 })
+        {
+            var wasteBytesByElementType = d.WasteBytesByElementType ?? new Dictionary<string, ulong>();
+            var elementTypes = new List<string>(d.WasteCountsByElementType.Keys);
+            elementTypes.Sort((a, b) =>
+            {
+                wasteBytesByElementType.TryGetValue(a, out ulong aBytes);
+                wasteBytesByElementType.TryGetValue(b, out ulong bBytes);
+                int byBytes = bBytes.CompareTo(aBytes);
+                return byBytes != 0 ? byBytes : string.CompareOrdinal(a, b);
+            });
+
+            int elementTypeLimit = Math.Min(elementTypes.Count, 15);
+            var elementTypeRows = new List<TableRow>(elementTypeLimit);
+            for (int i = 0; i < elementTypeLimit; i++)
+            {
+                string elementType = elementTypes[i];
+                int count = d.WasteCountsByElementType[elementType];
+                wasteBytesByElementType.TryGetValue(elementType, out ulong bytes);
+                double shareOfTotal = d.TotalWastedMemory > 0 ? (double)bytes / d.TotalWastedMemory * 100.0 : 0.0;
+                elementTypeRows.Add(new TableRow([
+                    Cell(FormatHelper.TruncateString(elementType, 60)),
+                    Cell($"{count:N0}", count),
+                    Cell(FormatHelper.FormatBytes(bytes), (long)Math.Min(bytes, (ulong)long.MaxValue)),
+                    Cell($"{shareOfTotal:F1}%", shareOfTotal)]));
+            }
+            compactTables.Add(STCompact("Wasted memory by element type",
+                new[] { CH("Element Type"), CH("Wasteful Count","number"), CH("Wasted","bytes"), CH("Share of Waste") },
+                elementTypeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
         var topWasteful = d.TopWastefulCollections ?? [];
         if (topWasteful.Count > 0)
         {

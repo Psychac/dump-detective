@@ -81,7 +81,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
 
         RetentionOptions options = context.AnalysisOptions.MemoryLeak;
         ExecutionPolicy policy = context.AnalysisOptions.ExecutionPolicy;
-        bool diag = context.Diagnostics.EnableMemoryDiagnostics;
+        bool diag = context.Diagnostics.EnableMemoryDiagnostics && context.Diagnostics.EnablePerformanceDiagnostics;
 
         if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: entry", Console.Out);
 

@@ -36,7 +36,7 @@ internal class StatisticsCache
         {
             if (TryHydrateTypeStatisticsFromIndex(heap, heapIndex.TypeAggregates, out var hydratedStats, out var hydratedSamples, out var hydratedNamesByMethodTable))
             {
-                Console.Error.WriteLine($"[PERF] StatisticsCache: hydrated from index, {heapIndex.TypeAggregates.Count} unique MTs, {__sw.Elapsed.TotalSeconds:F2}s");
+                //Console.Error.WriteLine($"[PERF] StatisticsCache: hydrated from index, {heapIndex.TypeAggregates.Count} unique MTs, {__sw.Elapsed.TotalSeconds:F2}s");
                 _typeStats = hydratedStats;
                 _sampleInstances = hydratedSamples;
                 _typeNamesByMethodTable = hydratedNamesByMethodTable;
@@ -44,7 +44,7 @@ internal class StatisticsCache
             }
         }
 
-        Console.Error.WriteLine($"[PERF] StatisticsCache: FALLING BACK to full heap walk (hydration failed or no index)");
+        //Console.Error.WriteLine($"[PERF] StatisticsCache: FALLING BACK to full heap walk (hydration failed or no index)");
         _typeStats = new Dictionary<string, CachedTypeStatistics>(capacity: 1024);
         _sampleInstances = new Dictionary<string, ulong>(capacity: 1024);
         _typeNamesByMethodTable = new Dictionary<ulong, string>(capacity: 1024);

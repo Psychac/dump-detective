@@ -6,7 +6,7 @@
     "Audience": "All"
   },
   "Diagnostics": {
-    "EnableMemoryDiagnostics": false,
+    "EnableMemoryDiagnostics": true,
     "EnablePerformanceDiagnostics": false,
     "ContinueOnAnalyzerFailure": true
   },

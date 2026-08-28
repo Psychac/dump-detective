@@ -13,9 +13,9 @@
 | **Total P0 Identified** | 77 |
 | **Total P1 Identified** | 155 |
 | **P0 Implemented** | 70 |
-| **P1 Implemented** | 122 |
-| **P2 Implemented** | 54 |
-| **Overall P0+P1 Rate** | 82.8% (192/232) |
+| **P1 Implemented** | 123 |
+| **P2 Implemented** | 59 |
+| **Overall P0+P1 Rate** | 83.2% (193/232) |
 
 ---
 
@@ -63,7 +63,7 @@ P0-4 was a regression hiding behind two individually-DONE roadmap items).
 | 21 | **DbConnectionAnalyzer** | 2/2 | 4/4 | 2/4 | 0/2 | ✅ P0+P1 complete (R1-R6); P2 50% (R7 done, R8-R10 pending) |
 | 22 | **TimerLeakAnalyzer** | 2/2 | 3/3 | 2/5 | 0/3 | ✅ P0+P1 COMPLETE (2/2, 3/3); P2 40% (2/5) |
 | 23 | **StaticRootLeakDetector** | 4/4 | 5/5 | 0/5 | 0/4 | ✅ P0+P1 COMPLETE (4/4, 5/5 — P1-5 shipped via tuple capture in BFS primitive) |
-| 25 | **GCRootAnalyzer** | 2/2 | 4/4 | 0/5 | 0/3 | ✅ P0+P1 COMPLETE (2/2, 4/4) — P0-1 was already done pre-dating this correction (tracker was stale, audit doc already showed it DONE); P1-1 (field/owner attribution) done via [../root-field-name-index-plan.md](../root-field-name-index-plan.md) |
+| 25 | **GCRootAnalyzer** | 2/2 | 4/4 | 5/5 | 4/4 | ✅ P0+P1+P2+P3 COMPLETE (2026-08-28) — P0-1 was already done pre-dating this correction (tracker was stale, audit doc already showed it DONE); P1-1 (field/owner attribution) done via [../root-field-name-index-plan.md](../root-field-name-index-plan.md). P2: per-type `FinalizerQueue` breakdown (uncapped, not top-10 per project convention), Gen0/1/2/LOH generation distribution per root kind via `GenerationTagResolver`, `Tags`/`Order` declared, `RootSetCache._roots` publish race fixed via `Volatile.Read`/`Interlocked.CompareExchange`, dropped-zero-estimate-root count surfaced. P3: P3-1 (reverse-BFS root chain) and P3-2 (dominator-tree cross-reference with leak suspects) turned out to be the same feature — investigation found `RootPathFinder`/`ReverseReferenceIndex` already existed and in use by 6 other analyzers, and that applying it *inside* `GCRootAnalyzer` itself would be a degenerate no-op (a GC root's target is always a direct reference, no chain to reverse-BFS); the real gap was `LeakCandidateAnalyzer`'s `RootKind` being an unverified heuristic guess — both items implemented there instead via `EnrichTopCandidatesWithRootChains` (see `LeakCandidateAnalyzer` row below). P3-3 (trend regression on `gcroot.strong.handle.count`) found already fully wired through the generic trend-comparer pipeline, no code needed. P3-4 (shared collapsible tree for `RootPathGroups`) implemented as a new `TreeWidgets` output collapsing shared forward-walk shapes, additive alongside the unchanged flat view. See `gcroot-analyzer-audit.md` |
 
 **Subtotal: 46/46 P0 done, 86/86 P1 done** (AsyncStateMachineAnalyzer, AsyncTaskAnalyzer, and AllocationPatternAnalyzer moved to the RE-AUDITED table above; their P0/P1 counts are tracked there instead)
 
@@ -73,9 +73,9 @@ P0-4 was a regression hiding behind two individually-DONE roadmap items).
 | 16 | **ThreadAnalyzer** | 2/3* | 2/4* | 4/8 | 0/4 | P0-1,P0-2 done; P0-3 BLOCKED (ClrMD API, reverse-index workaround available); P1-3,P1-4 done; P1-1,P1-2 BLOCKED (ClrMD API); P2-1,P2-2,P2-4,P2-5 done; P2-3,P2-6,P2-7,P2-8 pending |
 | 17 | **LockGraphAnalyzer** | 2/4 | 2/4 | 3/6 | 0/3 | P0-3,P0-4 done; P1-2,P1-3 done; P2-1,P2-3,P2-5 done; P0-1,P0-2,P1-1,P1-4,P2-2,P2-4,P2-6 pending |
 | 18 | **ReferenceChainAnalyzer** | 1/1 | 5/8 | 0/8 | 0/9 | ✅ P0 complete (100%); P1 62.5% (I-2,I-3,I-4,I-5,I-6 done); E-1-E-3 pending |
-| 19 | **LeakCandidateAnalyzer** | 1/2 | 1/4 | 0/6 | 0/4 | ✅ P0-2, P1-2 done; P0-1, P1-1/3/4 pending |
+| 19 | **LeakCandidateAnalyzer** | 1/2 | 2/4 | 0/6 | 0/4 | ✅ P0-2, P1-2 done; P1-3 done (2026-08-28) — root-chain enrichment (`EnrichTopCandidatesWithRootChains`) added as part of closing out `gcroot-analyzer-audit.md` P3-1/P3-2, exceeds the original "first hop, top-3" scope (full verified chain, top-20); P0-1, P1-1/4 pending |
 
-**Subtotal: 19/25 P0 done, 18/28 P1 done, 25/50 P2 done** (in-progress pools)
+**Subtotal: 19/25 P0 done, 19/28 P1 done, 25/50 P2 done** (in-progress pools)
 
 ---
 

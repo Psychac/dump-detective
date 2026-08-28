@@ -1,8 +1,10 @@
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Traversal;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 
 using Microsoft.Diagnostics.Runtime;
 
@@ -10,6 +12,11 @@ namespace DumpDetective.Analysis.Analyzers;
 
 internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
 {
+    // Bounds root-chain enrichment (P3-1/P3-2), not the returned candidate population — matches
+    // GCRootAnalyzer.StackOwnerAttributionLimit's precedent: purely cosmetic per-candidate lookup
+    // that's too costly to run for every candidate, so scoped to the highest-suspicion ones only.
+    private const int RootChainTopN = 20;
+
     public string Name => "Leak Candidate Analysis";
     public string Category => "Memory";
     public int Order => 100;
@@ -17,13 +24,14 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
     public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Analyze(context.Heap, context.CompletedRunResults, context.Cache, context.Progress, cancellationToken).Stamp(this));
+        return ValueTask.FromResult(Analyze(context.Heap, context.CompletedRunResults, context.Cache, context.AnalysisOptions.ReferenceChain, context.Progress, cancellationToken).Stamp(this));
     }
 
     private static AnalyzerDomainResult Analyze(
         ClrHeap heap,
         IReadOnlyList<AnalyzerRunResult>? completedRunResults,
         IHeapAnalysisCache cache,
+        ReferenceChainOptions referenceChainOptions,
         IProgress<AnalyzerProgressReport>? progress,
         CancellationToken cancellationToken)
     {
@@ -151,8 +159,127 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
             return StringComparer.Ordinal.Compare(a.TypeName, b.TypeName);
         });
 
+        EnrichTopCandidatesWithRootChains(candidates, heap, cache, completedRunResults, referenceChainOptions, cancellationToken);
+
         // Complete ranked population, no Top-N cap (§11.2 D5) — the render layer paginates.
         return new LeakCandidateDomainResult(candidates.Count, candidates, byClass, true);
+    }
+
+    // P3-1/P3-2 (docs/analysis/phase1/gcroot-analyzer-audit.md): genuine root chains for the
+    // top-scored candidates, cross-referencing GCRootAnalyzer's already-recorded direct root
+    // targets first (cheap, exact) and falling back to a bounded RootPathFinder BFS — the same
+    // reverse-index-backed search CollectionAnalyzer/DominatorAnalyzer/EventLeakAnalyzer/
+    // ReferenceChainAnalyzer/StaticRootLeakDetector/TimerLeakAnalyzer already use — for candidates
+    // that aren't themselves a direct root target but are reachable from one.
+    private static void EnrichTopCandidatesWithRootChains(
+        List<LeakCandidateRecord> candidates,
+        ClrHeap heap,
+        IHeapAnalysisCache cache,
+        IReadOnlyList<AnalyzerRunResult>? completedRunResults,
+        ReferenceChainOptions referenceChainOptions,
+        CancellationToken cancellationToken)
+    {
+        int topN = Math.Min(candidates.Count, RootChainTopN);
+        if (topN == 0)
+            return;
+
+        GCRootDomainResult? gcRoot = completedRunResults?.GetResult<GCRootDomainResult>();
+        Dictionary<ulong, RootFinding>? directRootsByTargetAddress = null;
+        if (gcRoot is not null && gcRoot.TopRootsBySeverity.Count > 0)
+        {
+            directRootsByTargetAddress = new Dictionary<ulong, RootFinding>(gcRoot.TopRootsBySeverity.Count);
+            foreach (RootFinding root in gcRoot.TopRootsBySeverity)
+                directRootsByTargetAddress[root.TargetAddress] = root;
+        }
+
+        RootPathFinder? finder = null;
+        IReadOnlyList<(string RootKind, ulong Address)>? roots = null;
+
+        for (int i = 0; i < topN; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            LeakCandidateRecord candidate = candidates[i];
+
+            ulong sampleAddress = default;
+            if (!TryGetSampleAddress(cache, candidate.TypeName, out sampleAddress))
+                continue;
+
+            if (directRootsByTargetAddress is not null && directRootsByTargetAddress.TryGetValue(sampleAddress, out RootFinding? directRoot) && directRoot is not null)
+            {
+                string fieldSuffix = directRoot.FieldDescription is not null ? $" {directRoot.FieldDescription}" : string.Empty;
+                candidates[i] = candidate with
+                {
+                    RootChain = $"{directRoot.RootKind}{fieldSuffix} -> {FormatNodeByAddress(heap, sampleAddress)}"
+                };
+                continue;
+            }
+
+            finder ??= BuildRootPathFinder(heap, cache, referenceChainOptions, out roots);
+            if (finder is null || roots is null || roots.Count == 0)
+                continue;
+
+            bool found = finder.TryFindAnyRootPath(
+                sampleAddress, roots, out string? rootKind, out List<ulong>? path, out _, out _, out _, cancellationToken);
+
+            if (found && rootKind is not null && path is not null)
+            {
+                candidates[i] = candidate with { RootChain = FormatChain(heap, rootKind, path) };
+            }
+        }
+    }
+
+    private static bool TryGetSampleAddress(IHeapAnalysisCache cache, string typeName, out ulong sampleAddress)
+    {
+        sampleAddress = cache.GetSampleInstanceAddress(typeName) ?? 0;
+        return sampleAddress != 0;
+    }
+
+    private static RootPathFinder? BuildRootPathFinder(
+        ClrHeap heap,
+        IHeapAnalysisCache cache,
+        ReferenceChainOptions options,
+        out IReadOnlyList<(string RootKind, ulong Address)> roots)
+    {
+        roots = cache.GetOrBuildValidRoots(heap);
+        if (roots.Count == 0)
+            return null;
+
+        var limits = new RootPathSearchLimits
+        {
+            MaxCandidateNodes = options.MaxCandidateNodes,
+            MaxCandidateDepth = options.MaxCandidateDepth,
+            MaxRootExpansionDepth = options.MaxRootExpansionDepth,
+            LargeFanoutThreshold = options.LargeFanoutThreshold,
+        };
+
+        var provider = new ReferenceGraph(heap);
+        var telemetry = new ReferenceChainAnalyzer.TelemetryCounters();
+
+        return new RootPathFinder(
+            heap,
+            provider,
+            limits,
+            telemetry.AsProxy(),
+            ReferenceChainAnalyzer.IsNoisyType,
+            type => ReferenceChainAnalyzer.IsKnownLeakType(type, options.KnownLeakTypePatterns),
+            cache.TryGetReverseIndexProvider(),
+            cache);
+    }
+
+    private static string FormatChain(ClrHeap heap, string rootKind, IReadOnlyList<ulong> addresses)
+    {
+        var parts = new List<string>(addresses.Count);
+        for (int i = 0; i < addresses.Count; i++)
+            parts.Add(FormatNodeByAddress(heap, addresses[i]));
+
+        return $"{rootKind}: {string.Join(" -> ", parts)}";
+    }
+
+    private static string FormatNodeByAddress(ClrHeap heap, ulong address)
+    {
+        ClrObject obj = heap.GetObject(address);
+        string typeName = obj.IsValid ? (obj.Type?.Name ?? "?") : "<invalid>";
+        return $"{typeName}@0x{address:X}";
     }
 
     private static LeakClass Classify(

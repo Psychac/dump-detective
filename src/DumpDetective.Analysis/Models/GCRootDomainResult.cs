@@ -9,7 +9,11 @@ public sealed record RootKindSummary(
     int Count,
     ulong EstimatedRetainedBytes,
     double PctOfManagedHeap,
-    bool IsExactRetainedBytes = false);
+    bool IsExactRetainedBytes = false,
+    double Gen0Fraction = 0.0,
+    double Gen1Fraction = 0.0,
+    double Gen2Fraction = 0.0,
+    double LohFraction = 0.0);
 
 public sealed record RootFinding(
     string RootKind,
@@ -38,4 +42,5 @@ internal sealed record GCRootDomainResult(
     IReadOnlyList<RootFinding> TopRootsBySeverity,
     IReadOnlyList<RootPathFinding> RootPaths,
     bool PathSearchCapped,
-    int PathSearchCappedCount) : AnalyzerDomainResult;
+    int PathSearchCappedCount,
+    int DroppedZeroEstimateRootCount = 0) : AnalyzerDomainResult;

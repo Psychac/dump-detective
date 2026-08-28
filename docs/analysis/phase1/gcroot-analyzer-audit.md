@@ -289,16 +289,104 @@ dotMemory provides:
 | **P1-2** | Add `PinnedHandle` finding in `GCRootFindingGenerator` with LOH fragmentation risk | High — pinned handle accumulation is a frequent production issue; completely absent today | Low | High | ✅ DONE (8b6b6b8) | Improvement |
 | **P1-3** | Propagate `CancellationToken` through `ReadRootCandidates` call and into `BoundedGraphWalk` | Medium — correctness gap that matters at 25 GB+ scale | Low | High | ✅ DONE (d127297) | Improvement |
 | **P1-4** | Merge double `heap.GetObject` per root into one call in `GCRootAnalysisProjection` | Medium — halves heap access count in the projection loop | Low | High | ✅ DONE (2ea3a98) | Improvement |
-| **P2-1** | Add per-type `FinalizerQueue` breakdown (top 10 types by count) | Medium — immediately identifies source of finalization pressure | Low | High | ⏳ Pending | Improvement |
-| **P2-2** | Add generation distribution per root kind (Gen0/1/2/LOH fraction) using `heap.GetGeneration` | Medium — distinguishes transient stack roots from long-lived Gen2 retention | Medium | High | ⏳ Pending | Improvement |
-| **P2-3** | Declare `Tags` (e.g., `["gc", "roots", "retention"]`) and `Order` on the analyzer | Low-medium — enables pipeline filtering and deterministic ordering | Low | High | ⏳ Pending | Improvement |
-| **P2-4** | Fix `RootSetCache` write-ordering: use `Volatile.Write`/`Interlocked.CompareExchange` for `_roots` assignment | Low-medium — race is unlikely in practice but is a correctness gap | Low | High | ⏳ Pending | Improvement |
-| **P2-5** | Add count of dropped zero-estimate roots to `GCRootDomainResult` and surface in the report | Low-medium — makes silent exclusions visible | Low | High | ⏳ Pending | Improvement |
-| **P3-1** | Implement reverse BFS from root target back to GC root using `ReverseReferenceIndex` for exact retention chains | Very high if implemented — matches WinDbg `!gcroot` capability | Very High | Medium | ⏳ Future | Evolution |
-| **P3-2** | Add dominator-tree analysis for top-N leak suspects cross-referencing `GCRootAnalyzer` and `LeakAnalyzer` | Very high if implemented — matches dotMemory capability | Very High | Medium | ⏳ Future | Evolution |
-| **P3-3** | Trend-based finding: fire warning when `gcroot.strong.handle.count` increases across dump series | Medium — leverages existing trend infrastructure | Low | Medium | ⏳ Future | Improvement |
-| **P3-4** | Adopt shared collapsible tree widget (once built for Thread Stack Cluster P3-2) to collapse `RootPathGroups` chains that share a common suffix near the GC root, instead of one independent chain card per path | Medium — reduces redundant chain cards at scale, no new data needed | Medium (depends on shared widget) | Medium | ⏳ Future | Evolution |
+| **P2-1** | Add per-type `FinalizerQueue` breakdown (top 10 types by count) | Medium — immediately identifies source of finalization pressure | Low | High | ✅ DONE | Improvement |
+| **P2-2** | Add generation distribution per root kind (Gen0/1/2/LOH fraction) using `heap.GetGeneration` | Medium — distinguishes transient stack roots from long-lived Gen2 retention | Medium | High | ✅ DONE | Improvement |
+| **P2-3** | Declare `Tags` (e.g., `["gc", "roots", "retention"]`) and `Order` on the analyzer | Low-medium — enables pipeline filtering and deterministic ordering | Low | High | ✅ DONE | Improvement |
+| **P2-4** | Fix `RootSetCache` write-ordering: use `Volatile.Write`/`Interlocked.CompareExchange` for `_roots` assignment | Low-medium — race is unlikely in practice but is a correctness gap | Low | High | ✅ DONE | Improvement |
+| **P2-5** | Add count of dropped zero-estimate roots to `GCRootDomainResult` and surface in the report | Low-medium — makes silent exclusions visible | Low | High | ✅ DONE | Improvement |
+| **P3-1** | Implement reverse BFS from root target back to GC root using `ReverseReferenceIndex` for exact retention chains | Very high if implemented — matches WinDbg `!gcroot` capability | Medium (capability already exists — see resolution note) | Medium | ✅ DONE | Evolution |
+| **P3-2** | Add dominator-tree analysis for top-N leak suspects cross-referencing `GCRootAnalyzer` and `LeakAnalyzer` | Very high if implemented — matches dotMemory capability | Medium | Medium | ✅ DONE | Evolution |
+| **P3-3** | Trend-based finding: fire warning when `gcroot.strong.handle.count` increases across dump series | Medium — leverages existing trend infrastructure | Low | Medium | ✅ DONE (no code change — already wired) | Improvement |
+| **P3-4** | Adopt shared collapsible tree widget (once built for Thread Stack Cluster P3-2) to collapse `RootPathGroups` chains that share a common suffix near the GC root, instead of one independent chain card per path | Medium — reduces redundant chain cards at scale, no new data needed | Medium (depends on shared widget) | Medium | ✅ DONE | Evolution |
 
+> **P3-3 resolution note:** already fully implemented, no code change needed. `GCRootTrendComparer`
+> already emits `gcroot.strong.handle.count` from both `ExtractMetrics` and `Compare`, tagged
+> `MetricTrendDirection.HigherIsWorse`. `GCRootTrendComparer` is registered generically via the
+> `gc-root` `AnalyzerFeatureModule` entry in `DefaultAnalyzerFeatureModuleCatalog`, and
+> `TrendAnalyzer` runs every registered `IAnalyzerTrendComparer` uniformly — any `HigherIsWorse`
+> metric that increases across a dump series is picked up as a regression by the same generic
+> pipeline (`MetricDelta.IsRegression`, consumed by `TrendStoryBuilder`/`TrendReportComposer`/
+> `TrendConsolePresenter`) used for every other analyzer's metrics. No `GCRootAnalyzer`-specific
+> code was ever missing; the audit's "leverages existing trend infrastructure" premise was correct
+> and the infrastructure already covers this metric.
+>
+> **P3-4 resolution note:** `GCRootIntelligenceSectionBuilder` now emits a `TreeWidgets` slot
+> alongside the unchanged `RootPathGroups` (kept for consumers that only want the flat per-path
+> view — same additive pattern `ThreadStackClusterSectionBuilder` uses for `StackClusters` +
+> `TreeWidgets`). One shared-prefix trie per `RootPathGroup`, built from that group's
+> `RootPathFinding.PathTypeNames` sequences: every path in a group already shares hop[0] by
+> construction (grouped by `TargetTypeName`), so that hop becomes the group's tree root label and
+> only `hops[1..]` are merged — collapsing near-duplicate forward-walk shapes (e.g. many
+> `Dictionary<K,V>` root targets that all bottom out through the same `Entry[] -> string -> char[]`
+> shape) into one shared branch instead of one independent card per path. Rendered by the same
+> `TreeNode`/`TreeWidget` shared collapsible tree widget model `DominatorAnalyzer`'s P3-3 dominance
+> chains and `ThreadStackClusterAnalyzer`'s cluster tree already use; the trie-merge algorithm
+> itself mirrors `ThreadStackClusterAnalyzer.BuildClusterTree`'s shape (bounded via
+> `MaxRootPathTreeNodes`/`MaxRootPathTreeChildren` safety caps, not a display cap — matches project
+> convention of exact/full data with only pathological-case bounds).
+>
+> **P3-1/P3-2 resolution note:** both items turned out to be the same feature from two angles, and
+> both are now implemented together in `LeakCandidateAnalyzer` rather than in `GCRootAnalyzer`
+> itself. Investigation first: `RootPathFinder` (genuine reverse-BFS root-to-target chain
+> construction, backed by `ReverseReferenceIndex`/`IBackwardReferenceProvider` when available) was
+> already implemented and in production use by six other analyzers (`CollectionAnalyzer`,
+> `DominatorAnalyzer`, `EventLeakAnalyzer`, `ReferenceChainAnalyzer`, `StaticRootLeakDetector`,
+> `TimerLeakAnalyzer`) — P3-1's infrastructure was never missing. What *was* missing: applying it
+> inside `GCRootAnalyzer` itself is a degenerate no-op, because every `RootFinding.TargetAddress`
+> is by construction already the *direct* object a GC root references (`ClrRoot.Object` has no
+> indirection — a root either references an object or it doesn't) — there is no multi-hop chain to
+> reverse-BFS for a `GCRootAnalyzer` finding, which is also why the report caveat at the top of
+> this section still points users at WinDbg/dotMemory for genuinely indirect chains.
+>
+> The real gap was in `LeakCandidateAnalyzer` (the doc's "`LeakAnalyzer`"): its `RootKind` field
+> was a pure heuristic guess (type-name pattern matching), never verified against actual root data,
+> and it never cross-referenced `GCRootAnalyzer`'s output at all — satisfying P3-2's literal ask.
+> `LeakCandidateAnalyzer` now runs `EnrichTopCandidatesWithRootChains` for its top
+> `RootChainTopN` (20) highest-suspicion-score candidates (bounded — this is enrichment, not the
+> ranking itself): it first checks `GCRootDomainResult.TopRootsBySeverity` for a direct hit
+> (candidate's sample address already recorded as a GC root target — O(1), no search), and falls
+> back to a bounded `RootPathFinder` search (same limits/telemetry/noise-filtering as
+> `ReferenceChainAnalyzer`, reusing `context.AnalysisOptions.ReferenceChain`) for candidates that
+> are reachable from a root only indirectly. The result — `LeakCandidateRecord.RootChain`, a
+> verified `"RootKind -> Type@0xAddr -> ... -> Type@0xAddr"` string, `null` when unattempted or
+> unreachable within search bounds — is surfaced as a new "Root Chain" column in
+> `LeakAnalysisSectionBuilder`'s candidate table. This is possible because `LeakCandidateAnalyzer`
+> already implements `IDeferredAnalyzer`, guaranteeing it runs after `GCRootAnalyzer` with access
+> to its completed result via `completedRunResults.GetResult<GCRootDomainResult>()`.
+>
+> **P2-1 resolution note:** implemented in `GCRootIntelligenceSectionBuilder`, right next to the
+> existing flat "Finalizer roots" table — groups the same `FinalizerQueue`-kind roots (already the
+> complete, uncapped population, per §9.16) by `TargetTypeName`, aggregates count and total
+> estimated retained bytes, sorted by count descending. Deliberately **not** capped to the audit's
+> literal "top 10" — matches project convention (`LeakCandidateDomainResult.TopCandidates`: complete
+> ranked population, render layer paginates, not the data) and was confirmed with the user before
+> implementing. No analyzer/domain-model change needed — pure report-layer aggregation of data
+> already on `GCRootDomainResult.TopRootsBySeverity`.
+>
+> **P2-2 resolution note:** implemented via `GenerationTagResolver.Resolve` (existing
+> `heap.GetSegmentByAddress`/`seg.GetGeneration` resolver, already used by dominator-tree Stage B
+> persistence), applied per root target in `GCRootAnalysisProjection.Build`. `RootKindSummary` now
+> carries `Gen0Fraction`/`Gen1Fraction`/`Gen2Fraction`/`LohFraction` (share of that kind's roots
+> resolving to each generation; Poh/Frozen/Unknown targets count toward `Count` but not toward any
+> of the four fractions), rendered as new columns in the "GC root kinds" table
+> (`GCRootIntelligenceSectionBuilder`).
+>
+> **P2-3 resolution note:** `GCRootAnalyzer` now declares `Tags => ["gc", "roots", "retention"]`
+> and `Order => 120`, placing it right after `DominatorAnalyzer` (`Order => 110`) since it
+> optionally consumes the dominator tree via `IRequiresDominatorTreeIndex`.
+>
+> **P2-4 resolution note:** `RootSetCache.GetOrBuildRoots` now reads `_roots` via `Volatile.Read`
+> and publishes it via `Interlocked.CompareExchange`, on both the disk-index and live-heap-walk
+> paths. A caller that loses the publish race gets the winner's list back instead of its own
+> (otherwise-discarded) build, so concurrent callers can never observe a torn or stale `_roots`
+> reference and never disagree on which root set is canonical for the run.
+>
+> **P2-5 resolution note:** `GCRootAnalysisProjection.Build`'s existing skip condition (null
+> target, unresolvable object metadata, or zero-size object — the only path that produced no
+> retained-byte estimate) now counts what it drops. `GCRootDomainResult.DroppedZeroEstimateRootCount`
+> carries that count through to `GCRootIntelligenceSectionBuilder`, which surfaces it as a key
+> metric and, when non-zero, a caveat line explaining why those roots are absent from every table.
+>
 > **Reverse index available (2026-08-12):** the `ReverseReferenceIndex` P3-1 depends on is implemented — `ReverseEdgeIndexReader.TryGetParents`, consumed via `RootPathFinder`. P3-1 is no longer blocked on infrastructure; it can be re-scoped out of P3 since the query primitive already exists and is used by CollectionAnalyzer/DominatorAnalyzer/EventLeakAnalyzer/ReferenceChainAnalyzer/StaticRootLeakDetector/TimerLeakAnalyzer today. See `docs/analysis/phase1/phase1-completion-tracker.md` § Reverse Edge Index — Consumer Opportunities.
 
 > **P0-1 resolution note:** shipped as `GCRootAnalyzer` Step 3 (path tracing) now also

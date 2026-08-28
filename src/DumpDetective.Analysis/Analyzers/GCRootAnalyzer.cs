@@ -35,6 +35,8 @@ namespace DumpDetective.Analysis.Analyzers
 
         public string Name => "GC Root Analysis";
         public string Category => "Memory";
+        public IReadOnlyCollection<string> Tags => ["gc", "roots", "retention"];
+        public int Order => 120;
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
@@ -171,7 +173,8 @@ namespace DumpDetective.Analysis.Analyzers
                 TopRootsBySeverity: topFindings,
                 RootPaths: pathFindings,
                 PathSearchCapped: pathCappedCount > 0,
-                PathSearchCappedCount: pathCappedCount);
+                PathSearchCappedCount: pathCappedCount,
+                DroppedZeroEstimateRootCount: projection.DroppedZeroEstimateRootCount);
         }
 
         private static GCRootDomainResult EmptyResult() =>

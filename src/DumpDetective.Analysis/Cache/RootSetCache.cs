@@ -53,8 +53,9 @@ internal class RootSetCache
         if (heap is null)
             throw new ArgumentNullException(nameof(heap));
 
-        if (_roots is not null)
-            return _roots;
+        IReadOnlyList<RootRecord>? existingRoots = Volatile.Read(ref _roots);
+        if (existingRoots is not null)
+            return existingRoots;
 
         var builtIndex = _getHeapIndex();
         if (builtIndex is not null)
@@ -68,10 +69,12 @@ internal class RootSetCache
                     foreach ((ulong targetAddr, ulong rootAddr, byte kind) in candidates)
                         fromIndex.Add(new RootRecord(targetAddr, rootAddr, kind));
 
-                    _roots = fromIndex;
+                    // Publish via CompareExchange so a concurrent caller that lost the race gets
+                    // back the winner's list rather than its own, otherwise-discarded, build.
+                    IReadOnlyList<RootRecord>? winner = Interlocked.CompareExchange(ref _roots, fromIndex, null) ?? fromIndex;
                     _lastBuildTime = DateTime.UtcNow;
                     _lastBuildError = null;
-                    return _roots;
+                    return winner;
                 }
             }
             catch
@@ -80,9 +83,10 @@ internal class RootSetCache
             }
         }
 
-        _roots = BuildFromLiveHeap(heap);
+        List<RootRecord> fromLiveHeap = BuildFromLiveHeap(heap);
+        IReadOnlyList<RootRecord> liveWinner = Interlocked.CompareExchange(ref _roots, fromLiveHeap, null) ?? fromLiveHeap;
         _lastBuildTime ??= DateTime.UtcNow;
-        return _roots;
+        return liveWinner;
     }
 
     public HashSet<ulong> GetStaticRootedAddresses(ClrHeap heap)

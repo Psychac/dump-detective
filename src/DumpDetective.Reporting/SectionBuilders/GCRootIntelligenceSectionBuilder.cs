@@ -43,15 +43,22 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
         }
         blocks.Add(T("Root-owned subgraph types show the object types reachable from each root. For exact root-to-target retention chains, use WinDbg !gcroot or dotMemory."));
 
+        if (roots.DroppedZeroEstimateRootCount > 0)
+        {
+            blocks.Add(T($"{roots.DroppedZeroEstimateRootCount:N0} root(s) were dropped from the analysis " +
+                "(null target, unresolvable object metadata, or zero-size object) and contribute no retained-byte estimate."));
+        }
+
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
             ["total_roots"] = new NumericMetricValue(roots.TotalRoots, MetricUnit.Count),
             ["path_search_capped"] = new TextMetricValue(roots.PathSearchCapped ? $"Yes ({roots.PathSearchCappedCount:N0} capped)" : "No"),
+            ["dropped_zero_estimate_roots"] = new NumericMetricValue(roots.DroppedZeroEstimateRootCount, MetricUnit.Count),
         };
 
         compactTables.Add(STCompact(
             "GC root kinds",
-            new[] { CH("Root Kind"), CH("Count","number"), CH("Estimated Retained","bytes"), CH("% of Heap", "number", "percent"), CH("Exact?") },
+            new[] { CH("Root Kind"), CH("Count","number"), CH("Estimated Retained","bytes"), CH("% of Heap", "number", "percent"), CH("Exact?"), CH("Gen0 %", "number", "percent"), CH("Gen1 %", "number", "percent"), CH("Gen2 %", "number", "percent"), CH("LOH %", "number", "percent") },
             BuildKindRows(roots.ByKind).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
         compactTables.Add(STCompact(
@@ -66,6 +73,23 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
                 "Finalizer roots",
                 new[] { CH("Target Type"), CH("Field"), CH("Est. Retained","bytes"), CH("Severity","number"), CH("Root Addr") },
                 finalizerRoots.Select(root => R(new object?[] { root.TargetTypeName, root.FieldDescription ?? "—", root.EstimatedRetainedBytes, root.SeverityScore, $"0x{root.RootAddress:X}" })).ToArray()));
+
+            // P2-1 (docs/analysis/phase1/gcroot-analyzer-audit.md): per-type breakdown of the same
+            // finalizer roots above — complete ranked population, no top-N cap (matches
+            // LeakCandidateDomainResult.TopCandidates precedent: the render layer paginates, not
+            // the data). Immediately surfaces which type(s) dominate finalization pressure instead
+            // of requiring the reader to eyeball the flat per-root table above.
+            var finalizerByType = finalizerRoots
+                .GroupBy(root => root.TargetTypeName, StringComparer.Ordinal)
+                .Select(g => (TypeName: g.Key, Count: g.Count(), TotalRetainedBytes: g.Aggregate(0UL, (sum, root) => sum + root.EstimatedRetainedBytes)))
+                .OrderByDescending(t => t.Count)
+                .ThenByDescending(t => t.TotalRetainedBytes)
+                .ToArray();
+
+            compactTables.Add(STCompact(
+                "Finalizer queue by type",
+                new[] { CH("Target Type"), CH("Count", "number"), CH("Total Est. Retained", "bytes") },
+                finalizerByType.Select(t => R(new object?[] { t.TypeName, t.Count, t.TotalRetainedBytes })).ToArray()));
         }
 
         // ── Root paths: typed RootPathGroups slot ─────────────────────────
@@ -112,11 +136,126 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
                 blocks.Add(T($"Root path search was capped ({roots.PathSearchCappedCount:N0} path(s) truncated) — some types may have incomplete chains."));
         }
 
+        // P3-4 (docs/analysis/phase1/gcroot-analyzer-audit.md): typed TreeWidgets slot — collapses
+        // RootPathGroups chains that share a common structure near the target/root end into one
+        // shared-prefix tree per group, instead of one independent chain card per path (rendered by
+        // the same shared collapsible tree widget ThreadStackClusterAnalyzer's cluster tree uses —
+        // see docs/refactor/collapsible-tree-widget-design.md). RootPathGroups above is unchanged
+        // and still emitted for consumers that only want the flat per-path view.
+        List<TreeWidget>? treeWidgets = roots.RootPaths.Count > 0 ? BuildRootPathTreeWidgets(roots.RootPaths) : null;
+
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
             CompactTables: compactTables.Count > 0 ? compactTables : null,
-            RootPathGroups: rootPathGroups.Count > 0 ? rootPathGroups : null);
+            RootPathGroups: rootPathGroups.Count > 0 ? rootPathGroups : null,
+            TreeWidgets: treeWidgets);
+    }
+
+    // ── P3-4: shared-prefix tree over each RootPathGroup's forward-walk hop sequences ──────────
+    // Mirrors ThreadStackClusterAnalyzer.BuildClusterTree's trie-merge shape (see that method's
+    // docs/refactor/collapsible-tree-widget-design.md reference), scoped to RootPathFinding.PathTypeNames
+    // instead of stack-frame signatures. Every path in a group already shares hop[0] by construction
+    // (grouped by TargetTypeName), so that hop becomes the group's tree root label and only hops[1..]
+    // are merged.
+    private const int MaxRootPathTreeNodes = 400;
+    private const int MaxRootPathTreeChildren = 8;
+
+    private static List<TreeWidget> BuildRootPathTreeWidgets(IReadOnlyList<RootPathFinding> rootPaths)
+    {
+        var byTargetType = rootPaths
+            .GroupBy(p => p.TargetTypeName, StringComparer.Ordinal)
+            .OrderByDescending(g => g.Count())
+            .ThenBy(g => g.Key, StringComparer.Ordinal);
+
+        int nodeBudget = MaxRootPathTreeNodes;
+        var groupRoots = new List<TreeNode>();
+        bool anyTruncated = false;
+
+        foreach (var group in byTargetType)
+        {
+            if (nodeBudget <= 0) { anyTruncated = true; break; }
+            nodeBudget--;
+
+            var trieRoot = new RootPathTrieNode();
+            int pathCount = 0;
+            foreach (RootPathFinding path in group)
+            {
+                pathCount++;
+                RootPathTrieNode node = trieRoot;
+                for (int i = 1; i < path.PathTypeNames.Count; i++)
+                {
+                    node = GetOrAddChild(node, path.PathTypeNames[i]);
+                    node.Count++;
+                }
+            }
+
+            List<KeyValuePair<string, RootPathTrieNode>> orderedChildren = OrderChildrenByCountDescending(trieRoot.Children);
+            var children = new List<TreeNode>(Math.Min(orderedChildren.Count, MaxRootPathTreeChildren));
+            int childTruncated = 0;
+            for (int i = 0; i < orderedChildren.Count; i++)
+            {
+                if (children.Count < MaxRootPathTreeChildren && nodeBudget > 0)
+                    children.Add(ConvertRootPathTrieNode(orderedChildren[i].Key, orderedChildren[i].Value, ref nodeBudget));
+                else
+                    childTruncated++;
+            }
+            if (childTruncated > 0)
+                anyTruncated = true;
+
+            groupRoots.Add(new TreeNode(TrimTypeName(group.Key), pathCount, "paths",
+                children.Count > 0 ? children : null, childTruncated));
+        }
+
+        return
+        [
+            new TreeWidget("Root-owned subgraph shapes (shared structure collapsed)", groupRoots, anyTruncated)
+        ];
+    }
+
+    private static RootPathTrieNode GetOrAddChild(RootPathTrieNode node, string typeName)
+    {
+        if (!node.Children.TryGetValue(typeName, out RootPathTrieNode? child))
+        {
+            child = new RootPathTrieNode();
+            node.Children[typeName] = child;
+        }
+        return child;
+    }
+
+    private static List<KeyValuePair<string, RootPathTrieNode>> OrderChildrenByCountDescending(Dictionary<string, RootPathTrieNode> children)
+    {
+        var ordered = new List<KeyValuePair<string, RootPathTrieNode>>(children);
+        ordered.Sort(static (a, b) =>
+        {
+            int byCount = b.Value.Count.CompareTo(a.Value.Count);
+            return byCount != 0 ? byCount : string.CompareOrdinal(a.Key, b.Key);
+        });
+        return ordered;
+    }
+
+    private static TreeNode ConvertRootPathTrieNode(string typeName, RootPathTrieNode node, ref int nodeBudget)
+    {
+        nodeBudget--;
+
+        List<KeyValuePair<string, RootPathTrieNode>> orderedChildren = OrderChildrenByCountDescending(node.Children);
+        var children = new List<TreeNode>(Math.Min(orderedChildren.Count, MaxRootPathTreeChildren));
+        int truncatedChildCount = 0;
+        for (int i = 0; i < orderedChildren.Count; i++)
+        {
+            if (children.Count < MaxRootPathTreeChildren && nodeBudget > 0)
+                children.Add(ConvertRootPathTrieNode(orderedChildren[i].Key, orderedChildren[i].Value, ref nodeBudget));
+            else
+                truncatedChildCount++;
+        }
+
+        return new TreeNode(typeName, node.Count, "paths", children.Count > 0 ? children : null, truncatedChildCount);
+    }
+
+    private sealed class RootPathTrieNode
+    {
+        public int Count;
+        public readonly Dictionary<string, RootPathTrieNode> Children = new(StringComparer.Ordinal);
     }
 
     private static List<TableRow> BuildKindRows(IReadOnlyList<RootKindSummary> kinds)
@@ -130,7 +269,11 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
                 Cell(kind.Count.ToString("N0"), kind.Count),
                 Cell(FormatBytes(kind.EstimatedRetainedBytes), (long)Math.Min(kind.EstimatedRetainedBytes, long.MaxValue)),
                 Cell(kind.PctOfManagedHeap.ToString("F1") + "%"),
-                Cell(kind.IsExactRetainedBytes ? "Yes" : "No")));
+                Cell(kind.IsExactRetainedBytes ? "Yes" : "No"),
+                Cell((kind.Gen0Fraction * 100.0).ToString("F1") + "%"),
+                Cell((kind.Gen1Fraction * 100.0).ToString("F1") + "%"),
+                Cell((kind.Gen2Fraction * 100.0).ToString("F1") + "%"),
+                Cell((kind.LohFraction * 100.0).ToString("F1") + "%")));
         }
 
         return rows;

@@ -4,12 +4,14 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Traversal.Dominator;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Analysis.Utilities;
 
 internal sealed record GCRootAnalysisProjectionResult(
     IReadOnlyList<RootKindSummary> ByKind,
-    List<RootFinding> FindingsBySeverityDescending);
+    List<RootFinding> FindingsBySeverityDescending,
+    int DroppedZeroEstimateRootCount);
 
 internal static class GCRootAnalysisProjection
 {
@@ -32,20 +34,40 @@ internal static class GCRootAnalysisProjection
 
         var kindCounts = new Dictionary<string, int>(8);
         var kindBytes = new Dictionary<string, ulong>(8);
+        // Index: 0 = Gen0, 1 = Gen1, 2 = Gen2, 3 = Loh. Poh/Frozen/Unknown targets are counted
+        // toward kindCounts but not toward any generation bucket (audit only asked for Gen0-2/LOH).
+        var kindGenerationCounts = new Dictionary<string, int[]>(8);
         Dictionary<string, List<ulong>>? targetsByKind = treeProvider is not null ? new Dictionary<string, List<ulong>>(8) : null;
         var findings = new List<RootFinding>(roots.Count);
         Dictionary<ulong, (string TypeName, string FieldName, int AppDomainId)>? staticFieldsByRootAddress = null;
+        int droppedZeroEstimateRootCount = 0;
 
         for (int i = 0; i < roots.Count; i++)
         {
             (ulong targetAddr, ulong rootAddr, byte rawKind) = roots[i];
 
+            // Dropped silently before P2-5: a null target, unresolvable object metadata, or a
+            // zero-size object all mean this root contributes no retained-byte estimate at all —
+            // surfaced as a single count on GCRootDomainResult rather than left invisible.
             if (targetAddr == 0 || !cache.TryGetObjectMetadata(heap, targetAddr, out ulong methodTable, out ulong size) || size == 0)
+            {
+                droppedZeroEstimateRootCount++;
                 continue;
+            }
 
             string kind = RootIndexReader.KindToString(rawKind);
             kindCounts[kind] = (kindCounts.TryGetValue(kind, out int count) ? count : 0) + 1;
             kindBytes[kind] = (kindBytes.TryGetValue(kind, out ulong bytes) ? bytes : 0UL) + size;
+
+            if (!kindGenerationCounts.TryGetValue(kind, out int[]? genCounts))
+                kindGenerationCounts[kind] = genCounts = new int[4];
+            switch (GenerationTagResolver.Resolve(heap, targetAddr))
+            {
+                case GenerationTag.Gen0: genCounts[0]++; break;
+                case GenerationTag.Gen1: genCounts[1]++; break;
+                case GenerationTag.Gen2: genCounts[2]++; break;
+                case GenerationTag.Loh: genCounts[3]++; break;
+            }
 
             if (targetsByKind is not null)
             {
@@ -110,13 +132,24 @@ internal static class GCRootAnalysisProjection
             }
 
             double pct = totalHeapBytes > 0 ? (double)estBytes / totalHeapBytes * 100.0 : 0.0;
-            byKind.Add(new RootKindSummary(kind, kv.Value, estBytes, pct, isExact));
+
+            double gen0Fraction = 0.0, gen1Fraction = 0.0, gen2Fraction = 0.0, lohFraction = 0.0;
+            if (kindGenerationCounts.TryGetValue(kind, out int[]? genCounts) && kv.Value > 0)
+            {
+                gen0Fraction = (double)genCounts[0] / kv.Value;
+                gen1Fraction = (double)genCounts[1] / kv.Value;
+                gen2Fraction = (double)genCounts[2] / kv.Value;
+                lohFraction = (double)genCounts[3] / kv.Value;
+            }
+
+            byKind.Add(new RootKindSummary(kind, kv.Value, estBytes, pct, isExact,
+                gen0Fraction, gen1Fraction, gen2Fraction, lohFraction));
         }
         byKind.Sort(static (a, b) => b.EstimatedRetainedBytes.CompareTo(a.EstimatedRetainedBytes));
 
         findings.Sort(static (a, b) => b.SeverityScore.CompareTo(a.SeverityScore));
 
-        return new GCRootAnalysisProjectionResult(byKind, findings);
+        return new GCRootAnalysisProjectionResult(byKind, findings, droppedZeroEstimateRootCount);
     }
 
     private static string ResolveTypeName(ClrHeap heap, ulong methodTable, ulong targetAddr)

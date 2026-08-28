@@ -38,6 +38,91 @@ public sealed class CollectionSectionBuilderTests
     private static CompactTable WastefulCollectionsTable(AnalyzerDetailSection section) =>
         section.CompactTables!.Single(t => t.Title == "Wasteful collections");
 
+    private static CompactTable? QueueSubTable(AnalyzerDetailSection section) =>
+        section.CompactTables!.SingleOrDefault(t => t.Title == "Wasteful queues — buffer layout");
+
+    [Fact]
+    public void Build_WastefulCollectionsTable_DoesNotIncludeQueueOnlyColumns()
+    {
+        // Head/Tail/free-segment layout only means anything for Queue<T>'s circular buffer —
+        // every other kind always rendered "—" here, so these columns moved to their own table.
+        var snapshot = new WastefulCollectionSnapshot(
+            Type: "System.Collections.Generic.Dictionary`2",
+            Kind: CollectionKind.Dictionary,
+            Count: 800,
+            Capacity: 1000,
+            FillRate: 80.0,
+            WastedMemory: 8_000,
+            Address: 0x1000);
+
+        var result = BuildResult(totalWasted: 8_000, countsByKind: null, bytesByKind: null,
+            topWastefulCollections: [snapshot]);
+
+        CompactTable table = WastefulCollectionsTable(new CollectionSectionBuilder().Build(result));
+
+        table.Headers.Select(h => h.Name).Should().NotContain(["Head", "Tail", "Largest Free Gap", "Free Segments"]);
+    }
+
+    [Fact]
+    public void Build_QueueWastefulCollections_RendersBufferLayoutSubTable()
+    {
+        var queueSnapshot = new WastefulCollectionSnapshot(
+            Type: "System.Collections.Generic.Queue`1",
+            Kind: CollectionKind.Queue,
+            Count: 100,
+            Capacity: 1000,
+            FillRate: 10.0,
+            WastedMemory: 9_000,
+            Address: 0x2000,
+            Head: 50,
+            Tail: 150,
+            LargestContiguousFreeSegmentBytes: 800,
+            FreeSegmentCount: 2);
+        var dictionarySnapshot = new WastefulCollectionSnapshot(
+            Type: "System.Collections.Generic.Dictionary`2",
+            Kind: CollectionKind.Dictionary,
+            Count: 800,
+            Capacity: 1000,
+            FillRate: 80.0,
+            WastedMemory: 1_000,
+            Address: 0x1000);
+
+        var result = BuildResult(totalWasted: 10_000, countsByKind: null, bytesByKind: null,
+            topWastefulCollections: [queueSnapshot, dictionarySnapshot]);
+
+        CompactTable? queueTable = QueueSubTable(new CollectionSectionBuilder().Build(result));
+
+        queueTable.Should().NotBeNull();
+        queueTable!.Headers.Select(h => h.Name).Should().Equal("Type", "Count", "Capacity", "Head", "Tail", "Largest Free Gap", "Free Segments");
+        queueTable.Rows.Should().ContainSingle();
+        object?[] row = queueTable.Rows[0].Values;
+        row[0].Should().Be("System.Collections.Generic.Queue`1");
+        row[1].Should().Be(100L);
+        row[2].Should().Be(1000L);
+        row[3].Should().Be(50L);
+        row[4].Should().Be(150L);
+        row[5].Should().Be(800L);
+        row[6].Should().Be(2L);
+    }
+
+    [Fact]
+    public void Build_NoQueueWastefulCollections_OmitsBufferLayoutSubTable()
+    {
+        var snapshot = new WastefulCollectionSnapshot(
+            Type: "System.Collections.Generic.List`1",
+            Kind: CollectionKind.List,
+            Count: 800,
+            Capacity: 1000,
+            FillRate: 80.0,
+            WastedMemory: 8_000,
+            Address: 0x1000);
+
+        var result = BuildResult(totalWasted: 8_000, countsByKind: null, bytesByKind: null,
+            topWastefulCollections: [snapshot]);
+
+        QueueSubTable(new CollectionSectionBuilder().Build(result)).Should().BeNull();
+    }
+
     [Fact]
     public void Build_WastefulCollectionsTable_IncludesRecommendationColumn()
     {

@@ -97,10 +97,6 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
                     Cell($"{c.Capacity:N0}", c.Capacity),
                     Cell($"{c.FillRate:F1}%",   c.FillRate),
                     Cell(FormatHelper.FormatBytes(c.WastedMemory), (long)c.WastedMemory),
-                    Cell(c.Head.HasValue ? c.Head.Value.ToString("N0") : "—", c.Head.HasValue ? c.Head.Value : null),
-                    Cell(c.Tail.HasValue ? c.Tail.Value.ToString("N0") : "—", c.Tail.HasValue ? c.Tail.Value : null),
-                    Cell(c.LargestContiguousFreeSegmentBytes.HasValue ? FormatHelper.FormatBytes(c.LargestContiguousFreeSegmentBytes.Value) : "—", c.LargestContiguousFreeSegmentBytes.HasValue ? (long)Math.Min(c.LargestContiguousFreeSegmentBytes.Value, (ulong)long.MaxValue) : null),
-                    Cell(c.FreeSegmentCount.HasValue ? c.FreeSegmentCount.Value.ToString("N0") : "—", c.FreeSegmentCount.HasValue ? c.FreeSegmentCount.Value : null),
                     Cell(c.ElementType),
                     Cell(c.ElementSize > 0 ? FormatHelper.FormatBytes(c.ElementSize) : "—", c.ElementSize > 0 ? (long)Math.Min(c.ElementSize, (ulong)long.MaxValue) : null),
                     Cell(c.SizeEstimateConfidence),
@@ -109,11 +105,36 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
                     Cell(c.Recommendation)]));
             }
             compactTables.Add(STCompact("Wasteful collections",
-                new[] { CH("Type"), CH("Kind"), CH("Count","number"), CH("Capacity","number"), CH("Fill Rate"), CH("Wasted","bytes"), CH("Head","number"), CH("Tail","number"), CH("Largest Free Gap"), CH("Free Segments","number"), CH("Element Type"), CH("Element Size","bytes"), CH("Confidence"), CH("Method"), CH("Root"), CH("Recommendation") },
+                new[] { CH("Type"), CH("Kind"), CH("Count","number"), CH("Capacity","number"), CH("Fill Rate"), CH("Wasted","bytes"), CH("Element Type"), CH("Element Size","bytes"), CH("Confidence"), CH("Method"), CH("Root"), CH("Recommendation") },
                 wcRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             if (topWasteful.Count > limit)
             {
                 // note will be shown in narrative blocks
+            }
+
+            // Head/Tail/free-segment layout only means anything for Queue<T>'s circular buffer —
+            // every other kind always renders "—" in these columns, so they're broken out into
+            // their own sub-table instead of padding the shared table with dashes.
+            var queueRows = topWasteful.Where(c => c.Kind == CollectionKind.Queue).ToList();
+            if (queueRows.Count > 0)
+            {
+                int queueLimit = Math.Min(queueRows.Count, 15);
+                var qRows = new List<TableRow>(queueLimit);
+                for (int i = 0; i < queueLimit; i++)
+                {
+                    var c = queueRows[i];
+                    qRows.Add(new TableRow([
+                        Cell(FormatHelper.TruncateString(c.Type, 60)),
+                        Cell($"{c.Count:N0}", c.Count),
+                        Cell($"{c.Capacity:N0}", c.Capacity),
+                        Cell(c.Head.HasValue ? c.Head.Value.ToString("N0") : "—", c.Head.HasValue ? c.Head.Value : null),
+                        Cell(c.Tail.HasValue ? c.Tail.Value.ToString("N0") : "—", c.Tail.HasValue ? c.Tail.Value : null),
+                        Cell(c.LargestContiguousFreeSegmentBytes.HasValue ? FormatHelper.FormatBytes(c.LargestContiguousFreeSegmentBytes.Value) : "—", c.LargestContiguousFreeSegmentBytes.HasValue ? (long)Math.Min(c.LargestContiguousFreeSegmentBytes.Value, (ulong)long.MaxValue) : null),
+                        Cell(c.FreeSegmentCount.HasValue ? c.FreeSegmentCount.Value.ToString("N0") : "—", c.FreeSegmentCount.HasValue ? c.FreeSegmentCount.Value : null)]));
+                }
+                compactTables.Add(STCompact("Wasteful queues — buffer layout",
+                    new[] { CH("Type"), CH("Count","number"), CH("Capacity","number"), CH("Head","number"), CH("Tail","number"), CH("Largest Free Gap"), CH("Free Segments","number") },
+                    qRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
         }
 

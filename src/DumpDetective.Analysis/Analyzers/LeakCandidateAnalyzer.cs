@@ -62,6 +62,12 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
                 dependentTargetTypes.Add(entry.Name);
         }
 
+        // Sourced from the already-completed timer-leak analyzer run — LogicalTimerCount is its
+        // de-duplicated count (TimerQueueTimerCount), not the raw double-counted TotalTimers, so
+        // it's the right magnitude signal to correlate against each timer wrapper type's row here.
+        TimerLeakDomainResult? timerLeakResult = completedRunResults?.GetResult<TimerLeakDomainResult>();
+        int logicalTimerCount = timerLeakResult?.LogicalTimerCount ?? 0;
+
         var candidates = new List<LeakCandidateRecord>(Math.Min(aggregates.Count, 128));
         Dictionary<LeakClass, int> byClass = new();
 
@@ -105,7 +111,8 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
                 isFinalizable,
                 isDelegate,
                 isContainer,
-                gen2Pct);
+                gen2Pct,
+                logicalTimerCount);
 
             int score = Score(
                 aggregate,
@@ -115,7 +122,9 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
                 pinnedTargetTypes.Contains(typeName),
                 dependentTargetTypes.Contains(typeName),
                 isContainer,
-                referenceFieldRatio);
+                referenceFieldRatio,
+                typeName,
+                logicalTimerCount);
             FindingSeverity severity = GetSeverity(score);
 
             string? rootKind = classification switch
@@ -127,6 +136,7 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
                 LeakClass.EventLeak => "EventLeak",
                 LeakClass.CacheLeak => "Cache",
                 LeakClass.ThreadLocalLeak => "ThreadLocal",
+                LeakClass.TimerLeak => "Timer",
                 _ => null
             };
 
@@ -282,6 +292,12 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
         return $"{typeName}@0x{address:X}";
     }
 
+    // Same Warning/Critical thresholds TimerLeakFindingGenerator uses, so a candidate only earns
+    // the TimerLeak classification/score boost once the timer analyzer itself considers the count
+    // leak-worthy.
+    private const int TimerLeakWarningThreshold = 100;
+    private const int TimerLeakCriticalThreshold = 250;
+
     private static LeakClass Classify(
         string typeName,
         ulong sampleAddress,
@@ -291,7 +307,8 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
         bool isFinalizable,
         bool isDelegate,
         bool isContainer,
-        double gen2Pct)
+        double gen2Pct,
+        int logicalTimerCount)
     {
         if (typeName.Contains("ThreadLocal", StringComparison.OrdinalIgnoreCase))
             return LeakClass.ThreadLocalLeak;
@@ -304,6 +321,9 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
 
         if (staticRoots.Contains(sampleAddress))
             return LeakClass.StaticRetention;
+
+        if (logicalTimerCount >= TimerLeakWarningThreshold && TimerLeakAnalyzer.NamedTimerWrapperTypeNames.Contains(typeName))
+            return LeakClass.TimerLeak;
 
         if (isDelegate || typeName.Contains("Event", StringComparison.OrdinalIgnoreCase))
             return LeakClass.EventLeak;
@@ -325,7 +345,9 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
         bool isPinned,
         bool isDependent,
         bool isContainer,
-        double referenceFieldRatio)
+        double referenceFieldRatio,
+        string typeName,
+        int logicalTimerCount)
     {
         int score = 0;
 
@@ -347,6 +369,13 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
             score += 5;
         if (aggregate.Flags.HasFlag(TypeAggregateFlags.IsDelegateType))
             score += 5;
+        if (TimerLeakAnalyzer.NamedTimerWrapperTypeNames.Contains(typeName))
+        {
+            if (logicalTimerCount >= TimerLeakCriticalThreshold)
+                score += 20;
+            else if (logicalTimerCount >= TimerLeakWarningThreshold)
+                score += 10;
+        }
 
         return score;
     }

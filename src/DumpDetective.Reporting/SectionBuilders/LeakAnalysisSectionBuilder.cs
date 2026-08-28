@@ -210,6 +210,10 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
                 $"{candidate.TypeName} is kept alive as the value in a ConditionalWeakTable where the key is still reachable. " +
                 "Review the table's owner lifetime and consider explicit cleanup.",
 
+            LeakClass.TimerLeak =>
+                $"{candidate.TypeName} instances ({candidate.InstanceCount:N0}, {FormatBytes(candidate.TotalSize)}) correlate with an elevated logical timer " +
+                "count reported by Timer Leak Analysis. Dispose timers explicitly when no longer needed; avoid per-request or per-entity timers.",
+
             LeakClass.Unknown =>
                 $"{candidate.TypeName} is reachable from a GC root but the retention pattern was not recognised. " +
                 "Investigate using the root paths in §5 and the dominator candidates in §3.2.",

@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Traversal;
 using DumpDetective.Analysis.Traversal.Dominator;
@@ -29,16 +30,35 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
         "System.Threading.TimerThread",
     ];
 
+    /// <summary>
+    /// Exact-match timer wrapper/queue type names classified with a dedicated
+    /// <see cref="TimerObjectCategory"/> (excludes the generic "OtherTimer" namespace/token
+    /// fallback). Exposed for <c>LeakCandidateAnalyzer</c> to correlate its per-type candidate
+    /// rows with <see cref="TimerLeakDomainResult.LogicalTimerCount"/> without duplicating these
+    /// literals.
+    /// </summary>
+    public static readonly IReadOnlySet<string> NamedTimerWrapperTypeNames = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "System.Threading.Timer",
+        "System.Timers.Timer",
+        "System.Threading.TimerQueueTimer",
+        "System.Threading.TimerHolder",
+        "System.Threading.PeriodicTimer",
+    };
 
     public bool IsCandidateType(string typeName) => ClassifyType(typeName) != TimerObjectCategory.None;
+
+    // Only System.Threading.TimerQueueTimer exposes the underlying `_period`; buckets are fixed
+    // categories (not sorted by count) so the table reads left-to-right from tightest to loosest.
+    private static readonly string[] IntervalBucketLabels = ["< 100 ms", "100 ms – 1 s", "> 1 s", "Infinite"];
 
     public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Analyze(context.Heap, context.Cache, cancellationToken).Stamp(this));
+        return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, cancellationToken).Stamp(this));
     }
 
-    private AnalyzerDomainResult Analyze(ClrHeap? heap, IHeapAnalysisCache? cache, CancellationToken cancellationToken)
+    private AnalyzerDomainResult Analyze(ClrHeap? heap, IHeapAnalysisCache? cache, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
     {
         if (heap is null)
             return Empty();
@@ -95,6 +115,9 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
 
         PopulateEvidence(heap, cache, byType, cancellationToken);
 
+        IReadOnlyList<(string Bucket, int Count)> intervalHistogram =
+            BuildIntervalHistogram(heap, cache, candidates, progress, cancellationToken);
+
         int total = threadingTimerCount + timersTimerCount + timerQueueTimerCount + timerHolderCount + periodicTimerCount + otherTimerCount;
 
         return new TimerLeakDomainResult(
@@ -108,7 +131,8 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
             PeriodicTimerCount: periodicTimerCount,
             OtherTimerCount: otherTimerCount,
             TotalBytes: totalBytes,
-            ByType: byType);
+            ByType: byType,
+            IntervalHistogram: intervalHistogram);
     }
 
     // For each timer type, samples a bounded set of instances and asks RootPathFinder for a
@@ -179,7 +203,6 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
     {
         try
         {
-            // TODO: Can extract the field extraction logic in a helper.
             var obj = heap.GetObject(address);
             if (!obj.IsValid || obj.Type == null)
                 return -1;
@@ -188,27 +211,109 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
             if (periodField == null)
                 return -1;
 
-            try
-            {
-                int intVal = periodField.Read<int>(address, interior: false);
-                return intVal;
-            }
-            catch
-            {
-                try
-                {
-                    long longVal = periodField.Read<long>(address, interior: false);
-                    return longVal;
-                }
-                catch
-                {
-                    return -1;
-                }
-            }
+            return TryReadPeriodField(periodField, address);
         }
         catch
         {
             return -1;
+        }
+    }
+
+    // `_period` is `uint` on some runtimes and `long` on others (TimerQueueTimer's backing field
+    // shape changed across .NET versions); try the narrower read first since it's the common case.
+    private static long TryReadPeriodField(ClrInstanceField periodField, ulong address)
+    {
+        try
+        {
+            int intVal = periodField.Read<int>(address, interior: false);
+            return intVal;
+        }
+        catch
+        {
+            try
+            {
+                long longVal = periodField.Read<long>(address, interior: false);
+                return longVal;
+            }
+            catch
+            {
+                return -1;
+            }
+        }
+    }
+
+    // TypeAggregates only retain one sample address per type, so an interval distribution needs a
+    // second exact heap pass over every TimerQueueTimer instance — mirrors the pattern used by
+    // AsyncStateMachineAnalyzer's suspend-state histogram.
+    private static IReadOnlyList<(string Bucket, int Count)> BuildIntervalHistogram(
+        ClrHeap heap,
+        IHeapAnalysisCache? cache,
+        Dictionary<ulong, (string TypeName, long Count, ulong Bytes)> candidates,
+        IProgress<AnalyzerProgressReport>? progress,
+        CancellationToken cancellationToken)
+    {
+        var periodFieldByMt = new Dictionary<ulong, ClrInstanceField>();
+        foreach (KeyValuePair<ulong, (string TypeName, long Count, ulong Bytes)> kv in candidates)
+        {
+            if (!kv.Value.TypeName.Equals("System.Threading.TimerQueueTimer", StringComparison.Ordinal))
+                continue;
+
+            ClrInstanceField? periodField = heap.GetTypeByMethodTable(kv.Key)?.GetFieldByName("_period");
+            if (periodField != null)
+                periodFieldByMt[kv.Key] = periodField;
+        }
+
+        int lessThan100Ms = 0, between100MsAnd1s = 0, moreThan1s = 0, infinite = 0;
+
+        if (periodFieldByMt.Count > 0)
+        {
+            bool hasDiskIndex = cache != null && cache.EnumerateIndexedEntriesAsTuples().Any();
+            IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> entries = hasDiskIndex
+                ? cache!.EnumerateIndexedEntriesAsTuples()
+                : LiveHeapEntries(heap);
+
+            var scanCounter = new ObjectScanCounter(
+                "scanning timer instances for interval histogram",
+                progress, reportEveryObjects: 50_000, reportEveryElapsed: TimeSpan.FromSeconds(2));
+
+            foreach ((ulong address, ulong mt, ulong _) in entries)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                scanCounter.Tick();
+
+                if (!periodFieldByMt.TryGetValue(mt, out ClrInstanceField? periodField))
+                    continue;
+
+                long periodMs = TryReadPeriodField(periodField, address);
+                if (periodMs < 0)
+                    infinite++;
+                else if (periodMs < 100)
+                    lessThan100Ms++;
+                else if (periodMs < 1_000)
+                    between100MsAnd1s++;
+                else
+                    moreThan1s++;
+            }
+
+            scanCounter.Complete();
+        }
+
+        return
+        [
+            (IntervalBucketLabels[0], lessThan100Ms),
+            (IntervalBucketLabels[1], between100MsAnd1s),
+            (IntervalBucketLabels[2], moreThan1s),
+            (IntervalBucketLabels[3], infinite),
+        ];
+    }
+
+    // Fallback for in-memory cache mode (no disk-backed object index available).
+    private static IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> LiveHeapEntries(ClrHeap heap)
+    {
+        foreach (ClrObject obj in heap.EnumerateObjects())
+        {
+            if (!obj.IsValid || obj.Type is null) continue;
+            yield return (obj.Address, obj.Type.MethodTable, obj.Size);
         }
     }
 
@@ -282,7 +387,7 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, ITypedResourceCandidateSource
     #endregion
 
     private static TimerLeakDomainResult Empty() =>
-        new(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, []);
+        new(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, [], []);
 }
 
 internal enum TimerObjectCategory

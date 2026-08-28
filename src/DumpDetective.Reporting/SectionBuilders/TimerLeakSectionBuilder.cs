@@ -114,6 +114,21 @@ internal sealed class TimerLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
             }
         }
 
+        if (d.IntervalHistogram.Count > 0 && d.TimerQueueTimerCount > 0)
+        {
+            var histogramRows = new List<CompactRow>(d.IntervalHistogram.Count);
+            for (int i = 0; i < d.IntervalHistogram.Count; i++)
+            {
+                (string bucket, int count) = d.IntervalHistogram[i];
+                histogramRows.Add(R(bucket, count));
+            }
+
+            compactTables.Add(STCompact("Timer interval distribution (TimerQueueTimer)", new[]
+            {
+                CH("Interval"), CH("Count", "number")
+            }, histogramRows));
+        }
+
         if ((d.TimerHolderCount + d.TimerQueueTimerCount) >= 50)
         {
             blocks.Add(T("Timer queue pressure is elevated. This usually means timers outlive their intended scope and are not disposed promptly."));

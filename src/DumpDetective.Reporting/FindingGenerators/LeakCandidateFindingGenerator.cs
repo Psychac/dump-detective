@@ -131,6 +131,7 @@ internal sealed class LeakCandidateFindingGenerator : IFindingGenerator
         LeakClass.FinalizerRetention => "Prefer IDisposable and suppress finalization when possible.",
         LeakClass.CacheLeak => "Bound cache size and add eviction.",
         LeakClass.ThreadLocalLeak => "Dispose ThreadLocal<T> instances with thread lifetime.",
+        LeakClass.TimerLeak => "Dispose timers explicitly when no longer needed; avoid creating per-request or per-entity timers.",
         _ => "Inspect root paths and retention owners for top leak candidates."
     };
 }

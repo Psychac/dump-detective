@@ -26,6 +26,11 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 metrics.Add(new("timer.type.bytes", t.TypeName, t.TotalBytes, "bytes", MetricTrendDirection.HigherIsWorse));
             }
 
+            foreach ((string bucket, int count) in r.IntervalHistogram)
+            {
+                metrics.Add(new("timer.interval.bucket", bucket, count, "objects", MetricTrendDirection.HigherIsWorse));
+            }
+
             return metrics;
         }
 

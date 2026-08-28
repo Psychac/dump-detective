@@ -211,7 +211,7 @@ public sealed class InfrastructureFindingGeneratorTests
     public void TimerLeak_NoFindings_WhenNotFound()
     {
         var gen = new TimerLeakFindingGenerator();
-        var result = new TimerLeakDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, []);
+        var result = new TimerLeakDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, [], []);
         gen.Generate(result).Should().BeEmpty();
     }
 
@@ -248,7 +248,7 @@ public sealed class InfrastructureFindingGeneratorTests
     public void TimerLeak_CanGenerate_OnlyForTimerLeakDomainResult()
     {
         var gen = new TimerLeakFindingGenerator();
-        gen.CanGenerate(new TimerLeakDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, [])).Should().BeTrue();
+        gen.CanGenerate(new TimerLeakDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, [], [])).Should().BeTrue();
         gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [])).Should().BeFalse();
     }
 
@@ -346,6 +346,7 @@ public sealed class InfrastructureFindingGeneratorTests
             PeriodicTimerCount: periodic,
             OtherTimerCount: other,
             TotalBytes: byType.Aggregate(0UL, (sum, t) => sum + t.TotalBytes),
-            ByType: byType);
+            ByType: byType,
+            IntervalHistogram: []);
     }
 }

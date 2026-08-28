@@ -12,6 +12,7 @@ internal enum LeakClass
     FinalizerRetention,
     GCHandleRetention,
     DependentHandleLeak,
+    TimerLeak,
     Unknown
 }
 

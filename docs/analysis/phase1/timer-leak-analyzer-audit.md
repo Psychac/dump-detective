@@ -502,24 +502,24 @@ for genuine leaks. The false-positive-severity risk is real.
 | **P2** | Surface `searchTruncated` as a section warning banner and factor into finding confidence text | Medium — engineers need to know when evidence is incomplete | Low | High | Improvement | ✅ COMPLETE |
 | **P2** | Fix `System.Linq` import in `TimerLeakSectionBuilder` (replace with manual loop) | Low — code style / correctness for hot paths | Very Low | High | Improvement | ✅ COMPLETE |
 | **P2** | Narrow `OtherTimerCategory` to exclude known CLR-internal non-user types (e.g. `TimerQueue`) | Medium — avoids false positive contributions to OtherTimerCount | Low | Medium | Improvement | ✅ COMPLETE |
-| **P3** | Add timer interval histogram (group `_period` into < 100 ms / 100 ms–1 s / > 1 s / infinite) | Medium — separates accumulation leak from timer flood CPU issue | Medium | Medium | Improvement |
-| **P3** | Feed de-duplicated logical timer count into `LeakCandidateAnalyzer` ranking (open Phase 0 action item) | Medium — cross-analyzer correlation | Medium | High | Evolution |
+| **P3** | Add timer interval histogram (group `_period` into < 100 ms / 100 ms–1 s / > 1 s / infinite) | Medium — separates accumulation leak from timer flood CPU issue | Medium | Medium | Improvement | ✅ COMPLETE |
+| **P3** | Feed de-duplicated logical timer count into `LeakCandidateAnalyzer` ranking (open Phase 0 action item) | Medium — cross-analyzer correlation | Medium | High | Evolution | ✅ COMPLETE |
 
 ### Final Verdict
 
-1. **Production-ready?** Conditionally — directionally correct but severity is unreliable due to
-   double-counting. The P0 count-deduplication fix is a prerequisite for trusted severity.
+**Status (2026-08-28): P0+P1+P2+P3 all COMPLETE — audit closed.**
 
-2. **Highest-impact improvements:** (1) deduplicate `TotalTimers` to logical count, (2) add
-   `PeriodicTimer`, (3) render the already-populated evidence in the section builder, (4) read
-   `_period` and callback target per sample.
+1. **Production-ready?** Yes. The P0 count-deduplication fix landed first, so severity has been
+   reliable (based on `LogicalTimerCount`, not the double-counted `TotalTimers`) since early in this
+   audit's lifecycle; every subsequent P1/P2/P3 item has since shipped as well.
 
-3. **Platform evolution opportunities:** Timer state sampling is a natural fit for
-   `ITypedResourceInstanceSampler` — the pattern already exists in `DbConnectionAnalyzer` and
-   `WcfChannelAnalyzer`. No new infrastructure is needed; it is a matter of applying the pattern.
-   The `LeakCandidateAnalyzer` integration (Phase 0 open action) would give timers cross-analyzer
-   severity ranking.
+2. **Highest-impact improvements delivered:** deduplicated `TotalTimers` to a logical count,
+   `PeriodicTimer` (.NET 6+) coverage, root-path evidence rendered in the section builder, per-sample
+   `_period`/callback-target reads, and a `_period` interval histogram (< 100 ms / 100 ms–1 s / > 1 s /
+   infinite) via a second exact heap pass over every `TimerQueueTimer` instance.
 
-4. **Highest engineering return:** The combination of P0 deduplication + P0 `PeriodicTimer` + P1
-   evidence rendering is approximately 4 hours of work and produces a qualitatively different report
-   — severity becomes reliable and the retention chain is visible.
+3. **Platform evolution — closed:** the `LeakCandidateAnalyzer` integration (this analyzer's own
+   final open item) now correlates `LeakCandidateAnalyzer`'s per-type candidate rows with
+   `TimerLeakDomainResult.LogicalTimerCount` via `completedRunResults`, adding a `LeakClass.TimerLeak`
+   classification and score boost for named timer wrapper types once the count crosses the same
+   100/250 warning/critical thresholds `TimerLeakFindingGenerator` uses. No pending items remain.

@@ -124,17 +124,6 @@ internal static class TrendSnapshotSectionComposer
 
         foreach (SectionBlock block in section.Blocks)
             blocks.Add(block);
-
-        if (section.Provenance is { } provenance)
-        {
-            blocks.Add(new HeadingBlock("Provenance", 1));
-            blocks.Add(new MetricBlock("Analyzer", provenance.Analyzer, null, 2));
-            blocks.Add(new MetricBlock("Status", provenance.Status, null, 2));
-            blocks.Add(new MetricBlock("Duration", $"{provenance.DurationMs:F0} ms", provenance.DurationMs, 2));
-            blocks.Add(new MetricBlock("Objects Scanned", provenance.ObjectScanCount.ToString("N0"), provenance.ObjectScanCount, 2));
-            blocks.Add(new MetricBlock("Cache Hits", provenance.CacheHits.ToString("N0"), provenance.CacheHits, 2));
-            blocks.Add(new MetricBlock("Cache Misses", provenance.CacheMisses.ToString("N0"), provenance.CacheMisses, 2));
-        }
     }
 
     // ── Key Metrics Helpers ───────────────────────────────────────────────────

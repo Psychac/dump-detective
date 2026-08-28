@@ -7,7 +7,6 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class InsightsSectionBuilder : SectionBuilderBase, IReportSectionBuilder
 {
-    public IReadOnlyList<string> SourceAnalyzers => [];
 
     public string SectionId => "X1";
     public string DisplayTitle => "Cross-Domain Insights";

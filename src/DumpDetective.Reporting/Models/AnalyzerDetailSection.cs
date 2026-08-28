@@ -67,16 +67,6 @@ internal static class CompactTableExtensions
     // Legacy translators removed; producers now emit CompactTable directly.
 }
 
-/// <summary>Run provenance — duration, scan count, cache stats — shown collapsed at the bottom of the section.</summary>
-internal sealed record SectionProvenance(
-    string Analyzer,
-    string Status,
-    double DurationMs,
-    long ObjectScanCount,
-    long CacheHits,
-    long CacheMisses,
-    IReadOnlyList<string>? CappingNotes = null);
-
 // ── Typed structured-data slots ───────────────────────────────────────────────
 
 /// <summary>A single frame in a named stack trace.</summary>
@@ -227,7 +217,6 @@ internal sealed record AnalyzerDetailSection(
     SectionLeadFinding? LeadFinding = null,  // Always-visible top finding — null when section has no findings
     IReadOnlyDictionary<string, MetricValue>? KeyMetrics = null, // Always-visible metric strip (map: snake_case -> value)
     // Legacy typed tables removed: producers should populate `CompactTables` only.
-    SectionProvenance? Provenance = null,    // Run provenance — collapsed footer
     IReadOnlyList<CompactTable>? CompactTables = null,           // Compact table representation (preferred)
     IReadOnlyList<NamedStackTrace>? StackTraces = null,          // Named thread/stack traces (replaces H+SF[] blocks)
     IReadOnlyList<RootPathGroup>? RootPathGroups = null,         // GC root paths grouped by target type (replaces nested collapses)

@@ -34,7 +34,7 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
         ReportSectionAssembler.ApplySectionMetadata(mergedSections, runs);
 
         // Extract typed contract slots (LeadFinding, KeyMetrics, Tables, Provenance) from block stream
-        ReportSectionAssembler.NormalizeSectionContractSlots(mergedSections, runs, reportBuilders);
+        ReportSectionAssembler.NormalizeSectionContractSlots(mergedSections, runs);
 
         // Apply domain-priority ordering (Critical domains first, then by domain priority, then SortOrder)
         ReportSectionAssembler.ApplyDomainOrdering(mergedSections);
@@ -198,7 +198,7 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
 
         // Keep section shape parity with full report serialization.
         ReportSectionAssembler.ApplySectionMetadata(mergedSections, runs);
-        ReportSectionAssembler.NormalizeSectionContractSlots(mergedSections, runs, reportBuilders);
+        ReportSectionAssembler.NormalizeSectionContractSlots(mergedSections, runs);
         ReportSectionAssembler.ApplyDomainOrdering(mergedSections);
 
         return mergedSections;

@@ -11,8 +11,6 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSectionBuilder
 {
-    public IReadOnlyList<string> SourceAnalyzers => [];
-
     public string SectionId => "Z3";
     public string DisplayTitle => "Known Limitations";
     public int SortOrder => 1750;

@@ -7,7 +7,7 @@ namespace DumpDetective.Reporting.Services;
 
 /// <summary>
 /// Builds and orders analyzer/spec sections into the merged section list, and
-/// promotes typed contract slots (LeadFinding, Provenance) from raw run data.
+/// promotes typed contract slots (LeadFinding) from raw run data.
 /// </summary>
 internal static class ReportSectionAssembler
 {
@@ -60,14 +60,7 @@ internal static class ReportSectionAssembler
                 AnalyzerName: run.AnalyzerName,
                 DisplayTitle: builder.DisplayTitle,
                 SortOrder:    builder.SortOrder,
-                Blocks:       [new TextBlock(statusNote)],
-                Provenance:   new SectionProvenance(
-                    Analyzer:        run.AnalyzerName,
-                    Status:          NormalizeStatus(run.Status),
-                    DurationMs:      run.Duration.TotalMilliseconds,
-                    ObjectScanCount: 0,
-                    CacheHits:       0,
-                    CacheMisses:     0)));
+                Blocks:       [new TextBlock(statusNote)]));
         }
 
         return sections;
@@ -160,33 +153,18 @@ internal static class ReportSectionAssembler
     /// <summary>
     /// Extracts typed contract slots from each section's raw block stream and populates
     /// <see cref="AnalyzerDetailSection.LeadFinding"/>, <see cref="AnalyzerDetailSection.KeyMetrics"/>,
-    /// <see cref="AnalyzerDetailSection.CompactTables"/>, and <see cref="AnalyzerDetailSection.Provenance"/>.
+    /// and <see cref="AnalyzerDetailSection.CompactTables"/>.
     /// MetricBlocks and TableBlocks are removed from <c>Blocks</c> once promoted.
     /// Runs that have no matching analyzer run still get metric/table extraction from blocks.
-    /// For cross-cutting <see cref="IReportSectionBuilder"/> sections, provenance is built from all
-    /// contributing analyzer runs listed in <see cref="IReportSectionBuilder.SourceAnalyzers"/>.
     /// </summary>
     public static void NormalizeSectionContractSlots(
         List<AnalyzerDetailSection> sections,
-        IReadOnlyList<AnalyzerRunResult> runs,
-        IReadOnlyList<IReportSectionBuilder>? reportBuilders = null)
+        IReadOnlyList<AnalyzerRunResult> runs)
     {
         // Build analyzerName → run for O(1) lookup
         var runMap = new Dictionary<string, AnalyzerRunResult>(runs.Count, StringComparer.OrdinalIgnoreCase);
         for (int r = 0; r < runs.Count; r++)
             runMap[runs[r].AnalyzerName] = runs[r];
-
-        // Build sectionAnalyzerName → SourceAnalyzers[] for cross-cutting sections
-        var sourceAnalyzerMap = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
-        if (reportBuilders is not null)
-        {
-            for (int b = 0; b < reportBuilders.Count; b++)
-            {
-                IReportSectionBuilder rb = reportBuilders[b];
-                if (rb.SourceAnalyzers.Count > 0)
-                    sourceAnalyzerMap[rb.DisplayTitle] = rb.SourceAnalyzers;
-            }
-        }
 
         for (int i = 0; i < sections.Count; i++)
         {
@@ -231,64 +209,14 @@ internal static class ReportSectionAssembler
                 }
             }
 
-            // ── Build Provenance from run diagnostics ─────────────────────────
-            SectionProvenance? provenance = section.Provenance;
-            if (provenance is null && matchedRun is not null)
-            {
-                provenance = new SectionProvenance(
-                    Analyzer:         matchedRun.AnalyzerName,
-                    Status:           NormalizeStatus(matchedRun.Status),
-                    DurationMs:       matchedRun.Duration.TotalMilliseconds,
-                    ObjectScanCount:  matchedRun.Diagnostics?.ObjectScanCount ?? 0,
-                    CacheHits:        matchedRun.Diagnostics?.CacheHits ?? 0,
-                    CacheMisses:      matchedRun.Diagnostics?.CacheMisses ?? 0);
-            }
-            else if (provenance is null && sourceAnalyzerMap.TryGetValue(section.AnalyzerName, out IReadOnlyList<string>? sourceNames))
-            {
-                // Cross-cutting section: aggregate provenance from all contributing runs
-                double totalMs = 0;
-                long totalScans = 0, totalHits = 0, totalMisses = 0;
-                bool allSuccess = true;
-                var cappingNotes = new List<string>();
-                int matched = 0;
-
-                for (int s = 0; s < sourceNames.Count; s++)
-                {
-                    if (!runMap.TryGetValue(sourceNames[s], out AnalyzerRunResult? sourceRun))
-                        continue;
-
-                    matched++;
-                    totalMs     += sourceRun.Duration.TotalMilliseconds;
-                    totalScans  += sourceRun.Diagnostics?.ObjectScanCount ?? 0;
-                    totalHits   += sourceRun.Diagnostics?.CacheHits ?? 0;
-                    totalMisses += sourceRun.Diagnostics?.CacheMisses ?? 0;
-                    if (sourceRun.Status != AnalyzerExecutionStatus.Success)
-                        allSuccess = false;
-                }
-
-                if (matched > 0)
-                {
-                    provenance = new SectionProvenance(
-                        Analyzer:        section.AnalyzerName,
-                        Status:          allSuccess ? "Success" : "Partial",
-                        DurationMs:      totalMs,
-                        ObjectScanCount: totalScans,
-                        CacheHits:       totalHits,
-                        CacheMisses:     totalMisses,
-                        CappingNotes:    cappingNotes.Count > 0 ? cappingNotes : null);
-                }
-            }
-
             // ── Write back only if something changed ──────────────────────────
-            bool changed = leadFinding is not null && section.LeadFinding is null
-                        || provenance is not null && section.Provenance is null;
+            bool changed = leadFinding is not null && section.LeadFinding is null;
 
             if (changed)
             {
                 sections[i] = section with
                 {
                     LeadFinding = leadFinding,
-                    Provenance  = provenance,
                 };
             }
         }

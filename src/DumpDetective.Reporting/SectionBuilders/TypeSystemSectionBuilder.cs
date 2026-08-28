@@ -13,7 +13,6 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
 {
     private const int TopRows = 30;
 
-    public IReadOnlyList<string> SourceAnalyzers => ["MemoryAnalyzer", "GCGenerationAnalyzer", "ObjectShapeAnalyzer", "ModuleAnalyzer", "GCRootAnalyzer", "DominatorAnalyzer"];
 
     public string SectionId => "C1";
     public string DisplayTitle => "Type Table";

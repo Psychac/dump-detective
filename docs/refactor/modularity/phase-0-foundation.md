@@ -29,6 +29,15 @@ to become source-neutral.
    *optionally* benefit from once trace exists. This table is the direct input to Phase 3's
    `[RequiresCapability]` attributes and to the graded-fidelity design; doing it now, while the
    dump-only behavior is the only behavior, avoids retrofitting guesses later.
+3a. **Judgment-site inventory** *(new — from the
+   [analyzer-pipeline audit](../analyzer-pipeline-stages-and-leadfinding-dedup.md))*. That audit
+   already catalogued judgment duplication across stages 1–3 but explicitly left gaps: only 8 of 39
+   section builders were audited for `SectionLeadFinding`, ~20 domain models were checked at
+   field-shape level but not deep-read, `LeakCandidateRecord.Severity`'s computation site is
+   untraced, and `ExplainableScoringEngine`'s independence is unconfirmed. Close those gaps here —
+   every location that computes a severity, band, threshold, composite score, or row-selection
+   ranking, across all four layers. This is the definitive input to Phase 5's synthesis-rule
+   authoring, and Phase 5 cannot be scoped without it.
 4. **Namespace re-org in place.** Move analyzers into per-domain namespaces mirroring the eventual
    plugin packages (see [phase-3-plugin-packaging.md](phase-3-plugin-packaging.md)). Pure move,
    reviewable as a rename-only diff.

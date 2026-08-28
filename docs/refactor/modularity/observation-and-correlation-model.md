@@ -51,6 +51,44 @@ everything below.
 
 ---
 
+## 2a. Observations must not carry judgment
+
+The [analyzer-pipeline audit](../analyzer-pipeline-stages-and-leadfinding-dedup.md) supplies a
+litmus test for stage-1 purity: *"if a field requires a hand-picked constant or weight to compute
+(`/35.0`, `*0.30`, a threshold cutoff), it doesn't belong here."*
+
+As first drafted, `Observation` failed that test — an observation typed `gc.pressure` carrying a
+`Confidence` is a judgment call made inside the analyzer. Corrected rules:
+
+| Field | Rule |
+|---|---|
+| `Measures` | **Raw only.** `gen2Ratio = 0.8`, `retainedBytes = 8.0e8`, `pauseMs = 4200`. Never a weighted composite, never a normalized-against-a-magic-constant score. |
+| `ObservationType` | A **factual characterization**, not a severity claim. `gc.generation-composition`, not `gc.pressure-high`. It names *what was measured*, not *how bad it is*. |
+| `Confidence` | **Measurement** confidence only — was the capability degraded, was sampling partial, was the data truncated. Never severity confidence. |
+| `Subjects` / `When` / `Provenance` | Facts by construction. |
+
+Everything the audit catalogues as Smell A — `MemoryPressureScore`'s weighted composite,
+`GCPressureLevel`'s banding, `HealthScore`, `SeverityScore`, `SuspicionScore`, and
+`LeakCandidateRecord.Severity` (a `FindingSeverity` baked into a domain row) — moves into synthesis
+rules. So does the audit's Smell B row *selection* judgment.
+
+**This is a multi-source requirement, not just hygiene.** A composite score computed inside an
+analyzer is frozen at the fidelity of whatever capabilities that analyzer had. Computed in
+synthesis, the same score sharpens automatically when a session supplies `trace.gc-events` —
+which is exactly the graded-fidelity premise the platform rests on. Baked stage-1 scores would
+quietly defeat it.
+
+### Where the raw per-entity data lives
+
+The audit's Smell B asks whether N separately-capped `Top*` lists should collapse into one complete
+raw table, and flags a bounded-memory concern about doing so. The answer here: **the complete table
+lives in the disk-backed index**, observations reference rows via `EvidenceRef`, and
+ranking/selection happens in synthesis or render. That's the same discipline already applied to
+millions of heap objects — an uncapped complete table is safe precisely because it was never going
+to be materialized in memory. Domain-result `Top*` lists stop being an analyzer-side artifact.
+
+---
+
 ## 2. Findings are derived, not authored
 
 ```

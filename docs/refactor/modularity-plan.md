@@ -161,6 +161,82 @@ that's unacceptable.
 
 ---
 
+## 4a. Relationship to the analyzer-pipeline / LeadFinding audit
+
+[analyzer-pipeline-stages-and-leadfinding-dedup.md](analyzer-pipeline-stages-and-leadfinding-dedup.md)
+audits judgment duplication across the current 4-stage pipeline. It is **not a competing plan** —
+it is the dump-only, near-term expression of the same conclusion this plan reaches at Phase 5, and
+parts of it are prerequisites here rather than consequences.
+
+### Where the two agree
+
+The audit's recommended boundary — *Analyzer emits pure raw facts → one "Insight" stage owns all
+judgment → assembly → render* — is structurally identical to Phase 5 (analyzers emit observations;
+synthesis rules own severity/banding/selection; `IFindingGenerator` and `InsightEngine` both
+retire). Two independent analyses converging on "there must be exactly one judgment stage" is
+reasonable evidence the conclusion is right.
+
+### Where this plan was wrong, now corrected
+
+- **Phase 5 previously kept `AnalyzerDomainResult` "for presentation"**, with section builders
+  still reading it independently — preserving precisely the stage-2/stage-3 split the audit shows
+  already produces wrong `LeadFinding` output in 6 of 8 builders. The former open question ("should
+  detail sections derive from observations too?") *is* the audit's core bug. Resolved: yes. See
+  [phase-5](modularity/phase-5-observations-synthesis.md).
+- **Stage-1 purity (audit Smell A) is a prerequisite, not a byproduct.** If domain results still
+  carry baked composite judgment (`MemoryPressureScore`, `HealthScore`, `SuspicionScore`,
+  `GCPressureLevel`, `SeverityScore`, and `LeakCandidateRecord.Severity` — literally
+  `InsightFinding`'s own output type) when analyzers begin emitting observations, judgment exists in
+  two places again and the migration bakes in the drift it was meant to remove. Added to Phase 0 as
+  an audit item and to Phase 5 as gating work.
+- **Smell B (pre-curated `Top*` lists) converges with this plan's storage model.** "Collapse N
+  capped lists into one complete raw table" is answered by: the raw per-entity table lives in the
+  **disk-backed index**, observations reference it via `EvidenceRef`, and selection/ranking happens
+  in synthesis or render. That also answers the audit's own open question about bounded memory —
+  a complete uncapped table is safe precisely because it's disk-backed, which is what the platform
+  already does for heap objects. Sequencing still defers to
+  [analysis-profile-removal-plan.md](analysis-profile-removal-plan.md) § 11.
+
+### A contradiction the audit exposed in the observation model
+
+The audit's litmus test — *"if a field requires a hand-picked constant or weight to compute
+(`/35.0`, `*0.30`, a threshold cutoff), it doesn't belong in stage 1"* — applies to `Observation`
+too, and the model as originally written failed it: an observation typed `gc.pressure` carrying a
+`Confidence` is judgment emitted by the analyzer.
+
+Resolved in [observation-and-correlation-model.md § 2a](modularity/observation-and-correlation-model.md):
+measures stay raw, observation types are factual characterizations rather than severity claims, and
+observation `Confidence` means *measurement* confidence only. All weighting, banding, thresholding
+and severity move to synthesis.
+
+This is strictly better for multi-source, not just for purity: a `MemoryPressureScore` computed
+inside the analyzer can never be improved by trace data, because the analyzer never sees it. The
+same score computed in synthesis sharpens automatically when `trace.gc-events` becomes available —
+which is the entire graded-fidelity premise of § 2.
+
+### What should not wait for this plan
+
+**The audit's P0 fixes — Hang, Lock Graph, Finalizable Object, Segment Reservation — should be
+fixed now.** They are live correctness bugs (the report's `LeadFinding` can show weaker severity
+than the analyzer actually computed), the fix is subtractive, and `NormalizeSectionContractSlots`
+already contains the derivation path that replaces the deleted logic. Blocking a correctness fix
+behind a multi-quarter platform migration would be the wrong call. The same applies to P1
+(Crash/Exception, Async Task) and the confidence-band consolidation.
+
+Doing them first also *reduces* Phase 5's work: every builder that stops constructing
+`SectionLeadFinding` inline is one less judgment site to migrate later.
+
+### Also carried forward into this plan
+
+- `ExplainableScoringEngine` (Reporting layer) is a **fourth** scoring location beyond the
+  stage-1/stage-2/stage-3 sites — it must be reconciled during Phase 5, not left as a surviving
+  independent judgment path.
+- The three near-identical confidence-band ladders (`SectionBuilderBase`, `ReportSectionAssembler`,
+  `LeakAnalysisSectionBuilder`) collapse into `ConfidenceBreakdown` (Phase 5), but should be
+  consolidated *now* per the audit rather than waiting.
+
+---
+
 ## 5. What this deletes
 
 - The `SingleDump | MultiDump | TraceOnly | Combined` mode enum — never built
@@ -240,9 +316,11 @@ off — not a permanent design.
   `PrimaryProcess`. Extending means process identity joins every `EntityRef` key.
 - **Live targets as artifacts** — attaching to a running process is "an artifact that keeps
   producing capabilities." Not designed for.
-- **Does `AnalyzerDomainResult` survive?** Phase 5 keeps it for presentation. Whether detail
-  sections should eventually be built from observations too is unresolved — more uniform, but may
-  lose domain-specific richness worth keeping.
+- ~~**Does `AnalyzerDomainResult` survive?**~~ **Resolved** (§ 4a): detail sections derive from
+  observations, not from domain results. Leaving section builders reading domain results
+  independently is the exact duplication the analyzer-pipeline audit shows is already producing
+  wrong output. Domain results survive only as a transitional presentation payload during Phase 5,
+  carrying no judgment fields.
 - **Declarative vs. code synthesis rules** — leaning hybrid (code rules, declarative matching).
 - **Capability & observation-type vocabulary governance** — shared namespaces across plugins;
   needs registries with versioning discipline or they fragment.

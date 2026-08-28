@@ -28,6 +28,10 @@ internal sealed class StaticRootSectionBuilder : SectionBuilderBase, IAnalyzerSe
         {
             ["concerning_static_roots"] = new NumericMetricValue(d.RootCount, MetricUnit.Count),
             ["total_retained_bytes"] = new NumericMetricValue((double)d.TotalRetainedBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.TotalRetainedBytes)),
+            ["static_roots_as_pct_of_live_heap"] = new NumericMetricValue(
+                RatioValue(d.TotalRetainedBytes, d.TotalManagedHeapBytes),
+                MetricUnit.Percent,
+                FormatRatio(d.TotalRetainedBytes, d.TotalManagedHeapBytes)),
         };
 
         var compactTables = new List<CompactTable>();
@@ -47,10 +51,12 @@ internal sealed class StaticRootSectionBuilder : SectionBuilderBase, IAnalyzerSe
                 rootRows.Add(R(
                     FormatHelper.TruncateString(r.RootDescription, 90),
                     r.TypeName,
+                    r.DirectObjectSize,
                     bytesDisplay,
-                    (double)r.ObjectsKeptAlive));
+                    (double)r.ObjectsKeptAlive,
+                    r.Gen2OrLohRetainedFraction * 100.0));
             }
-            compactTables.Add(STCompact("Top roots by retained bytes", new[] { CH("Root"), CH("Type"), CH("Retained Bytes","bytes"), CH("Objects Kept Alive","number") }, rootRows));
+            compactTables.Add(STCompact("Top roots by retained bytes", new[] { CH("Root"), CH("Type"), CH("Shallow Size","bytes"), CH("Retained Bytes","bytes"), CH("Objects Kept Alive","number"), CH("Gen2/LOH %","number","percent") }, rootRows));
 
             var collectionRoots = roots.Where(r => r.ContainsCollections).ToList();
             if (collectionRoots.Count > 0)
@@ -88,6 +94,22 @@ internal sealed class StaticRootSectionBuilder : SectionBuilderBase, IAnalyzerSe
                     compactTables.Add(STCompact($"Top retained types in '{FormatHelper.TruncateString(r.RootDescription, 60)}'",
                         new[] { CH("Type"), CH("Count","number"), CH("Total Size","bytes") },
                         typeRows));
+                }
+
+                var topNamespaces = r.TopRetainedNamespaces;
+                if (topNamespaces != null && topNamespaces.Count > 0)
+                {
+                    var namespaceRows = new List<CompactRow>();
+                    foreach (var namespaceInfo in topNamespaces)
+                    {
+                        namespaceRows.Add(R(
+                            namespaceInfo.Namespace,
+                            (double)namespaceInfo.Count,
+                            (ulong)namespaceInfo.TotalSize));
+                    }
+                    compactTables.Add(STCompact($"Top retained namespaces in '{FormatHelper.TruncateString(r.RootDescription, 60)}'",
+                        new[] { CH("Namespace"), CH("Count","number"), CH("Total Size","bytes") },
+                        namespaceRows));
                 }
             }
         }

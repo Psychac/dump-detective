@@ -14,7 +14,7 @@
 | **Total P1 Identified** | 155 |
 | **P0 Implemented** | 70 |
 | **P1 Implemented** | 123 |
-| **P2 Implemented** | 59 |
+| **P2 Implemented** | 64 |
 | **Overall P0+P1 Rate** | 83.2% (193/232) |
 
 ---
@@ -62,7 +62,7 @@ P0-4 was a regression hiding behind two individually-DONE roadmap items).
 | 20 | **HttpObjectAnalyzer** | 2/2 | 3/3 | 0/5 | 2/3 | ✅ P0+P1 complete; P0-1, P0-2, P1-1, P1-2, P1-3, P3-3 done |
 | 21 | **DbConnectionAnalyzer** | 2/2 | 4/4 | 2/4 | 0/2 | ✅ P0+P1 complete (R1-R6); P2 50% (R7 done, R8-R10 pending) |
 | 22 | **TimerLeakAnalyzer** | 2/2 | 3/3 | 2/5 | 0/3 | ✅ P0+P1 COMPLETE (2/2, 3/3); P2 40% (2/5) |
-| 23 | **StaticRootLeakDetector** | 4/4 | 5/5 | 0/5 | 0/4 | ✅ P0+P1 COMPLETE (4/4, 5/5 — P1-5 shipped via tuple capture in BFS primitive) |
+| 23 | **StaticRootLeakDetector** | 4/4 | 5/5 | 7/7 | 4/5 | ✅ P0+P1+P2 COMPLETE (4/4, 5/5, 7/7 — P1-5 shipped via tuple capture in BFS primitive). P2: 7/7 — P2-1 (`HasDelegateFields` now also checks `ClrType.StaticFields` for field-like events), P2-2 (Gen2/LOH retained-fraction per root via `SegmentKindMapper.ResolveGeneration`), P2-4 (`static_roots_as_pct_of_live_heap` key metric), P2-5 (dead public `Analyze(ClrHeap, IHeapAnalysisCache)` overload removed), P2-6 (redundant explicit `Dispose()` removed) all shipped; P2-3 (cross-root overlap/shared-visited-set) found superseded — the dominator tree's virtual-root design already guarantees disjoint per-root retained subtrees (proven by `DominatorTreeComputerTests`), so no double-counting exists to fix; P2-7 (per-root growth delta in trend `Compare()`) found superseded — the scoped `static.root.byname.bytes` metric already renders as a per-root delta/pattern/status table via the generic T4 metric-timeline pipeline, and adding it to `Compare()` would break the aggregate-only convention every other trend comparer follows. P3: 4/5 — P3-1 (`[ThreadStatic]` root-description tag, using the already-available `ThreadStaticVar` root-kind distinction, no new heap walk), P3-2 (top retained namespaces alongside top types, new `TypeFilterHelper.GetNamespace` helper), P3-3 (finalizer-queue cross-reference via new `InsightEngine.DetectStaticRootFinalizableCorrelation`, joining on `FinalizableObjectAnalyzer`'s already-computed `TopQueueTypesByCount` rather than building a new finalizer-queue index), and P3-4 (exclusive-vs-inclusive size: wired the already-computed but previously-dropped `DirectObjectSize` through to the report as a new "Shallow Size" column) all shipped. P3-5 (parallel BFS across roots) deliberately deferred — no profiling evidence this is the actual bottleneck, and `CollectionAnalyzer`'s own parallel path already documents that ClrMD heap/field reads aren't reliably thread-safe under concurrent execution in this codebase, so the same hazard would apply here (`static-root-leak-detector-audit.md`) |
 | 25 | **GCRootAnalyzer** | 2/2 | 4/4 | 5/5 | 4/4 | ✅ P0+P1+P2+P3 COMPLETE (2026-08-28) — P0-1 was already done pre-dating this correction (tracker was stale, audit doc already showed it DONE); P1-1 (field/owner attribution) done via [../root-field-name-index-plan.md](../root-field-name-index-plan.md). P2: per-type `FinalizerQueue` breakdown (uncapped, not top-10 per project convention), Gen0/1/2/LOH generation distribution per root kind via `GenerationTagResolver`, `Tags`/`Order` declared, `RootSetCache._roots` publish race fixed via `Volatile.Read`/`Interlocked.CompareExchange`, dropped-zero-estimate-root count surfaced. P3: P3-1 (reverse-BFS root chain) and P3-2 (dominator-tree cross-reference with leak suspects) turned out to be the same feature — investigation found `RootPathFinder`/`ReverseReferenceIndex` already existed and in use by 6 other analyzers, and that applying it *inside* `GCRootAnalyzer` itself would be a degenerate no-op (a GC root's target is always a direct reference, no chain to reverse-BFS); the real gap was `LeakCandidateAnalyzer`'s `RootKind` being an unverified heuristic guess — both items implemented there instead via `EnrichTopCandidatesWithRootChains` (see `LeakCandidateAnalyzer` row below). P3-3 (trend regression on `gcroot.strong.handle.count`) found already fully wired through the generic trend-comparer pipeline, no code needed. P3-4 (shared collapsible tree for `RootPathGroups`) implemented as a new `TreeWidgets` output collapsing shared forward-walk shapes, additive alongside the unchanged flat view. See `gcroot-analyzer-audit.md` |
 
 **Subtotal: 46/46 P0 done, 86/86 P1 done** (AsyncStateMachineAnalyzer, AsyncTaskAnalyzer, and AllocationPatternAnalyzer moved to the RE-AUDITED table above; their P0/P1 counts are tracked there instead)
@@ -153,6 +153,28 @@ Different audits use different conventions for marking completion:
 | **ThreadAnalyzer P1-2** | `ClrThread.Name` property not available | Thread triage acceleration lost; critical context unavailable in hang reports | Awaiting Microsoft.Diagnostics.Runtime API enhancement | Requires managed thread enumeration + TLS parsing (architecture-specific) |
 
 **Status:** All three items marked as BLOCKED (⏳) indicating API limitations. P0-3's substitute is the global lock-contention table (not the reverse edge index — see note above); P1-1 and P1-2 are true API gaps.
+
+---
+
+## Cross-Analyzer / InsightEngine — Needs Re-Evaluation After All Audits Land
+
+Several per-analyzer audits have been closing "cross-analyzer correlation" items piecemeal by
+bolting a new `InsightEngine` detector onto whatever pair of analyzers the audit happened to be
+looking at (e.g. `ThreadStackClusterAnalyzer` × `HangAnalyzer`, `GCGenerationAnalyzer` ×
+`FinalizableObjectAnalyzer`, `StringAnalyzer` × `GCHandleAnalyzer`'s pinned-bytes breakdown,
+`JitAnalyzer` × `ModuleDomainResult`, and the `StaticRootLeakDetector` × `FinalizableObjectAnalyzer`
+finalizer-queue correlation planned in `static-root-leak-detector-audit.md` P3-3). Each of these was
+the right call in isolation, but `InsightEngine` itself — `InsightRuleContext`'s ever-growing field
+list, the three `IInsightRuleGroup` buckets, overlapping thresholds, and possible redundant/near-
+duplicate detectors across analyzers audited at different times — has not been reviewed holistically.
+
+**Action:** once every Phase 1 analyzer audit in this tracker is complete and its recommendations
+implemented, do a dedicated pass over `InsightEngine.cs` as a whole: check for duplicate or
+overlapping correlations, confirm `InsightRuleContext` hasn't accumulated dead/unused fields,
+and confirm the rule-group split (`BaselineRuleGroup`/`MemoryAndRuntimeRuleGroup`/
+`CorrelationRuleGroup`) still makes sense once every planned cross-analyzer detector exists. Do not
+treat any individual audit's InsightEngine addition as final/architecturally reviewed until this
+pass happens.
 
 ---
 

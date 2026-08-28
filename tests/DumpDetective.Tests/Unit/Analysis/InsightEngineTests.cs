@@ -619,6 +619,101 @@ public sealed class InsightEngineTests
         findings.Should().NotContain(f => f.Title.Contains("Pinned strings detected", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void Analyze_ShouldEmitCorrelation_WhenStaticRootRetainsTypeQueuedForFinalization()
+    {
+        InsightEngine engine = new();
+
+        StaticRootDomainResult staticRoot = new(
+            RootCount: 1,
+            TotalRetainedBytes: 10_000,
+            TopRootsByRetainedBytes:
+            [
+                new StaticRootSnapshot(
+                    RootDescription: "MyApp.Cache._entries",
+                    TotalMemoryImpact: 10_000,
+                    ObjectsKeptAlive: 50,
+                    TopRetainedTypes: [new RetainedTypeInfo { TypeName = "MyApp.Resource", Count = 50, TotalSize = 10_000 }])
+            ]);
+
+        FinalizableObjectDomainResult finalizable = new(
+            TotalFinalizableObjects: 100,
+            TotalFinalizableBytes: 10_000,
+            Gen0Count: 0,
+            Gen1Count: 0,
+            Gen2Count: 100,
+            LohCount: 0,
+            FinalizerQueueCount: 30,
+            FinalizerQueueRetainedBytes: 0,
+            IsRetainedEstimatePartial: false,
+            HasUndisposedDisposableInQueue: false,
+            CriticalFinalizerQueueCount: 0,
+            CriticalFinalizerQueueBytes: 0,
+            TopFinalizableTypesByGen2Count: [],
+            TopQueueTypesByCount: [new QueueTypeStatistic("MyApp.Resource", 30)],
+            TopCriticalFinalizerTypesByCount: [],
+            TopQueueEntriesByRetainedSize: []);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Static Root Leak Detection", AnalyzerExecutionStatus.Success, staticRoot),
+            BuildRun("Finalizable Object Analysis", AnalyzerExecutionStatus.Success, finalizable),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("queued for finalization", StringComparison.OrdinalIgnoreCase)
+            && f.Evidence.Contains("MyApp.Cache._entries", StringComparison.Ordinal)
+            && f.Evidence.Contains("MyApp.Resource", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Analyze_ShouldNotEmitCorrelation_WhenNoRetainedTypeMatchesQueuedType()
+    {
+        InsightEngine engine = new();
+
+        StaticRootDomainResult staticRoot = new(
+            RootCount: 1,
+            TotalRetainedBytes: 10_000,
+            TopRootsByRetainedBytes:
+            [
+                new StaticRootSnapshot(
+                    RootDescription: "MyApp.Cache._entries",
+                    TotalMemoryImpact: 10_000,
+                    ObjectsKeptAlive: 50,
+                    TopRetainedTypes: [new RetainedTypeInfo { TypeName = "MyApp.Unrelated", Count = 50, TotalSize = 10_000 }])
+            ]);
+
+        FinalizableObjectDomainResult finalizable = new(
+            TotalFinalizableObjects: 100,
+            TotalFinalizableBytes: 10_000,
+            Gen0Count: 0,
+            Gen1Count: 0,
+            Gen2Count: 100,
+            LohCount: 0,
+            FinalizerQueueCount: 30,
+            FinalizerQueueRetainedBytes: 0,
+            IsRetainedEstimatePartial: false,
+            HasUndisposedDisposableInQueue: false,
+            CriticalFinalizerQueueCount: 0,
+            CriticalFinalizerQueueBytes: 0,
+            TopFinalizableTypesByGen2Count: [],
+            TopQueueTypesByCount: [new QueueTypeStatistic("MyApp.Resource", 30)],
+            TopCriticalFinalizerTypesByCount: [],
+            TopQueueEntriesByRetainedSize: []);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Static Root Leak Detection", AnalyzerExecutionStatus.Success, staticRoot),
+            BuildRun("Finalizable Object Analysis", AnalyzerExecutionStatus.Success, finalizable),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().NotContain(f => f.Title.Contains("queued for finalization", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static AnalyzerRunResult BuildRun(string analyzerName, AnalyzerExecutionStatus status, AnalyzerDomainResult? result = null)
         => new(
             AnalyzerName: analyzerName,

@@ -320,25 +320,79 @@ the full reasoning and the audit of which call sites actually needed it.
 
 #### P2 — Medium
 
-| # | Recommendation | Impact | Difficulty | Confidence | Classification |
-|---|---------------|--------|------------|------------|----------------|
-| P2-1 | **Extend `HasDelegateFields` to check static fields** of the retaining type for event backing stores | Correctness | Low | Medium | Improvement |
-| P2-2 | **Gen2/LOH retention percentage** in snapshot | Diagnostic quality | Medium | High | Improvement |
-| P2-3 | **Cross-root overlap detection** — shared visited set across top-N roots to report unique retained bytes | Correctness/Quality | Medium | High | Improvement |
-| P2-4 | **`static_roots_as_pct_of_live_heap`** metric in key metrics | Context | Low | High | Improvement |
-| P2-5 | **Remove public `Analyze(ClrHeap, IHeapAnalysisCache)` overload** — leaks internal surface; tests should use `AnalyzeAsync` with a constructed `AnalysisContext` | Code hygiene | Low | High | Improvement |
-| P2-6 | **Remove redundant `void Dispose() { }`** explicit declaration — the interface default already provides it | Code hygiene | Low | High | Improvement |
-| P2-7 | **Per-root growth delta** in trend comparer when baseline is available | Investigation workflow | Medium | Medium | Improvement |
+| # | Recommendation | Impact | Difficulty | Confidence | Classification | Status |
+|---|---------------|--------|------------|------------|----------------|--------|
+| P2-1 | **Extend `HasDelegateFields` to check static fields** of the retaining type for event backing stores | Correctness | Low | Medium | Improvement | ✅ DONE |
+| P2-2 | **Gen2/LOH retention percentage** in snapshot | Diagnostic quality | Medium | High | Improvement | ✅ DONE |
+| P2-3 | **Cross-root overlap detection** — shared visited set across top-N roots to report unique retained bytes | Correctness/Quality | Medium | High | Improvement | ⛔ N/A — superseded |
+| P2-4 | **`static_roots_as_pct_of_live_heap`** metric in key metrics | Context | Low | High | Improvement | ✅ DONE |
+| P2-5 | **Remove public `Analyze(ClrHeap, IHeapAnalysisCache)` overload** — leaks internal surface; tests should use `AnalyzeAsync` with a constructed `AnalysisContext` | Code hygiene | Low | High | Improvement | ✅ DONE |
+| P2-6 | **Remove redundant `void Dispose() { }`** explicit declaration — the interface default already provides it | Code hygiene | Low | High | Improvement | ✅ DONE |
+| P2-7 | **Per-root growth delta** in trend comparer when baseline is available | Investigation workflow | Medium | Medium | Improvement | ⛔ N/A — superseded |
+
+P2-7 superseded: `StaticRootTrendComparer.ExtractMetrics` already emits a scoped
+`static.root.byname.bytes` metric per root, which the T4 Metric Timeline section
+(`TrendMetricTimelineSectionBuilder`) already renders as a per-root "Comparison Trends" table —
+one row per root with Δ, Δ%, a drift-pattern label, and a Stable/Regression/Severe-regression
+status, ranked by severity. The only gap versus the literal recommendation is that `Compare()`
+(baseline-vs-current) only emits the two aggregate deltas (`static.root.count`,
+`static.root.retained.bytes`), so individual roots don't compete for a slot in the small,
+cross-analyzer Top-5-regressions headline list. Every other `IAnalyzerTrendComparer` in the
+codebase (Boxing, Dominator, GCGeneration, Module, Hang, …) follows the same convention —
+`Compare()` aggregate-only, per-item detail only via `ExtractMetrics`/the T4 table — so making
+this analyzer the one exception isn't worth the inconsistency for what's already visible.
+
+P2-3 superseded: retained bytes come from `IDominatorTreeProvider`, a real dominator tree with a
+virtual root parenting every GC root (`DominatorTreeComputer`). Its own test suite proves two
+properties that rule out cross-root double counting for this analyzer's top-N summation — every
+GC root is always a direct child of the virtual root and is never folded into another root's
+subtree even when also graph-reachable from it
+(`Compute_RootWithSingleParentDegreeShape_IsNeverFoldedEvenThoughItLooksFoldable`), and an object
+reachable via multiple paths is promoted to their common ancestor and excluded from every
+descendant subtree rather than counted in more than one
+(`Compute_Diamond_MergePointDominatedByRoot_RetainedBytesSumCorrectly`). So two static roots'
+retained subtrees are disjoint by construction; exact-duplicate root addresses are separately
+deduplicated in `AnalyzeStaticRoots` via `processedRoots`. A shared visited set would change
+nothing today — P2-3's premise applied to the old pre-§12.1 naive BFS retained-set walk, not the
+current exact dominator-tree path.
 
 #### P3 — Low
 
-| # | Recommendation | Impact | Difficulty | Confidence | Classification |
-|---|---------------|--------|------------|------------|----------------|
-| P3-1 | **[ThreadStatic] field identification** in root description | Diagnostic | Low | Medium | Improvement |
-| P3-2 | **Top retained namespaces** alongside top types | Diagnostic quality | Low | High | Improvement |
-| P3-3 | **Finalizer queue cross-reference** — flag roots retaining finalizable objects | Diagnostic quality | High | Medium | Evolution |
-| P3-4 | **Dominator-tree retained size** (exclusive vs. inclusive) | Deep analysis | High | High | Evolution |
-| P3-5 | **Parallel BFS across roots** using `Parallel.For` with a shared cancellation token | Performance | Medium | Medium | Improvement |
+| # | Recommendation | Impact | Difficulty | Confidence | Classification | Status |
+|---|---------------|--------|------------|------------|----------------|--------|
+| P3-1 | **[ThreadStatic] field identification** in root description | Diagnostic | Low | Medium | Improvement | ✅ DONE |
+| P3-2 | **Top retained namespaces** alongside top types | Diagnostic quality | Low | High | Improvement | ✅ DONE |
+| P3-3 | **Finalizer queue cross-reference** — flag roots retaining finalizable objects | Diagnostic quality | High | Medium | Evolution | ✅ DONE |
+| P3-4 | **Dominator-tree retained size** (exclusive vs. inclusive) | Deep analysis | High | High | Evolution | ✅ DONE |
+| P3-5 | **Parallel BFS across roots** using `Parallel.For` with a shared cancellation token | Performance | Medium | Medium | Improvement | ⏸️ Deferred |
+
+P3-3 implemented via `InsightEngine.DetectStaticRootFinalizableCorrelation` (`CorrelationRuleGroup`),
+not a new "finalizer queue index" as originally scoped — `FinalizableObjectAnalyzer` already
+computes `TopQueueTypesByCount` (types with objects *currently* enqueued for finalization, not
+merely finalizable types), so the correlation is a type-name join against each static root's
+`TopRetainedTypes`, matching the existing `DetectJitModuleHotspot`-style domain-result-level
+correlation pattern. `StaticRootDomainResult` was wired into `InsightRuleContext` for the first
+time as part of this change. See `docs/analysis/phase1/phase1-completion-tracker.md`'s new
+"Cross-Analyzer / InsightEngine — Needs Re-Evaluation" section — this addition, like the other
+piecemeal `InsightEngine` additions from other audits, is subject to a holistic re-review once all
+Phase 1 audits are complete.
+
+P3-4 scope reduced: the "build a dominator-tree platform capability" half of this recommendation
+predates `DominatorAnalyzer`/`IDominatorTreeProvider`, which already exist and are already consumed
+here (§12.1) for exact inclusive retained bytes per root. The real remaining gap was that
+`DirectObjectSize` (the root object's own shallow size — the "exclusive" number) was already
+computed on `StaticRootAnalysis` but silently dropped in `BuildSnapshot` before reaching the report.
+Wired it through to `StaticRootSnapshot` and added a "Shallow Size" column next to "Retained Bytes"
+in the top-roots table, so the report now shows both the exclusive and inclusive size per root.
+
+P3-5 deferred: not implemented without profiling evidence first. `CollectionAnalyzer`'s own parallel
+path documents that ClrMD heap/field reads "are not reliably thread-safe" under concurrent execution
+in this codebase and gates parallelism behind `IDataReader.IsThreadSafe` plus a `SerializeHeapAccess`
+lock fallback — the same hazard would apply to a parallel per-root walk here (`heap.GetTypeByMethodTable`,
+`cache.TryGetObjectMetadata`, `heap.GetObject` in `HasDelegateFields` are all called per retained
+object). Root-level parallelism also only helps if runtime is spread across many roots rather than
+dominated by one or two large ones (Amdahl's law) — no profiling data exists either way. Revisit only
+after measuring a real dump's static-root analysis time breakdown.
 
 ---
 

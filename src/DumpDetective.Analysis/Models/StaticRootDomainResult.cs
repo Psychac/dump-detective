@@ -9,12 +9,20 @@ internal sealed class RetainedTypeInfo
     public ulong TotalSize { get; set; }
 }
 
+internal sealed class RetainedNamespaceInfo
+{
+    public string Namespace { get; set; } = string.Empty;
+    public int Count { get; set; }
+    public ulong TotalSize { get; set; }
+}
+
 // Static Roots
 
 internal sealed record StaticRootDomainResult(
     int RootCount,
     ulong TotalRetainedBytes,
-    IReadOnlyList<StaticRootSnapshot>? TopRootsByRetainedBytes = null) : AnalyzerDomainResult;
+    IReadOnlyList<StaticRootSnapshot>? TopRootsByRetainedBytes = null,
+    ulong TotalManagedHeapBytes = 0) : AnalyzerDomainResult;
 
 internal sealed record StaticRootSnapshot(
     string RootDescription,
@@ -26,4 +34,7 @@ internal sealed record StaticRootSnapshot(
     bool ScanWasCapped = false,
     bool ContainsCollections = false,
     bool ContainsEventHandlers = false,
-    string? AssemblyLoadContextInfo = null);
+    string? AssemblyLoadContextInfo = null,
+    double Gen2OrLohRetainedFraction = 0.0,
+    IReadOnlyList<RetainedNamespaceInfo>? TopRetainedNamespaces = null,
+    ulong DirectObjectSize = 0);

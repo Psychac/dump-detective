@@ -109,6 +109,7 @@ internal sealed class InsightEngine
         DbConnectionDomainResult? dbConn = FindResult<DbConnectionDomainResult>(runs);
         WcfChannelDomainResult? wcf = FindResult<WcfChannelDomainResult>(runs);
         HttpObjectDomainResult? http = FindResult<HttpObjectDomainResult>(runs);
+        StaticRootDomainResult? staticRoot = FindResult<StaticRootDomainResult>(runs);
 
         var ruleContext = new InsightRuleContext(
             Runs: runs,
@@ -138,7 +139,8 @@ internal sealed class InsightEngine
             EventLeaks: eventLeaks,
             DbConn: dbConn,
             Wcf: wcf,
-            Http: http);
+            Http: http,
+            StaticRoot: staticRoot);
 
         for (int i = 0; i < RuleGroups.Count; i++)
             RuleGroups[i].Apply(findings, in ruleContext);
@@ -181,7 +183,8 @@ internal sealed class InsightEngine
         EventLeakDomainResult? EventLeaks,
         DbConnectionDomainResult? DbConn,
         WcfChannelDomainResult? Wcf,
-        HttpObjectDomainResult? Http);
+        HttpObjectDomainResult? Http,
+        StaticRootDomainResult? StaticRoot);
 
     private sealed class BaselineRuleGroup : IInsightRuleGroup
     {
@@ -226,6 +229,7 @@ internal sealed class InsightEngine
             DetectFatalExceptionOnHeap(findings, context.Crash);
             DetectEventLeakPattern(findings, context.EventLeaks, context.GcGen, context.Finalizable);
             DetectDataTableLifecyclePattern(findings, context.Finalizable, context.Memory);
+            DetectStaticRootFinalizableCorrelation(findings, context.StaticRoot, context.Finalizable);
             DetectKnownLeakPatterns(findings, context.Memory);
             DetectMemoryTypeGenerationCorrelation(findings, context.Memory, context.GcGen);
             DetectStringMemoryConcentration(findings, context.Memory, context.Strings);
@@ -1319,6 +1323,72 @@ internal sealed class InsightEngine
                             "Consider replacing DataTable/DataSet with strongly typed models to eliminate finalizer overhead.",
             Tags: ["datatable", "datarow", "finalizer", "memory-leak", "dispose"],
             MetricValue: dataColumnFinalizer + dataRowHeap,
+            MetricUnit: "objects"));
+    }
+
+    /// <summary>
+    /// P3-3 (docs/analysis/phase1/static-root-leak-detector-audit.md): cross-references each
+    /// static root's top retained types against <see cref="FinalizableObjectDomainResult.TopQueueTypesByCount"/>
+    /// — types with objects *currently* enqueued for finalization, not merely finalizable types —
+    /// by type name. No new heap walk or shared index is needed; both lists are already computed
+    /// by their respective analyzers.
+    /// </summary>
+    private static void DetectStaticRootFinalizableCorrelation(
+        List<InsightFinding> findings,
+        StaticRootDomainResult? staticRoot,
+        FinalizableObjectDomainResult? finalizable)
+    {
+        if (staticRoot is null || finalizable is null)
+            return;
+
+        if (staticRoot.TopRootsByRetainedBytes is null || finalizable.TopQueueTypesByCount.Count == 0)
+            return;
+
+        var queueCountByType = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (int i = 0; i < finalizable.TopQueueTypesByCount.Count; i++)
+        {
+            QueueTypeStatistic stat = finalizable.TopQueueTypesByCount[i];
+            queueCountByType[stat.TypeName] = stat.QueueCount;
+        }
+
+        string? bestRootDescription = null;
+        string? bestTypeName = null;
+        int bestQueueCount = 0;
+        int bestRetainedCount = 0;
+
+        foreach (StaticRootSnapshot root in staticRoot.TopRootsByRetainedBytes)
+        {
+            if (root.TopRetainedTypes is null)
+                continue;
+
+            foreach (RetainedTypeInfo typeInfo in root.TopRetainedTypes)
+            {
+                if (!queueCountByType.TryGetValue(typeInfo.TypeName, out int queueCount) || queueCount <= bestQueueCount)
+                    continue;
+
+                bestQueueCount = queueCount;
+                bestRootDescription = root.RootDescription;
+                bestTypeName = typeInfo.TypeName;
+                bestRetainedCount = typeInfo.Count;
+            }
+        }
+
+        if (bestRootDescription is null)
+            return;
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Memory",
+            Severity: FindingSeverity.Info,
+            Title: "Static root retains a type with objects queued for finalization",
+            Evidence: $"Static root '{bestRootDescription}' retains {bestRetainedCount:N0} instance(s) of " +
+                      $"{bestTypeName}, which also has {bestQueueCount:N0} instance(s) currently queued for " +
+                      "finalization — this root may be delaying their collection.",
+            Recommendation: "Confirm this static root's ownership of the type is intentional (e.g. a cache), " +
+                            "and that instances are removed or disposed once no longer needed so finalization " +
+                            "isn't delayed by long-lived static retention.",
+            Tags: ["static-root", "finalizer", "cross-cutting"],
+            MetricValue: bestQueueCount,
             MetricUnit: "objects"));
     }
 

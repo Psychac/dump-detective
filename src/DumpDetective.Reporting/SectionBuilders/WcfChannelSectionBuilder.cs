@@ -30,6 +30,9 @@ internal sealed class WcfChannelSectionBuilder : SectionBuilderBase, IAnalyzerSe
             ["closing"] = new NumericMetricValue(d.ClosingChannels, MetricUnit.Count),
             ["closed"] = new NumericMetricValue(d.ClosedChannels, MetricUnit.Count),
             ["other"] = new NumericMetricValue(d.OtherChannels, MetricUnit.Count),
+            ["invalid_state"] = new NumericMetricValue(d.InvalidStateCount, MetricUnit.Count),
+            ["duplex_channels"] = new NumericMetricValue(d.DuplexChannelCount, MetricUnit.Count),
+            ["session_channels"] = new NumericMetricValue(d.SessionChannelCount, MetricUnit.Count),
             ["factories"] = new NumericMetricValue(d.FactoryCount, MetricUnit.Count),
             ["total_bytes"] = new NumericMetricValue(d.TotalBytes, MetricUnit.Bytes),
         };
@@ -58,9 +61,11 @@ internal sealed class WcfChannelSectionBuilder : SectionBuilderBase, IAnalyzerSe
                     Cell($"{t.ClosedCount:N0}",  t.ClosedCount),
                     Cell($"{t.OtherCount:N0}",   t.OtherCount),
                     Cell(FormatBytes(t.TotalBytes)),
+                    Cell(t.BindingHint.ToString()),
+                    Cell($"{t.InvalidStateCount:N0}", t.InvalidStateCount),
                 ]));
             }
-            compactTables.Add(STCompact("Channel objects by type", new[] { CH("Type"), CH("Total","number"), CH("Opening","number"), CH("Opened","number"), CH("Faulted","number"), CH("Closing","number"), CH("Closed","number"), CH("Other","number"), CH("Heap Size","bytes") }, typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Channel objects by type", new[] { CH("Type"), CH("Total","number"), CH("Opening","number"), CH("Opened","number"), CH("Faulted","number"), CH("Closing","number"), CH("Closed","number"), CH("Other","number"), CH("Heap Size","bytes"), CH("Binding"), CH("Invalid State","number") }, typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         // Top faulted channels

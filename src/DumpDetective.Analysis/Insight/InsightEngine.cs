@@ -242,6 +242,7 @@ internal sealed class InsightEngine
             DetectDbConnectionLeak(findings, context.DbConn, context.Crash);
             DetectLongHeldTransactionOnOpenConnection(findings, context.SqlTxn, context.DbConn);
             DetectWcfChannelFault(findings, context.Wcf, context.Crash);
+            DetectWcfOpeningTimeoutCorrelation(findings, context.Wcf, context.Crash);
             DetectHttpClientAccumulation(findings, context.Http);
             DetectClusterHangCorrelation(findings, context.Clusters, context.Hang);
         }
@@ -1698,6 +1699,12 @@ internal sealed class InsightEngine
     /// Raises a Warning when a large number of operational timeout exceptions are present on the heap,
     /// indicating systematic connection pool exhaustion, network instability, or slow dependencies.
     /// </summary>
+    private static bool IsTimeoutExceptionType(string typeName) =>
+        typeName is "System.TimeoutException" or
+            "System.OperationCanceledException" or
+            "System.Net.WebException" ||
+        typeName.EndsWith("TimeoutException", StringComparison.OrdinalIgnoreCase);
+
     private static void DetectRecurringTimeoutPattern(
         List<InsightFinding> findings,
         CrashDomainResult? crash)
@@ -1711,10 +1718,7 @@ internal sealed class InsightEngine
 
         foreach (KeyValuePair<string, int> kv in crash.ExceptionTypeCounts)
         {
-            if (kv.Key is "System.TimeoutException" or
-                "System.OperationCanceledException" or
-                "System.Net.WebException" ||
-                kv.Key.EndsWith("TimeoutException", StringComparison.OrdinalIgnoreCase))
+            if (IsTimeoutExceptionType(kv.Key))
             {
                 timeoutCount += kv.Value;
             }
@@ -1875,6 +1879,58 @@ internal sealed class InsightEngine
                 MetricValue: wcf.FaultedChannels,
                 MetricUnit: "faulted channels"));
         }
+    }
+
+    /// <summary>
+    /// Cross-correlates channels stuck in the Opening state with timeout exceptions elsewhere
+    /// on the heap. Opening is transient in healthy operation, so its presence alongside a
+    /// timeout exception is itself the signal (§P2-2,
+    /// docs/analysis/phase1/wcf-channel-analyzer-audit.md) — this is deliberately not gated on a
+    /// count threshold the way <see cref="DetectRecurringTimeoutPattern"/> is, since a co-occurring
+    /// timeout is a much stronger indicator here than raw timeout volume alone. Severity escalates
+    /// once either signal grows large enough to suggest an ongoing outage rather than one-off flakiness.
+    /// </summary>
+    private static void DetectWcfOpeningTimeoutCorrelation(
+        List<InsightFinding> findings,
+        WcfChannelDomainResult? wcf,
+        CrashDomainResult? crash)
+    {
+        if (wcf is null || !wcf.WcfPresent) return;
+        if (wcf.OpeningChannels == 0) return;
+
+        int timeoutCount = 0;
+        if (crash?.ExceptionTypeCounts is not null)
+        {
+            foreach (KeyValuePair<string, int> kv in crash.ExceptionTypeCounts)
+            {
+                if (IsTimeoutExceptionType(kv.Key))
+                    timeoutCount += kv.Value;
+            }
+        }
+
+        if (timeoutCount == 0) return;
+
+        FindingSeverity severity = wcf.OpeningChannels >= 5 || timeoutCount >= 10
+            ? FindingSeverity.Warning
+            : FindingSeverity.Info;
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Infrastructure",
+            Severity: severity,
+            Title: $"{wcf.OpeningChannels:N0} WCF channel(s) stuck Opening alongside timeout exceptions",
+            Evidence: $"{wcf.OpeningChannels:N0} WCF channel(s) are in the Opening state with " +
+                      $"{timeoutCount:N0} timeout/cancellation exception(s) on heap. " +
+                      "A channel normally spends milliseconds in Opening — a channel captured in " +
+                      "this state usually means Channel.Open()/OpenAsync() is blocked on a connect, " +
+                      "DNS, or handshake timeout.",
+            Recommendation: "Check the remote endpoint's availability and network path (firewall, DNS, " +
+                            "load balancer health). Confirm openTimeout is set appropriately for the " +
+                            "transport, and that Open()/OpenAsync() failures are observed and the channel " +
+                            "is Abort()ed rather than left half-open.",
+            Tags: ["infrastructure", "wcf", "channel", "timeout", "connection"],
+            MetricValue: wcf.OpeningChannels,
+            MetricUnit: "opening channels"));
     }
 
     private static void DetectHttpClientAccumulation(

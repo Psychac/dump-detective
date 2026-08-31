@@ -1,5 +1,6 @@
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 
 using Microsoft.Diagnostics.Runtime;
@@ -132,9 +133,8 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
 
     private ClrHeap? _heap;
     private IHeapAnalysisCache? _cache;
-    private Dictionary<ulong, (string TypeName, long Count, ulong Bytes)>? _candidateMts;
     private HashSet<ulong>? _factoryMts;
-    private Dictionary<ulong, (string Name, int Total, int Opening, int Opened, int Faulted, int Closing, int Closed, int Other, ulong Bytes)>? _typeStats;
+    private Dictionary<ulong, (string Name, int Total, int Opening, int Opened, int Faulted, int Closing, int Closed, int Other, int InvalidState, ulong Bytes)>? _typeStats;
     private InstanceStateSampler<WcfChannelSnapshot>? _sampler;
     private int _factoryCount;
 
@@ -153,17 +153,16 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
 
         Dictionary<ulong, (string TypeName, long Count, ulong Bytes)> candidateMts =
             TypedResourceScanDriver.DiscoverCandidates(this, heap, context.Cache);
-        _candidateMts = candidateMts;
 
         Dictionary<ulong, (string TypeName, long Count, ulong Bytes)> factoryCandidates =
             TypedResourceCandidateScanner.DiscoverCandidates(heap, context.Cache, IsFactoryType);
         _factoryMts = new HashSet<ulong>(factoryCandidates.Keys);
 
-        var typeStats = new Dictionary<ulong, (string Name, int Total, int Opening, int Opened, int Faulted, int Closing, int Closed, int Other, ulong Bytes)>(candidateMts.Count);
+        var typeStats = new Dictionary<ulong, (string Name, int Total, int Opening, int Opened, int Faulted, int Closing, int Closed, int Other, int InvalidState, ulong Bytes)>(candidateMts.Count);
         foreach (KeyValuePair<ulong, (string TypeName, long Count, ulong Bytes)> kv in candidateMts)
         {
             int total = (int)Math.Min(kv.Value.Count, int.MaxValue);
-            typeStats[kv.Key] = (kv.Value.TypeName, total, 0, 0, 0, 0, 0, 0, kv.Value.Bytes);
+            typeStats[kv.Key] = (kv.Value.TypeName, total, 0, 0, 0, 0, 0, 0, 0, kv.Value.Bytes);
         }
 
         _typeStats = typeStats;
@@ -210,6 +209,7 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
                     self.Closing + o.Closing,
                     self.Closed + o.Closed,
                     self.Other + o.Other,
+                    self.InvalidState + o.InvalidState,
                     self.Bytes);
             }
 
@@ -220,7 +220,6 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
 
     private void OnHeapEntry(in HeapEntry entry)
     {
-        var candidateMts = _candidateMts!;
         var typeStats = _typeStats!;
         var sampler = _sampler!;
 
@@ -233,12 +232,13 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
             return;
         }
 
-        if (!candidateMts.ContainsKey(entry.MethodTable)) return;
+        // typeStats is seeded 1:1 from _candidateMts in BeforeHeapIndexScan, so a single
+        // TryGetValue against typeStats also serves as the candidate-type check.
         if (!typeStats.TryGetValue(entry.MethodTable, out var ts)) return;
 
         WcfChannelSnapshot? snap = TypedResourceScanDriver.TryGetSample(this, _heap!, in entry, ts.Name);
 
-        int opening = ts.Opening; int opened = ts.Opened; int faulted = ts.Faulted; int closing = ts.Closing; int closed = ts.Closed; int other = ts.Other;
+        int opening = ts.Opening; int opened = ts.Opened; int faulted = ts.Faulted; int closing = ts.Closing; int closed = ts.Closed; int other = ts.Other; int invalidState = ts.InvalidState;
         if (snap is not null)
         {
             if (snap.StateValue == StateOpening)      opening++;
@@ -246,10 +246,11 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
             else if (snap.StateValue == StateFaulted) faulted++;
             else if (snap.StateValue == StateClosing) closing++;
             else if (snap.StateValue == StateClosed)  closed++;
-            else                                      other++;
+            else if (IsValidCommunicationState(snap.StateValue)) other++; // Created (0) — valid, just uncommon to observe on heap
+            else invalidState++; // out-of-range/corrupted state read — do not silently fold into Other
         }
 
-        typeStats[entry.MethodTable] = (ts.Name, ts.Total, opening, opened, faulted, closing, closed, other, ts.Bytes);
+        typeStats[entry.MethodTable] = (ts.Name, ts.Total, opening, opened, faulted, closing, closed, other, invalidState, ts.Bytes);
 
         if (snap is not null && snap.StateValue == StateFaulted)
             sampler.AddTopSample(snap);
@@ -269,14 +270,15 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
             return Empty();
 
         // ── Build result ──────────────────────────────────────────────────────
-        int totalChannels = 0, totalOpening = 0, totalOpened = 0, totalFaulted = 0, totalClosing = 0, totalClosed = 0, totalOther = 0;
+        int totalChannels = 0, totalOpening = 0, totalOpened = 0, totalFaulted = 0, totalClosing = 0, totalClosed = 0, totalOther = 0, totalInvalidState = 0;
+        int totalDuplex = 0, totalSession = 0;
         ulong totalBytes = 0;
         var byType = new List<WcfChannelTypeSummary>(_typeStats.Count);
 
         foreach (var kv in _typeStats)
         {
             var ts = kv.Value;
-            byType.Add(new WcfChannelTypeSummary(ts.Name, ts.Total, ts.Opening, ts.Opened, ts.Faulted, ts.Closing, ts.Closed, ts.Other, ts.Bytes));
+            byType.Add(new WcfChannelTypeSummary(ts.Name, ts.Total, ts.Opening, ts.Opened, ts.Faulted, ts.Closing, ts.Closed, ts.Other, ts.Bytes, ClassifyBindingHint(ts.Name), ts.InvalidState));
             totalChannels += ts.Total;
             totalOpening  += ts.Opening;
             totalOpened   += ts.Opened;
@@ -284,7 +286,10 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
             totalClosing  += ts.Closing;
             totalClosed   += ts.Closed;
             totalOther    += ts.Other;
+            totalInvalidState += ts.InvalidState;
             totalBytes    += ts.Bytes;
+            if (IsDuplexChannelType(ts.Name)) totalDuplex += ts.Total;
+            if (IsSessionChannelType(ts.Name)) totalSession += ts.Total;
         }
 
         byType.Sort(static (a, b) => b.TotalCount.CompareTo(a.TotalCount));
@@ -301,7 +306,10 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
             ByType:           byType,
             TopFaultedChannels: WithRetainedBytes(_sampler?.TopSamples ?? []),
             FactoryCount:     _factoryCount,
-            TotalBytes:       totalBytes);
+            TotalBytes:       totalBytes,
+            InvalidStateCount: totalInvalidState,
+            DuplexChannelCount: totalDuplex,
+            SessionChannelCount: totalSession);
     }
 
     // §9 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): the biggest gap
@@ -325,6 +333,41 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
         return result;
     }
 
+    // Dumps carry no binding configuration, only channel objects, so this infers the binding
+    // from the channel type name's declaring-type prefix (nested channel classes carry their
+    // enclosing ChannelFactory's name, e.g. "TcpChannelFactory+ClientFramingDuplexSessionChannel"
+    // or "NamedPipeChannelFactory+PipeConnectionChannel"). net.tcp and net.pipe both use
+    // FramingDuplexSessionChannel under the hood, so when the heap only has the bare channel
+    // type with no factory-name prefix, neither token matches and this correctly reports
+    // Unknown rather than guessing. The "Security..." wrapper channel classes used for WS-*
+    // message security are emitted for wsHttpBinding far more often than for basicHttpBinding
+    // (which has no message-security wrapper), so a bare "Security" token is treated as the
+    // WsHttp signal. Order matters: NamedPipe/Tcp are checked first since a tcp channel can
+    // also carry a security wrapper.
+    internal static WcfBindingHint ClassifyBindingHint(string typeName)
+    {
+        if (typeName.Contains("NamedPipe", StringComparison.Ordinal))
+            return WcfBindingHint.NamedPipe;
+        if (typeName.Contains("Tcp", StringComparison.Ordinal))
+            return WcfBindingHint.NetTcp;
+        if (typeName.Contains("Security", StringComparison.Ordinal))
+            return WcfBindingHint.WsHttp;
+        if (typeName.Contains("Http", StringComparison.Ordinal))
+            return WcfBindingHint.Basic;
+        return WcfBindingHint.Unknown;
+    }
+
+    // Runtime channel objects are concrete classes, not the ISessionChannel/IDuplexChannel
+    // interfaces themselves, but System.ServiceModel's channel class names consistently encode
+    // both shape tokens (e.g. "ClientFramingDuplexSessionChannel" is both duplex and session-based),
+    // so a type-name token match is the same cheap, no-ClrType-introspection approach already used
+    // by ClassifyBindingHint rather than walking ClrType.EnumerateInterfaces() per candidate.
+    internal static bool IsDuplexChannelType(string typeName) =>
+        typeName.Contains("Duplex", StringComparison.Ordinal);
+
+    internal static bool IsSessionChannelType(string typeName) =>
+        typeName.Contains("Session", StringComparison.Ordinal);
+
     private static string MapCommunicationState(int state) => state switch
     {
         0 => "Created",
@@ -335,6 +378,13 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
         5 => "Faulted",
         _ => "Unknown",
     };
+
+    // CommunicationState only defines 0 (Created) through 5 (Faulted). A value outside that
+    // range means the "_state"/"state"/"communicationState" field probe matched a differently
+    // laid-out field on a lookalike type, or the memory is corrupted — either way it is not a
+    // real channel state and must not be folded into the Other bucket alongside legitimate
+    // (if uncommon) Created-state channels.
+    internal static bool IsValidCommunicationState(int stateVal) => stateVal is >= 0 and <= StateFaulted;
 
     private static WcfChannelDomainResult Empty() =>
         new(false, 0, 0, 0, 0, 0, 0, 0, [], []);

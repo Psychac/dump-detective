@@ -777,6 +777,130 @@ public sealed class InsightEngineTests
         findings.Should().NotContain(f => f.Title.Contains("held by a live transaction", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void Analyze_ShouldEmitFinding_WhenOpeningChannelsCoincideWithTimeoutExceptions()
+    {
+        InsightEngine engine = new();
+
+        WcfChannelDomainResult wcf = BuildWcfResult(opening: 1);
+
+        CrashDomainResult crash = new(
+            TotalExceptions: 1,
+            ActiveExceptions: 0,
+            ExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal)
+            {
+                ["System.TimeoutException"] = 1,
+            },
+            ActiveExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal));
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("WCF Channel Analysis", AnalyzerExecutionStatus.Success, wcf),
+            BuildRun("Crash Analyzer", AnalyzerExecutionStatus.Success, crash),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Severity == FindingSeverity.Info
+            && f.Title.Contains("stuck Opening", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Analyze_ShouldEscalateToWarning_WhenOpeningChannelCountIsHigh()
+    {
+        InsightEngine engine = new();
+
+        WcfChannelDomainResult wcf = BuildWcfResult(opening: 5);
+
+        CrashDomainResult crash = new(
+            TotalExceptions: 1,
+            ActiveExceptions: 0,
+            ExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal)
+            {
+                ["System.TimeoutException"] = 1,
+            },
+            ActiveExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal));
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("WCF Channel Analysis", AnalyzerExecutionStatus.Success, wcf),
+            BuildRun("Crash Analyzer", AnalyzerExecutionStatus.Success, crash),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Severity == FindingSeverity.Warning
+            && f.Title.Contains("stuck Opening", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Analyze_ShouldNotEmitOpeningTimeoutFinding_WhenNoTimeoutExceptionsPresent()
+    {
+        InsightEngine engine = new();
+
+        WcfChannelDomainResult wcf = BuildWcfResult(opening: 3);
+
+        CrashDomainResult crash = new(
+            TotalExceptions: 1,
+            ActiveExceptions: 0,
+            ExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal)
+            {
+                ["System.InvalidOperationException"] = 1,
+            },
+            ActiveExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal));
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("WCF Channel Analysis", AnalyzerExecutionStatus.Success, wcf),
+            BuildRun("Crash Analyzer", AnalyzerExecutionStatus.Success, crash),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().NotContain(f => f.Title.Contains("stuck Opening", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Analyze_ShouldNotEmitOpeningTimeoutFinding_WhenNoChannelsAreOpening()
+    {
+        InsightEngine engine = new();
+
+        WcfChannelDomainResult wcf = BuildWcfResult(opening: 0);
+
+        CrashDomainResult crash = new(
+            TotalExceptions: 1,
+            ActiveExceptions: 0,
+            ExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal)
+            {
+                ["System.TimeoutException"] = 1,
+            },
+            ActiveExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal));
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("WCF Channel Analysis", AnalyzerExecutionStatus.Success, wcf),
+            BuildRun("Crash Analyzer", AnalyzerExecutionStatus.Success, crash),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().NotContain(f => f.Title.Contains("stuck Opening", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static WcfChannelDomainResult BuildWcfResult(int opening) => new(
+        WcfPresent: true,
+        TotalChannels: opening + 1,
+        OpeningChannels: opening,
+        OpenedChannels: 1,
+        FaultedChannels: 0,
+        ClosingChannels: 0,
+        ClosedChannels: 0,
+        OtherChannels: 0,
+        ByType: [],
+        TopFaultedChannels: []);
+
     private static AnalyzerRunResult BuildRun(string analyzerName, AnalyzerExecutionStatus status, AnalyzerDomainResult? result = null)
         => new(
             AnalyzerName: analyzerName,

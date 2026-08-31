@@ -21,6 +21,7 @@ internal sealed class WcfChannelFindingGenerator : IFindingGenerator
         {
             string typeBreakdown = BuildFaultedBreakdown(r.ByType);
             string endpointSummary = BuildEndpointSummary(r.TopFaultedChannels);
+            WcfBindingHint dominantBinding = DominantFaultedBindingHint(r.ByType);
 
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
@@ -34,7 +35,8 @@ internal sealed class WcfChannelFindingGenerator : IFindingGenerator
                     "WCF best practice: wrap channel usage in try/catch. " +
                     "On success call channel.Close(). On any exception call channel.Abort(). " +
                     "Never call Close() on a faulted channel — it will throw. " +
-                    "Faulted channels that are not Abort()ed retain server-side resources and may cause connection pool exhaustion.",
+                    "Faulted channels that are not Abort()ed retain server-side resources and may cause connection pool exhaustion. " +
+                    BindingSpecificFaultGuidance(dominantBinding),
                 Tags: ["infrastructure", "wcf", "channel", "fault"],
                 MetricValue: r.FaultedChannels,
                 MetricUnit: "faulted channels"));
@@ -52,7 +54,9 @@ internal sealed class WcfChannelFindingGenerator : IFindingGenerator
                 Title: $"{r.TotalChannels:N0} WCF channel objects on managed heap",
                 Evidence: $"Total WCF channels: {r.TotalChannels:N0}. " +
                           $"Opening: {r.OpeningChannels:N0}, Opened: {r.OpenedChannels:N0}, Faulted: {r.FaultedChannels:N0}, " +
-                          $"Closing: {r.ClosingChannels:N0}, Closed: {r.ClosedChannels:N0}, Other: {r.OtherChannels:N0}.",
+                          $"Closing: {r.ClosingChannels:N0}, Closed: {r.ClosedChannels:N0}, Other: {r.OtherChannels:N0}" +
+                          (r.InvalidStateCount > 0 ? $", Invalid: {r.InvalidStateCount:N0}." : ".") +
+                          $" Duplex-capable: {r.DuplexChannelCount:N0}, Session-based: {r.SessionChannelCount:N0}.",
                 Recommendation:
                     "Each WCF channel holds a network connection and associated buffers. " +
                     "Create a new channel per logical operation and Close/Abort it immediately after use. " +
@@ -99,6 +103,40 @@ internal sealed class WcfChannelFindingGenerator : IFindingGenerator
         }
         return sb.Length > 0 ? sb.ToString() : "(mixed types)";
     }
+
+    private static WcfBindingHint DominantFaultedBindingHint(IReadOnlyList<WcfChannelTypeSummary> byType)
+    {
+        WcfBindingHint dominant = WcfBindingHint.Unknown;
+        int dominantFaulted = 0;
+        foreach (WcfChannelTypeSummary t in byType)
+        {
+            if (t.FaultedCount > dominantFaulted)
+            {
+                dominant = t.BindingHint;
+                dominantFaulted = t.FaultedCount;
+            }
+        }
+        return dominant;
+    }
+
+    private static string BindingSpecificFaultGuidance(WcfBindingHint hint) => hint switch
+    {
+        WcfBindingHint.NetTcp =>
+            "net.tcp channels most often fault from idle-connection timeouts or a mid-session TCP " +
+            "reset — check receiveTimeout/reliableSession settings and confirm the server-side " +
+            "connection quota isn't exhausted.",
+        WcfBindingHint.NamedPipe =>
+            "Named-pipe channels most often fault when the local host process serving the pipe " +
+            "restarts or its ACL/session context changes — confirm the pipe server's process " +
+            "lifetime matches client expectations.",
+        WcfBindingHint.WsHttp =>
+            "WS-* channels most often fault from an expired or renegotiated security token — check " +
+            "token lifetime configuration and clock skew between client and server.",
+        WcfBindingHint.Basic =>
+            "basicHttp channels most often fault from an HTTP-level timeout or a 5xx server " +
+            "response — check sendTimeout and server-side capacity.",
+        _ => "Binding could not be determined from the channel type name.",
+    };
 
     private static string BuildEndpointSummary(IReadOnlyList<WcfChannelSnapshot> topFaulted)
     {

@@ -432,18 +432,18 @@ make DumpDetective's WCF analysis definitively superior to any available tool.
 
 | # | Recommendation | Impact | Difficulty | Confidence | Classification |
 |---|---|---|---|---|---|
-| P2-1 | **Classify binding type from type name suffix.** Append `BindingHint` (Basic, NetTcp, WsHttp, NamedPipe, Unknown) to `WcfChannelTypeSummary`. Differentiate finding recommendations by binding type. | Medium | Low | Medium | Improvement |
-| P2-2 | **Add `Opening` + `Closing` cross-correlation in `InsightEngine`.** When `OpeningChannels > 0` and timeout exceptions are present, emit a cross-cutting finding for connection-level failures. | Medium | Low | High | Evolution |
-| P2-3 | **Add per-type cap indicator to `StateScanCapped`.** Change from `bool` to `IReadOnlyList<string>` of capped type names, or add a `CappedTypeCount` integer, so report consumers know the scope. | Low | Low | High | Improvement |
-| P2-4 | **Eliminate `ContainsKey` + `TryGetValue` double lookup in `OnHeapEntry`.** Single `TryGetValue` suffices. | Low | Trivial | High | Improvement |
+| P2-1 | **Classify binding type from type name suffix.** Append `BindingHint` (Basic, NetTcp, WsHttp, NamedPipe, Unknown) to `WcfChannelTypeSummary`. Differentiate finding recommendations by binding type. | Medium | Low | Medium | ✅ Complete (2026-08-31) |
+| P2-2 | **Add `Opening` + `Closing` cross-correlation in `InsightEngine`.** When `OpeningChannels > 0` and timeout exceptions are present, emit a cross-cutting finding for connection-level failures. | Medium | Low | High | ✅ Complete (2026-08-31) |
+| P2-3 | **Add per-type cap indicator to `StateScanCapped`.** Change from `bool` to `IReadOnlyList<string>` of capped type names, or add a `CappedTypeCount` integer, so report consumers know the scope. | Low | Low | High | ⏭️ Superseded (2026-08-31) |
+| P2-4 | **Eliminate `ContainsKey` + `TryGetValue` double lookup in `OnHeapEntry`.** Single `TryGetValue` suffices. | Low | Trivial | High | ✅ Complete (2026-08-31) |
 
 #### P3 — Low
 
 | # | Recommendation | Impact | Difficulty | Confidence | Classification |
 |---|---|---|---|---|---|
-| P3-1 | **Add `stateVal` range validation.** Guard `stateVal < 0 || stateVal > 5` and increment a separate `InvalidStateCount` rather than silently absorbing into `OtherChannels`. | Low | Trivial | Medium | Improvement |
-| P3-2 | **Detect duplex and session channels separately.** Add `ISessionChannel` and `IDuplexChannel` type tokens; add `SessionChannelCount` and `DuplexChannelCount` to domain model. | Medium | Medium | Medium | Improvement |
-| P3-3 | **Add a test that exercises the `MergePartial` new-key-from-worker path under realistic pre-seeding.** Currently the branch is logically unreachable in production. | Low | Low | High | Improvement |
+| P3-1 | **Add `stateVal` range validation.** Guard `stateVal < 0 || stateVal > 5` and increment a separate `InvalidStateCount` rather than silently absorbing into `OtherChannels`. | Low | Trivial | Medium | ✅ Complete (2026-08-31) |
+| P3-2 | **Detect duplex and session channels separately.** Add `ISessionChannel` and `IDuplexChannel` type tokens; add `SessionChannelCount` and `DuplexChannelCount` to domain model. | Medium | Medium | Medium | ✅ Complete (2026-08-31) |
+| P3-3 | **Add a test that exercises the `MergePartial` new-key-from-worker path under realistic pre-seeding.** Currently the branch is logically unreachable in production. | Low | Low | High | ✅ Complete (2026-08-31) |
 
 ---
 
@@ -570,3 +570,98 @@ make DumpDetective's WCF analysis definitively superior to any available tool.
 - Uses identical typed-resource infrastructure as WcfChannelAnalyzer
 
 **Status:** Platform-level improvement already in place. No action needed.
+
+### ✅ P2-1 Complete (2026-08-31)
+
+**Status:** Binding type now classified from channel type name and surfaced in reports
+
+**What was done:**
+- Added `WcfBindingHint` enum (`Unknown`, `Basic`, `NetTcp`, `WsHttp`, `NamedPipe`) to `DumpDetective.Core.Enums`
+- Added `BindingHint` field to `WcfChannelTypeSummary`, populated per-type in `WcfChannelAnalyzer.BuildResult()` via new `ClassifyBindingHint(string typeName)`
+- Classification is a type-name-token heuristic (NamedPipe → NamedPipe, Tcp → NetTcp, Security → WsHttp, Http → Basic, else Unknown); documented limitation: net.tcp and net.pipe both use `FramingDuplexSessionChannel` under the hood, so a bare channel type with no enclosing-factory-name prefix correctly classifies as `Unknown` rather than guessing
+- `WcfChannelSectionBuilder` now shows a "Binding" column in the per-type table
+- `WcfChannelFindingGenerator`'s faulted-channels finding now appends binding-specific remediation guidance (timeout/quota for net.tcp, pipe-server lifetime for net.pipe, security-token lifetime/clock-skew for WS-*, HTTP timeout/5xx for basicHttp) based on the dominant binding among faulted types
+
+**Impact:**
+- Reports now differentiate remediation guidance by binding instead of one generic recommendation for all faulted channels
+- Heuristic is intentionally conservative (Unknown when ambiguous) rather than mis-attributing a binding
+
+### ✅ P2-4 Complete (2026-08-31)
+
+**Status:** Double dictionary lookup removed from `OnHeapEntry`'s hot path
+
+**What was done:**
+- Removed the `_candidateMts.ContainsKey(entry.MethodTable)` check that preceded `_typeStats.TryGetValue(...)` — `_typeStats` is seeded 1:1 from the candidate-MethodTable map in `BeforeHeapIndexScan`, so `TryGetValue` against `_typeStats` alone already serves as the candidate-type check
+- Removed the now-write-only `_candidateMts` field; `BeforeHeapIndexScan` uses a local variable instead
+
+**Impact:**
+- One dictionary probe removed per heap object that reaches this point in `OnHeapEntry` (still gated behind the cheap `_factoryMts` MethodTable-set check first)
+- No behavior change; covered by existing `WcfChannelAnalyzerHeapIndexScanTests`
+
+### ✅ P2-2 Complete (2026-08-31)
+
+**Status:** New `DetectWcfOpeningTimeoutCorrelation` cross-cutting rule added to `InsightEngine`
+
+**What was done:**
+- Added `DetectWcfOpeningTimeoutCorrelation(findings, wcf, crash)` to `InsightEngine`'s `CorrelationRuleGroup`, alongside the existing `DetectWcfChannelFault` (which correlates *Faulted* channels with WCF/`ObjectDisposedException`) — this rule instead targets channels stuck in the *Opening* state, a distinct connect-time symptom that previously had no dedicated finding at all
+- Fires when `OpeningChannels > 0` **and** at least one timeout-family exception (`TimeoutException`, `OperationCanceledException`, `WebException`, or any `*TimeoutException`) is present on the heap — no minimum count floor, since the co-occurrence itself is the signal
+- Severity is `Info` by default, escalating to `Warning` once `OpeningChannels >= 5` or the timeout count `>= 10` (suggesting an ongoing outage rather than one-off flakiness)
+- Extracted the timeout-exception-type classification (previously inlined in `DetectRecurringTimeoutPattern`) into a shared `IsTimeoutExceptionType(string)` helper so the two rules can't drift out of sync on what counts as a "timeout" exception
+- Added 4 new tests in `InsightEngineTests.cs` covering: fires on co-occurrence, escalates to Warning at the high-count threshold, does not fire without a timeout exception, does not fire without any Opening channels
+
+**Impact:**
+- Connection-level failures (channels stuck trying to `Open()`/`OpenAsync()`) are now surfaced as their own actionable finding instead of being buried as a raw count inside the generic channel-count finding's evidence text
+- Closes the last item from the original P0-1 write-up, which flagged this correlation as the natural next step after making Opening/Closing first-class in the domain model
+
+### ⏭️ P2-3 Superseded (2026-08-31)
+
+**Status:** Not applicable — `StateScanCapped` no longer exists
+
+**Why:** The project moved to exact/full-data heap scanning across all analyzers and dropped
+top-K/capped-sample patterns outright rather than making caps more transparent. `WcfChannelDomainResult`
+and `WcfChannelTypeSummary` have no capping field of any kind today — the WCF heap scan is exhaustive,
+so there is no "scope of the cap" left to report. P2-3's premise (make an existing cap's scope visible)
+no longer applies; the underlying cap it targeted was removed rather than improved.
+
+### ✅ P3-1 Complete (2026-08-31)
+
+**Status:** Out-of-range channel state values are now counted separately from `OtherChannels`
+
+**What was done:**
+- Added `int InvalidState` to the analyzer's internal per-type tuple, threaded through `BeforeHeapIndexScan` seeding, `OnHeapEntry` classification, and `MergePartial` summation
+- Added `internal static bool IsValidCommunicationState(int stateVal) => stateVal is >= 0 and <= StateFaulted` — CommunicationState only defines 0 (Created) through 5 (Faulted); `OnHeapEntry` now checks this before falling back to the `Other` bucket, so a state value outside that range (a field-probe mismatch on a lookalike type, or memory corruption) increments a new `InvalidState` counter instead
+- Added `InvalidStateCount` to `WcfChannelTypeSummary` (per-type) and `WcfChannelDomainResult` (aggregate), both optional with a `0` default so every existing positional call site kept compiling unchanged
+- `WcfChannelSectionBuilder` shows an "Invalid State" column per-type and an `invalid_state` key metric
+- `WcfChannelFindingGenerator`'s channel-count finding evidence now appends `, Invalid: N` when `InvalidStateCount > 0`
+- Added `IsValidCommunicationState` boundary tests and an `InvalidState` merge test in `WcfChannelAnalyzerHeapIndexScanTests`, plus evidence-text tests in `InfrastructureFindingGeneratorTests`
+
+**Impact:**
+- A field-probe mismatch or heap corruption affecting the state read is now visible as its own signal instead of being indistinguishable from legitimate (if uncommon) Created-state channels
+- No behavior change to existing Opening/Opened/Faulted/Closing/Closed/Other classification — `InvalidState` only catches values that previously fell into the catch-all `else` branch
+
+### ✅ P3-2 Complete (2026-08-31)
+
+**Status:** Duplex and session channels now classified and counted separately
+
+**What was done:**
+- Added `internal static bool IsDuplexChannelType(string)` / `IsSessionChannelType(string)` to `WcfChannelAnalyzer` — type-name token matching (`"Duplex"` / `"Session"`) rather than `ClrType.EnumerateInterfaces()` per candidate, consistent with the existing zero-ClrType-introspection cost of `ClassifyBindingHint`. A channel's runtime type is a concrete class, not the `ISessionChannel`/`IDuplexChannel` interfaces the audit named, but WCF's channel class names consistently encode both shape tokens (e.g. `ClientFramingDuplexSessionChannel` is both), so this is a like-for-like continuation of the existing classification approach rather than a literal interface check
+- Added `DuplexChannelCount` and `SessionChannelCount` to `WcfChannelDomainResult` (both optional, default 0) — aggregated in `BuildResult()` from per-type `Total` counts; these are independent, overlapping classifications of `TotalChannels`, not a partition (a channel can be both duplex and session-based, or neither)
+- `WcfChannelSectionBuilder` exposes `duplex_channels` / `session_channels` key metrics
+- `WcfChannelFindingGenerator`'s channel-count finding evidence now always states `Duplex-capable: N, Session-based: N.`
+- Added `IsDuplexChannelType`/`IsSessionChannelType` theory tests and a finding-evidence test
+
+**Impact:**
+- Reports can now distinguish connection-oriented/stateful channel usage (net.tcp, net.pipe, WS-Session) from stateless request-reply channels (basicHttp) without a manual `!do` walk per channel type
+- No new `WcfChannelTypeSummary` columns added — kept the already-11-column per-type table from growing further; the two counts are aggregate-only, matching how `FactoryCount` is already surfaced
+
+### ✅ P3-3 Complete (2026-08-31)
+
+**Status:** New live-heap test proves `MergePartial`'s new-key-from-worker branch is unreachable in production, using a real `ClrHeap` instead of reflection-seeded state
+
+**What was done:**
+- Added `WcfChannelAnalyzerLiveHeapTests.cs`, following the project's existing `<Analyzer>LiveHeapTests` convention (`DbConnectionAnalyzerLiveHeapTests`, `SqlCommandAnalyzerLiveHeapTests`): attaches a real `ClrRuntime`/`ClrHeap` snapshot of the test process itself via `DataTarget.CreateSnapshotAndAttach`, with a test-only `System.ServiceModel.FakeChannel` fixture type (no dependency on the real System.ServiceModel package) that satisfies `WcfChannelAnalyzer.IsCandidateType`
+- The test calls the real `BeforeHeapIndexScan` (not reflection-injected `_typeStats`) on both a primary and a `CreateWorkerInstance()` worker against the *same* heap/cache, asserts their pre-seeded `_typeStats` key sets are identical before any entry is scanned, then runs `MergePartial` and asserts no new key appeared — directly demonstrating, against real ClrMD data, why the new-key-from-worker branch never fires in production (all workers discover the same candidate set from the same heap)
+- The pre-existing `MergePartial_AddsNewKeyFromWorker_WhenNotPresentInPrimary` test (reflection-seeded, artificially disjoint keys) is retained as-is — it still validates the defensive branch's own correctness as a safety net, it just isn't the "realistic pre-seeding" case P3-3 asked for
+
+**Impact:**
+- Closes the audit's full P0–P3 roadmap for `WcfChannelAnalyzer` — every recommendation is now either ✅ Complete or ⏭️ Superseded

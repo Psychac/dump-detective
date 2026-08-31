@@ -317,6 +317,38 @@ public sealed class InfrastructureFindingGeneratorTests
         findings.Should().ContainSingle(f => f.Severity == FindingSeverity.Critical);
     }
 
+    [Fact]
+    public void WcfChannel_CountFindingEvidence_IncludesInvalidState_WhenPresent()
+    {
+        var gen = new WcfChannelFindingGenerator();
+        var result = WcfResult(total: 100, opened: 90, faulted: 0, closed: 5) with { InvalidStateCount = 5 };
+        var findings = gen.Generate(result);
+        findings.Should().ContainSingle(f => f.Tags.Contains("leak") && f.Evidence.Contains("Invalid: 5"));
+    }
+
+    [Fact]
+    public void WcfChannel_CountFindingEvidence_OmitsInvalidState_WhenZero()
+    {
+        var gen = new WcfChannelFindingGenerator();
+        var result = WcfResult(total: 100, opened: 100, faulted: 0, closed: 0);
+        var findings = gen.Generate(result);
+        findings.Should().ContainSingle(f => f.Tags.Contains("leak") && !f.Evidence.Contains("Invalid"));
+    }
+
+    [Fact]
+    public void WcfChannel_CountFindingEvidence_IncludesDuplexAndSessionCounts()
+    {
+        var gen = new WcfChannelFindingGenerator();
+        var result = WcfResult(total: 100, opened: 100, faulted: 0, closed: 0) with
+        {
+            DuplexChannelCount = 40,
+            SessionChannelCount = 60,
+        };
+        var findings = gen.Generate(result);
+        findings.Should().ContainSingle(f =>
+            f.Tags.Contains("leak") && f.Evidence.Contains("Duplex-capable: 40, Session-based: 60."));
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // HttpObjectFindingGenerator
     // ─────────────────────────────────────────────────────────────────────────

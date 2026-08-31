@@ -107,6 +107,7 @@ internal sealed class InsightEngine
 
         // Part 6 — Infrastructure domain results
         DbConnectionDomainResult? dbConn = FindResult<DbConnectionDomainResult>(runs);
+        SqlTransactionDomainResult? sqlTxn = FindResult<SqlTransactionDomainResult>(runs);
         WcfChannelDomainResult? wcf = FindResult<WcfChannelDomainResult>(runs);
         HttpObjectDomainResult? http = FindResult<HttpObjectDomainResult>(runs);
         StaticRootDomainResult? staticRoot = FindResult<StaticRootDomainResult>(runs);
@@ -138,6 +139,7 @@ internal sealed class InsightEngine
             Boxing: boxing,
             EventLeaks: eventLeaks,
             DbConn: dbConn,
+            SqlTxn: sqlTxn,
             Wcf: wcf,
             Http: http,
             StaticRoot: staticRoot);
@@ -182,6 +184,7 @@ internal sealed class InsightEngine
         BoxingDomainResult? Boxing,
         EventLeakDomainResult? EventLeaks,
         DbConnectionDomainResult? DbConn,
+        SqlTransactionDomainResult? SqlTxn,
         WcfChannelDomainResult? Wcf,
         HttpObjectDomainResult? Http,
         StaticRootDomainResult? StaticRoot);
@@ -237,6 +240,7 @@ internal sealed class InsightEngine
             DetectRecurringTimeoutPattern(findings, context.Crash);
 
             DetectDbConnectionLeak(findings, context.DbConn, context.Crash);
+            DetectLongHeldTransactionOnOpenConnection(findings, context.SqlTxn, context.DbConn);
             DetectWcfChannelFault(findings, context.Wcf, context.Crash);
             DetectHttpClientAccumulation(findings, context.Http);
             DetectClusterHangCorrelation(findings, context.Clusters, context.Hang);
@@ -1790,6 +1794,49 @@ internal sealed class InsightEngine
                 MetricValue: dbConn.OpenConnections,
                 MetricUnit: "open connections"));
         }
+    }
+
+    // R8 (docs/analysis/phase1/DbConnectionAnalyzer-audit.md): correlates SqlTransactionAnalyzer's
+    // Active transaction snapshots (still referencing their owning connection) against
+    // DbConnectionAnalyzer's TopOpenConnections addresses. "N active transactions" alone is already
+    // reported by SqlTransactionFindingGenerator; this rule adds the cross-analyzer signal that
+    // specific open connections are being held by a live transaction, not just idle.
+    private static void DetectLongHeldTransactionOnOpenConnection(
+        List<InsightFinding> findings,
+        SqlTransactionDomainResult? sqlTxn,
+        DbConnectionDomainResult? dbConn)
+    {
+        if (sqlTxn is null || dbConn is null) return;
+        if (sqlTxn.ActiveCount == 0 || dbConn.OpenConnections == 0) return;
+
+        var openConnectionAddresses = new HashSet<ulong>(dbConn.TopOpenConnections.Count);
+        foreach (DbConnectionSnapshot conn in dbConn.TopOpenConnections)
+            openConnectionAddresses.Add(conn.Address);
+
+        int correlatedCount = 0;
+        foreach (SqlTransactionSnapshot txn in sqlTxn.TopActiveTransactions)
+        {
+            if (txn.ConnectionAddress is ulong connAddress && openConnectionAddresses.Contains(connAddress))
+                correlatedCount++;
+        }
+
+        if (correlatedCount < 3) return;
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Infrastructure",
+            Severity: correlatedCount >= 15 ? FindingSeverity.Critical : FindingSeverity.Warning,
+            Title: $"{correlatedCount:N0} open DB connections are held by a live transaction",
+            Evidence: $"{correlatedCount:N0} of {dbConn.OpenConnections:N0} open connections on the heap are " +
+                      "referenced by an Active SqlTransaction/IDbTransaction object that has not yet been " +
+                      "Committed, Rolled back, or Disposed. These connections cannot return to the pool while " +
+                      "the transaction is held open.",
+            Recommendation: "Review call sites that open a transaction alongside its connection. Ensure both " +
+                            "are wrapped in using statements scoped tightly to the unit of work, and that no " +
+                            "unrelated I/O or awaits happen while the transaction is open.",
+            Tags: ["infrastructure", "connections", "transaction", "pool-exhaustion"],
+            MetricValue: correlatedCount,
+            MetricUnit: "connections held by open transactions"));
     }
 
     private static void DetectWcfChannelFault(

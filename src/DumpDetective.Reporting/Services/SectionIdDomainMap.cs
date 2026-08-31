@@ -109,6 +109,12 @@ internal static class SectionIdDomainMap
         ["HTTP Object Analysis"]       = ("Infrastructure", "H3"),
         ["TimerLeakAnalyzer"]         = ("Infrastructure", "H4"),
         ["Timer Leak Analysis"]       = ("Infrastructure", "H4"),
+        ["SqlTransactionAnalyzer"]    = ("Infrastructure", "H5"),
+        ["SQL Transaction Analysis"]  = ("Infrastructure", "H5"),
+        ["SqlCommandAnalyzer"]        = ("Infrastructure", "H6"),
+        ["SQL Command Analysis"]      = ("Infrastructure", "H6"),
+        ["SqlConnectionPoolAnalyzer"] = ("Infrastructure", "H7"),
+        ["SQL Connection Pool Analysis"] = ("Infrastructure", "H7"),
 
         // C1 (TypeTable) is built by TypeSystemSectionBuilder as an IReportSectionBuilder — no analyzerName entry needed.
     };

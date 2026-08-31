@@ -83,6 +83,29 @@ internal sealed class DbConnectionSectionBuilder : SectionBuilderBase, IAnalyzer
                 openRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
+        // R12: retention paths for the Gen2 open connections DbConnectionAnalyzer ran root-path
+        // search against (bounded subset, not all open connections — see MaxRootPathEnrichment).
+        var rootPathRows = new List<TableRow>();
+        for (int i = 0; i < d.TopOpenConnections.Count; i++)
+        {
+            DbConnectionSnapshot s = d.TopOpenConnections[i];
+            if (s.RootPath is null) continue;
+
+            string shortType = s.TypeName.Contains('.') ? s.TypeName.Split('.')[^1] : s.TypeName;
+            rootPathRows.Add(new TableRow([
+                Cell(shortType),
+                Cell($"0x{s.Address:X}"),
+                Cell(s.RetainedBytes is ulong bytes ? FormatBytes(bytes) : "(unknown)"),
+                Cell(s.RootPath),
+            ]));
+        }
+        if (rootPathRows.Count > 0)
+        {
+            compactTables.Add(STCompact("Retention paths (Gen2 open connections)",
+                new[] { CH("Type"), CH("Address"), CH("Retained"), CH("GC Root Path") },
+                rootPathRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
         // Top exhausted pools by connection string
         if (d.TopPools.Count > 0)
         {

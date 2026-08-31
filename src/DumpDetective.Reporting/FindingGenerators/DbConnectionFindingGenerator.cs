@@ -89,13 +89,19 @@ internal sealed class DbConnectionFindingGenerator : IFindingGenerator
         // ── Gen2 (long-lived) open connections finding ──────────────────────────
         if (r.Gen2OpenConnections >= 5)
         {
+            // R12: surface the retention path for the worst (highest-retained-bytes) Gen2 open
+            // connection that got root-path evidence, so the finding itself answers "why is this
+            // still alive" instead of just "how many" — matches WinDbg/SOS's !gcroot workflow.
+            string? rootPathNote = FindBestRootPathNote(r.TopOpenConnections);
+
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
                 Category: "Infrastructure",
                 Severity: FindingSeverity.Critical,
                 Title: $"{r.Gen2OpenConnections:N0} Gen2 (long-lived) open DB connections",
                 Evidence: $"{r.Gen2OpenConnections:N0} open connections are in Generation 2 (long-lived objects). " +
-                          "Gen2 objects are rarely collected, indicating these connections have been open for a long time and are likely leaked.",
+                          "Gen2 objects are rarely collected, indicating these connections have been open for a long time and are likely leaked." +
+                          (rootPathNote is null ? "" : $" Retention path for the largest one: {rootPathNote}"),
                 Recommendation:
                     "Gen2 open connections are strong evidence of connection pool leaks. " +
                     "Review connection lifecycle: ensure all opened connections are properly closed in using blocks or try/finally. " +
@@ -122,5 +128,23 @@ internal sealed class DbConnectionFindingGenerator : IFindingGenerator
         }
         if (byType.Count > 3) sb.Append($" (+{byType.Count - 3} more)");
         return sb.ToString();
+    }
+
+    private static string? FindBestRootPathNote(IReadOnlyList<DbConnectionSnapshot> topOpenConnections)
+    {
+        DbConnectionSnapshot? best = null;
+        ulong bestBytes = 0;
+        foreach (DbConnectionSnapshot s in topOpenConnections)
+        {
+            if (s.RootPath is null) continue;
+            ulong bytes = s.RetainedBytes ?? 0;
+            if (best is null || bytes > bestBytes)
+            {
+                best = s;
+                bestBytes = bytes;
+            }
+        }
+
+        return best?.RootPath;
     }
 }

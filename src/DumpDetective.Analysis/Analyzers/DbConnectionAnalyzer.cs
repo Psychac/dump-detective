@@ -1,4 +1,6 @@
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Pipeline;
+using DumpDetective.Analysis.Traversal;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 
@@ -17,7 +19,7 @@ namespace DumpDetective.Analysis.Analyzers;
 /// Connection state mapping (System.Data.ConnectionState):
 ///   Closed=0, Open=1, Connecting=2, Executing=4, Fetching=8, Broken=16
 /// </summary>
-public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanParticipant, ITypedResourceCandidateSource, ITypedResourceInstanceSampler<DbConnectionSnapshot>
+public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanParticipant, ITypedResourceCandidateSource, ITypedResourceInstanceSampler<DbConnectionSnapshot>, IRequiresReachableGraphIndex
 {
     public string Name => "DB Connection Analysis";
     public string Category => "Infrastructure";
@@ -80,7 +82,7 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
                 var connStringObj = connStringField.ReadObject(address, interior: false);
                 if (connStringObj.IsValid && connStringObj.AsString() is string connStr)
                 {
-                    return AnonymiseConnectionString(connStr);
+                    return ConnectionStringAnonymiser.Anonymise(connStr);
                 }
             }
 
@@ -91,21 +93,6 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
             // Silently ignore errors reading connection strings
             return null;
         }
-    }
-
-    private static string AnonymiseConnectionString(string connStr)
-    {
-        if (string.IsNullOrWhiteSpace(connStr))
-            return connStr;
-
-        // Remove common sensitive keywords: password, pwd, user id, uid
-        var result = System.Text.RegularExpressions.Regex.Replace(
-            connStr,
-            @"(?i)(password|pwd|user\s?id|uid|secret)\s*=\s*[^;]*",
-            "$1=***",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-
-        return result;
     }
 
     // Instance accumulator state for the IHeapIndexScanParticipant path. Populated by
@@ -270,6 +257,7 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
         byType.Sort(static (a, b) => b.TotalCount.CompareTo(a.TotalCount));
 
         IReadOnlyList<DbConnectionSnapshot> topOpenConnections = WithRetainedBytes(_sampler?.TopSamples ?? []);
+        topOpenConnections = WithRootPaths(topOpenConnections);
 
         // Build top pools by server/database grouping
         var topPools = BuildTopPools(topOpenConnections);
@@ -306,6 +294,71 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
                 : s);
         }
         return result;
+    }
+
+    // R12 (docs/analysis/phase1/DbConnectionAnalyzer-audit.md): matches WinDbg/SOS's !gcroot
+    // workflow, but computing a root-path search for every open connection isn't viable — the
+    // (uncapped, per §11.2 D5) open-connection population can be in the thousands for a real
+    // leak. Scoped to Gen2 open connections (already the "likely leaked, not just in-flight"
+    // subset per the existing generation split), ranked by retained bytes so the worst offenders
+    // get a path first, and capped at MaxRootPathEnrichment total searches.
+    private const int MaxRootPathEnrichment = 20;
+
+    private static readonly RootPathSearchLimits RootPathLimits = new()
+    {
+        MaxCandidateNodes = 5_000,
+        MaxCandidateDepth = 8,
+        MaxRootExpansionDepth = 12,
+        LargeFanoutThreshold = 100,
+    };
+
+    private IReadOnlyList<DbConnectionSnapshot> WithRootPaths(IReadOnlyList<DbConnectionSnapshot> snapshots)
+    {
+        if (_cache is null || _heap is null || snapshots.Count == 0)
+            return snapshots;
+
+        List<DbConnectionSnapshot> enrichmentTargets = SelectForRootPathEnrichment(snapshots, MaxRootPathEnrichment);
+        if (enrichmentTargets.Count == 0)
+            return snapshots;
+
+        IReadOnlyList<(string RootKind, ulong Address)> validRoots = _cache.GetOrBuildValidRoots(_heap);
+        if (validRoots.Count == 0)
+            return snapshots;
+
+        var provider = new ReferenceGraph(_heap);
+        var finder = new RootPathFinder(
+            _heap, provider, RootPathLimits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType,
+            static _ => false, _cache.TryGetReverseIndexProvider(), _cache);
+
+        var enrichedByAddress = new Dictionary<ulong, DbConnectionSnapshot>(enrichmentTargets.Count);
+        foreach (DbConnectionSnapshot target in enrichmentTargets)
+        {
+            bool found = finder.TryFindAnyRootPath(
+                target.Address, validRoots, out string? rootKind, out List<ulong>? addresses, out bool truncated, out _, out _);
+            string? formattedPath = found ? RootPathSearchSupport.FormatPath(_heap, rootKind!, addresses, _cache) : null;
+            enrichedByAddress[target.Address] = target with { RootPath = formattedPath, RootPathSearchTruncated = truncated };
+        }
+
+        var result = new List<DbConnectionSnapshot>(snapshots.Count);
+        foreach (DbConnectionSnapshot s in snapshots)
+            result.Add(enrichedByAddress.TryGetValue(s.Address, out DbConnectionSnapshot enriched) ? enriched : s);
+        return result;
+    }
+
+    /// <summary>Gen2 open connections only, ranked by retained bytes descending (unknown-size
+    /// connections last), capped at <paramref name="cap"/>. Pure/testable — no ClrMD access.</summary>
+    internal static List<DbConnectionSnapshot> SelectForRootPathEnrichment(IReadOnlyList<DbConnectionSnapshot> snapshots, int cap)
+    {
+        var gen2 = new List<DbConnectionSnapshot>();
+        foreach (DbConnectionSnapshot s in snapshots)
+        {
+            if (s.Generation == 2)
+                gen2.Add(s);
+        }
+
+        gen2.Sort(static (a, b) => (b.RetainedBytes ?? 0).CompareTo(a.RetainedBytes ?? 0));
+
+        return gen2.Count > cap ? gen2.GetRange(0, cap) : gen2;
     }
 
     private static List<PoolSummary> BuildTopPools(IReadOnlyList<DbConnectionSnapshot> topOpenConnections)

@@ -1,3 +1,5 @@
+using System.Linq;
+
 using DumpDetective.Reporting.FindingGenerators;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Enums;
@@ -70,6 +72,191 @@ public sealed class InfrastructureFindingGeneratorTests
     {
         var gen = new DbConnectionFindingGenerator();
         gen.CanGenerate(new DbConnectionDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, [], [], [])).Should().BeTrue();
+        gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [])).Should().BeFalse();
+    }
+
+    [Fact]
+    public void DbConnection_Gen2Finding_IncludesRootPath_ForHighestRetainedConnection()
+    {
+        var gen = new DbConnectionFindingGenerator();
+        var topOpenConnections = new List<DbConnectionSnapshot>
+        {
+            new("Microsoft.Data.SqlClient.SqlConnection", 0x1, "Open", 1, null, 2, 100, "Gen2Root: SqlConnection@0x1"),
+            new("Microsoft.Data.SqlClient.SqlConnection", 0x2, "Open", 1, null, 2, 9000, "Gen2Root: SqlConnection@0x2"),
+        };
+        var result = new DbConnectionDomainResult(
+            ConnectionsFound: true, TotalConnections: 10, OpenConnections: 10, ClosedConnections: 0,
+            BrokenConnections: 0, OtherConnections: 0, UnknownStateConnections: 0,
+            Gen2OpenConnections: 5, Gen0OpenConnections: 0, ByType: [], TopOpenConnections: topOpenConnections, TopPools: []);
+
+        var findings = gen.Generate(result);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("Gen2") && f.Evidence.Contains("SqlConnection@0x2"));
+    }
+
+    [Fact]
+    public void DbConnection_Gen2Finding_OmitsRootPathNote_WhenNoneComputed()
+    {
+        var gen = new DbConnectionFindingGenerator();
+        var result = new DbConnectionDomainResult(
+            ConnectionsFound: true, TotalConnections: 10, OpenConnections: 10, ClosedConnections: 0,
+            BrokenConnections: 0, OtherConnections: 0, UnknownStateConnections: 0,
+            Gen2OpenConnections: 5, Gen0OpenConnections: 0, ByType: [], TopOpenConnections: [], TopPools: []);
+
+        var findings = gen.Generate(result);
+
+        findings.Should().Contain(f => f.Title.Contains("Gen2"));
+        findings.Single(f => f.Title.Contains("Gen2")).Evidence.Should().NotContain("Retention path");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // SqlConnectionPoolFindingGenerator
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void SqlConnectionPool_NoFindings_WhenNotFound()
+    {
+        var gen = new SqlConnectionPoolFindingGenerator();
+        var result = new SqlConnectionPoolDomainResult(false, 0, 0, []);
+        gen.Generate(result).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void SqlConnectionPool_NoFindings_WhenNoneNearCapacity()
+    {
+        var gen = new SqlConnectionPoolFindingGenerator();
+        var pools = new List<SqlConnectionPoolSnapshot>
+        {
+            new("Microsoft.Data.ProviderBase.DbConnectionPool", 0x1000, 10, 100, 0, "Server=A"),
+        };
+        var result = new SqlConnectionPoolDomainResult(true, 1, 0, pools);
+        gen.Generate(result).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void SqlConnectionPool_Warning_AtNearCapacity()
+    {
+        var gen = new SqlConnectionPoolFindingGenerator();
+        var pools = new List<SqlConnectionPoolSnapshot>
+        {
+            new("Microsoft.Data.ProviderBase.DbConnectionPool", 0x1000, 85, 100, 0, "Server=A"),
+        };
+        var result = new SqlConnectionPoolDomainResult(true, 1, 1, pools);
+        var findings = gen.Generate(result);
+        findings.Should().ContainSingle(f => f.Severity == FindingSeverity.Warning);
+    }
+
+    [Fact]
+    public void SqlConnectionPool_Critical_AtVeryHighUtilization()
+    {
+        var gen = new SqlConnectionPoolFindingGenerator();
+        var pools = new List<SqlConnectionPoolSnapshot>
+        {
+            new("Microsoft.Data.ProviderBase.DbConnectionPool", 0x1000, 98, 100, 0, "Server=A"),
+        };
+        var result = new SqlConnectionPoolDomainResult(true, 1, 1, pools);
+        var findings = gen.Generate(result);
+        findings.Should().ContainSingle(f => f.Severity == FindingSeverity.Critical);
+    }
+
+    [Fact]
+    public void SqlConnectionPool_CanGenerate_OnlyForSqlConnectionPoolDomainResult()
+    {
+        var gen = new SqlConnectionPoolFindingGenerator();
+        gen.CanGenerate(new SqlConnectionPoolDomainResult(false, 0, 0, [])).Should().BeTrue();
+        gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [])).Should().BeFalse();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // SqlTransactionFindingGenerator
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void SqlTransaction_NoFindings_WhenNotFound()
+    {
+        var gen = new SqlTransactionFindingGenerator();
+        var result = new SqlTransactionDomainResult(false, 0, 0, 0, 0, [], []);
+        gen.Generate(result).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void SqlTransaction_NoFindings_BelowThreshold()
+    {
+        var gen = new SqlTransactionFindingGenerator();
+        var result = SqlTxnResult(total: 10, active: 4, disposed: 6);
+        gen.Generate(result).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void SqlTransaction_Warning_AtActiveThreshold()
+    {
+        var gen = new SqlTransactionFindingGenerator();
+        var result = SqlTxnResult(total: 20, active: 5, disposed: 15);
+        var findings = gen.Generate(result);
+        findings.Should().ContainSingle(f => f.Severity == FindingSeverity.Warning && f.Title.Contains("5"));
+    }
+
+    [Fact]
+    public void SqlTransaction_Critical_AtHighActiveCount()
+    {
+        var gen = new SqlTransactionFindingGenerator();
+        var result = SqlTxnResult(total: 100, active: 30, disposed: 70);
+        var findings = gen.Generate(result);
+        findings.Should().ContainSingle(f => f.Severity == FindingSeverity.Critical);
+    }
+
+    [Fact]
+    public void SqlTransaction_CanGenerate_OnlyForSqlTransactionDomainResult()
+    {
+        var gen = new SqlTransactionFindingGenerator();
+        gen.CanGenerate(new SqlTransactionDomainResult(false, 0, 0, 0, 0, [], [])).Should().BeTrue();
+        gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [])).Should().BeFalse();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // SqlCommandFindingGenerator
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void SqlCommand_NoFindings_WhenNotFound()
+    {
+        var gen = new SqlCommandFindingGenerator();
+        var result = new SqlCommandDomainResult(false, 0, 0, 0, [], []);
+        gen.Generate(result).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void SqlCommand_NoFindings_BelowThreshold()
+    {
+        var gen = new SqlCommandFindingGenerator();
+        var result = SqlCmdResult(total: 50, active: 40, disposed: 10);
+        gen.Generate(result).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void SqlCommand_Warning_AtActiveThreshold()
+    {
+        var gen = new SqlCommandFindingGenerator();
+        var result = SqlCmdResult(total: 200, active: 100, disposed: 100);
+        var findings = gen.Generate(result);
+        findings.Should().ContainSingle(f => f.Severity == FindingSeverity.Warning && f.Title.Contains("100"));
+    }
+
+    [Fact]
+    public void SqlCommand_Critical_AtHighActiveCount()
+    {
+        var gen = new SqlCommandFindingGenerator();
+        var result = SqlCmdResult(total: 2000, active: 1000, disposed: 1000);
+        var findings = gen.Generate(result);
+        findings.Should().ContainSingle(f => f.Severity == FindingSeverity.Critical);
+    }
+
+    [Fact]
+    public void SqlCommand_CanGenerate_OnlyForSqlCommandDomainResult()
+    {
+        var gen = new SqlCommandFindingGenerator();
+        gen.CanGenerate(new SqlCommandDomainResult(false, 0, 0, 0, [], [])).Should().BeTrue();
         gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [])).Should().BeFalse();
     }
 
@@ -275,6 +462,37 @@ public sealed class InfrastructureFindingGeneratorTests
             ByType: summary,
             TopOpenConnections: [],
             TopPools: []);
+    }
+
+    private static SqlTransactionDomainResult SqlTxnResult(int total, int active, int disposed, int other = 0)
+    {
+        var summary = new List<SqlTransactionTypeSummary>
+        {
+            new("System.Data.SqlClient.SqlTransaction", total, disposed, active, other, (ulong)(total * 80))
+        };
+        return new SqlTransactionDomainResult(
+            TransactionsFound: total > 0,
+            TotalTransactions: total,
+            DisposedCount: disposed,
+            ActiveCount: active,
+            OtherCount: other,
+            ByType: summary,
+            TopActiveTransactions: []);
+    }
+
+    private static SqlCommandDomainResult SqlCmdResult(int total, int active, int disposed)
+    {
+        var summary = new List<SqlCommandTypeSummary>
+        {
+            new("System.Data.SqlClient.SqlCommand", total, disposed, active, (ulong)(total * 120))
+        };
+        return new SqlCommandDomainResult(
+            CommandsFound: total > 0,
+            TotalCommands: total,
+            DisposedCount: disposed,
+            ActiveCount: active,
+            ByType: summary,
+            TopActiveCommands: []);
     }
 
     private static WcfChannelDomainResult WcfResult(int total, int opened, int faulted, int closed, int other = 0, int opening = 0, int closing = 0)

@@ -714,6 +714,69 @@ public sealed class InsightEngineTests
         findings.Should().NotContain(f => f.Title.Contains("queued for finalization", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void Analyze_ShouldEmitFinding_WhenActiveTransactionsHoldOpenConnections()
+    {
+        InsightEngine engine = new();
+
+        var openConnections = new List<DbConnectionSnapshot>();
+        var activeTransactions = new List<SqlTransactionSnapshot>();
+        for (int i = 0; i < 5; i++)
+        {
+            ulong connAddress = 0x1000UL + (ulong)(i * 0x100);
+            openConnections.Add(new DbConnectionSnapshot("Microsoft.Data.SqlClient.SqlConnection", connAddress, "Open", 1));
+            activeTransactions.Add(new SqlTransactionSnapshot("Microsoft.Data.SqlClient.SqlTransaction", 0x2000UL + (ulong)(i * 0x100), "Active", 1, connAddress));
+        }
+
+        DbConnectionDomainResult dbConn = new(
+            ConnectionsFound: true, TotalConnections: 5, OpenConnections: 5, ClosedConnections: 0,
+            BrokenConnections: 0, OtherConnections: 0, UnknownStateConnections: 0,
+            Gen2OpenConnections: 0, Gen0OpenConnections: 0, ByType: [], TopOpenConnections: openConnections, TopPools: []);
+
+        SqlTransactionDomainResult sqlTxn = new(
+            TransactionsFound: true, TotalTransactions: 5, DisposedCount: 0, ActiveCount: 5,
+            OtherCount: 0, ByType: [], TopActiveTransactions: activeTransactions);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("DB Connection Analysis", AnalyzerExecutionStatus.Success, dbConn),
+            BuildRun("SQL Transaction Analysis", AnalyzerExecutionStatus.Success, sqlTxn),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("held by a live transaction", StringComparison.OrdinalIgnoreCase)
+            && f.MetricValue == 5);
+    }
+
+    [Fact]
+    public void Analyze_ShouldNotEmitFinding_WhenTransactionConnectionsDoNotMatchOpenConnections()
+    {
+        InsightEngine engine = new();
+
+        DbConnectionDomainResult dbConn = new(
+            ConnectionsFound: true, TotalConnections: 5, OpenConnections: 5, ClosedConnections: 0,
+            BrokenConnections: 0, OtherConnections: 0, UnknownStateConnections: 0,
+            Gen2OpenConnections: 0, Gen0OpenConnections: 0, ByType: [],
+            TopOpenConnections: [new DbConnectionSnapshot("SqlConnection", 0xAAAA, "Open", 1)], TopPools: []);
+
+        SqlTransactionDomainResult sqlTxn = new(
+            TransactionsFound: true, TotalTransactions: 5, DisposedCount: 0, ActiveCount: 5, OtherCount: 0,
+            ByType: [],
+            TopActiveTransactions: [new SqlTransactionSnapshot("SqlTransaction", 0xBBBB, "Active", 1, 0xCCCC)]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("DB Connection Analysis", AnalyzerExecutionStatus.Success, dbConn),
+            BuildRun("SQL Transaction Analysis", AnalyzerExecutionStatus.Success, sqlTxn),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().NotContain(f => f.Title.Contains("held by a live transaction", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static AnalyzerRunResult BuildRun(string analyzerName, AnalyzerExecutionStatus status, AnalyzerDomainResult? result = null)
         => new(
             AnalyzerName: analyzerName,

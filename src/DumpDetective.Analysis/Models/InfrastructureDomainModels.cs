@@ -28,7 +28,18 @@ internal sealed record DbConnectionSnapshot(
     /// <summary>Exact dominator-tree retained bytes for this connection (§9,
     /// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md). Null when the exact
     /// tree wasn't available.</summary>
-    ulong? RetainedBytes = null);
+    ulong? RetainedBytes = null,
+    /// <summary>R12 (docs/analysis/phase1/DbConnectionAnalyzer-audit.md): formatted GC root
+    /// retention path ("<c>RootKind: Type@0xAddr -> ... -> Type@0xAddr</c>"), matching WinDbg/SOS's
+    /// <c>!gcroot</c> workflow. Only computed for a bounded subset of Gen2 (long-lived, likely
+    /// leaked) open connections — see <c>DbConnectionAnalyzer.MaxRootPathEnrichment</c>. Null when
+    /// not attempted (non-Gen2, outside the enrichment cap, or no reachable graph index available)
+    /// or when no path was found.</summary>
+    string? RootPath = null,
+    /// <summary>True when the root-path search for this connection hit a search-space limit before
+    /// concluding no path exists — a null <see cref="RootPath"/> alongside <c>true</c> here means
+    /// "inconclusive", not "unreachable".</summary>
+    bool RootPathSearchTruncated = false);
 
 /// <summary>
 /// Summary of connections grouped by pool (server/database).
@@ -56,6 +67,34 @@ internal sealed record DbConnectionDomainResult(
     IReadOnlyList<DbConnectionSnapshot> TopOpenConnections,
     IReadOnlyList<PoolSummary> TopPools) : DumpDetective.Core.Models.AnalyzerDomainResult;
 
+// ── SQL Connection Pool (runtime pool-manager objects) ─────────────────────────
+
+/// <summary>
+/// Snapshot of a single ADO.NET connection-pool manager object
+/// (<c>System.Data.ProviderBase.DbConnectionPool</c> / <c>Microsoft.Data.ProviderBase.DbConnectionPool</c>
+/// — shared by both the legacy and current SqlClient packages; there is no per-provider pool
+/// subclass to match by name). <see cref="CurrentSize"/>/<see cref="MaxPoolSize"/> come directly
+/// from the pool's live internal counters, not from sampling connection objects, so this is exact
+/// pool-utilisation evidence rather than an estimate.
+/// </summary>
+internal sealed record SqlConnectionPoolSnapshot(
+    string TypeName,
+    ulong Address,
+    int CurrentSize,
+    int MaxPoolSize,
+    int MinPoolSize,
+    string? AnonymisedConnectionString);
+
+/// <summary>
+/// Domain result produced by <c>SqlConnectionPoolAnalyzer</c>. Reports exact current-size vs.
+/// max-pool-size for each discovered SqlClient connection-pool manager object on the heap.
+/// </summary>
+internal sealed record SqlConnectionPoolDomainResult(
+    bool PoolsFound,
+    int TotalPools,
+    int PoolsNearCapacity,
+    IReadOnlyList<SqlConnectionPoolSnapshot> Pools) : DumpDetective.Core.Models.AnalyzerDomainResult;
+
 // ── SQL Transaction ───────────────────────────────────────────────────────────
 
 /// <summary>
@@ -70,13 +109,17 @@ internal sealed record SqlTransactionTypeSummary(
     ulong TotalBytes);
 
 /// <summary>
-/// Lightweight snapshot of a single SQL transaction object.
+/// Lightweight snapshot of a single SQL transaction object. <see cref="ConnectionAddress"/> is
+/// the address of the owning connection object (read from the transaction's internal
+/// <c>_connection</c> field) while the transaction is Active; used to correlate long-held
+/// transactions against <c>DbConnectionDomainResult.TopOpenConnections</c>.
 /// </summary>
 internal sealed record SqlTransactionSnapshot(
     string TypeName,
     ulong Address,
     string StateLabel,
-    int StateValue);
+    int StateValue,
+    ulong? ConnectionAddress = null);
 
 /// <summary>
 /// Domain result for SQL transaction analysis.
@@ -89,8 +132,7 @@ internal sealed record SqlTransactionDomainResult(
     int ActiveCount,
     int OtherCount,
     IReadOnlyList<SqlTransactionTypeSummary> ByType,
-    IReadOnlyList<SqlTransactionSnapshot> TopActiveTransactions,
-    bool StateScanCapped) : DumpDetective.Core.Models.AnalyzerDomainResult;
+    IReadOnlyList<SqlTransactionSnapshot> TopActiveTransactions) : DumpDetective.Core.Models.AnalyzerDomainResult;
 
 // ── SQL Command ───────────────────────────────────────────────────────────────
 
@@ -105,6 +147,18 @@ internal sealed record SqlCommandTypeSummary(
     ulong TotalBytes);
 
 /// <summary>
+/// Lightweight snapshot of a single SQL command object. <see cref="StateValue"/>/<see cref="StateLabel"/>
+/// reflect whether the command's internal connection-reference field is still non-null — ADO.NET
+/// providers do not reliably null this out on <c>Dispose()</c>, so "Active" means "still wired to a
+/// connection object" rather than strictly "not yet disposed".
+/// </summary>
+internal sealed record SqlCommandSnapshot(
+    string TypeName,
+    ulong Address,
+    string StateLabel,
+    int StateValue);
+
+/// <summary>
 /// Domain result for SQL command analysis.
 /// Reports outstanding commands that may hold connection resources.
 /// </summary>
@@ -114,7 +168,7 @@ internal sealed record SqlCommandDomainResult(
     int DisposedCount,
     int ActiveCount,
     IReadOnlyList<SqlCommandTypeSummary> ByType,
-    bool StateScanCapped) : DumpDetective.Core.Models.AnalyzerDomainResult;
+    IReadOnlyList<SqlCommandSnapshot> TopActiveCommands) : DumpDetective.Core.Models.AnalyzerDomainResult;
 
 // ── WCF Channel ───────────────────────────────────────────────────────────────
 

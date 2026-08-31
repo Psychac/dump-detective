@@ -31,9 +31,13 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
             ["dead_target_ratio"] = new NumericMetricValue(d.DeadTargetRatio, MetricUnit.Percent, $"{d.DeadTargetRatio:P1}"),
             ["weakreference_objects"] = new NumericMetricValue(d.WeakReferenceObjectCount, MetricUnit.Count),
             ["weakreference_object_bytes"] = new NumericMetricValue((double)d.WeakReferenceObjectBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.WeakReferenceObjectBytes)),
-            ["stale_wrappers_m_handle_0"] = new NumericMetricValue(d.StaleWrapperCount, MetricUnit.Count),
+            ["stale_wrappers_m_handle_0"] = new NumericMetricValue(d.StaleWrapperCount, MetricUnit.Count,
+                d.StaleWrapperCountIsExact ? $"{d.StaleWrapperCount:N0}" : $"{d.StaleWrapperCount:N0} (estimated)"),
             ["dependent_handles_dead_primary_key"] = new NumericMetricValue(d.DependentHandleDeadKeyCount, MetricUnit.Count),
         };
+
+        if (d.HeldOnlyViaWeakReferenceDetectionAvailable)
+            keyMetrics["held_only_via_weak_reference"] = new NumericMetricValue(d.HeldOnlyViaWeakReferenceCount, MetricUnit.Count);
 
         if (d.PhaseBSkipped)
             blocks.Add(T("⚠ Phase B (WeakReference Analysis) was skipped — heap object enumeration unavailable. No WeakReference object data available."));
@@ -46,6 +50,24 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
             foreach (NameCountEntry e in d.WeakHandleKinds)
                 rows.Add(new TableRow([Cell(e.Name), Cell($"{e.Count:N0}", e.Count)]));
             compactTables.Add(STCompact("Weak handle kinds", new[] { CH("Kind"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
+        if (d.WeakHandleKindLiveness is { Count: > 0 } kindLiveness)
+        {
+            var rows = new List<TableRow>(kindLiveness.Count);
+            foreach (HandleKindLivenessEntry e in kindLiveness)
+            {
+                double deadRatio = e.Total == 0 ? 0.0 : (double)e.Dead / e.Total;
+                rows.Add(new TableRow([
+                    Cell(e.Kind),
+                    Cell($"{e.Alive:N0}", e.Alive),
+                    Cell($"{e.Dead:N0}", e.Dead),
+                    Cell($"{e.Total:N0}", e.Total),
+                    Cell($"{deadRatio:P1}", deadRatio)]));
+            }
+            compactTables.Add(STCompact("Weak handle kind alive/dead breakdown",
+                new[] { CH("Kind"), CH("Alive","number"), CH("Dead","number"), CH("Total","number"), CH("Dead %","number") },
+                rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopWeakTargetTypes.Count > 0)
@@ -62,6 +84,45 @@ internal sealed class WeakReferenceSectionBuilder : SectionBuilderBase, IAnalyze
             foreach (NameCountEntry e in d.TopStaleWrapperHolderTypes)
                 rows.Add(new TableRow([Cell(e.Name), Cell($"{e.Count:N0}", e.Count)]));
             compactTables.Add(STCompact("Top stale wrapper holder types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
+        if (!d.StaleWrapperCountIsExact && d.StaleWrapperCount > 0)
+            blocks.Add(T("⚠ Stale wrapper count (estimated): the disk-backed object index was unavailable for this run, so the count above is extrapolated from one sampled instance per WeakReference<T> type rather than a full scan — it can be up to 100% off per type group."));
+
+        if (d.DependentDeadKeyValueTypes is { Count: > 0 } deadKeyValueTypes)
+        {
+            var rows = new List<TableRow>(deadKeyValueTypes.Count);
+            foreach (NameCountEntry e in deadKeyValueTypes)
+                rows.Add(new TableRow([Cell(e.Name), Cell($"{e.Count:N0}", e.Count)]));
+            compactTables.Add(STCompact("Dependent dead-key value types", new[] { CH("Value type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+
+            if (d.DependentDeadKeyValueTypesUnresolvedCount > 0)
+                blocks.Add(T($"ℹ {d.DependentDeadKeyValueTypesUnresolvedCount:N0} dead-key dependent handle(s) had an unresolvable or already-collected value object and are not reflected in the value-type breakdown above."));
+        }
+
+        if (d.AliveWeakTargetGenerationDistribution is { Count: > 0 } genDistribution)
+        {
+            var rows = new List<TableRow>(genDistribution.Count);
+            foreach (NameCountEntry e in genDistribution)
+                rows.Add(new TableRow([Cell(e.Name), Cell($"{e.Count:N0}", e.Count)]));
+            compactTables.Add(STCompact("Alive weak target GC generation distribution", new[] { CH("Generation"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            blocks.Add(T("Dead weak targets are excluded: their handle address is already cleared or may point at memory since reused by an unrelated object, so a generation can't be attributed reliably."));
+
+            if (d.AliveWeakTargetGenerationUnresolvedCount > 0)
+                blocks.Add(T($"ℹ {d.AliveWeakTargetGenerationUnresolvedCount:N0} alive weak target(s) resolved to an object but their GC segment/generation could not be determined."));
+        }
+
+        if (d.HeldOnlyViaWeakReferenceDetectionAvailable && d.HeldOnlyViaWeakReferenceCount > 0)
+        {
+            blocks.Add(T($"{d.HeldOnlyViaWeakReferenceCount:N0} alive weak target(s) are unreachable from any GC root — the weak handle is currently the only known reference to them, and they will be collected on the next GC."));
+
+            if (d.HeldOnlyViaWeakReferenceTopTypes is { Count: > 0 } heldOnlyTypes)
+            {
+                var rows = new List<TableRow>(heldOnlyTypes.Count);
+                foreach (NameCountEntry e in heldOnlyTypes)
+                    rows.Add(new TableRow([Cell(e.Name), Cell($"{e.Count:N0}", e.Count)]));
+                compactTables.Add(STCompact("Held only via weak reference — top types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            }
         }
 
         // Typed Artifacts slot

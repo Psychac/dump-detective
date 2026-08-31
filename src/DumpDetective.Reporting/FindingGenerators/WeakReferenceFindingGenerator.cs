@@ -27,6 +27,10 @@ internal sealed class WeakReferenceFindingGenerator : IFindingGenerator
 
         var signals = new List<WeakRefSignal>(3);
 
+        // §24.2 P3-4: qualifies StaleWrapperCount wherever it's cited — see
+        // WeakReferenceDomainResult.StaleWrapperCountIsExact for when this applies.
+        string staleWrapperQualifier = r.StaleWrapperCountIsExact ? "" : " (estimated)";
+
         // High dead-target ratio — stale wrapper accumulation.
         if (r.TotalWeakHandles > 0 && r.DeadTargetRatio >= 0.5)
         {
@@ -36,7 +40,7 @@ internal sealed class WeakReferenceFindingGenerator : IFindingGenerator
                 Title: "High proportion of dead weak handle targets",
                 Evidence: $"{r.DeadWeakTargets:N0} of {r.TotalWeakHandles:N0} weak handles " +
                           $"({r.DeadTargetRatio:P1}) point to already-collected objects. " +
-                          $"Stale WeakReference wrappers: {r.StaleWrapperCount:N0}.",
+                          $"Stale WeakReference wrappers: {r.StaleWrapperCount:N0}{staleWrapperQualifier}.",
                 Recommendation: "Audit caches and event subscriptions that hold WeakReference objects. " +
                                 "Ensure entries are purged after the target is collected to avoid accumulation.",
                 Tags: ["weak-reference", "handles", "cache", "memory-leak"],
@@ -77,6 +81,28 @@ internal sealed class WeakReferenceFindingGenerator : IFindingGenerator
                 MetricUnit: "handles"));
         }
 
+        // "Held only via weak reference" signal — objects still alive but unreachable from any
+        // GC root, so the weak handle is the only known reference and they'll be collected next GC.
+        if (r.HeldOnlyViaWeakReferenceDetectionAvailable && r.HeldOnlyViaWeakReferenceCount > 0)
+        {
+            string topTypeSuffix = r.HeldOnlyViaWeakReferenceTopTypes is { Count: > 0 } topTypes
+                ? $" Most common: {topTypes[0].Name} ({topTypes[0].Count:N0})."
+                : "";
+
+            signals.Add(new WeakRefSignal(
+                Severity: FindingSeverity.Info,
+                Priority: 120,
+                Title: "Objects held only via weak reference",
+                Evidence: $"{r.HeldOnlyViaWeakReferenceCount:N0} alive weak target(s) are unreachable from any GC root — " +
+                          $"the weak handle is currently the only known reference to them.{topTypeSuffix}",
+                Recommendation: "Informational: these objects are pending collection on the next GC and are not " +
+                                "themselves a leak. If this count is unexpectedly large, it may indicate churn in a " +
+                                "cache or subscription pattern that repeatedly creates short-lived weakly-referenced objects.",
+                Tags: ["weak-reference", "gc-root", "diagnostic"],
+                MetricValue: r.HeldOnlyViaWeakReferenceCount,
+                MetricUnit: "objects"));
+        }
+
         // Summary finding (always).
         FindingSeverity summarySeverity = FindingSeverity.Info;
         for (int i = 0; i < signals.Count; i++)
@@ -97,7 +123,7 @@ internal sealed class WeakReferenceFindingGenerator : IFindingGenerator
                       $"({r.DeadTargetRatio:P1}). " +
                       $"WeakReference objects: {r.WeakReferenceObjectCount:N0} " +
                       $"({FormatHelper.FormatBytes(r.WeakReferenceObjectBytes)}). " +
-                      $"Stale wrappers: {r.StaleWrapperCount:N0}.",
+                      $"Stale wrappers: {r.StaleWrapperCount:N0}{staleWrapperQualifier}.",
             Recommendation: signals.Count > 0
                 ? $"Review the {signals.Count} weak-reference signal(s) below."
                 : "Weak handle health is acceptable.",

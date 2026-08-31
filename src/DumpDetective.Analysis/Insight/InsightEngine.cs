@@ -897,7 +897,7 @@ internal sealed class InsightEngine
             : FindingSeverity.Info;
 
         string staleNote = weakRef.StaleWrapperCount > 0
-            ? $" {weakRef.StaleWrapperCount:N0} stale WeakReference<T> wrapper object(s) detected."
+            ? $" {weakRef.StaleWrapperCount:N0}{(weakRef.StaleWrapperCountIsExact ? "" : " (estimated)")} stale WeakReference<T> wrapper object(s) detected."
             : string.Empty;
 
         findings.Add(new InsightFinding(

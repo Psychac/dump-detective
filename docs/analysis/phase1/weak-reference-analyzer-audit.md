@@ -152,6 +152,8 @@ For dead-key dependent handles, enumerate `ClrHandle.DependentTarget` to identif
 **4.3 GC generation distribution of alive/dead weak targets (Medium)**
 Use `heap.GetObject(addr).Type?.IsValueType` and the object's segment generation to show which GC generation the alive and dead targets came from. Dead Gen2 objects that are weak targets indicate long-lived stale registrations, while dead Gen0 objects are routine churn.
 
+> **Implemented (P3-3):** alive-target generation distribution only (Gen0/Gen1/Gen2/LOH, via `SegmentKindMapper.ResolveGeneration`). Dead-target generation was scoped out: a dead weak handle's address is either already cleared to 0 by the GC when the target was collected, or — if still non-zero — may point at memory since reused by an unrelated object, so resolving "its" generation would attribute a misleading value rather than the collected object's actual former generation.
+
 **4.4 Size breakdown for alive weak targets (Medium)**
 `TopWeakTargetTypes` tracks count but not size. Adding `TotalSizeBytes` to `NameCountEntry` or introducing a parallel `TopWeakTargetTypesBySize` list enables engineers to identify which types contribute the most retained pressure through weak references.
 
@@ -263,6 +265,24 @@ Phase B probes one sample instance per `WeakReference<T>` closed generic type gr
 
 For a type with 10,000 instances where 5,000 are stale, the result will be either 0 or 10,000 stale wrappers — never the true count. The finding text presents `StaleWrapperCount` as a plain number without any indication that it is a group-sample approximation.
 
+> **Resolved (P3-4):** rather than just labeling this estimate, the index path is now exact. It
+> streams the disk-backed object index (`IHeapAnalysisCache.EnumerateIndexedEntriesAsTuples`) once,
+> filtered to the small set of `WeakReference<T>`-shaped MethodTables, and reads `m_handle` per
+> actual instance — the same "stream the disk index, filter by known MT, only touch matching
+> objects" convention already used by `AsyncStateMachineAnalyzer`'s suspend-state histogram,
+> `TimerLeakAnalyzer`, and `EventLeak/PublisherRegistry`. `TopStaleWrapperHolderTypes` is now an
+> exact per-type breakdown as a side effect, not just the aggregate. The old one-sample
+> extrapolation survives only as a degraded fallback for the (should-not-occur-in-production) case
+> where `TypeAggregates` is available but the disk object index itself isn't — that case, and only
+> that case, is what `WeakReferenceDomainResult.StaleWrapperCountIsExact = false` / the
+> `(estimated)` qualifier in report text now indicates.
+>
+> **Known gap:** no dedicated analyzer-level unit test exercises the new streaming-scan code path —
+> `WeakReferenceAnalyzer` has no existing test fixture wiring a fake `IHeapAnalysisCache` +
+> `AnalysisContext`, and building one was out of scope for this pass. Verified via full solution
+> build and the existing (finding-generator-level) test suite, which stayed green; a real dump run
+> or a purpose-built fixture would be needed to verify the exact-scan path end-to-end.
+
 ### Confidence risks
 
 | Risk | Severity | Notes |
@@ -347,17 +367,19 @@ dotMemory shows "Incoming references" including weak references, and can flag ob
 | P1-2 | **Merge Phase A and Phase C into a single handle-snapshot pass** — eliminates one full read of HandleSnapshot.bin on disk | Performance | High | Medium | High | Improvement | ✅ Done (commit f4caad1) |
 | P1-3 | **Add Phase B fallback heap scan** when `typeAggregates` is null — filter `heap.EnumerateObjects()` by `WeakRefGenericName`/`WeakRefNonGenericName`; add `PhaseBSkipped` flag to result | Correctness | Medium | Medium | High | Improvement | ✅ Done (commit f123412) |
 | P1-4 | **Emit both signals** from `WeakReferenceFindingGenerator` when both the dead-ratio and dependent-handle thresholds are met | Diagnostic | Medium | Low | High | Improvement | ✅ Done (commit 7ebe9bd) |
-| P2-1 | **Add per-kind alive/dead breakdown** — track `aliveByKind` and `deadByKind` dicts; add to domain result and section builder | Diagnostic | High | Medium | High | Improvement | Pending |
+| P2-1 | **Add per-kind alive/dead breakdown** — track `aliveByKind` and `deadByKind` dicts; add to domain result and section builder | Diagnostic | High | Medium | High | Improvement | ✅ Done |
 | P2-2 | **Add absolute dead-count threshold signal** (configurable, default 10,000) alongside the ratio signal | Diagnostic | Medium | Low | High | Improvement | ✅ Done (commit f4c7461) |
 | P2-3 | **Eliminate double `heap.GetObject` in MemoryHandleSnapshotReader** — add `bool IsAlive` pre-computed to `HandleRecord` or expose it as a property | Performance | Medium | Low | High | Improvement | ✅ Done (commit f4c7461) |
 | P2-4 | **Add `ObjectScanCounter` to Phase C reader path** for progress reporting on large dumps | Performance | Low | Low | High | Improvement | ✅ Done (commit f4c7461) |
 | P2-5 | **Raise `WeakRefProbeSampleLimit` defaults** — Balanced: 50, Full: 500; the per-probe cost is a single ClrMD field read | Performance | Medium | Low | High | Improvement | ✅ Done (commit f4c7461) |
-| P3-1 | **Expose dependent-handle value types** — use `ClrHandle.DependentTarget` in a Phase C extension to identify secondary types for dead-key entries | Diagnostic | High | Medium | Medium | Improvement | Pending |
-| P3-2 | **Add "held only via weak reference" detection** — join WeakTarget addresses against `ReverseReferenceIndex`; flag objects with no strong incoming edges | Diagnostic | High | High | Medium | Evolution | Pending |
+| P3-1 | **Expose dependent-handle value types** — use `ClrHandle.DependentTarget` in a Phase C extension to identify secondary types for dead-key entries | Diagnostic | High | Medium | Medium | Improvement | ✅ Done |
+| P3-2 | **Add "held only via weak reference" detection** — join WeakTarget addresses against `ReverseReferenceIndex`; flag objects with no strong incoming edges | Diagnostic | High | High | Medium | Evolution | ✅ Done (via `IReachableAddressProvider`, not `TryGetParents` — see note) |
 
 > **Reverse index available (2026-08-12):** P3-2's `ReverseReferenceIndex` is implemented as `ReverseEdgeIndexReader.TryGetParents` — a per-`WeakTarget` existence check (parents empty/truncated-false ⇒ "held only via weak reference"), no traversal required. See `docs/analysis/phase1/phase1-completion-tracker.md` § Reverse Edge Index — Consumer Opportunities.
-| P3-3 | **Add GC generation distribution** for alive/dead weak targets using object segment metadata | Diagnostic | Medium | Medium | Medium | Improvement | Pending |
-| P3-4 | **Add `(estimated)` qualifier** to stale wrapper count in evidence text; document approximation method | Diagnostic | Low | Low | High | Improvement | Pending |
+>
+> **Implemented (P3-2), using a different index than originally proposed:** `TryGetParents` only records *object-to-object* edges, so a directly-rooted object (e.g. a static field pointing straight at it, with no other object also holding it) would show zero recorded parents too — a false positive for "held only via weak reference." Implemented instead against `IReachableAddressProvider.IsReachable`, backed by the same Stage A walk but seeded from `heap.EnumerateRoots()` (which, like all ClrMD root enumeration, never includes weak/dependent handles) and following only strong references. An alive weak target with `IsReachable == false` means nothing but the weak handle currently references it — the correct signal, without the static-root false-positive risk.
+| P3-3 | **Add GC generation distribution** for alive/dead weak targets using object segment metadata | Diagnostic | Medium | Medium | Medium | Improvement | ✅ Done (alive targets only — dead-target generation found unreliable, see notes) |
+| P3-4 | **Add `(estimated)` qualifier** to stale wrapper count in evidence text; document approximation method | Diagnostic | Low | Low | High | Improvement | ✅ Done — upgraded scope: index path is now exact, not just labeled (see note) |
 
 ---
 

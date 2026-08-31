@@ -241,32 +241,56 @@ internal sealed record WcfChannelDomainResult(
 /// </summary>
 internal sealed record HttpObjectTypeSummary(
     string TypeName,
-    int Count,
+    long Count,
     ulong TotalBytes);
 
 /// <summary>
-/// Lightweight snapshot of a single HttpClient object, capped per scan.
+/// Per-module count/size summary for HttpMessageHandler subclasses, distinguishing e.g. Polly
+/// pipelines, logging/auth DelegatingHandlers, and application-layer handlers by owning module —
+/// resolved once per distinct handler type, not per instance.
 /// </summary>
-internal sealed record HttpClientSnapshot(
+internal sealed record HttpHandlerModuleSummary(
+    string ModuleName,
+    long Count,
+    ulong TotalBytes);
+
+/// <summary>
+/// Lightweight snapshot of a single HttpClient, HttpWebRequest, ServicePoint, or
+/// IHttpClientFactory handler tracking entry object. <see cref="Uri"/> holds the base address
+/// (HttpClient) or request URI (HttpWebRequest); <see cref="TimeoutMilliseconds"/>,
+/// <see cref="ResponsePending"/>, <see cref="ClientName"/>, and <see cref="ConnectionLimit"/> are
+/// populated only for the category they apply to.
+/// </summary>
+internal sealed record HttpInstanceSnapshot(
+    string Category,
     string TypeName,
     ulong Address,
-    string? BaseAddress = null,
-    long TimeoutMilliseconds = -1);
+    string? Uri = null,
+    long TimeoutMilliseconds = -1,
+    bool ResponsePending = false,
+    string? ClientName = null,
+    int? ConnectionLimit = null);
 
 /// <summary>
 /// Domain result produced by <c>HttpObjectAnalyzer</c>.
 /// </summary>
 internal sealed record HttpObjectDomainResult(
     bool HttpObjectsFound,
-    int TotalHttpObjects,
-    int HttpClientCount,
-    int HttpWebRequestCount,
-    int HttpWebResponseCount,
-    int HttpMessageHandlerCount,
-    int ServicePointCount,
+    long TotalHttpObjects,
+    long HttpClientCount,
+    long HttpWebRequestCount,
+    long HttpWebResponseCount,
+    long HttpMessageHandlerCount,
+    long ServicePointCount,
+    long ActiveHandlerTrackingEntryCount,
+    long ExpiredHandlerTrackingEntryCount,
+    long HttpClientGen0Count,
+    long HttpClientGen1Count,
+    long HttpClientGen2Count,
     ulong TotalBytes,
     IReadOnlyList<HttpObjectTypeSummary> ByType,
-    IReadOnlyList<HttpClientSnapshot> TopHttpClients) : DumpDetective.Core.Models.AnalyzerDomainResult;
+    IReadOnlyList<HttpInstanceSnapshot> TopHttpInstances,
+    IReadOnlyList<HttpHandlerModuleSummary> HandlerModules) : DumpDetective.Core.Models.AnalyzerDomainResult;
 
 // ── Timer Objects ───────────────────────────────────────────────────────────
 

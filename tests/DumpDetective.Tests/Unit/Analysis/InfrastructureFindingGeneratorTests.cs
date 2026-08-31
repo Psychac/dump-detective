@@ -72,7 +72,7 @@ public sealed class InfrastructureFindingGeneratorTests
     {
         var gen = new DbConnectionFindingGenerator();
         gen.CanGenerate(new DbConnectionDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, [], [], [])).Should().BeTrue();
-        gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [])).Should().BeFalse();
+        gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [], [], [])).Should().BeFalse();
     }
 
     [Fact]
@@ -165,7 +165,7 @@ public sealed class InfrastructureFindingGeneratorTests
     {
         var gen = new SqlConnectionPoolFindingGenerator();
         gen.CanGenerate(new SqlConnectionPoolDomainResult(false, 0, 0, [])).Should().BeTrue();
-        gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [])).Should().BeFalse();
+        gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [], [], [])).Should().BeFalse();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -211,7 +211,7 @@ public sealed class InfrastructureFindingGeneratorTests
     {
         var gen = new SqlTransactionFindingGenerator();
         gen.CanGenerate(new SqlTransactionDomainResult(false, 0, 0, 0, 0, [], [])).Should().BeTrue();
-        gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [])).Should().BeFalse();
+        gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [], [], [])).Should().BeFalse();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -257,7 +257,7 @@ public sealed class InfrastructureFindingGeneratorTests
     {
         var gen = new SqlCommandFindingGenerator();
         gen.CanGenerate(new SqlCommandDomainResult(false, 0, 0, 0, [], [])).Should().BeTrue();
-        gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [])).Should().BeFalse();
+        gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [], [], [])).Should().BeFalse();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -357,7 +357,7 @@ public sealed class InfrastructureFindingGeneratorTests
     public void HttpObject_NoFindings_WhenNotFound()
     {
         var gen = new HttpObjectFindingGenerator();
-        var result = new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], []);
+        var result = new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [], [], []);
         gen.Generate(result).Should().BeEmpty();
     }
 
@@ -377,6 +377,33 @@ public sealed class InfrastructureFindingGeneratorTests
         var result = HttpResult(httpClients: 20, webRequests: 0, webResponses: 0);
         var findings = gen.Generate(result);
         findings.Should().ContainSingle(f => f.Severity == FindingSeverity.Critical);
+    }
+
+    [Fact]
+    public void HttpObject_HttpClientEvidence_MentionsGen0Churn_WhenMostlyGen0()
+    {
+        var gen = new HttpObjectFindingGenerator();
+        var result = HttpResult(httpClients: 10, httpClientGen0: 8, httpClientGen1: 1, httpClientGen2: 1);
+        var findings = gen.Generate(result);
+        findings.Should().ContainSingle(f => f.Tags.Contains("httpclient") && f.Evidence.Contains("per-request allocation"));
+    }
+
+    [Fact]
+    public void HttpObject_HttpClientEvidence_MentionsGen2Reuse_WhenMostlyGen2()
+    {
+        var gen = new HttpObjectFindingGenerator();
+        var result = HttpResult(httpClients: 10, httpClientGen0: 1, httpClientGen1: 1, httpClientGen2: 8);
+        var findings = gen.Generate(result);
+        findings.Should().ContainSingle(f => f.Tags.Contains("httpclient") && f.Evidence.Contains("long-lived reuse — the count"));
+    }
+
+    [Fact]
+    public void HttpObject_HttpClientEvidence_OmitsGenerationCommentary_WhenGenerationUnresolved()
+    {
+        var gen = new HttpObjectFindingGenerator();
+        var result = HttpResult(httpClients: 10);
+        var findings = gen.Generate(result);
+        findings.Should().ContainSingle(f => f.Tags.Contains("httpclient") && !f.Evidence.Contains("Gen0") && !f.Evidence.Contains("Gen2"));
     }
 
     [Fact]
@@ -407,10 +434,76 @@ public sealed class InfrastructureFindingGeneratorTests
     }
 
     [Fact]
+    public void HttpObject_ServicePointEvidence_MentionsLowConnectionLimit_WhenSampled()
+    {
+        var gen = new HttpObjectFindingGenerator();
+        var result = HttpResult(servicePoints: 50, topHttpInstances:
+        [
+            new HttpInstanceSnapshot("ServicePoint", "System.Net.ServicePoint", 0x1000, ConnectionLimit: 2),
+            new HttpInstanceSnapshot("ServicePoint", "System.Net.ServicePoint", 0x2000, ConnectionLimit: 100),
+        ]);
+        var findings = gen.Generate(result);
+        findings.Should().ContainSingle(f => f.Tags.Contains("servicepoint") && f.Evidence.Contains("ConnectionLimit=2"));
+    }
+
+    [Fact]
+    public void HttpObject_ServicePointEvidence_OmitsConnectionLimitClause_WhenNoneSampledOrAllHealthy()
+    {
+        var gen = new HttpObjectFindingGenerator();
+        var result = HttpResult(servicePoints: 50, topHttpInstances:
+        [
+            new HttpInstanceSnapshot("ServicePoint", "System.Net.ServicePoint", 0x1000, ConnectionLimit: 100),
+        ]);
+        var findings = gen.Generate(result);
+        findings.Should().ContainSingle(f => f.Tags.Contains("servicepoint") && !f.Evidence.Contains("ConnectionLimit="));
+    }
+
+    [Fact]
+    public void HttpObject_Warning_WhenManyHandlers()
+    {
+        var gen = new HttpObjectFindingGenerator();
+        var result = HttpResult(handlers: 10);
+        var findings = gen.Generate(result);
+        findings.Should().ContainSingle(f => f.Tags.Contains("httpmessagehandler") && f.Severity == FindingSeverity.Warning);
+    }
+
+    [Fact]
+    public void HttpObject_Critical_WhenVeryManyHandlers()
+    {
+        var gen = new HttpObjectFindingGenerator();
+        var result = HttpResult(handlers: 50);
+        var findings = gen.Generate(result);
+        findings.Should().ContainSingle(f => f.Tags.Contains("httpmessagehandler") && f.Severity == FindingSeverity.Critical);
+    }
+
+    [Fact]
+    public void HttpObject_HandlerEvidence_NamesTopModule_WhenHandlerModulesPresent()
+    {
+        var gen = new HttpObjectFindingGenerator();
+        var result = HttpResult(handlers: 10, handlerModules:
+        [
+            new HttpHandlerModuleSummary("Polly.dll", 7, 700),
+            new HttpHandlerModuleSummary("MyApp.dll", 3, 300),
+        ]);
+        var findings = gen.Generate(result);
+        findings.Should().ContainSingle(f => f.Tags.Contains("httpmessagehandler") && f.Evidence.Contains("Polly.dll"));
+    }
+
+    [Fact]
+    public void HttpObject_Warning_WhenManyExpiredHandlerTrackingEntries()
+    {
+        var gen = new HttpObjectFindingGenerator();
+        var result = HttpResult(activeHandlerTrackingEntries: 3, expiredHandlerTrackingEntries: 20);
+        var findings = gen.Generate(result);
+        findings.Should().ContainSingle(f => f.Tags.Contains("httpclientfactory"));
+    }
+
+    [Fact]
     public void HttpObject_BelowThresholds_NoFindings()
     {
         var gen = new HttpObjectFindingGenerator();
-        var result = HttpResult(httpClients: 4, webRequests: 9, webResponses: 5, servicePoints: 10);
+        var result = HttpResult(httpClients: 4, webRequests: 9, webResponses: 5, servicePoints: 10,
+            activeHandlerTrackingEntries: 3, expiredHandlerTrackingEntries: 19);
         gen.Generate(result).Should().BeEmpty();
     }
 
@@ -418,7 +511,7 @@ public sealed class InfrastructureFindingGeneratorTests
     public void HttpObject_CanGenerate_OnlyForHttpObjectDomainResult()
     {
         var gen = new HttpObjectFindingGenerator();
-        gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [])).Should().BeTrue();
+        gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [], [], [])).Should().BeTrue();
         gen.CanGenerate(new WcfChannelDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [])).Should().BeFalse();
     }
 
@@ -468,7 +561,7 @@ public sealed class InfrastructureFindingGeneratorTests
     {
         var gen = new TimerLeakFindingGenerator();
         gen.CanGenerate(new TimerLeakDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, [], [])).Should().BeTrue();
-        gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, [], [])).Should().BeFalse();
+        gen.CanGenerate(new HttpObjectDomainResult(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [], [], [])).Should().BeFalse();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -548,9 +641,14 @@ public sealed class InfrastructureFindingGeneratorTests
 
     private static HttpObjectDomainResult HttpResult(
         int httpClients = 0, int webRequests = 0, int webResponses = 0,
-        int handlers = 0, int servicePoints = 0)
+        int handlers = 0, int servicePoints = 0,
+        int activeHandlerTrackingEntries = 0, int expiredHandlerTrackingEntries = 0,
+        int httpClientGen0 = 0, int httpClientGen1 = 0, int httpClientGen2 = 0,
+        IReadOnlyList<HttpHandlerModuleSummary>? handlerModules = null,
+        IReadOnlyList<HttpInstanceSnapshot>? topHttpInstances = null)
     {
-        int total = httpClients + webRequests + webResponses + handlers + servicePoints;
+        int total = httpClients + webRequests + webResponses + handlers + servicePoints
+                  + activeHandlerTrackingEntries + expiredHandlerTrackingEntries;
         var byType = new List<HttpObjectTypeSummary>();
         if (httpClients > 0)  byType.Add(new("System.Net.Http.HttpClient", httpClients, (ulong)(httpClients * 400)));
         if (webRequests > 0)  byType.Add(new("System.Net.HttpWebRequest", webRequests, (ulong)(webRequests * 300)));
@@ -564,9 +662,15 @@ public sealed class InfrastructureFindingGeneratorTests
             HttpWebResponseCount: webResponses,
             HttpMessageHandlerCount: handlers,
             ServicePointCount: servicePoints,
+            ActiveHandlerTrackingEntryCount: activeHandlerTrackingEntries,
+            ExpiredHandlerTrackingEntryCount: expiredHandlerTrackingEntries,
+            HttpClientGen0Count: httpClientGen0,
+            HttpClientGen1Count: httpClientGen1,
+            HttpClientGen2Count: httpClientGen2,
             TotalBytes: byType.Aggregate(0UL, (sum, t) => sum + t.TotalBytes),
             ByType: byType,
-            TopHttpClients: []);
+            TopHttpInstances: topHttpInstances ?? [],
+            HandlerModules: handlerModules ?? []);
     }
 
     private static TimerLeakDomainResult TimerResult(

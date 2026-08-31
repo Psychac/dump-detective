@@ -387,13 +387,13 @@ the standard pipeline. Silently wrong when the cache is absent.
 | **P1-1** | **Implement `ITypedResourceInstanceSampler<HttpClientSnapshot>` with base URI + timeout capture** | **Diagnostic** | **Improvement** | **High** | **Medium** | **High** | ✅ **DONE** |
 | **P1-2** | **Fix `HttpObjectTrendComparer.Compare` to include `ServicePointCount` and `HttpMessageHandlerCount` deltas** | **Correctness** | **Improvement** | **Medium** | **Low** | **High** | ✅ **DONE** |
 | **P1-3** | **Add section narrative blocks for `HttpWebResponse` and `ServicePoint` in `HttpObjectSectionBuilder`** | **Diagnostic** | **Improvement** | **Medium** | **Low** | **High** | ✅ **DONE** |
-| P2-1 | Add `HttpWebRequest` instance snapshot (URL, state) via per-instance sampling | Diagnostic | Improvement | Medium | Medium | Medium | |
-| P2-2 | Add `IHttpClientFactory` handler tracking entry detection | Diagnostic | Improvement | Medium | Medium | Medium | |
-| P2-3 | Add GC generation breakdown for `HttpClient` instances | Diagnostic | Improvement | Medium | Medium | High | |
-| P2-4 | Add overflow guard (use `long` accumulators) for per-category counters | Correctness | Improvement | Low | Low | High | |
-| P2-5 | Add handler chain depth / handler-per-client ratio metric | Diagnostic | Improvement | Medium | Low | Medium | |
-| P3-1 | `HttpMessageHandler` accumulation finding threshold | Diagnostic | Improvement | Low | Low | Medium | |
-| P3-2 | `ServicePoint.m_ConnectionLimit` field read on sampled instances | Diagnostic | Improvement | Low | Medium | High | |
+| **P2-1** | **Add `HttpWebRequest` instance snapshot (URL, state) via per-instance sampling** | **Diagnostic** | **Improvement** | **Medium** | **Medium** | **Medium** | ✅ **DONE** |
+| **P2-2** | **Add `IHttpClientFactory` handler tracking entry detection** | **Diagnostic** | **Improvement** | **Medium** | **Medium** | **Medium** | ✅ **DONE** |
+| **P2-3** | **Add GC generation breakdown for `HttpClient` instances** | **Diagnostic** | **Improvement** | **Medium** | **Medium** | **High** | ✅ **DONE** |
+| **P2-4** | **Add overflow guard (use `long` accumulators) for per-category counters** | **Correctness** | **Improvement** | **Low** | **Low** | **High** | ✅ **DONE** |
+| **P2-5** | **Add handler chain depth / handler-per-client ratio metric** | **Diagnostic** | **Improvement** | **Medium** | **Low** | **Medium** | ✅ **DONE** (partial — see summary) |
+| **P3-1** | **`HttpMessageHandler` accumulation finding threshold** | **Diagnostic** | **Improvement** | **Low** | **Low** | **Medium** | ✅ **DONE** |
+| **P3-2** | **`ServicePoint.m_ConnectionLimit` field read on sampled instances** | **Diagnostic** | **Improvement** | **Low** | **Medium** | **High** | ✅ **DONE** |
 | **P3-3** | **Register `HttpObjectAnalyzer` as `IHeapIndexScanParticipant` for architectural consistency** | **Architecture** | **Evolution** | **Low** | **Medium** | **High** | ✅ **DONE** |
 
 ### Final Verdict
@@ -602,3 +602,225 @@ the standard pipeline. Silently wrong when the cache is absent.
 
 - All 8 HTTP object analyzer tests pass
 - No breaking changes to section builder API or output format
+
+---
+
+## Implementation Summary (P2-1)
+
+**Status:** ✅ **COMPLETE**
+
+### What Was Done
+
+1. **Unified `HttpClientSnapshot` and the new `HttpWebRequest` snapshot into a single `HttpInstanceSnapshot` record** (`InfrastructureDomainModels.cs`)
+   - Replaces the HttpClient-only `HttpClientSnapshot` with `HttpInstanceSnapshot(Category, TypeName, Address, Uri, TimeoutMilliseconds, ResponsePending)`
+   - Avoids doubling the sampler/list/wiring machinery that implementing `ITypedResourceInstanceSampler<T>` twice (once per snapshot type) would have required — one sampler, one list, one section table, extensible to future categories (e.g. `ServicePoint.m_ConnectionLimit`)
+   - `HttpObjectDomainResult.TopHttpClients` renamed to `TopHttpInstances`
+
+2. **Implemented `HttpWebRequest` per-instance sampling** (`HttpObjectAnalyzer.cs`)
+   - `TrySampleHttpWebRequest` reads `_requestUri` (Uri → URL) and derives `ResponsePending` from `_beginGetResponseCalled && !_endGetResponseCalled`
+   - Field names confirmed by decompiling the actual .NET 9 runtime `System.Net.Requests.dll` rather than assuming .NET Framework layout — since .NET 5, `HttpWebRequest` is implemented as a compatibility shim over `HttpClient`, so its private fields differ from the legacy implementation
+   - `ResponsePending = true` flags a request whose response was requested but never completed — the case most relevant to a hang/leak investigation
+   - `HttpClient` sampling (`TrySampleHttpClient`) unchanged in behavior, just returns `HttpInstanceSnapshot` instead of `HttpClientSnapshot`
+
+3. **Closed a pre-existing reporting gap found during scoping**: `TopHttpClients` from P1-1 was populated in the domain model but never rendered anywhere in `HttpObjectSectionBuilder`. Added an "HTTP object instances" compact table (Category, Address, URI, Detail) covering both `HttpClient` and `HttpWebRequest` snapshots, following the same pattern as `WcfChannelSectionBuilder`'s faulted-channel table.
+
+### Impact
+
+- **Diagnostic gap closed:** `HttpWebRequest` accumulation now has instance-level URL and pending-response visibility, matching what P1-1 gave `HttpClient`
+- **Previously-invisible data now visible:** the P1-1 `HttpClient` snapshot table is now actually rendered in the report for the first time
+- **No new capping:** `InstanceStateSampler<T>` is uncapped (post profile-removal refactor); no `MaxStateSamplesPerType`/`TopSampleCap` reintroduced
+
+### Testing
+
+- All 45 HTTP object / infrastructure finding generator tests pass
+- Full unit suite (799 tests) passes
+- No real-dump discrepancy tests run yet (not required for this change; can be run one-at-a-time in foreground on request)
+
+---
+
+## Implementation Summary (P2-2)
+
+**Status:** ✅ **COMPLETE**
+
+### What Was Done
+
+1. **Corrected a wrong assumption in the original audit**: the audit guessed a nested type `HttpClientFactory+ActiveHandlerTrackingEntry`. Decompiling `Microsoft.Extensions.Http.dll` (versions 6.0.0, 8.0.0, 9.0.5, across `netstandard2.0`/`net461`/`net6.0`+/`net9.0` TFMs) showed both types are actually **top-level, non-nested, `internal sealed`**: `Microsoft.Extensions.Http.ActiveHandlerTrackingEntry` and `Microsoft.Extensions.Http.ExpiredHandlerTrackingEntry`, with an identical field/property shape across all three package versions.
+
+2. **Added detection for both tracking-entry types** (`HttpObjectAnalyzer.cs`)
+   - New `HttpObjectCategory` values `ActiveHandlerTrackingEntry` / `ExpiredHandlerTrackingEntry`, classified by exact type-name match (no pattern matching needed)
+   - `TrySampleHandlerTrackingEntry` reads the `Name` auto-property's compiled backing field (`<Name>k__BackingField`) — the logical client name passed to `IHttpClientFactory.CreateClient(name)` — surfaced via the new `HttpInstanceSnapshot.ClientName` field
+   - New `ActiveHandlerTrackingEntryCount` / `ExpiredHandlerTrackingEntryCount` counters on `HttpObjectDomainResult`, wired through `OnHeapEntry`/`BuildResult` identically to the existing categories
+
+3. **Deliberately excluded**: resolving `ExpiredHandlerTrackingEntry._livenessTracker.IsAlive` to detect a handler that's expired-but-still-referenced (the "true leak" signal). Doing so requires walking the GC handle table to match a specific `WeakReference`'s target — the same machinery `WeakReferenceAnalyzer` already built (`IRequiresReachableGraphIndex`, full handle-table pass). That's a disproportionate dependency for this analyzer's lightweight streaming design. Used a cheaper proxy instead: `ExpiredHandlerTrackingEntryCount` tracked via the trend comparer — a count that doesn't shrink across snapshots is the leak signal.
+
+4. **Cross-runtime fix to the P2-1 `HttpWebRequest` sampler, per explicit request**: decompiled `System.Net.Requests.dll` (.NET 9, the P2-1 baseline) against .NET Framework's `System.dll` (v4.0.30319) and found the field layouts differ completely — .NET 5+ implements `HttpWebRequest` as a shim over `HttpClient` (`_requestUri`, `_beginGetResponseCalled`/`_endGetResponseCalled`), while .NET Framework has the original implementation (`_Uri`, `m_RequestSubmitted`/`_HttpResponse`). `TrySampleHttpWebRequest` now tries the modern field names first and falls back to the Framework field names, so URL/pending-response capture works on both runtimes. Note: pre-.NET-5 .NET Core (2.1–3.1) has a third, unverified field layout — not explicitly covered, but the existing try/catch/null-check pattern degrades gracefully (empty URI, `ResponsePending: false`) rather than failing.
+
+5. **Findings, trend, and reporting**
+   - New Warning finding when `ExpiredHandlerTrackingEntryCount >= 20`, explaining handler-rotation churn and pointing at `HandlerLifetime` / direct-handler-capture as causes
+   - `HttpObjectTrendComparer`: added `http.activehandlertrackingentry` / `http.expiredhandlertrackingentry` metrics (`ExtractMetrics` and `Compare`)
+   - `HttpObjectSectionBuilder`: added key metrics for both counts, a churn narrative block, and extended the P2-1 "HTTP object instances" table's `Detail` column to show `Client: {name}` for tracking-entry rows
+
+### Impact
+
+- **Diagnostic gap closed:** `IHttpClientFactory` handler rotation is now visible at both the aggregate (counts, trend) and instance (client name) level
+- **Cross-runtime correctness:** `HttpWebRequest` instance sampling (P2-1) now works on both .NET 5+ and .NET Framework dumps instead of only the runtime it was originally verified against
+- **Avoided scope creep:** did not pull `WeakReferenceAnalyzer`'s handle-table machinery into a lightweight streaming analyzer for a count-based proxy that already gives an adequate signal via trend
+
+### Testing
+
+- All 46 HTTP object / infrastructure finding generator tests pass (45 + 1 new churn-finding test)
+- Full unit suite (800 tests) passes
+- No real-dump discrepancy tests run yet (not required for this change; can be run one-at-a-time in foreground on request)
+
+---
+
+## Implementation Summary (P2-3)
+
+**Status:** ✅ **COMPLETE**
+
+### What Was Done
+
+1. **GC generation breakdown for `HttpClient`** (`HttpObjectAnalyzer.cs`)
+   - Added `_httpClientGen0`/`_httpClientGen1`/`_httpClientGen2` analyzer-level accumulators (not per-type — `HttpClient` is matched by exact type name, so there's normally exactly one candidate `MethodTable`), incremented in the existing `OnHeapEntry` `HttpClient` case using `entry.Generation`
+   - **No new ClrMD calls needed**: `HeapEntry.Generation` is already populated for free during the Phase-1 index build for every entry reaching `IHeapIndexScanParticipant.OnHeapEntry` — `CollectionAnalyzer` already relies on this same field for its own per-kind generation breakdown, so this reuses an established, already-cheap mechanism rather than adding a second heap pass or per-object ClrMD field read
+   - `gen >= 2` clamped into the Gen2 bucket (absorbs LOH/POH/unusual cases), `gen < 0` (unresolved) excluded from all buckets — same defensive pattern `CollectionAnalyzer` uses
+   - New `HttpClientGen0Count`/`HttpClientGen1Count`/`HttpClientGen2Count` on `HttpObjectDomainResult`
+
+2. **Enriched the existing "N HttpClient instances" finding instead of adding a new finding** (`HttpObjectFindingGenerator.cs`)
+   - `BuildGenerationEvidence` appends a clause to the existing finding's evidence text: "{X}% are Gen0, consistent with per-request allocation" when Gen0 dominates (>50%), or "{X}% are Gen2, consistent with long-lived reuse" when Gen2 dominates
+   - Deliberately not a separate finding — same instance count means opposite things depending on generation, so this refines the existing signal rather than creating finding-proliferation for what's the same underlying observation
+   - Silently omits the generation clause when no instances have a resolved generation (defensive: fallback/non-indexed paths where `entry.Generation` is the -1 sentinel)
+
+3. **Trend and reporting**
+   - `HttpObjectTrendComparer`: added `http.httpclient.gen0`/`gen1` (`HigherIsWorse` — churn) and `http.httpclient.gen2` (`Neutral` — higher isn't inherently good or bad as a trend signal, it just describes allocation pattern)
+   - `HttpObjectSectionBuilder`: added `http_client_gen0`/`gen1`/`gen2` key metrics
+
+### Impact
+
+- **Diagnostic gap closed:** the same "N HttpClient instances" count now carries a generation-based interpretation, resolving the ambiguity the audit called out (audit item 5: "Gen2 confirms long-term survival; Gen0/1 confirms per-request allocation — a single datum changes the diagnostic conclusion")
+- **Zero marginal cost:** implemented entirely from data the shared heap-index scan already produces; no additional heap pass, no additional per-object ClrMD reads
+
+### Testing
+
+- All 49 HTTP object / infrastructure finding generator tests pass (46 + 3 new generation-evidence tests)
+- Full unit suite (803 tests) passes
+- No real-dump discrepancy tests run yet (not required for this change; can be run one-at-a-time in foreground on request)
+
+---
+
+## Implementation Summary (P2-4)
+
+**Status:** ✅ **COMPLETE**
+
+### What Was Done
+
+1. **Corrected the audit's own justification before implementing**: the audit's cited overflow site (`httpClientCount += count` with `count` derived from `(int)Math.Min(kv.Value.Count, int.MaxValue)`) describes the pre-P0-1/P3-3 bulk-add design, which `IHeapIndexScanParticipant` already replaced — `OnHeapEntry` increments counters one object at a time now, not via a bulk `TypeAggregates` count. The specific scenario the audit described no longer exists. Implemented anyway for consistency with the project's existing `Gen0Count`/`Gen1Count`/`Gen2Count` precedent (already promoted `int`→`long` project-wide for the same class of risk), even though a per-category HTTP counter overflowing today would require more live objects of one type than a 25GB dump ceiling could physically hold.
+
+2. **Widened every per-category counter from `int` to `long`** (`HttpObjectAnalyzer.cs`, `InfrastructureDomainModels.cs`)
+   - `HttpObjectDomainResult`: `TotalHttpObjects`, `HttpClientCount`, `HttpWebRequestCount`, `HttpWebResponseCount`, `HttpMessageHandlerCount`, `ServicePointCount`, `ActiveHandlerTrackingEntryCount`, `ExpiredHandlerTrackingEntryCount`, `HttpClientGen0Count`, `HttpClientGen1Count`, `HttpClientGen2Count`
+   - `HttpObjectTypeSummary.Count`
+   - `HttpObjectAnalyzer`'s internal `_typeStats` tuple fields, `_httpClientGen0`/`gen1`/`gen2`, and all `BuildResult` accumulator locals
+
+3. **Verified before implementing that this is a fully contained change**: `InsightFinding.MetricValue` (`double?`), `AnalyzerMetric.Value` (`double`), and `NumericMetricValue`/`KM` (`double`) already receive these counts by implicit widening conversion — so `HttpObjectFindingGenerator`, `HttpObjectSectionBuilder`, and `HttpObjectTrendComparer` needed **zero** changes. Confirmed by a clean rebuild with no compile errors anywhere outside the two files actually touched.
+
+4. **Opportunistic cleanup**: removed a dead line in `BeforeHeapIndexScan` left over from the pre-P0-1 design — `int total = (int)Math.Min(kv.Value.Count, int.MaxValue);` was computed and never used.
+
+### Impact
+
+- **Consistency, not a live bug fix**: no test changes were needed and none were added, since this is a pure type-widening change with no new behavior to verify — the existing 803-test suite passing unchanged is exactly the expected signal
+- **Removed dead code** left over from the superseded pre-P0-1 accumulation design
+
+### Testing
+
+- Full unit suite (803 tests) passes unchanged, confirming the widening introduced no behavioral or compile-time regressions
+- No real-dump discrepancy tests run yet (not required for this change; can be run one-at-a-time in foreground on request)
+
+---
+
+## Implementation Summary (P2-5)
+
+**Status:** ✅ **DONE (partial)** — implemented the ratio metric and module-breakdown table; deliberately did not implement per-instance handler chain depth (see below)
+
+### What Was Done
+
+1. **Handler-per-client ratio** (`HttpObjectSectionBuilder.cs`, `HttpObjectTrendComparer.cs`)
+   - Purely derived (`HttpMessageHandlerCount / HttpClientCount`), no new domain-model fields needed
+   - Section builder: new `handler_client_ratio` key metric, only emitted when `HttpClientCount > 0`
+   - Trend comparer: new `http.handlerratio` metric/delta (`HigherIsWorse`), with a `HandlerClientRatio` helper that returns `0.0` instead of `NaN`/`Infinity` when there are no `HttpClient` instances to divide by — matches the audit's own framing ("if ratio grows over time in multi-dump sessions, may indicate handler leaks")
+
+2. **HttpMessageHandler breakdown by owning module** (`HttpObjectAnalyzer.cs`, `InfrastructureDomainModels.cs`)
+   - Reused the existing `TypeAggregateNameResolver.ResolveModuleName` utility (already used by `ModuleAnalyzer`) rather than adding new ClrMD surface — resolves a MethodTable to its containing DLL filename
+   - Resolved once per distinct `HttpMessageHandler` subclass type (bounded by distinct types seen, not per instance) inside the existing `BuildResult` per-type loop — no additional heap pass
+   - New `HttpHandlerModuleSummary(ModuleName, Count, TotalBytes)` and `HttpObjectDomainResult.HandlerModules`, rendered as a new "HttpMessageHandler by module" table
+
+3. **Deliberately excluded**: true per-instance handler *chain* depth (walking each `DelegatingHandler` instance's `InnerHandler`/`_innerHandler` field recursively to count how many handlers are stacked, e.g. Logging→Auth→SocketsHttpHandler = depth 3). This requires per-instance ClrMD field-chasing, meaningfully more expensive than the type-level module resolution above, and was flagged as speculative before implementing — the module breakdown already answers the audit's stated diagnostic goal (distinguishing Polly/logging/auth/application-layer handlers) without it. Would only be worth building against a confirmed need for depth specifically, not just handler categorization.
+
+### Impact
+
+- **Diagnostic gap closed**: `HttpMessageHandler` accumulation (previously a single opaque count with "no guidance text explaining what the count means," per the audit's own Area 4 weakness #4) can now be attributed to a specific module/library, and the client-to-handler ratio gives a session-over-session leak signal
+- **No new ClrMD API surface**: module resolution reuses an existing, already-tested shared utility
+
+### Testing
+
+- New `HttpObjectTrendComparerTests.cs` (3 tests): ratio computed correctly, ratio is `0` (not `NaN`) when there are no HttpClient instances, and `Compare` produces the correct delta for a rising-churn scenario
+- Full unit suite (806 tests) passes
+- No real-dump discrepancy tests run yet (not required for this change; can be run one-at-a-time in foreground on request)
+- Not covered by an automated test: the `HandlerModules` population itself (`ResolveModuleName` against a live `ClrHeap`), since no heap-scan test harness exists for `HttpObjectAnalyzer` in this codebase (a pre-existing gap, not introduced by this change) — same limitation applies to all HTTP-object-analyzer work done in this audit pass
+
+---
+
+## Implementation Summary (P3-1)
+
+**Status:** ✅ **COMPLETE**
+
+### What Was Done
+
+1. **Added the missing `HttpMessageHandlerCount` finding** (`HttpObjectFindingGenerator.cs`), filling the gap the audit called out directly (Area 4 weakness #4: "50 HttpMessageHandler subclasses reported in type table but never discussed")
+   - Warning at ≥10, Critical at ≥50 — same severity-escalation shape as the existing `HttpClient` finding, chosen by scale reasoning (handlers are heavier/rarer than `HttpClient` wrappers) rather than measured data, consistent with how the other HTTP thresholds in this analyzer were originally set
+   - Evidence text explains the three root causes from the audit: `IHttpClientFactory` rotation, leaked/directly-captured handlers, and long `DelegatingHandler` middleware chains
+   - Recommendation points at the P2-2 expired-handler-tracking-entry count and the P2-5 handler-per-client ratio as the next diagnostic step
+
+2. **Connected the finding to the P2-5 module breakdown** via a new `BuildTopHandlerModuleEvidence` helper — appends "Largest contributor: {module} (N instances)" when `HandlerModules` is populated. Without this, the P2-5 module-breakdown table existed in the domain result and report but nothing pointed a reader at it; this finding is now the entry point that sends them there.
+
+3. Confirmed this finding is genuinely independent of P2-2/P2-5, not a duplicate: it fires even when `IHttpClientFactory` isn't in use at all (no `ActiveHandlerTrackingEntry`/`ExpiredHandlerTrackingEntry` objects would exist in that case) and even when `HttpClientCount` is 0 (so the P2-5 ratio is undefined/zero).
+
+### Impact
+
+- **Diagnostic gap closed**: the last HTTP object category without any finding coverage (`HttpMessageHandler`) now has one, and it actively surfaces the P2-5 module-breakdown data that would otherwise sit unused in the report
+
+### Testing
+
+- 4 new tests: Warning at 10, Critical at 50, module-name evidence enrichment, and confirmed the existing `HttpObject_BelowThresholds_NoFindings` test (handlers defaults to 0) still passes unchanged
+- Full unit suite (809 tests) passes
+- No real-dump discrepancy tests run yet (not required for this change; can be run one-at-a-time in foreground on request)
+
+---
+
+## Implementation Summary (P3-2)
+
+**Status:** ✅ **COMPLETE**
+
+### What Was Done
+
+1. **Corrected the audit's field-name assumption before implementing** (same discipline as P2-1): decompiled `ServicePoint` on both runtimes.
+   - **.NET Framework** (`System.dll` v4.0.30319): `private int m_ConnectionLimit;` — matches the audit's original guess
+   - **.NET 9** (`System.Net.Requests.dll`): `private int _connectionLimit;` — different name, same naming-drift pattern already found for `HttpWebRequest`'s URI field in P2-1
+   - `TrySampleServicePoint` tries `_connectionLimit` first, falls back to `m_ConnectionLimit`
+
+2. **Extended the existing per-instance sampling machinery rather than building new infrastructure** — this is the 4th category (after `HttpClient`, `HttpWebRequest`, and the handler tracking entries) to plug into the same `ITypedResourceInstanceSampler<HttpInstanceSnapshot>`/`InstanceStateSampler`/`TopHttpInstances` pipeline built in P2-1. Added:
+   - `HttpInstanceSnapshot.ConnectionLimit` (dedicated nullable `int` field, not overloading an existing one — same reasoning as `ClientName` in P2-2)
+   - `TrySampleServicePoint`, wired into the `TrySample` dispatch and the existing `ServicePoint` case in `OnHeapEntry`
+   - `HttpObjectSectionBuilder`'s instance-table `Detail` column extended with `ConnectionLimit: N` for `ServicePoint` rows
+
+3. **Enriched the existing `ServicePointCount >= 50` finding rather than adding a new one** (same pattern as P2-3's HttpClient-generation enrichment and P3-1's module-name enrichment) — `BuildLowConnectionLimitEvidence` scans `TopHttpInstances` for the lowest sampled `ConnectionLimit` and appends a clause when it's ≤4 (covers the historical .NET default of 2). Directly answers the audit's own framing: "`ServicePoint` count alone doesn't say whether any of them are a bottleneck — the limit does."
+
+### Impact
+
+- **Diagnostic gap closed**: a `ServicePoint` count is no longer just a raw number — when connection limits were successfully sampled, the finding now says whether any of them are actually constraining throughput
+- **Reused, not duplicated, infrastructure**: zero new sampler/list/wiring machinery — this addition is almost entirely mechanical repetition of the pattern P2-1 established, confirming that pattern generalizes cleanly to a 4th category
+
+### Testing
+
+- 2 new tests: evidence mentions the lowest sampled `ConnectionLimit` when ≤4, and the clause is omitted when no sample is low enough (or none was sampled at all)
+- Full unit suite (811 tests) passes
+- No real-dump discrepancy tests run yet (not required for this change; can be run one-at-a-time in foreground on request)

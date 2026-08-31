@@ -29,8 +29,19 @@ internal sealed class HttpObjectSectionBuilder : SectionBuilderBase, IAnalyzerSe
             ["http_web_response"] = new NumericMetricValue(d.HttpWebResponseCount, MetricUnit.Count),
             ["handlers"] = new NumericMetricValue(d.HttpMessageHandlerCount, MetricUnit.Count),
             ["service_point"] = new NumericMetricValue(d.ServicePointCount, MetricUnit.Count),
+            ["active_handler_tracking_entries"] = new NumericMetricValue(d.ActiveHandlerTrackingEntryCount, MetricUnit.Count),
+            ["expired_handler_tracking_entries"] = new NumericMetricValue(d.ExpiredHandlerTrackingEntryCount, MetricUnit.Count),
+            ["http_client_gen0"] = new NumericMetricValue(d.HttpClientGen0Count, MetricUnit.Count),
+            ["http_client_gen1"] = new NumericMetricValue(d.HttpClientGen1Count, MetricUnit.Count),
+            ["http_client_gen2"] = new NumericMetricValue(d.HttpClientGen2Count, MetricUnit.Count),
             ["total_heap_size"] = new NumericMetricValue((double)d.TotalBytes, MetricUnit.Bytes, FormatBytes(d.TotalBytes)),
         };
+
+        if (d.HttpClientCount > 0)
+        {
+            double handlerClientRatio = d.HttpMessageHandlerCount / (double)d.HttpClientCount;
+            keyMetrics["handler_client_ratio"] = new NumericMetricValue(handlerClientRatio, MetricUnit.Count, $"{handlerClientRatio:F1}x");
+        }
 
         if (!d.HttpObjectsFound)
         {
@@ -70,6 +81,57 @@ internal sealed class HttpObjectSectionBuilder : SectionBuilderBase, IAnalyzerSe
             blocks.Add(new TextBlock(
                 "ServicePointManager.MaxServicePoints defaults to unlimited, causing ServicePoint accumulation and potential OOM. " +
                 "Set a reasonable limit (e.g., 100) or migrate to HttpClient (.NET 6+ preferred)."));
+
+        if (d.ExpiredHandlerTrackingEntryCount >= 20)
+            blocks.Add(new TextBlock(
+                "A large number of expired IHttpClientFactory handler tracking entries means many SocketsHttpHandler " +
+                "rotations have accumulated. Each rotation only frees the previous handler once nothing still " +
+                "references it — a persistently high count suggests either a very short HandlerLifetime or code " +
+                "holding onto a handler/HttpMessageHandler directly instead of obtaining it through the factory."));
+
+        if (d.TopHttpInstances.Count > 0)
+        {
+            var instanceRows = new List<TableRow>(d.TopHttpInstances.Count);
+            for (int i = 0; i < d.TopHttpInstances.Count; i++)
+            {
+                HttpInstanceSnapshot s = d.TopHttpInstances[i];
+                string detail = s.Category switch
+                {
+                    "HttpClient" => s.TimeoutMilliseconds >= 0 ? $"Timeout: {s.TimeoutMilliseconds:N0} ms" : "",
+                    "HttpWebRequest" => s.ResponsePending ? "Response pending" : "",
+                    "ActiveHandlerTrackingEntry" or "ExpiredHandlerTrackingEntry" =>
+                        s.ClientName is not null ? $"Client: {s.ClientName}" : "",
+                    "ServicePoint" => s.ConnectionLimit is int limit ? $"ConnectionLimit: {limit:N0}" : "",
+                    _ => "",
+                };
+                instanceRows.Add(new TableRow([
+                    Cell(s.Category),
+                    Cell($"0x{s.Address:X}"),
+                    Cell(s.Uri ?? "(n/a)"),
+                    Cell(detail),
+                ]));
+            }
+            compactTables.Add(STCompact("HTTP object instances",
+                new[] { CH("Category"), CH("Address"), CH("URI"), CH("Detail") },
+                instanceRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
+        if (d.HandlerModules.Count > 0)
+        {
+            var handlerModuleRows = new List<TableRow>(d.HandlerModules.Count);
+            for (int i = 0; i < d.HandlerModules.Count; i++)
+            {
+                HttpHandlerModuleSummary m = d.HandlerModules[i];
+                handlerModuleRows.Add(new TableRow([
+                    Cell(m.ModuleName),
+                    Cell($"{m.Count:N0}", m.Count),
+                    Cell(FormatBytes(m.TotalBytes)),
+                ]));
+            }
+            compactTables.Add(STCompact("HttpMessageHandler by module",
+                new[] { CH("Module"), CH("Count", "number"), CH("Heap Size") },
+                handlerModuleRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
 
         return new AnalyzerDetailSection(AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,

@@ -977,6 +977,100 @@ public sealed class InsightEngineTests
         findings.Should().NotContain(f => f.Title.Contains("stuck Opening", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void Analyze_ReferenceChainTypeBelowHeapFractionThreshold_EmitsNoDominatorCorrelationFinding()
+    {
+        InsightEngine engine = new();
+
+        ReferenceChainDomainResult referenceChain = BuildReferenceChainResult(("App.SmallCache", 5_000UL));
+        DominatorDomainResult leak = BuildDominatorResultWithTotalHeap(1_000_000UL);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Reference Chain Analysis", AnalyzerExecutionStatus.Success, referenceChain),
+            BuildRun("Dominator Analysis", AnalyzerExecutionStatus.Success, leak),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().NotContain(f => f.Title == "Reference-chain type dominates a large heap fraction");
+    }
+
+    [Fact]
+    public void Analyze_ReferenceChainTypeAboveWarningThreshold_EmitsWarningDominatorCorrelation()
+    {
+        InsightEngine engine = new();
+
+        ReferenceChainDomainResult referenceChain = BuildReferenceChainResult(("App.BigCache", 150_000UL));
+        DominatorDomainResult leak = BuildDominatorResultWithTotalHeap(1_000_000UL);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Reference Chain Analysis", AnalyzerExecutionStatus.Success, referenceChain),
+            BuildRun("Dominator Analysis", AnalyzerExecutionStatus.Success, leak),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        InsightFinding finding = findings.Should().ContainSingle(f => f.Title == "Reference-chain type dominates a large heap fraction").Subject;
+        finding.Severity.Should().Be(FindingSeverity.Warning);
+        finding.Evidence.Should().Contain("App.BigCache");
+    }
+
+    [Fact]
+    public void Analyze_ReferenceChainTypeAboveCriticalThreshold_EmitsCriticalDominatorCorrelation()
+    {
+        InsightEngine engine = new();
+
+        ReferenceChainDomainResult referenceChain = BuildReferenceChainResult(("App.HugeCache", 300_000UL));
+        DominatorDomainResult leak = BuildDominatorResultWithTotalHeap(1_000_000UL);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Reference Chain Analysis", AnalyzerExecutionStatus.Success, referenceChain),
+            BuildRun("Dominator Analysis", AnalyzerExecutionStatus.Success, leak),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().ContainSingle(f => f.Title == "Reference-chain type dominates a large heap fraction")
+            .Which.Severity.Should().Be(FindingSeverity.Critical);
+    }
+
+    private static ReferenceChainDomainResult BuildReferenceChainResult(params (string TypeName, ulong RetainedBytes)[] types)
+    {
+        var traces = new List<ReferenceTypeSampleSnapshot>(types.Length);
+        for (int i = 0; i < types.Length; i++)
+        {
+            traces.Add(new ReferenceTypeSampleSnapshot(
+                TypeName: types[i].TypeName,
+                Count: 10,
+                TotalSizeBytes: types[i].RetainedBytes,
+                SampleAddress: 0x1000,
+                SampleObjectType: types[i].TypeName,
+                SampleObjectSize: 32,
+                HasGcRoot: true,
+                RootKind: "StaticVar",
+                RootPath: null,
+                PathHops: null,
+                TraversalLimited: false,
+                RetainedBytes: types[i].RetainedBytes));
+        }
+
+        return new ReferenceChainDomainResult(
+            AnalyzedSamples: types.Length,
+            RetainedSamples: types.Length,
+            RetainedPercent: 100.0,
+            TopTypeSampleTraces: traces);
+    }
+
+    private static DominatorDomainResult BuildDominatorResultWithTotalHeap(ulong totalHeapBytes) => new(
+        CandidateCount: 0,
+        AnalyzedCount: 0,
+        TotalEstimatedRetainedBytes: 0,
+        TopDominatorTypes: [],
+        TotalHeapBytes: totalHeapBytes);
+
     private static WcfChannelDomainResult BuildWcfResult(int opening) => new(
         WcfPresent: true,
         TotalChannels: opening + 1,

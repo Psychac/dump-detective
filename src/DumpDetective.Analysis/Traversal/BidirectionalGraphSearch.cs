@@ -7,10 +7,26 @@ namespace DumpDetective.Analysis.Traversal;
 /// is unit-testable with synthetic graphs, independent of <c>ClrHeap</c>/<c>ClrObject</c>, which
 /// this repo has no fixtures to construct in tests. <see cref="IndexBackedBidirectionalSearch"/>
 /// is the ClrMD-aware adapter that supplies the neighbor functions.
+///
+/// Instance (not static): callers that invoke <see cref="TryFindPath"/> repeatedly against
+/// different targets (one search per candidate object) are expected to reuse a single instance so
+/// the frontier/visited/predecessor collections below are cleared and reused instead of allocated
+/// fresh per search.
 /// </summary>
-internal static class BidirectionalGraphSearch
+internal sealed class BidirectionalGraphSearch
 {
-    public static bool TryFindPath(
+    private readonly Dictionary<ulong, string> _rootKindByAddress = new();
+    private readonly HashSet<ulong> _forwardVisited = new();
+    private readonly Dictionary<ulong, ulong> _forwardPrev = new();
+    private List<ulong> _forwardFrontier = new();
+    private List<ulong> _forwardFrontierNext = new();
+
+    private readonly HashSet<ulong> _backwardVisited = new();
+    private readonly Dictionary<ulong, ulong> _backwardNext = new();
+    private List<ulong> _backwardFrontier = new();
+    private List<ulong> _backwardFrontierNext = new();
+
+    public bool TryFindPath(
         ulong target,
         IReadOnlyList<(string RootKind, ulong Address)> roots,
         Func<ulong, IEnumerable<ulong>> getForwardNeighbors,
@@ -28,13 +44,22 @@ internal static class BidirectionalGraphSearch
         candidateSetSize = 0;
         budgetExhausted = false;
 
-        var rootKindByAddress = new Dictionary<ulong, string>();
+        _rootKindByAddress.Clear();
+        _forwardVisited.Clear();
+        _forwardPrev.Clear();
+        _forwardFrontier.Clear();
+        _forwardFrontierNext.Clear();
+        _backwardVisited.Clear();
+        _backwardNext.Clear();
+        _backwardFrontier.Clear();
+        _backwardFrontierNext.Clear();
+
         foreach ((string kind, ulong addr) in roots)
         {
             if (addr == 0)
                 continue;
 
-            rootKindByAddress.TryAdd(addr, kind);
+            _rootKindByAddress.TryAdd(addr, kind);
 
             if (addr == target)
             {
@@ -44,16 +69,17 @@ internal static class BidirectionalGraphSearch
             }
         }
 
-        if (rootKindByAddress.Count == 0)
+        if (_rootKindByAddress.Count == 0)
             return false;
 
-        var forwardVisited = new HashSet<ulong>(rootKindByAddress.Keys);
-        var forwardPrev = new Dictionary<ulong, ulong>();
-        List<ulong> forwardFrontier = new(rootKindByAddress.Keys);
+        foreach (ulong addr in _rootKindByAddress.Keys)
+        {
+            _forwardVisited.Add(addr);
+            _forwardFrontier.Add(addr);
+        }
 
-        var backwardVisited = new HashSet<ulong> { target };
-        var backwardNext = new Dictionary<ulong, ulong>();
-        List<ulong> backwardFrontier = new() { target };
+        _backwardVisited.Add(target);
+        _backwardFrontier.Add(target);
 
         maxTotalDepth = Math.Max(1, maxTotalDepth);
 
@@ -62,38 +88,40 @@ internal static class BidirectionalGraphSearch
         int backwardDepth = 0;
 
         while (meetingNode is null
-               && (forwardFrontier.Count > 0 || backwardFrontier.Count > 0)
-               && forwardVisited.Count + backwardVisited.Count < maxNodes
+               && (_forwardFrontier.Count > 0 || _backwardFrontier.Count > 0)
+               && _forwardVisited.Count + _backwardVisited.Count < maxNodes
                && forwardDepth + backwardDepth < maxTotalDepth)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (forwardFrontier.Count > 0)
+            if (_forwardFrontier.Count > 0)
             {
-                forwardFrontier = ExpandLevel(forwardFrontier, forwardVisited, forwardPrev, backwardVisited, getForwardNeighbors, ref meetingNode);
+                ExpandLevel(_forwardFrontier, _forwardFrontierNext, _forwardVisited, _forwardPrev, _backwardVisited, getForwardNeighbors, ref meetingNode);
+                (_forwardFrontier, _forwardFrontierNext) = (_forwardFrontierNext, _forwardFrontier);
                 forwardDepth++;
             }
             else
             {
-                forwardFrontier = [];
+                _forwardFrontier.Clear();
             }
 
-            if (meetingNode is null && backwardFrontier.Count > 0)
+            if (meetingNode is null && _backwardFrontier.Count > 0)
             {
-                backwardFrontier = ExpandLevel(backwardFrontier, backwardVisited, backwardNext, forwardVisited, getBackwardNeighbors, ref meetingNode);
+                ExpandLevel(_backwardFrontier, _backwardFrontierNext, _backwardVisited, _backwardNext, _forwardVisited, getBackwardNeighbors, ref meetingNode);
+                (_backwardFrontier, _backwardFrontierNext) = (_backwardFrontierNext, _backwardFrontier);
                 backwardDepth++;
             }
             else if (meetingNode is not null)
             {
-                backwardFrontier = [];
+                _backwardFrontier.Clear();
             }
         }
 
-        candidateSetSize = forwardVisited.Count + backwardVisited.Count;
+        candidateSetSize = _forwardVisited.Count + _backwardVisited.Count;
 
         if (meetingNode is null)
         {
-            budgetExhausted = forwardVisited.Count + backwardVisited.Count >= maxNodes
+            budgetExhausted = _forwardVisited.Count + _backwardVisited.Count >= maxNodes
                 || forwardDepth + backwardDepth >= maxTotalDepth;
             return false;
         }
@@ -104,18 +132,18 @@ internal static class BidirectionalGraphSearch
         // it, collecting in reverse, then flip to root→...→meet order.
         var forwardHalf = new List<ulong> { meet };
         ulong cursor = meet;
-        while (forwardPrev.TryGetValue(cursor, out ulong prev))
+        while (_forwardPrev.TryGetValue(cursor, out ulong prev))
         {
             forwardHalf.Add(prev);
             cursor = prev;
         }
         forwardHalf.Reverse();
-        rootKind = rootKindByAddress.TryGetValue(cursor, out string? kindFound) ? kindFound : null;
+        rootKind = _rootKindByAddress.TryGetValue(cursor, out string? kindFound) ? kindFound : null;
 
         // Backward half: successors already trace meet→...→target in the right order.
         var backwardHalf = new List<ulong>();
         cursor = meet;
-        while (backwardNext.TryGetValue(cursor, out ulong next))
+        while (_backwardNext.TryGetValue(cursor, out ulong next))
         {
             backwardHalf.Add(next);
             cursor = next;
@@ -128,16 +156,22 @@ internal static class BidirectionalGraphSearch
         return true;
     }
 
-    /// <summary>Expands one BFS level for either direction — identical shape for forward and backward, only the neighbor function and bookkeeping dictionaries differ.</summary>
-    private static List<ulong> ExpandLevel(
+    /// <summary>
+    /// Expands one BFS level for either direction — identical shape for forward and backward,
+    /// only the neighbor function and bookkeeping dictionaries differ. Writes into
+    /// <paramref name="next"/> (cleared first) rather than allocating, so the caller can ping-pong
+    /// between two pooled frontier buffers instead of allocating a new list per level.
+    /// </summary>
+    private static void ExpandLevel(
         List<ulong> frontier,
+        List<ulong> next,
         HashSet<ulong> visited,
         Dictionary<ulong, ulong> predecessor,
         HashSet<ulong> otherVisited,
         Func<ulong, IEnumerable<ulong>> getNeighbors,
         ref ulong? meetingNode)
     {
-        var next = new List<ulong>();
+        next.Clear();
 
         foreach (ulong node in frontier)
         {
@@ -151,13 +185,11 @@ internal static class BidirectionalGraphSearch
                 if (otherVisited.Contains(neighbor))
                 {
                     meetingNode = neighbor;
-                    return next;
+                    return;
                 }
 
                 next.Add(neighbor);
             }
         }
-
-        return next;
     }
 }

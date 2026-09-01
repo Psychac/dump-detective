@@ -66,6 +66,8 @@ internal sealed class InsightEngine
     private const ulong PinnedStringLeakCriticalBytes = 20UL * 1024 * 1024; // 20 MB
     private const int CrashModuleHotspotMinActiveExceptions = 3;
     private const double CrashModuleHotspotDominantSharePct = 50.0;
+    private const double ReferenceChainDominatorWarningPct = 10.0;
+    private const double ReferenceChainDominatorCriticalPct = 25.0;
 
     private const string Source = "InsightEngine";
 
@@ -113,6 +115,7 @@ internal sealed class InsightEngine
         WcfChannelDomainResult? wcf = FindResult<WcfChannelDomainResult>(runs);
         HttpObjectDomainResult? http = FindResult<HttpObjectDomainResult>(runs);
         StaticRootDomainResult? staticRoot = FindResult<StaticRootDomainResult>(runs);
+        ReferenceChainDomainResult? referenceChain = FindResult<ReferenceChainDomainResult>(runs);
 
         var ruleContext = new InsightRuleContext(
             Runs: runs,
@@ -144,7 +147,8 @@ internal sealed class InsightEngine
             SqlTxn: sqlTxn,
             Wcf: wcf,
             Http: http,
-            StaticRoot: staticRoot);
+            StaticRoot: staticRoot,
+            ReferenceChain: referenceChain);
 
         for (int i = 0; i < RuleGroups.Count; i++)
             RuleGroups[i].Apply(findings, in ruleContext);
@@ -189,7 +193,8 @@ internal sealed class InsightEngine
         SqlTransactionDomainResult? SqlTxn,
         WcfChannelDomainResult? Wcf,
         HttpObjectDomainResult? Http,
-        StaticRootDomainResult? StaticRoot);
+        StaticRootDomainResult? StaticRoot,
+        ReferenceChainDomainResult? ReferenceChain);
 
     private sealed class BaselineRuleGroup : IInsightRuleGroup
     {
@@ -248,6 +253,7 @@ internal sealed class InsightEngine
             DetectWcfOpeningTimeoutCorrelation(findings, context.Wcf, context.Crash);
             DetectHttpClientAccumulation(findings, context.Http);
             DetectClusterHangCorrelation(findings, context.Clusters, context.Hang);
+            DetectReferenceChainDominatorCorrelation(findings, context.ReferenceChain, context.Leak);
         }
     }
 
@@ -2165,6 +2171,72 @@ internal sealed class InsightEngine
             Tags: ["thread-cluster", "hang", "blocking", "contention", "cross-analyzer"],
             MetricValue: overlapRatio,
             MetricUnit: "ratio",
+            EvidenceTables: [evidenceTable]));
+    }
+
+    /// <summary>
+    /// E-4 (docs/analysis/phase1/reference-chain-analyzer-audit.md): correlates
+    /// ReferenceChainAnalyzer's top-by-size type traces with DominatorAnalyzer's total heap size
+    /// to flag types whose representative sample dominates a disproportionate fraction of the
+    /// heap — closes the dotMemory "dominators" parity gap. Reuses <see cref="ReferenceTypeSampleSnapshot.RetainedBytes"/>
+    /// (already exact, dominator-tree-backed via E-2) rather than re-deriving retained size here.
+    /// </summary>
+    private static void DetectReferenceChainDominatorCorrelation(
+        List<InsightFinding> findings,
+        ReferenceChainDomainResult? referenceChain,
+        DominatorDomainResult? leak)
+    {
+        if (referenceChain is null || leak is null || leak.TotalHeapBytes == 0)
+            return;
+        if (referenceChain.TopTypeSampleTraces is not { Count: > 0 } traces)
+            return;
+
+        var offenders = new List<(string TypeName, ulong RetainedBytes, double Pct)>();
+        bool anyCritical = false;
+
+        for (int i = 0; i < traces.Count; i++)
+        {
+            ReferenceTypeSampleSnapshot trace = traces[i];
+            if (!trace.RetainedBytes.HasValue)
+                continue;
+
+            double pct = trace.RetainedBytes.Value * 100.0 / leak.TotalHeapBytes;
+            if (pct < ReferenceChainDominatorWarningPct)
+                continue;
+
+            offenders.Add((trace.TypeName, trace.RetainedBytes.Value, pct));
+            anyCritical |= pct >= ReferenceChainDominatorCriticalPct;
+        }
+
+        if (offenders.Count == 0)
+            return;
+
+        offenders.Sort(static (a, b) => b.Pct.CompareTo(a.Pct));
+
+        var rows = new List<IReadOnlyList<object?>>(offenders.Count);
+        for (int i = 0; i < offenders.Count; i++)
+            rows.Add(new object?[] { offenders[i].TypeName, FormatBytes(offenders[i].RetainedBytes), $"{offenders[i].Pct:F1}%" });
+
+        var evidenceTable = new FindingEvidenceTable(
+            "Types dominating a large heap fraction",
+            ["Type", "Retained Bytes", "% of Heap"],
+            rows);
+
+        (string TypeName, ulong RetainedBytes, double Pct) top = offenders[0];
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Memory",
+            Severity: anyCritical ? FindingSeverity.Critical : FindingSeverity.Warning,
+            Title: "Reference-chain type dominates a large heap fraction",
+            Evidence: $"{offenders.Count:N0} traced type(s) retain ≥ {ReferenceChainDominatorWarningPct:F0}% of the heap. " +
+                      $"Largest: {top.TypeName} retains {FormatBytes(top.RetainedBytes)} ({top.Pct:F1}% of {FormatBytes(leak.TotalHeapBytes)} total heap).",
+            Recommendation: "A single type's representative instance dominating this much of the heap indicates a small " +
+                            "number of objects (often a cache, collection, or singleton) are pinning a disproportionate " +
+                            "amount of memory. Inspect the reference-chain root path for these types to identify the owner.",
+            Tags: ["reference-chain", "dominator", "memory-leak", "cross-analyzer"],
+            MetricValue: top.Pct,
+            MetricUnit: "% of heap",
             EvidenceTables: [evidenceTable]));
     }
 

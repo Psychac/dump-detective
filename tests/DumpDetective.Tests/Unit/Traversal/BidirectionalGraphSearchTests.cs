@@ -46,7 +46,7 @@ public class BidirectionalGraphSearchTests
         // root(1) -> a(2) -> b(3) -> target(4)
         var (fwd, bwd) = BuildGraph((1UL, 2UL), (2UL, 3UL), (3UL, 4UL));
 
-        bool found = BidirectionalGraphSearch.TryFindPath(
+        bool found = new BidirectionalGraphSearch().TryFindPath(
             target: 4UL,
             roots: Roots(1UL),
             fwd, bwd,
@@ -69,7 +69,7 @@ public class BidirectionalGraphSearchTests
     {
         var (fwd, bwd) = BuildGraph((1UL, 2UL));
 
-        bool found = BidirectionalGraphSearch.TryFindPath(
+        bool found = new BidirectionalGraphSearch().TryFindPath(
             target: 1UL,
             roots: Roots(1UL),
             fwd, bwd,
@@ -86,7 +86,7 @@ public class BidirectionalGraphSearchTests
     {
         var (fwd, bwd) = BuildGraph((1UL, 2UL));
 
-        bool found = BidirectionalGraphSearch.TryFindPath(
+        bool found = new BidirectionalGraphSearch().TryFindPath(
             target: 2UL,
             roots: Roots(1UL),
             fwd, bwd,
@@ -103,7 +103,7 @@ public class BidirectionalGraphSearchTests
         // Two disconnected chains: 1->2, and 3->4 (target). No edge connects them.
         var (fwd, bwd) = BuildGraph((1UL, 2UL), (3UL, 4UL));
 
-        bool found = BidirectionalGraphSearch.TryFindPath(
+        bool found = new BidirectionalGraphSearch().TryFindPath(
             target: 4UL,
             roots: Roots(1UL),
             fwd, bwd,
@@ -122,7 +122,7 @@ public class BidirectionalGraphSearchTests
         // root A(1) is disconnected; root B(10) -> 11 -> target(12).
         var (fwd, bwd) = BuildGraph((1UL, 2UL), (10UL, 11UL), (11UL, 12UL));
 
-        bool found = BidirectionalGraphSearch.TryFindPath(
+        bool found = new BidirectionalGraphSearch().TryFindPath(
             target: 12UL,
             roots: Roots(1UL, 10UL),
             fwd, bwd,
@@ -142,7 +142,7 @@ public class BidirectionalGraphSearchTests
         // root(1) -> 2 -> 3 -> 2 (cycle back to 2) ; 3 -> target(4)
         var (fwd, bwd) = BuildGraph((1UL, 2UL), (2UL, 3UL), (3UL, 2UL), (3UL, 4UL));
 
-        bool found = BidirectionalGraphSearch.TryFindPath(
+        bool found = new BidirectionalGraphSearch().TryFindPath(
             target: 4UL,
             roots: Roots(1UL),
             fwd, bwd,
@@ -164,7 +164,7 @@ public class BidirectionalGraphSearchTests
 
         var (fwd, bwd) = BuildGraph(edges.ToArray());
 
-        bool found = BidirectionalGraphSearch.TryFindPath(
+        bool found = new BidirectionalGraphSearch().TryFindPath(
             target: 50UL,
             roots: Roots(1UL),
             fwd, bwd,
@@ -187,7 +187,7 @@ public class BidirectionalGraphSearchTests
 
         var (fwd, bwd) = BuildGraph(edges.ToArray());
 
-        bool found = BidirectionalGraphSearch.TryFindPath(
+        bool found = new BidirectionalGraphSearch().TryFindPath(
             target: 20UL,
             roots: Roots(1UL),
             fwd, bwd,
@@ -210,7 +210,7 @@ public class BidirectionalGraphSearchTests
         var (fwd, bwd) = BuildGraph((1UL, 2UL), (2UL, 3UL), (3UL, 4UL));
         // (target=4 has no entries as a key in `forward`, i.e. genuinely no outgoing edges.)
 
-        bool found = BidirectionalGraphSearch.TryFindPath(
+        bool found = new BidirectionalGraphSearch().TryFindPath(
             target: 4UL,
             roots: Roots(1UL),
             fwd, bwd,
@@ -226,7 +226,7 @@ public class BidirectionalGraphSearchTests
     {
         var (fwd, bwd) = BuildGraph((1UL, 2UL));
 
-        bool found = BidirectionalGraphSearch.TryFindPath(
+        bool found = new BidirectionalGraphSearch().TryFindPath(
             target: 2UL,
             roots: Array.Empty<(string, ulong)>(),
             fwd, bwd,
@@ -242,7 +242,7 @@ public class BidirectionalGraphSearchTests
     {
         var (fwd, bwd) = BuildGraph((1UL, 2UL));
 
-        bool found = BidirectionalGraphSearch.TryFindPath(
+        bool found = new BidirectionalGraphSearch().TryFindPath(
             target: 2UL,
             roots: Roots(0UL, 1UL),
             fwd, bwd,
@@ -259,7 +259,7 @@ public class BidirectionalGraphSearchTests
         // Diamond graph: root(1) -> 2, root(1) -> 3, both 2 and 3 -> target(4).
         var (fwd, bwd) = BuildGraph((1UL, 2UL), (1UL, 3UL), (2UL, 4UL), (3UL, 4UL));
 
-        bool found = BidirectionalGraphSearch.TryFindPath(
+        bool found = new BidirectionalGraphSearch().TryFindPath(
             target: 4UL,
             roots: Roots(1UL),
             fwd, bwd,

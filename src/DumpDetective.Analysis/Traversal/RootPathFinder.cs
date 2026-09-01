@@ -30,12 +30,16 @@ internal sealed class RootPathFinder
 {
     private readonly ClrHeap _heap;
     private readonly IReferenceProvider _provider;
-    private readonly IBackwardReferenceProvider? _reverseIndexProvider;
     private readonly RootPathSearchLimits _limits;
     private readonly IPathSearchTelemetry _telemetry;
     private readonly Func<ClrType?, bool> _isNoise;
     private readonly Func<ClrType?, bool> _forceExpand;
     private readonly IHeapAnalysisCache? _cache;
+
+    // Reused across every TryFindAnyRootPath call on this instance (one call per candidate
+    // object) instead of allocated per call, so its internal frontier/visited/predecessor
+    // collections are cleared and reused rather than reallocated per search.
+    private readonly IndexBackedBidirectionalSearch? _indexBackedSearch;
 
     public RootPathFinder(
         ClrHeap heap,
@@ -49,12 +53,17 @@ internal sealed class RootPathFinder
     {
         _heap = heap;
         _provider = provider;
-        _reverseIndexProvider = reverseIndexProvider;
         _limits = limits;
         _telemetry = telemetry;
         _isNoise = isNoise;
         _forceExpand = forceExpand;
         _cache = cache;
+
+        if (reverseIndexProvider is not null)
+        {
+            _indexBackedSearch = new IndexBackedBidirectionalSearch(
+                heap, provider, reverseIndexProvider, limits, telemetry, isNoise, forceExpand, cache);
+        }
     }
 
     public bool TryFindAnyRootPath(
@@ -74,12 +83,9 @@ internal sealed class RootPathFinder
         // When a disk-backed reverse index is available, use genuine bidirectional BFS instead of
         // the forward-only heuristic below — see IndexBackedBidirectionalSearch for why this
         // finds paths the heuristic can miss and covers a smaller search space.
-        if (_reverseIndexProvider is not null)
+        if (_indexBackedSearch is not null)
         {
-            var indexBackedSearch = new IndexBackedBidirectionalSearch(
-                _heap, _provider, _reverseIndexProvider, _limits, _telemetry, _isNoise, _forceExpand, _cache);
-
-            return indexBackedSearch.TryFindPath(
+            return _indexBackedSearch.TryFindPath(
                 target, roots, out rootKind, out path, out searchTruncated,
                 out candidateSetSize, out reverseIndexEntryCount, cancellationToken);
         }

@@ -15,6 +15,8 @@ internal sealed class TypeIndexBuilder
                     TypeAggregateFlags flags = TypeAggregateFlags.None,
                     int generation = -1)
     {
+        bool isLoh = entry.Size >= LohThresholdBytes;
+
         // OPT-#5: Single ref-returning probe via CollectionsMarshal eliminates the TryGetValue copy-out
         // + _aggregates[key] = agg copy-back that the previous TryGetValue/assign pattern required.
         // This is the innermost loop of the entire indexing pipeline — zero struct copies per object.
@@ -24,22 +26,32 @@ internal sealed class TypeIndexBuilder
         if (!existed)
         {
             aggregate.SampleAddress = entry.Address;
+            aggregate.SamplePriority = SamplePriority(isLoh, generation);
             aggregate.ModuleId = moduleId;
             // Flags are type-level (same for all instances); set once on first encounter.
             aggregate.Flags = flags;
         }
-        // Deterministic tie-break: lowest address always wins, independent of scan order.
-        // Segments assigned to the same thread are not guaranteed to be processed in
-        // address order, so a later Add() can see a lower address than the first one seen.
-        else if (entry.Address < aggregate.SampleAddress)
+        else
         {
-            aggregate.SampleAddress = entry.Address;
+            // Tie-break: prefer a longer-lived sample (LOH/Gen2 over Gen1 over Gen0/unknown — I-9,
+            // docs/analysis/phase1/reference-chain-analyzer-audit.md) since a Gen0 sample is likely
+            // to be transient and gives a less confident single-sample retention verdict downstream
+            // (e.g. ReferenceChainAnalyzer). Within the same tier, lowest address wins — deterministic
+            // and independent of scan order, since segments assigned to the same thread are not
+            // guaranteed to be processed in address order.
+            byte priority = SamplePriority(isLoh, generation);
+            if (priority > aggregate.SamplePriority
+                || (priority == aggregate.SamplePriority && entry.Address < aggregate.SampleAddress))
+            {
+                aggregate.SampleAddress = entry.Address;
+                aggregate.SamplePriority = priority;
+            }
         }
 
         aggregate.Count++;
         aggregate.TotalSize += entry.Size;
 
-        if (entry.Size >= LohThresholdBytes)
+        if (isLoh)
         {
             aggregate.LohCount++;
             aggregate.LohSize += entry.Size;
@@ -60,6 +72,9 @@ internal sealed class TypeIndexBuilder
         _sizeBuckets[SizeBucketHelper.GetBucketIndex(entry.Size)]++;
     }
 
+    private static byte SamplePriority(bool isLoh, int generation) =>
+        isLoh || generation == 2 ? (byte)2 : generation == 1 ? (byte)1 : (byte)0;
+
     // Merges another builder's aggregates into this one.
     // Used to combine per-thread partial results from parallel segment scans.
     public void Merge(TypeIndexBuilder other)
@@ -72,14 +87,18 @@ internal sealed class TypeIndexBuilder
             if (!existed)
             {
                 aggregate.SampleAddress = otherAgg.SampleAddress;
+                aggregate.SamplePriority = otherAgg.SamplePriority;
                 aggregate.ModuleId = otherAgg.ModuleId;
                 aggregate.Flags = otherAgg.Flags;
             }
-            // Deterministic tie-break: lowest address always wins, independent of the
-            // non-deterministic order in which parallel segment builders get merged.
-            else if (otherAgg.SampleAddress < aggregate.SampleAddress)
+            // Same generation-tier-then-lowest-address tie-break as Add(), applied across partial
+            // builders — deterministic and independent of the non-deterministic order in which
+            // parallel segment builders get merged.
+            else if (otherAgg.SamplePriority > aggregate.SamplePriority
+                || (otherAgg.SamplePriority == aggregate.SamplePriority && otherAgg.SampleAddress < aggregate.SampleAddress))
             {
                 aggregate.SampleAddress = otherAgg.SampleAddress;
+                aggregate.SamplePriority = otherAgg.SamplePriority;
             }
 
             aggregate.Count += otherAgg.Count;
@@ -139,6 +158,10 @@ internal sealed class TypeIndexBuilder
         public long LohCount;
         public ulong LohSize;
         public ulong SampleAddress;
+        // Not persisted to TypeAggregateIndexEntry/disk — purely a build-time tie-break input for
+        // SampleAddress (I-9, docs/analysis/phase1/reference-chain-analyzer-audit.md). Discarded
+        // once Build() picks the winning SampleAddress.
+        public byte SamplePriority;
         public int ModuleId;
         public int Gen0Count;
         public int Gen1Count;

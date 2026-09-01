@@ -202,7 +202,23 @@ internal sealed record TypeSampleTrace(
     bool HasGcRoot,
     IReadOnlyList<string>? RootHops,  // parsed hop list root-first; null when no root found
     bool TraversalLimited,
-    string StatusLabel);  // "GC root found" | "No root (search limit)" | "No root" | "Sample unavailable"
+    string StatusLabel,  // "GC root found" | "No root (search limit)" | "No root" | "Sample unavailable"
+    // E-1 (docs/analysis/phase1/reference-chain-analyzer-audit.md) root-consistency scoring across
+    // multiple probed instances of the type. 0/0 when only the single representative sample above
+    // was analyzed (SampleCount <= 1) — the multi-sample columns add nothing in that case.
+    int SampleCount = 0,
+    int RetainedSampleCount = 0,
+    // E-2 (docs/analysis/phase1/reference-chain-analyzer-audit.md): exact retained-subgraph bytes
+    // for the representative sample, from the dominator tree. Null when unavailable — SampleObjectSize
+    // above remains the shallow-size fallback in that case.
+    ulong? RetainedBytes = null,
+    // E-3 (same doc): field names closing the WinDbg/SOS parity gap. RootFieldName is the static
+    // field/stack frame owner holding the root reference (first hop); LastHopFieldName is the field
+    // on the second-to-last path object holding the reference to the sample (last hop). Either can
+    // be null independently — a GC-handle root has no field name, an array-sourced last hop has no
+    // field name, and a one-hop path (root points directly at the sample) has no last hop at all.
+    string? RootFieldName = null,
+    string? LastHopFieldName = null);
 
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -4,19 +4,18 @@ using DumpDetective.Core.Abstractions;
 
 namespace DumpDetective.Analysis.Traversal;
 
-
 /// <summary>
 /// ClrMD-aware adapter around <see cref="BidirectionalGraphSearch"/>: supplies forward neighbors
 /// via <see cref="IReferenceProvider"/> (actual outgoing references) and backward neighbors via
 /// <see cref="IBackwardReferenceProvider"/> (actual parents, from the disk-backed reverse-reference
 /// index) — real traversal in both directions, applying the same noise-pruning/fanout-capping
-/// rules as the legacy <see cref="CandidateSetBuilder"/>/<see cref="BidirectionalPathFinder"/>
-/// pipeline this replaces when a reverse index is available.
+/// rules the legacy <see cref="CandidateSetBuilder"/>/<see cref="BidirectionalPathFinder"/>
+/// pipeline uses when no reverse index is available.
 ///
-/// Unlike that legacy pipeline — which approximates "reverse" by walking forward from the target
-/// and hoping it bumps into the real retaining chain — this performs genuine reverse traversal, so
-/// it cannot miss a path that exists within the search bounds, and meeting-in-the-middle covers a
-/// smaller search space than one-sided BFS to the same total depth.
+/// Unlike the legacy pipeline — which approximates "reverse" by walking forward from the target
+/// hoping it bumps into the real retaining chain — this performs genuine reverse traversal, so it
+/// cannot miss a path that exists within the search bounds, and meeting-in-the-middle covers a
+/// smaller search space than a one-sided BFS of the same total depth.
 /// </summary>
 internal sealed class IndexBackedBidirectionalSearch
 {
@@ -28,6 +27,7 @@ internal sealed class IndexBackedBidirectionalSearch
     private readonly Func<ClrType?, bool> _isNoise;
     private readonly Func<ClrType?, bool> _forceExpand;
     private readonly IHeapAnalysisCache? _cache;
+    private readonly BidirectionalGraphSearch _graphSearch = new();
 
     public IndexBackedBidirectionalSearch(
         ClrHeap heap,
@@ -57,16 +57,14 @@ internal sealed class IndexBackedBidirectionalSearch
         out bool searchTruncated,
         out int candidateSetSize,
         out int reverseIndexEntryCount,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken = default)
     {
-        bool truncatedByIndex = false;
         int reverseCalls = 0;
+        bool truncatedByIndex = false;
 
-        // Local iterator functions (not instance methods) so they can capture and mutate the
-        // locals above via closure — iterator methods can't take ref/out parameters directly.
         IEnumerable<ulong> ForwardNeighbors(ulong node)
         {
-            // OPT (docs/cache/cache-architecture.md Phase 6): this is a type-classification
+            // OPT (docs/cache/cache-architecture.md Phase 6): type-classification is a pruning
             // gate, not the traversal mechanism — actual neighbor expansion below goes through
             // _forwardProvider, which is index-backed when a reverse index is in play.
             ClrType? type = RootPathSearchSupport.ResolveType(_heap, _cache, node);
@@ -98,8 +96,8 @@ internal sealed class IndexBackedBidirectionalSearch
 
         IEnumerable<ulong> BackwardNeighbors(ulong node)
         {
-            // OPT (docs/cache/cache-architecture.md Phase 6): same type-classification gate
-            // as ForwardNeighbors above — actual reverse expansion goes through _backwardProvider.
+            // OPT (docs/cache/cache-architecture.md Phase 6): same type-classification gate as
+            // ForwardNeighbors above — actual reverse expansion goes through _backwardProvider.
             ClrType? type = RootPathSearchSupport.ResolveType(_heap, _cache, node);
             if (type is null)
                 yield break;
@@ -137,7 +135,7 @@ internal sealed class IndexBackedBidirectionalSearch
             }
         }
 
-        bool found = BidirectionalGraphSearch.TryFindPath(
+        bool found = _graphSearch.TryFindPath(
             target,
             roots,
             ForwardNeighbors,

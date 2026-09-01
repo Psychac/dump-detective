@@ -19,10 +19,14 @@ internal abstract class SectionBuilderBase
     protected static ConfidenceBandBlock BuildConfidenceBand(double? score, IReadOnlyList<string>? caveats)
     {
         double resolvedScore = score ?? 0.5;
-        string band   = resolvedScore >= 0.85 ? "High" : resolvedScore >= 0.65 ? "Med-High" : resolvedScore >= 0.45 ? "Medium" : "Low";
-        string symbol = resolvedScore >= 0.85 ? "●●●●" : resolvedScore >= 0.65 ? "●●●○" : resolvedScore >= 0.45 ? "●●○○" : "●○○○";
-        return new ConfidenceBandBlock(band, resolvedScore, symbol, caveats?.ToArray() ?? []);
+        string band = resolvedScore >= 0.85 ? "High" : resolvedScore >= 0.65 ? "Med-High" : resolvedScore >= 0.45 ? "Medium" : "Low";
+        return new ConfidenceBandBlock(band, resolvedScore, SymbolForScore(resolvedScore), caveats?.ToArray() ?? []);
     }
+
+    /// <summary>Same four-dot scale as <see cref="BuildConfidenceBand"/>, exposed standalone for
+    /// callers (e.g. a <c>SectionLeadFinding</c>) that compute their own confidence score.</summary>
+    protected static string SymbolForScore(double score) =>
+        score >= 0.85 ? "●●●●" : score >= 0.65 ? "●●●○" : score >= 0.45 ? "●●○○" : "●○○○";
     protected static ListItemBlock Li(string text, int indent = 0) => new(text, indent);
     protected static DividerBlock Divider() => new();
     protected static BlankBlock Blank() => new();

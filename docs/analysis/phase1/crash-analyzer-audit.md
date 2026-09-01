@@ -453,26 +453,56 @@ in DumpDetective's platform but is not wired into this analyzer.
 | I-3 | Migrate full field extraction (`_message`, `_HResult`, `_innerException`) to `ClrException` wrapper | P1 | High | Medium | High | ✅ DONE |
 | I-4 | Raise thread stack capture from `.Take(10)` to match `MaxCurrentThreadFramesToPrint` ceiling | P1 | Medium | Low | High | ✅ DONE |
 | I-5 | Replace `typeName.Contains("Exception")` with `ClrType.IsException` / base-type walk | P1 | Medium | Low | High | ✅ DONE |
-| I-6 | Remove dead `CreateFinding()` method | P1 | Low | Trivial | High | N/A |
+| I-6 | Remove dead `CreateFinding()` method | P1 | Low | Trivial | High | ✅ DONE — method no longer present |
 | I-7 | Add `ILogger<CrashAnalyzer>?` injection; emit per-object diagnostics on `catch {}` sites | P1 | Medium | Low | High | ✅ DONE |
 | I-8 | Add GC generation distribution per exception type (zero marginal scan cost) | P2 | High | Low | High | ✅ DONE — uses HeapEntry.Generation from index |
-| I-9 | Add `AggregateException` inner exception unwrapping | P2 | High | Medium | High | Pending |
-| I-10 | Add exception message distribution per type (distinct count + most common message) | P2 | High | Low | High | Pending |
-| I-11 | Implement crash bucket `(exception_type, top_user_frame)` | P2 | High | Medium | High | Pending |
-| I-12 | Flag rethrown exceptions (non-null `_remoteStackTraceString`) and lower inference confidence | P2 | Medium | Low | High | Pending |
-| I-13 | Derive lead finding `ConfidenceScore` from actual `InferenceConfidence` distribution | P2 | Medium | Low | High | Pending |
-| I-14 | Add exception heap size per type (sum `HeapEntry.Size` in participant scan) | P3 | Medium | Low | Medium | Pending |
-| I-15 | Cross-reference top user-code frames against `ModuleDomainResult` for assembly attribution | P3 | Medium | Medium | Medium | Pending |
+| I-9 | Add `AggregateException` inner exception unwrapping | P2 | High | Medium | High | ✅ DONE — `_innerExceptions` unwrapped via `ClrArray`, exact per-type tally independent of `MaxExceptionsPerType`, exposed as its own report table |
+| I-10 | Add exception message distribution per type (distinct count + most common message) | P2 | High | Low | High | ✅ DONE — distinct count, most common message, most common active message, derived from the per-type sampled instance set; new report table |
+| I-11 | Implement crash bucket `(exception_type, top_user_frame)` | P2 | High | Medium | High | ✅ DONE — buckets over the sampled instance set via `IsFrameworkFrame`-filtered top user frame, ranked table + narrative callout of the dominant bucket |
+| I-12 | Flag rethrown exceptions (non-null `_remoteStackTraceString`) and lower inference confidence | P2 | Medium | Low | High | ✅ DONE — `IsRethrown` flagged on instances/candidates, one-tier confidence downgrade, new "Rethrown" report columns |
+| I-13 | Derive lead finding `ConfidenceScore` from actual `InferenceConfidence` distribution | P2 | Medium | Low | High | ✅ DONE — weighted (by ActiveExceptionCount) average of per-candidate tier scores, symbol/caveat derived from it, no longer hardcoded 0.85 |
+| I-14 | Add exception heap size per type (sum `HeapEntry.Size` in participant scan) | P3 | Medium | Low | Medium | ✅ DONE — `entry.Size`/`ClrObject.Size` summed unconditionally in both scan paths, new report table + `exception_heap_bytes` key metric |
+| I-15 | Cross-reference top user-code frames against `ModuleDomainResult` for assembly attribution | P3 | Medium | Medium | Medium | ✅ DONE — implemented via direct `ClrStackFrame.Method.Type.Module` resolution instead of a `ModuleDomainResult` cross-reference (more precise, no E-2 dependency); scoped to active crash-thread candidates, the only place raw `ClrStackFrame`s (not yet collapsed to text) are still available |
 
 ### Evolutions (Improve the Platform)
 
 | ID | Recommendation | P | Impact | Difficulty | Confidence | Status |
 |---|---|---|---|---|---|---|
-| E-1 | Add exception retention paths for Gen2 objects via existing reverse-reference index | P2 | High | Medium | High | Pending |
+| E-1 | Add exception retention paths for Gen2 objects via existing reverse-reference index | P2 | High | Medium | High | ✅ DONE — scoped to Gen2+LOH (`Generation >= 2`); reuses `RootPathFinder`/`ReverseEdgeIndexReader` via the same pattern as `EventLeakAnalyzer.PopulateEvidence`; bounded by new `MaxRetentionPathEnrichmentMs` (default 2000ms, matching `EventLeakOptions`); no-ops when no cache is available |
 
 > **Reverse index available (2026-08-12):** E-1's "existing reverse-reference index" is `ReverseEdgeIndexReader`, queryable via `RootPathFinder`. No new infrastructure needed — same pattern already used by EventLeakAnalyzer/DominatorAnalyzer/TimerLeakAnalyzer. See `docs/analysis/phase1/phase1-completion-tracker.md` § Reverse Edge Index — Consumer Opportunities.
-| E-2 | Wire `ModuleDomainResult` and `ThreadDomainResult` into section builder for cross-section correlation | P2 | Medium | Medium | High | Pending |
-| E-3 | Define a platform-level shared extraction-function pattern for `IHeapIndexScanParticipant` dual paths | P3 | Medium | High | Medium | Pending |
+| E-2 | Wire `ModuleDomainResult` and `ThreadDomainResult` into section builder for cross-section correlation | P2 | Medium | Medium | High | ✅ DONE (reframed) |
+| E-3 | Define a platform-level shared extraction-function pattern for `IHeapIndexScanParticipant` dual paths | P3 | Medium | High | Medium | Deferred |
+
+> **Reframed and implemented (2026-09-01):** E-2 as originally stated is infeasible —
+> `IAnalyzerSectionBuilder.Build(AnalyzerDomainResult result)` receives only its own analyzer's
+> domain result (see `ReportSectionAssembler.BuildAnalyzerSections`, which calls `builder.Build(run.Result)`
+> per-run by name); `ExceptionAnalysisSectionBuilder`'s `threads`/`modules` locals are hardcoded `null`
+> and structurally cannot be populated without a breaking change to the interface shared by 15+ section
+> builders. The underlying diagnostic intent already has a home: `InsightEngine`'s `InsightRuleContext`
+> carries every domain result (including `Crash`, `Threads`, and `AppDomains`/`ModuleDomainResult`)
+> simultaneously and already runs ~15 cross-analyzer correlation rules
+> (`InsightEngine.cs::CorrelationRuleGroup`) — including the identical pattern for JIT+Module
+> (`DetectJitModuleHotspot`). Implemented `DetectCrashModuleHotspot` following that template: it
+> aggregates active-exception counts by `CrashThreadCandidateSnapshot.TopUserFrameModule` and, when one
+> module owns a majority (≥50%) of attributed active exceptions, cross-references it against
+> `ModuleDomainResult.ConflictingAssemblyNames`/`TopModulesBySize` — emitting a `Warning` finding with
+> an evidence table when the dominant module also has a version conflict (a signal neither analyzer can
+> produce alone). Covered by
+> `Analyze_ShouldEmitWarning_WhenActiveExceptionsConcentratedInConflictedModule` and
+> `Analyze_ShouldNotEmitCrashModuleFinding_WhenActiveExceptionsBelowThreshold` in `InsightEngineTests.cs`.
+> Thread correlation (`ThreadDomainResult`) was left out of this pass — no concrete blocked-thread/crash
+> correlation signal was identified; revisit only if a real need surfaces.
+
+> **Deferred (2026-09-01):** Confirmed not CrashAnalyzer-specific — `LohFragmentationAnalyzer` has the
+> same `AnalyzeFromIndex`/`AnalyzeFromHeap` dual-path shape. But the two paths differ in concurrency
+> model (sequential-per-worker + explicit merge vs. shared-state parallel via `ConcurrentDictionary`),
+> so a shared abstraction isn't fully specified from one data point. CrashAnalyzer's
+> `MergePartial` comment (Gen0/Gen1/Gen2/LOH counts silently dropped on parallel index scans) shows
+> the duplication risk is real, not speculative — but one confirmed drift bug isn't enough to design
+> the right shared shape. **Revisit when a second analyzer's dual-path drifts** (a divergence bug
+> like the one above recurs elsewhere); design the extraction abstraction from two real cases
+> instead of one.
 
 ---
 
@@ -532,11 +562,14 @@ production-grade crash diagnostic tool.
 
 **3. What opportunities exist to evolve the platform?**  
 E-1 (exception retention paths) leverages the existing reverse-reference infrastructure for a
-new high-value use case at no new indexing cost. E-2 (cross-section wiring) would enable genuine
-correlated findings across crash, thread, and module sections rather than conditional notes that
-never materialize. E-3 (shared extraction helper) reduces the dual-path maintenance burden for
+new high-value use case at no new indexing cost. E-2, as originally scoped (wiring other domain
+results directly into `ExceptionAnalysisSectionBuilder`), was infeasible against the section-builder
+contract; reframed and implemented as an `InsightEngine` correlation rule instead (see Evolutions
+table), which is where genuine cross-analyzer findings already live for every other analyzer pair.
+E-3 (shared extraction helper) reduces the dual-path maintenance burden for
 all `IHeapIndexScanParticipant` analyzers â€” a platform-wide improvement triggered by a pattern
-observed here.
+observed here, but deferred until a second dual-path drift confirms the right shared shape (see
+Evolutions table).
 
 **4. Which recommendations provide the highest engineering return?**  
 Migrating to `ClrException` (I-3) is the single highest-leverage change: it subsumes the P0

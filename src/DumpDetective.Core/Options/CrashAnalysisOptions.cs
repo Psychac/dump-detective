@@ -19,5 +19,15 @@ namespace DumpDetective.Core.Options
         /// constant, not tier-varied.
         /// </summary>
         public int MaxExceptionsPerType { get; init; } = 10;
+
+        /// <summary>
+        /// Wall-clock budget (milliseconds) for Gen2/LOH exception retention-path enrichment —
+        /// bounds total <c>RootPathFinder</c> BFS time across the whole candidate set, the same
+        /// role <see cref="EventLeakOptions.MaxEvidenceEnrichmentMs"/> plays for
+        /// <c>EventLeakAnalyzer</c>. Retention-path search is real per-object work (unlike the
+        /// unconditional totals/counts elsewhere in this analyzer), so it needs its own budget
+        /// rather than relying on <see cref="MaxExceptionsPerType"/> alone.
+        /// </summary>
+        public int MaxRetentionPathEnrichmentMs { get; init; } = 2000;
     }
 }

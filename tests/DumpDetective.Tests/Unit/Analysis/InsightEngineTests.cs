@@ -259,6 +259,94 @@ public sealed class InsightEngineTests
     }
 
     [Fact]
+    public void Analyze_ShouldEmitWarning_WhenActiveExceptionsConcentratedInConflictedModule()
+    {
+        InsightEngine engine = new();
+
+        CrashDomainResult crash = new(
+            TotalExceptions: 10,
+            ActiveExceptions: 8,
+            ExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal) { ["FooException"] = 10 },
+            ActiveExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal) { ["FooException"] = 8 },
+            TopCrashThreadCandidates:
+            [
+                CrashCandidate(1, activeCount: 6, topUserFrameModule: "MyApp.Plugins.dll"),
+                CrashCandidate(2, activeCount: 2, topUserFrameModule: "MyApp.Core.dll"),
+            ]);
+
+        ModuleDomainResult modules = new(
+            TotalModules: 10,
+            DynamicModules: 0,
+            UniqueModuleNames: 10,
+            VersionConflictGroups: 1,
+            ConflictingAssemblyNames: ["MyApp.Plugins.dll"],
+            TopModulesBySize: [new LoadedModuleSnapshot("MyApp.Plugins.dll", "MyApp.Plugins", "C:\\app\\MyApp.Plugins.dll", 0x1000, 5_000_000, false, true)],
+            ConflictDetails: [],
+            HeavyModuleWarningThresholdBytes: 1_000_000,
+            UnknownIdentityDuplicateModules: new HashSet<string>());
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Crash Analysis", AnalyzerExecutionStatus.Success, crash),
+            BuildRun("Module Analysis", AnalyzerExecutionStatus.Success, modules),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Severity == FindingSeverity.Warning
+            && f.Title.Contains("concentrated", StringComparison.OrdinalIgnoreCase)
+            && f.Tags.Contains("cross-analyzer")
+            && f.EffectiveEvidenceTables.Count == 1
+            && f.EffectiveEvidenceTables[0].Rows.Count == 2);
+    }
+
+    [Fact]
+    public void Analyze_ShouldNotEmitCrashModuleFinding_WhenActiveExceptionsBelowThreshold()
+    {
+        InsightEngine engine = new();
+
+        CrashDomainResult crash = new(
+            TotalExceptions: 2,
+            ActiveExceptions: 2,
+            ExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal) { ["FooException"] = 2 },
+            ActiveExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal) { ["FooException"] = 2 },
+            TopCrashThreadCandidates: [CrashCandidate(1, activeCount: 2, topUserFrameModule: "MyApp.Plugins.dll")]);
+
+        ModuleDomainResult modules = new(
+            TotalModules: 10,
+            DynamicModules: 0,
+            UniqueModuleNames: 10,
+            VersionConflictGroups: 1,
+            ConflictingAssemblyNames: ["MyApp.Plugins.dll"],
+            TopModulesBySize: [new LoadedModuleSnapshot("MyApp.Plugins.dll", "MyApp.Plugins", "C:\\app\\MyApp.Plugins.dll", 0x1000, 5_000_000, false, true)],
+            ConflictDetails: [],
+            HeavyModuleWarningThresholdBytes: 1_000_000,
+            UnknownIdentityDuplicateModules: new HashSet<string>());
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Crash Analysis", AnalyzerExecutionStatus.Success, crash),
+            BuildRun("Module Analysis", AnalyzerExecutionStatus.Success, modules),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().NotContain(f => f.Title.Contains("concentrated", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static CrashThreadCandidateSnapshot CrashCandidate(uint threadId, int activeCount, string? topUserFrameModule) => new(
+        ThreadId: threadId,
+        OSThreadId: threadId,
+        ActiveExceptionCount: activeCount,
+        PrimaryExceptionType: "FooException",
+        TopFrames: [],
+        OriginalStackTrace: null,
+        OriginalStackTraceInferred: false,
+        OriginalStackTraceInferredFrom: null,
+        TopUserFrameModule: topUserFrameModule);
+
+    [Fact]
     public void Analyze_ShouldEmitEvidenceTable_WhenClusterOverlapsWithHangWaitReasons()
     {
         InsightEngine engine = new();

@@ -137,6 +137,47 @@ public sealed class CrashAnalyzerHeapIndexScanTests
         mergedCandidates[42u].SampleMessage.Should().Be("boom");
     }
 
+    [Fact]
+    public void MergePartial_SumsGenerationAndAggregateInnerExceptionCountsAcrossWorkers()
+    {
+        CrashAnalyzer primary = SeedAnalyzer(
+            maxExceptionsPerType: 10, total: 1, active: 0,
+            typeCounts: new(), activeTypeCounts: new(),
+            exceptionsByType: new(), candidates: new());
+        SetField(typeof(CrashAnalyzer), primary, "_exceptionGen0Counts", new Dictionary<string, int> { ["FooException"] = 2 });
+        SetField(typeof(CrashAnalyzer), primary, "_aggregateExceptionCount", 1);
+        SetField(typeof(CrashAnalyzer), primary, "_aggregateInnerExceptionTypeCounts", new Dictionary<string, int> { ["System.IO.IOException"] = 1 });
+        SetField(typeof(CrashAnalyzer), primary, "_exceptionHeapSizeByType", new Dictionary<string, ulong> { ["FooException"] = 100UL });
+
+        CrashAnalyzer worker = SeedAnalyzer(
+            maxExceptionsPerType: 10, total: 1, active: 0,
+            typeCounts: new(), activeTypeCounts: new(),
+            exceptionsByType: new(), candidates: new());
+        SetField(typeof(CrashAnalyzer), worker, "_exceptionGen0Counts", new Dictionary<string, int> { ["FooException"] = 3, ["BarException"] = 1 });
+        SetField(typeof(CrashAnalyzer), worker, "_aggregateExceptionCount", 2);
+        SetField(typeof(CrashAnalyzer), worker, "_aggregateInnerExceptionTypeCounts", new Dictionary<string, int> { ["System.IO.IOException"] = 2, ["System.TimeoutException"] = 1 });
+        SetField(typeof(CrashAnalyzer), worker, "_exceptionHeapSizeByType", new Dictionary<string, ulong> { ["FooException"] = 50UL, ["BarException"] = 25UL });
+
+        ((IParallelHeapIndexScanParticipant)primary).MergePartial([worker]);
+
+        GetGen0Counts(primary).Should().BeEquivalentTo(new Dictionary<string, int>
+        {
+            ["FooException"] = 5,
+            ["BarException"] = 1
+        });
+        GetAggregateExceptionCount(primary).Should().Be(3);
+        GetAggregateInnerExceptionTypeCounts(primary).Should().BeEquivalentTo(new Dictionary<string, int>
+        {
+            ["System.IO.IOException"] = 3,
+            ["System.TimeoutException"] = 1
+        });
+        GetExceptionHeapSizeByType(primary).Should().BeEquivalentTo(new Dictionary<string, ulong>
+        {
+            ["FooException"] = 150UL,
+            ["BarException"] = 25UL
+        });
+    }
+
     private static ExceptionInstance NonActive(ulong address) => new() { Address = address };
 
     private static ExceptionInstance Active(ulong address, uint threadId) => new()
@@ -164,6 +205,13 @@ public sealed class CrashAnalyzerHeapIndexScanTests
         SetField(type, analyzer, "_activeExceptionTypeCounts", activeTypeCounts);
         SetField(type, analyzer, "_exceptionsByType", exceptionsByType);
         SetField(type, analyzer, "_crashThreadCandidates", candidates);
+        SetField(type, analyzer, "_exceptionGen0Counts", new Dictionary<string, int>());
+        SetField(type, analyzer, "_exceptionGen1Counts", new Dictionary<string, int>());
+        SetField(type, analyzer, "_exceptionGen2Counts", new Dictionary<string, int>());
+        SetField(type, analyzer, "_exceptionLohCounts", new Dictionary<string, int>());
+        SetField(type, analyzer, "_aggregateExceptionCount", 0);
+        SetField(type, analyzer, "_aggregateInnerExceptionTypeCounts", new Dictionary<string, int>());
+        SetField(type, analyzer, "_exceptionHeapSizeByType", new Dictionary<string, ulong>());
 
         return analyzer;
     }
@@ -204,5 +252,25 @@ public sealed class CrashAnalyzerHeapIndexScanTests
     private static Dictionary<uint, CrashThreadCandidate> GetCandidates(CrashAnalyzer analyzer) =>
         (Dictionary<uint, CrashThreadCandidate>)typeof(CrashAnalyzer)
             .GetField("_crashThreadCandidates", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(analyzer)!;
+
+    private static Dictionary<string, int> GetGen0Counts(CrashAnalyzer analyzer) =>
+        (Dictionary<string, int>)typeof(CrashAnalyzer)
+            .GetField("_exceptionGen0Counts", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(analyzer)!;
+
+    private static int GetAggregateExceptionCount(CrashAnalyzer analyzer) =>
+        (int)typeof(CrashAnalyzer)
+            .GetField("_aggregateExceptionCount", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(analyzer)!;
+
+    private static Dictionary<string, int> GetAggregateInnerExceptionTypeCounts(CrashAnalyzer analyzer) =>
+        (Dictionary<string, int>)typeof(CrashAnalyzer)
+            .GetField("_aggregateInnerExceptionTypeCounts", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(analyzer)!;
+
+    private static Dictionary<string, ulong> GetExceptionHeapSizeByType(CrashAnalyzer analyzer) =>
+        (Dictionary<string, ulong>)typeof(CrashAnalyzer)
+            .GetField("_exceptionHeapSizeByType", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(analyzer)!;
 }

@@ -115,7 +115,7 @@ None. The classifier and ranker are well-scoped.
 | **Balanced and Scalar lists missing** | The two most numerically dominant categories are entirely absent from the report. An engineer looking at a heap dominated by `Balanced` types gets zero signal. | High |
 | **ValueHeavy finding threshold is coarse** | The finding fires only if `TopValueHeavyTypes[0].InstanceCount >= 10_000`, with no size consideration. A 200-byte struct with 5,000 instances is ignored; a 16-byte struct with 10,001 instances triggers the finding. | Medium |
 | **Finding severity ceiling is `Info`** | Both findings are at most `Info` or `Warning`. A dump where the top reference-heavy type has 10 million instances and 20 reference fields represents substantial GC scan pressure; this should be `Critical`. | Medium |
-| **Recommendation for value-heavy types references `BoxingAnalyzer`** | The recommendation says "Consider using BoxingAnalyzer for struct-layout optimization." `BoxingAnalyzer` does not optimize layouts — it detects boxed instances. The recommendation is misleading; padding analysis belongs to struct field ordering and `[StructLayout]`. | Low |
+| ~~**Recommendation for value-heavy types references `BoxingAnalyzer`**~~ | ~~The recommendation says "Consider using BoxingAnalyzer for struct-layout optimization." `BoxingAnalyzer` does not optimize layouts — it detects boxed instances.~~ **Correction (2026-09-01):** `BoxingAnalyzer` has computed exact struct padding waste (`StaticSize - Σ field.Size`, `TopPaddingWasteTypes`/`AggregatePaddingWasteBytes`, "Struct types with highest padding waste" table) since its first commit (`af2f0e8`, 2026-05-01) — three months before this audit was written. The original recommendation undersold what `BoxingAnalyzer` does, rather than being wrong about it doing nothing. | Low |
 | **`AvgRefFieldsPerType` computed over analyzed cap, not all types** | The key metric is described as a heap-wide average but is capped at `InstanceCountCap` (default 200) types. On a heap with 5,000 types, this average reflects only the 200 highest-instance-count types. The metric label does not disclose this. | Medium |
 | **Missing total GC scan cost estimate** | The report has no aggregate signal: how many total reference-field pointer traces will the GC perform across all reference-heavy types? This is `Σ(RefFields × InstanceCount)` per type — a single number that characterises the heap's GC scan budget. | High |
 
@@ -178,7 +178,7 @@ None. The classifier and ranker are well-scoped.
 | **Finalizable × reference-heavy intersection** | High | Double GC cost: scan overhead *and* finalization queue pressure. Trivially derivable from existing `TypeShapeProfile` fields. |
 | **Per-type byte size from `TotalSize` aggregate** | High | Average bytes per instance = `TotalSize / Count`; immediately improves LOH and large-allocation diagnosis. |
 | **Deep inheritance + reference-heavy correlation** | Medium | `BaseTypeChainDepth` is captured but never used. Types with deep chains and many ref fields are candidates for refactoring. |
-| **Struct padding estimate for value-heavy types** | Medium | `ValueHeavy` types with large `TotalFields` counts may carry alignment padding; a rough estimate via `StaticSize` (from `ClrType`) would complement the BoxingAnalyzer. |
+| ~~**Struct padding estimate for value-heavy types**~~ | Medium | ~~`ValueHeavy` types with large `TotalFields` counts may carry alignment padding; a rough estimate via `StaticSize` (from `ClrType`) would complement the BoxingAnalyzer.~~ **Correction (2026-09-01):** already exists — see E-3 resolution note. |
 | **Trend acceleration for GC scan cost** | Medium | If scan cost score grows faster than instance count, new reference fields were added — a structural regression. |
 | **Interface-density signal** | Low | High `InterfaceCount` with reference-heavy types indicates virtual-dispatch complexity; useful in architecture reviews. |
 
@@ -324,22 +324,28 @@ is retained.
 | I-6 | **Add Array shape table**: top reference-type arrays ranked by `InstanceCount`. | High | Medium | High | Improvement | ⊘ SKIPPED |
 | I-7 | **Add Finalizable × ReferenceHeavy finding**: fire at Warning severity when a type is both finalizable and reference-heavy with ≥10K instances. | High | Low | High | Improvement | ✅ DONE |
 | I-8 | **Fix `AvgRefFieldsPerType` label**: disclose in the metric description that it is computed over at most `InstanceCountCap` types, not all types in the heap. | Medium | Low | High | Improvement | ✅ DONE |
-| I-9 | **Replace silent `catch` on `EnumerateInterfaces()`** with `ILogger`-based diagnostics, consistent with the pattern in `DefaultAnalyzerFactory`. | Medium | Low | High | Improvement | — |
+| I-9 | **Replace silent `catch` on `EnumerateInterfaces()`** with `ILogger`-based diagnostics, consistent with the pattern in `DefaultAnalyzerFactory`. | Medium | Low | High | Improvement | ✅ DONE (TBD) |
 | E-1 | **Cross-analyzer retention correlation**: surface ObjectShapeAnalyzer's top reference-heavy types as input candidates to LeakCandidateAnalyzer or ReferenceChainAnalyzer for automatic root-path attribution. | Very High | High | Medium | Evolution | ⊘ DEFERRED |
 
 > **Reverse index available (2026-08-12):** E-1 was deferred as an architectural blocker (completion tracker notes it as such) — worth re-evaluating now that `ReverseEdgeIndexReader.TryGetParents` / `RootPathFinder` exist. Sampling top reference-heavy-type instance addresses and calling `RootPathFinder` on them is the same pattern already used by ReferenceChainAnalyzer/StaticRootLeakDetector, so the "root-path attribution" half of E-1 no longer needs new infrastructure — only the cross-analyzer candidate-passing plumbing remains open. See `docs/analysis/phase1/phase1-completion-tracker.md` § Reverse Edge Index — Consumer Opportunities.
-| I-10 | **Upgrade finding severity**: add `Critical` tier when `Σ(RefFields × InstanceCount)` exceeds a configurable threshold, indicating material GC scan pressure. | Medium | Low | High | Improvement | — |
-| I-11 | **Fix misleading recommendation** in value-heavy finding: replace "BoxingAnalyzer for struct-layout optimization" with accurate guidance on field ordering and `[StructLayout(LayoutKind.Sequential)]`. | Low | Low | High | Improvement | — |
-| I-12 | **Add `IAnalyzer.Tags` override**: `["gc", "object-shape", "memory", "gc-scan"]`. | Low | Low | High | Improvement | — |
-| I-13 | **Replace full sort with partial sort** for `candidates` when `shapes.Count` is large: use a min-heap approach to select top-`InstanceCountCap` entries in O(n log k). | Low | Medium | Medium | Improvement | — |
+| I-10 | **Upgrade finding severity**: add `Critical` tier when `Σ(RefFields × InstanceCount)` exceeds a configurable threshold, indicating material GC scan pressure. | Medium | Low | High | Improvement | ✅ DONE (TBD) |
+| I-11 | **Fix misleading recommendation** in value-heavy finding: replace "BoxingAnalyzer for struct-layout optimization" with accurate guidance on field ordering and `[StructLayout(LayoutKind.Sequential)]`. | Low | Low | High | Improvement | ✅ DONE (TBD) |
+| I-12 | **Add `IAnalyzer.Tags` override**: `["gc", "object-shape", "memory", "gc-scan"]`. | Low | Low | High | Improvement | ✅ DONE (TBD) |
+| I-13 | ~~Replace full sort with partial sort for `candidates` when `shapes.Count` is large: use a min-heap approach to select top-`InstanceCountCap` entries in O(n log k)~~ | — | — | — | — | ⊘ SUPERSEDED (2026-09-01) |
+
+> **I-13 note (2026-09-01):** written when `InstanceCountCap` (and the `Fast`/`Balanced`/`Full` profile tiers) still existed — a min-heap top-K selection would have beaten a full sort once type counts got large, since only the capped top-K needed to be materialized. Both `InstanceCountCap` and the profile-tier system were removed by the [AnalysisProfile simplification](../../refactor/analysis-profile-removal-plan.md); `ObjectShapeAnalyzer` now returns every analyzed type in each category list (`TopReferenceHeavyTypes`/`TopValueHeavyTypes`/`TopBalancedTypes`/`TopGen2RetainedTypes`, the last added by E-2), uncapped. A partial top-K sort buys nothing when the full sorted output is the actual contract — `O(n log n)` is required regardless of algorithm. Reintroducing a cap purely to make a partial sort meaningful would conflict with this project's "no top-N sampling" convention. The full sort's cost was already assessed as negligible in Audit Area 5 (tens of thousands of types even on a 25GB/500M-object dump, since type counts don't scale with object counts) and remains so with the extra E-2 sort added.
 
 ### Evolutions
 
-| ID | Recommendation | Impact | Difficulty | Confidence | Classification |
-|---|---|---|---|---|---|
-| E-1 | **Cross-analyzer retention correlation**: surface ObjectShapeAnalyzer's top reference-heavy types as input candidates to LeakCandidateAnalyzer or ReferenceChainAnalyzer for automatic root-path attribution. | Very High | High | Medium | Evolution |
-| E-2 | **Generation-aware shape ranking**: extend `TypeAggregateIndexEntry` with per-generation instance counts so ObjectShapeAnalyzer can rank by `RefFields × Gen2Count` — the retention-adjusted GC scan cost. | High | High | Medium | Evolution |
-| E-3 | **Struct padding estimation**: for value-heavy types, compute `ClrType.StaticSize - Σ field.Size` as a padding estimate and surface it alongside `BoxingAnalyzer`'s struct analysis. | Medium | Medium | Medium | Evolution |
+| ID | Recommendation | Impact | Difficulty | Confidence | Classification | Status |
+|---|---|---|---|---|---|---|
+| E-1 | **Cross-analyzer retention correlation**: surface ObjectShapeAnalyzer's top reference-heavy types as input candidates to LeakCandidateAnalyzer or ReferenceChainAnalyzer for automatic root-path attribution. | Very High | High | Medium | Evolution | ⊘ DEFERRED (architectural blocker — see decision above) |
+| E-2 | **Generation-aware shape ranking**: extend `TypeAggregateIndexEntry` with per-generation instance counts so ObjectShapeAnalyzer can rank by `RefFields × Gen2Count` — the retention-adjusted GC scan cost. | High | High | Medium | Evolution | ✅ DONE, revised (TBD) |
+| E-3 | ~~**Struct padding estimation**: for value-heavy types, compute `ClrType.StaticSize - Σ field.Size` as a padding estimate and surface it alongside `BoxingAnalyzer`'s struct analysis.~~ | Medium | Medium | Medium | Evolution | ⊘ ALREADY IMPLEMENTED (elsewhere) |
+
+> **E-2 note (2026-09-01):** the proposed schema change was unnecessary — `TypeAggregateIndexEntry.Gen2Count`/`Gen2TotalSize` already existed (added for `GCGenerationAnalyzer`'s own P2-4, before this audit's schema was checked against current source). `ObjectShapeAnalyzer` now reads `Gen2Count` directly per candidate, exposes it on `TypeShapeProfile.Gen2InstanceCount`, and adds a new `TopGen2RetainedTypes` list ranked by `ReferenceFields × Gen2InstanceCount` descending (additive — `TopReferenceHeavyTypes`'s I-1 ranking by `refRatio × InstanceCount` is unchanged) plus a `TotalGen2GcScanWork` aggregate metric, mirroring `TotalGcScanWork` (I-3). Section builder gained matching "Gen2 Instances"/"Gen2 Scan Cost" columns on every shape table and a new "Gen2-retained types" compact table; trend comparer gained `shape.total.gen2.gc.scan.work`.
+
+> **E-3 note (2026-09-01):** this recommendation was already fully implemented — three months *before* this audit was written. `BoxingAnalyzer.ComputeTotalFieldBytes`/`ComputePaddingWaste` compute exactly `StaticSize - Σ field.Size` per value type (`af2f0e8`, 2026-05-01, predating this audit's `a8d0c5d`, 2026-08-03), surfaced as `BoxingDomainResult.TopPaddingWasteTypes`/`AggregatePaddingWasteBytes` and rendered in the "Boxing Analysis" report's "Struct types with highest padding waste" table. Building a second, duplicate padding computation inside `ObjectShapeAnalyzer` itself would violate DRY for no diagnostic gain — `ObjectShapeAnalyzer` has no more access to live `BoxingAnalysisOptions`/thresholds than any other analyzer, and the underlying computation (`ClrType.Fields` field-size summation) is identical. Instead, fixed the ObjectShapeFindingGenerator's value-heavy recommendation (already touched by I-11) to name the exact table: "See Boxing Analysis's 'Struct types with highest padding waste' table for exact per-type wasted bytes." Also corrected two other places in this audit (Area 2 weakness table, Area 4 opportunity table) that independently assumed `BoxingAnalyzer` didn't already do this.
 
 ---
 
@@ -381,13 +387,13 @@ incomplete. The report is useful for quick triage but insufficient for confident
 | P1 | I-7 | Finalizable × ReferenceHeavy finding | High | Low | High | Improvement | ✅ DONE |
 | P1 | E-1 | Cross-analyzer retention correlation | Very High | High | Medium | Evolution | ⊘ DEFERRED |
 | P2 | I-8 | Disclose cap scope in `AvgRefFieldsPerType` label | Medium | Low | High | Improvement | ✅ DONE |
-| P2 | I-9 | Replace silent catch with ILogger | Medium | Low | High | Improvement | — |
-| P2 | I-10 | Add Critical severity tier for GC scan pressure | Medium | Low | High | Improvement | — |
-| P2 | E-2 | Generation-aware shape ranking | High | High | Medium | Evolution | — |
-| P3 | I-11 | Fix misleading BoxingAnalyzer recommendation | Low | Low | High | Improvement | — |
-| P3 | I-12 | Add `IAnalyzer.Tags` override | Low | Low | High | Improvement | — |
-| P3 | I-13 | Partial sort for large type counts | Low | Medium | Medium | Improvement | — |
-| P3 | E-3 | Struct padding estimation for value-heavy types | Medium | Medium | Medium | Evolution | — |
+| P2 | I-9 | Replace silent catch with ILogger | Medium | Low | High | Improvement | ✅ DONE |
+| P2 | I-10 | Add Critical severity tier for GC scan pressure | Medium | Low | High | Improvement | ✅ DONE |
+| P2 | E-2 | Generation-aware shape ranking | High | High | Medium | Evolution | ✅ DONE, revised |
+| P3 | I-11 | Fix misleading BoxingAnalyzer recommendation | Low | Low | High | Improvement | ✅ DONE |
+| P3 | I-12 | Add `IAnalyzer.Tags` override | Low | Low | High | Improvement | ✅ DONE |
+| P3 | I-13 | Partial sort for large type counts (superseded — cap removed, full sort required regardless) | Low | Medium | Medium | Improvement | ⊘ SUPERSEDED |
+| P3 | E-3 | Struct padding estimation for value-heavy types (already implemented in BoxingAnalyzer, predates this audit) | Medium | Medium | Medium | Evolution | ⊘ ALREADY IMPLEMENTED |
 
 ### Final Verdict
 

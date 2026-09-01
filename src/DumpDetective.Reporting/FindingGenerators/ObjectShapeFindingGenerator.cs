@@ -7,6 +7,11 @@ namespace DumpDetective.Reporting.FindingGenerators;
 
 internal sealed class ObjectShapeFindingGenerator : IFindingGenerator
 {
+    // Σ(RefFields × InstanceCount) — total reference-field pointer slots GC must trace across
+    // all analyzed types. Crossing this indicates the reference-field density finding reflects
+    // material heap-wide GC scan pressure, not just a handful of reference-heavy types.
+    private const long TotalGcScanWorkCriticalThreshold = 250_000_000L;
+
     public string AnalyzerName => "Object Shape Analysis";
     public bool CanGenerate(AnalyzerDomainResult result) => result is ObjectShapeAnalyzerDomainResult;
 
@@ -25,13 +30,20 @@ internal sealed class ObjectShapeFindingGenerator : IFindingGenerator
                     $"{FormatTypeName(t.TypeName)} ({t.ReferenceFields} ref fields, {t.InstanceCount:N0} instances)"))
                 : "none";
 
+            FindingSeverity severity = r.TotalGcScanWork >= TotalGcScanWorkCriticalThreshold
+                ? FindingSeverity.Critical
+                : r.AvgRefFieldsPerType >= 8.0
+                    ? FindingSeverity.Warning
+                    : FindingSeverity.Info;
+
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
                 Category: "Memory",
-                Severity: r.AvgRefFieldsPerType >= 8.0 ? FindingSeverity.Warning : FindingSeverity.Info,
+                Severity: severity,
                 Title: $"High reference-field density: avg {r.AvgRefFieldsPerType:F1} ref fields/type",
                 Evidence: $"{r.TopReferenceHeavyTypes.Count} reference-heavy types found. " +
-                                $"Top: {top}. Average ref fields per analyzed type: {r.AvgRefFieldsPerType:F1}.",
+                                $"Top: {top}. Average ref fields per analyzed type: {r.AvgRefFieldsPerType:F1}. " +
+                                $"Total GC scan work across all analyzed types: {r.TotalGcScanWork:N0} ref-field scan slots.",
                 Recommendation: "Review types with many reference fields. Consider splitting large aggregate types, " +
                                 "using value types for hot-path data, or caching field offsets to reduce GC scan cost.",
                 Tags: ["gc-scan", "reference-fields", "object-shape"],
@@ -53,8 +65,10 @@ internal sealed class ObjectShapeFindingGenerator : IFindingGenerator
                     Evidence: $"Top value-heavy type: {FormatTypeName(r.TopValueHeavyTypes[0].TypeName)} " +
                                     $"({r.TopValueHeavyTypes[0].TotalFields} fields, {topValCount:N0} instances). " +
                                     $"{r.TopValueHeavyTypes.Count} value-heavy types analyzed.",
-                    Recommendation: "Check struct field ordering for padding waste. " +
-                                    "Consider using BoxingAnalyzer for struct-layout optimization.",
+                    Recommendation: "Check struct field ordering for padding waste — order fields largest-to-smallest " +
+                                    "and consider [StructLayout(LayoutKind.Sequential)] to control layout explicitly. " +
+                                    "See Boxing Analysis's \"Struct types with highest padding waste\" table for exact " +
+                                    "per-type wasted bytes (StaticSize minus summed field sizes) and boxing-site detection.",
                     Tags: ["value-type", "struct", "object-shape"],
                     MetricValue: topValCount,
                     MetricUnit: "instances"));

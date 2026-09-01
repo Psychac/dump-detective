@@ -362,7 +362,9 @@ public sealed class ReportingCompositionTests
             ],
             TotalTypesAnalyzed: 1,
             AvgRefFieldsPerType: 2,
-            TotalGcScanWork: 20);
+            TotalGcScanWork: 20,
+            TopGen2RetainedTypes: [],
+            TotalGen2GcScanWork: 0);
 
         AnalyzerRunResult memoryRun = new(
             AnalyzerName: "MemoryAnalyzer",

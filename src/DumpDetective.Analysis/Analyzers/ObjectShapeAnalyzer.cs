@@ -4,6 +4,7 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 
 using Microsoft.Diagnostics.Runtime;
+using Microsoft.Extensions.Logging;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -18,6 +19,16 @@ namespace DumpDetective.Analysis.Analyzers
     {
         public string Name => "Object Shape Analysis";
         public string Category => "Memory";
+        public IReadOnlyCollection<string> Tags => ["gc", "object-shape", "memory", "gc-scan"];
+
+        private readonly ILogger<ObjectShapeAnalyzer>? _logger;
+
+        public ObjectShapeAnalyzer() { }
+
+        public ObjectShapeAnalyzer(ILogger<ObjectShapeAnalyzer>? logger)
+        {
+            _logger = logger;
+        }
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
@@ -25,7 +36,7 @@ namespace DumpDetective.Analysis.Analyzers
             return ValueTask.FromResult(Analyze(context.Heap, context.Cache).Stamp(this));
         }
 
-        private static AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache)
+        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache)
         {
             if (cache is not HeapAnalysisCache heapCache
                 || !heapCache.TryGetHeapIndex(out HeapIndexBuildResult? idx)
@@ -37,7 +48,9 @@ namespace DumpDetective.Analysis.Analyzers
                     TopBalancedTypes: [],
                     TotalTypesAnalyzed: 0,
                     AvgRefFieldsPerType: 0,
-                    TotalGcScanWork: 0);
+                    TotalGcScanWork: 0,
+                    TopGen2RetainedTypes: [],
+                    TotalGen2GcScanWork: 0);
             }
 
             IReadOnlyDictionary<ulong, TypeShapeEntry> shapes = idx.TypeShapeCache;
@@ -57,6 +70,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             long totalRefFields = 0;
             long totalGcScanWork = 0;
+            long totalGen2GcScanWork = 0;
             int typesAnalyzed = 0;
 
             foreach ((ulong mt, TypeShapeEntry shape, long count) in candidates)
@@ -72,6 +86,9 @@ namespace DumpDetective.Analysis.Analyzers
                 totalRefFields += shape.RefFields;
                 totalGcScanWork += (long)(shape.RefFields * (double)Math.Max(0, count));
 
+                ulong gen2InstanceCount = (ulong)Math.Max(0, agg.Gen2Count);
+                totalGen2GcScanWork += (long)(shape.RefFields * (double)gen2InstanceCount);
+
                 double refRatio = shape.TotalFields > 0
                     ? shape.RefFields * 1.0 / shape.TotalFields
                     : 0.0;
@@ -86,8 +103,15 @@ namespace DumpDetective.Analysis.Analyzers
 
                 int baseDepth = ComputeBaseTypeDepth(type);
                 int ifaceCount;
-                try { ifaceCount = type.EnumerateInterfaces().Count(); }
-                catch { ifaceCount = 0; }
+                try
+                {
+                    ifaceCount = type.EnumerateInterfaces().Count();
+                }
+                catch (Exception ex)
+                {
+                    ifaceCount = 0;
+                    _logger?.LogDebug(ex, "Error enumerating interfaces for type {TypeName} (MT=0x{MethodTable:x})", type.Name, mt);
+                }
 
                 var profile = new TypeShapeProfile(
                     TypeName: type.Name ?? $"MT:0x{mt:x}",
@@ -102,7 +126,8 @@ namespace DumpDetective.Analysis.Analyzers
                     IsArray: type.IsArray,
                     BaseTypeChainDepth: baseDepth,
                     InterfaceCount: ifaceCount,
-                    Category: category);
+                    Category: category,
+                    Gen2InstanceCount: gen2InstanceCount);
 
                 if (category == ObjectShapeCategory.ReferenceHeavy)
                     refHeavyCandidates.Add(profile);
@@ -125,6 +150,18 @@ namespace DumpDetective.Analysis.Analyzers
             balancedCandidates.Sort(static (a, b) =>
                 b.InstanceCount.CompareTo(a.InstanceCount));
 
+            // Retention-adjusted ranking: RefFields × Gen2InstanceCount rather than total
+            // InstanceCount, since Gen2 objects are rescanned on every full GC while Gen0/Gen1
+            // objects are collected (and thus scanned) far more cheaply.
+            var gen2RetainedCandidates = new List<TypeShapeProfile>(
+                refHeavyCandidates.Count + valHeavyCandidates.Count + balancedCandidates.Count);
+            gen2RetainedCandidates.AddRange(refHeavyCandidates);
+            gen2RetainedCandidates.AddRange(valHeavyCandidates);
+            gen2RetainedCandidates.AddRange(balancedCandidates);
+            gen2RetainedCandidates.Sort(static (a, b) =>
+                (b.ReferenceFields * (double)b.Gen2InstanceCount)
+                    .CompareTo(a.ReferenceFields * (double)a.Gen2InstanceCount));
+
             double avgRefFields = typesAnalyzed > 0 ? totalRefFields * 1.0 / typesAnalyzed : 0.0;
 
             return new ObjectShapeAnalyzerDomainResult(
@@ -133,7 +170,9 @@ namespace DumpDetective.Analysis.Analyzers
                 TopBalancedTypes: balancedCandidates,
                 TotalTypesAnalyzed: typesAnalyzed,
                 AvgRefFieldsPerType: avgRefFields,
-                TotalGcScanWork: totalGcScanWork);
+                TotalGcScanWork: totalGcScanWork,
+                TopGen2RetainedTypes: gen2RetainedCandidates,
+                TotalGen2GcScanWork: totalGen2GcScanWork);
         }
 
         private static int ComputeBaseTypeDepth(ClrType type)

@@ -34,9 +34,30 @@ None. The analyzer is narrowly scoped to `SyncBlock`-based monitors.
 - No `ClrThread.BlockingObjects`-based `LockWaitGraph` primitive is possible — the API doesn't exist. Any shared primitive would have to be built from the same `heap.EnumerateSyncBlocks()` holder/waiter-count data this analyzer and `ThreadAnalyzer` already have access to, i.e. a shared "contested lock inventory," not a wait-for graph.
 - A `WaitForGraph<TNode>` DFS-cycle-detection utility would still be valuable *if* a future ClrMD version exposes per-thread blocking-object data (see P0-1/P0-2 reclassification below); it has no data source to operate on today.
 
+#### P2-4 deferral caveats
+
+Deliberately left unimplemented — flagged open rather than attempted, because there is no current
+consumer to justify extracting a shared primitive yet:
+
+- As of this audit, neither `ThreadAnalyzer` nor `HangAnalyzer` calls `heap.EnumerateSyncBlocks()`
+  at all — `LockGraphAnalyzer` is the only analyzer with this scan today. The "avoid three separate
+  re-implementations" framing (see Final Verdict) describes a hypothetical future state, not a
+  present one.
+- `ThreadAnalyzer`'s mirror-image item (`IThreadOwnershipIndex`, P3-4 in
+  [thread-analyzer-audit.md](thread-analyzer-audit.md)) is itself unimplemented, and as written
+  there depends on `ClrThread.EnumerateBlockingObjects()` — the same API confirmed **not to exist**
+  in ClrMD 4 (see Area 3 above). The two audits' shared-primitive ideas don't yet agree on a
+  concrete, ClrMD-4-achievable shape.
+- Extracting a shared "contested lock inventory" type now, with a single consumer, would be
+  premature abstraction — no design pressure yet from a second real call site to validate the
+  right shape (holder/waiter counts only? per-type aggregation? caching?).
+- Revisit once `ThreadAnalyzer` or `HangAnalyzer` has a confirmed, concrete need to surface
+  contested-lock data (i.e. a second real consumer exists), so the shared primitive's shape is
+  driven by two actual use cases instead of guessed in advance.
+
 ### Architectural observations
 
-The `IThreadStackScanParticipant` integration is correct and appropriately conservative (`GetRequiredFrameCount` returns 1). The fallback path for non-pipeline invocations is well-structured.
+The `IThreadStackScanParticipant` integration is correct and appropriately conservative (`GetRequiredFrameCount` returns `FrameScanDepth` (8), enough to skip past the native "Runtime" transition frames ahead of the real `Monitor.Enter_Slowpath` frame — see P1-4 coverage notes below). The fallback path for non-pipeline invocations is well-structured.
 
 ---
 
@@ -137,10 +158,78 @@ Correctly implemented. `GetRequiredFrameCount` returns 1. `BeforeThreadStackScan
 - **Per-lock waiter-to-holder ratio**: `WaitingThreadCount / (RecursionCount > 0 ? 1 : 1)` as a contention-pressure metric.
 - **Unresolved owners**: count of contested locks with `HoldingThreadAddress != 0` but no matching thread in `threadByAddress` — indicates threads that exited while holding the lock (a potential cause of deadlock).
 
+#### P2-2 deferral caveats
+
+Deliberately left unimplemented — flagged open rather than attempted, for the same category of
+reason as [P3-2](#p3-2-deferral-caveats): reading `ReaderWriterLockSlim`'s internal state means
+reflecting into private implementation fields, not a public/stable contract.
+
+- `ReaderWriterLockSlim`'s lock-state field (`_rwLock`/similar `LockState`-style bitfield encoding
+  writer-held/upgradeable-held/reader-count) is a private implementation detail whose name and bit
+  layout have changed across .NET Framework vs .NET Core vs .NET 5+ and across BCL versions within
+  a runtime family — the same fragility already documented for `SemaphoreSlim` internals.
+- No spike was done to confirm the current field name/layout against a real dump; there is no
+  validated field-level design here, only "read the field" as a one-line placeholder.
+- A correct implementation would need per-runtime-version field maps plus graceful fallback when
+  the field isn't found, which is materially more work than a single field read.
+- Revisit only if there's a confirmed need (e.g. a real dump where `ReaderWriterLockSlim` contention
+  is suspected and monitor-based detection can't see it) — not speculatively.
+
 ### Lower-value / high-effort
 
 - `Mutex` / native sync object tracking — requires reading CLR internal structures not exposed by ClrMD.
 - `SemaphoreSlim` wait queue traversal — requires object field navigation.
+
+#### P3-2 deferral caveats
+
+Deliberately left unimplemented — flagged open rather than attempted, because the effort/confidence
+profile (High effort, Low confidence) is a poor trade for a Low-priority coverage gap:
+
+- Unlike P0/P1/P2 items, there is no validated field-level design here — just "requires object
+  field navigation." No spike was done to confirm field names against a real dump.
+- `SemaphoreSlim`'s relevant internal state (`_currentCount`, `_maxCount`, `_waitCount`, `_lockObj`,
+  plus the async-waiter queue fields used when `WaitAsync` is involved) are private implementation
+  details, not a public/stable contract.
+- Those field names and layout have changed across runtimes (.NET Framework vs .NET Core vs
+  .NET 5+) and across BCL versions within a runtime family. A hard-coded field-name lookup is
+  liable to silently stop working (or silently mis-read) on a version we have not tested against.
+- Any implementation would need per-runtime-version field maps and graceful fallback when fields
+  aren't found, which is materially more work than a single heap-object field read and still
+  wouldn't carry the same confidence as the `SyncBlock`-based monitor detection this analyzer
+  otherwise relies on.
+- Revisit only if there's a confirmed need (e.g. a real dump where `SemaphoreSlim` contention is
+  suspected and monitor-based detection can't see it) — not speculatively.
+
+#### P1-4 coverage notes
+
+Implemented as `LockGraphAnalyzerLiveHeapTests` — real background threads/locks on the test
+process's own heap (self-attach via `DataTarget.CreateSnapshotAndAttach`), not reflection-seeded
+state, because a thin lock only inflates to a `SyncBlock` under genuine contention. Covers:
+
+- Contested lock detection (real two-thread monitor contention).
+- Deadlock-candidate heuristic (a thread holding one inflated lock while blocked entering another).
+- The no-contention path (a held-but-uncontended lock — thin, correctly invisible — produces no
+  contested-lock or candidate entries for its holder).
+
+Does **not** cover the "unresolved owner" path (a `SyncBlock` whose `HoldingThreadAddress` no
+longer resolves to a live thread — P2-1's "thread exited while holding lock" case). Modern .NET
+has no supported way to terminate a managed thread without unwinding its `finally` blocks (no
+`Thread.Abort`), so a lock can't be abandoned mid-hold from live managed test code — only a real
+crash captured in a dump produces that state. Marked partial rather than fully done for this
+reason.
+
+**Bug found and fixed while writing these tests**: the deadlock-candidate heuristic (top-frame
+`monitor.wait`/`monitor.enter` check, both the `IThreadStackScanParticipant` pipeline path and the
+direct-invocation fallback) took literally stack frame 0 from `EnumerateStackTrace()`. A live
+snapshot of a thread genuinely blocked in `Monitor.Enter` showed frame 0 (and frame 1) are native
+"Runtime" transition frames with no `Method` (empty signature) — the real
+`Monitor.Enter_Slowpath`/`ObjWait` managed frame was at index 2. Reading frame 0 blindly meant
+`topFrameSignature` was `null` for a genuinely blocked thread, so the deadlock-candidate finding
+that P0-1/P0-3/P0-4 built out was silently never firing in production. Fixed by scanning up to
+`FrameScanDepth` (8) frames for the first one with a non-empty `Method.Signature`, in both the
+participant path (`GetRequiredFrameCount` raised from 1 to `FrameScanDepth`) and the fallback path.
+This is exactly the "harden top-frame heuristic" work the Final Verdict already called out as a
+near-term win — it just hadn't been noticed until a real blocked thread was captured live.
 
 ---
 
@@ -292,15 +381,15 @@ DumpDetective's contention reporting is broadly competitive with dotMemory and V
 | P1-1 | ~~Capture waiting thread IDs per contested lock (via `BlockingObjects`)~~ — **BLOCKED**: `SyncBlock.WaitingThreadCount` is a count only, no thread IDs; no ClrMD 4 API exposes waiter identity | Diagnostic quality | High | Low (follows P0-1) | High | Improvement |
 | P1-2 | Add owner thread frame summary (N frames) for deadlock candidate owners | Diagnostic quality | High | Low | High | Improvement | ✅ DONE |
 | P1-3 | Replace O(M×N) lock-to-thread grouping with a pre-built `Dictionary<int, List<LockContention>>` | Performance | Medium | Low | High | Improvement | ✅ DONE |
-| P1-4 | Add unit tests: contested lock detection, deadlock cycle detection, no-contention path, null-owner path | Testing | High | Medium | High | Improvement |
+| P1-4 | Add unit tests: contested lock detection, deadlock cycle detection, no-contention path, null-owner path | Testing | High | Medium | High | Improvement | ✅ DONE (partial — see note) |
 | P2-1 | Expose unresolved-owner count in domain result and flag in report (thread exited while holding lock) | Diagnostic quality | Medium | Low | High | Improvement | ✅ DONE |
-| P2-2 | Add `ReaderWriterLockSlim` state detection via heap object field inspection | Coverage | Medium | Medium | Medium | Improvement |
+| P2-2 | Add `ReaderWriterLockSlim` state detection via heap object field inspection | Coverage | Medium | Medium | Medium | Improvement | ⏸ DEFERRED — see caveats below |
 | P2-3 | Make confidence score dynamic (lower when owner resolution rate is poor) | Diagnostic quality | Medium | Low | High | Improvement | ✅ DONE |
-| P2-4 | Elevate a shared "contested lock inventory" primitive (holder + waiter count from `heap.EnumerateSyncBlocks()`, not a wait-for graph) for HangAnalyzer/ThreadAnalyzer cross-correlation | Architecture | Medium | Medium | Medium | Evolution |
+| P2-4 | Elevate a shared "contested lock inventory" primitive (holder + waiter count from `heap.EnumerateSyncBlocks()`, not a wait-for graph) for HangAnalyzer/ThreadAnalyzer cross-correlation | Architecture | Medium | Medium | Medium | Evolution | ⏸ DEFERRED — see caveats below |
 | P2-5 | Lower `reportEveryObjects` in `ObjectScanCounter` to `50` for sync block enumeration | Performance | Low | Trivial | High | Improvement | ✅ DONE |
-| P2-6 | Replace `ToLowerInvariant().Contains(...)` with `string.Contains(..., StringComparison.OrdinalIgnoreCase)` | Correctness | Low | Trivial | High | Improvement |
-| P3-1 | Flag high-recursion contested locks as potential re-entrancy signals | Diagnostic quality | Low | Low | Medium | Improvement |
-| P3-2 | `SemaphoreSlim` and cooperative-wait primitive detection via heap object traversal | Coverage | Low | High | Low | Improvement |
+| P2-6 | Replace `ToLowerInvariant().Contains(...)` with `string.Contains(..., StringComparison.OrdinalIgnoreCase)` | Correctness | Low | Trivial | High | Improvement | ✅ DONE |
+| P3-1 | Flag high-recursion contested locks as potential re-entrancy signals | Diagnostic quality | Low | Low | Medium | Improvement | ✅ DONE |
+| P3-2 | `SemaphoreSlim` and cooperative-wait primitive detection via heap object traversal | Coverage | Low | High | Low | Improvement | ⏸ DEFERRED — see caveats below |
 
 ---
 
@@ -310,6 +399,6 @@ DumpDetective's contention reporting is broadly competitive with dotMemory and V
 
 2. **Highest-impact improvements**: P0-1 and P0-2 as originally framed (use `ClrThread.BlockingObjects`, DFS cycle detection) are **not implementable** — verified by reflection, the API doesn't exist. The achievable substitute is a global lock-contention table (holder + waiter count, `WaitingThreadCount > 0`) plus a hardened, honestly-labelled top-frame heuristic. P0-3, P0-4, and P0-5 are the real near-term wins: they eliminate misleading outputs without depending on a nonexistent API.
 
-3. **Platform evolution opportunity**: A shared "contested lock inventory" primitive built from `heap.EnumerateSyncBlocks()` (not `BlockingObjects`) would make `HangAnalyzer`, `ThreadAnalyzer`, and `LockGraphAnalyzer` more coherent and avoid three separate re-implementations of the same sync-block scan.
+3. **Platform evolution opportunity (deferred, P2-4)**: A shared "contested lock inventory" primitive built from `heap.EnumerateSyncBlocks()` (not `BlockingObjects`) would make `HangAnalyzer`, `ThreadAnalyzer`, and `LockGraphAnalyzer` more coherent — but as of this audit `LockGraphAnalyzer` is the *only* one of the three doing this scan, so there is no second consumer yet to shape or justify the extraction. See P2-4 deferral caveats above.
 
 4. **Highest engineering return**: P0-3 → P0-4 → P0-5 → P1-1's achievable substitute (global contention table). True per-thread wait-for graph and verified cycle detection are blocked until a future ClrMD version exposes per-thread blocking-object data — track as an external dependency, not an internal implementation task.

@@ -13,6 +13,10 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
     public string DisplayTitle => "Lock Graph & Deadlocks";
     public int SortOrder => 300;
 
+    // A lock re-entered this many times by its holder while other threads wait on it
+    // is a re-entrancy signal worth calling out separately from ordinary contention.
+    private const int HighRecursionThreshold = 3;
+
     public bool CanHandle(AnalyzerDomainResult result) => result is LockGraphDomainResult;
 
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
@@ -25,6 +29,9 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
             BuildConfidenceBand(confidenceScore, ["Derived from recorded wait chains and lock ownership."]),
         };
 
+        var contestedDetails = d.ContestedLockDetails ?? [];
+        int highRecursionLockCount = contestedDetails.Count(cl => cl.RecursionCount >= HighRecursionThreshold);
+
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
             ["held_locks"] = new NumericMetricValue(d.TotalHeldLocks, MetricUnit.Count),
@@ -32,10 +39,14 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
             ["max_waiters_on_single_lock"] = new NumericMetricValue(d.MaxWaitersOnSingleLock, MetricUnit.Count),
             ["deadlock_candidates"] = new NumericMetricValue(d.DeadlockCandidateCount, MetricUnit.Count),
             ["unresolved_owners"] = new NumericMetricValue(d.UnresolvedOwnerCount, MetricUnit.Count),
+            ["high_recursion_locks"] = new NumericMetricValue(highRecursionLockCount, MetricUnit.Count),
         };
 
         if (d.UnresolvedOwnerCount > 0)
             blocks.Add(T($"⚠ {d.UnresolvedOwnerCount} lock(s) held by threads that are no longer in the runtime (possible thread crash/termination)."));
+
+        if (highRecursionLockCount > 0)
+            blocks.Add(T($"⚠ {highRecursionLockCount} contested lock(s) show a recursion count ≥ {HighRecursionThreshold} — the holder is re-entering the lock repeatedly while other threads wait, a potential re-entrancy issue."));
 
         var topTypes = d.TopContestedLockTypes ?? [];
         if (topTypes.Count > 0)
@@ -48,7 +59,6 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
             compactTables.Add(STCompact("Top contested lock types", new[] { CH("Type"), CH("Waiters") }, ctRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
-        var contestedDetails = d.ContestedLockDetails ?? [];
         if (contestedDetails.Count > 0)
         {
             var clRows = new List<TableRow>(contestedDetails.Count);

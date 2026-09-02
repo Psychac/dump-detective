@@ -116,6 +116,7 @@ internal sealed class InsightEngine
         HttpObjectDomainResult? http = FindResult<HttpObjectDomainResult>(runs);
         StaticRootDomainResult? staticRoot = FindResult<StaticRootDomainResult>(runs);
         ReferenceChainDomainResult? referenceChain = FindResult<ReferenceChainDomainResult>(runs);
+        LockGraphDomainResult? lockGraph = FindResult<LockGraphDomainResult>(runs);
 
         var ruleContext = new InsightRuleContext(
             Runs: runs,
@@ -148,7 +149,8 @@ internal sealed class InsightEngine
             Wcf: wcf,
             Http: http,
             StaticRoot: staticRoot,
-            ReferenceChain: referenceChain);
+            ReferenceChain: referenceChain,
+            LockGraph: lockGraph);
 
         for (int i = 0; i < RuleGroups.Count; i++)
             RuleGroups[i].Apply(findings, in ruleContext);
@@ -194,7 +196,8 @@ internal sealed class InsightEngine
         WcfChannelDomainResult? Wcf,
         HttpObjectDomainResult? Http,
         StaticRootDomainResult? StaticRoot,
-        ReferenceChainDomainResult? ReferenceChain);
+        ReferenceChainDomainResult? ReferenceChain,
+        LockGraphDomainResult? LockGraph);
 
     private sealed class BaselineRuleGroup : IInsightRuleGroup
     {
@@ -252,7 +255,7 @@ internal sealed class InsightEngine
             DetectWcfChannelFault(findings, context.Wcf, context.Crash);
             DetectWcfOpeningTimeoutCorrelation(findings, context.Wcf, context.Crash);
             DetectHttpClientAccumulation(findings, context.Http);
-            DetectClusterHangCorrelation(findings, context.Clusters, context.Hang);
+            DetectClusterHangCorrelation(findings, context.Clusters, context.Hang, context.Threads, context.LockGraph);
             DetectReferenceChainDominatorCorrelation(findings, context.ReferenceChain, context.Leak);
         }
     }
@@ -2071,12 +2074,21 @@ internal sealed class InsightEngine
     /// findings. When most of the dominant cluster's threads are independently reported as
     /// waiting by HangAnalyzer, the two single-analyzer findings describe the same bottleneck —
     /// this promotes that overlap into one elevated, correlated finding instead of leaving the
-    /// reader to notice the connection themselves.
+    /// reader to notice the connection themselves. When ThreadAnalyzer's data is also available,
+    /// the overlapping threads' StackRootCount is folded in as a retention signal: a stuck thread
+    /// that also anchors GC roots means resolving the block may relieve retained memory too. When
+    /// LockGraphAnalyzer's data is also available and any overlapping thread is independently
+    /// flagged as a deadlock candidate (holding a lock while itself blocked), severity is escalated
+    /// to Critical and the held lock types are named — this is the strongest signal available
+    /// short of true circular-wait detection, since it ties stack shape + wait state + lock
+    /// ownership into one finding instead of three disconnected single-analyzer observations.
     /// </summary>
     private static void DetectClusterHangCorrelation(
         List<InsightFinding> findings,
         ThreadStackClusterDomainResult? clusters,
-        HangDomainResult? hang)
+        HangDomainResult? hang,
+        ThreadDomainResult? threads,
+        LockGraphDomainResult? lockGraph)
     {
         if (clusters is null || hang is null)
             return;
@@ -2094,10 +2106,15 @@ internal sealed class InsightEngine
             waitingOsThreadIds.Add(waitingThreads[i].OSThreadId);
 
         int overlapCount = 0;
+        var overlappingOsThreadIds = new HashSet<uint>();
         for (int i = 0; i < dominant.SampleOsThreadIds.Count; i++)
         {
-            if (waitingOsThreadIds.Contains(dominant.SampleOsThreadIds[i]))
+            uint osThreadId = dominant.SampleOsThreadIds[i];
+            if (waitingOsThreadIds.Contains(osThreadId))
+            {
                 overlapCount++;
+                overlappingOsThreadIds.Add(osThreadId);
+            }
         }
 
         double overlapRatio = overlapCount / (double)dominant.SampleOsThreadIds.Count;
@@ -2141,6 +2158,31 @@ internal sealed class InsightEngine
             ? FindingSeverity.Critical
             : FindingSeverity.Warning;
 
+        // If any overlapping thread is independently flagged by LockGraphAnalyzer as a deadlock
+        // candidate (holding a lock while itself blocked), that's structural evidence outweighing
+        // the raw percentage heuristic above — escalate regardless of dominantPercentOfAlive.
+        int overlappingDeadlockCandidateCount = 0;
+        var deadlockLockTypes = new List<string>();
+        if (lockGraph?.DeadlockCandidateDetails is { Count: > 0 } deadlockCandidates)
+        {
+            var seenLockTypes = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = 0; i < deadlockCandidates.Count; i++)
+            {
+                DeadlockCandidateSnapshot candidate = deadlockCandidates[i];
+                if (!overlappingOsThreadIds.Contains(candidate.OsThreadId))
+                    continue;
+
+                overlappingDeadlockCandidateCount++;
+                for (int j = 0; j < candidate.LockObjectTypes.Count; j++)
+                {
+                    if (seenLockTypes.Add(candidate.LockObjectTypes[j]))
+                        deadlockLockTypes.Add(candidate.LockObjectTypes[j]);
+                }
+            }
+        }
+        if (overlappingDeadlockCandidateCount > 0)
+            sev = FindingSeverity.Critical;
+
         string reasonNote = dominantWaitReason is not null
             ? $", predominantly waiting on {dominantWaitReason}"
             : string.Empty;
@@ -2155,6 +2197,24 @@ internal sealed class InsightEngine
             ["Wait Reason", "Thread Count"],
             reasonRows);
 
+        string retentionNote = string.Empty;
+        if (threads is not null)
+        {
+            int retainedStackRoots = SumStackRootCounts(threads, overlappingOsThreadIds);
+            if (retainedStackRoots > 0)
+                retentionNote = $" These threads also anchor {retainedStackRoots:N0} GC root(s) via their stacks, so resolving the block may relieve retained memory too.";
+        }
+
+        string deadlockNote = string.Empty;
+        var tags = new List<string> { "thread-cluster", "hang", "blocking", "contention", "cross-analyzer" };
+        if (overlappingDeadlockCandidateCount > 0)
+        {
+            string lockTypeList = deadlockLockTypes.Count > 0 ? string.Join(", ", deadlockLockTypes) : "unresolved type(s)";
+            deadlockNote = $" {overlappingDeadlockCandidateCount} of these threads are additionally flagged by " +
+                           $"LockGraphAnalyzer as deadlock candidates, holding lock(s) on: {lockTypeList}.";
+            tags.Add("deadlock-candidate");
+        }
+
         findings.Add(new InsightFinding(
             Analyzer: Source,
             Category: "Threads",
@@ -2163,15 +2223,50 @@ internal sealed class InsightEngine
             Evidence: $"{overlapCount} of {dominant.SampleOsThreadIds.Count} sampled threads in the dominant " +
                       $"stack cluster ({dominant.Count:N0} threads, {dominantPercentOfAlive:F1}% of alive threads) " +
                       $"are also reported as waiting by the Hang analyzer{reasonNote}. " +
-                      $"Cluster signature: {dominant.Signature}",
-            Recommendation: "A large group of threads sharing an identical stack and wait state strongly " +
-                            "suggests a single contended resource or blocking call. Inspect the cluster's " +
-                            "innermost frame together with the corresponding Hang analyzer wait details to " +
-                            "identify the shared bottleneck.",
-            Tags: ["thread-cluster", "hang", "blocking", "contention", "cross-analyzer"],
+                      $"Cluster signature: {dominant.Signature}{retentionNote}{deadlockNote}",
+            Recommendation: overlappingDeadlockCandidateCount > 0
+                ? "Threads in this cluster are both blocked and independently confirmed to be holding contended " +
+                  "locks. Review lock acquisition order across these threads and use cycle-detection tooling " +
+                  "(e.g., !dlk in WinDbg) to confirm circular-wait before restarting the process."
+                : "A large group of threads sharing an identical stack and wait state strongly " +
+                  "suggests a single contended resource or blocking call. Inspect the cluster's " +
+                  "innermost frame together with the corresponding Hang analyzer wait details to " +
+                  "identify the shared bottleneck.",
+            Tags: tags,
             MetricValue: overlapRatio,
             MetricUnit: "ratio",
             EvidenceTables: [evidenceTable]));
+    }
+
+    // Sums StackRootCount for the given OS thread IDs, deduplicated across ThreadAnalyzer's
+    // per-category snapshot lists — a thread can appear in both TopBlockedThreads and
+    // TopLockedThreads simultaneously (it can hold a lock while separately blocked waiting on
+    // something else), so a naive sum across lists would double-count its StackRootCount.
+    private static int SumStackRootCounts(ThreadDomainResult threads, HashSet<uint> osThreadIds)
+    {
+        if (osThreadIds.Count == 0)
+            return 0;
+
+        var stackRootsByOsThreadId = new Dictionary<uint, int>();
+        AddStackRootCounts(stackRootsByOsThreadId, threads.TopBlockedThreads);
+        AddStackRootCounts(stackRootsByOsThreadId, threads.TopLockedThreads);
+        AddStackRootCounts(stackRootsByOsThreadId, threads.OtherThreads);
+
+        int total = 0;
+        foreach (uint osThreadId in osThreadIds)
+        {
+            if (stackRootsByOsThreadId.TryGetValue(osThreadId, out int count))
+                total += count;
+        }
+        return total;
+    }
+
+    private static void AddStackRootCounts(Dictionary<uint, int> map, IReadOnlyList<ThreadStateSnapshot>? snapshots)
+    {
+        if (snapshots is null)
+            return;
+        for (int i = 0; i < snapshots.Count; i++)
+            map[snapshots[i].OSThreadId] = snapshots[i].StackRootCount;
     }
 
     /// <summary>

@@ -408,6 +408,187 @@ public sealed class InsightEngineTests
     }
 
     [Fact]
+    public void Analyze_ShouldEnrichClusterHangCorrelation_WithStackRootCounts_WhenThreadDataAvailable()
+    {
+        InsightEngine engine = new();
+
+        ThreadStackClusterDomainResult clusters = new(
+            AliveThreadCount: 10,
+            UniqueClusters: 1,
+            SingletonSignatures: 0,
+            DiversityPercent: 10.0,
+            TopClusterSignatures: ["Frame.A -> Frame.B"],
+            TopClusters: [new ThreadClusterSnapshot(
+                Count: 8,
+                SampleOsThreadIds: [1, 2, 3],
+                Signature: "Frame.A -> Frame.B")]);
+
+        HangDomainResult hang = new(
+            TotalAliveThreads: 10,
+            WaitingThreadCount: 3,
+            ThreadsHoldingLocks: 0,
+            WaitingPercent: 30.0,
+            WaitCategoryBreakdown: new Dictionary<string, int>(),
+            TotalTaskContinuations: 0,
+            QueuedWorkItems: 0,
+            TotalTasks: 0,
+            PendingTasks: 0,
+            FaultedTasks: 0,
+            CanceledTasks: 0,
+            RuntimeThreadPoolDataAvailable: false,
+            RuntimeMinThreads: 0,
+            RuntimeMaxThreads: 0,
+            RuntimeActiveWorkerThreads: 0,
+            RuntimeIdleWorkerThreads: 0,
+            RuntimeRetiredWorkerThreads: 0,
+            RuntimeQueueLength: null,
+            RuntimeCpuUtilization: 0,
+            IsStarved: false,
+            HealthScore: 50,
+            TopWaitingThreads:
+            [
+                new WaitingThreadSnapshot(1, 1, "Monitor", "MonitorWait", 0, "Frame.A"),
+                new WaitingThreadSnapshot(2, 2, "Monitor", "MonitorWait", 0, "Frame.A"),
+                new WaitingThreadSnapshot(3, 3, "Monitor", "MonitorWait", 0, "Frame.A"),
+            ]);
+
+        ThreadDomainResult threads = new(
+            TotalThreadCount: 10,
+            AliveThreadCount: 10,
+            InactiveThreadCount: 0,
+            GcThreadCount: 0,
+            BlockedThreadCount: 3,
+            LockHoldingThreadCount: 0,
+            ThreadsWithActiveExceptionsCount: 0,
+            BackgroundThreadCount: 0,
+            WaitPatternBreakdown: new Dictionary<string, int>(),
+            TopBlockedThreads:
+            [
+                new ThreadStateSnapshot(1, 1, 0, "Wait", "Preemptive", "MonitorWait", "MonitorWait", [], StackRootCount: 10, StackSizeBytes: 0),
+                new ThreadStateSnapshot(2, 2, 0, "Wait", "Preemptive", "MonitorWait", "MonitorWait", [], StackRootCount: 20, StackSizeBytes: 0),
+                new ThreadStateSnapshot(3, 3, 0, "Wait", "Preemptive", "MonitorWait", "MonitorWait", [], StackRootCount: 5, StackSizeBytes: 0),
+            ]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Thread Stack Signature Clustering", AnalyzerExecutionStatus.Success, clusters),
+            BuildRun("Hang Analyzer", AnalyzerExecutionStatus.Success, hang),
+            BuildRun("Thread Analysis", AnalyzerExecutionStatus.Success, threads),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("Dominant thread-stack cluster correlates", StringComparison.OrdinalIgnoreCase)
+            && f.Evidence.Contains("35", StringComparison.Ordinal)
+            && f.Evidence.Contains("anchor", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static (ThreadStackClusterDomainResult Clusters, HangDomainResult Hang) BuildLowSeverityClusterHangOverlap() => (
+        new ThreadStackClusterDomainResult(
+            AliveThreadCount: 10,
+            UniqueClusters: 1,
+            SingletonSignatures: 0,
+            DiversityPercent: 10.0,
+            TopClusterSignatures: ["Frame.A -> Frame.B"],
+            TopClusters: [new ThreadClusterSnapshot(
+                Count: 3,
+                SampleOsThreadIds: [1, 2, 3],
+                Signature: "Frame.A -> Frame.B")]),
+        new HangDomainResult(
+            TotalAliveThreads: 10,
+            WaitingThreadCount: 3,
+            ThreadsHoldingLocks: 0,
+            WaitingPercent: 30.0,
+            WaitCategoryBreakdown: new Dictionary<string, int>(),
+            TotalTaskContinuations: 0,
+            QueuedWorkItems: 0,
+            TotalTasks: 0,
+            PendingTasks: 0,
+            FaultedTasks: 0,
+            CanceledTasks: 0,
+            RuntimeThreadPoolDataAvailable: false,
+            RuntimeMinThreads: 0,
+            RuntimeMaxThreads: 0,
+            RuntimeActiveWorkerThreads: 0,
+            RuntimeIdleWorkerThreads: 0,
+            RuntimeRetiredWorkerThreads: 0,
+            RuntimeQueueLength: null,
+            RuntimeCpuUtilization: 0,
+            IsStarved: false,
+            HealthScore: 50,
+            TopWaitingThreads:
+            [
+                new WaitingThreadSnapshot(1, 1, "Monitor", "MonitorWait", 1, "Frame.A"),
+                new WaitingThreadSnapshot(2, 2, "Monitor", "MonitorWait", 0, "Frame.A"),
+                new WaitingThreadSnapshot(3, 3, "Monitor", "MonitorWait", 0, "Frame.A"),
+            ]));
+
+    [Fact]
+    public void Analyze_ShouldEscalateClusterHangCorrelation_WhenOverlapIncludesDeadlockCandidate()
+    {
+        InsightEngine engine = new();
+        (ThreadStackClusterDomainResult clusters, HangDomainResult hang) = BuildLowSeverityClusterHangOverlap();
+
+        LockGraphDomainResult lockGraph = new(
+            TotalHeldLocks: 1,
+            ContestedLockCount: 1,
+            MaxWaitersOnSingleLock: 1,
+            DeadlockCandidateCount: 1,
+            DeadlockCandidateDetails:
+            [
+                new DeadlockCandidateSnapshot(1, 1, ["MyApp.OrderLock"], [0x1000], "Frame.A", [])
+            ]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Thread Stack Signature Clustering", AnalyzerExecutionStatus.Success, clusters),
+            BuildRun("Hang Analyzer", AnalyzerExecutionStatus.Success, hang),
+            BuildRun("Lock Graph Analysis", AnalyzerExecutionStatus.Success, lockGraph),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("Dominant thread-stack cluster correlates", StringComparison.OrdinalIgnoreCase)
+            && f.Severity == FindingSeverity.Critical
+            && f.Tags.Contains("deadlock-candidate")
+            && f.Evidence.Contains("MyApp.OrderLock", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Analyze_ShouldNotEscalateClusterHangCorrelation_WhenDeadlockCandidateDoesNotOverlap()
+    {
+        InsightEngine engine = new();
+        (ThreadStackClusterDomainResult clusters, HangDomainResult hang) = BuildLowSeverityClusterHangOverlap();
+
+        LockGraphDomainResult lockGraph = new(
+            TotalHeldLocks: 1,
+            ContestedLockCount: 1,
+            MaxWaitersOnSingleLock: 1,
+            DeadlockCandidateCount: 1,
+            DeadlockCandidateDetails:
+            [
+                new DeadlockCandidateSnapshot(99, 99, ["MyApp.OrderLock"], [0x1000], "Frame.Z", [])
+            ]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Thread Stack Signature Clustering", AnalyzerExecutionStatus.Success, clusters),
+            BuildRun("Hang Analyzer", AnalyzerExecutionStatus.Success, hang),
+            BuildRun("Lock Graph Analysis", AnalyzerExecutionStatus.Success, lockGraph),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("Dominant thread-stack cluster correlates", StringComparison.OrdinalIgnoreCase)
+            && f.Severity == FindingSeverity.Warning
+            && !f.Tags.Contains("deadlock-candidate")
+            && !f.Evidence.Contains("MyApp.OrderLock", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Analyze_ShouldEmitEvidenceTable_WhenTopMemoryTypeIsAlmostEntirelyGen2()
     {
         InsightEngine engine = new();

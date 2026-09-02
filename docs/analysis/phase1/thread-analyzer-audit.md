@@ -211,20 +211,19 @@ No fundamental scalability blocker exists. The shared-walk architecture ensures 
 **Wait-pattern table token collision risk**
 `ThreadWaitClassifier.ClassifySignature` uses `Contains` on the full method signature string. The token `"mutex"` would match a method named `ConcurrentMutex.TryEnterFast` or a type named `ProxyMutexHelper`. The classification is heuristic but this creates potential false positives in atypical stacks.
 
-**`AsyncChainDetection.Full` in-place mutation of shared `stackFrames`**
-When full async chain detection widens the frame window, it appends to the *same* `stackFrames` list instance that was already added to `threadsWithLocks`, `blockedThreads`, or `threadsWithExceptions` (if the thread also matched those conditions). These lists all hold references to the same object. The mutation is intended (capture full context), but because the expansion happens *after* the object is stored in other lists, the stored references in those lists will also see the extended frames — this is non-obvious and fragile.
+**`AsyncChainDetection.Full` in-place mutation of shared `stackFrames`** — ✅ RESOLVED (by unrelated refactor)
+Originally: when full async chain detection widened the frame window, it appended to the *same* `stackFrames` list instance that was already added to `threadsWithLocks`, `blockedThreads`, or `threadsWithExceptions` (if the thread also matched those conditions), so the stored references in those lists would silently see the extended frames. Commit `8e86e1a` ("Removed analysis profile from Thread Analyzer") deleted the entire `AnalysisProfile`/`AsyncChainDetection` preset mechanism this depended on. In the current code, `stackFrames` is populated once from the dispatcher's already-unbounded capture (`UnboundedFrameCount`) and is only ever read afterward — there is no second "widen the window" pass, so the aliasing risk no longer exists.
 
 **`ThreadsWithExceptions` sort by `LockCount`**
 `threadsWithExceptions` is sorted `OrderByDescending(t => t.Thread.LockCount)` — a thread with an exception but zero locks sorts to the bottom. Sorting by exception severity (e.g., by exception type priority, or by whether the thread is alive) would be more meaningful. Threads with active exceptions that hold no locks are still critical.
 
 **False negatives in wait detection**
 The `WaitPatterns` table does not cover:
-- `ValueTask` awaiting patterns
-- `Task.WaitAll` / `Task.WhenAny` blocking
+- `Task.WhenAny` blocking (`Task.WaitAll` is already caught incidentally by the `"task.wait"` substring token)
 - `SemaphoreSlim.Wait` (covered by "semaphore" token but only if the signature contains lowercase "semaphore" — the actual CLR signature is `System.Threading.SemaphoreSlim.Wait(...)`, which does contain "semaphore", so this is fine)
 - `SpinWait` / `SpinLock` busy-wait (intentionally excluded as it's CPU-bound, not blocked)
-- `CountdownEvent.Wait`
-- `Barrier.SignalAndWait`
+
+`ValueTask` awaiting patterns, `CountdownEvent.Wait`, and `Barrier.SignalAndWait` are now covered (P2-8).
 
 ### Edge Cases
 
@@ -324,13 +323,13 @@ The `WaitPatterns` table does not cover:
 | P2-3 | Replace `List<string>` allocation in `FormatThreadState` with `Span<string>` or `string.Create` | Performance | Medium | Medium | High | Improvement | — |
 | P2-4 | Remove redundant `_stackRootCountByThreadAddress` mirror when shared cache is present | Performance | Low | Low | High | Improvement | ✅ DONE |
 | P2-5 | Add `BlockedThreadRatio` (`BlockedThreadCount / AliveThreadCount`) to `ThreadDomainResult`; emit as key metric | Reporting | Medium | Trivial | High | Improvement | ✅ DONE |
-| P2-6 | Add `StackMemorySummary` (total, mean, max, p95 stack bytes) to `ThreadDomainResult` | Diagnostic | Medium | Low | High | Improvement | — |
-| P2-7 | Add targeted findings for: finalizer blocked, blocked ratio > 70%, zero active threads, async chain depth > 10 | Reporting | High | Low | High | Improvement | — |
-| P2-8 | Add `WaitPatterns` entries for `CountdownEvent.Wait`, `Barrier.SignalAndWait`, `ValueTask` | Correctness | Medium | Low | Medium | Improvement | — |
-| P3-1 | Add `AppDomainDistribution` guard: suppress column from reports when count == 1 (modern .NET single-domain) | Reporting | Low | Trivial | High | Improvement | — |
-| P3-2 | Document in-place mutation side-effect of `AsyncChainDetection.Full` frame widening; consider copying to avoid aliasing across category lists | Correctness | Low | Low | High | Improvement | — |
-| P3-3 | Add `ThreadStackClusterAnalyzer` result cross-reference into `ThreadSectionBuilder` ("see cluster analysis for grouping") | Platform | Medium | Low | Medium | Evolution | — |
-| P3-4 | Introduce `IThreadOwnershipIndex` shared infrastructure built during `BeforeThreadStackScan` from `EnumerateBlockingObjects`; share with `LockGraphAnalyzer` | Platform | Very High | High | High | Evolution | — |
+| P2-6 | Add `StackMemorySummary` (total, mean, max, p95 stack bytes) to `ThreadDomainResult` | Diagnostic | Medium | Low | High | Improvement | ✅ DONE |
+| P2-7 | Add targeted findings for: finalizer blocked, blocked ratio > 70%, zero active threads, async chain depth > 10 | Reporting | High | Low | High | Improvement | ✅ DONE |
+| P2-8 | Add `WaitPatterns` entries for `CountdownEvent.Wait`, `Barrier.SignalAndWait`, `ValueTask` | Correctness | Medium | Low | Medium | Improvement | ✅ DONE |
+| P3-1 | Add `AppDomainDistribution` guard: suppress column from reports when count == 1 (modern .NET single-domain) | Reporting | Low | Trivial | High | Improvement | ✅ DONE |
+| P3-2 | Document in-place mutation side-effect of `AsyncChainDetection.Full` frame widening; consider copying to avoid aliasing across category lists | Correctness | Low | Low | High | Improvement | ✅ RESOLVED (moot) |
+| P3-3 | Add `ThreadStackClusterAnalyzer` result cross-reference into `ThreadSectionBuilder` ("see cluster analysis for grouping") | Platform | Medium | Low | Medium | Evolution | ✅ DONE |
+| P3-4 | Introduce `IThreadOwnershipIndex` shared infrastructure built during `BeforeThreadStackScan` from `EnumerateBlockingObjects`; share with `LockGraphAnalyzer` | Platform | Very High | High | High | Evolution | ❌ REPLACED |
 | P3-5 | Re-audit async chain depth (`MoveNext` frame counting) against .NET 11 GA Runtime Async; add an additive continuation-depth signal for stacks with no `MoveNext` frames once the CLR-exposed marker is finalized | Correctness | Medium | Medium | Low (spec not final) | Evolution | — |
 
 ---
@@ -377,6 +376,13 @@ The `WaitPatterns` table does not cover:
 - P2-2 ✅ DONE — Removed LINQ Select/Take in snapshot methods
 - P2-4 ✅ DONE — Removed redundant cache mirror when shared cache present
 - P2-5 ✅ DONE — Added BlockedThreadRatio key metric
+- P2-6 ✅ DONE — Added StackMemorySummary (total/mean/max/p95) key metrics
+- P2-7 ✅ DONE — Added targeted findings: finalizer blocked, blocked ratio >70%, zero active threads, async chain depth >10
+- P2-8 ✅ DONE — Added WaitPatterns entries for CountdownEvent.Wait, Barrier.SignalAndWait, ValueTask
+- P3-1 ✅ DONE — Suppressed AppDomain thread distribution table when only one AppDomain is present
+- P3-2 ✅ RESOLVED (moot) — `AnalysisProfile`/`AsyncChainDetection` preset mechanism was deleted wholesale in `8e86e1a`; the described aliasing defect no longer exists in current code
+- P3-3 ✅ DONE — Two parts: (1) static "see cluster analysis" pointer added to `ThreadSectionBuilder`'s hotspot table; (2) `InsightEngine.DetectClusterHangCorrelation` extended with a genuine data-driven enrichment — sums `ThreadDomainResult` `StackRootCount` across the overlapping cluster/hang thread set and folds a retained-GC-root note into the existing correlated finding
+- P3-4 ❌ REPLACED — As scoped, blocked on the same nonexistent `EnumerateBlockingObjects()`/`ClrBlockingObject` API as P0-3, and the wrong extension point besides (sync-block enumeration is heap-level, not part of the shared thread-stack walk). `LockGraphAnalyzer` already builds the equivalent ownership data internally (owner-thread map, contested locks, deadlock candidates) via `heap.EnumerateSyncBlocks()` — it was just never shared. Replaced with a much smaller, implemented fix: added `LockGraphDomainResult` to `InsightEngine`'s `InsightRuleContext` (previously absent entirely) and extended `DetectClusterHangCorrelation` to escalate to Critical and name the held lock types when an overlapping cluster/hang thread is independently flagged by `LockGraphAnalyzer` as a deadlock candidate — ties stack shape + wait state + lock ownership into one finding, the actual goal behind P3-4, without new ClrMD API or shared-infra risk
 
 ---
 

@@ -32,6 +32,7 @@ namespace DumpDetective.Analysis.Analyzers
             new("MonitorContention", "monitor.enter", "Thread contending for a lock (monitor)."),
             new("TaskBlocking", "task.wait", "Synchronous wait on task completion."),
             new("TaskBlocking", "task`1.get_result", "Blocking on Task.Result."),
+            new("TaskBlocking", "valuetask", "Blocking on ValueTask completion (e.g., .GetAwaiter().GetResult())."),
             new("Sleep", "thread.sleep", "Thread is sleeping."),
             new("Semaphore", "semaphore", "Waiting on semaphore permit."),
             new("Mutex", "mutex", "Waiting on mutex ownership."),
@@ -39,10 +40,15 @@ namespace DumpDetective.Analysis.Analyzers
             new("WaitHandle", "manualresetevent", "Waiting on ManualResetEvent."),
             new("WaitHandle", "autoresetevent", "Waiting on AutoResetEvent."),
             new("ThreadJoin", "thread.join", "Waiting for another thread to complete."),
+            new("CountdownEvent", "countdownevent.wait", "Waiting on CountdownEvent to reach zero."),
+            new("Barrier", "signalandwait", "Waiting on Barrier phase synchronization (SignalAndWait)."),
             new("BlockingIO", "socket.receive", "Blocking on socket receive."),
             new("BlockingIO", "socket.accept", "Blocking on socket accept."),
             new("BlockingIO", "filestream.read", "Blocking on file I/O read."),
         ];
+
+        // Internal for direct unit testing of the production wait-pattern table.
+        internal static IReadOnlyList<WaitPattern> WaitPatternsForTesting => WaitPatterns;
 
         public string Name => "Thread Analysis";
         public string Category => "Threads";
@@ -263,7 +269,27 @@ namespace DumpDetective.Analysis.Analyzers
                     finalizerFrameStrings,
                     threadInfo.AsyncChainThreadCount,
                     threadInfo.MaxAsyncChainDepth,
-                    threadInfo.AliveCount > 0 ? (double)threadInfo.PotentiallyBlockedThreads.Count / threadInfo.AliveCount : 0.0);
+                    threadInfo.AliveCount > 0 ? (double)threadInfo.PotentiallyBlockedThreads.Count / threadInfo.AliveCount : 0.0,
+                    BuildStackMemorySummary(threadInfo.StackSizeByteSamples));
+        }
+
+        // Internal for direct unit testing, matching CountMoveNextDepthFromSignatures.
+        internal static ThreadStackMemorySummary? BuildStackMemorySummary(List<ulong> samples)
+        {
+            if (samples.Count == 0)
+                return null;
+
+            samples.Sort();
+
+            ulong total = 0;
+            for (int i = 0; i < samples.Count; i++)
+                total += samples[i];
+
+            ulong max = samples[^1];
+            ulong p95 = samples[(int)Math.Floor((samples.Count - 1) * 0.95)];
+            double mean = (double)total / samples.Count;
+
+            return new ThreadStackMemorySummary(total, mean, max, p95, samples.Count);
         }
 
         private static ThreadStateSnapshot ToThreadStateSnapshot(ThreadWithStackTrace source)
@@ -391,6 +417,12 @@ namespace DumpDetective.Analysis.Analyzers
                     stackFrames.Add(availableFrames[i]);
 
                 TrackTopFrameHotspot(result.TopFrameHotspots, stackFrames);
+
+                ulong stackSizeBytes = thread.StackBase > thread.StackLimit
+                    ? thread.StackBase - thread.StackLimit
+                    : 0;
+                if (stackSizeBytes > 0)
+                    result.StackSizeByteSamples.Add(stackSizeBytes);
 
                 if (currentException != null)
                 {
@@ -673,6 +705,10 @@ namespace DumpDetective.Analysis.Analyzers
         // Async state-machine chain depth
         public int AsyncChainThreadCount { get; set; }
         public int MaxAsyncChainDepth { get; set; }
+
+        // Stack size (bytes) of every alive thread with a resolvable stack range — feeds
+        // the total/mean/max/p95 StackMemorySummary. Bounded by thread count, not heap size.
+        public List<ulong> StackSizeByteSamples { get; } = new();
 
         // ThreadPool telemetry (queried in BeforeThreadStackScan)
         public int ThreadPoolQueueDepth { get; set; }

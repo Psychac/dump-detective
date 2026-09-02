@@ -40,7 +40,17 @@ internal sealed record ThreadDomainResult(
     IReadOnlyList<string>? FinalizerFrames = null,
     int AsyncChainThreadCount = 0,
     int MaxAsyncChainDepth = 0,
-    double BlockedThreadRatio = 0.0) : AnalyzerDomainResult;
+    double BlockedThreadRatio = 0.0,
+    ThreadStackMemorySummary? StackMemorySummary = null) : AnalyzerDomainResult;
+
+// Aggregate stack-size footprint across all alive threads with a resolvable stack range
+// (StackBase > StackLimit). Null when no thread yielded a positive stack size.
+internal sealed record ThreadStackMemorySummary(
+    ulong TotalBytes,
+    double MeanBytes,
+    ulong MaxBytes,
+    ulong P95Bytes,
+    int SampleCount);
 
 internal sealed record ThreadStateSnapshot(
     uint ThreadId,

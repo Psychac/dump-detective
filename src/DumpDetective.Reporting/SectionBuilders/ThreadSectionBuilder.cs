@@ -43,6 +43,13 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             ["async_chain_threads"] = new NumericMetricValue(d.AsyncChainThreadCount, MetricUnit.Count),
             ["max_async_chain_depth"] = new NumericMetricValue(d.MaxAsyncChainDepth, MetricUnit.Count),
         };
+        if (d.StackMemorySummary is { } stackMemory)
+        {
+            keyMetrics["stack_memory_total"] = new NumericMetricValue(stackMemory.TotalBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(stackMemory.TotalBytes));
+            keyMetrics["stack_memory_mean"] = new NumericMetricValue(stackMemory.MeanBytes, MetricUnit.Bytes, FormatHelper.FormatBytes((ulong)stackMemory.MeanBytes));
+            keyMetrics["stack_memory_max"] = new NumericMetricValue(stackMemory.MaxBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(stackMemory.MaxBytes));
+            keyMetrics["stack_memory_p95"] = new NumericMetricValue(stackMemory.P95Bytes, MetricUnit.Bytes, FormatHelper.FormatBytes(stackMemory.P95Bytes));
+        }
         if (d.FinalizerManagedThreadId.HasValue)
         {
             keyMetrics["finalizer_thread_id"] = new NumericMetricValue(d.FinalizerManagedThreadId.Value, MetricUnit.Count);
@@ -167,6 +174,7 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             for (int i = 0; i < hotspots.Count; i++)
                 hsRows.Add(new TableRow([Cell(hotspots[i].Name), Cell($"{hotspots[i].Count:N0}", hotspots[i].Count)]));
             compactTables.Add(STCompact("Top frame hotspots", new[] { CH("Frame"), CH("Count","number") }, hsRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            blocks.Add(T("See the Thread Stack Signature Clustering section for full-stack grouping and dominant-cluster detail beyond these single-frame hotspot counts."));
         }
 
         // Every alive thread not already covered by the locked/blocked/exception tables above —
@@ -190,7 +198,9 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             compactTables.Add(STCompact("Other threads", new[] { CH("Thread ID","number"), CH("OS Thread","number"), CH("State"), CH("GC Mode"), CH("Stack Roots","number"), CH("Stack Size","bytes"), CH("Top Frame") }, otherRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
-        if (d.AppDomainDistribution is { Count: > 0 })
+        // A single AppDomain is the norm on .NET 5+ and conveys nothing — only show the
+        // table when there's more than one AppDomain to differentiate between.
+        if (d.AppDomainDistribution is { Count: > 1 })
         {
             var appRows = new List<TableRow>(d.AppDomainDistribution.Count);
             foreach (var kvp in d.AppDomainDistribution)

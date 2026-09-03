@@ -150,11 +150,63 @@ public sealed class PublisherRegistryTests
         var options = new EventLeakOptions();
         int eventsScanned = 0;
         int publisherInstances = 0;
+        var leakingMTs = new HashSet<ulong>();
 
-        scanner.Scan(cache.EnumerateIndexedEntries(), groupAcc, rootHints, options,
+        scanner.Scan(cache.EnumerateIndexedEntries(), groupAcc, rootHints, options, leakingMTs,
             ref eventsScanned, ref publisherInstances);
 
         groupAcc.Keys.Should().NotContain(key => key.IsStatic,
             "static descriptors are skipped entirely by EventLeakFastScanner (design §6) — only SweepRegistryStatics may add static groups, so a bare scan must produce none");
+    }
+
+    /// <summary>
+    /// P2-1 regression (docs/analysis/phase1/eventleak-analyzer-audit.md): Pass 2 used to gate on
+    /// <c>cache is not null</c> alone when deciding how to populate <c>liveMts</c>. A real
+    /// <see cref="HeapAnalysisCache"/> can exist without a disk index ever having been built on
+    /// it — <see cref="HeapAnalysisCache.EnumerateIndexedEntriesAsTuples"/> silently yields
+    /// nothing in that case rather than throwing, so the old check produced an empty
+    /// <c>liveMts</c> set and zero instance-field descriptors. The fix mirrors
+    /// <c>EventLeakAnalyzer.FindEventLeaks</c>'s own check (<c>cache is HeapAnalysisCache hc
+    /// &amp;&amp; hc.TryGetHeapIndex(out _)</c>) so Pass 2 falls back to a raw heap walk instead.
+    /// </summary>
+    [DiscrepancyFact]
+    public void Build_CacheWithoutPrebuiltIndex_StillDiscoversInstanceDescriptors()
+    {
+        string dumpPath = DumpPath;
+        if (!File.Exists(dumpPath)) return;
+        using DataTarget dataTarget = DataTarget.LoadDump(dumpPath);
+        ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();
+        ClrHeap heap = runtime.Heap;
+
+        // Deliberately do NOT call cache.PrebuildHeapIndex — this cache exists (is not null) but
+        // has no disk-backed index, which is exactly the condition the old "cache is not null"
+        // check got wrong.
+        HeapAnalysisCache unindexedCache = new();
+        PublisherRegistry unindexedRegistry = PublisherRegistry.Build(heap, unindexedCache);
+
+        HeapAnalysisCache indexedCache = new();
+        indexedCache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
+        PublisherRegistry indexedRegistry = PublisherRegistry.Build(heap, indexedCache);
+
+        int matchedInstanceDescriptor = 0;
+        foreach (ClrObject obj in heap.EnumerateObjects())
+        {
+            if (!obj.IsValid || obj.Type is null) continue;
+
+            bool unindexedHas = unindexedRegistry.TryGetDescriptors(obj.Type.MethodTable, out EventFieldDescriptor[]? unindexedDescriptors);
+            bool indexedHas = indexedRegistry.TryGetDescriptors(obj.Type.MethodTable, out EventFieldDescriptor[]? indexedDescriptors);
+
+            unindexedHas.Should().Be(indexedHas,
+                "Pass 2's live-instance walk must find the same candidate MTs whether or not a disk index happens to exist");
+
+            if (unindexedHas && !indexedDescriptors!.All(d => d.IsStatic))
+            {
+                matchedInstanceDescriptor++;
+                if (matchedInstanceDescriptor >= 20) break;
+            }
+        }
+
+        matchedInstanceDescriptor.Should().BeGreaterThan(0,
+            "the reference dump must contain at least one live instance-field publisher for this regression to be meaningful — a return to the old bug would silently make this zero");
     }
 }

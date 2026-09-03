@@ -807,6 +807,8 @@ export function buildAnalyzerSection(section, i) {
       if (group.hasDuplicateSubscriptions) addM('Dup Subscriptions', 'Yes — same subscriber registered multiple times');
       if (group.hasLifetimeMismatch) addM('Lifetime Mismatch', 'Yes — Gen2 publisher retaining Gen0/Gen1 subscribers');
       if (group.orphanedSubscriberInstances > 0) addM('Orphaned Instances', Number(group.orphanedSubscriberInstances).toLocaleString('en-US') + ' dead-subscriber pattern');
+      if (group.isTimerEvent) addM('Category', 'Timer — undisposed timers are a common source of process-lifetime leaks');
+      else if (group.isPropertyChangedEvent) addM('Category', 'INotifyPropertyChanged — the highest-frequency MVVM event');
       gBody.appendChild(metaGrid);
 
       const subTypes = Array.isArray(group.topSubscriberTypes) ? group.topSubscriberTypes : [];
@@ -871,7 +873,7 @@ export function buildAnalyzerSection(section, i) {
           const cnt = el('span', 'event-leak-card__sub-count'); cnt.textContent = Number(det.count || 0).toLocaleString('en-US');
           const typ = el('span', 'event-leak-card__sub-type'); typ.textContent = det.type || '';
           const mth = el('span', 'event-leak-card__sub-method'); mth.textContent = det.methodName ? ' → ' + det.methodName : '';
-          const sz  = el('span', 'event-leak-card__sub-size');  sz.textContent  = det.size > 0 ? ' ' + formatBytes(Number(det.size)) : '';
+          const sz  = el('span', 'event-leak-card__sub-size');  sz.textContent  = det.size > 0 ? ' ' + formatBytes(Number(det.size)) + (det.sizeIsExact ? ' (exact)' : ' (est.)') : '';
           row.appendChild(cnt); row.appendChild(typ); row.appendChild(mth); row.appendChild(sz);
           sdList.appendChild(row);
         }

@@ -125,7 +125,10 @@ internal sealed record SubscriberDetailEntry(
     string Type,
     string? MethodName,
     int Count,
-    ulong Size);
+    ulong Size,
+    /// <summary>True when <see cref="Size"/> is the dominator tree's exact retained bytes for this
+    /// subscriber rather than the per-type shallow-size average (mirrors <see cref="RootPath.RetainedSizeIsExact"/>).</summary>
+    bool SizeIsExact = false);
 
 /// <summary>Per-publisher event group summary with embedded subscriber type breakdown.</summary>
 internal sealed record EventLeakGroupCard(
@@ -143,7 +146,9 @@ internal sealed record EventLeakGroupCard(
     bool HasDuplicateSubscriptions,
     bool HasLifetimeMismatch,
     int DisposedButSubscribedInstances,
-    IReadOnlyList<SubscriberDetailEntry> TopSubscriberTypes);
+    IReadOnlyList<SubscriberDetailEntry> TopSubscriberTypes,
+    bool IsTimerEvent = false,
+    bool IsPropertyChangedEvent = false);
 
 /// <summary>Per-publisher instance drill-down with optional per-subscriber details.</summary>
 internal sealed record EventLeakInstanceCard(

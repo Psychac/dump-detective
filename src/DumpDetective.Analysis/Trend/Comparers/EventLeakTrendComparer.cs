@@ -41,6 +41,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 MetricDeltaHelper.Compute("event.leak.instances", null, b.TotalEventLeakInstances, c.TotalEventLeakInstances, "events", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("event.total.subscribers", null, b.TotalSubscribers, c.TotalSubscribers, "subscribers", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("event.static.leaks", null, b.StaticEventLeakCount, c.StaticEventLeakCount, "events", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("event.instance.leaks", null, b.InstanceEventLeakCount, c.InstanceEventLeakCount, "events", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("event.publisher.instances", null, b.TotalPublisherInstances, c.TotalPublisherInstances, "publishers", MetricTrendDirection.Neutral)
             ];
         }

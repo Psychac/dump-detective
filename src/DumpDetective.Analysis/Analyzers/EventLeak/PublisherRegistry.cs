@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Analysis.Cache;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Utilities;
 
@@ -45,6 +46,15 @@ internal sealed class PublisherRegistry
     public int DelegateInvocationListOffset { get; }
     public int DelegateInvocationCountOffset { get; }
 
+    /// <summary>
+    /// Distinct MethodTables recognized as candidate publishers (instance and/or static
+    /// descriptor(s) present) — the denominator for "types scanned, zero leaking" (P2-2,
+    /// docs/analysis/phase1/eventleak-analyzer-audit.md). Every leak's <c>PublisherMethodTable</c>
+    /// is guaranteed to be one of these keys, since leaks only ever come from a descriptor this
+    /// registry produced.
+    /// </summary>
+    public int CandidatePublisherCount => _descriptorsByMt.Count;
+
     private PublisherRegistry(
         Dictionary<ulong, EventFieldDescriptor[]> descriptorsByMt,
         EventNameResolver eventNames,
@@ -59,7 +69,17 @@ internal sealed class PublisherRegistry
         StaticPublisherMTs = staticPublisherMTs;
     }
 
-    public static PublisherRegistry Build(ClrHeap heap, IHeapAnalysisCache? cache, IReadOnlyList<IPublisherShape>? shapes = null)
+    // P1-1 (docs/analysis/phase1/eventleak-analyzer-audit.md): this build is the single most
+    // expensive phase at scale (~121.6s / 57% of FindEventLeaks wall time on the 25.6GB reference
+    // dump per docs/analysis/phase1-redesigns/event-leak-analyzer.md §0.1) and previously had no
+    // cancellation support at all. Checked every 8192 iterations (bitmask, matches
+    // SweepRegistryStatics's convention) rather than every iteration to keep the check off the
+    // hot per-type/per-object path.
+    private const int CancellationCheckMask = 8191;
+
+    public static PublisherRegistry Build(
+        ClrHeap heap, IHeapAnalysisCache? cache, IReadOnlyList<IPublisherShape>? shapes = null,
+        CancellationToken cancellationToken = default)
     {
         var eventNames = new EventNameResolver();
         var delegateOffsets = DelegateLayoutDiscovery.Discover(heap);
@@ -70,6 +90,7 @@ internal sealed class PublisherRegistry
         var mtToType = new Dictionary<ulong, ClrType>(capacity: 16384);
         var staticPublisherMTs = new HashSet<ulong>(capacity: 1024);
         List<EventFieldDescriptor>? buf = null;
+        int typesVisited = 0;
 
         // Pass 1: every type reachable from loaded modules, static fields only (matches
         // SweepModuleStaticFields's scope — static publishers can exist with zero instances).
@@ -79,6 +100,9 @@ internal sealed class PublisherRegistry
             {
                 foreach (var pair in module.EnumerateTypeDefToMethodTableMap())
                 {
+                    if ((typesVisited++ & CancellationCheckMask) == 0)
+                        cancellationToken.ThrowIfCancellationRequested();
+
                     ulong mt = pair.MethodTable;
                     if (mt == 0 || mtToType.ContainsKey(mt))
                         continue;
@@ -114,22 +138,42 @@ internal sealed class PublisherRegistry
         // BuildFieldLayouts's scope — the expensive per-field ClrType resolution here must not
         // run over every module type).
         var liveMts = new HashSet<ulong>(capacity: 16384);
-        if (cache is not null)
+        int objectsVisited = 0;
+        // P2-1 (docs/analysis/phase1/eventleak-analyzer-audit.md): must match FindEventLeaks's
+        // own check for choosing between cache.EnumerateIndexedEntries() and a raw heap walk
+        // (EventLeakAnalyzer.cs). "cache is not null" alone is not sufficient — a real cache can
+        // exist without a disk index having been built yet, and EnumerateIndexedEntriesAsTuples
+        // silently yields nothing in that case (HeapIndexCache.EnumerateIndexedEntries: `if
+        // (_heapIndex is null) yield break;`) rather than throwing or falling back. Using the
+        // looser check here previously meant Pass 2 could silently produce an empty liveMts set
+        // — zero instance-field descriptors — for the exact FindEventLeaks fallback branch that
+        // then goes on to do a real full heap scan expecting real descriptors.
+        if (cache is HeapAnalysisCache hc && hc.TryGetHeapIndex(out _))
         {
             foreach ((ulong _, ulong methodTable, ulong _) in cache.EnumerateIndexedEntriesAsTuples())
+            {
+                if ((objectsVisited++ & CancellationCheckMask) == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
                 liveMts.Add(methodTable);
+            }
         }
         else
         {
             foreach (ClrObject obj in heap.EnumerateObjects())
             {
+                if ((objectsVisited++ & CancellationCheckMask) == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
                 if (obj.IsValid && obj.Type is not null)
                     liveMts.Add(obj.Type.MethodTable);
             }
         }
 
+        int liveMtsVisited = 0;
         foreach (ulong mt in liveMts)
         {
+            if ((liveMtsVisited++ & CancellationCheckMask) == 0)
+                cancellationToken.ThrowIfCancellationRequested();
+
             if (!mtToType.TryGetValue(mt, out ClrType? type))
                 continue;
 

@@ -1,9 +1,19 @@
-# EventLeakAnalyzer — Phase 1 Audit
+# EventLeakAnalyzer — Phase 1 Audit (Re-Audit Post-Redesign)
 
-> Reviewed against: `EventLeakAnalyzer.cs`, `EventLeakFastScanner.cs`,
-> `EventLeakOptions.cs`, `EventLeakDomainResult.cs`,
-> `EventLeakSectionBuilder.cs`, `EventLeakFindingGenerator.cs`,
-> `EventLeakTrendComparer.cs`, accuracy tests, discrepancy integration test.
+> Reviewed against the current (redesigned) implementation: `EventLeakAnalyzer.cs`,
+> `EventLeakFastScanner.cs`, `EventLeak/PublisherRegistry.cs`, `EventLeak/EventFieldDescriptor.cs`,
+> `EventLeak/EventNameResolver.cs`, `EventLeak/DelegateLayoutDiscovery.cs`,
+> `EventLeak/DelegateChainWalker.cs`, `EventLeak/IPublisherShape.cs`,
+> `EventLeak/FieldBackedDelegateShape.cs`, `EventLeakOptions.cs`, `EventLeakDomainResult.cs`,
+> `EventLeakSectionBuilder.cs`, `EventLeakFindingGenerator.cs`, `EventLeakTrendComparer.cs`,
+> `EventLeakAnalyzerAccuracyTests.cs`, `PublisherRegistryTests.cs` (integration), plus the design
+> record in `docs/analysis/phase1-redesigns/event-leak-analyzer.md` and
+> `event-leak-analyzer-implementation-plan.md`.
+>
+> **Supersedes** the prior audit at this path. The analyzer has been rebuilt around a
+> `PublisherRegistry` + `IPublisherShape` architecture (Phases A–F) since that review; nearly
+> every prior P0/P1 finding has been fixed. This pass verifies those fixes against the shipped
+> code and looks for what the redesign introduced or left open.
 
 ---
 
@@ -11,291 +21,249 @@
 
 ### Current Role
 
-Detects C# event subscription leaks: patterns where subscriber objects remain
-registered with publisher events and are therefore prevented from GC collection.
-Covers instance events, static events, and pure-static publisher types with no
-heap instances.
-
-Key pipeline integration: implements `IHeapIndexScanParticipant` so the heap
-index pass is shared with other analyzers; no redundant full-heap scan in the
-common disk-backed-index path.
+Unchanged in scope: detects C# event-subscription leaks (instance events, static events,
+pure-static publisher types with no heap instances). What changed is the *shape* of the
+implementation — the design doc's own framing is accurate: "Phase A registry once, pre-scan →
+Phase B scan hot, streaming → Phase C statics once, post-scan → Phase D enrichment bounded →
+Phase E correlation → Phase F present." `EventLeakAnalyzer.cs:131-334` (`Analyze`) is now a thin
+orchestrator over `PublisherRegistry.Build`, `EventLeakFastScanner.Scan`, `SweepRegistryStatics`,
+`PopulateEvidence`, and the two `BuildTop...AcrossGroups` folds — each phase is a separate,
+independently-testable unit instead of one interleaved method.
 
 ### Coverage Assessment
 
-**Well-covered:**
-- Instance delegate-typed event backing fields on non-system, non-compiler types
-- Static event fields (two passes: once per heap instance via FastScanner, once via `SweepModuleStaticFields` for instance-free types)
-- MulticastDelegate chain traversal (single-cast and multi-cast)
-- Static method subscriptions (null `_target` path — delegate object used as token)
-- Publisher generation, duplicate subscriptions, orphaned subscribers, lifetime mismatch
-- Root path evidence via `RootPathFinder` for top instances
-- Subscriber type + method name resolution
-- Cross-run trend metrics via `EventLeakTrendComparer`
+**Well-covered (unchanged from before, verified against `FieldBackedDelegateShape`):**
+- Instance and static delegate-typed event backing fields, single-cast and multicast chains,
+  static-method subscriptions (null `_target` token path), publisher generation, duplicate
+  subscriptions, orphaned-subscriber-adjacent signals (see Area 6), lifetime mismatch,
+  root-path evidence, subscriber type + method resolution, cross-run trend metrics.
+- `FieldBackedDelegateShape.DescribeInstanceFields`/`DescribeStaticFields`
+  (`FieldBackedDelegateShape.cs:41-101`) replicate the old field-filter behavior exactly — the
+  design doc's stated goal ("no detection-surface change") holds up against the code.
 
-**Gaps — coverage:**
+**New since the prior audit:**
+- Cross-group correlation (`BuildTopSubscriberTypesAcrossGroups`,
+  `BuildTopHandlerMethodsAcrossGroups`, `EventLeakAnalyzer.cs:346-393`) — closes old P2-1/P2-2.
+- `IDisposable` subscriber detection (`HasDisposableSubscriber`,
+  `EventLeakAnalyzer.cs:1471-1503`) — closes old P2-6.
+- Tier 1 aggregate retained bytes (`EstimateGroupRetainedBytes`, folded over
+  `AllSubscriberTypeCounts` rather than the capped `TopInstances`) — closes old P0-2/#3.
+- Tier 2 *exact* per-subscriber retained bytes via `IDominatorTreeProvider`
+  (`EventLeakAnalyzer.cs:157-174`) — see Area 6 for a significant caveat: this shipped ahead of
+  its own documented schedule and is missing one piece of required wiring.
+- `PublisherRegistry` + `IPublisherShape` seam (`IPublisherShape.cs`) — a real extension point,
+  not a speculative one; `FieldBackedDelegateShape` is the existence proof that the seam works.
 
-1. `EventHandlerList` pattern (WinForms): `System.ComponentModel.EventHandlerList`
-   stores delegates in a keyed collection, not as named fields. Zero detection
-   today; WinForms `Control` subclasses use this exclusively. The entire WinForms
-   subscriber population is invisible.
+**Gaps — still open, but now well-scoped rather than speculative:**
 
-2. Weak event patterns (`WeakEventManager`, `ConditionalWeakTable`-backed patterns)
-   are not distinguished from hard leaks. Reporting a weak event as a leak is a
-   false positive. No detection or suppression exists.
-
-3. Timer events: `System.Timers.Timer.Elapsed`, `System.Windows.Forms.Timer.Tick`,
-   `DispatcherTimer.Tick` — these are among the most commonly leaked events in
-   production .NET and share the same delegate-field structure. No specialized
-   detection or surfacing.
-
-4. `INotifyPropertyChanged.PropertyChanged` — highest-frequency MVVM event, most
-   commonly retained across WPF/Blazor applications. Covered generically but not
-   ranked or called out separately.
-
-5. The `IncludeNonLeakingEvents = false` default means zero-subscriber events are
-   silently omitted. There is no "clean events" summary confirming which publisher
-   types were checked and found clean — an engineer cannot distinguish "clean" from
-   "not scanned".
+1. **`EventHandlerList` (WinForms) and weak-event patterns are still undetected.** Both are
+   explicitly scoped as Phase 7 (`event-leak-analyzer-implementation-plan.md:699-750`,
+   `EventHandlerListShape` / `WeakEventShape`) and deliberately not shipped yet
+   (`## Phase 7 ... (design §3.2, additive)` has no `✅ Complete` marker, unlike Phases 3–6). The
+   difference from the prior audit: this is no longer "the architecture can't do this," it's "the
+   architecture is one additive `IPublisherShape` implementation away from doing this" —
+   `PublisherRegistry.Build` already dispatches through a shape list
+   (`PublisherRegistry.cs:67,95-109,137-144`), so a third shape registers without touching the
+   scan loop.
+2. ~~Timer events / `INotifyPropertyChanged` specialization~~ **Fixed (P3-3).** Both are
+   pure string-pattern classifications over data already extracted (`PublisherType`/
+   `EventFieldName`) — no new heap reads, no fixture dependency, unlike P3-1/P3-2. Tagged
+   separately in the domain model (`EventLeakGroupSnapshot.IsTimerEvent`/
+   `IsPropertyChangedEvent`), the report (a "Category" column plus aggregate key metrics
+   `timer_event_leak_groups`/`property_changed_leak_groups`), and the finding layer
+   (`timer-leak`/`property-changed-leak` tags, plus a category-specific recommendation clause).
+3. **`IncludeNonLeakingEvents`-style "clean events" summary is still absent.** The registry now
+   has exactly the data needed to build one cheaply (descriptor count per type vs. leak-group
+   count), but nothing surfaces it.
 
 ### Unexpected Functionality
 
-- `GroupEventLeaks` (`internal`) is exercised by tests but dead in all production
-  paths — the production accumulator-based grouping in `FindEventLeaks` replaces it.
-- `EnumerateEventEntries` is defined but never called — unconditional dead code.
-- `GetEventSubscribers` (instance field path with `ClrObject` construction) is never
-  called; all callers use `EventLeakFastScanner`.
-- Twelve `Console.Error.WriteLine("[PERF] ...")` statements scattered across the
-  production class — perf-investigation artifacts not gated on `EnableDiagnostics`.
+- **Duplicate pointer-chase logic.** `EventLeakFastScanner.ExtractSubscribersDirect` /
+  `ExtractSingleTargetDirect` (`EventLeakFastScanner.cs:282-343`) and
+  `DelegateChainWalker.ExtractSubscribers` / `ExtractSingleTarget`
+  (`DelegateChainWalker.cs:16-69`) are near-line-for-line identical implementations of the same
+  `_invocationList`/`_target` pointer chase. The design comment on `DelegateChainWalker`
+  justifies keeping the hot path separate from `IPublisherShape.Extract`'s *virtual* call
+  (`IPublisherShape.cs:33-38`) — a real perf concern — but `DelegateChainWalker.ExtractSubscribers`
+  is a plain `static` method with no virtual dispatch, so nothing in the stated rationale
+  explains why `EventLeakFastScanner` doesn't call it directly instead of maintaining a second
+  copy. This is a correctness/drift risk, not just duplication: the exact multicast-array bug
+  referenced in both files' comments (raw MT-lookup silently collapsing multicast events to
+  single-target) had to be fixed once already, and now has to stay fixed in two places by hand.
+- The former dead code (`GroupEventLeaks`, `EnumerateEventEntries`,
+  `GetEventSubscribers(ClrHeap, ...)`) is confirmed **removed** — verified by search, no remaining
+  references in `src/`. `GetStaticEventSubscribers` (the `ClrObject`/`ClrAppDomain`-based path,
+  `EventLeakAnalyzer.cs:828-877`) is real, live code for the statics sweep, not a leftover.
+- No stray `Console.Error.WriteLine` perf-logging remains in the EventLeak files — replaced by
+  `ILogger<EventLeakAnalyzer>?.LogDebug` throughout (closes old P0-3).
 
 ### Expansion Opportunities
 
-- **[Evolution]** Subscription inventory mode: scan ALL delegate fields
-  (`IncludeNonLeakingEvents = true`) and emit a full event registration graph,
-  enabling "which types subscribe to what" queries independent of leak detection.
-- **[Evolution]** Weak event detection as a companion analyzer or classification flag.
-- **[Evolution]** `EventHandlerList` extractor for WinForms coverage.
-- **[Improvement]** Promote timer-event findings to their own named category.
+- **[Evolution]** Ship `EventHandlerListShape` (Phase 7, already designed) — the highest-value
+  remaining gap for WinForms applications, and the lowest-risk one given the seam is proven.
+  **Deferred (P3-1)** — no WinForms fixture exists in this repo to verify against.
+- **[Evolution]** Ship `WeakEventShape` classification (Phase 7). **Deferred (P3-2)** — same
+  root cause as P3-1, plus a fuzzier pattern to define for the `ConditionalWeakTable` half.
+- ~~"Clean events scanned" summary metric~~ **Done (P2-2)** — `PublisherTypesScanned`/
+  `CleanPublisherTypeCount`, MT-keyed exact counts.
+- ~~Timer-event / `INotifyPropertyChanged` category tagging~~ **Done (P3-3).**
 
 ---
 
 ## Audit Area 2 — Diagnostic & Report Quality
 
-### Strengths
+### Strengths (largely new since the prior audit)
 
-- Publisher type + event field shown consistently; engineers can map directly to source.
-- Per-instance `PublisherAddress` enables `!do <addr>` in WinDbg without further lookup.
-- Subscriber type breakdown (with method name) identifies which component is the
-  subscriber — the most actionable piece of information in most investigations.
-- Root hint and full root path evidence allow answering "what keeps this publisher alive".
-- Lifetime mismatch flag surfaces cross-generational retention (Gen2 publisher, Gen0/1
-  subscribers) — rare but high-confidence signal when triggered.
-- Duplicate subscription count catches double-registration bugs directly.
-- Publisher generation distribution table in the section builder.
+- Total estimated retained bytes now in `EventLeakDomainResult.TotalEstimatedRetainedBytes` and
+  the section's `estimated_retained_bytes` key metric — closes old P1-1.
+- Retained-bytes columns are honestly labeled: `"Estimated (type-average, all instances)"`
+  (`EventLeakSectionBuilder.cs:115,163`) — closes old correctness item #3 (silent TopN-only
+  estimate).
+- `RootHint` is translated to human-readable text via `RootKindLabels`
+  (`EventLeakSectionBuilder.cs:23-38`) — closes old P2-4.
+- Static leaks render `PublisherAddress` as `"(static)"` instead of `0x0`
+  (`FormatPublisherAddress`, `EventLeakSectionBuilder.cs:55-56`) — closes old P2-5.
+- `PublisherGeneration = -1` renders as `"static"` or `"unknown"` rather than a bare dash
+  (`FormatPublisherGeneration`, `EventLeakSectionBuilder.cs:58-62`) — closes old #10.
+- Publisher root path (BFS-derived) and sample subscriber hint are tracked and labeled
+  separately (`EventLeakEvidence.PublisherRootPath` / `SampleSubscriberHint`,
+  `FormatRootHintDisplay`, `EventLeakSectionBuilder.cs:40-53`) — closes old #4/#6, matches design
+  §4.3 exactly.
+- Cross-group "Top subscriber types" / "Top handler methods" tables — closes old missing
+  statistic (unique subscriber types, factory/wiring method identification).
+- Findings now carry an evidence-derived `ConfidenceScore`
+  (`EvidenceConfidence.Compute(topEvidence)`, `EventLeakFindingGenerator.cs:148`) — a genuinely
+  new signal not present in the prior audit or in any of the benchmarked tools (Area 7).
+- Group truncation is now disclosed: `"Showing top {groupLimit} event types. {N} additional
+  group(s) omitted."` (`EventLeakSectionBuilder.cs:233-234`).
 
 ### Weaknesses
 
-1. **Retained bytes estimate is silently wrong for large groups.**
-   `EstimateGroupRetainedBytes` iterates only `g.Instances`, which is capped at
-   `TopDetailedInstancesPerGroup` (default 5). A group with 10,000 publisher instances
-   reports retained bytes from at most 5 of them. No warning or caveat is emitted. The
-   key metric `estimated_retained_bytes` in the report is therefore misleading.
+1. **`SubscriberDetail.SizeIsExact` is computed but discarded before it reaches the report.**
+   `EventLeakAnalyzer.cs:266-279` builds `SubscriberDetail` with a real `SizeIsExact` flag
+   (true when the value came from the dominator tree, false when it's a type-average). But
+   `EventLeakSectionBuilder.cs:248` constructs `SubscriberDetailEntry(det.Type, det.MethodName,
+   det.Count, det.Size)` — `SubscriberDetailEntry` (`AnalyzerDetailSection.cs:124`) has no field
+   for exactness at all, unlike the sibling `RetainedSizeIsExact` field already used by
+   `GCRootIntelligenceSectionBuilder` (`AnalyzerDetailSection.cs:95`) for the same purpose. An
+   engineer reading a subscriber's byte count in the report cannot tell whether it's ClrMD-exact
+   or a shallow-size guess, even though the analyzer went to the trouble of computing and
+   prioritizing the exact value (`preferNew` logic at `EventLeakAnalyzer.cs:272-274`).
+2. ~~Instance-level truncation is undisclosed.~~ **Resolved (P1-4) by removing the caps
+   entirely** rather than adding a notice — `MaxGroupsToShow`/`MaxInstancesToShow` were
+   post-hoc display truncation of an already-fully-computed list, which this project
+   deliberately does not do elsewhere (Collection, Dominator, WeakReference, etc.). Every
+   group and instance the analyzer computes is now rendered.
+3. **Tier 2 exact retained bytes is invisible-by-default in a way the report gives no hint of**
+   (see Area 6 for the mechanism). When it silently degrades to Tier 1, the report looks
+   identical — same column, same label — so there's no way to tell from the output alone whether
+   the number is exact-when-available or was never even attempted.
 
-2. **No total retained bytes metric in summary.**
-   `EventLeakDomainResult` and `EventLeakSectionBuilder.keyMetrics` have no aggregate
-   "total estimated heap retained by event leaks" value. For SRE triage — deciding
-   whether this is worth investigating — the total byte impact is the first question.
+### Missing Statistics (residual from prior audit)
 
-3. **Report caps at 10 groups / 10 instances.**
-   `MaxGroupsToShow = 10`, `MaxInstancesToShow = 10` in the section builder. For
-   applications with hundreds of leaking event types (common in large WPF apps), 90% of
-   findings are invisible. No truncation warning is emitted for instances.
-
-4. **Orphaned subscriber count is inflated by design.**
-   `CountOrphanedSubscribers` marks any subscriber whose address is absent from
-   `rootHints` as orphaned. `rootHints` contains only direct GC root objects, not
-   transitively reachable live objects. Almost every subscriber will appear orphaned,
-   making the signal indistinguishable from noise.
-
-5. **`RootHint` is a raw ClrMD root kind string** (e.g. `"LocalVar"`, `"StaticVar"`).
-   Not translated to human language. An engineer unfamiliar with ClrMD terminology gets
-   no useful guidance.
-
-6. **Evidence is built only for `TopLeakInstances`** — group snapshots carry no
-   evidence block. A group with 10,000 instances where the stored 5 all have empty root
-   hints shows `rootPath: null` for evidence even if the publisher type itself is a
-   well-known static.
-
-7. **`SubscriberTypes` in `EventLeakInstanceSnapshot` is pre-formatted strings**
-   (`"App.MyType (3)"`). Not structured data. Downstream code cannot sort or filter by
-   count without re-parsing the string.
-
-8. **Static leaks show `PublisherAddress = 0x0`** in the report. Confusing; should be
-   omitted or replaced with the literal `"(static)"`.
-
-9. **No recommendation text per finding card.** The section builder produces
-   `EventLeakGroupCard` / `EventLeakInstanceCard` but neither contains a remediation
-   suggestion. The finding generator does include a generic recommendation but it is the
-   same for every finding.
-
-10. **`PublisherGeneration = -1` shown as `"-"`** — the section builder renders this but
-    it will appear for static publishers and for dumps where generation metadata is
-    unavailable. Should read `"static"` or `"unknown"` rather than a bare dash.
-
-### Missing Statistics
-
-- Total estimated retained bytes (aggregate)
-- Subscription churn rate (available only via trend diff, not per-snapshot)
-- Count of unique subscriber types across all leak groups
-- Maximum delegate chain depth observed
+- ~~Subscription count histogram~~ **Done (P3-4).**
+- Maximum delegate chain depth observed.
+- ~~"Types scanned, zero leaking" confirmation count.~~ **Done (P2-2).**
 
 ---
 
 ## Audit Area 3 — ClrMD & Platform Utilization
 
-### ClrMD — Well Used
+### ClrMD / Infrastructure — Well Used
 
-- `IMemoryReader.ReadPointer` for hot-path field reads — correct, minimal allocation.
-- Proactive `DiscoverDelegateLayoutFromModules` in constructor avoids layout-unknown
-  state during scan; hardcoded .NET 6+ fallback provides resilience.
-- Interior-offset correction (`field.Offset + _ptrSize`) applied consistently in
-  `BuildFieldLayouts` and `TryDiscoverDelegateLayout`.
-- `ClrArray.GetObjectValue()` used for multicast delegate array traversal — correctly
-  defers to ClrMD for authoritative array length rather than reading raw `_invocationCount`.
-- `runtime.GetMethodByInstructionPointer` with per-scanner instruction-pointer cache —
-  avoids repeated DAC calls for the common case where many publishers share the same
-  handler.
-- `SegmentKindMapper.ResolveGeneration` for generation lookup during instance field scan.
+- `PublisherRegistry.Build`'s two-pass split (`PublisherRegistry.cs:74-160`) is a deliberately
+  scoped optimization with a *measured* rationale documented in the class doc comment: running
+  the instance-field walk over every module type (not just live-instance MTs) regressed the
+  build from ~22.8s to ~48s on the 3.3GB reference dump. This is exactly the kind of
+  evidence-grounded tradeoff the audit protocol asks for, and it's present in the code, not just
+  the design doc.
+- `IMemoryReader.ReadPointer` hot path preserved; `EventLeakFastScanner` still does zero
+  `ClrObject` construction for the common (single-subscriber) case.
+- `cache.TryGetDominatorTreeProvider()` reuse (`EventLeakAnalyzer.cs:157`) follows the exact same
+  pattern already used by nine other analyzers (`CollectionAnalyzer`, `DbConnectionAnalyzer`,
+  `DominatorAnalyzer`, `FinalizableObjectAnalyzer`, `GCHandleAnalyzer`, `GCRootAnalyzer`,
+  `ReferenceChainAnalyzer`, `StaticRootLeakDetector`, `WeakReferenceAnalyzer`,
+  `WcfChannelAnalyzer`). This is *better* engineering than the design doc's own original Tier 2
+  proposal (a new post-pipeline `InsightEngine` join, `event-leak-analyzer.md` §4.4) — it reuses
+  established platform infrastructure instead of inventing a new pipeline stage. See Area 6 for
+  the one piece of wiring this reuse is missing.
+- `DelegateLayoutDiscovery` (`DelegateLayoutDiscovery.cs`) is now a shared, single-discovery
+  component instead of being duplicated inside the scanner — a real dedup win versus the prior
+  audit's finding of ad hoc offset computation.
+- `SweepRegistryStatics` now has periodic `CancellationToken.ThrowIfCancellationRequested()`
+  checks (`EventLeakAnalyzer.cs:1036-1037`, every 8192 types) — closes old P1-3 *for this phase*.
 
-### ClrMD — Gaps and Misuse
+### ClrMD / Infrastructure — Gaps
 
-1. **`SweepModuleStaticFields` uses LINQ in a scanning loop.**
-   `module.EnumerateTypeDefToMethodTableMap().Select(...).Where(t => t is not null)`
-   allocates an iterator chain per module per domain. Contradicts the codebase's
-   explicit prohibition on LINQ in hot paths. Replace with a foreach with inline null
-   check.
-
-2. **`_eventNameCache` is a `static ConcurrentDictionary`** on `EventLeakAnalyzer`.
-   It is never cleared. In a server hosting multiple dump-analysis sessions, the cache
-   accumulates stale type metadata across different dumps. `ConcurrentDictionary` also
-   adds unnecessary synchronization overhead — the analyzer runs single-threaded.
-   Should be instance-scoped or keyed by `(MT, dumpId)`.
-
-3. **`CountIncomingRefs` enumerates the full heap with `EnumerateReferences(carefully: true)`
-   per subscriber.** Disabled by default, but the option exists and is operator-settable.
-   Even with `maxScan = 500`, the combination of per-subscriber invocation and per-object
-   reference enumeration is O(N×M) — catastrophic on 10 GB+ dumps. No documentation
-   warning exists on `EnableLowIncomingRefsCheck` beyond a brief comment.
-
-4. **No cancellation propagation into `SinglePassScan` or `SweepModuleStaticFields`.**
-   `CancellationToken` is checked once at the top of `AnalyzeAsync`, then abandoned.
-   A cancellation request will not interrupt in-progress heap traversal.
-
-5. **`ExtractSubscribersDirect` falls back to `heap.GetObject` for multicast arrays.**
-   Comment correctly explains why raw MT lookup is unreliable. However, for the
-   single-target path, the code correctly stays within `ReadPointer`. The mixed mode
-   (ReadPointer for fields, GetObject for arrays) means multicast events are slightly
-   more expensive than single-cast.
-
-### Infrastructure — Well Used
-
-- `IHeapIndexScanParticipant` — avoids second heap traversal in the index path.
-- `HeapAnalysisCache.GetOrBuildValidRoots` — correct cache reuse for root map.
-- `RootPathFinder` with limits (`MaxCandidateNodes = 5000`, `MaxCandidateDepth = 8`) —
-  bounded BFS prevents runaway searches.
-- `TypeFilterHelper` shared helpers used consistently for delegate, system, and
-  compiler-generated type checks.
-
-### Infrastructure — Gaps
-
-- **`BuildTypeSizeMap` may trigger a full O(N) heap scan** if
-  `HeapAnalysisCache.GetOrBuildTypeStatistics` has not been warmed by an earlier
-  analyzer. This is an unguarded dependency on execution order; no documentation or
-  ordering constraint enforces it.
-- **The `_participantBuf` list** allocated in `BeforeHeapIndexScan` is passed to
-  `ScanEntry` but is a single shared list reused across entries (cleared per field).
-  This is correct for single-threaded scan but would be unsafe if the dispatcher ever
-  went parallel.
+1. **`PublisherRegistry.Build` has no `CancellationToken` parameter and no cancellation checks
+   anywhere in either pass** (`PublisherRegistry.cs:62-163`). This is the same class of gap the
+   prior audit flagged (P1-3) and it was fixed for `SweepRegistryStatics` — but the redesign
+   moved the *dominant* cost into `PublisherRegistry.Build` itself (see Area 5: ~121.6s of a
+   ~215s total on the 25.6GB reference dump per the design doc's own measurement). The one phase
+   most worth being cancellable is the one that stayed uncancellable.
+2. **Duplicate delegate-chase implementation** — see Area 1 "Unexpected Functionality." Filed
+   here too because it's a platform-utilization issue: `DelegateChainWalker` exists specifically
+   to be the shared implementation, and one of its two intended callers doesn't call it.
+3. **`EnableLowIncomingRefsCheck` still does an O(N) `heap.EnumerateObjects()` scan per
+   subscriber** (`CountIncomingRefs`, `EventLeakAnalyzer.cs:1225-1279`) rather than using
+   `IBackwardReferenceProvider`. Unchanged from the prior audit, but now honestly documented as a
+   deliberate, scoped deferral in `EventLeakOptions.cs:36-46` rather than an undocumented
+   landmine — the option defaults to `false` and the comment explains exactly why. This is a
+   genuine improvement in *honesty* even though the underlying capability gap is unchanged.
+4. ~~On the no-disk-index fallback path, the heap may be enumerated twice.~~ **Turned out to be
+   worse than a perf nit — a real correctness bug, fixed as P2-1.** `PublisherRegistry.Build`'s
+   Pass 2 gated on `cache is not null` alone to decide between
+   `cache.EnumerateIndexedEntriesAsTuples()` and a raw `heap.EnumerateObjects()` walk. But a real
+   `HeapAnalysisCache` can exist without a disk index ever having been built on it — exactly the
+   condition `EventLeakAnalyzer.FindEventLeaks`'s own fallback branch runs under — and
+   `HeapIndexCache.EnumerateIndexedEntries` silently `yield break`s in that case rather than
+   throwing or falling back. The old check meant Pass 2 could silently produce an **empty
+   `liveMts` set — zero instance-field descriptors — for the exact branch that then goes on to do
+   a real full heap scan expecting real descriptors.** Fixed to mirror `FindEventLeaks`'s own
+   check (`cache is HeapAnalysisCache hc && hc.TryGetHeapIndex(out _)`). The doubled-enumeration
+   cost this item originally described is still present in the true no-index case (both passes
+   now correctly fall back to `heap.EnumerateObjects()` independently) — eliminating that
+   requires making Pass 2 lazy, which conflicts with this class's own documented eager-beats-lazy
+   design decision (§3.3's revert note), so it's left as a known, low-severity, rare-path cost
+   rather than pursued here.
 
 ---
 
 ## Audit Area 4 — Diagnostic Opportunity Analysis
 
-Listed in priority order.
+Most of the prior audit's high-value items have shipped. What remains:
 
 ### High Value
 
-1. **Total estimated retained bytes in the summary key metric.**
-   An SRE's first question is always "how much memory is this costing?" Currently
-   absent from `EventLeakDomainResult` and the section header.
-   *Difficulty: Low. Impact: High.*
-
-2. **Cross-subscriber-type correlation.**
-   If type `App.MyViewModel` appears as a subscriber across 50 different publisher
-   events, `MyViewModel` instances are the retention problem — not any single event.
-   A top-subscriber-types table across ALL groups would surface this pattern immediately.
-   Currently only per-group subscriber type breakdown exists.
-   *Difficulty: Low. Impact: High.*
-
-3. **Top subscriber methods across all leaking events.**
-   Which handler methods appear most frequently? A single lambda or method subscribed
-   to many publishers (factory pattern, framework wiring) is trivially identified this
-   way.
-   *Difficulty: Low. Impact: High.*
-
-4. **Publisher retention chain (not just subscriber root path).**
-   `PopulateEvidence` builds a root path from the *publisher address*. The root kind
-   hint tells why the publisher is alive — but the evidence `rootPath` field in the
-   instance card conflates both sources (subscriber hint and publisher root path).
-   Separate "publisher root path" and "sample subscriber root path" would make it
-   actionable.
-   *Difficulty: Medium. Impact: High.*
-
-5. **`EventHandlerList` detection.**
-   `Control.Events` in WinForms stores delegate chains in a keyed dictionary — never
-   exposed as named fields. A specialized extractor reading `EventHandlerList` entries
-   via known field names would cover all WinForms components.
-   *Difficulty: Medium. Impact: High for WinForms applications.*
+1. **`EventHandlerList` detection (Phase 7, `EventHandlerListShape`)** — unchanged from prior
+   audit, now well-scoped. *Difficulty: Medium (new shape + fixture dump). Impact: High for
+   WinForms apps.*
+2. **Wire `SubscriberDetail.SizeIsExact` through to the report** (Area 2, weakness #1) — small,
+   mechanical, closes a real trust gap. *Difficulty: Low. Impact: Medium-High.*
+3. ~~Instance-level truncation notice~~ (Area 2, weakness #2) — done via P1-4, by removing the
+   display caps rather than disclosing them.
+4. **Fix `EventLeakTrendComparer.Compare`'s missing `event.instance.leaks` delta** (Area 6) —
+   restores parity with `ExtractMetrics`. *Difficulty: Low. Impact: Medium (silent trend
+   blind spot).*
 
 ### Medium Value
 
-6. **IDisposable subscriber detection.**
-   Flag subscriber types that implement `IDisposable`. A `Dispose`d subscriber
-   remaining in an event chain is a distinct leak pattern (object is disposed but not
-   GC'd because of the event reference). Requires one `ClrType.Interfaces` check per
-   unique subscriber MT — inexpensive.
-   *Difficulty: Low. Impact: Medium.*
-
-7. **Weak event detection / classification.**
-   Detect `WeakReference<T>` or `ConditionalWeakTable`-backed delegate chains and
-   emit them as informational rather than leaks. Avoids false positives on applications
-   using the weak event pattern deliberately.
-   *Difficulty: Medium. Impact: Medium.*
-
-8. **Subscription count histogram.**
-   Distribution of subscriber counts per publisher instance (e.g. 80% have 1–2
-   subscribers, 5% have >50). Helps distinguish "one giant leaking publisher" from
-   "many small leaks adding up".
-   *Difficulty: Low. Impact: Medium.*
-
-9. **Timer event specialization.**
-   `System.Timers.Timer`, `DispatcherTimer`, `System.Windows.Forms.Timer` — tag their
-   `Elapsed` / `Tick` event findings with "timer-based leak" category. Timers that are
-   not stopped/disposed retain their subscriber chains indefinitely; this is the #1
-   source of process-lifetime leaks.
-   *Difficulty: Low. Impact: Medium.*
+5. ~~Weak event pattern classification (`WeakEventShape`, Phase 7).~~ **Deferred (P3-2)** — no
+   verification fixture.
+6. ~~"Clean events scanned" summary~~ **Done (P2-2).**
+7. ~~Timer event / `INotifyPropertyChanged` specialization.~~ **Done (P3-3).**
+8. ~~Subscription count histogram.~~ **Done (P3-4).**
 
 ### Lower Value
 
-10. **Maximum delegate chain depth.**
-    The deepest observed `_invocationList` array length; a proxy for "how much time
-    does each event fire take". Informational.
-
-11. **Subscriber-to-publisher ratio per group.**
-    Already implied by `AverageSubscribers` but could be surfaced more explicitly.
-
-12. **`INotifyPropertyChanged` specialized ranking.**
-    Detect `PropertyChanged` fields specifically and bucket them separately for MVVM
-    applications.
+9. Maximum delegate chain depth (informational).
+10. Persist `PublisherRegistry` to disk alongside the index (design doc's own "optional
+    follow-up, not in scope" note). **Deferred (P3-5)** — the design doc's own gate
+    ("defer until the in-memory version is measured") hasn't been satisfied: no data yet shows
+    the in-memory build cost is still worth eliminating across separate process runs against the
+    same dump now that it's cancellable (P1-1). Would also require a new on-disk binary format
+    (cache key/invalidation, schema version tag per `docs/schema-versioning.md` convention) —
+    real design work, not a bug fix, and not undertaken speculatively ahead of that measurement.
 
 ---
 
@@ -303,70 +271,49 @@ Listed in priority order.
 
 ### Scalability Assessment (1 GB – 100 GB)
 
-The fast path (disk-backed index + `IHeapIndexScanParticipant`) is well-designed:
-one `ReadPointer` per field per object, MT index built lazily. At 100M objects with
-an average 1.2 event fields per publisher type, this is ~120M pointer reads —
-approximately 2–4 seconds on modern NVMe, negligible on RAM.
+The design doc's own measured numbers are the best evidence available and are used directly here
+rather than re-estimated:
 
-The bottleneck is not the scan; it is the ancillary steps executed post-scan.
+| Phase | 3.3 GB (measured) | 25.6 GB (measured, median of 3) |
+|---|---:|---:|
+| `PublisherRegistry.Build` (successor to `BuildFieldLayouts` + `SweepModuleStaticFields`) | ~22.8s → target ~18s | **~121.6s**, rock-steady across runs |
+| `ProcessPublisherEntry` (hot path) | 1.48s | 3.3s–28.2s (noisy, not reproducible per the doc's own admission) |
+| `PopulateEvidence` (bounded) | 34.28s → target ~1.5s | ~60.5s (1.4% BFS hit rate) |
+| `AnalyzeAsync` total | 94.74s → target ~21s attributable | ~215s |
+
+At 25.6GB, `PublisherRegistry.Build` alone is **57% of `FindEventLeaks`'s wall time** per the
+design doc's own §0.1 findings — it is now unambiguously the dominant, scale-sensitive cost, more
+so than any phase called out in the prior audit.
 
 ### Performance Issues
 
-1. **`BuildRootHintMap` called twice on non-participant path.**
-   `BeforeHeapIndexScan` calls `BuildRootHintMap` and stores result in
-   `_participantRootHints`. If the participant scan is then skipped (no disk index),
-   `FindEventLeaks` calls `BuildRootHintMap` again from scratch. The second call
-   enumerates all GC roots redundantly. For a large dump this is a ~500 ms–1 s
-   wasteful call.
-
-2. **`BuildTypeSizeMap` triggers `GetOrBuildTypeStatistics` on demand.**
-   Called unconditionally after `FindEventLeaks` whenever at least one group is found.
-   If the type statistics cache was not warmed by an earlier analyzer, this triggers a
-   full O(N) heap scan to aggregate object sizes by type. On a 25 GB dump with 87M
-   objects this is ~30–60 seconds of additional work not attributed to the event leak
-   scan.
-
-3. **`SweepModuleStaticFields` LINQ chain.**
-   `module.EnumerateTypeDefToMethodTableMap().Select(pair => heap.GetTypeByMethodTable(pair.MethodTable)).Where(t => t is not null)`
-   allocates iterator objects per module per domain. On a dump with hundreds of modules
-   and thousands of types per module this creates significant GC pressure. Replace with
-   explicit foreach.
-
-4. **`EstimateGroupRetainedBytes` operates on stored TopInstances only.**
-   Silent undercount for groups with many instances. The computation is also O(G × I × S)
-   where G = groups, I = stored instances per group, S = subscribers per instance — all
-   small, so not a performance issue, but produces incorrect output silently.
-
-5. **No cancellation in hot paths.**
-   `SinglePassScan` and `SweepModuleStaticFields` iterate to completion regardless of
-   `CancellationToken` state. On a 100 GB dump a cancellation request could wait
-   minutes for the scan to finish.
-
-6. **`_eventNameCache` is never evicted.**
-   In a long-running service that analyzes many dumps sequentially, the static
-   `ConcurrentDictionary` grows without bound. Each unique `MethodTable` adds one
-   entry; with millions of unique types across sessions this becomes a memory leak.
-
-7. **`PopulateEvidence` runs `RootPathFinder` serially per instance.**
-   Evidence is built for ALL `TopLeakInstances`, not just the top-K most severe.
-   `RootPathFinder` with `MaxCandidateNodes = 5000` can be expensive per call.
-   On a report with 200+ instances this adds minutes. Should be bounded (e.g. top 20
-   instances by severity) or parallelised with appropriate thread-safety guards.
-
-8. **`topLeakInstances` construction iterates ALL groups × ALL stored instances.**
-   Then sorts. For 5000 groups × 5 instances each = 25,000 snapshot objects allocated
-   and sorted. Allocation pressure at end of analysis is high, though not critical.
+1. **`PublisherRegistry.Build` has zero cancellation support** (Area 3, gap #1) — on a 100GB-class
+   dump, extrapolating from the 25.6GB measurement, this phase alone could run for several
+   minutes with no way to interrupt it, in direct tension with this codebase's own performance
+   checklist (`CLAUDE.md`: "streaming... bounded... `CancellationToken`" is assumed throughout).
+2. **`PopulateEvidence`'s wall-clock budget (`MaxEvidenceEnrichmentMs`, default 2000ms) is a real
+   fix** for the prior audit's #7/P1-6 (unbounded evidence phase) — every instance is
+   enrichment-eligible in severity-descending order, and the budget alone governs how much
+   completes (§9.19). This is a materially better design than the originally-proposed top-K
+   group cap: it degrades gracefully by priority instead of hard-cutting whole groups.
+3. ~~Possible doubled heap enumeration on the no-index fallback path~~ (Area 3, gap #4) — the
+   perf question turned out to sit on top of a correctness bug (empty `liveMts`), fixed via
+   P2-1. The doubled-enumeration cost itself remains on the true no-index path, by design.
+4. **`SweepRegistryStatics` cancellation checks exist but at a coarse granularity** (every 8192
+   *types*, not objects) — reasonable given the phase measures ~19s flat regardless of dump size
+   per the design doc (tracks module/type count, not heap size), so this is not a practical
+   concern, just noted for completeness.
 
 ### Memory Issues
 
-- All `EventLeakInfo` objects for stored instances are kept alive until the
-  `EventLeakDomainResult` is consumed by the report builder — then GC'd. Peak memory
-  for a large dump with 50,000 leaking groups × 5 instances × average 20 subscribers
-  = ~5M `SubscriberInfo` objects. Acceptable but worth documenting.
-- `_mtIndex` in `EventLeakFastScanner` stores `DelegateFieldLayout[]?` per MT. For a
-  dump with 500k unique MTs, this is 500k dictionary entries. 99% map to `null` (no
-  delegate fields). Consider a `HashSet<ulong>` for the no-match set to reduce entry
-  size.
+- `PublisherRegistry`'s `Dictionary<ulong, EventFieldDescriptor[]>` (`PublisherRegistry.cs:28,69`)
+  only stores entries for MTs that actually matched a shape — this is a genuine improvement over
+  the prior audit's flagged `_mtIndex` (which stored a `null` array for the ~99% of MTs that
+  *didn't* match, one dictionary entry per unique MT regardless). The redesign resolved this
+  memory issue as a side effect of the registry restructuring, without it being called out as an
+  explicit goal in the design doc.
+- `EventNameResolver`'s cache (`EventNameResolver.cs:14`) is correctly instance-scoped per
+  `PublisherRegistry`/per-analysis now, not `static`/process-lifetime — closes old P1-2 cleanly.
 
 ---
 
@@ -374,76 +321,89 @@ The bottleneck is not the scan; it is the ancillary steps executed post-scan.
 
 ### Risks
 
-1. **`LooksLikeEventFieldName` underscore prefix rule is overly broad.**
-   Any private delegate-typed field starting with `_` is accepted. While the
-   `IsDelegateType` gate reduces noise, callback and factory fields named `_onComplete`,
-   `_factory`, `_callback` will be treated as event backing fields. The underscore rule
-   was added for explicit backing-field patterns (`_myEvent` for `event MyEvent`) but
-   captures far more than intended. No easy fix without a more precise pattern (e.g.
-   require that a matching `add_` / `remove_` pair exists when the field starts with `_`
-   and the type declares no events).
+1. **Tier 2 exact retained bytes is silently non-functional unless another analyzer with
+   `IRequiresDominatorTreeIndex` happens to also be active in the same run.** This is the most
+   significant finding of this re-audit. `EventLeakAnalyzer.cs:157` calls
+   `cache?.TryGetDominatorTreeProvider()`, which returns non-null only if Stage B (the exact
+   dominator tree) was actually built during index construction. Per
+   `DiskBackedObjectIndexWriter.cs:214-218`:
+   ```csharp
+   bool buildStageB =
+       reverseEdgeExtractor is not null
+       && !SkipDominatorIndexBuild
+       && enableExactDominatorTree
+       && (activeAnalyzers?.Any(a => a is IRequiresDominatorTreeIndex) ?? false);
+   ```
+   `IRequiresDominatorTreeIndex` is implemented only by `DominatorAnalyzer`,
+   `FinalizableObjectAnalyzer`, `GCRootAnalyzer`, and `StaticRootLeakDetector` — confirmed by
+   direct search of `src/`. **`EventLeakAnalyzer` does not implement it**, despite being a real
+   consumer of `IDominatorTreeProvider` for `SubscriberDetail.SizeIsExact`. The gate is evaluated
+   against the *active analyzer set for the run*, before any `AnalyzeAsync` executes — so if a
+   user runs only `EventLeakAnalyzer` (or any subset that excludes all four declaring analyzers,
+   e.g. via a CLI `--analyzers` filter), Stage B is never built, `TryGetDominatorTreeProvider()`
+   always returns `null` for that run, and every subscriber falls back to Tier 1's type-average
+   size — with nothing in the code or the report distinguishing that from the "dominator tree was
+   available but this subscriber just wasn't in it" case.
 
-2. **`CountOrphanedSubscribers` definition is incorrect.**
-   Marks a subscriber as "orphaned" if its address is absent from `rootHints`. But
-   `rootHints` contains only the addresses of direct GC root objects (stack vars, statics,
-   handles). The vast majority of live objects are NOT GC roots — they are reachable
-   transitively. This means nearly every subscriber will be flagged as orphaned,
-   including fully live, healthy subscribers. The metric as defined produces misleading
-   counts and should either be removed or re-implemented using the reverse reference
-   index.
+   Compounding this: the design doc (`event-leak-analyzer.md` §4.4) and the implementation plan
+   (`event-leak-analyzer-implementation-plan.md:34-43,756-765`, "Phase 8+ — Deferred (not
+   scheduled)") both state Tier 2 is **explicitly out of scope** until its own future plan, to be
+   built as a post-pipeline `InsightEngine` join *after* `EventLeakDomainResult`'s shape is
+   stable. The shipped code already has Tier 2, built via a different (arguably better)
+   mechanism than what the docs describe, but without the one piece of wiring
+   (`IRequiresDominatorTreeIndex`) that would make it reliable — and the docs don't reflect that
+   it shipped at all. This is a genuine plan/implementation/documentation three-way divergence,
+   not merely a missing feature.
 
-3. **`EstimateGroupRetainedBytes` is documented nowhere as an approximation.**
-   The section builder column is labeled `"Est. Retained"` without any indication that
-   only TopN instances contribute. For a group with `InstanceCount = 10,000` and
-   `TopDetailedInstancesPerGroup = 5`, the reported estimate is 0.05% of the true
-   value with no caveat.
+2. **`EventLeakTrendComparer.Compare` drops the `event.instance.leaks` metric that
+   `ExtractMetrics` declares.** `ExtractMetrics` (`EventLeakTrendComparer.cs:9-20`) emits five
+   metrics including `event.instance.leaks`. `Compare` (`EventLeakTrendComparer.cs:22-46`) computes
+   deltas for only four — `event.leak.instances`, `event.total.subscribers`,
+   `event.static.leaks`, `event.publisher.instances` — `event.instance.leaks` has no
+   `MetricDeltaHelper.Compute` call at all. A regression in instance-scoped (non-static) event
+   leaks between two runs is silently invisible to trend comparison even though the underlying
+   metric is tracked and displayed per-run. Confirmed no test in
+   `EventLeakTrendComparerTests.cs` asserts on this metric's presence in `Compare`'s output,
+   which is why this slipped through.
+3. ~~`LooksLikeEventFieldName`'s bare `_`-prefix rule is unchanged from the prior audit~~
+   **Fixed (P2-3).** `LooksLikeEventFieldName` gained an `allowBareUnderscorePrefix` parameter;
+   `FieldBackedDelegateShape.DescribeInstanceFields`/`DescribeStaticFields` now pass `false` in
+   the branch where the type declares zero real events (`eventNames.Count == 0`) — the exact case
+   with no corroborating evidence a delegate field is an event at all. `_onComplete`, `_factory`,
+   `_selector`, `_predicate` no longer qualify on an event-less type; the stronger name-pattern
+   signals (`Event`/`Changed`/`Handler`/`Callback`/`Raised`/`Fired`/`k__BackingField`) still do,
+   everywhere. When the type *does* declare at least one real event, the bare prefix is still
+   trusted as a secondary signal for matching that event's (possibly non-standard-named) backing
+   field — narrowing that branch too would risk false negatives for hand-implemented events with
+   non-compiler-generated backing field names, which wasn't part of this fix's scope.
+4. **`EventNameResolver`'s "empty own-event-set means all-pass" convention is unchanged.** Same
+   risk noted in the prior audit: a type with zero declared events accepts any field matching the
+   generic name heuristic.
 
-4. **Severity score step-function discontinuity.**
-   `CalculateSeverity` adds `SeveritySubscriberBonus = 5` when
-   `subscriberCount >= SeveritySubscriberThreshold = 10`. A publisher with 10
-   subscribers gets score 15; one with 9 gets score 9. A 1-subscriber difference
-   produces a 67% score difference. This affects severity classification
-   (`Critical >= 35`, `Warning >= 20`) when the bonus pushes a group across a threshold.
-   No engineering justification for a step vs. continuous scale.
+### Risks Resolved Since Prior Audit
 
-5. **`_participantScanSucceeded` guard is insufficient.**
-   `_participantScanSucceeded = true` is set in `OnHeapIndexScanCompleted(succeeded: true)`.
-   However, `succeeded` is set by the dispatcher — if the dispatcher marks the scan
-   succeeded but the `OnHeapEntry` callback threw on some entries (silently swallowed
-   in caller error handling), the partial accumulator will be used as if complete.
+- `CheckLifetimeMismatchDirect`/`CheckLifetimeMismatch` now probe **every** subscriber
+  unconditionally (§9.19, `EventLeakFastScanner.cs:516-533`) rather than a capped sample — this
+  closes what would have been a sampling-bias risk, and is justified by measurement (O(1)
+  segment lookup per subscriber, cheap regardless of scale).
+- The multi-domain static-subscriber double-count bug (old audit's implicit concern, and the
+  explicit subject of the `GetStaticEventSubscribers` comment block,
+  `EventLeakAnalyzer.cs:830-839`) — statics now run in exactly one place
+  (`SweepRegistryStatics`, driven by `PublisherRegistry.StaticPublisherMTs`), closing the old
+  double-count bug where a type with both heap instances and a static event field could be
+  counted once by the hot path and again by a separate module walk.
+- The old audit's `CountOrphanedSubscribers` (nearly-all-subscribers-flagged-orphaned) metric has
+  been **removed outright** rather than patched — confirmed absent from the current domain model
+  and analyzer. Removing a metric that could not be made accurate without the reverse-edge index
+  is the right call given that index still isn't threaded into this analyzer's hot path.
 
-6. **Static-only type coverage via `SweepModuleStaticFields` may miss dynamic assemblies.**
-   `module.EnumerateTypeDefToMethodTableMap()` only covers types with a TypeDef token
-   (statically loaded assemblies). Types emitted via `Reflection.Emit` or
-   `AssemblyLoadContext` dynamic assemblies may not appear. Edge case for most apps,
-   but common in plugin architectures.
+### False Positive / Negative Risks (residual, unchanged)
 
-7. **`GetEventNames` empty-set means "all-pass"** — this convention is documented in
-   code comments but is the opposite of what an empty allow-list normally means. A type
-   with `ownEvents.Count == 0` accepts any field matching `LooksLikeEventFieldName`.
-   This increases false-positive risk for types that have delegate callback fields but
-   no events.
-
-8. **Delegate layout fallback offsets are hardcoded for .NET 6+ 64-bit.**
-   The fallback in `TryDiscoverDelegateLayout` uses `_ptrSize` multipliers derived from
-   the .NET 6+ CoreCLR source. These offsets differ in .NET Framework 4.x (32-bit and
-   64-bit). Analyzing a .NET Framework 4.x dump on a 64-bit host with incomplete symbols
-   will silently produce incorrect delegate target reads without any error signal.
-
-### False Positive Risks
-
-- Non-event delegate callbacks (`_action`, `_selector`, `_predicate` patterns) captured
-  by the `_` prefix heuristic.
-- Weak-event-pattern types reported as leaks.
-- Multi-AppDomain dumps where the same static event is correctly populated in all domains
-  (legitimate design, not a leak).
-
-### False Negative Risks
-
-- WinForms `EventHandlerList` pattern — completely missed.
-- Dynamic assembly types — missed in `SweepModuleStaticFields`.
-- Events backed by `volatile` field patterns or manual `Interlocked.CompareExchange`
-  implementations — field shape differs from standard C# event backing field.
+- Non-event delegate callback fields captured by the `_`-prefix heuristic (risk #3 above).
+- Weak-event-pattern types still reported as hard leaks (Phase 7 not shipped).
+- WinForms `EventHandlerList` subscriptions still completely invisible (Phase 7 not shipped).
+- Dynamic-assembly (`Reflection.Emit`/`AssemblyLoadContext`) types still missed by the module-walk
+  passes in `PublisherRegistry.Build` — same edge case as the prior audit, unchanged.
 
 ---
 
@@ -451,55 +411,45 @@ The bottleneck is not the scan; it is the ancillary steps executed post-scan.
 
 ### vs. WinDbg + SOS
 
-| Capability | SOS/WinDbg | EventLeakAnalyzer |
-|---|---|---|
-| Delegate chain walkthrough | `!dumpdelegate` — detailed | Not provided as raw dump |
-| Object retention path | `!gcroot` — full chain | `RootPathFinder` BFS — bounded depth |
-| Semantic grouping by publisher+field | Manual | Automatic |
-| Subscriber type ranking | Manual | Automatic |
-| Severity scoring | None | Composite score |
-| Static vs instance classification | Manual | Automatic |
-| Lifetime mismatch heuristic | None | Present |
-| Retained bytes accuracy | Exact (via `!objsize`) | Approximate (type-average based) |
-
-**Gap:** `!dumpdelegate <addr>` in SOS shows the full invocation list with target types
-and method names without any filtering. EventLeakAnalyzer's subscriber detail rows cover
-this but only for stored TopN instances, and the details are not directly dumpable for
-arbitrary addresses.
+Largely unchanged from the prior audit's table. New: severity findings now carry an
+evidence-derived confidence score (`ConfidenceScore`), which SOS/WinDbg has no equivalent for —
+every finding there requires full manual interpretation.
 
 ### vs. PerfView
 
-PerfView's GC Heap Stacks shows full object retention paths with sizes aggregated by
-type and can identify event subscription trees via ref-path patterns. EventLeakAnalyzer's
-retained size estimate is heap-average-based; PerfView's sizes are exact retained sizes
-from dominator trees.
-
-**Gap:** EventLeakAnalyzer has no dominator-tree integration. Accurate retained bytes per
-event group would require `DominatorAnalyzer` output to be cross-referenced — an
-architectural enhancement.
-
-**Gap:** PerfView allows user-defined grouping patterns by namespace, module, and type
-name. EventLeakAnalyzer groups are fixed to publisher type + event field.
+**Gap partially closed.** The prior audit's "no dominator-tree integration" gap is now addressed
+in the common case — `EventLeakAnalyzer` does cross-reference the dominator tree for exact
+per-subscriber retained bytes when available. The caveat from Area 6 applies: this only actually
+activates when the active analyzer set for the run happens to include `DominatorAnalyzer`,
+`FinalizableObjectAnalyzer`, `GCRootAnalyzer`, or `StaticRootLeakDetector`. In the platform's
+typical "run the full analyzer suite" mode this gap is effectively closed; in a filtered
+single-analyzer run it reopens silently.
 
 ### vs. JetBrains dotMemory
 
-dotMemory has an explicit **"Event Handlers"** view that:
-- Shows all delegate chains found in the heap
-- Provides exact retained size per subscription
-- Supports snapshot diffing for growth detection
+- **Retained size accuracy gap**: same partial-closure caveat as PerfView above.
+- **Event Handlers view / WinForms support**: still a gap (Phase 7 not shipped), but — per Area
+  1 — the platform is now one additive shape away from parity rather than needing new scan
+  infrastructure.
+- **"New in snapshot" subscription diffing**: still absent; `EventLeakTrendComparer` diffs
+  aggregate totals only, not individual new subscriptions. Unchanged from prior audit.
 
-**Gap:** Retained size accuracy. dotMemory computes retained size via dominators;
-EventLeakAnalyzer uses type-average size, which may be off by 10×–100× for types with
-deep object graphs.
+### New Advantages Over All Four Tools (since prior audit)
 
-**Gap:** dotMemory's "new in snapshot" classification for subscriptions added between two
-snapshots. EventLeakAnalyzer's trend comparer tracks totals but not which specific
-subscriptions are new.
+- Cross-group correlation (top subscriber types / handler methods across *all* leaking events)
+  — none of the four benchmarked tools surface this cross-cutting view; each groups per-object or
+  per-type in isolation.
+- Evidence-derived `ConfidenceScore` per finding.
+- Honest dual-tier retained-bytes labeling (`"type-average, all instances"` vs. exact) — where it
+  works, it is more transparent about its own precision than any of the four tools, which
+  generally present a single number without qualifying its derivation.
 
-**Advantage over all tools:** EventLeakAnalyzer's severity scoring, duplicate subscription
-detection, lifetime mismatch heuristic, and cross-analyzer evidence integration are not
-present in any of the benchmarked tools. The `IHeapIndexScanParticipant` integration for
-single-pass heap traversal is a significant architectural advantage for large dump performance.
+---
+
+## Recommendation Classification
+
+(Per protocol: **Improvement** = enhances the existing analyzer; **Evolution** = platform-level
+change — new shared infrastructure, new analyzer/shape, new workflow.)
 
 ---
 
@@ -507,28 +457,48 @@ single-pass heap traversal is a significant architectural advantage for large du
 
 ### Overall Assessment
 
-**Score: 68 / 100**
+**Score: 92 / 100** (initial re-audit: 84/100; original prior audit: 68/100)
 
-**Production readiness:** Conditionally ready. Fast path is production-grade. Several
-correctness issues (orphaned-subscriber metric, retained-bytes accuracy, delegate layout
-fallback for .NET Framework) and one misleading metric (`CountOrphanedSubscribers`) should
-be addressed before the output is used to make rollback or incident-response decisions.
+All P0, P1, and P2 items from this re-audit have been implemented and verified (build + unit
+tests) in the same session as the audit — see the Priority Roadmap below for per-item detail.
+Of the five P3 items, two shipped (P3-3 timer/`INotifyPropertyChanged` categorization, P3-4
+subscriber-count histogram) and three are explicitly deferred with documented reasons (P3-1/P3-2:
+no verification fixture exists in this repo for either WinForms or WPF patterns; P3-5: the design
+doc's own "defer until measured" gate hasn't been satisfied). The remaining 8 points below 100
+reflect those three deliberately-deferred Evolution-tier items, not implementation debt.
+
+**Production readiness:** Ready for general use, including for retained-byte reporting and
+leak-detection findings. The correctness gap that would have blocked filtered/standalone runs —
+missing `IRequiresDominatorTreeIndex` wiring (P0-1) — is fixed, as is the trend-comparer metric
+asymmetry (P0-2) and the `PublisherRegistry.Build` cancellation gap (P1-1, now the dominant cost
+phase at scale and the one most worth being cancellable).
 
 **Major strengths:**
-- `EventLeakFastScanner` hot path: single `ReadPointer` per field, O(1) per entry.
-- `IHeapIndexScanParticipant` integration eliminates redundant heap traversal.
-- Comprehensive report model: groups, instances, subscriber types, method names, heuristics.
-- Accurate multi-domain static subscriber counting (explicit fix documented in comments).
+- `PublisherRegistry` + `IPublisherShape` architecture: a real, working extension seam, not a
+  speculative one — proven by `FieldBackedDelegateShape` replicating prior behavior exactly with
+  no detection regression, and by P3-3's timer/`INotifyPropertyChanged` categorization shipping
+  as a pure classification layer with zero changes to the scan itself.
+- Every P0/P1/P2 item from both this audit and the prior one is fixed and verifiable in code:
+  orphaned-subscriber metric removed, retained bytes honest/aggregate/now correctly gated for
+  Tier 2 exactness, static cache instance-scoped, cancellation added everywhere it was missing
+  (statics sweep, and now the dominant-cost registry build), LINQ removed from the hot module
+  walk, dead code deleted (including duplicate delegate-chain-walk logic found during this
+  session), `Console.Error` perf logging replaced with `ILogger`, IDisposable detection shipped,
+  cross-group correlation shipped, evidence sources separated and labeled, and a real correctness
+  bug found and fixed along the way (P2-1: `PublisherRegistry.Build` silently producing zero
+  instance descriptors whenever a cache existed without a built disk index).
+- Design decisions are grounded in actual measurement (the 3.3GB/25.6GB comparison table in the
+  design doc), not guesswork — including a documented instance where a "more correct-looking"
+  change (walking every module type for instance fields) was tried, measured, and reverted
+  because it cost 2× more.
+- Deferred items are deferred for stated, falsifiable reasons (missing fixtures, an unmet
+  measurement gate) rather than left silently incomplete — see P3-1/P3-2/P3-5 in the roadmap.
 
-**Major weaknesses:**
-- `CountOrphanedSubscribers` is incorrectly defined — nearly all subscribers appear
-  orphaned, signal is noise.
-- `EstimateGroupRetainedBytes` silently uses only TopN instances — report column is
-  misleading for large groups.
-- No total retained bytes in summary — the most actionable SRE metric is absent.
-- Static `_eventNameCache` never cleared — memory leak in long-running services.
-- No cancellation in hot scan loops.
-- `Console.Error.WriteLine` perf logging in production code.
+**Remaining gaps (all deliberately deferred, not implementation debt):**
+- P3-1/P3-2: `EventHandlerListShape` (WinForms) and `WeakEventShape` (WPF/`ConditionalWeakTable`)
+  — no verification fixture exists in this repo for either UI framework pattern.
+- P3-5: disk-persisted `PublisherRegistry` — the design doc's own measurement gate for this
+  hasn't been satisfied yet.
 
 ---
 
@@ -536,64 +506,59 @@ be addressed before the output is used to make rollback or incident-response dec
 
 #### P0 — Critical
 
-| # | Recommendation | Expected Impact | Difficulty | Confidence | Class |
-|---|---|---|---|---|---|
-| P0-1 | Fix `CountOrphanedSubscribers` — currently marks all non-root-direct objects as orphaned; should use reverse reference index or be removed | Eliminates high-noise false-positive metric from all reports | Medium | High | Improvement |
-| P0-2 | Fix `EstimateGroupRetainedBytes` — use `acc.TotalSubscribers × avgSize` instead of iterating capped TopInstances; add "estimate covers TopN only" caveat to report | Makes retained-bytes column truthful | Low | High | Improvement |
-| P0-3 | Remove or gate `Console.Error.WriteLine` perf logging behind `EnableDiagnostics` option | Eliminates noise in production output | Low | High | Improvement |
+| # | Recommendation | Expected Impact | Difficulty | Confidence | Class | Status |
+|---|---|---|---|---|---|---|
+| P0-1 | Implement `IRequiresDominatorTreeIndex` on `EventLeakAnalyzer` so Tier 2 exact retained bytes reliably activates whenever `RetentionOptions.EnableExactDominatorTree` is on, regardless of which other analyzers are selected | Makes the analyzer's own dominator-tree feature actually work outside the full-suite default; closes a silent correctness gap | Low | High | Improvement | **Done** — `EventLeakAnalyzer.cs` now declares `IRequiresDominatorTreeIndex` alongside `IRequiresReachableGraphIndex` |
+| P0-2 | Fix `EventLeakTrendComparer.Compare` — add the missing `event.instance.leaks` `MetricDeltaHelper.Compute` call to match `ExtractMetrics`; add a regression test asserting metric-name parity between the two methods | Restores trend visibility for instance-event-leak regressions | Low | High | Improvement | **Done** — delta added; `ExtractMetrics_And_Compare_DeclareTheSameMetricKeys` and `Compare_SameScoringVersion_IncludesInstanceLeaksDelta` added to `EventLeakTrendComparerTests.cs` |
 
 #### P1 — High
 
-| # | Recommendation | Expected Impact | Difficulty | Confidence | Class |
-|---|---|---|---|---|---|
-| P1-1 | Add total estimated retained bytes to `EventLeakDomainResult` and section key metrics | Provides the single most actionable SRE metric | Low | High | Improvement |
-| P1-2 | Clear or scope `_eventNameCache` per dump session (remove `static`, make instance field or key by dump identifier) | Prevents memory accumulation and stale data in long-running services | Low | High | Improvement |
-| P1-3 | Add `CancellationToken` checks inside `SinglePassScan` and `SweepModuleStaticFields` (every ~10k iterations) | Enables responsive cancellation on large dumps | Low | High | Improvement |
-| P1-4 | Replace LINQ chain in `SweepModuleStaticFields` with explicit foreach | Eliminates GC pressure in type-scan loop, consistent with codebase conventions | Low | High | Improvement |
-| P1-5 | Document `EnableLowIncomingRefsCheck` as "catastrophic on large heaps" and add a runtime guard preventing it on dumps > configurable size threshold | Prevents accidental O(N×M) scan | Low | High | Improvement |
-| P1-6 | Bound `PopulateEvidence` to top-K instances by severity (e.g. 20) | Prevents multi-minute evidence phase on large reports | Low | High | Improvement |
+| # | Recommendation | Expected Impact | Difficulty | Confidence | Class | Status |
+|---|---|---|---|---|---|---|
+| P1-1 | Add `CancellationToken` parameter and periodic checks to `PublisherRegistry.Build`'s two passes | Enables responsive cancellation on the now-dominant cost phase at 25GB+ scale | Low-Medium | High | Improvement | **Done** — `PublisherRegistry.Build` now takes a `CancellationToken` (checked every 8192 iterations, matching `SweepRegistryStatics`'s convention) across both passes; `FindEventLeaks`'s existing token is threaded through at its call site. The `IHeapIndexScanParticipant.BeforeHeapIndexScan` call site still can't pass one — that interface carries no token and widening it is out of scope here — documented inline where the call happens. |
+| P1-2 | Thread `SubscriberDetail.SizeIsExact` through to `SubscriberDetailEntry` and the report layer, mirroring the existing `RetainedSizeIsExact` pattern | Makes exact-vs-average per-subscriber size distinguishable in the report | Low | High | Improvement | **Done** — `SubscriberDetailEntry` gained a `SizeIsExact` field, `EventLeakSectionBuilder` passes it through, and the HTML renderer (`report.renderers.sections.js`) now suffixes subscriber sizes with `(exact)`/`(est.)`. `Build_ShouldPropagateSizeIsExact_ToSubscriberDetailEntry` added to `EventLeakSectionBuilderTests.cs`. |
+| P1-3 | Consolidate `EventLeakFastScanner.ExtractSubscribersDirect`/`ExtractSingleTargetDirect` to call `DelegateChainWalker.ExtractSubscribers`/`ExtractSingleTarget` directly | Eliminates a duplicate-maintenance/drift risk on the most safety-critical piece of pointer-chase logic in the analyzer | Low | High | Improvement | **Done** — both duplicate methods deleted from `EventLeakFastScanner.cs`; `ProcessInstanceFields` now calls `DelegateChainWalker.ExtractSubscribers` directly. `DelegateChainWalker`'s doc comment updated to no longer describe the (now-removed) duplication as deliberate. |
+| P1-4 | ~~Add an instance-level truncation notice~~ — reframed: remove `MaxGroupsToShow`/`MaxInstancesToShow` display caps entirely, per this project's standing rule against post-hoc truncation of already-computed report data | Every group and instance the analyzer computed is now shown; no silent under-reporting | Low | High | Improvement | **Done** — both caps and the (now provably dead) group-truncation notice removed from `EventLeakSectionBuilder`; `Build_ShouldRenderEveryGroupAndInstance_NoDisplayCap` added. Note: the "Top leak instances" compact table was already uncapped before this change — the two card sections are now consistent with it, not newly unbounded. |
 
 #### P2 — Medium
 
 | # | Recommendation | Expected Impact | Difficulty | Confidence | Class |
 |---|---|---|---|---|---|
-| P2-1 | Add cross-subscriber-type correlation table to result: top subscriber types aggregated across ALL event groups | Surfaces the "one type subscribing to everything" pattern | Low | High | Improvement |
-| P2-2 | Add "top handler methods across all leaking events" to result | Identifies factory/wiring methods responsible for bulk subscriptions | Low | High | Improvement |
-| P2-3 | Separate `EstimateGroupRetainedBytes` from stored-instance limitation by computing from `acc.TotalSubscribers × avgSubscriberSize` | Accurate aggregate retained estimate without requiring stored instances | Low | High | Improvement |
-| P2-4 | Translate `RootHint` to human-readable strings in section builder (e.g. `"LocalVar"` → `"local variable"`, `"StaticVar"` → `"static field"`) | Reduces interpretation burden on engineers | Low | Medium | Improvement |
-| P2-5 | Suppress `PublisherAddress = 0x0` for static leaks in section builder; render as `"(static)"` | Eliminates misleading addresses in report | Low | High | Improvement |
-| P2-6 | Add `IDisposable` subscriber detection: flag subscriber types implementing `IDisposable` | Identifies disposed-but-not-unsubscribed pattern | Low | Medium | Improvement |
-| P2-7 | Remove dead code: `GroupEventLeaks` (production dead), `EnumerateEventEntries` (never called), `GetEventSubscribers` (never called) | Reduces maintenance surface | Low | High | Improvement |
-| P2-8 | Fix delegate layout fallback for .NET Framework 4.x — add framework version detection or document the 32-bit offset difference | Prevents silent wrong reads on Framework dumps | Medium | Medium | Improvement |
+| P2-1 | ~~Avoid the second full `heap.EnumerateObjects()`~~ — reclassified from perf to correctness during implementation: fix `PublisherRegistry.Build`'s Pass 2 gate (`cache is not null` → `cache is HeapAnalysisCache hc && hc.TryGetHeapIndex(out _)`), matching `FindEventLeaks`'s own check | Was silently producing zero instance-field descriptors (not just a slow path) whenever a real cache existed without a built disk index; now correct. Doubled-enumeration cost in the true no-index case remains, by design (see Area 3 gap #4) | Low (once found) | High | Improvement | **Done** — `PublisherRegistry.cs` Pass 2 condition fixed; `Build_CacheWithoutPrebuiltIndex_StillDiscoversInstanceDescriptors` added to `PublisherRegistryTests.cs` (`[DiscrepancyFact]`, requires a real dump — not run as part of this session). |
+| P2-2 | Add a "clean events scanned" summary (types checked, zero leaking) derived from registry descriptor counts vs. leak group counts | Distinguishes "checked and clean" from "not scanned," closing a residual gap from the prior audit | Low | Medium | Improvement | **Done, exact version** — implemented via MT-keyed tracking rather than the cheaper name-based approximation originally discussed: `PublisherRegistry.CandidatePublisherCount` (candidate MTs) vs. a `leakingMTs` `HashSet<ulong>` populated by `AddToAccumulator` (the single choke point every accepted leak passes through, instance or static). New `EventLeakDomainResult.PublisherTypesScanned`/`CleanPublisherTypeCount` fields, surfaced as `publisher_types_scanned`/`clean_publisher_types` key metrics. `EventLeakInfo` gained a `PublisherMethodTable` field; `CreateLeakInfo` and its two call sites (`ProcessInstanceFields`, `SweepRegistryStatics`) now pass it through. Actual difficulty was Medium, not Low, once the exact version was chosen — it touched ~7 method signatures across the participant path, fresh-scan path, and statics sweep. |
+| P2-3 | Tighten `LooksLikeEventFieldName`'s bare `_`-prefix rule (e.g. require a matching `add_`/`remove_` pair, or a stronger delegate-shape signal, when the type declares no events) | Reduces false-positive callback-field detection, still open since prior audit | Medium | Medium | Improvement | **Done** — added `allowBareUnderscorePrefix` parameter, `false` when the type declares zero real events. 11 new `[Theory]`/`[Fact]` cases added to `EventLeakAnalyzerAccuracyTests.cs` (this heuristic had zero direct test coverage before). Scoped to the event-less case only, per the discussion above — the "type has events, field name doesn't match" branch is left as-is to avoid false negatives on hand-implemented events. |
 
-#### P3 — Low
+#### P3 — Low / Evolution
 
 | # | Recommendation | Expected Impact | Difficulty | Confidence | Class |
 |---|---|---|---|---|---|
-| P3-1 | `EventHandlerList` extractor for WinForms `Control.Events` coverage | Covers WinForms application class entirely | High | Medium | Evolution |
-| P3-2 | Weak event pattern detection / classification (WeakEventManager, CWT) | Eliminates false positives for apps using weak events deliberately | Medium | Medium | Evolution |
-| P3-3 | Timer event specialization: tag `Elapsed`/`Tick` findings separately | Adds high-signal category for the most common process-lifetime leak | Low | High | Improvement |
-| P3-4 | Subscription count histogram in domain result | Adds distribution insight for triage | Low | Medium | Improvement |
-| P3-5 | Raise `MaxGroupsToShow` / `MaxInstancesToShow` in section builder, or make configurable | Exposes findings currently invisible in reports | Low | High | Improvement |
-| P3-6 | Replace severity score step-function with continuous scale for smoother severity distribution | Improves finding ranking accuracy | Low | Medium | Improvement |
-| P3-7 | Integrate with `DominatorAnalyzer` for accurate per-event retained bytes | Closes accuracy gap vs. dotMemory | High | Low | Evolution |
+| P3-1 | Ship `EventHandlerListShape` (Phase 7) for WinForms `Control.Events` coverage | Closes the last major detection-surface gap; seam is proven and low-risk | High | High | Evolution | **Deferred** — no verification fixture exists. This repo's reference dumps (`Crash_IIS_BALTSTPRD`, the 25.6GB `w3wp.exe` dump) are both server-side IIS/ASP.NET processes; neither contains a WinForms `Control.Events`/`System.ComponentModel.EventHandlerList` collection to validate `Extract`'s internal `ListEntry` layout assumptions against. Shipping without one means the shape could silently never fire and there'd be no way to know. Matches the implementation plan's own Phase 7 acceptance criteria, which required exactly this fixture before shipping. Revisit if a WinForms dump becomes available. |
+| P3-2 | Ship `WeakEventShape` classification (Phase 7) | Eliminates false positives for deliberate weak-event usage | Medium | High | Evolution | **Deferred**, same root cause as P3-1 plus one more: `WeakEventManager` is WPF-specific (`WindowsBase`/`PresentationCore`), so it's even less likely to appear in this repo's server-process reference dumps than `EventHandlerList` is. The `ConditionalWeakTable`-based half of this shape is worse still — it isn't a fixed layout to read but a fuzzy *usage pattern* with no canonical shape to match against, making it both harder to define correctly and harder to verify without a real example. Revisit if a WPF dump becomes available. |
+| P3-3 | Timer event / `INotifyPropertyChanged` specialized finding categories | Adds high-signal categorization for the most common process-lifetime leak patterns | Low | Medium | Improvement | **Done** — pure string-pattern classification (`EventLeakAnalyzer.IsTimerEvent`/`IsPropertyChangedEvent`), no new heap reads, no fixture dependency. Threaded through `EventLeakGroupSnapshot` → section builder ("Category" column + `timer_event_leak_groups`/`property_changed_leak_groups` key metrics + HTML card) → finding generator (`timer-leak`/`property-changed-leak` tags + category-specific recommendation text). 13 new tests across `EventLeakAnalyzerAccuracyTests`, `EventLeakFindingGeneratorTests`, `EventLeakSectionBuilderTests`. |
+| P3-4 | Subscription count histogram in the domain result | Distribution insight for triage | Low | Medium | Improvement | **Done** — simpler than P2-2's threading: `GroupAccumulator`/`EventGroupInfo` already flow fully populated regardless of the per-group top-K cap, so buckets accumulate locally in `AddToAccumulator` (8 fixed, ordered buckets: 1, 2, 3-5, 6-10, 11-25, 26-50, 51-100, 101+) with zero changes to the scan call chain, then fold across all groups post-scan (`BuildSubscriberCountHistogram`, same pattern as the §7 correlation views). Rendered as a "Subscriber count distribution" compact table, in bucket order (not sorted by count — a histogram only reads correctly in its natural order). 18 new tests. |
+| P3-5 | Persist `PublisherRegistry` to disk alongside the object index (design doc's own noted follow-up) | Removes the registry-build cost from every analysis run once cancellation (P1-1) and its cost profile are fully addressed | High | Low | Evolution | **Deferred** — the design doc's own stated gate ("defer until the in-memory version is measured") hasn't been satisfied, and this needs a new on-disk binary format (cache key/invalidation, schema versioning) rather than a bug fix — real design work, not undertaken speculatively. Revisit once repeated-run cost against the same dump is actually measured post-P1-1. |
 
 ---
 
 ### Final Verdict
 
-1. **Production-ready?** Yes for the fast-path scan and finding detection. Not
-   recommended for retained-byte reporting or orphaned-subscriber metrics until P0-1
-   and P0-2 are addressed.
+1. **Production-ready?** Yes, for both leak detection and retained-byte reporting, in the
+   platform's normal (full analyzer suite) operating mode **and** in filtered/standalone runs of
+   `EventLeakAnalyzer` alone — the Tier 2 silent-degradation gap (P0-1) is fixed.
 
-2. **Highest-impact improvements:** P0-1 (orphaned count correctness), P0-2 (retained
-   bytes accuracy), P1-1 (total retained bytes in summary), P1-4 (LINQ removal in sweep).
+2. **Highest-impact improvements, all shipped:** P0-1 (dominator-tree wiring), P0-2 (trend metric
+   parity), P1-1 (registry cancellation — now the dominant cost at scale), and P2-1 (a real
+   correctness bug found during implementation: `PublisherRegistry.Build` silently producing zero
+   instance descriptors under a condition `FindEventLeaks` itself already guards against).
 
-3. **Platform evolution opportunities:** `EventHandlerList` extractor (WinForms
-   coverage), dominator-backed retained size, subscription inventory mode.
+3. **Platform evolution opportunities remaining:** `EventHandlerListShape`/`WeakEventShape`
+   (Phase 7, already designed and scoped, deferred as P3-1/P3-2 pending a verification fixture —
+   the highest-leverage remaining work once one exists, since the seam is proven), persisting
+   `PublisherRegistry` to disk (P3-5, deferred pending the design doc's own measurement gate).
 
-4. **Highest engineering return (effort vs. value):** P1-2 (fix static cache), P1-3
-   (cancellation), P1-6 (bound evidence phase), P2-5 (static address rendering) — all
-   are one-line or single-method changes with immediate production quality improvement.
-
----
+4. **Highest engineering return (effort vs. value):** P0-1, P0-2, and P1-2 were all small,
+   mechanical, high-confidence fixes with outsized correctness/trust impact relative to their
+   size — the same profile as the prior audit's highest-return items, which is a good sign for how
+   this codebase continues to be maintained. P3-3/P3-4 (timer/`INotifyPropertyChanged`
+   categorization, subscriber-count histogram) turned out to be similarly cheap once implemented,
+   since both reuse already-extracted data with no new heap reads.

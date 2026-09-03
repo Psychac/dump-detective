@@ -110,10 +110,11 @@ internal sealed class EventLeakFastScanner
         Dictionary<GroupKey, EventLeakAnalyzer.GroupAccumulator> groupAcc,
         Dictionary<ulong, string> rootHints,
         EventLeakOptions options,
+        HashSet<ulong> leakingMTs,
         ref int eventsScanned,
         ref int publisherInstances)
     {
-        SinglePassScan(streamingEntries, groupAcc, rootHints, options,
+        SinglePassScan(streamingEntries, groupAcc, rootHints, options, leakingMTs,
             ref eventsScanned, ref publisherInstances);
 
         return true;
@@ -131,6 +132,7 @@ internal sealed class EventLeakFastScanner
         Dictionary<GroupKey, EventLeakAnalyzer.GroupAccumulator> groupAcc,
         Dictionary<ulong, string> rootHints,
         EventLeakOptions options,
+        HashSet<ulong> leakingMTs,
         ref int eventsScanned,
         ref int publisherInstances)
     {
@@ -141,7 +143,7 @@ internal sealed class EventLeakFastScanner
             return;
 
         long p0 = Stopwatch.GetTimestamp();
-        ProcessPublisherEntry(entry, descriptors, buf, groupAcc, rootHints, options,
+        ProcessPublisherEntry(entry, descriptors, buf, groupAcc, rootHints, options, leakingMTs,
             ref eventsScanned, ref publisherInstances);
         _processPublisherEntryTicks += Stopwatch.GetTimestamp() - p0;
     }
@@ -155,13 +157,14 @@ internal sealed class EventLeakFastScanner
         Dictionary<GroupKey, EventLeakAnalyzer.GroupAccumulator> groupAcc,
         Dictionary<ulong, string> rootHints,
         EventLeakOptions options,
+        HashSet<ulong> leakingMTs,
         ref int eventsScanned,
         ref int publisherInstances)
     {
         var buf = new List<(ulong addr, ulong mt, ulong delegateAddr)>(capacity: 64);
         foreach (HeapEntry entry in entries)
         {
-            ScanEntry(in entry, buf, groupAcc, rootHints, options,
+            ScanEntry(in entry, buf, groupAcc, rootHints, options, leakingMTs,
                 ref eventsScanned, ref publisherInstances);
         }
     }
@@ -181,6 +184,7 @@ internal sealed class EventLeakFastScanner
         Dictionary<GroupKey, EventLeakAnalyzer.GroupAccumulator> groupAcc,
         Dictionary<ulong, string> rootHints,
         EventLeakOptions options,
+        HashSet<ulong> leakingMTs,
         ref int eventsScanned,
         ref int publisherInstances)
     {
@@ -188,7 +192,7 @@ internal sealed class EventLeakFastScanner
         // is now the single place static delegate fields are read, once per MT in
         // PublisherRegistry.StaticPublisherMTs, after the scan completes.
         bool hadField = ProcessInstanceFields(
-            entry, descriptors, buf, groupAcc, rootHints, options,
+            entry, descriptors, buf, groupAcc, rootHints, options, leakingMTs,
             ref eventsScanned);
 
         if (hadField) publisherInstances++;
@@ -205,6 +209,7 @@ internal sealed class EventLeakFastScanner
         Dictionary<GroupKey, EventLeakAnalyzer.GroupAccumulator> groupAcc,
         Dictionary<ulong, string> rootHints,
         EventLeakOptions options,
+        HashSet<ulong> leakingMTs,
         ref int eventsScanned)
     {
         bool hadField = false;
@@ -228,7 +233,13 @@ internal sealed class EventLeakFastScanner
                 continue;
 
             buf.Clear();
-            ExtractSubscribersDirect(delegateAddr, buf);
+            // P1-3 (docs/analysis/phase1/eventleak-analyzer-audit.md): call the shared
+            // DelegateChainWalker directly instead of maintaining a second, hand-copied
+            // implementation of the same pointer chase — DelegateChainWalker.ExtractSubscribers
+            // is a plain static method, not a virtual IPublisherShape.Extract call, so nothing
+            // about the hot-path/virtual-dispatch rationale in DelegateChainWalker's own doc
+            // comment applied to keeping a duplicate here.
+            DelegateChainWalker.ExtractSubscribers(_heap, _reader, delegateAddr, _registry.DelegateTargetOffset, _registry.DelegateInvocationListOffset, buf);
             if (buf.Count == 0) continue;
 
             // Filter noise/compiler-generated publisher types but do NOT require Gen2.
@@ -256,90 +267,18 @@ internal sealed class EventLeakFastScanner
                     options, heap: _heap,
                     publisherGeneration: publisherGen,
                     hasLifetimeMismatch: mismatch,
-                    disposableTypeCache: _registry.DisposableTypeCache);
+                    disposableTypeCache: _registry.DisposableTypeCache,
+                    publisherMethodTable: entry.MethodTable);
 
             // IsLikelyPublisher: subscriber count and gen already validated above.
             // Still call to honour any future threshold changes.
-            EventLeakAnalyzer.AddToAccumulator(groupAcc, leak, options.TopDetailedInstancesPerGroup);
+            EventLeakAnalyzer.AddToAccumulator(groupAcc, leak, options.TopDetailedInstancesPerGroup, leakingMTs);
         }
 
         // NOTE: publisherInstances is intentionally NOT incremented here.
         // ProcessPublisherEntry (the caller on sequential paths) owns the increment
         // to avoid double-counting.
         return hadField;
-    }
-
-    // ──────────────────────────────────────────────────────────────────────────────
-    // Direct subscriber extraction (no ClrObject, no heap.GetObject)
-    // ──────────────────────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Extracts subscriber (address, methodTable) pairs from a delegate object
-    /// entirely via <see cref="IMemoryReader.ReadPointer"/> calls.
-    /// Uses the registry's pre-discovered <c>_target</c> / <c>_invocationList</c> offsets —
-    /// no ClrType lookups, no <c>ClrObject</c> allocations.
-    /// </summary>
-    private void ExtractSubscribersDirect(ulong delegateAddr, List<(ulong addr, ulong mt, ulong delegateAddr)> results)
-    {
-        // Read _invocationList to distinguish single vs multicast delegate.
-        ulong invListAddr;
-        if (!_reader.ReadPointer(delegateAddr + (ulong)_registry.DelegateInvocationListOffset, out invListAddr))
-            return;
-
-        if (invListAddr == 0)
-        {
-            // Single subscriber: read _target.
-            ExtractSingleTargetDirect(delegateAddr, results);
-            return;
-        }
-
-        // Multicast: invListAddr points to a Delegate[] array containing per-subscriber delegates.
-        // Use ClrMD's GetObject to validate the array and get its authoritative Length.
-        // Raw MT-lookup via GetTypeByMethodTable is unreliable here — the type may not yet be
-        // in ClrMD's cache, causing IsArray to return false and silently collapsing every
-        // multicast event to a single-target read (1 subscriber per publisher instead of N).
-        ClrObject invListObj = _heap.GetObject(invListAddr);
-        if (!invListObj.IsValid || !invListObj.IsArray)
-        {
-            // Not an array — fall back to single-target (covers chained-delegate edge cases).
-            ExtractSingleTargetDirect(delegateAddr, results);
-            return;
-        }
-
-        ClrArray arr = invListObj.AsArray();
-        int invCount = arr.Length;
-        if (invCount == 0 || invCount > 1_000_000) // sanity cap
-            return;
-
-        // Iterate the Delegate[] using ClrMD's array accessors — same approach as the
-        // ClrMD path in GetDelegateTargets, so behaviour is identical for both paths.
-        for (int i = 0; i < invCount; i++)
-        {
-            ClrObject elem = arr.GetObjectValue(i);
-            if (elem.IsValid && elem.Address != 0)
-                ExtractSingleTargetDirect(elem.Address, results);
-        }
-    }
-
-    private void ExtractSingleTargetDirect(ulong delegateAddr, List<(ulong addr, ulong mt, ulong delegateAddr)> results)
-    {
-        ulong targetAddr;
-        if (_reader.ReadPointer(delegateAddr + (ulong)_registry.DelegateTargetOffset, out targetAddr)
-            && targetAddr != 0)
-        {
-            // Instance method handler: _target is the subscriber object.
-            ulong targetMt;
-            if (_reader.ReadPointer(targetAddr, out targetMt) && targetMt != 0)
-                results.Add((targetAddr, targetMt, delegateAddr));
-        }
-        else
-        {
-            // Static method handler: use the delegate object itself as the token
-            // (matches existing behaviour in ExtractSingleSubscriber).
-            ulong delegateMt;
-            if (_reader.ReadPointer(delegateAddr, out delegateMt) && delegateMt != 0)
-                results.Add((delegateAddr, delegateMt, delegateAddr));
-        }
     }
 
     // ──────────────────────────────────────────────────────────────────────────────

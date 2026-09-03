@@ -32,7 +32,23 @@ internal sealed record EventLeakDomainResult(
     // Phase E / design §7: cross-group correlation views, folded once over the completed
     // group set. First-class collections, not buried in a per-group breakdown.
     IReadOnlyList<NameCountEntry>? TopSubscriberTypesAcrossGroups = null,
-    IReadOnlyList<NameCountEntry>? TopHandlerMethodsAcrossGroups = null) : AnalyzerDomainResult;
+    IReadOnlyList<NameCountEntry>? TopHandlerMethodsAcrossGroups = null,
+    // P2-2 (docs/analysis/phase1/eventleak-analyzer-audit.md): distinguishes "checked and clean"
+    // from "not scanned" — PublisherRegistry.CandidatePublisherCount vs. the distinct set of
+    // publisher MTs that produced at least one accepted leak (AddToAccumulator's leakingMTs).
+    // Both MT-keyed, so the split stays exact even if two loaded types share a display name.
+    int PublisherTypesScanned = 0,
+    int CleanPublisherTypeCount = 0,
+    // P3-3 (docs/analysis/phase1/eventleak-analyzer-audit.md): counts folded once over
+    // TopLeakGroups, mirroring PublisherTypesScanned/CleanPublisherTypeCount's shape — cheap
+    // aggregate visibility for the two highest-signal, most common event-leak categories.
+    int TimerEventLeakGroupCount = 0,
+    int PropertyChangedEventLeakGroupCount = 0,
+    // P3-4 (docs/analysis/phase1/eventleak-analyzer-audit.md): subscriber-count distribution
+    // across ALL leak instances, in ascending-bucket order (not sorted by count — a histogram
+    // reads correctly only in its natural order). Distinguishes "one giant leaking publisher"
+    // from "many small leaks adding up".
+    IReadOnlyList<NameCountEntry>? SubscriberCountHistogram = null) : AnalyzerDomainResult;
 
 internal sealed record EventLeakGroupSnapshot(
     string PublisherType,
@@ -48,7 +64,13 @@ internal sealed record EventLeakGroupSnapshot(
     ulong EstimatedSubscriberRetainedBytes = 0,
     bool HasDuplicateSubscriptions = false,
     int DisposedButSubscribedInstances = 0,
-    bool HasLifetimeMismatch = false);
+    bool HasLifetimeMismatch = false,
+    // P3-3 (docs/analysis/phase1/eventleak-analyzer-audit.md): pure string-pattern
+    // classification (EventLeakAnalyzer.IsTimerEvent/IsPropertyChangedEvent) over
+    // PublisherType/EventFieldName — computed once per group, not per instance, since both
+    // depend only on data shared by every instance in the group.
+    bool IsTimerEvent = false,
+    bool IsPropertyChangedEvent = false);
 
 /// <summary>Per-subscriber detail row shown in the instance drill-down.</summary>
 internal sealed record SubscriberDetail(

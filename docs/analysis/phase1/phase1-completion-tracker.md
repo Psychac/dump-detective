@@ -10,12 +10,12 @@
 | Metric | Value |
 |--------|-------|
 | **Total Analyzers Audited** | 35 |
-| **Total P0 Identified** | 77 |
-| **Total P1 Identified** | 155 |
-| **P0 Implemented** | 70 |
-| **P1 Implemented** | 126 |
-| **P2 Implemented** | 81 |
-| **Overall P0+P1 Rate** | 84.5% (196/232) |
+| **Total P0 Identified** | 76 (was 77 — EventLeakAnalyzer's superseded 3-item pre-redesign count swapped for its fresh 2-item roadmap, 2026-09-03) |
+| **Total P1 Identified** | 153 (was 155 — same swap, fresh 4-item roadmap replacing the superseded 6-item count) |
+| **P0 Implemented** | 72 (70 + EventLeakAnalyzer's 2/2) |
+| **P1 Implemented** | 130 (126 + EventLeakAnalyzer's 4/4) |
+| **P2 Implemented** | 84 (81 + EventLeakAnalyzer's 3/3) |
+| **Overall P0+P1 Rate** | 88.2% (202/229) |
 
 ---
 
@@ -32,8 +32,9 @@ P0-4 was a regression hiding behind two individually-DONE roadmap items).
 | 1 | **AsyncStateMachineAnalyzer** | 2026-08-14 | 62→86/100 | 4/4 | 8/8 | 6/8 | 1/4 | ✅ Re-audit found P0-4 (regex drift silently defeated P2-4), P1-7 (gen2 fraction scope mismatch), P1-8 (dead code) — all fixed same-session; P2-5,P2-6 done, P2-7,P2-8 pending; see [async-state-machine-analyzer-audit.md](async-state-machine-analyzer-audit.md) |
 | 2 | **AsyncTaskAnalyzer** | 2026-08-15 | 68→87/100 | 0/0 | 0/2 | 0/4 | 0/7 | ✅ Full ground-truth re-audit (fresh roadmap numbering, supersedes original P0-P3 doc). No correctness bugs found. Found P1-1 (TaskCompletionSource/IValueTaskSource candidate discovery bypasses the Phase 1 disk-cache fast path — redundant ClrMD cost repeated every run × every parallel worker, whereas the equivalent Task-classification flag is a zero-cost persisted bit) and P1-2 (trend comparer untouched since original audit — 9 fields added across P2-6/P2-7/P3-1/P3-2/P3-3 have zero regression tracking). Both pending; see [async-task-analyzer-audit.md](async-task-analyzer-audit.md) |
 | 3 | **AllocationPatternAnalyzer** | 2026-08-15 | 62→82/100 | 0/0 | 0/2 | 0/3 | 0/5 | ✅ Full ground-truth re-audit (fresh roadmap numbering, supersedes original P0-P3 doc). No correctness bugs found — production-ready unconditionally. Found P1 (`TryGetTypeName` resolves names for every scanned candidate, up to 20,000 on the Full preset, not just the emitted top-N — reintroduces the class of ClrMD-call waste an earlier fix already addressed once) and P1 (`ComputeExactGenBytes`'s live-ClrMD segment-based happy path has zero test coverage — every existing test only exercises the approximate fallback). Both pending; see [allocation-pattern-analyzer-audit.md](allocation-pattern-analyzer-audit.md) |
+| 4 | **EventLeakAnalyzer** | 2026-09-03 | 68→92/100 | 2/2 | 4/4 | 3/3 | 2/5 | ✅ P0+P1+P2 COMPLETE, same-session. Full ground-truth re-audit (fresh roadmap numbering, supersedes original P0-P3 doc) triggered by a ground-up code redesign since the prior audit (`PublisherRegistry`/`IPublisherShape` architecture replacing the old scanner) — the superseded doc had 0/9 items implemented before the redesign made them moot, not because the analyzer was neglected. Found+fixed P0-1 (`EventLeakAnalyzer` never declared `IRequiresDominatorTreeIndex`, so Tier 2 exact retained bytes silently degraded to Tier 1 whenever run outside the full analyzer suite) and P0-2 (`EventLeakTrendComparer.Compare` silently dropped a metric it declared in `ExtractMetrics`). P1: registry-build cancellation (now the dominant cost phase at scale, ~57% of wall time at 25.6GB), `SubscriberDetail.SizeIsExact` wired through to the report, duplicate delegate-chain-walk logic consolidated onto the shared `DelegateChainWalker`, and both report-layer display caps removed entirely (`MaxGroupsToShow`/`MaxInstancesToShow`) per this project's standing no-top-N-truncation rule rather than adding a disclosure notice. P2: found+fixed a second real correctness bug (`PublisherRegistry.Build`'s Pass 2 silently produced zero instance descriptors whenever a cache existed without a built disk index — the same condition `FindEventLeaks` itself already guarded against), an MT-keyed exact clean-vs-leaking publisher-type count, and a tightened `_`-prefix event-field heuristic for types with zero declared events. P3: 2/5 — timer/`INotifyPropertyChanged` categorization and a subscriber-count histogram both shipped (pure classification/local accumulation, no new heap reads, no fixture dependency); `EventHandlerListShape`/`WeakEventShape` (WinForms/WPF) and disk-persisted `PublisherRegistry` deliberately deferred — no verification fixture exists in this repo for either UI-framework pattern, and the disk-persistence item's own design-doc measurement gate ("defer until the in-memory version is measured") hasn't been satisfied. See [eventleak-analyzer-audit.md](eventleak-analyzer-audit.md) |
 
-**Subtotal: 4/4 P0 done, 8/8 P1 done** (3 analyzers re-audited so far; AsyncTaskAnalyzer's and AllocationPatternAnalyzer's re-audit roadmaps have no P0 items, so their own P0/P1 counts (0/0 and 0/2 each) are not summed into this subtotal, which tracks the pre-existing P0/P1 pattern from the first re-audited analyzer)
+**Subtotal: 6/6 P0 done, 12/12 P1 done** (4 analyzers re-audited so far; AsyncTaskAnalyzer's and AllocationPatternAnalyzer's re-audit roadmaps have no P0 items, so their own P0/P1 counts (0/0 and 0/2 each) are not summed into this subtotal, which tracks the P0/P1 pattern from AsyncStateMachineAnalyzer and EventLeakAnalyzer — the two re-audited analyzers whose fresh roadmaps do have real P0 items, both now fully closed)
 
 ---
 
@@ -83,9 +84,8 @@ P0-4 was a regression hiding behind two individually-DONE roadmap items).
 
 | Analyzer | P0 | P1 | Total Pending | Notes |
 |----------|----|----|---|-------|
-| EventLeakAnalyzer | 0/3 | 0/6 | 9 | — |
 
-**Subtotal: 0/3 P0 done, 0/6 P1 done** (not-started pools)
+*(EventLeakAnalyzer moved to the RE-AUDITED table above, 2026-09-03 — no rows currently tracked here. The Progress Summary's "5 analyzers with zero completion" figure below was never fully reconciled against named rows in this table even before this change — the other 4 were not individually listed here, and verifying them is out of scope of this update.)*
 
 ---
 
@@ -95,14 +95,14 @@ P0-4 was a regression hiding behind two individually-DONE roadmap items).
 
 | Category | Count | Notes |
 |----------|-------|-------|
-| Analyzers with P0+P1 100% complete (all P1 done) | 23 | All P0+P1 recommendations implemented (includes AsyncTaskAnalyzer, AllocationPatternAnalyzer, StaticRootLeakDetector, GCRootAnalyzer, TimerLeakAnalyzer, MemoryAnalyzer, GCHandleAnalyzer, HeapTopologyAnalyzer, DominatorAnalyzer, GCGenerationAnalyzer, HttpObjectAnalyzer, ReferenceChainAnalyzer (2026-09-01), ObjectShapeAnalyzer (2026-09-01), and 10 others) |
+| Analyzers with P0+P1 100% complete (all P1 done) | 24 | All P0+P1 recommendations implemented (includes AsyncTaskAnalyzer, AllocationPatternAnalyzer, StaticRootLeakDetector, GCRootAnalyzer, TimerLeakAnalyzer, MemoryAnalyzer, GCHandleAnalyzer, HeapTopologyAnalyzer, DominatorAnalyzer, GCGenerationAnalyzer, HttpObjectAnalyzer, ReferenceChainAnalyzer (2026-09-01), ObjectShapeAnalyzer (2026-09-01), EventLeakAnalyzer (2026-09-03, P0+P1+P2 all done), and 10 others) |
 | Analyzers with partial P0+P1 completion | 7 | Some items done, some pending (includes LeakCandidateAnalyzer, ThreadAnalyzer, LockGraphAnalyzer) |
-| Analyzers with zero P0+P1 completion | 5 | Not yet started |
-| **Total P0 recommendations** | **77** | — |
-| **P0 items implemented** | **70** | 90.9% |
-| **Total P1 recommendations** | **155** | — |
-| **P1 items implemented** | **125** | 80.6% |
-| **Combined P0+P1 rate** | **84.1%** | (195/232) |
+| Analyzers with zero P0+P1 completion | 4 | Not yet started (EventLeakAnalyzer moved out of this pool 2026-09-03) |
+| **Total P0 recommendations** | **76** | (was 77 — EventLeakAnalyzer's superseded 3-item pre-redesign count swapped for its fresh 2-item roadmap) |
+| **P0 items implemented** | **72** | 94.7% |
+| **Total P1 recommendations** | **153** | (was 155 — same swap, fresh 4-item roadmap replacing the superseded 6-item count) |
+| **P1 items implemented** | **129** | 84.3% |
+| **Combined P0+P1 rate** | **87.8%** | (201/229) |
 
 ---
 
@@ -130,7 +130,7 @@ Different audits use different conventions for marking completion:
 - ArrayAnalyzer, BoxingAnalyzer, SegmentReservationAnalyzer, ThreadStackClusterAnalyzer, FinalizableObjectAnalyzer, JitAnalyzer, LohFragmentationAnalyzer, MemoryAnalyzer, GCHandleAnalyzer, HeapTopologyAnalyzer, StringAnalyzer, GCGenerationAnalyzer, WcfChannelAnalyzer, HttpObjectAnalyzer, and CrashAnalyzer are the only analyzers with ALL P0+P1+P2+P3 complete (ArrayAnalyzer 4/4 P3; BoxingAnalyzer 4/4 P3, including unit test coverage for pure helper logic; SegmentReservationAnalyzer 4/4 P3, including the P3-4 regions-based GC per-region statistics evolution item; ThreadStackClusterAnalyzer 4/4 P3, including the P3-3 cross-analyzer correlation with `HangAnalyzer`; FinalizableObjectAnalyzer 3/3 P3 plus its 2 Evolution items, including root-path cross-reference via `RootPathFinder`; JitAnalyzer 2/2 P3, including a per-module JIT stack heatmap cross-referenced with `ModuleDomainResult` via a new reusable `InsightFinding.EvidenceTables` capability; LohFragmentationAnalyzer 4/4 P3, including converting `LohSegmentStats` to a `readonly record struct` and rewiring its type-aggregated LOH/POH table onto the unbounded Phase 1 `TypeAggregateIndexEntry` instead of a capped top-100 sample; MemoryAnalyzer 4/4 P3, including per-walk BFS progress reporting shared across 3 other analyzers via `RetainedSizeCandidateSelector`, cancellation support inside `BoundedGraphWalk.ComputeExclusiveRetained`, and one item resolved by cross-linking to `HeapTopologyAnalyzer`'s pre-existing per-logical-heap balance metrics instead of duplicating them; GCHandleAnalyzer 4/4 P2 and 4/4 P3, including a binary-format version bump (`HandleSnapshot.bin` v1→v2) to carry dependent-handle targets inline instead of a second live enumeration pass, and one P3 item found already covered by the separate `FinalizableObjectAnalyzer`; HeapTopologyAnalyzer 5/5 P2 and 4/4 P3, including a shared `SegmentSummary`/`SegmentSummaryCache` that eliminates the segment-enumeration duplication with `SegmentReservationAnalyzer` — the last remaining "platform-level opportunity" noted below — and one P3 item found not applicable since the SOH full-scan mode it targeted no longer exists in the codebase; StringAnalyzer 6/6 P2 and 4/4 P3, including a binary-format version bump (`TypeAggregateIndexEntry` v3→v4) replacing an averaged Gen2-bytes estimate with an exact sum, and retention-path sampling for the top duplicate patterns via the shared `RootPathFinder` infrastructure; GCGenerationAnalyzer 5/5 P2 and 5/5 P3, including switching its per-type ranking and its `InsightEngine` cross-analyzer correlation from Gen2 instance count to exact Gen2 bytes, a `FinalizableGen2Count`/`FinalizableGen2Bytes` cross-reference to `FinalizableObjectAnalyzer`, and a P3-3 "GC segment map" item found superseded by `HeapTopologyAnalyzer` that nonetheless surfaced and fixed a real bug in the shared `AnalyzerHelpers.ComputeExactGenBytes` helper, which had been zeroing Gen0/Gen1 bytes on every classic (non-regions) GC dump; WcfChannelAnalyzer 4/4 P2 and 3/3 P3, including a type-name-token `WcfBindingHint` classification that drives binding-specific finding remediation text, a new `InsightEngine` correlation between stuck-Opening channels and timeout exceptions, splitting invalid/out-of-range channel-state reads into their own `InvalidStateCount` instead of folding them into `OtherChannels`, duplex/session channel-shape counts, and a live-`ClrHeap` test proving `MergePartial`'s new-key-from-worker branch is unreachable in production — one P2 item (a per-type cap indicator) found superseded since the cap it targeted no longer exists anywhere in the codebase; HttpObjectAnalyzer 5/5 P2 and 3/3 P3, including unified per-instance sampling for `HttpClient`/`HttpWebRequest`/`ServicePoint` with field names for both .NET Framework and .NET 5+ verified by decompiling the actual runtime assemblies rather than assumed, `IHttpClientFactory` handler-rotation detection, a free GC-generation breakdown reusing an already-populated index field, and a handler-per-client ratio plus module-breakdown table — the P2-5 roadmap item's literal per-instance chain-depth walk was deliberately excluded as disproportionate once the module breakdown already answered the same diagnostic question; CrashAnalyzer 6/6 P2 and 2/2 P3, including exact per-type `AggregateException` inner-exception unwrapping, a `(exception_type, top_user_frame)` crash-bucket dedup key, rethrow detection with confidence downgrade, a lead-finding `ConfidenceScore` now derived from the real per-candidate confidence distribution instead of a hardcoded value, and exception-to-assembly attribution via direct `ClrStackFrame.Method.Type.Module` resolution rather than a `ModuleDomainResult` cross-reference — plus its E-1 Evolution item (Gen2/LOH retention paths via `RootPathFinder`, same pattern as `EventLeakAnalyzer`); E-2/E-3 remain, both platform-level rather than CrashAnalyzer-specific)
 
 **Remaining Work:**
-- 9 analyzers (26%) have zero P0/P1 implementation
+- 8 analyzers (23%) have zero P0/P1 implementation (was 9 — EventLeakAnalyzer moved to fully complete, 2026-09-03)
 - High-impact blockers: LeakCandidateAnalyzer (13 items pending across P0-P3); ThreadAnalyzer's remaining 5 items (P0-3, P1-1, P1-2, P2-3, P3-5) are down from 7-8 as of 2026-09-02 — only P2-3 (small perf cleanup) and P3-5 (deferred pending .NET 11 GA) are implementation debt, the other three are ClrMD API gaps
 - ~~Platform-level opportunity: HeapTopologyAnalyzer + SegmentReservationAnalyzer share segment enumeration code (P2 evolution)~~ — resolved 2026-08-27 via `SegmentSummary`/`SegmentSummaryCache` (see `docs/refactor/heap-segment-shared-pass-plan.md`)
 

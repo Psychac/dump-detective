@@ -6,10 +6,11 @@ namespace DumpDetective.Analysis.Analyzers.EventLeak;
 
 /// <summary>
 /// Pointer-chase logic for extracting subscriber (address, methodTable, delegateAddress)
-/// tuples from a MulticastDelegate chain. Used by <see cref="FieldBackedDelegateShape.Extract"/>
-/// (shape-level correctness tests) and mirrored inline by <c>EventLeakFastScanner</c>'s hot
-/// path — the two are kept as separate call sites deliberately (design §5): the hot path must
-/// never go through the <see cref="IPublisherShape"/> virtual call.
+/// tuples from a MulticastDelegate chain. Used both by <see cref="FieldBackedDelegateShape.Extract"/>
+/// (shape-level correctness tests) and directly by <c>EventLeakFastScanner</c>'s hot path
+/// (P1-3, docs/analysis/phase1/eventleak-analyzer-audit.md) — this class is a plain static
+/// method, not a virtual <see cref="IPublisherShape"/> call, so the hot path can call it
+/// directly without incurring the per-object virtual dispatch design §5 avoids.
 /// </summary>
 internal static class DelegateChainWalker
 {

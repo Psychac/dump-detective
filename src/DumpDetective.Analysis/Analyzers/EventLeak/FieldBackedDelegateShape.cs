@@ -53,10 +53,16 @@ internal sealed class FieldBackedDelegateShape : IPublisherShape
 
             if (eventNames.Count > 0)
             {
+                // Type has at least one confirmed real event — the bare "_" prefix is trusted
+                // as a secondary signal for matching that event's backing field by name (P2-3).
                 if (!eventNames.Contains(field.Name) && !EventLeakAnalyzer.LooksLikeEventFieldName(field.Name))
                     continue;
             }
-            else if (!EventLeakAnalyzer.LooksLikeEventFieldName(field.Name))
+            // Type declares zero real events — no corroborating evidence a delegate field here
+            // is an event at all, so the bare "_" prefix alone must not qualify it (P2-3,
+            // docs/analysis/phase1/eventleak-analyzer-audit.md): only the stronger name-pattern
+            // signals (Event/Changed/Handler/Callback/Raised/Fired/k__BackingField) do.
+            else if (!EventLeakAnalyzer.LooksLikeEventFieldName(field.Name, allowBareUnderscorePrefix: false))
                 continue;
 
             // Absolute offset (including the MT header), same interior-offset correction as
@@ -84,10 +90,11 @@ internal sealed class FieldBackedDelegateShape : IPublisherShape
 
             if (eventNames.Count > 0)
             {
+                // See DescribeInstanceFields for why the bare "_" prefix is only trusted here.
                 if (!eventNames.Contains(sField.Name!) && !EventLeakAnalyzer.LooksLikeEventFieldName(sField.Name))
                     continue;
             }
-            else if (!EventLeakAnalyzer.LooksLikeEventFieldName(sField.Name))
+            else if (!EventLeakAnalyzer.LooksLikeEventFieldName(sField.Name, allowBareUnderscorePrefix: false))
                 continue;
 
             // Offset is meaningless for static descriptors — read via ClrStaticField instead.

@@ -16,11 +16,22 @@ internal class EventGroupInfo
     public Dictionary<string, int>? AllSubscriberTypeCounts { get; set; }
     // Handler-method counts accumulated across ALL instances (design §7 correlation phase).
     public Dictionary<(string Type, string? MethodName), int>? AllSubscriberMethodCounts { get; set; }
+    // Subscriber-count histogram bucket totals, accumulated across ALL instances in this group
+    // (not just the stored top-N) — indexed by EventLeakAnalyzer.SubscriberCountHistogramBuckets
+    // (P3-4, docs/analysis/phase1/eventleak-analyzer-audit.md). Folded across all groups in
+    // Analyze() into one cross-group distribution, the same shape as the §7 correlation views.
+    public int[]? SubscriberCountBuckets { get; set; }
 }
 
 internal class EventLeakInfo
 {
     public ulong PublisherAddress { get; set; }
+    /// <summary>Publisher's MethodTable — 0 for statics before the address-free path is set (see
+    /// <c>CreateLeakInfo</c>'s <c>publisherMethodTable</c> parameter). Used to track distinct
+    /// leaking publisher types against <c>PublisherRegistry.CandidatePublisherCount</c> (P2-2,
+    /// docs/analysis/phase1/eventleak-analyzer-audit.md) — MT-keyed, not name-keyed, so it stays
+    /// exact even if two loaded types happen to share a display name.</summary>
+    public ulong PublisherMethodTable { get; set; }
     public string PublisherType { get; set; } = string.Empty;
     public string EventFieldName { get; set; } = string.Empty;
     public bool IsStatic { get; set; }

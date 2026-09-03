@@ -173,6 +173,223 @@ public sealed class EventLeakAnalyzerAccuracyTests
     }
 
     // -----------------------------------------------------------------------
+    // AddToAccumulator — leakingMTs tracking (P2-2, docs/analysis/phase1/eventleak-analyzer-audit.md)
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void AddToAccumulator_RecordsPublisherMethodTable_InLeakingMTs()
+    {
+        var acc = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), EventLeakAnalyzer.GroupAccumulator>();
+        var leakingMTs = new HashSet<ulong>();
+        var leak = new EventLeakInfo
+        {
+            PublisherMethodTable = 0x1234,
+            PublisherType = "App.Publisher",
+            EventFieldName = "DataReady",
+            IsStatic = false,
+            SubscriberCount = 1,
+        };
+
+        EventLeakAnalyzer.AddToAccumulator(acc, leak, capacity: 5, leakingMTs);
+
+        leakingMTs.Should().ContainSingle().Which.Should().Be(0x1234UL);
+    }
+
+    [Fact]
+    public void AddToAccumulator_MultipleLeaksSameMethodTable_DeduplicatesInLeakingMTs()
+    {
+        var acc = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), EventLeakAnalyzer.GroupAccumulator>();
+        var leakingMTs = new HashSet<ulong>();
+
+        for (int i = 0; i < 3; i++)
+        {
+            var leak = new EventLeakInfo
+            {
+                PublisherMethodTable = 0xAAAA,
+                PublisherType = "App.Publisher",
+                EventFieldName = "DataReady",
+                IsStatic = false,
+                SubscriberCount = 1,
+            };
+            EventLeakAnalyzer.AddToAccumulator(acc, leak, capacity: 5, leakingMTs);
+        }
+
+        leakingMTs.Should().ContainSingle("three leaks from the same MT count as one leaking publisher type, not three");
+    }
+
+    [Fact]
+    public void AddToAccumulator_WithoutLeakingMTsArgument_DoesNotThrow()
+    {
+        var acc = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), EventLeakAnalyzer.GroupAccumulator>();
+        var leak = new EventLeakInfo { PublisherType = "App.Publisher", EventFieldName = "DataReady" };
+
+        var act = () => EventLeakAnalyzer.AddToAccumulator(acc, leak, capacity: 5);
+
+        act.Should().NotThrow("leakingMTs is optional so existing/other callers that don't care about the clean-vs-leaking count keep working");
+    }
+
+    // -----------------------------------------------------------------------
+    // LooksLikeEventFieldName — allowBareUnderscorePrefix (P2-3, docs/analysis/phase1/eventleak-analyzer-audit.md)
+    // -----------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("_onComplete")]
+    [InlineData("_factory")]
+    [InlineData("_selector")]
+    [InlineData("_predicate")]
+    public void LooksLikeEventFieldName_BareUnderscorePrefixDisallowed_RejectsOrdinaryCallbackFields(string fieldName)
+    {
+        // These are exactly the false-positive examples called out in the audit: private
+        // delegate-typed fields that are callbacks/factories, not C# event backing fields.
+        EventLeakAnalyzer.LooksLikeEventFieldName(fieldName, allowBareUnderscorePrefix: false)
+            .Should().BeFalse($"'{fieldName}' has no event-specific name pattern and the type declares no real events");
+    }
+
+    [Theory]
+    [InlineData("_onComplete")]
+    [InlineData("_myEvent")]
+    public void LooksLikeEventFieldName_BareUnderscorePrefixAllowed_AcceptsAnyUnderscoreField(string fieldName)
+    {
+        // Default (allowBareUnderscorePrefix: true) preserves the original, broader behavior —
+        // used when the type is already known to declare at least one real event.
+        EventLeakAnalyzer.LooksLikeEventFieldName(fieldName).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("_myEventHandler")]   // "Handler"
+    [InlineData("myEvent")]           // "Event"
+    [InlineData("_onValueChanged")]   // "Changed"
+    [InlineData("<MyEvent>k__BackingField")]
+    public void LooksLikeEventFieldName_StrongNamePattern_AcceptedEvenWithoutBareUnderscorePrefix(string fieldName)
+    {
+        // Strong, event-specific substrings must still qualify a field regardless of whether the
+        // bare "_" prefix fallback is allowed — tightening P2-3 must not regress these.
+        EventLeakAnalyzer.LooksLikeEventFieldName(fieldName, allowBareUnderscorePrefix: false)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void LooksLikeEventFieldName_NullOrEmpty_AlwaysRejected()
+    {
+        EventLeakAnalyzer.LooksLikeEventFieldName(null).Should().BeFalse();
+        EventLeakAnalyzer.LooksLikeEventFieldName(string.Empty).Should().BeFalse();
+    }
+
+    // -----------------------------------------------------------------------
+    // IsTimerEvent / IsPropertyChangedEvent (P3-3, docs/analysis/phase1/eventleak-analyzer-audit.md)
+    // -----------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("System.Timers.Timer", "Elapsed")]
+    [InlineData("System.Windows.Forms.Timer", "Tick")]
+    [InlineData("System.Windows.Threading.DispatcherTimer", "Tick")]
+    public void IsTimerEvent_KnownTimerTypeAndEvent_ReturnsTrue(string publisherType, string eventFieldName)
+    {
+        EventLeakAnalyzer.IsTimerEvent(publisherType, eventFieldName).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("System.Timers.Timer", "Tick")]              // wrong event for this type
+    [InlineData("System.Windows.Forms.Timer", "Elapsed")]    // wrong event for this type
+    [InlineData("App.MyPublisher", "Elapsed")]                // not a timer type at all
+    [InlineData("System.Threading.Timer", "Elapsed")]         // System.Threading.Timer has no event
+    public void IsTimerEvent_MismatchedTypeOrEvent_ReturnsFalse(string publisherType, string eventFieldName)
+    {
+        EventLeakAnalyzer.IsTimerEvent(publisherType, eventFieldName).Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsPropertyChangedEvent_MatchesByNameOnly_RegardlessOfPublisherType()
+    {
+        // Any type can implement INotifyPropertyChanged — this is a name-only match.
+        EventLeakAnalyzer.IsPropertyChangedEvent("PropertyChanged").Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsPropertyChangedEvent_OtherEventName_ReturnsFalse()
+    {
+        EventLeakAnalyzer.IsPropertyChangedEvent("PropertyChanging").Should().BeFalse();
+        EventLeakAnalyzer.IsPropertyChangedEvent("Changed").Should().BeFalse();
+    }
+
+    // -----------------------------------------------------------------------
+    // Subscriber-count histogram (P3-4, docs/analysis/phase1/eventleak-analyzer-audit.md)
+    // -----------------------------------------------------------------------
+
+    [Theory]
+    [InlineData(1, "1")]
+    [InlineData(2, "2")]
+    [InlineData(3, "3-5")]
+    [InlineData(5, "3-5")]
+    [InlineData(6, "6-10")]
+    [InlineData(10, "6-10")]
+    [InlineData(11, "11-25")]
+    [InlineData(25, "11-25")]
+    [InlineData(26, "26-50")]
+    [InlineData(50, "26-50")]
+    [InlineData(51, "51-100")]
+    [InlineData(100, "51-100")]
+    [InlineData(101, "101+")]
+    [InlineData(1_000_000, "101+")]
+    public void GetSubscriberCountBucketIndex_ReturnsExpectedBucketLabel(int subscriberCount, string expectedLabel)
+    {
+        int idx = EventLeakAnalyzer.GetSubscriberCountBucketIndex(subscriberCount);
+
+        EventLeakAnalyzer.SubscriberCountHistogramBuckets[idx].Label.Should().Be(expectedLabel);
+    }
+
+    [Fact]
+    public void AddToAccumulator_IncrementsCorrectSubscriberCountBucket()
+    {
+        var acc = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), EventLeakAnalyzer.GroupAccumulator>();
+        var leak = new EventLeakInfo { PublisherType = "App.Publisher", EventFieldName = "DataReady", SubscriberCount = 7 };
+
+        EventLeakAnalyzer.AddToAccumulator(acc, leak, capacity: 5);
+
+        var group = acc[("App.Publisher", "DataReady", false)];
+        int expectedIdx = EventLeakAnalyzer.GetSubscriberCountBucketIndex(7); // "6-10"
+        group.SubscriberCountBuckets[expectedIdx].Should().Be(1);
+        group.SubscriberCountBuckets.Sum().Should().Be(1, "exactly one leak was added, so exactly one bucket total");
+    }
+
+    [Fact]
+    public void BuildSubscriberCountHistogram_FoldsAcrossAllGroups_InAscendingBucketOrder()
+    {
+        var bucketsA = new int[EventLeakAnalyzer.SubscriberCountHistogramBuckets.Length];
+        bucketsA[0] = 3; // "1"
+        var bucketsB = new int[EventLeakAnalyzer.SubscriberCountHistogramBuckets.Length];
+        bucketsB[0] = 2; // "1"
+        bucketsB[^1] = 5; // "101+"
+
+        var groups = new List<EventGroupInfo>
+        {
+            new() { PublisherType = "A", EventFieldName = "E", SubscriberCountBuckets = bucketsA },
+            new() { PublisherType = "B", EventFieldName = "E", SubscriberCountBuckets = bucketsB },
+        };
+
+        List<NameCountEntry> histogram = EventLeakAnalyzer.BuildSubscriberCountHistogram(groups);
+
+        histogram.Should().HaveCount(EventLeakAnalyzer.SubscriberCountHistogramBuckets.Length);
+        histogram[0].Name.Should().Be("1");
+        histogram[0].Count.Should().Be(5, "3 (group A) + 2 (group B)");
+        histogram[^1].Name.Should().Be("101+");
+        histogram[^1].Count.Should().Be(5);
+    }
+
+    [Fact]
+    public void BuildSubscriberCountHistogram_GroupWithNullBuckets_IsSkippedNotThrown()
+    {
+        var groups = new List<EventGroupInfo>
+        {
+            new() { PublisherType = "A", EventFieldName = "E", SubscriberCountBuckets = null },
+        };
+
+        var act = () => EventLeakAnalyzer.BuildSubscriberCountHistogram(groups);
+
+        act.Should().NotThrow();
+    }
+
+    // -----------------------------------------------------------------------
     // ParseRootPublisher
     // -----------------------------------------------------------------------
 

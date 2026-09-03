@@ -14,7 +14,12 @@ using Microsoft.Extensions.Logging;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    public class EventLeakAnalyzer : IAnalyzer, IHeapIndexScanParticipant, IRequiresReachableGraphIndex
+    // IRequiresDominatorTreeIndex (§10.3): opts this analyzer into Stage B's exact dominator
+    // tree build gate (DiskBackedObjectIndexWriter.Build's buildStageB) so
+    // cache.TryGetDominatorTreeProvider() in Analyze() below is reliably non-null instead of
+    // depending on some other analyzer (DominatorAnalyzer, GCRootAnalyzer, etc.) also being
+    // active in the same run to have implicitly requested it.
+    public class EventLeakAnalyzer : IAnalyzer, IHeapIndexScanParticipant, IRequiresReachableGraphIndex, IRequiresDominatorTreeIndex
     {
         // Presentation and severity tuning moved to EventLeakOptions
 
@@ -33,6 +38,10 @@ namespace DumpDetective.Analysis.Analyzers
         private EventLeakFastScanner? _participantFastScanner;
         private PublisherRegistry? _participantRegistry;
         private Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), GroupAccumulator>? _participantGroupAcc;
+        // P2-2 (docs/analysis/phase1/eventleak-analyzer-audit.md): distinct publisher MTs that
+        // produced at least one accepted leak, tracked by AddToAccumulator — compared against
+        // PublisherRegistry.CandidatePublisherCount to report "types scanned, zero leaking".
+        private HashSet<ulong>? _participantLeakingMTs;
         private Dictionary<ulong, string>? _participantRootHints;
         private IReadOnlyList<ClrAppDomain>? _participantAppDomains;
         private List<(ulong addr, ulong mt, ulong delegateAddr)>? _participantBuf;
@@ -69,6 +78,7 @@ namespace DumpDetective.Analysis.Analyzers
             _participantScanSucceeded = false;
             _participantOptions = context.AnalysisOptions.EventLeak;
             _participantGroupAcc = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), GroupAccumulator>();
+            _participantLeakingMTs = new HashSet<ulong>();
             _participantAppDomains = context.Heap.Runtime.AppDomains;
             context.ReportSubPhase?.Invoke("building root hint map");
             var __rootHintSw = System.Diagnostics.Stopwatch.StartNew();
@@ -76,6 +86,10 @@ namespace DumpDetective.Analysis.Analyzers
             _logger?.LogDebug("EventLeakAnalyzer.BuildRootHintMap: {ElapsedSeconds:F2}s", __rootHintSw.Elapsed.TotalSeconds);
             context.ReportSubPhase?.Invoke("building publisher registry");
             var __registrySw = System.Diagnostics.Stopwatch.StartNew();
+            // No CancellationToken to thread through here — IHeapIndexScanParticipant.BeforeHeapIndexScan
+            // doesn't carry one (AnalysisContext has none either); widening that shared interface for
+            // every participant is out of scope for this fix. The FindEventLeaks call site below does
+            // have one and passes it through.
             _participantRegistry = PublisherRegistry.Build(context.Heap, context.Cache);
             _logger?.LogDebug("EventLeakAnalyzer.PublisherRegistry.Build: {ElapsedSeconds:F2}s", __registrySw.Elapsed.TotalSeconds);
             var __fastScannerSw = System.Diagnostics.Stopwatch.StartNew();
@@ -94,7 +108,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             _participantFastScanner.ScanEntry(
                 in entry, _participantBuf!, _participantGroupAcc!, _participantRootHints!,
-                _participantOptions!, ref _participantEventsScanned, ref _participantPublisherInstances);
+                _participantOptions!, _participantLeakingMTs!, ref _participantEventsScanned, ref _participantPublisherInstances);
         }
 
         void IHeapIndexScanParticipant.OnHeapIndexScanCompleted(bool succeeded)
@@ -110,6 +124,31 @@ namespace DumpDetective.Analysis.Analyzers
         }
 
         // internal so EventLeakFastScanner can reference the type without reflection.
+        // P3-4 (docs/analysis/phase1/eventleak-analyzer-audit.md): fixed, ordered subscriber-count
+        // buckets for the cross-group distribution histogram — distinguishes "one giant leaking
+        // publisher" from "many small leaks adding up". Small and allocation-free per group
+        // (plain int[] indexed by bucket, not a Dictionary); GetSubscriberCountBucketIndex is an
+        // O(BucketCount) linear scan over 8 entries, the only per-leak cost.
+        internal static readonly (string Label, int MaxInclusive)[] SubscriberCountHistogramBuckets =
+        [
+            ("1", 1),
+            ("2", 2),
+            ("3-5", 5),
+            ("6-10", 10),
+            ("11-25", 25),
+            ("26-50", 50),
+            ("51-100", 100),
+            ("101+", int.MaxValue)
+        ];
+
+        internal static int GetSubscriberCountBucketIndex(int subscriberCount)
+        {
+            for (int i = 0; i < SubscriberCountHistogramBuckets.Length; i++)
+                if (subscriberCount <= SubscriberCountHistogramBuckets[i].MaxInclusive)
+                    return i;
+            return SubscriberCountHistogramBuckets.Length - 1;
+        }
+
         internal class GroupAccumulator
         {
             public int InstanceCount;
@@ -126,20 +165,32 @@ namespace DumpDetective.Analysis.Analyzers
             // Populated in the same loop as AllSubscriberTypeCounts — MethodName is already resident
             // on SubscriberInfo, just discarded there.
             public Dictionary<(string Type, string? MethodName), int> AllSubscriberMethodCounts = new();
+            // P3-4: subscriber-count histogram, aggregated across ALL instances (not just TopInstances)
+            // for the same reason as the two dictionaries above.
+            public int[] SubscriberCountBuckets = new int[SubscriberCountHistogramBuckets.Length];
         }
 
         private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache? cache, EventLeakOptions options, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
         {
             var __sw = System.Diagnostics.Stopwatch.StartNew();
             var groupedLeaks = FindEventLeaks(heap, cache, options, progress, cancellationToken,
-                out int eventsScanned, out int publisherInstances);
+                out int eventsScanned, out int publisherInstances,
+                out int candidatePublisherTypeCount, out int leakingPublisherTypeCount);
             _logger?.LogDebug("EventLeakAnalyzer.FindEventLeaks: {ElapsedSeconds:F2}s", __sw.Elapsed.TotalSeconds);
+
+            // P2-2 (docs/analysis/phase1/eventleak-analyzer-audit.md): exact clean-vs-leaking
+            // split, MT-keyed on both sides (registry candidates and leakingMTs), so it stays
+            // correct even where a name-based fold would double-count or undercount types that
+            // share a display name.
+            int cleanPublisherTypeCount = Math.Max(0, candidatePublisherTypeCount - leakingPublisherTypeCount);
 
             if (groupedLeaks.Count == 0)
             {
                 return new EventLeakDomainResult(0, 0, 0, 0,
                     TotalEventsScanned: eventsScanned,
-                    TotalPublisherInstances: publisherInstances);
+                    TotalPublisherInstances: publisherInstances,
+                    PublisherTypesScanned: candidatePublisherTypeCount,
+                    CleanPublisherTypeCount: cleanPublisherTypeCount);
             }
 
             // Build type-size map once for EstimatedSubscriberRetainedBytes computation.
@@ -240,7 +291,17 @@ namespace DumpDetective.Analysis.Analyzers
                     EstimateGroupRetainedBytes(g, typeSizeMap),
                     HasDuplicateSubscriptions: groupHasDuplicates,
                     DisposedButSubscribedInstances: groupDisposedButSubscribedInstances,
-                    HasLifetimeMismatch: groupHasLifetimeMismatch));
+                    HasLifetimeMismatch: groupHasLifetimeMismatch,
+                    IsTimerEvent: IsTimerEvent(g.PublisherType, g.EventFieldName),
+                    IsPropertyChangedEvent: IsPropertyChangedEvent(g.EventFieldName)));
+            }
+
+            int timerEventLeakGroupCount = 0;
+            int propertyChangedEventLeakGroupCount = 0;
+            for (int i = 0; i < topLeakGroups.Count; i++)
+            {
+                if (topLeakGroups[i].IsTimerEvent) timerEventLeakGroupCount++;
+                if (topLeakGroups[i].IsPropertyChangedEvent) propertyChangedEventLeakGroupCount++;
             }
 
             var topLeakInstances = new List<EventLeakInstanceSnapshot>();
@@ -315,6 +376,7 @@ namespace DumpDetective.Analysis.Analyzers
             __sw.Restart();
             var topSubscriberTypesAcrossGroups = BuildTopSubscriberTypesAcrossGroups(groupedLeaks, TopCorrelationEntries);
             var topHandlerMethodsAcrossGroups = BuildTopHandlerMethodsAcrossGroups(groupedLeaks, TopCorrelationEntries);
+            var subscriberCountHistogram = BuildSubscriberCountHistogram(groupedLeaks);
             _logger?.LogDebug("EventLeakAnalyzer.BuildCorrelationViews: {ElapsedSeconds:F2}s", __sw.Elapsed.TotalSeconds);
 
             return new EventLeakDomainResult(
@@ -330,7 +392,12 @@ namespace DumpDetective.Analysis.Analyzers
                 TopPublisherEvents: topPublisherEventsFull,
                 TotalEstimatedRetainedBytes: totalEstimatedRetainedBytes,
                 TopSubscriberTypesAcrossGroups: topSubscriberTypesAcrossGroups,
-                TopHandlerMethodsAcrossGroups: topHandlerMethodsAcrossGroups);
+                TopHandlerMethodsAcrossGroups: topHandlerMethodsAcrossGroups,
+                PublisherTypesScanned: candidatePublisherTypeCount,
+                CleanPublisherTypeCount: cleanPublisherTypeCount,
+                TimerEventLeakGroupCount: timerEventLeakGroupCount,
+                PropertyChangedEventLeakGroupCount: propertyChangedEventLeakGroupCount,
+                SubscriberCountHistogram: subscriberCountHistogram);
         }
 
         // Cap on the correlation views (design §7) — first-class cross-group folds, not a
@@ -390,6 +457,33 @@ namespace DumpDetective.Analysis.Analyzers
                 named[name] = existing + kvp.Value;
             }
             return TopNByCount(named, topN, static (name, count) => new NameCountEntry(name, count));
+        }
+
+        /// <summary>
+        /// P3-4 (docs/analysis/phase1/eventleak-analyzer-audit.md): folds each group's
+        /// <see cref="EventGroupInfo.SubscriberCountBuckets"/> — itself already accumulated across
+        /// ALL instances in the group, not just the capped <c>TopInstances</c> — into one
+        /// cross-group subscriber-count distribution. Pure in-memory fold, no heap access.
+        /// Bucket order is preserved (ascending by subscriber count) rather than sorted by count,
+        /// since a histogram reads correctly only in its natural order.
+        /// </summary>
+        internal static List<NameCountEntry> BuildSubscriberCountHistogram(List<EventGroupInfo> groups)
+        {
+            var totals = new int[SubscriberCountHistogramBuckets.Length];
+            for (int i = 0; i < groups.Count; i++)
+            {
+                int[]? buckets = groups[i].SubscriberCountBuckets;
+                if (buckets is null)
+                    continue;
+
+                for (int b = 0; b < totals.Length; b++)
+                    totals[b] += buckets[b];
+            }
+
+            var result = new List<NameCountEntry>(totals.Length);
+            for (int b = 0; b < totals.Length; b++)
+                result.Add(new NameCountEntry(SubscriberCountHistogramBuckets[b].Label, totals[b]));
+            return result;
         }
 
         private static List<NameCountEntry> TopNByCount(Dictionary<string, int> counts, int topN, Func<string, int, NameCountEntry> makeEntry)
@@ -559,11 +653,18 @@ namespace DumpDetective.Analysis.Analyzers
         }
 
         // internal so EventLeakFastScanner can call without reflection.
+        // leakingMTs is the single choke point every accepted leak (instance or static) passes
+        // through, so it's the natural place to mark a publisher MT as "leaking" for P2-2's
+        // clean-vs-leaking count (docs/analysis/phase1/eventleak-analyzer-audit.md). Optional so
+        // callers that don't care about that count (tests) don't need to thread a set through.
         internal static void AddToAccumulator(
             Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), GroupAccumulator> acc,
             EventLeakInfo leak,
-            int capacity)
+            int capacity,
+            HashSet<ulong>? leakingMTs = null)
         {
+            leakingMTs?.Add(leak.PublisherMethodTable);
+
             var key = (leak.PublisherType, leak.EventFieldName, leak.IsStatic);
             if (!acc.TryGetValue(key, out var a))
             {
@@ -576,6 +677,7 @@ namespace DumpDetective.Analysis.Analyzers
             if (leak.SubscriberCount < a.MinSubscribers) a.MinSubscribers = leak.SubscriberCount;
             if (leak.SubscriberCount > a.MaxSubscribers) a.MaxSubscribers = leak.SubscriberCount;
             if (leak.SeverityScore > a.MaxSeverity) a.MaxSeverity = leak.SeverityScore;
+            a.SubscriberCountBuckets[GetSubscriberCountBucketIndex(leak.SubscriberCount)]++;
 
             // Accumulate subscriber type counts from ALL instances so the report type-breakdown
             // reflects the full population, not just the top-N stored instances.
@@ -632,6 +734,9 @@ namespace DumpDetective.Analysis.Analyzers
             if (source.MinSubscribers < dest.MinSubscribers) dest.MinSubscribers = source.MinSubscribers;
             if (source.MaxSubscribers > dest.MaxSubscribers) dest.MaxSubscribers = source.MaxSubscribers;
             if (source.MaxSeverity > dest.MaxSeverity) dest.MaxSeverity = source.MaxSeverity;
+
+            for (int i = 0; i < SubscriberCountHistogramBuckets.Length; i++)
+                dest.SubscriberCountBuckets[i] += source.SubscriberCountBuckets[i];
 
             foreach (var kvp in source.AllSubscriberTypeCounts)
             {
@@ -711,7 +816,7 @@ namespace DumpDetective.Analysis.Analyzers
             }
         }
 
-        private List<EventGroupInfo> FindEventLeaks(ClrHeap heap, IHeapAnalysisCache? cache, EventLeakOptions options, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken, out int eventsScanned, out int publisherInstances)
+        private List<EventGroupInfo> FindEventLeaks(ClrHeap heap, IHeapAnalysisCache? cache, EventLeakOptions options, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken, out int eventsScanned, out int publisherInstances, out int candidatePublisherTypeCount, out int leakingPublisherTypeCount)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -723,6 +828,10 @@ namespace DumpDetective.Analysis.Analyzers
             Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), GroupAccumulator> groupAcc;
             Dictionary<ulong, string> rootHints;
             PublisherRegistry registry;
+            // P2-2 (docs/analysis/phase1/eventleak-analyzer-audit.md): distinct publisher MTs
+            // marked by AddToAccumulator as having produced at least one accepted leak — see
+            // that method's leakingMTs parameter for where entries are added.
+            HashSet<ulong> leakingMTs;
 
             // BeforeHeapIndexScan/OnHeapEntry already ran via the pipeline's
             // HeapIndexScanDispatcher before AnalyzeAsync executes when a disk-backed heap
@@ -735,18 +844,20 @@ namespace DumpDetective.Analysis.Analyzers
                 groupAcc = _participantGroupAcc;
                 rootHints = _participantRootHints!;
                 registry = _participantRegistry!;
+                leakingMTs = _participantLeakingMTs!;
                 eventsScanned = _participantEventsScanned;
                 publisherInstances = _participantPublisherInstances;
             }
             else
             {
                 groupAcc = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), GroupAccumulator>();
+                leakingMTs = new HashSet<ulong>();
                 var __phaseSw = System.Diagnostics.Stopwatch.StartNew();
                 rootHints = BuildRootHintMap(heap, cache);
                 _logger?.LogDebug("FindEventLeaks.BuildRootHintMap: {ElapsedSeconds:F2}s ({RootCount} roots)", __phaseSw.Elapsed.TotalSeconds, rootHints.Count);
 
                 __phaseSw.Restart();
-                registry = PublisherRegistry.Build(heap, cache);
+                registry = PublisherRegistry.Build(heap, cache, cancellationToken: cancellationToken);
                 _logger?.LogDebug("FindEventLeaks.PublisherRegistry.Build: {ElapsedSeconds:F2}s", __phaseSw.Elapsed.TotalSeconds);
 
                 // ── Fast scanner: direct IMemoryReader.ReadPointer — no heap.GetObject ────
@@ -759,7 +870,7 @@ namespace DumpDetective.Analysis.Analyzers
                     : StreamObjectsAsEntries(heap);
 
                 __phaseSw.Restart();
-                fastScanner.Scan(streamingEntries, groupAcc, rootHints, options,
+                fastScanner.Scan(streamingEntries, groupAcc, rootHints, options, leakingMTs,
                     ref eventsScanned, ref publisherInstances);
                 double __scanWall = __phaseSw.Elapsed.TotalSeconds;
 
@@ -775,8 +886,11 @@ namespace DumpDetective.Analysis.Analyzers
             // No longer processed on the hot path, so there is nothing left to dedup against.
             var __sweepSw = System.Diagnostics.Stopwatch.StartNew();
             SweepRegistryStatics(heap, appDomains, rootHints, options, registry,
-                leak => AddToAccumulator(groupAcc, leak, options.TopDetailedInstancesPerGroup), ref eventsScanned, cancellationToken, progress);
+                leak => AddToAccumulator(groupAcc, leak, options.TopDetailedInstancesPerGroup, leakingMTs), ref eventsScanned, cancellationToken, progress);
             _logger?.LogDebug("FindEventLeaks.SweepRegistryStatics: {ElapsedSeconds:F2}s", __sweepSw.Elapsed.TotalSeconds);
+
+            candidatePublisherTypeCount = registry.CandidatePublisherCount;
+            leakingPublisherTypeCount = leakingMTs.Count;
 
             scanCounter.Complete();
 
@@ -813,7 +927,8 @@ namespace DumpDetective.Analysis.Analyzers
                     MinSubscribers = minSubs,
                     Instances = acc.TopInstances,
                     AllSubscriberTypeCounts = acc.AllSubscriberTypeCounts,
-                    AllSubscriberMethodCounts = acc.AllSubscriberMethodCounts
+                    AllSubscriberMethodCounts = acc.AllSubscriberMethodCounts,
+                    SubscriberCountBuckets = acc.SubscriberCountBuckets
                 });
             }
 
@@ -889,7 +1004,8 @@ namespace DumpDetective.Analysis.Analyzers
             string? preferredRootHint = null,
             int publisherGeneration = -1,
             bool hasLifetimeMismatch = false,
-            Dictionary<ulong, bool>? disposableTypeCache = null)
+            Dictionary<ulong, bool>? disposableTypeCache = null,
+            ulong publisherMethodTable = 0)
         {
             string rootHint = preferredRootHint ?? string.Empty;
 
@@ -926,6 +1042,7 @@ namespace DumpDetective.Analysis.Analyzers
             return new EventLeakInfo
             {
                 PublisherAddress = publisherAddress,
+                PublisherMethodTable = publisherMethodTable,
                 PublisherType = publisherType,
                 EventFieldName = eventFieldName,
                 IsStatic = isStatic,
@@ -1068,7 +1185,8 @@ namespace DumpDetective.Analysis.Analyzers
                         subs, rootHints, options, heap: heap,
                         publisherGeneration: 2,
                         hasLifetimeMismatch: mismatch,
-                        disposableTypeCache: disposableTypeCache);
+                        disposableTypeCache: disposableTypeCache,
+                        publisherMethodTable: mt);
 
                     if (IsLikelyPublisher(leak, options))
                         addLeak(leak);
@@ -1091,9 +1209,10 @@ namespace DumpDetective.Analysis.Analyzers
 
         // internal so EventLeakFastScanner can reuse the same heuristic.
         // NOTE: this is only called after the field type has been confirmed as a delegate type,
-        // so the _ prefix rule is safe — it's not a broad "any private field" match, it's
-        // "any private delegate-typed backing field", which is a standard C# event pattern.
-        internal static bool LooksLikeEventFieldName(string? fieldName)
+        // so the _ prefix rule is safe from matching "any private field" — it's "any private
+        // delegate-typed backing field". That alone is not enough to be event-specific, though:
+        // see allowBareUnderscorePrefix below (P2-3, docs/analysis/phase1/eventleak-analyzer-audit.md).
+        internal static bool LooksLikeEventFieldName(string? fieldName, bool allowBareUnderscorePrefix = true)
         {
             if (string.IsNullOrEmpty(fieldName)) return false;
 
@@ -1106,8 +1225,16 @@ namespace DumpDetective.Analysis.Analyzers
             if (fieldName.IndexOf("Fired", StringComparison.OrdinalIgnoreCase) >= 0) return true;
             if (fieldName.Contains("k__BackingField", StringComparison.Ordinal)) return true;
             // Standard C# explicit event backing field convention: _myEvent, _clickHandler, etc.
-            // Safe here because callers already require field.Type to be a delegate type.
-            if (fieldName.StartsWith("_", StringComparison.Ordinal)) return true;
+            // A bare "_" prefix alone is NOT event-specific — an ordinary callback/factory field
+            // (_onComplete, _factory, _selector, _predicate) matches it just as well as a real
+            // event backing field. allowBareUnderscorePrefix is false when the caller already
+            // knows the type declares zero real events (PublisherRegistry's eventNames.Count == 0
+            // path) — in that case only the stronger name-pattern signals above should qualify a
+            // field, since there is no corroborating evidence this delegate field is an event at
+            // all. When the type DOES declare at least one real event, the prefix is trusted as a
+            // secondary signal for matching that event's (possibly non-standard-named) backing
+            // field.
+            if (allowBareUnderscorePrefix && fieldName.StartsWith("_", StringComparison.Ordinal)) return true;
 
             return false;
         }
@@ -1125,6 +1252,29 @@ namespace DumpDetective.Analysis.Analyzers
             if (typeName.Contains("DisplayClass", StringComparison.Ordinal)) return true;
             return false;
         }
+
+        // P3-3 (docs/analysis/phase1/eventleak-analyzer-audit.md): pure string-pattern
+        // classification over data already extracted during the scan (PublisherType,
+        // EventFieldName) — no new heap reads, no new IPublisherShape. Unstopped/undisposed
+        // timers are one of the most common sources of process-lifetime event leaks in
+        // production .NET (audit Area 1 gap #3).
+        internal static bool IsTimerEvent(string publisherType, string eventFieldName)
+        {
+            if (string.Equals(publisherType, "System.Timers.Timer", StringComparison.Ordinal))
+                return string.Equals(eventFieldName, "Elapsed", StringComparison.Ordinal);
+            if (string.Equals(publisherType, "System.Windows.Forms.Timer", StringComparison.Ordinal))
+                return string.Equals(eventFieldName, "Tick", StringComparison.Ordinal);
+            if (string.Equals(publisherType, "System.Windows.Threading.DispatcherTimer", StringComparison.Ordinal))
+                return string.Equals(eventFieldName, "Tick", StringComparison.Ordinal);
+            return false;
+        }
+
+        // INotifyPropertyChanged.PropertyChanged is the highest-frequency MVVM event and the
+        // most commonly retained event across WPF/Blazor applications (audit Area 1 gap #4).
+        // Any type can implement the interface, so this is a name-only match — there is no
+        // single "publisher type" to key off the way IsTimerEvent does.
+        internal static bool IsPropertyChangedEvent(string eventFieldName) =>
+            string.Equals(eventFieldName, "PropertyChanged", StringComparison.Ordinal);
 
         private static bool IsFieldBackedDelegate(ClrObject parent, ClrInstanceField field, ClrObject value)
         {

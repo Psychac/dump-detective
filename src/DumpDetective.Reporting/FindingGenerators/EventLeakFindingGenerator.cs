@@ -61,6 +61,13 @@ internal sealed class EventLeakFindingGenerator : IFindingGenerator
         string exampleA = string.Empty;
         string exampleB = string.Empty;
 
+        // P3-3 (docs/analysis/phase1/eventleak-analyzer-audit.md): an aggregate finding can span
+        // multiple groups, so "any" rather than "all" — even one timer/INotifyPropertyChanged
+        // group in the mix is worth calling out, since both are the most common real-world
+        // process-lifetime leak patterns.
+        bool anyTimerEvent = false;
+        bool anyPropertyChangedEvent = false;
+
         for (int i = 0; i < groups.Count; i++)
         {
             EventLeakGroupSnapshot group = groups[i];
@@ -69,6 +76,8 @@ internal sealed class EventLeakFindingGenerator : IFindingGenerator
             groupCount++;
             totalPublisherInstances += group.InstanceCount;
             totalSubscribers += group.TotalSubscribers;
+            if (group.IsTimerEvent) anyTimerEvent = true;
+            if (group.IsPropertyChangedEvent) anyPropertyChangedEvent = true;
 
             if (group.MaxSubscribers > maxSubscribersPerInstance)
                 maxSubscribersPerInstance = group.MaxSubscribers;
@@ -133,16 +142,24 @@ internal sealed class EventLeakFindingGenerator : IFindingGenerator
             }
         }
 
+        string recommendation = "Ensure subscribers are unsubscribed and avoid long-lived static event publishers where possible.";
+        if (anyTimerEvent)
+            recommendation += " At least one leaking publisher is a Timer/DispatcherTimer — call Stop() and Dispose() when the owning object is done with it, not just unsubscribing the handler.";
+        if (anyPropertyChangedEvent)
+            recommendation += " At least one leaking publisher is an INotifyPropertyChanged.PropertyChanged event — verify view models unsubscribe on disposal/navigation-away.";
+
+        var tags = new List<string>(capacity: 5) { "event-leak", isStatic ? "static-event" : "instance-event", "retention" };
+        if (anyTimerEvent) tags.Add("timer-leak");
+        if (anyPropertyChangedEvent) tags.Add("property-changed-leak");
+
         findings.Add(new InsightFinding(
             Analyzer: "Event Leak Analysis",
             Category: "Leak",
             Severity: severity,
             Title: title,
             Evidence: evidence,
-            Recommendation: "Ensure subscribers are unsubscribed and avoid long-lived static event publishers where possible.",
-            Tags: isStatic
-                ? ["event-leak", "static-event", "retention"]
-                : ["event-leak", "instance-event", "retention"],
+            Recommendation: recommendation,
+            Tags: tags,
             MetricValue: totalSubscribers,
             MetricUnit: "subscribers",
             ConfidenceScore: EvidenceConfidence.Compute(topEvidence)));

@@ -1,3 +1,5 @@
+using System.Linq;
+
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Trend.Comparers;
 using DumpDetective.Core.Models;
@@ -13,12 +15,14 @@ public sealed class EventLeakTrendComparerTests
     private static EventLeakDomainResult MakeResult(
         int totalInstances = 1,
         int totalSubscribers = 1,
-        int scoringVersion = 2) =>
+        int scoringVersion = 2,
+        int staticLeaks = 0,
+        int instanceLeaks = 0) =>
         new(
             TotalEventLeakInstances: totalInstances,
             TotalSubscribers: totalSubscribers,
-            StaticEventLeakCount: 0,
-            InstanceEventLeakCount: totalInstances,
+            StaticEventLeakCount: staticLeaks,
+            InstanceEventLeakCount: instanceLeaks == 0 && staticLeaks == 0 ? totalInstances : instanceLeaks,
             ScoringVersion: scoringVersion);
 
     [Fact]
@@ -59,6 +63,37 @@ public sealed class EventLeakTrendComparerTests
         var deltas = comparer.Compare(new UnrelatedDomainResult(), new UnrelatedDomainResult());
 
         deltas.Should().BeEmpty();
+    }
+
+    // P0-2 regression: Compare() used to omit "event.instance.leaks" even though
+    // ExtractMetrics() declares it — a regression in instance-scoped event leaks between two
+    // runs was silently invisible to trend comparison.
+    [Fact]
+    public void Compare_SameScoringVersion_IncludesInstanceLeaksDelta()
+    {
+        var comparer = new EventLeakTrendComparer();
+        var baseline = MakeResult(totalInstances: 5, staticLeaks: 1, instanceLeaks: 4, scoringVersion: 2);
+        var current = MakeResult(totalInstances: 8, staticLeaks: 1, instanceLeaks: 7, scoringVersion: 2);
+
+        var deltas = comparer.Compare(baseline, current);
+
+        deltas.Should().Contain(d => d.Key == "event.instance.leaks" && d.Delta == 3);
+    }
+
+    // Guards against future asymmetry: every metric key ExtractMetrics() declares must also
+    // appear in Compare()'s output (when scoring versions match), or a regression on that
+    // metric becomes silently invisible to trend comparison, as happened with
+    // "event.instance.leaks" (P0-2).
+    [Fact]
+    public void ExtractMetrics_And_Compare_DeclareTheSameMetricKeys()
+    {
+        var comparer = new EventLeakTrendComparer();
+        var result = MakeResult(totalInstances: 3, staticLeaks: 1, instanceLeaks: 2, scoringVersion: 2);
+
+        var extractedKeys = comparer.ExtractMetrics(result).Select(m => m.Key).ToHashSet();
+        var comparedKeys = comparer.Compare(result, result).Select(d => d.Key).ToHashSet();
+
+        comparedKeys.Should().BeEquivalentTo(extractedKeys);
     }
 
     private sealed record UnrelatedDomainResult : AnalyzerDomainResult;

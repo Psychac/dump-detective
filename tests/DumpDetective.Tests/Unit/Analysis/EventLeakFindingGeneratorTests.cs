@@ -75,6 +75,54 @@ public sealed class EventLeakFindingGeneratorTests
         findings[0].Severity.Should().Be(FindingSeverity.Critical);
     }
 
+    // P3-3 (docs/analysis/phase1/eventleak-analyzer-audit.md): timer/INotifyPropertyChanged
+    // categorization must reach the finding layer — tags for cross-cutting filtering, and a
+    // category-specific recommendation clause since the fix differs (Stop()+Dispose() for
+    // timers vs. unsubscribing on view-model disposal for PropertyChanged).
+    [Fact]
+    public void Generate_TimerEventGroup_TagsFindingAndAddsTimerRecommendation()
+    {
+        var gen = new EventLeakFindingGenerator();
+        var result = BuildResult(
+            new EventLeakGroupSnapshot("System.Timers.Timer", "Elapsed", false, 22, 8, 64, 8.0, 1, 12,
+                IsTimerEvent: true));
+
+        var findings = gen.Generate(result);
+
+        findings.Should().ContainSingle();
+        findings[0].Tags.Should().Contain("timer-leak");
+        findings[0].Recommendation.Should().Contain("Stop()");
+    }
+
+    [Fact]
+    public void Generate_PropertyChangedEventGroup_TagsFindingAndAddsPropertyChangedRecommendation()
+    {
+        var gen = new EventLeakFindingGenerator();
+        var result = BuildResult(
+            new EventLeakGroupSnapshot("App.MyViewModel", "PropertyChanged", false, 22, 8, 64, 8.0, 1, 12,
+                IsPropertyChangedEvent: true));
+
+        var findings = gen.Generate(result);
+
+        findings.Should().ContainSingle();
+        findings[0].Tags.Should().Contain("property-changed-leak");
+        findings[0].Recommendation.Should().Contain("INotifyPropertyChanged");
+    }
+
+    [Fact]
+    public void Generate_NoTimerOrPropertyChangedGroups_DoesNotAddCategoryTags()
+    {
+        var gen = new EventLeakFindingGenerator();
+        var result = BuildResult(
+            new EventLeakGroupSnapshot("OrderPublisher", "Changed", false, 22, 8, 64, 8.0, 1, 12));
+
+        var findings = gen.Generate(result);
+
+        findings.Should().ContainSingle();
+        findings[0].Tags.Should().NotContain("timer-leak");
+        findings[0].Tags.Should().NotContain("property-changed-leak");
+    }
+
     private static EventLeakDomainResult BuildResult(params EventLeakGroupSnapshot[] groups)
     {
         int totalSubscribers = 0;

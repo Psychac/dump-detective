@@ -161,10 +161,12 @@ public class DominatorTreeReaderProviderTests : IDisposable
         DominatorTreeReaderProvider.TryOpen(containerReader!, out DominatorTreeReaderProvider? provider).Should().BeTrue();
         using (provider)
         {
-            // MT 0xA1 covers both a (surviving, retained 120) and leaf (folded, retained 100) —
-            // the per-type rollup must be exact over every reachable instance, not just survivors.
+            // MT 0xA1 covers both a (surviving, retained 120 = a's own 20 + folded leaf's 100) and
+            // leaf (folded into a, retained 100 on its own). leaf is a strict descendant of a in the
+            // dominator tree and shares its MethodTable, so a's 120 already includes leaf's 100 —
+            // the per-type rollup must not add leaf's bytes a second time on top.
             provider!.TryGetRetainedBytesByMethodTable(0xA1UL, out ulong retained).Should().BeTrue();
-            retained.Should().Be(220UL);
+            retained.Should().Be(120UL);
 
             provider.TryGetRetainedBytesByMethodTable(0xA2UL, out ulong bRetained).Should().BeTrue();
             bRetained.Should().Be(5UL);

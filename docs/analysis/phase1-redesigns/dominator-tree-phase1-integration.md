@@ -22,6 +22,9 @@ container closes.
   `ThreadAnalyzer`'s report output is deliberately deferred to whoever picks it up next.
 - Garbage→reachable edge count was never isolated from garbage→garbage noise — moot, since Stage A.5
   (below) was determined unnecessary regardless.
+- **§8 cross-type retained overlap** — all three sub-questions shipped 2026-09-03: §8a
+  (single-sample containment), §8b (full-population instance counts), §8c (exact shared bytes over
+  each pair's topmost instances). No open follow-up scoped under §8.
 
 ## Terminology
 
@@ -150,6 +153,20 @@ throws before silently overflowing `int.MaxValue` instead of estimating in advan
 measured so far peak at 6.42GB; an untested, much larger dump now fails safely instead of either
 corrupting or being pre-emptively rejected.
 
+**2026-09-03 correctness fix — per-type rollup double-counted same-typed nesting.** The per-type
+rollup above (`DominatorRetainedBytesRollup.Compute`) originally summed each reachable node's own
+`RetainedBytes` grouped by `MethodTable`, with no exclusion when one node of type T dominated
+another node of the *same* type T — since a node's `RetainedBytes` already sums its whole subtree,
+that double-counted every self-referential same-typed chain (a linked list, a tree of same-typed
+nodes referencing each other) from O(bytes) up to O(bytes × depth). Fixed by walking the dominator
+tree via its own child CSR (`ChildOffsets`/`ChildTargets`, same as `EnumerateRetainedSet`) with a
+depth-ordered ancestor stack, crediting a node's bytes to its type's bucket only when no ancestor
+already claimed that type — O(1) amortized per node instead of an O(depth) `Idom` walk. Folded
+leaves are walked via `LeafFoldResult.FoldedLeafOffsets`/`FoldedLeafOldIds` (§10.5, until now
+unused) alongside their surviving parent, getting the same exclusion check against the parent's
+ancestor chain. Regression tests: `DominatorRetainedBytesRollupTests` (same-type chain, sibling
+non-exclusion, folded-leaf-same-type-as-parent).
+
 `DominatorAnalyzer.TryComputeExactDominatorTree` (renamed `TryReadExactDominatorTree`) no longer
 recomputes any of this in Phase 2 — it reads `IHeapAnalysisCache.TryGetDominatorTreeProvider()`
 instead, closing the double-computation problem this whole redesign started from. This also made
@@ -205,3 +222,82 @@ thread. `IThreadRetentionProvider.TryGetRetainedBytesForThread(uint osThreadId, 
 `ThreadAnalyzer` report section consumes it yet — deliberately deferred, since threading a cache-backed
 provider into `ThreadAnalyzer`'s more complex, dispatcher-based categorization path is its own
 separate-risk change.
+
+## 8. Cross-type retained overlap ("shared subgraph size")
+
+From [dominator-analyzer-audit.md](../phase1/dominator-analyzer-audit.md) P3: "explains why
+exclusive retained bytes are 0 for co-dominating types." Written pre-exact-tree, when the answer
+came from BFS with a shared visited set across type scans (an ordering artifact, not a real
+answer). With the exact tree this is a real, well-defined question — but a different one at the
+object level vs. the type level.
+
+**§8a — object level (sample-based) — ✅ shipped 2026-09-03.** Dominance is a tree, so for any two
+*specific* objects, one strictly dominates the other or neither does — never partial overlap
+(`DominatorRetainedSetAggregator`'s own reasoning, §7 above). `DominatorAnalyzer.FindContainingCandidateTypeName`
+scans each Gen2/LOH candidate's already-built dominance chain (§7's `BuildDominatorChain` — no
+extra provider calls) for another candidate's sample address; the nearest such ancestor wins.
+Exposed as `DominatorDomainResult.ContainingTypeNameByTypeName`, rendered as a new "Shared subgraph
+overlap (sample-based)" compact table (`DominatorSectionBuilder`), listing only rows where a
+containing candidate was actually found. Explicitly sample-based like every other per-type field on
+this path: proves "these two types' *sampled* instances overlap," not "every instance overlaps" — a
+missing entry means no candidate was found on the chain within `MaxDominatorChainDepth`, not that no
+overlap exists. Tests: `DominatorAnalyzerChainTests` (nearest-ancestor-wins, no-match, self-only-chain,
+sentinel-hop-never-matched), `DominatorSectionBuilderTests` (render/omit, Gen2/LOH scoping).
+
+**§8b — type level (full population), instance counts — ✅ shipped 2026-09-03.** A type is a population of objects; two types' combined retained sets (union of each
+instance's subtree) can have real *partial* overlap — object O counts toward both A's and B's
+retained set iff O's root-to-O ancestor chain contains at least one A-instance and at least one
+B-instance, regardless of which is closer. That's a population-level question §8a's single-sample
+check can't answer.
+
+**Why the original algorithm sketch (above, now superseded) didn't fit.** It assumed reuse of §5's
+build-time depth-ordered tree walk over `DominatorTreeComputeResult.ChildOffsets`/`ChildTargets` —
+but that structure only exists in memory during the one-time Phase 1 build
+(`DiskBackedObjectIndexWriter.Build`). `DominatorAnalyzer` runs in Phase 2 against the query-time
+`IDominatorTreeProvider` facade, which has no whole-tree top-down walk — only point queries
+(`TryGetImmediateDominator`, `TryGetRetainedBytes`, `TryGetRetainedBytesByMethodTable`) and
+`EnumerateRetainedSet(address)` (subtree-from-one-address, explicitly documented as unbounded near
+the tree's root). The candidate-type set itself isn't known until Phase 2 either (it depends on
+the heuristic leak-signal pass), so moving the computation earlier wasn't an option. Also dropped:
+the K² pairwise-credit-per-node design, since it doesn't arise with the shape actually built below.
+
+**What was built instead.** `DominatorAnalyzer.ComputeCrossTypeOverlap`:
+1. Streams the *existing* disk-backed heap index once (`IHeapAnalysisCache.EnumerateIndexedEntriesAsTuples`,
+   no ClrMD field walks, no format change) filtering to the Gen2/LOH candidates' `MethodTable`s,
+   collecting every instance address of every candidate type — bounded by the new
+   `RetentionOptions.MaxCrossTypeOverlapInstancesScanned` (default 2,000,000; an honest safety cap,
+   not a silent sample — hitting it sets `DominatorDomainResult.CrossTypeOverlapInstanceScanCapped`,
+   folded into the section's confidence band like `ObjectScanCapped` already is).
+2. For each collected instance, `FindContainingInstanceTypeName` walks `TryGetImmediateDominator`
+   upward (bounded by the existing `MaxDominatorChainDepth`), skipping same-type ancestors (that's
+   same-type nesting, not cross-type overlap — see §5) to find the nearest ancestor of a *different*
+   candidate type.
+3. Aggregates a `(TypeName, ContainingTypeName) -> instance count` — exposed as
+   `DominatorDomainResult.CrossTypeOverlapPairs`, rendered as the "Cross-type retained overlap"
+   table, scoped to Gen2/LOH candidates same as every other table on this path.
+
+**§8c — exact shared bytes — ✅ shipped 2026-09-03, same change as §8b.** A *byte* total ("A
+contributes N bytes to B's retained set") needs the same same-type-double-counting care as §5's
+fix — summing every A-instance's own retained bytes toward the (A, B) pair would double-count when
+one A-instance dominates another A-instance that's also inside B. Folded into the same walk as §8b
+rather than a second pass over the instances: `WalkInstanceAncestry` (renamed from
+`FindContainingInstanceTypeName`) now returns *both* the nearest different-type ancestor (§8b's
+question) and whether *any* ancestor anywhere in the chain — not just the nearest one, since a
+same-type ancestor can sit beyond the nearest different-type one — is also this instance's own
+type (§8c's "topmost" question; the two can't share an early-exit since same-type-ancestor
+detection needs to scan the whole chain up to `MaxDominatorChainDepth`, not stop at the first
+different-type match). `ComputeCrossTypeOverlap` sums `TryGetRetainedBytes` for a pair only over
+its topmost instances, alongside the existing per-instance count. Exposed as
+`CrossTypeOverlapPair.ContainedRetainedBytes` (0 is a real, honest outcome when every contained
+instance for a pair happens to be non-topmost — the doc comment on the record explains why),
+rendered as the table's new "Retained" column (an absent cell, not a literal 0, when zero).
+
+Tests: `DominatorAnalyzerChainTests` (`WalkInstanceAncestry`'s same-type-skip-for-containing-type/
+same-type-beyond-nearest-different-type/no-match/depth-cap cases, `ComputeCrossTypeOverlap`'s
+sibling-both-counted vs. nested-only-topmost-counted byte cases against a fake `IHeapAnalysisCache`
++ `IDominatorTreeProvider`), `DominatorSectionBuilderTests` (render/omit, Gen2/LOH scoping,
+capped-flag caveat, zero-bytes-renders-as-absent-not-zero).
+
+No further follow-up scoped under §8 — §8a (single-sample), §8b (instance counts), and §8c (exact
+topmost-instance bytes) together cover object-level, population-level, and byte-exact answers to
+the audit item's original "shared subgraph size" ask.

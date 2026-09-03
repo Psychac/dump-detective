@@ -135,6 +135,16 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
                     sb.AppendLine($"{Indent(0)}> {band.Symbol} {band.Band} confidence{(band.Caveats.Length > 0 ? $" — {string.Join("; ", band.Caveats)}" : string.Empty)}");
                     sb.AppendLine();
                     break;
+                case InterpretationBlock interp:
+                    sb.AppendLine($"{Indent(interp.IndentLevel)}💡 {interp.Text}");
+                    sb.AppendLine();
+                    break;
+                case NextStepsBlock steps:
+                    sb.AppendLine($"{Indent(0)}Next steps:");
+                    foreach (NextStepLink link in steps.Links)
+                        sb.AppendLine($"{Indent(0)}- {link.Label} (see section {link.SectionId})");
+                    sb.AppendLine();
+                    break;
                 case CollapsibleSectionBeginBlock cs:
                     sb.AppendLine($"[{cs.Title}]");
                     break;

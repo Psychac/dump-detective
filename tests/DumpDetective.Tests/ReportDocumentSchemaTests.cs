@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text.Json;
 
 using DumpDetective.Core.Enums;
@@ -224,5 +225,46 @@ public sealed class ReportDocumentSchemaTests
         json.Should().NotContain("\"findings\"");
         json.Should().NotContain("\"DumpPath\"");
         json.Should().NotContain("\"ElapsedSeconds\"");
+    }
+
+    // Regression: DominatorSectionBuilder's dominance-chain TreeWidget nests one TreeNode per hop
+    // (up to RetentionOptions.MaxDominatorChainDepth, 64 by default, plus a sentinel). That nesting
+    // used to blow System.Text.Json's default 64-level MaxDepth ("A possible object cycle was
+    // detected"). ReportJsonContext now raises MaxDepth so a chain at the safety bound still
+    // serializes.
+    [Fact]
+    public void RoundTrip_DeeplyNestedTreeWidgetChain_DoesNotThrow()
+    {
+        const int hopCount = 65; // MaxDominatorChainDepth (64) + 1 sentinel hop
+        TreeNode root = new("Leaf", IsChain: true);
+        for (int i = 0; i < hopCount - 1; i++)
+            root = new TreeNode($"Hop{i}", Children: [root], IsChain: true);
+
+        SingleDumpReportDocument original = new()
+        {
+            DumpPath = "C:/t.dmp",
+            GeneratedAtUtc = DateTime.UtcNow,
+            Domains =
+            [
+                new ReportDomainSection("Memory", null,
+                [
+                    new AnalyzerDetailSection("Dominator Analysis", "Dominator Analysis", 0, [],
+                        TreeWidgets: [new TreeWidget("Gen2 / LOH dominance chains", [root])])
+                ],
+                [])
+            ]
+        };
+
+        string json = JsonSerializer.Serialize(original, ReportJsonContext.Default.AnalysisReportDocument);
+        AnalysisReportDocument? restored = JsonSerializer.Deserialize(json, ReportJsonContext.Default.AnalysisReportDocument);
+
+        TreeNode restoredRoot = restored!.Domains![0].Sections[0].TreeWidgets!.Single().Roots.Single();
+        int depth = 1;
+        while (restoredRoot.Children is { Count: > 0 })
+        {
+            restoredRoot = restoredRoot.Children[0];
+            depth++;
+        }
+        depth.Should().Be(hopCount);
     }
 }

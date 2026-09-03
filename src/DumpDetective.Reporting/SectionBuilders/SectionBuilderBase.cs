@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 
 using DumpDetective.Core.Enums;
 using DumpDetective.Reporting.Models;
+using DumpDetective.Reporting.Services;
 using DumpDetective.Reporting.Utilities;
 
 namespace DumpDetective.Reporting.SectionBuilders;
@@ -27,6 +28,54 @@ internal abstract class SectionBuilderBase
     /// callers (e.g. a <c>SectionLeadFinding</c>) that compute their own confidence score.</summary>
     protected static string SymbolForScore(double score) =>
         score >= 0.85 ? "●●●●" : score >= 0.65 ? "●●●○" : score >= 0.45 ? "●●○○" : "●○○○";
+
+    /// <summary>
+    /// Narrative reading of a ratio/percent metric (docs/refactor/narrative-interpretation-text-design.md)
+    /// — e.g. "retained ≫ shallow → holds a large external graph." <paramref name="tiers"/> must be
+    /// ordered highest-<c>Threshold</c>-first; returns the first tier whose threshold
+    /// <paramref name="value"/> meets or exceeds, falling through to the last (lowest) tier as the
+    /// floor case. Thresholds and wording stay caller-owned — this only standardizes tier selection
+    /// and block shape, not domain semantics. Returns <c>null</c> for a missing value (no
+    /// interpretation fabricated for data that isn't there) or an empty <paramref name="tiers"/> list.
+    /// </summary>
+    protected static InterpretationBlock? Interpret(double? value, params (double Threshold, string Text)[] tiers)
+    {
+        if (value is not double resolved || tiers.Length == 0)
+            return null;
+
+        for (int i = 0; i < tiers.Length; i++)
+        {
+            if (resolved >= tiers[i].Threshold)
+                return new InterpretationBlock(tiers[i].Text);
+        }
+
+        return new InterpretationBlock(tiers[^1].Text);
+    }
+
+    /// <summary>
+    /// Cross-section "investigate next" pointers (docs/analysis/phase1/dominator-analyzer-audit.md's
+    /// "Shared Next steps" P3 item). <paramref name="targets"/> names the *analyzer*, not a section
+    /// ID directly — resolution through <see cref="SectionIdDomainMap"/> happens here so every
+    /// caller gets the same "skip anything unresolvable" behavior instead of reimplementing it.
+    /// A target analyzer with no <see cref="SectionIdDomainMap"/> entry, or an entry with an empty
+    /// ID (e.g. a supplementary section that predates this convention), is silently omitted rather
+    /// than emitting a link that can never resolve. Returns <c>null</c> when nothing resolved.
+    /// </summary>
+    protected static NextStepsBlock? NextSteps(params (string Label, string AnalyzerName)[] targets)
+    {
+        List<NextStepLink>? links = null;
+        for (int i = 0; i < targets.Length; i++)
+        {
+            (string label, string analyzerName) = targets[i];
+            if (SectionIdDomainMap.TryGet(analyzerName, out _, out string sectionId) && !string.IsNullOrEmpty(sectionId))
+            {
+                links ??= new List<NextStepLink>(targets.Length);
+                links.Add(new NextStepLink(label, sectionId));
+            }
+        }
+
+        return links is not null ? new NextStepsBlock(links) : null;
+    }
     protected static ListItemBlock Li(string text, int indent = 0) => new(text, indent);
     protected static DividerBlock Divider() => new();
     protected static BlankBlock Blank() => new();

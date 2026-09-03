@@ -88,6 +88,16 @@ Even with B fully built, the no-index `Parallel.ForEach(heap.Segments, ...)` fal
 
 ## Follow-up idea (not yet scoped): per-worker accumulator memory for large caps
 
+**2026-09-03: resolved by architecture, not by the fix sketched below.** `DominatorAnalyzer`
+dropped `IParallelHeapIndexScanParticipant` entirely on 2026-08-12 (`bd146c3`) when the disk-backed
+reverse-index path became its primary reference-counting strategy — `_referenceCount` (now
+`SpaceSavingCounter<ulong>` since the P3-1 fix, 2026-08-27) only runs in the single-threaded
+fallback path today, never per-worker. The `K × 20 MB` scenario below no longer occurs; see
+[dominator-analyzer-audit.md § Audit Area 5](../phase1/dominator-analyzer-audit.md) for the current
+assessment. Left below for historical context — the general per-worker-accumulator-memory concern
+could still recur for a *different* parallel-capable participant with a large object-scale cap, so
+the reasoning stays relevant even though this specific instance is moot.
+
 Noted 2026-08-06. Shape B's per-worker private-accumulator design (§ "Two candidate shapes")
 trades shared-state contention for **K full-sized copies** of each parallel-capable
 participant's accumulator before `MergePartial` folds them back to one. For participants whose

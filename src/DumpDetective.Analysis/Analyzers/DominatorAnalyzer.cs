@@ -112,6 +112,10 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
                 {
                     ExactRetainedBytesByTypeName = exact.RetainedBytesByTypeName ?? heuristicResult.ExactRetainedBytesByTypeName,
                     DominatorChainsByTypeName = exact.ChainsByTypeName ?? heuristicResult.DominatorChainsByTypeName,
+                    ContainingTypeNameByTypeName = exact.ContainingTypeNameByTypeName ?? heuristicResult.ContainingTypeNameByTypeName,
+                    CrossTypeOverlapPairs = exact.CrossTypeOverlapPairs ?? heuristicResult.CrossTypeOverlapPairs,
+                    CrossTypeOverlapInstanceScanCapped = exact.CrossTypeOverlapInstanceScanCapped,
+                    RootChainsByTypeName = exact.RootChainsByTypeName ?? heuristicResult.RootChainsByTypeName,
                 };
             }
         }
@@ -133,7 +137,11 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
     /// </summary>
     private readonly record struct ExactDominatorData(
         IReadOnlyDictionary<string, ulong>? RetainedBytesByTypeName,
-        IReadOnlyDictionary<string, IReadOnlyList<DominatorChainHop>>? ChainsByTypeName);
+        IReadOnlyDictionary<string, IReadOnlyList<DominatorChainHop>>? ChainsByTypeName,
+        IReadOnlyDictionary<string, string>? ContainingTypeNameByTypeName = null,
+        IReadOnlyList<CrossTypeOverlapPair>? CrossTypeOverlapPairs = null,
+        bool CrossTypeOverlapInstanceScanCapped = false,
+        IReadOnlyDictionary<string, RootChainSummary>? RootChainsByTypeName = null);
 
     private ExactDominatorData TryReadExactDominatorTree(
         ClrHeap heap,
@@ -156,8 +164,21 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
             // Only resolve type names the report will actually display (the Gen2/LOH sub-table's
             // candidates, already computed by the heuristic pass above) — resolving every unique
             // MethodTable's name would be wasted work for types the report never shows.
+            //
+            // §8 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): recognizing
+            // another candidate's sample address as an ancestor needs every candidate's address known
+            // up front, so this is a separate pass before the main loop below rather than being
+            // populated lazily inside it.
+            var candidateTypeNamesByAddress = new Dictionary<ulong, string>(heuristicResult.TopDominatorTypes.Count);
+            foreach (TypeSnapshot candidate in heuristicResult.TopDominatorTypes)
+                candidateTypeNamesByAddress[candidate.SampleAddress] = candidate.TypeName;
+
             Dictionary<string, ulong>? exactByTypeName = null;
             Dictionary<string, IReadOnlyList<DominatorChainHop>>? chainsByTypeName = null;
+            Dictionary<string, string>? containingTypeNameByTypeName = null;
+            // §8b needs every candidate's MethodTable (not just its one sample address) to recognize
+            // *any* instance of a candidate type while streaming the heap index below.
+            var candidateTypeNamesByMethodTable = new Dictionary<ulong, string>(heuristicResult.TopDominatorTypes.Count);
             foreach (TypeSnapshot candidate in heuristicResult.TopDominatorTypes)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -165,6 +186,8 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
                 ClrObject sample = heap.GetObject(candidate.SampleAddress);
                 if (!sample.IsValid || sample.Type is null)
                     continue;
+
+                candidateTypeNamesByMethodTable[sample.Type.MethodTable] = candidate.TypeName;
 
                 if (provider.TryGetRetainedBytesByMethodTable(sample.Type.MethodTable, out ulong exactRetained))
                 {
@@ -179,6 +202,16 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
                 {
                     chainsByTypeName ??= new Dictionary<string, IReadOnlyList<DominatorChainHop>>(StringComparer.Ordinal);
                     chainsByTypeName[candidate.TypeName] = chain;
+
+                    // §8: cross-type retained overlap, sample-based — the chain above already walked
+                    // every ancestor up to MaxDominatorChainDepth, so recognizing another candidate's
+                    // sample address on it is free (no extra provider calls).
+                    string? containingTypeName = FindContainingCandidateTypeName(chain, candidateTypeNamesByAddress);
+                    if (containingTypeName is not null)
+                    {
+                        containingTypeNameByTypeName ??= new Dictionary<string, string>(StringComparer.Ordinal);
+                        containingTypeNameByTypeName[candidate.TypeName] = containingTypeName;
+                    }
                 }
             }
 
@@ -192,7 +225,35 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
                     stopwatch.ElapsedMilliseconds, provider.TotalRetainedBytes, heuristicResult.TotalEstimatedRetainedBytes);
             }
 
-            return new ExactDominatorData(exactByTypeName, chainsByTypeName);
+            (IReadOnlyList<CrossTypeOverlapPair>? overlapPairs, bool overlapCapped) = ComputeCrossTypeOverlap(
+                cache, provider, candidateTypeNamesByMethodTable, options, cancellationToken);
+
+            if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: cross-type overlap scan done", Console.Out);
+
+            // Audit P2: root chains are scoped to the Gen2/LOH sub-table only, same candidate
+            // filter DominatorSectionBuilder uses for rendering — a RootPathFinder search is a real
+            // bidirectional BFS per candidate, not a free point lookup like every other per-type
+            // field above, so this deliberately doesn't run over the full TopDominatorTypes set.
+            var gen2LohCandidates = new List<TypeSnapshot>();
+            foreach (TypeSnapshot candidate in heuristicResult.TopDominatorTypes)
+            {
+                if (candidate.Gen2Count > 0 || candidate.LohBytes > 0)
+                    gen2LohCandidates.Add(candidate);
+            }
+            gen2LohCandidates.Sort(static (a, b) =>
+            {
+                int byGen2 = b.Gen2Count.CompareTo(a.Gen2Count);
+                return byGen2 != 0 ? byGen2 : b.LohBytes.CompareTo(a.LohBytes);
+            });
+            if (gen2LohCandidates.Count > heuristicResult.MaxTopDominatorTypesToShow)
+                gen2LohCandidates.RemoveRange(heuristicResult.MaxTopDominatorTypesToShow, gen2LohCandidates.Count - heuristicResult.MaxTopDominatorTypesToShow);
+
+            IReadOnlyDictionary<string, RootChainSummary>? rootChainsByTypeName = ComputeRootChains(
+                heap, cache, gen2LohCandidates, options, cancellationToken);
+
+            if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: root chain search done", Console.Out);
+
+            return new ExactDominatorData(exactByTypeName, chainsByTypeName, containingTypeNameByTypeName, overlapPairs, overlapCapped, rootChainsByTypeName);
         }
         catch (OperationCanceledException)
         {
@@ -244,6 +305,198 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
         ascending.Add(new DominatorChainHop($"… chain continues beyond {maxDepth} hops", 0, 0));
         ascending.Reverse();
         return ascending;
+    }
+
+    /// <summary>
+    /// §8 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): scans a
+    /// root-most-first, sample-leaf-last <paramref name="chain"/> (as built by
+    /// <see cref="BuildDominatorChain"/>) for the nearest ancestor hop that is another candidate
+    /// type's sample address — i.e. the type whose dominator subtree most tightly contains this
+    /// chain's own sample object. The chain's own last hop (itself) is always excluded. Scans from
+    /// the leaf backward so the *nearest* containing candidate wins, not the outermost one.
+    /// </summary>
+    internal static string? FindContainingCandidateTypeName(
+        IReadOnlyList<DominatorChainHop> chain,
+        IReadOnlyDictionary<ulong, string> candidateTypeNamesByAddress)
+    {
+        for (int i = chain.Count - 2; i >= 0; i--)
+        {
+            if (chain[i].Address != 0 && candidateTypeNamesByAddress.TryGetValue(chain[i].Address, out string? typeName))
+                return typeName;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// §8b (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): unlike §8a's
+    /// single-sample check, this needs every instance of every candidate type. Streams the
+    /// disk-backed heap index once (<see cref="IHeapAnalysisCache.EnumerateIndexedEntriesAsTuples"/>,
+    /// no ClrMD field walks) collecting instance addresses whose <c>MethodTable</c> matches a
+    /// candidate, bounded by <see cref="RetentionOptions.MaxCrossTypeOverlapInstancesScanned"/>, then
+    /// walks each collected instance's ancestor chain looking for the nearest *different* candidate
+    /// type — same primitive as <see cref="FindContainingCandidateTypeName"/>, generalized to a live
+    /// walk over an instance population instead of one precomputed chain.
+    /// </summary>
+    internal static (IReadOnlyList<CrossTypeOverlapPair>? Pairs, bool Capped) ComputeCrossTypeOverlap(
+        IHeapAnalysisCache cache,
+        IDominatorTreeProvider provider,
+        IReadOnlyDictionary<ulong, string> candidateTypeNamesByMethodTable,
+        RetentionOptions options,
+        CancellationToken cancellationToken)
+    {
+        if (candidateTypeNamesByMethodTable.Count < 2)
+            return (null, false); // nothing to overlap with
+
+        var instanceTypeNamesByAddress = new Dictionary<ulong, string>();
+        bool capped = false;
+        foreach ((ulong address, ulong methodTable, ulong _) in cache.EnumerateIndexedEntriesAsTuples())
+        {
+            if (!candidateTypeNamesByMethodTable.TryGetValue(methodTable, out string? typeName))
+                continue;
+
+            if (instanceTypeNamesByAddress.Count >= options.MaxCrossTypeOverlapInstancesScanned)
+            {
+                capped = true;
+                break;
+            }
+
+            instanceTypeNamesByAddress[address] = typeName;
+        }
+
+        if (instanceTypeNamesByAddress.Count == 0)
+            return (null, capped);
+
+        var countsByPair = new Dictionary<(string TypeName, string ContainingTypeName), int>();
+        var bytesByPair = new Dictionary<(string TypeName, string ContainingTypeName), ulong>();
+        foreach ((ulong address, string typeName) in instanceTypeNamesByAddress)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            (string? containingTypeName, bool hasSameTypeAncestor) = WalkInstanceAncestry(
+                provider, address, typeName, instanceTypeNamesByAddress, options.MaxDominatorChainDepth);
+            if (containingTypeName is null)
+                continue;
+
+            var key = (typeName, containingTypeName);
+            countsByPair[key] = countsByPair.GetValueOrDefault(key) + 1;
+
+            // §8c: only "topmost" instances (no ancestor also of this instance's own type) are
+            // exact-byte-summable — see CrossTypeOverlapPair's own doc comment for why a
+            // non-topmost instance's bytes are already counted inside another instance's total.
+            if (!hasSameTypeAncestor && provider.TryGetRetainedBytes(address, out ulong retainedBytes))
+                bytesByPair[key] = bytesByPair.GetValueOrDefault(key) + retainedBytes;
+        }
+
+        if (countsByPair.Count == 0)
+            return (Array.Empty<CrossTypeOverlapPair>(), capped);
+
+        var pairs = new List<CrossTypeOverlapPair>(countsByPair.Count);
+        foreach (var (key, count) in countsByPair)
+            pairs.Add(new CrossTypeOverlapPair(key.TypeName, key.ContainingTypeName, count, bytesByPair.GetValueOrDefault(key)));
+
+        return (pairs, capped);
+    }
+
+    /// <summary>
+    /// Walks the *entire* ancestor chain from <paramref name="address"/> up to the virtual root (or
+    /// <paramref name="maxDepth"/>, same safety bound as <see cref="BuildDominatorChain"/>) via
+    /// <see cref="IDominatorTreeProvider.TryGetImmediateDominator"/>, recording two independent
+    /// facts needed by §8b/§8c: the nearest ancestor of a *different* candidate type (§8b's count —
+    /// same-type ancestors are skipped when looking for this, since same-type nesting isn't
+    /// cross-type overlap), and whether *any* ancestor anywhere in the chain — not just the nearest
+    /// one — is also <paramref name="ownTypeName"/> (§8c's "topmost" exclusion; a same-type ancestor
+    /// can sit *beyond* the nearest different-type one, so this can't stop at the first match the
+    /// way the former does). Exits early once both are resolved and nothing further can change.
+    /// </summary>
+    internal static (string? ContainingTypeName, bool HasSameTypeAncestor) WalkInstanceAncestry(
+        IDominatorTreeProvider provider,
+        ulong address,
+        string ownTypeName,
+        IReadOnlyDictionary<ulong, string> instanceTypeNamesByAddress,
+        int maxDepth)
+    {
+        ulong current = address;
+        string? nearestDifferentTypeName = null;
+        bool hasSameTypeAncestor = false;
+
+        for (int depth = 0; depth < maxDepth; depth++)
+        {
+            if (!provider.TryGetImmediateDominator(current, out ulong parent) || parent == 0)
+                break;
+
+            if (instanceTypeNamesByAddress.TryGetValue(parent, out string? parentTypeName))
+            {
+                if (string.Equals(parentTypeName, ownTypeName, StringComparison.Ordinal))
+                    hasSameTypeAncestor = true;
+                else
+                    nearestDifferentTypeName ??= parentTypeName;
+            }
+
+            if (hasSameTypeAncestor && nearestDifferentTypeName is not null)
+                break; // nothing further up can change either result
+
+            current = parent;
+        }
+
+        return (nearestDifferentTypeName, hasSameTypeAncestor);
+    }
+
+    /// <summary>
+    /// Audit P2 (docs/analysis/phase1/dominator-analyzer-audit.md): "why is this alive," one
+    /// <c>RootPathFinder</c> search per <paramref name="candidates"/> entry — same construction
+    /// pattern as <see cref="PopulateEvidence"/>'s existing "highly referenced objects" evidence
+    /// search (<c>ReferenceGraph</c> + <c>RootPathSearchSupport</c>'s shared no-op telemetry/noise
+    /// predicate + the same <see cref="RetentionOptions.MaxRootPathCandidateNodes"/>-family limits),
+    /// just resolved into a hop-type-name list instead of <see cref="RootPathSearchSupport.FormatPath"/>'s
+    /// single joined string, to match <see cref="DominatorChainHop"/>'s list shape for rendering.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, RootChainSummary>? ComputeRootChains(
+        ClrHeap heap,
+        IHeapAnalysisCache cache,
+        IReadOnlyList<TypeSnapshot> candidates,
+        RetentionOptions options,
+        CancellationToken cancellationToken)
+    {
+        if (candidates.Count == 0)
+            return null;
+
+        IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
+        var provider = new ReferenceGraph(heap);
+        var limits = new RootPathSearchLimits
+        {
+            MaxCandidateNodes = options.MaxRootPathCandidateNodes,
+            MaxCandidateDepth = options.MaxRootPathCandidateDepth,
+            MaxRootExpansionDepth = options.MaxRootPathExpansionDepth,
+            LargeFanoutThreshold = options.RootPathLargeFanoutThreshold,
+        };
+        var finder = new RootPathFinder(
+            heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType,
+            static _ => false, cache.TryGetReverseIndexProvider(), cache);
+
+        Dictionary<string, RootChainSummary>? rootChainsByTypeName = null;
+        foreach (TypeSnapshot candidate in candidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            bool found = finder.TryFindAnyRootPath(
+                candidate.SampleAddress, roots, out string? rootKind, out List<ulong>? addresses,
+                out bool searchTruncated, out _, out _, cancellationToken);
+            if (!found || rootKind is null || addresses is null || addresses.Count == 0)
+                continue;
+
+            var hopTypeNames = new List<string>(addresses.Count);
+            foreach (ulong address in addresses)
+            {
+                ClrType? type = RootPathSearchSupport.ResolveType(heap, cache, address);
+                hopTypeNames.Add(type?.Name ?? StringConstants.UnknownType);
+            }
+
+            rootChainsByTypeName ??= new Dictionary<string, RootChainSummary>(StringComparer.Ordinal);
+            rootChainsByTypeName[candidate.TypeName] = new RootChainSummary(rootKind, hopTypeNames, searchTruncated);
+        }
+
+        return rootChainsByTypeName;
     }
 
     private static LeakSignals BuildLeakSignalsFromReverseIndex(

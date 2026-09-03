@@ -90,6 +90,17 @@ internal static class ReportHtmlShared
                         sb.AppendLine("</div>");
                         break;
                     }
+                case InterpretationBlock interp:
+                    sb.AppendLine($"<div class=\"detail-interpretation{IndCss(interp.IndentLevel)}\">💡 {WrapAddr(Enc(interp.Text))}</div>");
+                    break;
+                case NextStepsBlock steps:
+                    sb.AppendLine("<div class=\"detail-next-steps\">");
+                    sb.AppendLine("<div class=\"detail-next-steps__title\">Next steps</div>");
+                    sb.AppendLine("<ul>");
+                    foreach (NextStepLink link in steps.Links)
+                        sb.AppendLine($"<li><a href=\"#{Enc(link.SectionId)}\">{Enc(link.Label)}</a></li>");
+                    sb.AppendLine("</ul></div>");
+                    break;
                 case CollapsibleSectionBeginBlock cs:
                     sb.AppendLine($"<details class=\"detail-nested\"><summary>{Enc(cs.Title)}</summary><div class=\"detail-nested-content\">");
                     break;
@@ -450,10 +461,17 @@ internal static class ReportHtmlShared
         for (int i = 0; i < sections.Count; i++)
         {
             AnalyzerDetailSection section = sections[i];
+            // Same anchor scheme as MarkdownCanonicalReportFormatter (SectionId when present,
+            // detail-{i} fallback otherwise) — was index-only here, so a cross-section link built
+            // from a stable SectionId (e.g. "#A5") resolved in Markdown output but was dead in this
+            // pre-rendered HTML path. The primary client-side renderer (report.renderers.sections.js)
+            // already preferred SectionId; this only affects this server-side pre-render fallback,
+            // used for very large reports (see HtmlReportRenderer's shouldPreRender gate).
+            string anchor = string.IsNullOrEmpty(section.SectionId) ? $"detail-{i}" : section.SectionId;
             string colorClass = $"detail-color-{i % 6}";
-            sb.AppendLine($"<section id=\"detail-{i}\" class=\"analyzer-section {colorClass}\">");
+            sb.AppendLine($"<section id=\"{Enc(anchor)}\" class=\"analyzer-section {colorClass}\">");
             sb.AppendLine("<details>");
-            sb.AppendLine($"<summary>{Enc(section.DisplayTitle)} <a class=\"permalink\" href=\"#detail-{i}\" aria-label=\"Permalink\">🔗</a></summary>");
+            sb.AppendLine($"<summary>{Enc(section.DisplayTitle)} <a class=\"permalink\" href=\"#{Enc(anchor)}\" aria-label=\"Permalink\">🔗</a></summary>");
             sb.AppendLine("<div class=\"detail-block\">");
             RenderBlocksHtml(section.Blocks, sb);
             sb.AppendLine("</div></details></section>");

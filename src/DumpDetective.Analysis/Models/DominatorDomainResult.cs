@@ -82,7 +82,51 @@ internal sealed record DominatorDomainResult(
     /// that hits that cap ends with a synthetic "chain continues" hop (<c>Address == 0</c>)
     /// rather than silently looking complete.
     /// </summary>
-    IReadOnlyDictionary<string, IReadOnlyList<DominatorChainHop>>? DominatorChainsByTypeName = null) : AnalyzerDomainResult;
+    IReadOnlyDictionary<string, IReadOnlyList<DominatorChainHop>>? DominatorChainsByTypeName = null,
+    /// <summary>
+    /// Cross-type retained overlap (§8, docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md):
+    /// for a type name already present in <see cref="TopDominatorTypes"/>, the name of another
+    /// candidate type whose sample object's dominator subtree fully contains this type's sample
+    /// object — i.e. this type's entire retained subgraph is nested inside the named type's. Found
+    /// for free while walking <see cref="DominatorChainsByTypeName"/> (no extra provider calls):
+    /// the nearest such ancestor in the chain wins. Sample-based, like every other per-type field
+    /// here — proves "these two types' sampled instances overlap," not "every instance of these two
+    /// types overlaps"; a missing entry means no other candidate's sample was found on this type's
+    /// ancestor chain (within <see cref="DumpDetective.Core.Options.RetentionOptions.MaxDominatorChainDepth"/>),
+    /// not that no overlap exists. Null under the same "exact tree unavailable" conditions as
+    /// <see cref="ExactRetainedBytesByTypeName"/>.
+    /// </summary>
+    IReadOnlyDictionary<string, string>? ContainingTypeNameByTypeName = null,
+    /// <summary>
+    /// Cross-type retained overlap, full population level (§8b, docs/analysis/phase1-redesigns/
+    /// dominator-tree-phase1-integration.md) — unlike <see cref="ContainingTypeNameByTypeName"/>'s
+    /// single-sample check, this counts every instance of a candidate type whose dominator subtree
+    /// is contained within another candidate type's, up to <see cref="DumpDetective.Core.Options.RetentionOptions.MaxCrossTypeOverlapInstancesScanned"/>
+    /// instances scanned in total across all candidates. Null under the same "exact tree
+    /// unavailable" conditions as <see cref="ExactRetainedBytesByTypeName"/>; empty (not null) when
+    /// the exact tree was available but fewer than two candidate types were resolved, or none
+    /// overlapped.
+    /// </summary>
+    IReadOnlyList<CrossTypeOverlapPair>? CrossTypeOverlapPairs = null,
+    /// <summary>
+    /// True when the §8b instance scan above hit <see cref="DumpDetective.Core.Options.RetentionOptions.MaxCrossTypeOverlapInstancesScanned"/>
+    /// before finishing — <see cref="CrossTypeOverlapPairs"/> undercounts in this case rather than
+    /// covering every instance of every candidate type.
+    /// </summary>
+    bool CrossTypeOverlapInstanceScanCapped = false,
+    /// <summary>
+    /// Inline GC-root-chain summary (audit P2, docs/analysis/phase1/dominator-analyzer-audit.md) —
+    /// "why is this alive," distinct from <see cref="DominatorChainsByTypeName"/>'s "who retains
+    /// this" dominance chain. Keyed by type name, scoped to just the Gen2/LOH sub-table's
+    /// candidates (not the full <see cref="TopDominatorTypes"/> set — a real
+    /// <c>RootPathFinder</c> bidirectional search per candidate, not a free point lookup like the
+    /// other per-type fields here). Null when the exact tree was unavailable this run (same gate
+    /// as <see cref="ExactRetainedBytesByTypeName"/>, since this is computed alongside it); a
+    /// present dictionary can still be missing an entry for a given type when no path from any GC
+    /// root to that type's sample was found within the search's own bounds — see
+    /// <see cref="RootChainSummary.Truncated"/>.
+    /// </summary>
+    IReadOnlyDictionary<string, RootChainSummary>? RootChainsByTypeName = null) : AnalyzerDomainResult;
 
 internal sealed record HighlyReferencedObjectSnapshot(ulong Address, string TypeName, ulong Size, int IncomingReferences, ulong EstimatedRetainedBytes = 0, Evidence? Evidence = null);
 
@@ -96,3 +140,29 @@ internal sealed record RetentionTypeSnapshot(
 
 /// <summary>One hop in a dominance chain (P3-3) — see <see cref="DominatorDomainResult.DominatorChainsByTypeName"/>.</summary>
 internal sealed record DominatorChainHop(string TypeName, ulong Address, ulong RetainedBytes);
+
+/// <summary>
+/// One (type, containing type) pair from the §8b/§8c population-level overlap pass — see
+/// <see cref="DominatorDomainResult.CrossTypeOverlapPairs"/>. <see cref="ContainedInstanceCount"/>
+/// (§8b) counts every contained instance; <see cref="ContainedRetainedBytes"/> (§8c) sums only
+/// "topmost" contained instances (no ancestor also of <see cref="TypeName"/>) to avoid double-
+/// counting nested same-type retained bytes — see §5's fix for the same reasoning. Zero is a real,
+/// honest outcome when every contained instance for this pair happens to be non-topmost (each
+/// already counted inside another instance's total, possibly credited to a different pair or not
+/// credited at all), not evidence that nothing is shared — <see cref="ContainedInstanceCount"/>
+/// still reflects the true count in that case.
+/// </summary>
+internal sealed record CrossTypeOverlapPair(
+    string TypeName,
+    string ContainingTypeName,
+    int ContainedInstanceCount,
+    ulong ContainedRetainedBytes = 0);
+
+/// <summary>
+/// One GC-root-chain result from <c>RootPathFinder.TryFindAnyRootPath</c> — see
+/// <see cref="DominatorDomainResult.RootChainsByTypeName"/>. <see cref="HopTypeNames"/> is ordered
+/// root-most first, target (the candidate's sample object) last — same convention as
+/// <see cref="DominatorChainHop"/>'s dominance chain, for the same "A holds B holds ... holds your
+/// object" reading order.
+/// </summary>
+internal sealed record RootChainSummary(string RootKind, IReadOnlyList<string> HopTypeNames, bool Truncated);

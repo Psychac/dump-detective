@@ -94,4 +94,19 @@ public sealed class RetentionOptions
     /// rather than a silent truncation.
     /// </summary>
     public int MaxDominatorChainDepth { get; init; } = 64;
+
+    /// <summary>
+    /// Safety bound (not a display truncation) on how many object instances
+    /// <c>DominatorAnalyzer</c>'s cross-type population overlap pass (§8b,
+    /// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md) collects while
+    /// streaming the disk-backed heap index looking for instances of the Gen2/LOH sub-table's
+    /// candidate types. Unlike the sample-based §8a check, §8b needs every instance of every
+    /// candidate type to answer "how many objects of type A live inside type B's retained
+    /// subgraph" exactly — for a candidate type with millions of instances (a large collection,
+    /// or exactly the self-referential-chain shape this tool exists to catch) that's a real,
+    /// data-dependent cost, not one this option silently trims away: hitting the cap surfaces as
+    /// <c>DominatorDomainResult.CrossTypeOverlapInstanceScanCapped</c> rather than a quietly
+    /// under-counted result.
+    /// </summary>
+    public int MaxCrossTypeOverlapInstancesScanned { get; init; } = 2_000_000;
 }

@@ -97,8 +97,11 @@ internal static class SectionIdDomainMap
         ["WeakReferenceAnalyzer"]       = ("GC",      "B8"),
         ["Weak Reference Analysis"]     = ("GC",      "B8"),
 
-        // Supplementary section — ReferenceChainSectionBuilder (supporting analyzer, no fixed spec section)
-        ["Reference Chain Analysis"]   = ("Memory",     ""),
+        // Supplementary section — ReferenceChainSectionBuilder (supporting analyzer, no fixed spec
+        // section slot originally, but needs a real anchor to be a cross-section link target —
+        // see docs/analysis/phase1/dominator-analyzer-audit.md's "Shared Next steps" P3 item).
+        ["ReferenceChainAnalyzer"]     = ("Memory",     "A4"),
+        ["Reference Chain Analysis"]   = ("Memory",     "A4"),
 
         // Domain H — Infrastructure / Network
         ["DbConnectionAnalyzer"]       = ("Infrastructure", "H1"),

@@ -4,6 +4,7 @@ using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Models;
 using FluentAssertions;
 using System.IO;
+using System.Linq;
 using Xunit;
 
 namespace DumpDetective.Tests.Unit.Analyzers;
@@ -136,5 +137,34 @@ public sealed class ThreadStackClusterAnalyzerOptionsTests
         var wait = roots[0];
         wait.Children.Should().HaveCount(8);
         wait.TruncatedChildCount.Should().Be(2);
+    }
+
+    // Regression: a deeply recursive, branchy call stack (e.g. stack-overflow-shaped dumps) used to
+    // produce one nested TreeNode per branch point with no depth bound, which could exceed
+    // System.Text.Json's MaxDepth during report serialization ("possible object cycle detected").
+    // A short-lived sibling branching off the shared spine at every frame defeats the
+    // unbranched-chain collapse (Children.Count == 2 at every spine node), so this exercises the
+    // depth cap rather than the node/child-count budgets covered above.
+    [Fact]
+    public void BuildClusterTree_DeepBranchingStack_CapsNestingDepthInsteadOfGrowingUnbounded()
+    {
+        const int frameCount = 100;
+        var clusters = new List<ThreadStackClusterAnalyzer.StackCluster>();
+        var spineFrames = new List<string>();
+        for (int i = 0; i < frameCount; i++)
+        {
+            spineFrames.Add($"Frame{i}");
+            var sideFrames = new List<string>(spineFrames) { $"Frame{i}Side" };
+            clusters.Add(MakeCluster(string.Join(" | ", sideFrames), 1));
+        }
+        clusters.Add(MakeCluster(string.Join(" | ", spineFrames), 1));
+
+        var roots = ThreadStackClusterAnalyzer.BuildClusterTree(clusters);
+
+        int MaxDepth(ThreadClusterTreeNode node) =>
+            node.Children.Count == 0 ? 1 : 1 + node.Children.Max(MaxDepth);
+
+        int observedDepth = roots.Max(MaxDepth);
+        observedDepth.Should().BeLessThan(frameCount, "the depth cap should trigger well before the full stack depth");
     }
 }

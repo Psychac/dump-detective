@@ -280,6 +280,16 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
                     sb.AppendLine($"> {band.Symbol} {band.Band} confidence{(band.Caveats.Length > 0 ? $" — {string.Join("; ", band.Caveats)}" : string.Empty)}");
                     sb.AppendLine();
                     break;
+                case InterpretationBlock interp:
+                    sb.AppendLine($"*💡 {interp.Text}*");
+                    sb.AppendLine();
+                    break;
+                case NextStepsBlock steps:
+                    sb.AppendLine("**Next steps:**");
+                    foreach (NextStepLink link in steps.Links)
+                        sb.AppendLine($"- [{link.Label}](#{link.SectionId})");
+                    sb.AppendLine();
+                    break;
                 case CollapsibleSectionBeginBlock cs:
                     sb.AppendLine($"<details><summary>{cs.Title}</summary>");
                     sb.AppendLine();

@@ -33,6 +33,16 @@ namespace DumpDetective.Analysis.Analyzers
         private const int MaxTreeChildrenPerNode = 8;
         private const int MaxTreeNodes = 400;
 
+        // Safety bound (not a display truncation) on rendered TreeNode nesting depth, same
+        // reasoning as RetentionOptions.MaxDominatorChainDepth: a real call stack's depth is
+        // bounded only by the deepest recursion in the target app (e.g. an unbounded/stack-overflow
+        // recursive call), and each branch point in the trie adds one nested TreeNode.Children
+        // level in the JSON report — unbounded depth there previously tripped
+        // System.Text.Json's MaxDepth guard ("possible object cycle detected") on real dumps with
+        // deep, branchy stacks. Unbranched runs already collapse into one chain node below, so this
+        // only bounds how many distinct branch points get their own nesting level.
+        private const int MaxTreeDepth = 64;
+
         // P3-1: well-known framework wait/idle frames matched against a cluster's whole pipe-joined
         // signature via ThreadWaitClassifier — these represent expected framework activity rather
         // than application-level contention, so findings can avoid treating them as hotspots.
@@ -268,7 +278,7 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 if (nodeBudget <= 0)
                     break;
-                roots.Add(ConvertTrieNode(child.Key, child.Value, ref nodeBudget));
+                roots.Add(ConvertTrieNode(child.Key, child.Value, ref nodeBudget, depth: 0));
             }
             return roots;
         }
@@ -294,7 +304,7 @@ namespace DumpDetective.Analysis.Analyzers
             return ordered;
         }
 
-        private static ThreadClusterTreeNode ConvertTrieNode(string frameLabel, TrieBuildNode node, ref int nodeBudget)
+        private static ThreadClusterTreeNode ConvertTrieNode(string frameLabel, TrieBuildNode node, ref int nodeBudget, int depth)
         {
             nodeBudget--;
 
@@ -311,12 +321,16 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             List<KeyValuePair<string, TrieBuildNode>> orderedChildren = OrderChildrenByCountDescending(node.Children);
+
+            if (depth >= MaxTreeDepth)
+                return new ThreadClusterTreeNode(frameLabel, node.Count, Array.Empty<ThreadClusterTreeNode>(), isChain, orderedChildren.Count);
+
             var children = new List<ThreadClusterTreeNode>(Math.Min(orderedChildren.Count, MaxTreeChildrenPerNode));
             int truncatedChildCount = 0;
             for (int i = 0; i < orderedChildren.Count; i++)
             {
                 if (children.Count < MaxTreeChildrenPerNode && nodeBudget > 0)
-                    children.Add(ConvertTrieNode(orderedChildren[i].Key, orderedChildren[i].Value, ref nodeBudget));
+                    children.Add(ConvertTrieNode(orderedChildren[i].Key, orderedChildren[i].Value, ref nodeBudget, depth + 1));
                 else
                     truncatedChildCount++;
             }

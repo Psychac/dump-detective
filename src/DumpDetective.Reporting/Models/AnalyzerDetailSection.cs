@@ -265,6 +265,8 @@ internal sealed record AnalyzerDetailSection(
 [JsonDerivedType(typeof(CollapsibleSectionBeginBlock), "collapsibleBegin")]
 [JsonDerivedType(typeof(CollapsibleSectionEndBlock), "collapsibleEnd")]
 [JsonDerivedType(typeof(SparklineBlock), "sparkline")]
+[JsonDerivedType(typeof(InterpretationBlock), "interpretation")]
+[JsonDerivedType(typeof(NextStepsBlock), "nextSteps")]
 internal abstract record SectionBlock;
 
 internal sealed record HeadingBlock(string Text, int IndentLevel = 0) : SectionBlock;
@@ -292,6 +294,28 @@ internal sealed record ConfidenceBandBlock(
     double Score,
     string Symbol,
     string[] Caveats) : SectionBlock;
+
+/// <summary>
+/// Narrative reading of a ratio/percent metric (docs/refactor/narrative-interpretation-text-design.md)
+/// — e.g. "retained ≫ shallow → holds a large external graph." Distinct from <see cref="TextBlock"/>
+/// so renderers can style it as a muted "aside" instead of blending into ordinary narrative prose.
+/// Produced by <c>SectionBuilderBase.Interpret</c>, never constructed directly by a section builder.
+/// </summary>
+internal sealed record InterpretationBlock(string Text, int IndentLevel = 0) : SectionBlock;
+
+/// <summary>
+/// Cross-section "investigate next" pointers (docs/analysis/phase1/dominator-analyzer-audit.md's
+/// "Shared Next steps" P3 item) — e.g. Dominator pointing an engineer at GC Root Analysis or
+/// Reference Chain Analysis for root-cause follow-up, matching comparable tools' step-numbered
+/// investigation flow. <see cref="NextStepLink.SectionId"/> is the stable, analyzer-name-keyed ID
+/// from <c>SectionIdDomainMap</c> (e.g. <c>"A5"</c>), resolved at build time by
+/// <c>SectionBuilderBase.NextSteps</c> — never a raw analyzer name, so every formatter can turn it
+/// into a real anchor link without its own lookup. A link to a target that didn't run this session
+/// (filtered out, not just skipped) degrades to an unresolved in-page anchor rather than an error.
+/// </summary>
+internal sealed record NextStepsBlock(IReadOnlyList<NextStepLink> Links) : SectionBlock;
+
+internal sealed record NextStepLink(string Label, string SectionId);
 
 internal sealed record TableRow(IReadOnlyList<TableCell> Cells);
 internal sealed record TableCell(string Display, double? RawValue = null, string? LinkTarget = null);   // RawValue for client-side sort; LinkTarget for anchored links

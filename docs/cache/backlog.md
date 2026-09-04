@@ -49,6 +49,21 @@ actually hits.
   pressure during a large scan. Struct-of-arrays candidate, but only worth chasing if
   profiling shows GC pressure from this specifically (do the two items above first).
 
+## Real, measured disk-footprint win
+
+- **Edge-index and dominator-tree values stored as full 8-byte addresses instead of 4-byte node
+  indices into the already-existing `ObjectAddresses` column.** Measured (not projected) on a real
+  14.6M-object dump: the combined forward+reverse edge index is 57.1% of `cache.bin` (799 MB of
+  1.37 GB), the dominator tree another 16.3% (228 MB) — together 73.4% of the file, discovered while
+  investigating why `cache.bin` runs ~5x the size of a comparable tool's cache for the same dump (see
+  [docs/discrepancy/cache-footprint-comparison.md](../discrepancy/cache-footprint-comparison.md)).
+  Full clean-slate design — true CSR for both edge directions (no directory overhead at all, not
+  just narrower keys), `MethodTable` dictionary encoding, and block-level compression that preserves
+  point-lookup access — with a fully-derived projection (~45.7% from CSR + dictionary alone, real
+  arithmetic on measured counts; a further, unmeasured ~54–67% possible from compression on top) and
+  the full caveat list, in
+  [docs/analysis/phase1-redesigns/cache-format-clean-slate-redesign.md](../analysis/phase1-redesigns/cache-format-clean-slate-redesign.md).
+
 ## GC-root enumeration at scale (diagnosis is done — see cache-architecture.md § 8; only the fix is open)
 
 Confirmed intrinsic native cost (per-thread stack unwinding inside ClrMD's DAC layer),

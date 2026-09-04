@@ -1,5 +1,26 @@
 # HTML report payload size reduction — design
 
+## Status (as of 2026-09-04)
+
+**Phases 1–3 done. Phase 4 deferred.** Measured on the reference dump (full report, all 36
+analyzers, no exclusions):
+
+| Stage | Size | Cumulative reduction |
+|---|---:|---:|
+| Baseline | 29.9 MB | — |
+| Phase 1 — F7 gzip transport | 3.69 MB | 8.1× |
+| Phase 2 — F1 string pool + F2 bare rows | 2.81 MB | 10.6× |
+| Phase 3 — F3 Object Shape dedup + F4 subscriber pool + F6 float rounding | **2.65 MB** | **11.3×** |
+
+Each phase verified against the real 3.3 GB dump: regenerated the HTML, loaded it headless in
+Chrome from `file://`, and confirmed no data loss (resolved literal strings, matching row/table
+counts, no leaked pool indices). Full test suite green after each phase (1136 passed at time of
+writing). See "Sequencing" below for what shipped in each phase and where.
+
+**Phase 4 (F5 constant-column hoisting) is not started** — lowest measured payoff in the set
+(~0.26 MB pre-gzip) for the only change here needing a new header↔row arity contract. Pick it up
+only if there's a reason to squeeze further; otherwise this plan is complete as-is.
+
 ## Motivation
 
 After the top-N / capped-sample removal work, a single-dump HTML report for a 3.3 GB dump is

@@ -30,6 +30,7 @@ as fact. ClrMD version and AOT settings were confirmed directly against both rep
 | [performance-comparison.md](performance-comparison.md) | The other tool's published benchmarks, our current lack of equivalent numbers, and concrete hypotheses for the reported gap |
 | [analyzer-command-analysis-comparison.md](analyzer-command-analysis-comparison.md) | Per-analyzer deep dive: what each analyzer/command *computes*, algorithm vs. algorithm (corrected 33-analyzer/66-command counts, full mapping table, deep-dived pairs, follow-up worklist) |
 | [analyzer-command-report-comparison.md](analyzer-command-report-comparison.md) | Per-analyzer deep dive: how each analyzer/command *presents* its findings — architectural report-primitive gaps (structured `Explain`, inline chain rendering) that apply across all analyzers at once |
+| [cache-footprint-comparison.md](cache-footprint-comparison.md) | Exact, measured (not estimated) byte-level breakdown of why `cache.bin` (1.37 GB) is ~5x the other tool's `.ddcache` directory (271 MB) on the identical dump: no compression, a duplicated forward+reverse edge index at full address width, a full on-disk dominator tree |
 | [roadmap.md](roadmap.md) | Prioritized list of gaps worth closing, ordered by leverage |
 
 ## Headline findings
@@ -59,7 +60,16 @@ as fact. ClrMD version and AOT settings were confirmed directly against both rep
    BFS index built via a confirmed 3-pass `BfsIndexBuilder`) that is *explicitly* opt-in and
    measured at ~5x speedup across repeat runs.** We build a disk-backed index too (`cache.bin`), but
    it isn't exposed as a first-class, user-controlled lifecycle the way `load`/`close` are — see
-   [architecture-comparison.md](architecture-comparison.md) § Cache lifecycle.
+   [architecture-comparison.md](architecture-comparison.md) § Cache lifecycle. On the same real dump
+   (14.62M objects), this tool's `cache.bin` measures 1.37 GB vs. the other tool's full `.ddcache`
+   directory at 271 MB — a ~5x gap fully traced to three confirmed, measured causes, not a cache-tier
+   mismatch: no compression anywhere in `cache.bin` (their `.bfs.idx`/`.idom.idx` measure 5.1x/12.8x
+   Brotli reduction on this same dump's data), a duplicated forward+reverse edge index at full 8-byte
+   address width (57% of the file) vs. their single forward CSR at 4-byte dense indices, and a full
+   on-disk dominator tree with explicit child lists (16% of the file) vs. their 2-column
+   `idom[]`/`retained[]` format — see
+   [cache-footprint-comparison.md](cache-footprint-comparison.md) for the complete section-by-section
+   measurement on both sides.
 4. **The other tool is pinned to ClrMD 3.1.512801; this branch is mid-upgrade to ClrMD 4.0.732401**
    (branch name `upgrade/clrmd-4` literally documents this, confirmed directly from both `.csproj`
    files). A ClrMD major-version regression is a live, testable hypothesis for the heap-walk phase

@@ -434,7 +434,7 @@ public sealed class HtmlRendererCssTests
     {
         Match match = Regex.Match(
             html,
-            "<script id=\\\"report-json\\\" type=\\\"application/json\\\">([\\s\\S]*?)</script>",
+            "<script\\b[^>]*\\bid\\s*=\\s*[\"']report-json[\"'][^>]*>([\\s\\S]*?)</script>",
             RegexOptions.IgnoreCase);
 
         match.Success.Should().BeTrue();

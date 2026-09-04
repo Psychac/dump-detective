@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text;
@@ -24,6 +25,11 @@ internal sealed record HtmlRenderSettings(
 /// </summary>
 internal sealed class HtmlReportRenderer : IReportFormatter
 {
+    // Below this size the embedded payload stays plain JSON so small reports remain
+    // human-diffable/greppable straight out of the HTML file. See
+    // docs/refactor/report-payload-size-reduction-design.md (F7).
+    private const int CompressionThresholdBytes = 200_000;
+
     private static readonly string _template = EmbeddedResourceLoader.LoadText("report.html");
     private static readonly string _css = BuildInlinedCss();
     private static readonly string _js = BuildInlinedBundle();
@@ -80,13 +86,31 @@ internal sealed class HtmlReportRenderer : IReportFormatter
         // }
         string payloadJson = "{\"report\":" + reportJson + ",\"perDumpDocs\":" + perDumpJson + "}";
 
+        // Pre-rendered reports already duplicate their content directly into the HTML body,
+        // so keep their embedded payload plain rather than adding a decompression dependency
+        // to a path that doesn't need the byte savings as much.
+        bool compressPayload = !shouldPreRender
+            && Encoding.UTF8.GetByteCount(payloadJson) > CompressionThresholdBytes;
+        string reportJsonEncoding = compressPayload ? "gzip-base64" : "json";
+        string reportJsonBody = compressPayload ? GzipCompressToBase64(payloadJson) : payloadJson;
+
         return _template
             .Replace("{{CSS}}", _css)
-            .Replace("{{REPORT_JSON}}", payloadJson)
+            .Replace("{{REPORT_JSON_ENCODING}}", reportJsonEncoding)
+            .Replace("{{REPORT_JSON}}", reportJsonBody)
             .Replace("{{JS}}", _js)
             .Replace("{{PRE_RENDERED_HEALTH_SCORECARD}}", preHealthScorecard)
             .Replace("{{PRE_RENDERED_FINDINGS}}", preFindings)
             .Replace("{{PRE_RENDERED_ANALYZER_SECTIONS}}", preAnalyzers);
+    }
+
+    private static string GzipCompressToBase64(string text)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(text);
+        using var output = new MemoryStream();
+        using (var gzip = new GZipStream(output, CompressionLevel.SmallestSize, leaveOpen: true))
+            gzip.Write(raw, 0, raw.Length);
+        return Convert.ToBase64String(output.ToArray());
     }
 
     private static string CompactReportJson(AnalysisReportDocument doc, string reportJson)

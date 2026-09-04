@@ -26,7 +26,7 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
         bool anyKindIsHeuristic = roots.ByKind.Count == 0 || roots.ByKind.Any(k => !k.IsExactRetainedBytes);
 
         var (confidenceScore, capCaveats) = ConfidenceScoring.Compute(0.75,
-            ConfidenceScoring.F(roots.PathSearchCapped, 0.20, $"Root path search was capped ({roots.PathSearchCappedCount:N0} path(s) truncated)."));
+            ConfidenceScoring.F(roots.SubgraphWalkCapped, 0.20, $"Root-owned subgraph walk was capped ({roots.SubgraphWalkCappedCount:N0} subgraph(s) truncated)."));
 
         var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
@@ -52,7 +52,7 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
             ["total_roots"] = new NumericMetricValue(roots.TotalRoots, MetricUnit.Count),
-            ["path_search_capped"] = new TextMetricValue(roots.PathSearchCapped ? $"Yes ({roots.PathSearchCappedCount:N0} capped)" : "No"),
+            ["subgraph_walk_capped"] = new TextMetricValue(roots.SubgraphWalkCapped ? $"Yes ({roots.SubgraphWalkCappedCount:N0} capped)" : "No"),
             ["dropped_zero_estimate_roots"] = new NumericMetricValue(roots.DroppedZeroEstimateRootCount, MetricUnit.Count),
         };
 
@@ -92,83 +92,93 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
                 finalizerByType.Select(t => R(new object?[] { t.TypeName, t.Count, t.TotalRetainedBytes })).ToArray()));
         }
 
-        // ── Root paths: typed RootPathGroups slot ─────────────────────────
-        var rootPathGroups = new List<RootPathGroup>();
+        // ── Root-owned subgraphs: typed RootOwnedSubgraphGroups slot ────────
+        var subgraphGroups = new List<RootOwnedSubgraphGroup>();
 
-        if (roots.RootPaths.Count > 0)
+        if (roots.RootOwnedSubgraphs.Count > 0)
         {
-            var pathGroupings = roots.RootPaths
+            var subgraphGroupings = roots.RootOwnedSubgraphs
                 .GroupBy(p => p.TargetTypeName, StringComparer.Ordinal)
                 .OrderByDescending(g => g.Count())
                 .ThenBy(g => g.Key);
 
-            foreach (var group in pathGroupings)
+            foreach (var group in subgraphGroupings)
             {
-                var pathsInGroup = group.OrderBy(p => p.PathLength).Take(3).ToArray();
+                var subgraphsInGroup = group.OrderBy(p => p.SubgraphNodeCount).Take(3).ToArray();
                 bool anyGroupCapped = false;
-                for (int pi = 0; pi < pathsInGroup.Length; pi++)
-                    if (pathsInGroup[pi].WasCapped) { anyGroupCapped = true; break; }
+                for (int pi = 0; pi < subgraphsInGroup.Length; pi++)
+                    if (subgraphsInGroup[pi].WasCapped) { anyGroupCapped = true; break; }
 
-                var typedPaths = new List<RootPath>(pathsInGroup.Length);
-                for (int pi = 0; pi < pathsInGroup.Length; pi++)
+                var typedSubgraphs = new List<RootOwnedSubgraph>(subgraphsInGroup.Length);
+                for (int pi = 0; pi < subgraphsInGroup.Length; pi++)
                 {
-                    var p = pathsInGroup[pi];
-                    typedPaths.Add(new RootPath(
+                    var p = subgraphsInGroup[pi];
+                    typedSubgraphs.Add(new RootOwnedSubgraph(
                         RootKind:      p.RootKind,
                         TargetAddress: $"0x{p.TargetAddress:X8}",
-                        PathLength:    p.PathLength,
+                        SubgraphNodeCount: p.SubgraphNodeCount,
                         WasCapped:     p.WasCapped,
-                        Hops:          p.PathTypeNames,
+                        Hops:          p.SubgraphTypeNames,
                         EstimatedRetainedBytes:  p.EstimatedRetainedBytes,
                         RetainedSizeWasWalked:   p.RetainedSizeWasWalked,
                         RetainedSizeIsExact:     p.RetainedSizeIsExact));
                 }
 
-                rootPathGroups.Add(new RootPathGroup(
+                subgraphGroups.Add(new RootOwnedSubgraphGroup(
                     TargetType:      group.Key,
                     TargetTypeShort: TrimTypeName(group.Key),
-                    TotalPathCount:  group.Count(),
+                    TotalSubgraphCount: group.Count(),
                     AnyCapped:       anyGroupCapped,
-                    Paths:           typedPaths));
+                    Subgraphs:       typedSubgraphs));
             }
 
-            if (roots.PathSearchCapped)
-                blocks.Add(T($"Root path search was capped ({roots.PathSearchCappedCount:N0} path(s) truncated) — some types may have incomplete chains."));
+            if (roots.SubgraphWalkCapped)
+                blocks.Add(T($"Root-owned subgraph walk was capped ({roots.SubgraphWalkCappedCount:N0} subgraph(s) truncated) — some types may have incomplete subgraphs."));
         }
 
         // P3-4 (docs/analysis/phase1/gcroot-analyzer-audit.md): typed TreeWidgets slot — collapses
-        // RootPathGroups chains that share a common structure near the target/root end into one
-        // shared-prefix tree per group, instead of one independent chain card per path (rendered by
+        // RootOwnedSubgraphGroups entries that share a common structure near the target end into one
+        // shared-prefix tree per group, instead of one independent card per subgraph (rendered by
         // the same shared collapsible tree widget ThreadStackClusterAnalyzer's cluster tree uses —
-        // see docs/refactor/collapsible-tree-widget-design.md). RootPathGroups above is unchanged
-        // and still emitted for consumers that only want the flat per-path view.
-        List<TreeWidget>? treeWidgets = roots.RootPaths.Count > 0 ? BuildRootPathTreeWidgets(roots.RootPaths) : null;
+        // see docs/refactor/collapsible-tree-widget-design.md). RootOwnedSubgraphGroups above is
+        // unchanged and still emitted for consumers that only want the flat per-subgraph view.
+        List<TreeWidget>? treeWidgets = roots.RootOwnedSubgraphs.Count > 0 ? BuildRootOwnedSubgraphTreeWidgets(roots.RootOwnedSubgraphs) : null;
 
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,
             CompactTables: compactTables.Count > 0 ? compactTables : null,
-            RootPathGroups: rootPathGroups.Count > 0 ? rootPathGroups : null,
+            RootOwnedSubgraphGroups: subgraphGroups.Count > 0 ? subgraphGroups : null,
             TreeWidgets: treeWidgets);
     }
 
-    // ── P3-4: shared-prefix tree over each RootPathGroup's forward-walk hop sequences ──────────
+    // ── P3-4: shared-prefix tree over each RootOwnedSubgraphGroup's forward-walk hop sequences ──
     // Mirrors ThreadStackClusterAnalyzer.BuildClusterTree's trie-merge shape (see that method's
-    // docs/refactor/collapsible-tree-widget-design.md reference), scoped to RootPathFinding.PathTypeNames
-    // instead of stack-frame signatures. Every path in a group already shares hop[0] by construction
-    // (grouped by TargetTypeName), so that hop becomes the group's tree root label and only hops[1..]
-    // are merged.
-    private const int MaxRootPathTreeNodes = 400;
-    private const int MaxRootPathTreeChildren = 8;
+    // docs/refactor/collapsible-tree-widget-design.md reference), scoped to
+    // RootOwnedSubgraphFinding.SubgraphTypeNames instead of stack-frame signatures. Every subgraph
+    // in a group already shares hop[0] by construction (grouped by TargetTypeName), so that hop
+    // becomes the group's tree root label and only hops[1..] are merged.
+    private const int MaxSubgraphTreeNodes = 400;
+    private const int MaxSubgraphTreeChildren = 8;
 
-    private static List<TreeWidget> BuildRootPathTreeWidgets(IReadOnlyList<RootPathFinding> rootPaths)
+    // Safety bound (not a display truncation) on rendered TreeNode nesting depth — same reasoning
+    // as ThreadStackClusterAnalyzer.MaxTreeDepth. RootOwnedSubgraphFinding.SubgraphTypeNames comes
+    // from BoundedGraphWalk.CollectForwardTypeNames, a breadth-first walk capped at 500 *nodes*
+    // (PathWalkMaxNodes), not 20 hops — for a near-linear reachable subgraph (e.g. a long List/
+    // LinkedList chain) that BFS visits in mostly one direction, so SubgraphTypeNames can carry
+    // close to 500 hops. Left uncapped here, an unbranched run of that length previously nested
+    // ~500 levels of TreeNode.Children and tripped System.Text.Json's MaxDepth guard ("possible
+    // object cycle detected") on real dumps.
+    private const int MaxSubgraphTreeDepth = 64;
+
+    private static List<TreeWidget> BuildRootOwnedSubgraphTreeWidgets(IReadOnlyList<RootOwnedSubgraphFinding> subgraphFindings)
     {
-        var byTargetType = rootPaths
+        var byTargetType = subgraphFindings
             .GroupBy(p => p.TargetTypeName, StringComparer.Ordinal)
             .OrderByDescending(g => g.Count())
             .ThenBy(g => g.Key, StringComparer.Ordinal);
 
-        int nodeBudget = MaxRootPathTreeNodes;
+        int nodeBudget = MaxSubgraphTreeNodes;
         var groupRoots = new List<TreeNode>();
         bool anyTruncated = false;
 
@@ -177,35 +187,38 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
             if (nodeBudget <= 0) { anyTruncated = true; break; }
             nodeBudget--;
 
-            var trieRoot = new RootPathTrieNode();
-            int pathCount = 0;
-            foreach (RootPathFinding path in group)
+            var trieRoot = new SubgraphTrieNode();
+            int subgraphCount = 0;
+            foreach (RootOwnedSubgraphFinding finding in group)
             {
-                pathCount++;
-                RootPathTrieNode node = trieRoot;
-                for (int i = 1; i < path.PathTypeNames.Count; i++)
+                subgraphCount++;
+                SubgraphTrieNode node = trieRoot;
+                for (int i = 1; i < finding.SubgraphTypeNames.Count; i++)
                 {
-                    node = GetOrAddChild(node, path.PathTypeNames[i]);
+                    node = GetOrAddChild(node, finding.SubgraphTypeNames[i]);
                     node.Count++;
                 }
             }
 
-            List<KeyValuePair<string, RootPathTrieNode>> orderedChildren = OrderChildrenByCountDescending(trieRoot.Children);
-            var children = new List<TreeNode>(Math.Min(orderedChildren.Count, MaxRootPathTreeChildren));
+            List<KeyValuePair<string, SubgraphTrieNode>> orderedChildren = OrderChildrenByCountDescending(trieRoot.Children);
+            var children = new List<TreeNode>(Math.Min(orderedChildren.Count, MaxSubgraphTreeChildren));
             int childTruncated = 0;
             for (int i = 0; i < orderedChildren.Count; i++)
             {
-                if (children.Count < MaxRootPathTreeChildren && nodeBudget > 0)
-                    children.Add(ConvertRootPathTrieNode(orderedChildren[i].Key, orderedChildren[i].Value, ref nodeBudget));
+                if (children.Count < MaxSubgraphTreeChildren && nodeBudget > 0)
+                    children.Add(ConvertSubgraphTrieNode(orderedChildren[i].Key, orderedChildren[i].Value, ref nodeBudget, depth: 0));
                 else
                     childTruncated++;
             }
             if (childTruncated > 0)
                 anyTruncated = true;
 
-            groupRoots.Add(new TreeNode(TrimTypeName(group.Key), pathCount, "paths",
+            groupRoots.Add(new TreeNode(TrimTypeName(group.Key), subgraphCount, "subgraphs",
                 children.Count > 0 ? children : null, childTruncated));
         }
+
+        if (!anyTruncated)
+            anyTruncated = groupRoots.Any(HasTruncation);
 
         return
         [
@@ -213,19 +226,19 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
         ];
     }
 
-    private static RootPathTrieNode GetOrAddChild(RootPathTrieNode node, string typeName)
+    private static SubgraphTrieNode GetOrAddChild(SubgraphTrieNode node, string typeName)
     {
-        if (!node.Children.TryGetValue(typeName, out RootPathTrieNode? child))
+        if (!node.Children.TryGetValue(typeName, out SubgraphTrieNode? child))
         {
-            child = new RootPathTrieNode();
+            child = new SubgraphTrieNode();
             node.Children[typeName] = child;
         }
         return child;
     }
 
-    private static List<KeyValuePair<string, RootPathTrieNode>> OrderChildrenByCountDescending(Dictionary<string, RootPathTrieNode> children)
+    private static List<KeyValuePair<string, SubgraphTrieNode>> OrderChildrenByCountDescending(Dictionary<string, SubgraphTrieNode> children)
     {
-        var ordered = new List<KeyValuePair<string, RootPathTrieNode>>(children);
+        var ordered = new List<KeyValuePair<string, SubgraphTrieNode>>(children);
         ordered.Sort(static (a, b) =>
         {
             int byCount = b.Value.Count.CompareTo(a.Value.Count);
@@ -234,28 +247,35 @@ internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAn
         return ordered;
     }
 
-    private static TreeNode ConvertRootPathTrieNode(string typeName, RootPathTrieNode node, ref int nodeBudget)
+    private static TreeNode ConvertSubgraphTrieNode(string typeName, SubgraphTrieNode node, ref int nodeBudget, int depth)
     {
         nodeBudget--;
 
-        List<KeyValuePair<string, RootPathTrieNode>> orderedChildren = OrderChildrenByCountDescending(node.Children);
-        var children = new List<TreeNode>(Math.Min(orderedChildren.Count, MaxRootPathTreeChildren));
+        List<KeyValuePair<string, SubgraphTrieNode>> orderedChildren = OrderChildrenByCountDescending(node.Children);
+
+        if (depth >= MaxSubgraphTreeDepth)
+            return new TreeNode(typeName, node.Count, "subgraphs", null, orderedChildren.Count);
+
+        var children = new List<TreeNode>(Math.Min(orderedChildren.Count, MaxSubgraphTreeChildren));
         int truncatedChildCount = 0;
         for (int i = 0; i < orderedChildren.Count; i++)
         {
-            if (children.Count < MaxRootPathTreeChildren && nodeBudget > 0)
-                children.Add(ConvertRootPathTrieNode(orderedChildren[i].Key, orderedChildren[i].Value, ref nodeBudget));
+            if (children.Count < MaxSubgraphTreeChildren && nodeBudget > 0)
+                children.Add(ConvertSubgraphTrieNode(orderedChildren[i].Key, orderedChildren[i].Value, ref nodeBudget, depth + 1));
             else
                 truncatedChildCount++;
         }
 
-        return new TreeNode(typeName, node.Count, "paths", children.Count > 0 ? children : null, truncatedChildCount);
+        return new TreeNode(typeName, node.Count, "subgraphs", children.Count > 0 ? children : null, truncatedChildCount);
     }
 
-    private sealed class RootPathTrieNode
+    private static bool HasTruncation(TreeNode node) =>
+        node.TruncatedChildCount > 0 || (node.Children?.Any(HasTruncation) ?? false);
+
+    private sealed class SubgraphTrieNode
     {
         public int Count;
-        public readonly Dictionary<string, RootPathTrieNode> Children = new(StringComparer.Ordinal);
+        public readonly Dictionary<string, SubgraphTrieNode> Children = new(StringComparer.Ordinal);
     }
 
     private static List<TableRow> BuildKindRows(IReadOnlyList<RootKindSummary> kinds)

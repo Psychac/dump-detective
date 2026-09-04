@@ -100,20 +100,20 @@ internal sealed class GCRootFindingGenerator : IFindingGenerator
                 MetricUnit: "handles"));
         }
 
-        // ── Root path cap signal ──────────────────────────────────────────
-        if (r.PathSearchCapped && r.PathSearchCappedCount > 0)
+        // ── Root-owned subgraph walk cap signal ─────────────────────────────
+        if (r.SubgraphWalkCapped && r.SubgraphWalkCappedCount > 0)
         {
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
                 Category: "Confidence",
                 Severity: FindingSeverity.Info,
-                Title: $"Root path search capped ({r.PathSearchCappedCount} paths truncated)",
-                Evidence: $"BFS traversal hit the {r.PathSearchCappedCount} node/depth budget for some root paths. " +
-                          "Root path type chains may be incomplete for deeply nested object graphs.",
-                Recommendation: "Results are indicative — large object graphs may have deeper retention chains not shown.",
+                Title: $"Root-owned subgraph walk capped ({r.SubgraphWalkCappedCount} subgraphs truncated)",
+                Evidence: $"BFS traversal hit the {r.SubgraphWalkCappedCount} node/depth budget for some root-owned subgraphs. " +
+                          "The reported subgraph shape may be incomplete for deeply nested object graphs.",
+                Recommendation: "Results are indicative — large object graphs may retain more than shown.",
                 Tags: ["gc", "roots", "confidence", "cap"],
-                MetricValue: r.PathSearchCappedCount,
-                MetricUnit: "paths"));
+                MetricValue: r.SubgraphWalkCappedCount,
+                MetricUnit: "subgraphs"));
         }
 
         return findings;

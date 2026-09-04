@@ -102,7 +102,7 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
 
         var limitationRows = new List<TableRow>();
         AddLimitation(limitationRows, "Retention", results.Get<DominatorDomainResult>() is DominatorDomainResult retention && (retention.ApproximatedReferenceAddresses > 0 || retention.ObjectScanCapped || retention.ReferenceCountingSkipped), BuildRetentionText(results.Get<DominatorDomainResult>()));
-        AddLimitation(limitationRows, "GC roots", results.Get<GCRootDomainResult>() is GCRootDomainResult gcRoot && (gcRoot.PathSearchCapped || gcRoot.PathSearchCappedCount > 0), BuildRootText(results.Get<GCRootDomainResult>()));
+        AddLimitation(limitationRows, "GC roots", results.Get<GCRootDomainResult>() is GCRootDomainResult gcRoot && (gcRoot.SubgraphWalkCapped || gcRoot.SubgraphWalkCappedCount > 0), BuildRootText(results.Get<GCRootDomainResult>()));
         AddLimitation(limitationRows, "Hang / task scan", results.Get<HangDomainResult>() is HangDomainResult hang && !hang.RuntimeThreadPoolDataAvailable, BuildHangText(results.Get<HangDomainResult>()));
 
         if (limitationRows.Count > 0)
@@ -161,8 +161,8 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
         if (gcRoot is null)
             return "No GC root result available.";
 
-        if (gcRoot.PathSearchCapped)
-            return $"GC root path search was capped after {gcRoot.PathSearchCappedCount:N0} targets; deeper paths may be missing.";
+        if (gcRoot.SubgraphWalkCapped)
+            return $"GC root path search was capped after {gcRoot.SubgraphWalkCappedCount:N0} targets; deeper paths may be missing.";
 
         return "GC root paths are bounded and selective.";
     }

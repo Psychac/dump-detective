@@ -298,8 +298,8 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
             for (int i = 0; i < roots.TopRootsBySeverity.Count; i++)
                 rootedTypes.Add(roots.TopRootsBySeverity[i].TargetTypeName);
 
-            for (int i = 0; i < roots.RootPaths.Count; i++)
-                rootedTypes.Add(roots.RootPaths[i].TargetTypeName);
+            for (int i = 0; i < roots.RootOwnedSubgraphs.Count; i++)
+                rootedTypes.Add(roots.RootOwnedSubgraphs[i].TargetTypeName);
         }
 
         int limit = Math.Min(memory.TopTypes.Count, TopRows);

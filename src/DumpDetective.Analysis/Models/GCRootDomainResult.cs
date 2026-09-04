@@ -25,12 +25,17 @@ public sealed record RootFinding(
     int SeverityScore,
     bool RetainedBytesIsExact = false);
 
-public sealed record RootPathFinding(
+/// <summary>
+/// The subgraph of objects a rooted object retains — a forward BFS from
+/// <see cref="TargetAddress"/> outward into what it references, not a root-to-target chain
+/// (a GC root always points directly at its target; there is no multi-hop path to find there).
+/// </summary>
+public sealed record RootOwnedSubgraphFinding(
     ulong TargetAddress,
     string TargetTypeName,
     string RootKind,
-    IReadOnlyList<string> PathTypeNames,  // forward BFS from target outward (owned subgraph), not root-to-target chain
-    int PathLength,
+    IReadOnlyList<string> SubgraphTypeNames,  // type names in BFS order from the target outward
+    int SubgraphNodeCount,
     bool WasCapped,
     ulong EstimatedRetainedBytes = 0,
     bool RetainedSizeWasWalked = false,
@@ -40,7 +45,7 @@ internal sealed record GCRootDomainResult(
     int TotalRoots,
     IReadOnlyList<RootKindSummary> ByKind,
     IReadOnlyList<RootFinding> TopRootsBySeverity,
-    IReadOnlyList<RootPathFinding> RootPaths,
-    bool PathSearchCapped,
-    int PathSearchCappedCount,
+    IReadOnlyList<RootOwnedSubgraphFinding> RootOwnedSubgraphs,
+    bool SubgraphWalkCapped,
+    int SubgraphWalkCappedCount,
     int DroppedZeroEstimateRootCount = 0) : AnalyzerDomainResult;

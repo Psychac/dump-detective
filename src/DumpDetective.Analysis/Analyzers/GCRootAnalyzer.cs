@@ -97,7 +97,7 @@ namespace DumpDetective.Analysis.Analyzers
             // §9.16 (docs/refactor/analysis-profile-removal-plan.md): PathSearchTopN deleted —
             // M4 measured this as affordable (568ms uncapped vs. 874ms capped-to-25 on a real
             // dump with 1,404 findings).
-            int pathCappedCount = 0;
+            int subgraphWalkCappedCount = 0;
             int pathN = findings.Count;
 
             // §12.1: a target the dominator tree can answer exactly for needs no BFS at all — skip
@@ -126,17 +126,17 @@ namespace DumpDetective.Analysis.Analyzers
             foreach (RetainedSizeResult r in retainedResults)
                 retainedByAddress[r.Address] = r;
 
-            var pathFindings = new List<RootPathFinding>(pathN);
+            var subgraphFindings = new List<RootOwnedSubgraphFinding>(pathN);
 
             for (int i = 0; i < pathN; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 RootFinding f = findings[i];
 
-                var pathTypes = BoundedGraphWalk.CollectForwardTypeNames(heap, f.TargetAddress, PathWalkMaxNodes, PathWalkMaxDepth, out bool wasCapped, cancellationToken);
+                var subgraphTypeNames = BoundedGraphWalk.CollectForwardTypeNames(heap, f.TargetAddress, PathWalkMaxNodes, PathWalkMaxDepth, out bool wasCapped, cancellationToken);
 
                 if (wasCapped)
-                    pathCappedCount++;
+                    subgraphWalkCappedCount++;
 
                 ulong retainedBytes;
                 bool retainedSizeWasWalked;
@@ -155,12 +155,12 @@ namespace DumpDetective.Analysis.Analyzers
                     retainedSizeIsExact = false;
                 }
 
-                pathFindings.Add(new RootPathFinding(
+                subgraphFindings.Add(new RootOwnedSubgraphFinding(
                     TargetAddress: f.TargetAddress,
                     TargetTypeName: f.TargetTypeName,
                     RootKind: f.RootKind,
-                    PathTypeNames: pathTypes,
-                    PathLength: pathTypes.Count,
+                    SubgraphTypeNames: subgraphTypeNames,
+                    SubgraphNodeCount: subgraphTypeNames.Count,
                     WasCapped: wasCapped,
                     EstimatedRetainedBytes: retainedBytes,
                     RetainedSizeWasWalked: retainedSizeWasWalked,
@@ -171,9 +171,9 @@ namespace DumpDetective.Analysis.Analyzers
                 TotalRoots: roots.Count,
                 ByKind: projection.ByKind,
                 TopRootsBySeverity: topFindings,
-                RootPaths: pathFindings,
-                PathSearchCapped: pathCappedCount > 0,
-                PathSearchCappedCount: pathCappedCount,
+                RootOwnedSubgraphs: subgraphFindings,
+                SubgraphWalkCapped: subgraphWalkCappedCount > 0,
+                SubgraphWalkCappedCount: subgraphWalkCappedCount,
                 DroppedZeroEstimateRootCount: projection.DroppedZeroEstimateRootCount);
         }
 
@@ -181,8 +181,8 @@ namespace DumpDetective.Analysis.Analyzers
             new(TotalRoots: 0,
                 ByKind: Array.Empty<RootKindSummary>(),
                 TopRootsBySeverity: Array.Empty<RootFinding>(),
-                RootPaths: Array.Empty<RootPathFinding>(),
-                PathSearchCapped: false,
-                PathSearchCappedCount: 0);
+                RootOwnedSubgraphs: Array.Empty<RootOwnedSubgraphFinding>(),
+                SubgraphWalkCapped: false,
+                SubgraphWalkCappedCount: 0);
     }
 }

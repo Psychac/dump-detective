@@ -84,10 +84,10 @@ internal sealed record NamedStackTrace(
     bool Truncated);
 
 /// <summary>Objects reachable from a GC root's target (owned subgraph). Forward BFS from target outward, not a root-to-target retention chain.</summary>
-internal sealed record RootPath(
+internal sealed record RootOwnedSubgraph(
     string RootKind,
     string TargetAddress,   // hex string e.g. "0x1A2B3C"
-    int PathLength,
+    int SubgraphNodeCount,
     bool WasCapped,
     IReadOnlyList<string> Hops,   // type names in BFS order from target; shows graph shape owned by root
     ulong EstimatedRetainedBytes = 0,
@@ -95,12 +95,12 @@ internal sealed record RootPath(
     bool RetainedSizeIsExact = false);   // true => the dominator tree resolved EstimatedRetainedBytes exactly (§12.1); takes precedence over RetainedSizeWasWalked
 
 /// <summary>Object subgraphs reachable from roots of a particular target type, grouped for display.</summary>
-internal sealed record RootPathGroup(
+internal sealed record RootOwnedSubgraphGroup(
     string TargetType,         // fully qualified
     string TargetTypeShort,    // simple (last segment) name
-    int TotalPathCount,        // total paths in group before any take() limit
+    int TotalSubgraphCount,    // total subgraphs in group before any take() limit
     bool AnyCapped,
-    IReadOnlyList<RootPath> Paths);  // top paths (limited to 3)
+    IReadOnlyList<RootOwnedSubgraph> Subgraphs);  // top subgraphs (limited to 3)
 
 /// <summary>A single scored leak candidate with pre-computed explanation and impact text.</summary>
 internal sealed record LeakCandidateCard(
@@ -127,7 +127,7 @@ internal sealed record SubscriberDetailEntry(
     int Count,
     ulong Size,
     /// <summary>True when <see cref="Size"/> is the dominator tree's exact retained bytes for this
-    /// subscriber rather than the per-type shallow-size average (mirrors <see cref="RootPath.RetainedSizeIsExact"/>).</summary>
+    /// subscriber rather than the per-type shallow-size average (mirrors <see cref="RootOwnedSubgraph.RetainedSizeIsExact"/>).</summary>
     bool SizeIsExact = false);
 
 /// <summary>Per-publisher event group summary with embedded subscriber type breakdown.</summary>
@@ -240,7 +240,7 @@ internal sealed record AnalyzerDetailSection(
     // Legacy typed tables removed: producers should populate `CompactTables` only.
     IReadOnlyList<CompactTable>? CompactTables = null,           // Compact table representation (preferred)
     IReadOnlyList<NamedStackTrace>? StackTraces = null,          // Named thread/stack traces (replaces H+SF[] blocks)
-    IReadOnlyList<RootPathGroup>? RootPathGroups = null,         // GC root paths grouped by target type (replaces nested collapses)
+    IReadOnlyList<RootOwnedSubgraphGroup>? RootOwnedSubgraphGroups = null, // Root-owned subgraphs grouped by target type (replaces nested collapses)
     IReadOnlyList<TypeSampleTrace>? TypeTraces = null,           // Per-type sample traces with root chains (replaces collapse+M[] blocks)
     IReadOnlyList<LeakCandidateCard>? LeakCandidateCards = null, // Scored leak candidates with explanation+impact text
     IReadOnlyList<EventLeakGroupCard>? EventLeakGroupCards = null,       // Event leak per-group drill-down

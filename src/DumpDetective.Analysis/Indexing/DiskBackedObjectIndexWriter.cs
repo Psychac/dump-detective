@@ -31,28 +31,6 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     // amortizes the per-bucket lock over this many edges instead of taking it once per edge.
     private const int EdgeBatchSize = 2048;
 
-    // TEMPORARY perf A/B toggle (see docs/cache/backlog.md, GC-root enumeration option 2):
-    // set DD_SKIP_ROOT_INDEX_BUILD=1 to skip the eager Roots section write during Phase 1
-    // and let RootSetCache's live-heap fallback build roots on demand in Phase 2 instead.
-    // Remove once the A/B comparison picks a winner.
-    private static readonly bool SkipRootIndexBuild =
-        Environment.GetEnvironmentVariable("DD_SKIP_ROOT_INDEX_BUILD") == "1";
-
-    // Escape hatch for the reverse-reference index (see docs/analysis/phase1-redesigns/full-reverse-index-plan.md):
-    // set DD_SKIP_REVERSE_INDEX_BUILD=1 to skip forward-ref extraction during the heap scan if it
-    // regresses build time on a given dump — analyzers that would use it simply fall back to
-    // on-demand forward-ref enumeration, same as before this index existed.
-    private static readonly bool SkipReverseIndexBuild =
-        Environment.GetEnvironmentVariable("DD_SKIP_REVERSE_INDEX_BUILD") == "1";
-
-    // Escape hatch for the forward-reference index (see
-    // docs/analysis/phase1-redesigns/dominator-tree-lengauer-tarjan.md §D5): set
-    // DD_SKIP_FORWARD_INDEX_BUILD=1 to skip it. Consumers (currently: the dominator-tree
-    // reachability walk) fall back to a live ClrMD walk, same graceful-degradation contract as
-    // every other optional satellite section.
-    private static readonly bool SkipForwardIndexBuild =
-        Environment.GetEnvironmentVariable("DD_SKIP_FORWARD_INDEX_BUILD") == "1";
-
     // Stage A's walk successors source defaults to ForwardEdgeLooseFileReader (see
     // docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §2/§8.8): after three
     // rounds of measurement, the final version (mmap'd .dat + an in-memory decoded directory,
@@ -63,21 +41,6 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     // is unavailable for some other reason, or for future re-measurement).
     private static readonly bool ForceLiveClrMdWalk =
         Environment.GetEnvironmentVariable("DD_FORCE_LIVE_CLRMD_WALK") == "1";
-
-    // Escape hatch for the SegmentIndex satellite section (see
-    // docs/cache/cache-architecture.md): set DD_SKIP_SEGMENT_INDEX_BUILD=1 to skip it for
-    // A/B build-time isolation. Cost is expected to be negligible (segment-count-sized, not
-    // object-count-sized), so this is cheap insurance rather than an anticipated need — remove once
-    // validated, same as the other temporary toggles above.
-    private static readonly bool SkipSegmentIndexBuild =
-        Environment.GetEnvironmentVariable("DD_SKIP_SEGMENT_INDEX_BUILD") == "1";
-
-    // Escape hatch for Stage B (§10.3, docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md):
-    // set DD_SKIP_DOMINATOR_INDEX_BUILD=1 to force buildStageB false regardless of what
-    // activeAnalyzers/enableExactDominatorTree say — same A/B-isolation contract as the other
-    // Skip*Build flags above.
-    private static readonly bool SkipDominatorIndexBuild =
-        Environment.GetEnvironmentVariable("DD_SKIP_DOMINATOR_INDEX_BUILD") == "1";
 
     // §10.8 measurement pass (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md):
     // set DD_PERF_DOMINATOR_STAGEB=1 to print, in one Phase 1 run, everything §10.8 still needs a
@@ -192,18 +155,14 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §7 for why only
         // BFS-reachable objects getting entries is not a loss of accuracy for any current consumer.
         int reverseIndexBucketCount = ReverseIndexConstants.CalculateBucketCount(new FileInfo(dumpPath).Length);
-        ReverseEdgeExtractor? reverseEdgeExtractor = SkipReverseIndexBuild
-            ? null
-            : new ReverseEdgeExtractor(reverseIndexBucketCount, indexDir);
+        var reverseEdgeExtractor = new ReverseEdgeExtractor(reverseIndexBucketCount, indexDir);
 
         // Forward-reference index (§D5): extracted in the per-object foreach below that enumerates
         // obj.EnumerateReferences(carefully: true), keyed by parent. Reuses the reverse index's
         // bucket-count formula (dump-size-based, not edge-count-based, so it applies equally well
         // here) even though the two indices are no longer built from the same pass.
         int forwardIndexBucketCount = ForwardIndexConstants.CalculateBucketCount(new FileInfo(dumpPath).Length);
-        ForwardEdgeExtractor? forwardEdgeExtractor = SkipForwardIndexBuild
-            ? null
-            : new ForwardEdgeExtractor(forwardIndexBucketCount, indexDir);
+        var forwardEdgeExtractor = new ForwardEdgeExtractor(forwardIndexBucketCount, indexDir);
 
         // §10.3 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): Stage B only
         // ever runs on top of Stage A actually running (reverseEdgeExtractor is not null is Stage A's
@@ -213,7 +172,6 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // which is out of scope here (see §10.3's note on this).
         bool buildStageB =
             reverseEdgeExtractor is not null
-            && !SkipDominatorIndexBuild
             && enableExactDominatorTree
             && (activeAnalyzers?.Any(a => a is IRequiresDominatorTreeIndex) ?? false);
 
@@ -586,7 +544,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // §10.1/§10.4: build the (SegmentIndexEntry, scratch-file-paths) triples
         // ScratchFileObjectMetadataLookup needs, mirroring the SegmentIndex satellite's own
         // Start/End/FirstRecordIndex/RecordCount loop below — built here, before that satellite
-        // write, since it needs to exist regardless of whether SkipSegmentIndexBuild is set.
+        // write, since Stage B needs it whether or not the SegmentIndex write below succeeds.
         List<ScratchSegmentSource>? scratchSegmentSources = null;
         if (buildStageB)
         {
@@ -624,34 +582,32 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // ConcatenateScratchFiles' write order above (segment index order), which they do since
         // both iterate `segments` in the same order. Skipped/non-fatal like every other satellite
         // section — a build without SegmentIndex still works, just without TryGetObjectMetadata.
-        if (!SkipSegmentIndexBuild)
+        try
         {
-            try
+            progress?.Report(new(0, "writing SegmentIndex section", Detail: null, Elapsed: stopwatch.Elapsed));
+            var segmentIndexEntries = new List<SegmentIndexEntry>(segments.Length);
+            long cumulativeRecordIndex = 0;
+            for (int i = 0; i < segments.Length; i++)
             {
-                progress?.Report(new(0, "writing SegmentIndex section", Detail: null, Elapsed: stopwatch.Elapsed));
-                var segmentIndexEntries = new List<SegmentIndexEntry>(segments.Length);
-                long cumulativeRecordIndex = 0;
-                for (int i = 0; i < segments.Length; i++)
+                long recordCount = segRecordCounts[i];
+                if (recordCount > 0)
                 {
-                    long recordCount = segRecordCounts[i];
-                    if (recordCount > 0)
-                    {
-                        segmentIndexEntries.Add(new SegmentIndexEntry(
-                            segments[i].Start, segments[i].End, cumulativeRecordIndex, (int)recordCount));
-                    }
-                    cumulativeRecordIndex += recordCount;
+                    segmentIndexEntries.Add(new SegmentIndexEntry(
+                        segments[i].Start, segments[i].End, cumulativeRecordIndex, (int)recordCount));
                 }
+                cumulativeRecordIndex += recordCount;
+            }
 
-                containerWriter.BeginSection(CacheSectionId.SegmentIndex);
-                SegmentIndexWriter.Write(containerWriter.Stream, segmentIndexEntries);
-                containerWriter.EndSection(segmentIndexEntries.Count);
-            }
-            catch (Exception ex)
-            {
-                containerWriter.AbortSection();
-                satelliteWarnings.Add($"SegmentIndex: {ex.GetType().Name}: {ex.Message}");
-            }
+            containerWriter.BeginSection(CacheSectionId.SegmentIndex);
+            SegmentIndexWriter.Write(containerWriter.Stream, segmentIndexEntries);
+            containerWriter.EndSection(segmentIndexEntries.Count);
         }
+        catch (Exception ex)
+        {
+            containerWriter.AbortSection();
+            satelliteWarnings.Add($"SegmentIndex: {ex.GetType().Name}: {ex.Message}");
+        }
+    
 
         // Write StringDedup section (compact binary) so subsequent analyses
         // can read prebuilt dedup data without re-scanning the heap.
@@ -1042,124 +998,52 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         List<string> warnings = [];
 
         // Handles — GC handle enumeration
-        try
-        {
-            progress?.Report(new(0, "enumerating GC handles", Detail: null, Elapsed: stopwatch.Elapsed));
-            containerWriter.BeginSection(CacheSectionId.Handles);
-            long recordCount = HandleSnapshotWriter.Write(containerWriter.Stream, heap.Runtime, cancellationToken, progress, stopwatch);
-            containerWriter.EndSection(recordCount);
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            containerWriter.AbortSection();
-            warnings.Add($"Handles: {ex.GetType().Name}: {ex.Message}");
-        }
+        containerWriter.TryWriteSection(CacheSectionId.Handles, "enumerating GC handles",
+            stream => HandleSnapshotWriter.Write(stream, heap.Runtime, cancellationToken, progress, stopwatch),
+            warnings, progress, stopwatch);
 
         // Roots — GC root enumeration (can be slow on large dumps; progress reported every 50k roots)
-        try
-        {
-            if (SkipRootIndexBuild)
-            {
-                // Section intentionally omitted; RootIndexReader treats a missing Roots
-                // section as "no candidates", which triggers RootSetCache's live-heap fallback.
-                progress?.Report(new(0, "skipping GC root index (DD_SKIP_ROOT_INDEX_BUILD=1)", Detail: null, Elapsed: stopwatch.Elapsed));
-            }
-            else
-            {
-                progress?.Report(new(0, "enumerating GC roots", Detail: null, Elapsed: stopwatch.Elapsed));
-                containerWriter.BeginSection(CacheSectionId.Roots);
-                long recordCount = RootIndexWriter.Write(containerWriter.Stream, heap, cancellationToken, progress, stopwatch);
-                containerWriter.EndSection(recordCount);
-            }
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            containerWriter.AbortSection();
-            warnings.Add($"Roots: {ex.GetType().Name}: {ex.Message}");
-        }
+        containerWriter.TryWriteSection(CacheSectionId.Roots, "enumerating GC roots",
+            stream => RootIndexWriter.Write(stream, heap, cancellationToken, progress, stopwatch),
+            warnings, progress, stopwatch);
 
         // RootStackThreadAttribution — §12.2 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md):
         // which thread owns each Stack-kind root. Same gate as Roots (a ClrRoot alone carries no
         // thread identity, so this is only useful alongside the Roots section it cross-references
         // against at read time) — cheap relative to the rest of Phase 1, unconditional whenever
         // Roots itself builds, no separate opt-in.
-        try
-        {
-            if (SkipRootIndexBuild)
-            {
-                progress?.Report(new(0, "skipping stack-root thread attribution (DD_SKIP_ROOT_INDEX_BUILD=1)", Detail: null, Elapsed: stopwatch.Elapsed));
-            }
-            else
-            {
-                progress?.Report(new(0, "enumerating stack root thread ownership", Detail: null, Elapsed: stopwatch.Elapsed));
-                containerWriter.BeginSection(CacheSectionId.RootStackThreadAttribution);
-                long recordCount = RootStackThreadIndexWriter.Write(containerWriter.Stream, heap, cancellationToken, progress, stopwatch);
-                containerWriter.EndSection(recordCount);
-            }
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            containerWriter.AbortSection();
-            warnings.Add($"RootStackThreadAttribution: {ex.GetType().Name}: {ex.Message}");
-        }
+        containerWriter.TryWriteSection(CacheSectionId.RootStackThreadAttribution,
+            "enumerating stack root thread ownership",
+            stream => RootStackThreadIndexWriter.Write(stream, heap, cancellationToken, progress, stopwatch),
+            warnings, progress, stopwatch);
 
         // Tasks — Task objects collected during heap scan
-        try
-        {
-            progress?.Report(new(0, "writing Tasks section", Detail: null, Elapsed: stopwatch.Elapsed));
-            containerWriter.BeginSection(CacheSectionId.Tasks);
-            using (TaskIndexWriter tw = new(containerWriter.Stream))
+        containerWriter.TryWriteSection(CacheSectionId.Tasks, "writing Tasks section",
+            stream =>
             {
-                foreach ((ulong addr, ulong mt, int stateFlags) in taskCandidates)
-                    tw.Add(addr, mt, stateFlags); // read during Phase 1 scan; 0 falls back to Phase 2 re-read
-                tw.Flush();
-            }
-            containerWriter.EndSection(taskCandidates.Count);
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            containerWriter.AbortSection();
-            warnings.Add($"Tasks: {ex.GetType().Name}: {ex.Message}");
-        }
+                using (TaskIndexWriter tw = new(stream))
+                {
+                    foreach ((ulong addr, ulong mt, int stateFlags) in taskCandidates)
+                        tw.Add(addr, mt, stateFlags); // read during Phase 1 scan; 0 falls back to Phase 2 re-read
+                    tw.Flush();
+                }
+                return taskCandidates.Count;
+            },
+            warnings, progress, stopwatch);
 
         // LargeObjects — top-100 LOH objects by size
-        try
-        {
-            progress?.Report(new(0, "writing LargeObjects section", Detail: null, Elapsed: stopwatch.Elapsed));
-            var tracker = new LargeObjectTracker();
-            foreach ((ulong addr, ulong mt, ulong size) in largeCandidates)
-                tracker.Consider(addr, mt, size);
-            containerWriter.BeginSection(CacheSectionId.LargeObjects);
-            tracker.Write(containerWriter.Stream);
-            containerWriter.EndSection(largeCandidates.Count);
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            containerWriter.AbortSection();
-            warnings.Add($"LargeObjects: {ex.GetType().Name}: {ex.Message}");
-        }
+        var tracker = new LargeObjectTracker();
+        foreach ((ulong addr, ulong mt, ulong size) in largeCandidates)
+            tracker.Consider(addr, mt, size);
+        containerWriter.TryWriteSection(CacheSectionId.LargeObjects, "writing LargeObjects section",
+            stream => { tracker.Write(stream); return largeCandidates.Count; },
+            warnings, progress, stopwatch);
 
         // LohFreeBlocks — free block gaps already collected during the main scan;
         // no second segment walk required.
-        try
-        {
-            progress?.Report(new(0, "writing LohFreeBlocks section", Detail: null, Elapsed: stopwatch.Elapsed));
-            containerWriter.BeginSection(CacheSectionId.LohFreeBlocks);
-            long recordCount = LohFreeBlockWriter.WriteFromCandidates(
-                containerWriter.Stream, lohFreeBlockCandidates, cancellationToken);
-            containerWriter.EndSection(recordCount);
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            containerWriter.AbortSection();
-            warnings.Add($"LohFreeBlocks: {ex.GetType().Name}: {ex.Message}");
-        }
+        containerWriter.TryWriteSection(CacheSectionId.LohFreeBlocks, "writing LohFreeBlocks section",
+            stream => LohFreeBlockWriter.WriteFromCandidates(stream, lohFreeBlockCandidates, cancellationToken),
+            warnings, progress, stopwatch);
 
         return warnings;
     }
@@ -1699,6 +1583,21 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // header to read, unlike the pre-columnar format.
         if (!reader.TryGetSectionInfo(CacheSectionId.ObjectAddresses, out CacheTocEntry objEntry) || objEntry.RecordCount <= 0)
             return false;
+
+        // §6.2/§3: every section a successful build always writes must be present, not just the two
+        // this check used to look at. A satellite write that failed and was downgraded to a warning
+        // previously left a container that passed here forever, silently degrading every future
+        // analysis of the dump until someone deleted .dumpindex/ by hand.
+        //
+        // Presence only — deliberately not checksum validity. Verifying every section here would
+        // hash the whole file (~1.4 GB on the reference dump) on every cache hit, which is the exact
+        // cost CacheContainerReader's per-session memoization exists to remove. Integrity stays
+        // lazy, on first actual use. See cache-implementation-clean-slate-redesign.md § 6.4(a).
+        foreach (CacheSectionDescriptor descriptor in CacheSectionCatalog.Required)
+        {
+            if (!reader.ContainsSection(descriptor.Id))
+                return false;
+        }
 
         return TypeAggregateIndexReader.TryLoad(reader, containerPath, objEntry.RecordCount, out result);
     }

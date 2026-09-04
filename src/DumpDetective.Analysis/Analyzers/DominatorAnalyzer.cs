@@ -73,7 +73,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
     /// live-counting incoming references by walking every referencing object's fields — see git
     /// history for that implementation). Falls back to <see cref="AnalyzeObjectsPass"/>'s live
     /// scan only when no reverse index is available (in-memory mode, disabled via
-    /// <c>DD_SKIP_REVERSE_INDEX_BUILD=1</c>, or a pre-v4 cache.bin).
+    /// a failed reverse-index build, or a pre-v4 cache.bin).
     /// </summary>
     public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {

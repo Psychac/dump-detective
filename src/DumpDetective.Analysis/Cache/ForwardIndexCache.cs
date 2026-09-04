@@ -28,7 +28,7 @@ internal sealed class ForwardIndexCache : IDisposable
 
     /// <summary>
     /// Returns the shared forward-reference provider, or <c>null</c> if no forward index is
-    /// available for this run (in-memory mode, <c>DD_SKIP_FORWARD_INDEX_BUILD=1</c>, or the
+    /// available for this run (in-memory mode, or the
     /// forward-index sections failed to write). Never throws — a missing index is treated exactly
     /// like a missing satellite section elsewhere in this codebase: callers fall back to their own
     /// alternate strategy (a live <c>ClrObject.EnumerateReferences</c> walk).

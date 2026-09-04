@@ -28,7 +28,7 @@ internal sealed class ReverseIndexCache : IDisposable
 
     /// <summary>
     /// Returns the shared backward-reference provider, or <c>null</c> if no reverse index is
-    /// available for this run (in-memory mode, <c>DD_SKIP_REVERSE_INDEX_BUILD=1</c>, a pre-v4
+    /// available for this run (in-memory mode, a pre-v4
     /// cache.bin, or the reverse-index sections failed to write). Never throws — a missing index
     /// is treated exactly like a missing satellite section elsewhere in this codebase: callers
     /// fall back to their own alternate strategy.

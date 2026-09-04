@@ -167,7 +167,7 @@ internal class HeapIndexCache : IDisposable
         }
 
         // In-memory mode, or SegmentIndex unavailable on this disk index (old cache, aborted
-        // satellite write, DD_SKIP_SEGMENT_INDEX_BUILD=1) — fall back to a live ClrMD resolution
+        // satellite write) — fall back to a live ClrMD resolution
         // so callers never need to branch on backing mode.
         if (address == 0)
             return false;

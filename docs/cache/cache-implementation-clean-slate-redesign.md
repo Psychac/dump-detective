@@ -345,16 +345,116 @@ first-touches of the same section without either double-verifying or serializing
 lock for the duration of a 68.8 ms hash. This is the one part of § 6.1 that needs real design
 attention rather than being mechanical.
 
-### 6.2 `CacheSectionDescriptor` — one list, both directions
+### 6.2 `CacheSectionDescriptor` — one list, both directions ✅ DONE (partially — see the § 3 note)
 
-One descriptor per section, in one file, carrying: the `CacheSectionId`, whether it's
-required or optional, and its write/read delegates. Then:
+Shipped as `CacheSectionCatalog` (all 28 ids, each with a `CacheSectionRequirement` of
+`Required` / `Conditional` / `Unused`) plus `CacheContainerWriter.TryWriteSection(...)`.
+Build clean, **1144 passed / 0 failed / 20 skipped**.
+
+- **Write side**: five satellite sections (`Handles`, `Roots`, `Tasks`, `LargeObjects`,
+  `LohFreeBlocks`) now route through `TryWriteSection`, which owns the progress report,
+  `BeginSection`/`EndSection`, abort-on-failure and warning formatting. The four columnar sections
+  keep explicit code because they close via the precomputed-checksum `EndSection` overload, and
+  `TypeAggregates` keeps its own because it must be written last. Per § 6.4(b) the *order* stays
+  explicit; only the wrapper is shared.
+- **Fast path**: `TryLoadFromCache` now asserts every `Required` section is present, instead of
+  checking two. Presence only, never checksums — see § 6.4(a).
+- **Drift guard**: `CacheSectionCatalog.MissingFromCatalog()` plus a unit test fails the build if a
+  new `CacheSectionId` is added without a catalog entry. That is the mechanism the backlog gated a
+  source generator behind, achieved without build-time machinery.
+
+> **⚠ § 3 is only partially closed, and the reason is structural.** § 3 and the original § 6.2
+> wording called for confirming that "every section the previous build recorded is still present."
+> Implementing it exposed the premise as vacuous: **the TOC only ever lists sections that were
+> successfully closed**, so a section lost to a transient write failure leaves nothing behind to
+> compare against. There is no record of intent to diff.
+>
+> What shipped instead is the achievable half — sections are classified, and the fast path enforces
+> the five that *every* successful build writes unconditionally (`ObjectAddresses`,
+> `ObjectMethodTables`, `ObjectSizes`, `ObjectGenerations`, `TypeAggregates`). That catches a core
+> section lost to a disk-full or AV blip, which is the case that permanently degrades a dump.
+> It does **not** catch a lost *conditional* section (`Roots`, `SegmentIndex`, the edge indices, the
+> dominator sections), because absence is indistinguishable from "this build wasn't configured to
+> produce it" — every one of those is behind a `DD_SKIP_*` escape hatch or Stage B gating.
+>
+> Fully closing § 3 requires the writer to persist a manifest of *intended* sections for the fast
+> path to diff against. That is an additive format change and was not attempted here.
+
+#### 6.2.1 The five `DD_SKIP_*` build toggles — ✅ DELETED
+
+**Decision (2026-09-04):** all five were removed. They existed to A/B-isolate features during their
+development; those features are now core to what DumpDetective produces, so a build that silently
+omits one isn't a supported configuration. Removed: `DD_SKIP_ROOT_INDEX_BUILD`,
+`DD_SKIP_REVERSE_INDEX_BUILD`, `DD_SKIP_FORWARD_INDEX_BUILD`, `DD_SKIP_SEGMENT_INDEX_BUILD`,
+`DD_SKIP_DOMINATOR_INDEX_BUILD` — fields, branches, and skip-path progress messages.
+Net −169/+113 in `DiskBackedObjectIndexWriter`; build clean, 1144 passed.
+
+Deliberately **kept**: `DD_FORCE_LIVE_CLRMD_WALK` (selects the walk source, retained as a fallback
+and doesn't gate any section) and `DD_PERF_DOMINATOR_STAGEB` (diagnostics only).
+
+**Removing the toggles is not the same as promoting the sections to `Required`,** and the difference
+turned out to matter. Only `Roots` and `SegmentIndex` were promoted. Three groups stay `Conditional`
+for reasons no toggle removal touches:
+
+- **`RootStackThreadAttribution` — backwards compatibility.** It was added additively *without* a
+  `CacheFileHeader.CurrentFormatVersion` bump, so v4 containers written before it existed lack it
+  legitimately. Checking the real caches on disk found exactly that: the 27.5 GB dump's v4 cache has
+  no such section. Promoting it would have silently invalidated that cache and forced a full cold
+  re-index of a 27.5 GB dump. Promotion has to ride along with a format-version bump.
+- **`ReverseEdge*` / `ForwardEdge*` — deterministic failure at scale.** These depend on the
+  reachability walk and bucket sorts, which can fail *repeatably* on a very large heap (the
+  `ChunkedBuffer` int-overflow guard, or OOM) and are caught and downgraded to a warning by design.
+  Marking them `Required` would convert that into an unbreakable loop — cache rejected → full
+  rebuild → same failure → cache rejected — paying a cold build on every single run. Silent
+  degradation is the lesser evil here.
+- **`Dominator*` — genuine runtime gating.** Stage B is gated on an analyzer implementing
+  `IRequiresDominatorTreeIndex`; that condition is real and unaffected.
+
+The general lesson, worth carrying into any future promotion: **`Required` is a claim about every
+container already on disk, not just about the current writer.** Any section introduced additively
+since the last format-version bump cannot be promoted without one.
+
+#### 6.2.2 Original analysis (superseded by the decision above)
+
+Kept because it records why the toggles were removable and which had discharged their stated gate.
+
+Three of the six `Conditional` classifications exist **only** because of a `DD_SKIP_*` escape hatch,
+and two of those hatches are explicitly marked temporary in the source. Removing them would move
+those sections to `Required` and close most of the gap above without any manifest or format change.
+
+| Toggle | Sections it makes Conditional | Source says | Gate discharged? |
+|---|---|---|---|
+| `DD_SKIP_ROOT_INDEX_BUILD` | `Roots`, `RootStackThreadAttribution` | "TEMPORARY perf A/B toggle… **Remove once the A/B comparison picks a winner**" | **No** — that A/B *is* backlog item "GC-root enumeration, option 2", listed under "Three unattempted options, none started" |
+| `DD_SKIP_SEGMENT_INDEX_BUILD` | `SegmentIndex` | "cheap insurance rather than an anticipated need — **remove once validated**" | **No** — the `ObjectAddressLookup` perf question the backlog tracks is still open, and its BenchmarkDotNet harness has never been run |
+| `DD_SKIP_REVERSE_INDEX_BUILD` | `ReverseEdge*` | "Escape hatch… if it regresses build time on a given dump" | n/a — framed as a permanent operational lever, no removal language |
+| `DD_SKIP_FORWARD_INDEX_BUILD` | `ForwardEdge*` | "Escape hatch… same graceful-degradation contract as every other optional satellite section" | n/a — same |
+| `DD_SKIP_DOMINATOR_INDEX_BUILD` | `Dominator*` | "same A/B-isolation contract as the other `Skip*Build` flags" | Nominally temporary, but these sections are *also* gated by `IRequiresDominatorTreeIndex`/Stage B, so they stay Conditional regardless |
+
+So the picture is: **`Roots`, `RootStackThreadAttribution` and `SegmentIndex` are Conditional purely
+because of two toggles that were always meant to be deleted, and neither toggle's stated exit
+condition has been met.** The reverse/forward edge hatches read as deliberately permanent, and the
+dominator sections have a genuine analyzer-driven condition underneath the toggle.
+
+`SegmentIndex` is the one to prioritise, because the same removal is load-bearing for a second
+plan: [cache-format-clean-slate-redesign.md](cache-format-clean-slate-redesign.md) § 2.6 needs
+`SegmentIndex` promoted from optional to required before CSR can rely on address→index resolution.
+One deletion serves both.
+
+Two adjacent toggles whose stated purpose *has* been discharged, listed for completeness since they
+don't affect section classification: `DD_FORCE_LIVE_CLRMD_WALK`'s measurement concluded (loose-file
+reader measured ~2x faster on a 25 GB dump) but it is deliberately retained as a fallback; and
+`DD_PERF_DOMINATOR_STAGEB` exists for a § 10.8 measurement pass that has since been completed, which
+makes it a straightforward deletion candidate.
+
+The original design, for reference — the read-side half was not implemented:
 
 - **Write side**: `Build` iterates descriptors instead of inlining 13 near-identical
   try/catch/abort blocks. The progress report, the abort-on-failure, and the
   `warnings.Add($"{name}: ...")` formatting live in one place.
 - **Read side**: § 4's five copy-paste caches collapse into one generic
-  `LazySection<TProvider>` parameterised by descriptor.
+  `LazySection<TProvider>` parameterised by descriptor. **Not implemented** — the catalog exists and
+  can carry a reader factory, but the five caches are untouched. They open once each per run, so
+  this is the tidiness half of § 4 with no measured cost attached; it is the natural next increment.
 - **Fast path (§ 3)**: `TryLoadFromCache` iterates the descriptor list and confirms every
   section the previous build recorded is **present** in the TOC, instead of hard-coding two.
   Presence only — **not** checksum validity; see § 6.4(a), where validating integrity here
@@ -493,15 +593,14 @@ and neither currently has a caller.
 - **The on-disk format.** CSR, dictionary encoding, and block compression are
   [cache-format-clean-slate-redesign.md](cache-format-clean-slate-redesign.md)'s subject.
   Nothing here changes a byte layout, and none of § 6 blocks or is blocked by that work.
-- **The seven `DD_*` env-var build toggles**
-  (`SkipRootIndexBuild`, `SkipReverseIndexBuild`, `SkipForwardIndexBuild`,
-  `ForceLiveClrMdWalk`, `SkipSegmentIndexBuild`, `SkipDominatorIndexBuild`,
-  `PerfLogDominatorStageB`). These are static fields at the top of
-  `DiskBackedObjectIndexWriter`, each documented as a temporary A/B toggle to be removed once
-  its comparison concludes. Consolidating them into an explicit build plan is a reasonable
-  idea, but several are explicitly marked "remove once validated" — resolving those
-  A/B questions first is cheaper than building an abstraction over toggles that are
-  scheduled to be deleted.
+- **Consolidating the seven `DD_*` env-var build toggles into an explicit build plan.** Still out of
+  scope — but the earlier claim here that "each [is] documented as a temporary A/B toggle" was too
+  broad, and § 6.2.1 now sets out what each one actually says. Only two are marked for removal
+  (`DD_SKIP_ROOT_INDEX_BUILD`, `DD_SKIP_SEGMENT_INDEX_BUILD`) and neither's exit condition has been
+  met; two read as permanent escape hatches; one is doubly-gated. Building an abstraction over them
+  remains premature, but **deleting the two temporary ones is now on the critical path for two
+  separate items** — § 3's remaining gap here, and § 2.6 of the format redesign — so it is no longer
+  merely "cheaper to resolve first."
 - **`CacheMetrics`/`GetHealth()` dead code.** Already a backlog item; § 6.2 would make the
   metrics plumbing collapse along with the five caches, but the wire-it-up-or-delete-it
   decision is separate.

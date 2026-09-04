@@ -137,6 +137,51 @@ internal sealed class CacheContainerWriter : IDisposable
         _sectionOpen = false;
     }
 
+    /// <summary>
+    /// Writes one optional section, owning the whole begin/write/end/abort-and-warn shape that was
+    /// previously copy-pasted at thirteen call sites — see
+    /// docs/cache/cache-implementation-clean-slate-redesign.md § 6.2. <paramref name="write"/>
+    /// returns the section's record count.
+    /// </summary>
+    /// <remarks>
+    /// Only the *wrapper* is shared. Section order stays explicit at the call sites, because the
+    /// build genuinely cannot write them in an arbitrary order: the columnar sections need the
+    /// scratch files, the dominator sections need the reachability walk's result, and
+    /// <see cref="CacheSectionId.TypeAggregates"/> must go last because its presence is what marks
+    /// the build complete (§ 6.4(b)).
+    /// </remarks>
+    /// <returns><c>true</c> if the section was written and closed; <c>false</c> if it was aborted.</returns>
+    public bool TryWriteSection(
+        CacheSectionId id,
+        string progressMessage,
+        Func<Stream, long> write,
+        List<string> warnings,
+        IProgress<AnalyzerProgressReport>? progress = null,
+        System.Diagnostics.Stopwatch? stopwatch = null)
+    {
+        try
+        {
+            progress?.Report(new AnalyzerProgressReport(0, progressMessage, Detail: null,
+                Elapsed: stopwatch?.Elapsed ?? TimeSpan.Zero));
+            BeginSection(id);
+            long recordCount = write(Stream);
+            EndSection(recordCount);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Abort is itself best-effort: if the failure happened before BeginSection, or after
+            // EndSection already closed the section, there is nothing open to roll back.
+            try { AbortSection(); } catch { /* no section was open */ }
+            warnings.Add($"{id}: {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
+
     private uint ComputeChecksum(long start, long length)
     {
         bool reportProgress = _progress is not null && length >= ChecksumProgressThresholdBytes;

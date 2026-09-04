@@ -96,7 +96,7 @@ single `Build` entry point.
   `lohFreeBlockCandidates` (`ConcurrentBag<...>`, **uncapped** — see backlog),
   large-object candidates (capped at 100, no patch needed).
 - **Satellite sections written serially after the scan** (`WriteSatelliteSections`):
-  Handles, Roots (unless `DD_SKIP_ROOT_INDEX_BUILD=1`), Tasks, EventCandidates,
+  Handles, Roots, Tasks, EventCandidates,
   LargeObjects, LohFreeBlocks, StringDedup/StringDedupMeta, reverse index (unless
   `DD_SKIP_REVERSE_INDEX_BUILD=1`), SegmentIndex (unless
   `DD_SKIP_SEGMENT_INDEX_BUILD=1`). Each section is wrapped in its own try/catch — a
@@ -125,7 +125,7 @@ Backs `IHeapAnalysisCache.TryGetObjectMetadata(heap, address)` — an
   gaps, free blocks, padding) or don't land exactly on a record boundary (interior
   pointers are out of scope; see backlog).
 - Optional and additive: a missing `SegmentIndex` section (older cache,
-  `DD_SKIP_SEGMENT_INDEX_BUILD=1`, aborted satellite write) just means
+  aborted satellite write, or a pre-SegmentIndex cache) just means
   `TryGetObjectMetadata` falls back to a live `heap.GetObject` call — no format-version
   bump was needed to add this section.
 - Uses bounds-checked `MemoryMappedViewAccessor.ReadUInt64` reads, not the unsafe
@@ -150,7 +150,7 @@ index of incoming references, contrary to older docs in this folder that describ
   `HeapAnalysisCache.TryGetReverseIndexProvider()`.
 - `ReverseIndexCache` lazily opens and holds one reader (and its memory-mapped views)
   per run — never rebuilt per query, never eagerly built if no analyzer asks for it.
-- Skippable via `DD_SKIP_REVERSE_INDEX_BUILD=1`; missing/failed build → `null` provider,
+- Missing/failed build → `null` provider,
   same "caller falls back to its own strategy" contract as every other optional
   section.
 - Full byte format: `docs/analysis/phase1-redesigns/full-reverse-index-plan.md`.

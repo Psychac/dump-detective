@@ -167,7 +167,7 @@ fresh set per candidate.
 `src/DumpDetective.Analysis/Indexing/ReverseIndex/` — a real, shipped, disk-backed index of
 incoming references, hash-partitioned and sorted per-bucket. Scoped narrowly to parent lookup, not
 a general forward+reverse object graph; never fully materialized in memory. Optional/skippable via
-`DD_SKIP_REVERSE_INDEX_BUILD=1`. See
+a failed reverse-index build. See
 [docs/cache/cache-architecture.md § 5](cache/cache-architecture.md) for the write/read path.
 
 ### RootSetCache

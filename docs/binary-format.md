@@ -55,7 +55,7 @@ orchestration, why sections are optional, governing design constraints), see
 |---|---|---|
 | 0 | `Objects` (legacy interleaved format) | Unused since format v2 — never written |
 | 1 | `TypeAggregates` | Required (part of cache-hit fast-path check) |
-| 2 | `Roots` | Satellite (skippable via `DD_SKIP_ROOT_INDEX_BUILD=1`) |
+| 2 | `Roots` | Required (always written; validated by the cache-hit fast path) |
 | 3 | `Handles` | Satellite |
 | 4 | `Tasks` | Satellite |
 | 5 | `EventCandidates` | Satellite |
@@ -67,10 +67,10 @@ orchestration, why sections are optional, governing design constraints), see
 | 11 | `ObjectMethodTables` | Required |
 | 12 | `ObjectSizes` | Required |
 | 13 | `ObjectGenerations` | Required (v3+) |
-| 14 | `ReverseEdgeBuckets` | Optional (skippable via `DD_SKIP_REVERSE_INDEX_BUILD=1`) |
+| 14 | `ReverseEdgeBuckets` | Always written; may be absent if the reachability walk failed at scale |
 | 15 | `ReverseEdgeDirectories` | Optional |
 | 16 | `ReverseEdgeMetadata` | Optional |
-| 17 | `SegmentIndex` | Optional (skippable via `DD_SKIP_SEGMENT_INDEX_BUILD=1`) |
+| 17 | `SegmentIndex` | Required (always written; validated by the cache-hit fast path) |
 
 Only `TypeAggregates` and the four columnar object-index sections are re-verified by the cache-hit
 fast path today; a missing/failed satellite section falls back to a live ClrMD walk for whichever

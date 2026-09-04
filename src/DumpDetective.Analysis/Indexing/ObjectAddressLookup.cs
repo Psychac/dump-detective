@@ -47,7 +47,7 @@ internal sealed class ObjectAddressLookup : IDisposable
     /// Opens a lookup instance over <paramref name="containerPath"/>'s <c>SegmentIndex</c> and
     /// object columns. Returns <c>false</c> — never throws — when the container is missing, has no
     /// <c>SegmentIndex</c> section (old cache, aborted satellite write, or
-    /// <c>DD_SKIP_SEGMENT_INDEX_BUILD=1</c>), or is missing any of the three object columns it needs.
+    /// an aborted satellite write), or is missing any of the three object columns it needs.
     /// Callers own the returned instance and must dispose it.
     /// </summary>
     public static bool TryOpen(string containerPath, out ObjectAddressLookup? lookup)

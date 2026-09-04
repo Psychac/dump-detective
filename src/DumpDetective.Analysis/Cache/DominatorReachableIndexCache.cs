@@ -27,7 +27,7 @@ internal sealed class DominatorReachableIndexCache : IDisposable
 
     /// <summary>
     /// Returns the shared reachable-address provider, or <c>null</c> if it's unavailable for this
-    /// run (in-memory mode, <c>DD_SKIP_REVERSE_INDEX_BUILD=1</c> — Stage A's walk never runs
+    /// run (in-memory mode, a failed reverse-index build — Stage A's walk never completes
     /// without the reverse-edge index it feeds — or the section failed to write). Never throws —
     /// a missing index is treated exactly like a missing satellite section elsewhere in this
     /// codebase: callers fall back to their own alternate strategy, or skip the check.

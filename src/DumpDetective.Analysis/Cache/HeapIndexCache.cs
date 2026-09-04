@@ -1,5 +1,6 @@
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Indexing.Container;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Enums;
@@ -21,6 +22,37 @@ internal class HeapIndexCache : IDisposable
     // doesn't retry TryOpen on every call.
     private ObjectAddressLookup? _addressLookup;
     private bool _addressLookupAttempted;
+
+    // One container session for the whole run (docs/cache/cache-implementation-clean-slate-redesign.md
+    // § 6.1). It holds no OS handle — only the parsed TOC and the set of sections already
+    // checksum-verified — so it neither locks cache.bin nor needs disposing. Owned here, one
+    // HeapIndexCache per dump, never static: two dumps are analysed in one process for
+    // baseline/trend comparison.
+    private CacheContainerReader? _containerSession;
+    private bool _containerSessionAttempted;
+    private readonly object _containerSessionGate = new();
+
+    private CacheContainerReader? GetOrOpenContainerSession()
+    {
+        if (_containerSessionAttempted)
+            return _containerSession;
+
+        lock (_containerSessionGate)
+        {
+            if (_containerSessionAttempted)
+                return _containerSession;
+
+            string? path = _heapIndex?.IndexPath;
+            if (!string.IsNullOrWhiteSpace(path)
+                && CacheContainerReader.TryOpen(path, out CacheContainerReader? reader))
+            {
+                _containerSession = reader;
+            }
+
+            _containerSessionAttempted = true;
+            return _containerSession;
+        }
+    }
 
     public bool TryGetHeapIndex([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out HeapIndexBuildResult? heapIndex)
     {
@@ -88,7 +120,11 @@ internal class HeapIndexCache : IDisposable
         if (_heapIndex is null)
             yield break;
 
-        foreach (HeapEntry entry in ObjectIndexReader.Instance.ReadEntries(_heapIndex.IndexPath))
+        CacheContainerReader? session = GetOrOpenContainerSession();
+        if (session is null)
+            yield break;
+
+        foreach (HeapEntry entry in ObjectIndexReader.ReadDiskEntries(session))
             yield return entry;
     }
 
@@ -97,7 +133,11 @@ internal class HeapIndexCache : IDisposable
         if (_heapIndex is null)
             yield break;
 
-        foreach (HeapEntry entry in ObjectIndexReader.Instance.ReadEntriesRange(_heapIndex.IndexPath, startRecord, recordCount))
+        CacheContainerReader? session = GetOrOpenContainerSession();
+        if (session is null)
+            yield break;
+
+        foreach (HeapEntry entry in ObjectIndexReader.ReadDiskEntriesRange(session, startRecord, recordCount))
             yield return entry;
     }
 

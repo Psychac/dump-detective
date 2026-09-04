@@ -43,10 +43,29 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
         }
     }
 
-    // Internal static helper kept for call sites that don't need DI.
+    // Internal static helper kept for call sites that don't need DI. Opens a throwaway session;
+    // prefer the CacheContainerReader overload when enumerating more than once per run, so the
+    // columns' checksums are verified once rather than per enumeration.
     internal static IEnumerable<HeapEntry> ReadDiskEntries(string containerPath)
     {
-        if (!TryOpenColumns(containerPath, out MemoryMappedViewAccessor? addr, out MemoryMappedViewAccessor? mt,
+        if (string.IsNullOrWhiteSpace(containerPath)
+            || !CacheContainerReader.TryOpen(containerPath, out CacheContainerReader? reader)
+            || reader is null)
+            yield break;
+
+        foreach (HeapEntry entry in ReadDiskEntries(reader))
+            yield return entry;
+    }
+
+    /// <summary>
+    /// Streams every record using an already-open session, so the four object columns are
+    /// checksum-verified once for that session's lifetime instead of once per call — see
+    /// <see cref="CacheContainerReader"/> and docs/cache/cache-redesign-measurements.md § 5.
+    /// The session is owned by the caller and is not disposed here.
+    /// </summary>
+    internal static IEnumerable<HeapEntry> ReadDiskEntries(CacheContainerReader reader)
+    {
+        if (!TryOpenColumns(reader, out MemoryMappedViewAccessor? addr, out MemoryMappedViewAccessor? mt,
                 out MemoryMappedViewAccessor? size, out MemoryMappedViewAccessor? gen, out long recordCount))
             yield break;
 
@@ -62,10 +81,28 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
     // Internal static helper kept for call sites that don't need DI.
     internal static IEnumerable<HeapEntry> ReadDiskEntriesRange(string containerPath, long startRecord, long recordCount)
     {
+        if (string.IsNullOrWhiteSpace(containerPath)
+            || !CacheContainerReader.TryOpen(containerPath, out CacheContainerReader? reader)
+            || reader is null)
+            yield break;
+
+        foreach (HeapEntry entry in ReadDiskEntriesRange(reader, startRecord, recordCount))
+            yield return entry;
+    }
+
+    /// <summary>
+    /// Range counterpart of <see cref="ReadDiskEntries(CacheContainerReader)"/>. This is the one
+    /// that mattered most: <c>HeapIndexScanDispatcher</c> opens one range enumeration per worker
+    /// (8 on an 8-core box, 32 on a 32-core one) over <i>disjoint</i> slices, and the previous
+    /// per-open verify re-hashed the whole section for each — 2.9 GB hashed to read 365 MB.
+    /// With a shared session the first worker verifies and the rest proceed straight to reading.
+    /// </summary>
+    internal static IEnumerable<HeapEntry> ReadDiskEntriesRange(CacheContainerReader reader, long startRecord, long recordCount)
+    {
         if (startRecord < 0 || recordCount <= 0)
             yield break;
 
-        if (!TryOpenColumns(containerPath, out MemoryMappedViewAccessor? addr, out MemoryMappedViewAccessor? mt,
+        if (!TryOpenColumns(reader, out MemoryMappedViewAccessor? addr, out MemoryMappedViewAccessor? mt,
                 out MemoryMappedViewAccessor? size, out MemoryMappedViewAccessor? gen, out long totalRecordCount))
             yield break;
 
@@ -83,7 +120,7 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
     }
 
     private static bool TryOpenColumns(
-        string containerPath,
+        CacheContainerReader reader,
         out MemoryMappedViewAccessor? addr,
         out MemoryMappedViewAccessor? mt,
         out MemoryMappedViewAccessor? size,
@@ -95,9 +132,6 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
         size = null;
         gen = null;
         recordCount = 0;
-
-        if (string.IsNullOrWhiteSpace(containerPath) || !CacheContainerReader.TryOpen(containerPath, out CacheContainerReader? reader) || reader is null)
-            return false;
 
         if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectAddresses, out MemoryMappedViewAccessor? addrAcc, out long addrLen))
             return false;

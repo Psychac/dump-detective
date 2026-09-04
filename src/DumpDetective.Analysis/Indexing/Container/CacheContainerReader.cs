@@ -1,31 +1,83 @@
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.IO.Hashing;
 using System.IO.MemoryMappedFiles;
 
 namespace DumpDetective.Analysis.Indexing.Container;
 
 /// <summary>
-/// Opens <c>cache.bin</c> and hands out bounded, section-scoped streams. The TOC is small
-/// (32 bytes per section, ~10 sections) and is read once into memory by <see cref="TryOpen"/>;
-/// each <see cref="TryOpenSection"/> call then memory-maps the container and hands back a
-/// <see cref="MemoryMappedViewStream"/> bounded to that section's byte range. The mapping
-/// handle is unnamed (safe for concurrent analyzers per
-/// <see cref="DumpDetective.Core.Abstractions.IAnalyzer.IsThreadSafe"/>) and closed once the
-/// view is created — per <see cref="MemoryMappedFile"/> semantics the OS-level mapping stays
-/// alive for the view's lifetime, so readers get page-cache-backed random access instead of a
-/// fresh <see cref="FileStream"/> handle per call.
+/// Opens <c>cache.bin</c> and hands out bounded, section-scoped views. The TOC is small
+/// (32 bytes per section, ~25 sections) and is read once into memory by <see cref="TryOpen"/>;
+/// <see cref="TryOpenSection"/> and <see cref="TryOpenSectionAccessor"/> then hand back a view
+/// bounded to that section's byte range.
 /// </summary>
+/// <remarks>
+/// <para>
+/// One instance is a <b>session</b>: it remembers which sections it has already checksum-verified
+/// and does not re-verify them. That is the whole point — see
+/// docs/cache/cache-redesign-measurements.md § 5/§ 6. Verifying a section costs a full pass over its
+/// bytes (68.8 ms for the four object columns on a 14.6M-object dump, 197% of the scan it gates),
+/// and the previous design repeated it on every open: ~20 times per run, of which 8 came from
+/// <c>HeapIndexScanDispatcher</c>'s per-worker range enumerations all re-verifying the same whole
+/// section to read disjoint slices of it.
+/// </para>
+/// <para>
+/// The mapping handle deliberately stays per-call rather than per-session. An earlier revision held
+/// one <see cref="MemoryMappedFile"/> open for the session, which locks <c>cache.bin</c> on Windows
+/// and breaks any caller that later deletes or replaces the index directory. The cost it saved was
+/// never measured and is a <c>CreateFileMapping</c> syscall — microseconds against the 68.8 ms this
+/// class actually exists to avoid — so the lock was real and the saving was not.
+/// </para>
+/// <para>
+/// <b>Contract change this makes deliberately:</b> integrity is checked once per session rather than
+/// on every open, so corruption appearing <i>mid-run</i> is no longer caught. That is the right trade
+/// for a file that <see cref="CacheContainerWriter.Finish"/> renames into place and never rewrites,
+/// but it is a real narrowing and is recorded as such.
+/// </para>
+/// <para>
+/// Instances must stay scoped to one dump — never cached in a static keyed by path, since two dumps
+/// are analysed in one process for baseline/trend comparison. <see cref="Cache.HeapIndexCache"/>
+/// owns the long-lived one.
+/// </para>
+/// </remarks>
 internal sealed class CacheContainerReader
 {
     private readonly string _containerPath;
     private readonly IReadOnlyDictionary<CacheSectionId, CacheTocEntry> _sections;
     private readonly byte[] _dumpContentHash;
 
+    // Per-section gate, so N workers first-touching the *same* section verify it once between them
+    // while different sections still verify concurrently. A single lock would serialise every
+    // worker behind one 68.8 ms hash — the exact stall this class exists to remove.
+    private readonly ConcurrentDictionary<CacheSectionId, object> _verifyGates = new();
+    private readonly ConcurrentDictionary<CacheSectionId, bool> _verified = new();
+
     private CacheContainerReader(string containerPath, IReadOnlyDictionary<CacheSectionId, CacheTocEntry> sections, byte[] dumpContentHash)
     {
         _containerPath = containerPath;
         _sections = sections;
         _dumpContentHash = dumpContentHash;
+    }
+
+    /// <summary>
+    /// Runs <paramref name="verify"/> at most once per section id for this session's lifetime.
+    /// A section that fails verification is remembered as failed, so a corrupt section stays
+    /// treated as missing without being re-hashed on every subsequent attempt.
+    /// </summary>
+    private bool VerifyOnce(CacheSectionId id, Func<bool> verify)
+    {
+        if (_verified.TryGetValue(id, out bool cached))
+            return cached;
+
+        lock (_verifyGates.GetOrAdd(id, static _ => new object()))
+        {
+            if (_verified.TryGetValue(id, out cached))
+                return cached;
+
+            bool ok = verify();
+            _verified[id] = ok;
+            return ok;
+        }
     }
 
     /// <summary>
@@ -114,7 +166,12 @@ internal sealed class CacheContainerReader
             mapName: null, capacity: 0, MemoryMappedFileAccess.Read);
         MemoryMappedViewStream view = mmf.CreateViewStream(entry.Offset, entry.Length, MemoryMappedFileAccess.Read);
 
-        if (!VerifyChecksum(view, entry.Checksum))
+        if (!VerifyOnce(id, () =>
+            {
+                bool ok = VerifyChecksum(view, entry.Checksum);
+                view.Position = 0;
+                return ok;
+            }))
         {
             view.Dispose();
             return false;
@@ -170,7 +227,7 @@ internal sealed class CacheContainerReader
             mapName: null, capacity: 0, MemoryMappedFileAccess.Read);
         MemoryMappedViewAccessor view = mmf.CreateViewAccessor(entry.Offset, entry.Length, MemoryMappedFileAccess.Read);
 
-        if (!VerifyChecksumZeroCopy(view, entry.Length, entry.Checksum))
+        if (!VerifyOnce(id, () => VerifyChecksumZeroCopy(view, entry.Length, entry.Checksum)))
         {
             view.Dispose();
             return false;

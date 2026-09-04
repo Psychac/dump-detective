@@ -295,15 +295,36 @@ Strictly this is subsumed by § 6.1 (a session-scoped memoized verify makes work
 § 6.1 is going ahead, do it there instead of twice. Listed separately because it is the single
 largest contributor to the ≈20 and because § 6.1 is a larger change that may not be approved.
 
-### 6.1 `CacheSession` — one open container per run
+### 6.1 `CacheSession` — one open container per run ✅ DONE (subsuming § 6.0(b))
 
-A single object, owned by `HeapAnalysisCache` for the run's lifetime, that:
+Shipped as session semantics on `CacheContainerReader` itself rather than a new type — it already
+owned the TOC and the verification, so a separate object would have been a wrapper around it.
+`HeapIndexCache` holds one instance for the run and routes both enumeration APIs through it via new
+`ObjectIndexReader.ReadDiskEntries(CacheContainerReader)` / `ReadDiskEntriesRange(…)` overloads. The
+`containerPath` overloads remain for one-shot callers and tests. Build clean, **1139 passed / 0
+failed / 20 skipped**, +240/−20 across 4 files.
 
-- opens `cache.bin` once, parses the TOC once
-- holds **one** `MemoryMappedFile` for the whole file instead of one per section open
+What it does:
+
+- parses the TOC once per instance (unchanged)
 - **memoizes checksum verification per section id** — verify on first open, remember the
-  result, skip on subsequent opens
+  result (including failure), skip on subsequent opens
+- gates verification **per section**, so N workers first-touching the same section collapse to one
+  hash while different sections still verify concurrently
 - hands out section views; keeps the existing "corruption == missing section" contract
+
+> **⚠ One item from the original design was dropped, and the reason matters.** This section used to
+> also require holding **one `MemoryMappedFile` for the whole file** instead of one per section
+> open. Implementing that broke 70 tests with
+> `IOException: cache.bin is being used by another process` — a session-lifetime mapping **locks the
+> file on Windows**, so any later attempt to delete or replace the index directory fails. That is
+> § 6.4(d)'s risk, and it turned out to bite immediately rather than theoretically.
+>
+> The mapping was reverted to per-call; only the memoization was kept. The full measured win is
+> retained regardless, because the measured cost was the **checksum** (68.8 ms), never the mapping —
+> a `CreateFileMapping` syscall is microseconds. The original bullet asserted the shared mapping as
+> though it were part of the win; it never was, and it carried a real cost that was not identified
+> until it was built.
 
 This is the fix for § 1 **and § 1a** — both are the same root cause — and the enabler for
 everything else. The per-open verify semantics callers rely on are preserved exactly; only the
@@ -392,12 +413,16 @@ A session cached statically by path would leak across dumps, and this tool analy
 process for baseline/trend comparison. The session must be owned by the `HeapAnalysisCache` instance
 (one per dump), not reachable from a static.
 
-**(d) § 6.1 holds a file mapping open for the whole run — check the rebuild path.**
-`CacheContainerWriter.Finish()` does `File.Move(tmp, final, overwrite: true)`. On Windows that fails
-if another handle holds a mapping on `final`. Today's readers open and close quickly, so the window
-is tiny; a run-lifetime session widens it to the whole run. The current order (build, then read)
-appears safe, and separate dumps have separate `cache.bin` files — but this needs verifying against
-every path that could rebuild after a read, not assumed.
+**(d) ✅ CONFIRMED, and resolved by dropping the shared mapping.** This warned that a run-lifetime
+`MemoryMappedFile` would collide with `CacheContainerWriter.Finish()`'s
+`File.Move(tmp, final, overwrite: true)`, and asked for it to be verified rather than assumed.
+Verification was immediate: implementing the shared mapping failed 70 tests with
+`IOException: cache.bin is being used by another process`, from directory cleanup rather than from
+`File.Move` — a broader blast radius than this caveat anticipated, since *any* delete/replace of the
+index directory is affected, not just a rebuild.
+
+Resolved by keeping the mapping per-call and memoizing only the verification, which is where the
+entire measured cost was (§ 6.1). No `IDisposable` on the reader, no file lock, full win retained.
 
 **(e) § 6.1 weakens the corruption guarantee, deliberately.** Today every open re-verifies, so
 corruption appearing mid-run is caught. Memoized, the guarantee becomes "verified once per run."

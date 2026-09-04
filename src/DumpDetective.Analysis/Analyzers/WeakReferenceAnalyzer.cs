@@ -389,7 +389,10 @@ namespace DumpDetective.Analysis.Analyzers
                 // weak-reference-analyzer-audit.md Bug 4). Per-record cost of the streaming pass
                 // is cheap (an Address/MT/Size tuple); heap.GetObject and the field read only
                 // happen for entries whose MT is one of the handful of WeakReference-shaped types.
-                if (weakRefTypesByMt.Count > 0 && cache.EnumerateIndexedEntriesAsTuples().Any())
+                // Ask whether a heap index exists rather than enumerating to find out: `.Any()`
+                // opens the container, maps all four object columns and checksums every byte of
+                // them (~365 MB / ~69 ms on a 14.6M-object dump) to yield a single record.
+                if (weakRefTypesByMt.Count > 0 && cache is HeapAnalysisCache indexedCache && indexedCache.TryGetHeapIndex(out _))
                 {
                     var mHandleFieldByMt = new Dictionary<ulong, ClrInstanceField?>(weakRefTypesByMt.Count);
                     var wrScanCounter = new ObjectScanCounter("scanning WeakReference instances",

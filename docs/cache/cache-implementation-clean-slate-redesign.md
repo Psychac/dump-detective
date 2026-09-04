@@ -251,12 +251,16 @@ Four pieces, in dependency order. Each is independently shippable and each is sm
 Two items fall out of [measurements § 6](cache-redesign-measurements.md) that need none of the
 redesign below. They should land regardless of whether anything else here is ever approved.
 
-**(a) Replace the four `.Any()` disk-index probes with the existing guard.** These four sites:
+**(a) Replace the four `.Any()` disk-index probes with the existing guard. ✅ DONE.**
+All four sites converted; `dotnet build` clean, full unit suite green (1136 passed, 0 failed,
+20 skipped — the real-dump `DiscrepancyFact` tests, which self-skip without
+`DD_RUN_DISCREPANCY_TESTS=1`). A repo-wide search confirms no
+`EnumerateIndexedEntries*().Any()` probe remains.
 
-| Site | Current |
+| Site | Was |
 |---|---|
 | `AsyncStateMachineAnalyzer:215` | `cache.EnumerateIndexedEntriesAsTuples().Any()` |
-| `TimerLeakAnalyzer:270` | `cache.EnumerateIndexedEntriesAsTuples().Any()` |
+| `TimerLeakAnalyzer:270` | `cache != null && cache.EnumerateIndexedEntriesAsTuples().Any()` |
 | `WeakReferenceAnalyzer:392` | `cache.EnumerateIndexedEntriesAsTuples().Any()` |
 | `ReferenceChainAnalyzer:586` | `cache.EnumerateIndexedEntriesAsTuples().Any()` |
 
@@ -268,8 +272,14 @@ answer a boolean. The correct test already exists in this codebase and is used b
 cache is HeapAnalysisCache hc && hc.TryGetHeapIndex(out _)
 ```
 
-`PublisherRegistry` even carries a comment explaining why the looser check is wrong. This is four
+`PublisherRegistry` even carries a comment explaining why the looser check is wrong. This was four
 one-line changes worth ≈275 ms/run, and it removes four of the ≈20 opens outright.
+
+Two implementation notes for anyone reading the diff: `TryGetHeapIndex` is on the concrete
+`HeapAnalysisCache`, **not** on `IHeapAnalysisCache`, so the pattern-match cast is required rather
+than stylistic — all four analyzers already imported `DumpDetective.Analysis.Cache`. And in
+`AsyncStateMachineAnalyzer` / `WeakReferenceAnalyzer` the pattern variable is named `indexedCache`,
+not `heapCache`, because an enclosing scope in both files already binds `heapCache` (CS0136).
 
 Note the two idioms are not quite equivalent and the difference matters in the right direction:
 `.Any()` answers "did the enumeration yield anything," `TryGetHeapIndex` answers "is there a heap

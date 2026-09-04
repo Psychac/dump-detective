@@ -212,7 +212,10 @@ namespace DumpDetective.Analysis.Analyzers
                 // ObjectIndexReader) over a live ClrMD heap.EnumerateObjects() pass, which
                 // touches the mapped dump file per object. Only addresses matching a candidate
                 // MT ever get a live heap.GetObject() call, bounded by the per-type cap.
-                bool hasDiskIndex = cache.EnumerateIndexedEntriesAsTuples().Any();
+                // Ask whether a heap index exists rather than enumerating to find out: `.Any()`
+                // opens the container, maps all four object columns and checksums every byte of
+                // them (~365 MB / ~69 ms on a 14.6M-object dump) to yield a single record.
+                bool hasDiskIndex = cache is HeapAnalysisCache indexedCache && indexedCache.TryGetHeapIndex(out _);
                 IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> entries = hasDiskIndex
                     ? cache.EnumerateIndexedEntriesAsTuples()
                     : LiveHeapEntries(heap);

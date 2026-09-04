@@ -583,7 +583,10 @@ namespace DumpDetective.Analysis.Analyzers
             if (perTypeQuota <= 0 || primaryAddressByMt.Count == 0)
                 return additionalByMt;
 
-            bool hasDiskIndex = cache.EnumerateIndexedEntriesAsTuples().Any();
+            // Ask whether a heap index exists rather than enumerating to find out: `.Any()`
+            // opens the container, maps all four object columns and checksums every byte of
+            // them (~365 MB / ~69 ms on a 14.6M-object dump) to yield a single record.
+            bool hasDiskIndex = cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out _);
             IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> entries = hasDiskIndex
                 ? cache.EnumerateIndexedEntriesAsTuples()
                 : LiveHeapEntries(heap);

@@ -3,6 +3,10 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Indexing.Dominator;
+using DumpDetective.Analysis.Indexing.ReverseIndex;
+using DumpDetective.Analysis.Indexing.ForwardIndex;
+using DumpDetective.Analysis.Indexing.Container;
 using DumpDetective.Core.Enums;
 using System.Linq;
 
@@ -28,11 +32,13 @@ namespace DumpDetective.Analysis.Cache
         private readonly StatisticsCache _statisticsCache;
         private readonly SegmentSummaryCache _segmentSummaryCache = new();
         private readonly RootSetCache _rootSetCache;
-        private readonly ReverseIndexCache _reverseIndexCache;
-        private readonly ForwardIndexCache _forwardIndexCache;
-        private readonly DominatorReachableIndexCache _dominatorReachableIndexCache;
-        private readonly DominatorTreeIndexCache _dominatorTreeCache;
-        private readonly ThreadRetentionIndexCache _threadRetentionCache;
+        // All five share one implementation (§ 4) and one container session (§ 6.1) — they used to
+        // be five near-identical classes each opening their own CacheContainerReader.
+        private readonly LazyContainerIndex<IBackwardReferenceProvider> _reverseIndexCache;
+        private readonly LazyContainerIndex<IForwardReferenceProvider> _forwardIndexCache;
+        private readonly LazyContainerIndex<IReachableAddressProvider> _dominatorReachableIndexCache;
+        private readonly LazyContainerIndex<IDominatorTreeProvider> _dominatorTreeCache;
+        private readonly LazyContainerIndex<IThreadRetentionProvider> _threadRetentionCache;
 
         public long ObjectScanCount => Interlocked.Read(ref _objectScanCount);
         public long CacheHits => Interlocked.Read(ref _cacheHits);
@@ -61,33 +67,48 @@ namespace DumpDetective.Analysis.Cache
                 _heapIndexCache.TryGetHeapIndex(out var h);
                 return h;
             }, _methodTableCache);
-            _reverseIndexCache = new ReverseIndexCache(() =>
-            {
-                _heapIndexCache.TryGetHeapIndex(out var h);
-                return h;
-            });
-            _forwardIndexCache = new ForwardIndexCache(() =>
-            {
-                _heapIndexCache.TryGetHeapIndex(out var h);
-                return h;
-            });
-            _dominatorReachableIndexCache = new DominatorReachableIndexCache(() =>
-            {
-                _heapIndexCache.TryGetHeapIndex(out var h);
-                return h;
-            });
-            _dominatorTreeCache = new DominatorTreeIndexCache(() =>
-            {
-                _heapIndexCache.TryGetHeapIndex(out var h);
-                return h;
-            });
-            _threadRetentionCache = new ThreadRetentionIndexCache(
-                () =>
+            Func<CacheContainerReader?> container = () => _heapIndexCache.GetOrOpenContainerSession();
+
+            _reverseIndexCache = new LazyContainerIndex<IBackwardReferenceProvider>(
+                "ReverseIndexCache", container,
+                c => ReverseEdgeIndexReader.TryOpen(c, out ReverseEdgeIndexReader? r) && r is not null
+                    ? (new ReverseIndexBackwardReferenceProvider(r), r)
+                    : (null, null));
+
+            _forwardIndexCache = new LazyContainerIndex<IForwardReferenceProvider>(
+                "ForwardIndexCache", container,
+                c => ForwardEdgeIndexReader.TryOpen(c, out ForwardEdgeIndexReader? r) && r is not null
+                    ? (new ForwardIndexForwardReferenceProvider(r), r)
+                    : (null, null));
+
+            _dominatorReachableIndexCache = new LazyContainerIndex<IReachableAddressProvider>(
+                "DominatorReachableIndexCache", container,
+                c => DominatorReachableAddressReader.TryOpen(c, out DominatorReachableAddressReader? r) && r is not null
+                    ? (r, r)
+                    : (null, null));
+
+            _dominatorTreeCache = new LazyContainerIndex<IDominatorTreeProvider>(
+                "DominatorTreeIndexCache", container,
+                c => DominatorTreeReaderProvider.TryOpen(c, out DominatorTreeReaderProvider? p) && p is not null
+                    ? (p, p)
+                    : (null, null));
+
+            // Threads' retention view is derived from the dominator tree, so it stays null whenever
+            // that provider is unavailable — same dependency the dedicated class expressed via a
+            // second constructor delegate.
+            _threadRetentionCache = new LazyContainerIndex<IThreadRetentionProvider>(
+                "ThreadRetentionIndexCache", container,
+                c =>
                 {
-                    _heapIndexCache.TryGetHeapIndex(out var h);
-                    return h;
-                },
-                () => _dominatorTreeCache.TryGetProvider());
+                    IDominatorTreeProvider? tree = _dominatorTreeCache.TryGetProvider();
+                    if (tree is null)
+                        return (null, null);
+
+                    return ThreadRetentionReaderProvider.TryOpen(c, tree, CancellationToken.None,
+                        out ThreadRetentionReaderProvider? p) && p is not null
+                        ? (p, null)
+                        : (null, null);
+                });
         }
 
         public IEnumerable<CacheMetrics> GetCacheMetrics()
@@ -392,7 +413,17 @@ namespace DumpDetective.Analysis.Cache
             _forwardIndexCache.Dispose();
             _dominatorReachableIndexCache.Dispose();
             _dominatorTreeCache.Dispose();
+            // Owns nothing today (the provider holds no unmanaged handle), but it is IDisposable
+            // like its four siblings — disposing it keeps that from becoming a silent leak later.
+            _threadRetentionCache.Dispose();
             _heapIndexCache.Dispose();
+
+            if (Indexing.Container.CacheContainerReader.PerfLogSession)
+                Console.Error.WriteLine(Indexing.Container.CacheContainerReader.PerfSummary());
+
+            if (Indexing.ReverseIndex.ReverseEdgeIndexReader.PerfLogBlocks)
+                Console.Error.WriteLine(
+                    Indexing.ReverseIndex.ReverseEdgeIndexReader.DumpBlockTrace(Path.GetTempPath()));
         }
     }
 

@@ -53,12 +53,27 @@ internal sealed class ObjectAddressLookup : IDisposable
     public static bool TryOpen(string containerPath, out ObjectAddressLookup? lookup)
     {
         lookup = null;
-
-        List<SegmentIndexEntry> segments = SegmentIndexWriter.ReadRecords(containerPath);
-        if (segments.Count == 0)
+        if (string.IsNullOrWhiteSpace(containerPath)
+            || !CacheContainerReader.TryOpen(containerPath, out CacheContainerReader? reader)
+            || reader is null)
             return false;
 
-        if (!CacheContainerReader.TryOpen(containerPath, out CacheContainerReader? reader) || reader is null)
+        return TryOpen(reader, out lookup);
+    }
+
+    /// <summary>
+    /// Session-based overload. Preferred wherever the caller already holds the run's container:
+    /// this lookup opens <c>SegmentIndex</c> plus three object columns, and on a 14.6M-object dump
+    /// those three columns are 334.6 MiB — the entire measured redundancy left after § 6.1, because
+    /// a private reader re-verifies what the run's session already verified
+    /// (docs/cache/cache-redesign-measurements.md § 7.1).
+    /// </summary>
+    public static bool TryOpen(CacheContainerReader reader, out ObjectAddressLookup? lookup)
+    {
+        lookup = null;
+
+        List<SegmentIndexEntry> segments = SegmentIndexWriter.ReadRecords(reader);
+        if (segments.Count == 0)
             return false;
 
         if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectAddresses, out MemoryMappedViewAccessor? addrAcc, out _) || addrAcc is null)

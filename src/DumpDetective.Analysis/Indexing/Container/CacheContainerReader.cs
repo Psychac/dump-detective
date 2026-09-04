@@ -52,6 +52,33 @@ internal sealed class CacheContainerReader
     private readonly ConcurrentDictionary<CacheSectionId, object> _verifyGates = new();
     private readonly ConcurrentDictionary<CacheSectionId, bool> _verified = new();
 
+    // DD_PERF_CACHE_SESSION=1 — process-wide tally answering open question 2 in
+    // docs/cache/cache-redesign-measurements.md: how many section opens a real run performs, and
+    // how many of them the session's memoization spared from a full re-hash. Diagnostics only; the
+    // counters are Interlocked and off the hot path (one increment per *open*, not per record).
+    internal static readonly bool PerfLogSession =
+        Environment.GetEnvironmentVariable("DD_PERF_CACHE_SESSION") == "1";
+    internal static long ContainersOpened;
+    internal static long SectionOpens;
+    internal static long VerificationsPerformed;
+    internal static long VerificationsSkipped;
+    internal static long BytesVerified;
+    // Per-section verification tally: which sections are hashed more than once per run, i.e. which
+    // are reached through more than one CacheContainerReader instance.
+    internal static readonly ConcurrentDictionary<CacheSectionId, int> VerifiedPerSection = new();
+
+    internal static string PerfSummary() =>
+        $"[PERF] CacheSession: {Interlocked.Read(ref ContainersOpened):N0} container opens, " +
+        $"{Interlocked.Read(ref SectionOpens):N0} section opens, " +
+        $"{Interlocked.Read(ref VerificationsPerformed):N0} verified / " +
+        $"{Interlocked.Read(ref VerificationsSkipped):N0} skipped by memoization, " +
+        $"{Interlocked.Read(ref BytesVerified) / (1024.0 * 1024):N1} MiB hashed"
+        + Environment.NewLine + "[PERF] CacheSession: sections verified more than once: "
+        + (VerifiedPerSection.Any(kv => kv.Value > 1)
+            ? string.Join(", ", VerifiedPerSection.Where(kv => kv.Value > 1)
+                .OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key}×{kv.Value}"))
+            : "(none)");
+
     private CacheContainerReader(string containerPath, IReadOnlyDictionary<CacheSectionId, CacheTocEntry> sections, byte[] dumpContentHash)
     {
         _containerPath = containerPath;
@@ -66,13 +93,29 @@ internal sealed class CacheContainerReader
     /// </summary>
     private bool VerifyOnce(CacheSectionId id, Func<bool> verify)
     {
+        if (PerfLogSession) Interlocked.Increment(ref SectionOpens);
+
         if (_verified.TryGetValue(id, out bool cached))
+        {
+            if (PerfLogSession) Interlocked.Increment(ref VerificationsSkipped);
             return cached;
+        }
 
         lock (_verifyGates.GetOrAdd(id, static _ => new object()))
         {
             if (_verified.TryGetValue(id, out cached))
+            {
+                if (PerfLogSession) Interlocked.Increment(ref VerificationsSkipped);
                 return cached;
+            }
+
+            if (PerfLogSession)
+            {
+                Interlocked.Increment(ref VerificationsPerformed);
+                VerifiedPerSection.AddOrUpdate(id, 1, static (_, n) => n + 1);
+                if (_sections.TryGetValue(id, out CacheTocEntry e))
+                    Interlocked.Add(ref BytesVerified, e.Length);
+            }
 
             bool ok = verify();
             _verified[id] = ok;
@@ -122,6 +165,7 @@ internal sealed class CacheContainerReader
             }
 
             reader = new CacheContainerReader(containerPath, sections, header.DumpContentHash);
+            if (PerfLogSession) Interlocked.Increment(ref ContainersOpened);
             return true;
         }
         catch (IOException)

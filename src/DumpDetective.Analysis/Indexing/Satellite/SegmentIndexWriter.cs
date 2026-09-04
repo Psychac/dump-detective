@@ -66,11 +66,26 @@ internal static class SegmentIndexWriter
     /// </summary>
     internal static List<SegmentIndexEntry> ReadRecords(string containerPath)
     {
+        if (string.IsNullOrWhiteSpace(containerPath)
+            || !CacheContainerReader.TryOpen(containerPath, out CacheContainerReader? reader)
+            || reader is null)
+            return new List<SegmentIndexEntry>();
+
+        return ReadRecords(reader);
+    }
+
+    /// <summary>
+    /// Session-based overload — reads the <c>SegmentIndex</c> section from an already-open
+    /// container so its checksum is verified once for the run rather than once per reader
+    /// instance. See docs/cache/cache-implementation-clean-slate-redesign.md § 6.1.
+    /// </summary>
+    internal static List<SegmentIndexEntry> ReadRecords(CacheContainerReader reader)
+    {
         var result = new List<SegmentIndexEntry>();
 
         try
         {
-            if (!CacheSectionHelper.TryOpenCacheSection(containerPath, CacheSectionId.SegmentIndex, out Stream? stream) || stream is null)
+            if (!reader.TryOpenSection(CacheSectionId.SegmentIndex, out Stream? stream) || stream is null)
                 return result;
 
             using (stream)

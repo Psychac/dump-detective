@@ -1592,7 +1592,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // Presence only — deliberately not checksum validity. Verifying every section here would
         // hash the whole file (~1.4 GB on the reference dump) on every cache hit, which is the exact
         // cost CacheContainerReader's per-session memoization exists to remove. Integrity stays
-        // lazy, on first actual use. See cache-implementation-clean-slate-redesign.md § 6.4(a).
+        // lazy, on first actual use. See cache-implementation-clean-slate-redesign.md § 6.5(a).
         foreach (CacheSectionDescriptor descriptor in CacheSectionCatalog.Required)
         {
             if (!reader.ContainsSection(descriptor.Id))

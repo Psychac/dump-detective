@@ -9,7 +9,8 @@ Every claim below is grounded in current `upgrade/clrmd-4` source, with file:lin
 Numbers labelled **measured** come from the 14.6M-object real dump already profiled in
 [docs/discrepancy/cache-footprint-comparison.md](../discrepancy/cache-footprint-comparison.md).
 Numbers labelled **derived** are arithmetic on those measurements, not separate measurements.
-Nothing here has been benchmarked end-to-end yet — see § 9.
+§ 6.0(a), § 6.1, § 6.2 and § 6.4 are implemented; § 6.1 has been verified end-to-end against a real
+dump (see [measurements § 7](cache-redesign-measurements.md)). § 6.3 remains unbuilt.
 
 ---
 
@@ -318,7 +319,7 @@ What it does:
 > open. Implementing that broke 70 tests with
 > `IOException: cache.bin is being used by another process` — a session-lifetime mapping **locks the
 > file on Windows**, so any later attempt to delete or replace the index directory fails. That is
-> § 6.4(d)'s risk, and it turned out to bite immediately rather than theoretically.
+> § 6.5(d)'s risk, and it turned out to bite immediately rather than theoretically.
 >
 > The mapping was reverted to per-call; only the memoization was kept. The full measured win is
 > retained regardless, because the measured cost was the **checksum** (68.8 ms), never the mapping —
@@ -328,8 +329,17 @@ What it does:
 
 This is the fix for § 1 **and § 1a** — both are the same root cause — and the enabler for
 everything else. The per-open verify semantics callers rely on are preserved exactly; only the
-*repetition* goes away. Measured value: ≈20 opens/run × 68.8 ms ≈ **1.38 s** on the reference dump,
-≈8.2 s on the 27.5 GB one, all but the first open becoming free.
+*repetition* goes away.
+
+**Verified end-to-end** on the reference 3.3 GB dump, same build, memoization on vs. bypassed
+([measurements § 7](cache-redesign-measurements.md)): 82 section opens either way; **redundant
+hashing down 78.5%** (5,904.3 → 1,270.8 MiB), which is **≈0.88 s of CPU** at the measured verify
+throughput; a follow-up routing `ObjectAddressLookup` through the session took it further, to
+**936.2 MiB — the design's floor**, with only 0.26 MiB of redundancy left across three tiny sections
+([measurements § 7.1](cache-redesign-measurements.md)). The ≈1.38 s predicted here was ~36% high — it assumed all ≈20 opens were full
+four-column groups; some were smaller satellite sections. **Wall clock moved 0.3 s on a 51 s run,
+i.e. within noise at n=1** — the eliminated work is real and precisely measured, its user-visible
+effect on this dump is not yet distinguishable from variance.
 
 Non-obvious constraint to respect: the current unnamed-mapping-per-open design was chosen
 for thread safety across concurrent analyzers
@@ -355,10 +365,10 @@ Build clean, **1144 passed / 0 failed / 20 skipped**.
   `LohFreeBlocks`) now route through `TryWriteSection`, which owns the progress report,
   `BeginSection`/`EndSection`, abort-on-failure and warning formatting. The four columnar sections
   keep explicit code because they close via the precomputed-checksum `EndSection` overload, and
-  `TypeAggregates` keeps its own because it must be written last. Per § 6.4(b) the *order* stays
+  `TypeAggregates` keeps its own because it must be written last. Per § 6.5(b) the *order* stays
   explicit; only the wrapper is shared.
 - **Fast path**: `TryLoadFromCache` now asserts every `Required` section is present, instead of
-  checking two. Presence only, never checksums — see § 6.4(a).
+  checking two. Presence only, never checksums — see § 6.5(a).
 - **Drift guard**: `CacheSectionCatalog.MissingFromCatalog()` plus a unit test fails the build if a
   new `CacheSectionId` is added without a catalog entry. That is the mechanism the backlog gated a
   source generator behind, achieved without build-time machinery.
@@ -451,19 +461,28 @@ The original design, for reference — the read-side half was not implemented:
 - **Write side**: `Build` iterates descriptors instead of inlining 13 near-identical
   try/catch/abort blocks. The progress report, the abort-on-failure, and the
   `warnings.Add($"{name}: ...")` formatting live in one place.
-- **Read side**: § 4's five copy-paste caches collapse into one generic
-  `LazySection<TProvider>` parameterised by descriptor. **Not implemented** — the catalog exists and
-  can carry a reader factory, but the five caches are untouched. They open once each per run, so
-  this is the tidiness half of § 4 with no measured cost attached; it is the natural next increment.
+- **Read side**: ✅ **DONE.** § 4's five copy-paste caches are now one generic,
+  `LazyContainerIndex<TProvider>` — **−450 lines deleted, +100 added**. See § 6.4.
 - **Fast path (§ 3)**: `TryLoadFromCache` iterates the descriptor list and confirms every
   section the previous build recorded is **present** in the TOC, instead of hard-coding two.
-  Presence only — **not** checksum validity; see § 6.4(a), where validating integrity here
+  Presence only — **not** checksum validity; see § 6.5(a), where validating integrity here
   would hash the whole file and undo § 6.1. Integrity stays lazy, on first open, memoized.
 
 Deliberately *not* a source generator. A hand-written list in one file is enough to make
 drift visible, and adds no build-time machinery.
 
-### 6.3 Column-projection read API
+### 6.3 Column-projection read API — ❌ CLOSED UNBUILT (gated)
+
+**Decision (2026-09-05): § 6 is closed here and this item is not being built.** The evidence
+turned against it. § 6.1 eliminated 4.97 GB of per-run hashing (5,904.3 → 936.2 MiB) and that did
+not register above wall-clock noise on the reference dump. What § 6.3 would save is strictly
+smaller — page-cache traffic and materialization of two unused columns out of four, with the
+hashing already gone — so it cannot plausibly be measurable where the larger change wasn't.
+
+Reopen only if a real workload shows base-column enumeration cost as a bottleneck. The analysis
+below is kept because it is still correct about *what* is wasted; only the priority changed.
+
+
 
 Add projection entry points alongside the existing `HeapEntry` enumeration — e.g. an
 address+method-table pair stream — so the ~36% of column traffic that MT-filtering analyzers
@@ -477,7 +496,32 @@ for projection to save is the page-cache traffic and materialization of two unus
 the hashing. Re-measure that delta before deciding how many projections to add; adding exactly one
 (address + method table) covers every current consumer, and none should be added on spec.
 
-### 6.4 Design scrutiny — problems with § 6.1 and § 6.2 as written
+### 6.4 `LazyContainerIndex<TProvider>` — the five provider caches collapsed ✅ DONE
+
+`ForwardIndexCache`, `ReverseIndexCache`, `DominatorReachableIndexCache`, `DominatorTreeIndexCache`
+and `ThreadRetentionIndexCache` are deleted and replaced by one generic. **−450 lines removed,
++100 added**; build clean, 1144 passed / 0 failed / 20 skipped.
+
+Two things fell out that the § 4 write-up hadn't anticipated:
+
+- **The five were less identical than they looked.** The doc said they "vary only in type names".
+  In fact the *ownership* shape varies three ways: the edge indices expose a provider wrapping a
+  disposable reader, the dominator readers **are** their own provider, and the thread-retention
+  provider owns nothing and its class wasn't even `IDisposable`. A generic that only carried
+  `TProvider` would have leaked the edge readers. The factory therefore returns
+  `(TProvider? Provider, IDisposable? Owns)` — the one place the variation is real.
+- **They now share § 6.1's container session.** Each used to call `CacheContainerReader.TryOpen`
+  itself, so the five accounted for five of the ~13 independent opens catalogued in § 1. They now
+  take `Func<CacheContainerReader?>` pointing at `HeapIndexCache.GetOrOpenContainerSession()`, so
+  they reuse the run's session and inherit its verify-once memoization. This wasn't part of § 4's
+  scope; it fell out of doing § 6.1 first, and is a further reason to have sequenced it that way.
+
+`ThreadRetentionIndexCache`'s second constructor delegate (`Func<IDominatorTreeProvider?>`) became a
+closure over `_dominatorTreeCache` inside the factory, preserving the dependency exactly. Its cache
+is now disposed alongside the other four — it owns nothing today, but it is `IDisposable` like its
+siblings, and disposing it stops that from becoming a silent leak if that ever changes.
+
+### 6.5 Design scrutiny — problems with § 6.1 and § 6.2 as written
 
 Found by pressure-testing the proposals, not by measurement. § 6.2 has a real contradiction.
 
@@ -611,9 +655,11 @@ and neither currently has a caller.
 
 Closed since this doc was written — see
 [cache-redesign-measurements.md](cache-redesign-measurements.md). The run-level multiplier turned
-out to be derivable statically rather than needing an instrumented run, because the pipeline has no
-analyzer selection: `CreateAnalyzers()` takes no filter and the `AnalysisProfile` tiers are gone, so
-every analyzer runs on every dump and enumerating call sites gives the real count.
+out to be derivable statically rather than needing an instrumented run, because every analyzer runs
+by default: `CreateAnalyzers()` takes no filter and the `AnalysisProfile` tiers are gone.
+(Analyzer selection *does* exist — `AnalyzerFilterService` honours `--include-analyzers` /
+`--exclude-analyzers` — but it is opt-in and empty by default, so the count below is the
+default-configuration count and also the worst case.)
 
 **≈20 full-column opens per run × 68.8 ms ≈ 1.38 s of redundant checksum verification**, rising to
 ≈8.2 s on the 27.5 GB dump's cache. Two structural surprises fell out of that count, both in

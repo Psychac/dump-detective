@@ -148,7 +148,7 @@ internal sealed class CacheContainerWriter : IDisposable
     /// build genuinely cannot write them in an arbitrary order: the columnar sections need the
     /// scratch files, the dominator sections need the reachability walk's result, and
     /// <see cref="CacheSectionId.TypeAggregates"/> must go last because its presence is what marks
-    /// the build complete (§ 6.4(b)).
+    /// the build complete (§ 6.5(b)).
     /// </remarks>
     /// <returns><c>true</c> if the section was written and closed; <c>false</c> if it was aborted.</returns>
     public bool TryWriteSection(

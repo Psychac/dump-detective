@@ -223,11 +223,16 @@ is now the best-evidenced single change across either document.
 
 ## 6. The run-level multiplier — derived statically, no dump run needed
 
-The missing number was "how many times per run is each section opened?" It turns out this is
-answerable statically, because **the pipeline has no analyzer selection**: `CreateAnalyzers()` takes
-no filter argument and materializes every registered analyzer, and the `AnalysisProfile`
-Fast/Balanced/Full tiers are gone. Every analyzer runs on every dump. So enumerating call sites and
-their loop structure gives the real count, not merely a bound.
+The missing number was "how many times per run is each section opened?" It is answerable
+statically, because **every analyzer runs by default**: `CreateAnalyzers()` takes no filter and the
+`AnalysisProfile` Fast/Balanced/Full tiers are gone.
+
+Correction to an earlier version of this paragraph, which claimed the pipeline has *no* analyzer
+selection at all: it does. `AnalyzerFilterService.Apply` honours `--include-analyzers` and
+`--exclude-analyzers`, and both are empty unless the user sets them, so filtering is strictly
+opt-in. The count below is therefore the **default-configuration** count, which is also the worst
+case — narrowing the analyzer set can only remove opens, never add them. The conclusion is
+unchanged; the reasoning behind it was wrong.
 
 ### 6.1 Full inventory of object-column opens (reference dump, 8-core machine)
 
@@ -311,15 +316,145 @@ and roughly a fifth of it buys four booleans.
 
 ---
 
-## 7. Open questions this pass did *not* close
+## 7. Verified on a real run (2026-09-04) — § 6.1 measured end-to-end
+
+The predictions in § 5/§ 6 were per-open cost × statically-derived open count. Both have now been
+observed directly, on the reference 3.3 GB dump (cache-hit path), by instrumenting
+`CacheContainerReader` (`DD_PERF_CACHE_SESSION=1`) and running the real CLI twice — once with the
+§ 6.1 memoization active and once with it bypassed, same dump, same build.
+
+| | Section opens | Verified | Skipped | **Bytes hashed** | Wall clock |
+|---|---:|---:|---:|---:|---:|
+| Before § 6.1 (memoization bypassed) | 82 | 82 | 0 | **5,904.3 MiB** | 51.7 s |
+| After § 6.1 | 82 | 28 | **54** | **1,270.8 MiB** | 51.4 s |
+
+**The prediction held.** § 6.1 predicted ≈20 object-column enumerations; the run shows 82 *section*
+opens, and since each column enumeration opens four sections that is ≈20.5 enumerations — the static
+derivation in § 6 was accurate.
+
+**Redundant hashing is down 78.5%** — 4,633.5 MiB of XxHash32 work eliminated per run. At the § 5
+measured verify throughput (4.6–6.9 GB/s, ~5.5 GB/s weighted) that is **≈0.88 s of CPU**, against
+the ≈1.38 s predicted. The prediction was ~36% high because it assumed every one of the ≈20 opens
+was a full four-column group; several were smaller satellite sections.
+
+**But wall clock moved 0.3 s on a 51 s run, which is inside run-to-run noise at n=1.** The work
+eliminated is real, large, and precisely measured; its user-visible effect on this dump is ~1.7% and
+cannot be distinguished from variance without repeated runs. Stated plainly rather than rounded up
+into a speedup claim.
+
+### 7.1 Follow-up: the residual, and why it is now closed
+
+The first verified run left 1,270.8 MiB still hashed and 14 container opens. That looked like a
+large remaining opportunity — **it was not**, and measuring before building is what caught it.
+
+A per-section verification tally (`DD_PERF_CACHE_SESSION=1`) showed only six sections were ever
+hashed twice, and three of those were trivial:
+
+| Section verified twice | Redundant MiB |
+|---|---:|
+| `ObjectAddresses` | 111.54 |
+| `ObjectMethodTables` | 111.54 |
+| `ObjectSizes` | 111.54 |
+| `Handles` | 0.23 |
+| `Roots` | 0.03 |
+| `LargeObjects` | 0.00 |
+| **Total redundant** | **334.89** |
+
+So of the 1,270.8 MiB, only **334.9 MiB (26.4%) was redundant** — worth ≈64 ms at the measured
+throughput. The other **935.9 MiB is irreducible**: each section verified exactly once, which is the
+floor for this design. An earlier note here implied the whole 1,270.8 MiB was addressable; it wasn't.
+
+**And 99.9% of the redundancy had a single cause** — `ObjectAddressLookup` opened its own
+`CacheContainerReader` (two, counting `SegmentIndexWriter.ReadRecords`) and re-verified the three
+object columns the run's session had already checked. Routing it through the session fixed it:
+
+| | Container opens | Verified | **Bytes hashed** | Sections hashed twice |
+|---|---:|---:|---:|---|
+| After § 6.1 | 14 | 28 | 1,270.8 MiB | 6 |
+| After routing `ObjectAddressLookup` | **12** | **25** | **936.2 MiB** | 3 (`Roots`, `Handles`, `LargeObjects`) |
+
+936.2 MiB against a predicted floor of 935.9 — the model is exact. **Remaining redundancy is
+0.26 MiB across three tiny sections, which is not worth another change.** Twelve container opens
+remain, but they no longer cause meaningful duplicate hashing, so the open *count* is now a
+tidiness question rather than a cost one.
+
+Wall clock across these runs was 51.4 s / 51.7 s / 57.1 s — dominated by machine variance, with the
+slowest run being the one doing the *least* work. At n=1 per configuration it says nothing; bytes
+hashed is the deterministic measure and is what the table above reports.
+
+### 7.2 What the run revealed that the static analysis missed
+
+**14 container opens remain.** § 6.1's session covers `HeapIndexCache` and — since § 6.4 — the five
+provider caches, but fourteen `CacheContainerReader` instances still exist per run
+(`ObjectAddressLookup`, `RootIndexReader`, `TaskIndexReader`, the handle readers,
+`LohFragmentationAnalyzer`, `SegmentIndexWriter.ReadRecords`, …). **Memoization is per instance**, so
+a section opened through two different readers is verified twice. That is why 28 verifications
+occurred for a container holding ~26 sections, and why 1,270.8 MiB is still hashed — roughly the
+whole file once, which is the floor for the current design rather than a bug.
+
+Extending the session to the one site that mattered (`ObjectAddressLookup`) is done — see § 7.1.
+The other eleven cost 0.26 MiB between them and are deliberately left alone.
+
+---
+
+## 8. ⚠ OVERTURNS — the reverse-index compression risk was three orders of magnitude too pessimistic
+
+[format doc § 7.2.1](cache-format-clean-slate-redesign.md) argued that block-compressing the edge
+index would be a runtime disaster: "potentially millions of lookups", "a BFS touching 100,000 nodes
+with one uncached block each costs **3–14 seconds**", and "locality does not rescue it" because
+bucket assignment is by hash of the child address. That was reasoning, not measurement. Measured, on
+the reference 3.3 GB dump, with `TryGetParents` instrumented to record which 64 KB block of
+`ReverseEdgeBuckets` each lookup lands in (`DD_PERF_REVERSE_BLOCKS=1`):
+
+| | Measured |
+|---|---:|
+| `TryGetParents` calls in a full run | **8,851** (245 of them misses) |
+| Data-block touches | 8,606 |
+| **Distinct 64 KB blocks touched** | **710** — 46.5 MB, i.e. **18.9%** of the 245.9 MB section |
+| Distinct directory blocks | 7 (0.5 MB of 107.0 MB) |
+| **Touches per block** | **12.1** |
+
+**Both halves of the objection were wrong.** Call volume is ~8.8 thousand, not millions — the BFS
+does not perform one parent lookup per heap object. And locality is *good*, not poor: the working
+set is 710 blocks, so hash-scattering is irrelevant because nearly everything fits in a small cache.
+
+LRU simulation over the real trace:
+
+| Block cache | Cache MB | Misses | Hit rate | Decompressed MB | brotli @0.47 GB/s | zstd @2 GB/s |
+|---|---:|---:|---:|---:|---:|---:|
+| none | 0 | 8,606 | 0% | 564.0 | 1,200 ms | 282 ms |
+| 64 blocks | 4.2 | 2,497 | 71.0% | 163.6 | 348 ms | 82 ms |
+| **256 blocks** | **16.8** | 1,042 | **87.9%** | 68.3 | **145 ms** | **34 ms** |
+| 710 blocks | 46.5 | 710 | 91.7% | 46.5 | 99 ms | 23 ms |
+
+91.7% is the ceiling — every distinct block must be decompressed once. **A 16.8 MB block cache puts
+the cost at 34 ms with zstd**, against the 3–14 s § 7.2.1 predicted. Compressing the reverse-edge
+index is viable, and the "unbreakable runtime cost" objection is withdrawn.
+
+### 8.1 What this does *not* settle
+
+- **Scale.** This is the 3.3 GB dump, whose reverse section is 245.9 MB. On the 27.5 GB dump it is
+  3,064.2 MB — 12x — and more leak candidates plausibly means more lookups and a larger working set.
+  The 710-block figure is not known to hold there. Same instrumentation, one run, would tell.
+- **The forward index is a different access pattern and was not traced.** `ForwardEdgeBuckets` is
+  362.1 MB here and 2,516.2 MB on the 27.5 GB dump — 33% of both files, i.e. *larger* than the
+  reverse index — and its consumer is graph traversal rather than isolated point lookups. If it
+  turns out to be streamed end-to-end, § 4's 22x zero-copy penalty applies to it exactly as it does
+  to the base columns, and it should not be compressed. This is now the single biggest open question
+  about compression, and it displaces the one this section just closed.
+
+---
+
+## 9. Open questions this pass did *not* close
 
 Recorded so the boundary of the evidence is explicit. Everything in §§ 1–6 is measured or
 statically derived; everything here is not, and no plan should assume an answer.
 
 | # | Question | Blocks | Why it isn't answered here |
 |---|---|---|---|
-| 1 | **What is `TryGetParents` call volume and block hit-rate under a real root-path workload?** | Compression of the edge index — i.e. the single largest size lever | Needs an instrumented traversal against a real dump. § 2 measured compression *ratios*, never lookup *cost*. See [format doc §7.2.1](cache-format-clean-slate-redesign.md) |
-| 2 | Does one shared `MemoryMappedFile` serve 8–32 concurrent readers as well as today's per-open mappings? | [impl doc § 6.1](cache-implementation-clean-slate-redesign.md) | Requires the session to exist before it can be benchmarked |
+| 1 | ~~`TryGetParents` call volume and block hit-rate~~ **CLOSED — see § 8.** 8,851 calls, 710 distinct blocks, 87.9% hit rate on a 16.8 MB cache, 34 ms with zstd. The objection is withdrawn | — | — |
+| 1b | **Is `ForwardEdgeBuckets` streamed or point-queried?** It is 33% of both measured files — bigger than the reverse index | Whether compression applies to the largest section group | Same tracing, not yet done — see § 8.1 |
+| 2 | ~~Opens per run~~ **CLOSED** — see § 7. Predicted ≈20 enumerations, observed ≈20.5; hashing down 78.5%, wall clock within noise | — | — |
 | 3 | Does `DominatorImmediateDominatorAddresses` carry rows for folded leaves? | [format doc §4](cache-format-clean-slate-redesign.md)'s aggressive option | Answerable by reading the writer; not done in this pass |
 | 4 | How often is the dominance-chain-tree UI actually exercised per build? | Same | Usage data, not code |
 | 5 | What does CSR cost/save *after* compression, rather than instead of it? | [format doc §7.1](cache-format-clean-slate-redesign.md) item 5 | Requires a CSR prototype to compress |

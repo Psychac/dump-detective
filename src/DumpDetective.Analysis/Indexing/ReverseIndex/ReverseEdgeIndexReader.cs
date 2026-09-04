@@ -115,6 +115,46 @@ internal sealed unsafe class ReverseEdgeIndexReader : IDisposable
     /// <paramref name="truncated"/> is kept for on-disk format/caller compatibility but is always
     /// <c>false</c> now.
     /// </summary>
+    // ── Measurement scaffolding: open question 1 in docs/cache/cache-redesign-measurements.md ──
+    // DD_PERF_REVERSE_BLOCKS=1 records, per lookup, which 64 KB block of ReverseEdgeBuckets and
+    // ReverseEdgeDirectories the lookup lands in. Post-processing that trace answers whether block
+    // compression of these sections would thrash: the sections are 245.9 MB + 107.0 MB on the
+    // reference dump, and bucket assignment is by *hash* of the child address, so locality is the
+    // open worry (format doc § 7.2.1). Recording only — no behaviour change.
+    internal static readonly bool PerfLogBlocks =
+        Environment.GetEnvironmentVariable("DD_PERF_REVERSE_BLOCKS") == "1";
+    private const int BlockShift = 16;                  // 64 KB blocks
+    private static readonly object s_traceGate = new();
+    private static readonly List<int> s_dataBlocks = new(1 << 20);
+    private static readonly List<int> s_dirBlocks = new(1 << 20);
+    private static long s_lookups;
+    private static long s_lookupMisses;
+
+    /// <summary>Writes the recorded block trace next to the report and returns a one-line summary.</summary>
+    internal static string DumpBlockTrace(string directory)
+    {
+        lock (s_traceGate)
+        {
+            if (s_lookups == 0)
+                return "[PERF] ReverseBlocks: no TryGetParents calls recorded";
+
+            string path = Path.Combine(directory, "reverse-block-trace.bin");
+            using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20))
+            using (var bw = new BinaryWriter(fs))
+            {
+                bw.Write(s_dataBlocks.Count);
+                foreach (int b in s_dataBlocks) bw.Write(b);
+                bw.Write(s_dirBlocks.Count);
+                foreach (int b in s_dirBlocks) bw.Write(b);
+            }
+
+            return $"[PERF] ReverseBlocks: {s_lookups:N0} TryGetParents calls " +
+                   $"({s_lookupMisses:N0} misses), {s_dataBlocks.Count:N0} data-block touches, " +
+                   $"{s_dataBlocks.Distinct().Count():N0} distinct data blocks, " +
+                   $"{s_dirBlocks.Distinct().Count():N0} distinct directory blocks -> {path}";
+        }
+    }
+
     public bool TryGetParents(ulong child, out IReadOnlyList<ulong> parents, out bool truncated)
     {
         parents = Array.Empty<ulong>();
@@ -126,9 +166,25 @@ internal sealed unsafe class ReverseEdgeIndexReader : IDisposable
         lock (_bucketLocks[bucketIdx])
         {
             if (!TryFindInDirectory(loc, child, out long dataOffsetInBucket))
+            {
+                if (PerfLogBlocks)
+                    lock (s_traceGate) { s_lookups++; s_lookupMisses++; }
                 return false;
+            }
 
-            ReadGroup(loc.DataOffset + dataOffsetInBucket, out parents, out truncated);
+            long absoluteDataOffset = loc.DataOffset + dataOffsetInBucket;
+
+            if (PerfLogBlocks)
+            {
+                lock (s_traceGate)
+                {
+                    s_lookups++;
+                    s_dataBlocks.Add((int)(absoluteDataOffset >> BlockShift));
+                    s_dirBlocks.Add((int)(loc.DirectoryOffset >> BlockShift));
+                }
+            }
+
+            ReadGroup(absoluteDataOffset, out parents, out truncated);
             return true;
         }
     }

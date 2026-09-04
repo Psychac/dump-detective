@@ -25,15 +25,22 @@ conclusions the two design docs originally reached.
   during the build — directly against this project's bounded-memory philosophy. Fix:
   cap + sample like `masterStringDedup`, or stream to disk incrementally the way
   `ReverseEdgeExtractor` already does for edges.
-- **Cache-hit fast path only validates 2 of 25 sections.** `TryLoadFromCache` checks
-  that `TypeAggregates` + the columnar `Objects` sections exist and match the content
-  hash. It never re-checks satellite sections (Roots, Handles, Tasks, EventCandidates,
-  reverse index, `SegmentIndex`, …) on a *later* cache hit. A transient write failure
-  (disk-full, AV lock, permissions blip) during one run silently and **permanently**
-  downgrades every future analysis of that dump until someone deletes `.dumpindex/` by
-  hand. Fix: extend the fast-path check to confirm every section the *previous* build
-  successfully wrote is still present and checksum-valid, not just the two required
-  ones.
+- **Cache-hit fast path validation — partially closed (2026-09-04), remainder needs a format
+  change.** `TryLoadFromCache` used to check only `TypeAggregates` + `ObjectAddresses`, so a
+  transient write failure (disk-full, AV lock, permissions blip) silently and permanently
+  downgraded every future analysis of that dump. It now asserts all seven `Required` sections
+  are present — the four columnar object sections, `TypeAggregates`, `Roots`, `SegmentIndex` —
+  via `CacheSectionCatalog`, with a unit test guarding against a new section id landing
+  unclassified.
+  **What remains:** the original fix ("confirm every section the *previous* build wrote") turned
+  out to be unimplementable as stated — the TOC only lists sections that were successfully
+  closed, so a lost section leaves nothing to diff against. Catching a lost *conditional*
+  section (`Handles`, `Tasks`, the edge indices, the dominator sections) requires the writer to
+  persist a manifest of intended sections, which is an additive format change. Note also that
+  presence is checked but **not** checksum validity — validating every section here would hash
+  the whole file on every cache hit, defeating the per-session memoization. Full reasoning in
+  [cache-implementation-clean-slate-redesign.md](cache-implementation-clean-slate-redesign.md)
+  § 6.2/§ 6.5(a).
 
 ## Real, data-already-collected perf wins
 
@@ -93,9 +100,15 @@ Confirmed intrinsic native cost (per-thread stack unwinding inside ClrMD's DAC l
 1. Investigate whether `CachedMemoryReader`'s page/segment cache size or page
    granularity can be tuned to reduce per-`ReadVirtual`-call overhead at large dump
    sizes.
-2. Defer GC-root indexing to an on-demand Phase 2 step instead of always paying it
-   upfront in the cold Phase 1 build, trading a slower on-demand root query for a
-   faster initial index build on very large dumps.
+2. ~~Defer GC-root indexing to an on-demand Phase 2 step instead of always paying it
+   upfront in the cold Phase 1 build.~~ **Closed by decision, 2026-09-04, not by measurement.**
+   `DD_SKIP_ROOT_INDEX_BUILD` was the A/B lever for exactly this, and it was deleted along
+   with the other four skip toggles once GC roots were accepted as core output rather than
+   an optional feature (see
+   [cache-implementation-clean-slate-redesign.md](cache-implementation-clean-slate-redesign.md)
+   § 6.2.1). `Roots` is now a `Required` section validated by the cache-hit fast path, so
+   "build it lazily or not at all" is no longer a supported shape. Reopening this would mean
+   re-adding the lever first.
 3. **Cheapest, no correctness/perf risk**: just surface "GC roots" as its own visible
    progress phase with an ETA (the progress-reporting plumbing already supports this)
    so a 25GB-dump user isn't left staring at an apparently-stuck scan for three
@@ -103,13 +116,18 @@ Confirmed intrinsic native cost (per-thread stack unwinding inside ClrMD's DAC l
 
 ## Object address lookup (`SegmentIndex` / `ObjectAddressLookup`)
 
-- **Perf win was never rigorously confirmed.** Steady-state `TryGetObjectMetadata`
-  measured comparable to (not clearly faster than) `heap.GetObject` on an
-  already-warm heap — the real T2 call-site usage pattern. A BenchmarkDotNet harness
+- **Perf win was never rigorously confirmed — and the A/B lever is now gone.** Steady-state
+  `TryGetObjectMetadata` measured comparable to (not clearly faster than) `heap.GetObject`
+  on an already-warm heap — the real T2 call-site usage pattern. A BenchmarkDotNet harness
   exists (`src/BenchmarkSuite1/ObjectAddressLookupBenchmark.cs`) but hasn't been run.
-  Worth settling before assuming this pattern is a guaranteed win if applied to further
-  call sites — the value shipped so far may rest more on architectural consistency
-  (one index-first code path) than on a proven latency win.
+  Note that `DD_SKIP_SEGMENT_INDEX_BUILD` was the way to A/B this end-to-end, and it was
+  deleted on 2026-09-04 with `SegmentIndex` promoted to a `Required` section — so the
+  "is it worth building?" half is decided, and only the narrower "is the lookup faster than
+  `heap.GetObject`?" question remains, answerable via the harness alone.
+- **`ObjectAddressLookup` now opens through the run's container session** rather than its own
+  reader — that was the last meaningful source of duplicate checksum verification
+  ([cache-redesign-measurements.md](cache-redesign-measurements.md) § 7.1). Nothing further
+  to do here; noted so it isn't re-investigated.
 - **Interior-pointer resolution** (nearest object ≤ address, for conservative-GC-style
   lookups) is unimplemented. No current caller needs it — low priority, revisit only if
   one appears.

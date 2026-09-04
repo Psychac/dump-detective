@@ -58,10 +58,11 @@ measures 1,398.3 → 228.8 MiB (83.6%) on the reference dump, and 9,423.7 → 2,
 27.5 GB dump.** That is more than §2–§4 combined (45.7% projected) and requires no structural
 change. §5 was ordered last in this doc; on size grounds it should be first. Revised plan in §7.1.
 
-> **⚠ Read §7.2.1 before acting on that.** Scrutiny after the measurement pass found that
-> compression's *runtime* effect on the edge index — the very sections it shrinks most — is
-> unmeasured and plausibly negative, because those sections serve high-volume random point lookups
-> from BFS traversals. The size measurement stands; the sequencing does not, until that is settled.
+> **Update: the § 7.2.1 objection has been withdrawn by measurement.** The reverse-edge index turns
+> out to serve only 8,851 point lookups per run across 710 distinct 64 KB blocks, so a 16.8 MB block
+> cache makes decompression cost ~34 ms (zstd) — not the seconds § 7.2.1 predicted. "Compression
+> first" stands for that section. The open risk has moved to `ForwardEdgeBuckets`, which is *larger*
+> and whose access pattern is untraced (measurements § 8.1).
 
 228.8 MiB also beats the other tool's 271 MB outright — **without** giving up bounded-memory point
 lookups the way their full-in-memory-decompress design does. That property was the actual point of
@@ -574,7 +575,28 @@ real run opens each section. That needs an instrumented cache-hit run against a 
 Found by pressure-testing §7.1 rather than by measurement. The first is serious enough to
 qualify the headline recommendation.
 
-### 7.2.1 ⚠ Compression is a *size* win whose *runtime* effect on the edge index is probably negative
+### 7.2.1 ⚠ WITHDRAWN BY MEASUREMENT — this section's objection was ~1000x too pessimistic
+
+> **Read this before the argument below.** The concern was measured directly and does not hold. On
+> the reference dump a full run makes **8,851** `TryGetParents` calls, not "potentially millions",
+> and they touch only **710 distinct 64 KB blocks** (18.9% of the section) at **12.1 touches per
+> block** — locality is *good*, not defeated by hash-scattering. A 16.8 MB LRU block cache yields an
+> **87.9% hit rate**, putting decompression at **34 ms with zstd** against the "3–14 seconds" below.
+> Full trace and LRU simulation in [cache-redesign-measurements.md](cache-redesign-measurements.md)
+> § 8. **Compressing the reverse-edge index is viable**, and §7.1's "compression first" ordering
+> stands unqualified for that section.
+>
+> Two things the measurement did *not* settle, and they now matter more than this section did:
+> whether the 710-block working set holds on the 27.5 GB dump (12x larger reverse section), and
+> whether **`ForwardEdgeBuckets`** — 33% of both measured files, *larger* than the reverse index — is
+> streamed rather than point-queried, in which case § 5.1's 22x zero-copy penalty applies to it and
+> it must not be compressed. See measurements § 8.1.
+>
+> The reasoning below is kept as the record of what was argued and why it was wrong: it assumed one
+> parent lookup per BFS node over ~100,000 nodes, and inferred poor locality from the bucket hash
+> without checking the working-set size.
+
+#### Original argument (superseded)
 
 §5.1 asked "streaming or point lookup?" and concluded: compress the point-lookup sections. It never
 asked the follow-up question — **how many point lookups do those sections serve, and with what

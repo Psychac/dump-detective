@@ -32,7 +32,7 @@ internal class HeapIndexCache : IDisposable
     private bool _containerSessionAttempted;
     private readonly object _containerSessionGate = new();
 
-    private CacheContainerReader? GetOrOpenContainerSession()
+    internal CacheContainerReader? GetOrOpenContainerSession()
     {
         if (_containerSessionAttempted)
             return _containerSession;
@@ -157,7 +157,13 @@ internal class HeapIndexCache : IDisposable
             if (!_addressLookupAttempted)
             {
                 _addressLookupAttempted = true;
-                ObjectAddressLookup.TryOpen(_heapIndex.IndexPath, out _addressLookup);
+
+                // Through the run's session, not a private reader: this lookup maps three object
+                // columns, and a private reader would re-verify all 334.6 MiB of them that the
+                // session has already checked (measurements § 7.1).
+                CacheContainerReader? session = GetOrOpenContainerSession();
+                if (session is not null)
+                    ObjectAddressLookup.TryOpen(session, out _addressLookup);
             }
 
             // A disk index with a SegmentIndex section is authoritative — a miss here means

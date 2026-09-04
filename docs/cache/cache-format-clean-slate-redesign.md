@@ -58,6 +58,13 @@ measures 1,398.3 → 228.8 MiB (83.6%) on the reference dump, and 9,423.7 → 2,
 27.5 GB dump.** That is more than §2–§4 combined (45.7% projected) and requires no structural
 change. §5 was ordered last in this doc; on size grounds it should be first. Revised plan in §7.1.
 
+> **⚠ Before any of this: 33% of `cache.bin` is write-only.** The three `ForwardEdge*` sections are
+> written every build and have **zero production readers**
+> ([measurements § 9](cache-redesign-measurements.md)) — 462.4 MiB on the reference dump, 3,087.8 MiB
+> on the 27.5 GB one. Deleting that write is a larger, cheaper and more certain footprint win than
+> anything in this document, needs no encoding work, and shrinks the file this design would then
+> compress. It should be settled before §7.1 item 1 is scheduled.
+>
 > **Update: the § 7.2.1 objection has been withdrawn by measurement.** The reverse-edge index turns
 > out to serve only 8,851 point lookups per run across 710 distinct 64 KB blocks, so a 16.8 MB block
 > cache makes decompression cost ~34 ms (zstd) — not the seconds § 7.2.1 predicted. "Compression

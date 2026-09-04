@@ -445,7 +445,61 @@ index is viable, and the "unbreakable runtime cost" objection is withdrawn.
 
 ---
 
-## 9. Open questions this pass did *not* close
+## 9. ⚠ The `ForwardEdge*` sections are write-only — 33% of `cache.bin` is never read
+
+Open question 1b asked whether `ForwardEdgeBuckets` is streamed or point-queried, so we could decide
+whether compression's zero-copy penalty (§ 4) applies to it. **The answer is neither: nothing reads
+it.** Found by tracing the consumer chain rather than the access pattern.
+
+The full chain, verified by whole-repo search:
+
+- `ForwardEdgeBuckets` / `ForwardEdgeDirectories` / `ForwardEdgeMetadata` are written into the
+  container by Phase C of every build.
+- The only way to read them is `ForwardEdgeIndexReader`, reachable only via
+  `IForwardReferenceProvider`, reachable only via `IHeapAnalysisCache.TryGetForwardIndexProvider()`.
+- **`TryGetForwardIndexProvider()` has exactly three references in the entire repository**: its
+  declaration on the interface, its implementation on `HeapAnalysisCache`, and a test stub that
+  throws `NotSupportedException`. **Zero production callers.**
+
+Forward-edge *extraction* is essential and is not in question — Stage A's reachability walk consumes
+it, and that path measured ~2x faster than a live ClrMD walk on a 25 GB dump. But the walk reads the
+**loose `.dat`/`.idx` scratch files**, not the container. `DiskBackedObjectIndexWriter` says so
+directly: *"Merging them into the container (Phase C) happens after the walk, once the loose files
+are no longer needed as a successors source."* The container copy exists to serve *later* runs, and
+no later run asks for it.
+
+| | `ForwardEdge*` total | Share of `cache.bin` |
+|---|---:|---:|
+| Reference 3.3 GB dump | **462.4 MiB** | **33.1%** |
+| 21-04 27.5 GB dump | **3,087.8 MiB** | **32.8%** |
+
+So a third of the cache file — 3.0 GiB on the largest real dump — is written every build, costs
+Phase C merge I/O to produce, and is read by nothing. This is the `EventCandidates` situation (§ 1.1)
+at roughly 10,000x the size.
+
+### 9.1 What to do about it — not decided here
+
+Two coherent options, and the choice is a product call:
+
+1. **Stop persisting the three sections.** Immediately removes 33% of `cache.bin` and the Phase C
+   merge — a bigger, cheaper, more certain win than anything in the format redesign, with no
+   encoding work and no format redesign needed. The `CacheSectionId` slots stay reserved (never
+   renumber). Cost: adding a forward-edge consumer later would require a rebuild to repopulate.
+2. **Keep them and add the consumer they were built for.** Only if a real analyzer need exists —
+   otherwise this is the "no half-finished implementations" convention being violated at 3 GiB.
+
+**Note on sequencing:** deleting `DD_SKIP_FORWARD_INDEX_BUILD` (§ 6.2.1) made this section
+unconditional, on the reasoning that the feature is core. That reasoning holds for the *extraction*
+— the walk depends on it — but not for the *container persistence*, which this section shows nobody
+reads. Worth correcting rather than leaving implied.
+
+Also note this changes the compression arithmetic: if the sections stop being written, the
+`ForwardEdge*` rows drop out of § 2's table entirely, and compression's headline applies to a file
+that is already a third smaller.
+
+---
+
+## 10. Open questions this pass did *not* close
 
 Recorded so the boundary of the evidence is explicit. Everything in §§ 1–6 is measured or
 statically derived; everything here is not, and no plan should assume an answer.
@@ -453,7 +507,7 @@ statically derived; everything here is not, and no plan should assume an answer.
 | # | Question | Blocks | Why it isn't answered here |
 |---|---|---|---|
 | 1 | ~~`TryGetParents` call volume and block hit-rate~~ **CLOSED — see § 8.** 8,851 calls, 710 distinct blocks, 87.9% hit rate on a 16.8 MB cache, 34 ms with zstd. The objection is withdrawn | — | — |
-| 1b | **Is `ForwardEdgeBuckets` streamed or point-queried?** It is 33% of both measured files — bigger than the reverse index | Whether compression applies to the largest section group | Same tracing, not yet done — see § 8.1 |
+| 1b | ~~Is `ForwardEdgeBuckets` streamed or point-queried?~~ **CLOSED — § 9. Neither: it has zero production readers.** 33% of `cache.bin` is write-only | — | — |
 | 2 | ~~Opens per run~~ **CLOSED** — see § 7. Predicted ≈20 enumerations, observed ≈20.5; hashing down 78.5%, wall clock within noise | — | — |
 | 3 | Does `DominatorImmediateDominatorAddresses` carry rows for folded leaves? | [format doc §4](cache-format-clean-slate-redesign.md)'s aggressive option | Answerable by reading the writer; not done in this pass |
 | 4 | How often is the dominance-chain-tree UI actually exercised per build? | Same | Usage data, not code |

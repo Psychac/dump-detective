@@ -72,6 +72,16 @@ conclusions the two design docs originally reached.
 
 ## Real, measured disk-footprint win
 
+- **⚠ Biggest one, and it needs no encoding work: the three `ForwardEdge*` sections are write-only.**
+  `ForwardEdgeBuckets`/`ForwardEdgeDirectories`/`ForwardEdgeMetadata` are written by Phase C of every
+  build and read by nothing — `IHeapAnalysisCache.TryGetForwardIndexProvider()` has zero production
+  callers (declaration, implementation, and a throwing test stub are its only references). Forward-edge
+  *extraction* is essential (Stage A's reachability walk needs it, ~2x faster than a live ClrMD walk),
+  but the walk reads the loose scratch files, not the container. Measured cost of the dead copy:
+  **462.4 MiB (33.1%)** on the 3.3 GB dump, **3,087.8 MiB (32.8%)** on the 27.5 GB dump, plus the
+  Phase C merge I/O to produce it. Either stop persisting it or add the consumer it was built for —
+  see [cache-redesign-measurements.md](cache-redesign-measurements.md) § 9.
+
 - **Edge-index and dominator-tree values stored as full 8-byte addresses instead of 4-byte node
   indices into the already-existing `ObjectAddresses` column.** Measured (not projected) on a real
   14.6M-object dump: the combined forward+reverse edge index is 57.1% of `cache.bin` (799 MB of
@@ -86,11 +96,13 @@ conclusions the two design docs originally reached.
   dump and 76.5% on a 27.5 GB one — more than CSR + dictionary + dominator combined (45.7%).
   On size grounds that reorders the plan: compression first, CSR last, where CSR's remaining
   argument becomes query speed and ~1,992 MiB of directory overhead at 27.5 GB scale, not raw size.
-  **But do not start there.** Scrutiny found compression's *runtime* cost on the edge index is
-  unmeasured and plausibly severe — those sections serve high-volume random `TryGetParents` lookups
-  from BFS traversals, and bucket assignment is hash-scattered, so block reuse is poor
-  ([format doc §7.2.1](cache-format-clean-slate-redesign.md)). Open question 1 in
-  [the measurements doc §7](cache-redesign-measurements.md) gates this and is cheap to answer.
+  A scrutiny pass then argued compression's *runtime* cost on the edge index would be severe
+  (high-volume random `TryGetParents` lookups over hash-scattered buckets). **That objection was
+  measured and withdrawn**: a real run makes only 8,851 such lookups across 710 distinct 64 KB
+  blocks, so a 16.8 MB LRU cache gives an 87.9% hit rate and ~34 ms with zstd
+  ([measurements § 8](cache-redesign-measurements.md)). Compression of the reverse-edge index is
+  viable. **Do the write-only `ForwardEdge*` item above first** — it is larger, cheaper and needs
+  no encoding work, and it shrinks the file this design would then compress.
 
 ## GC-root enumeration at scale (diagnosis is done — see cache-architecture.md § 8; only the fix is open)
 

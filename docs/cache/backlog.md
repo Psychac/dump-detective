@@ -6,6 +6,16 @@ shipped lives in [cache-architecture.md](cache-architecture.md) instead. No prio
 ordering implied by section order within a tier; pick based on what a real workload
 actually hits.
 
+Two clean-slate redesigns sit alongside this backlog, both optional and independent of
+each other: the on-disk byte layout in
+[cache-format-clean-slate-redesign.md](cache-format-clean-slate-redesign.md),
+and the reader/writer/sub-cache code in
+[cache-implementation-clean-slate-redesign.md](cache-implementation-clean-slate-redesign.md)
+(which subsumes the fast-path-validation item below). Both are grounded in
+[cache-redesign-measurements.md](cache-redesign-measurements.md) — measured against the five real
+`cache.bin` files on disk, without loading any dump. Read that first; it overturned several
+conclusions the two design docs originally reached.
+
 ## Real bounded-memory / correctness gaps
 
 - **Unbounded satellite candidate collections.** `taskCandidates` and
@@ -15,7 +25,7 @@ actually hits.
   during the build — directly against this project's bounded-memory philosophy. Fix:
   cap + sample like `masterStringDedup`, or stream to disk incrementally the way
   `ReverseEdgeExtractor` already does for edges.
-- **Cache-hit fast path only validates 2 of ~14 sections.** `TryLoadFromCache` checks
+- **Cache-hit fast path only validates 2 of 25 sections.** `TryLoadFromCache` checks
   that `TypeAggregates` + the columnar `Objects` sections exist and match the content
   hash. It never re-checks satellite sections (Roots, Handles, Tasks, EventCandidates,
   reverse index, `SegmentIndex`, …) on a *later* cache hit. A transient write failure
@@ -27,12 +37,16 @@ actually hits.
 
 ## Real, data-already-collected perf wins
 
-- **`EventCandidateIndex` section is written every build but never read.**
-  `EventLeakAnalyzer` always does a full `heap.EnumerateObjects()` scan regardless —
-  there is no `EventCandidateIndexReader` anywhere in the codebase. The data is
-  already collected and paid for during the write pass; wiring `EventLeakAnalyzer` to
-  prefer it (mirroring how `AsyncTaskAnalyzer`/`RootSetCache`/etc. already prefer their
-  disk-backed candidates) is a real, scoped, zero-new-infrastructure perf win.
+- **`EventCandidates` is a reserved-but-unused section — not a free win.** An earlier
+  version of this entry claimed the section "is written every build but never read" and
+  called wiring a reader a "zero-new-infrastructure" win. That was wrong. A full-source
+  search for `EventCandidate` returns only the reserved enum member
+  (`CacheContainerFormat.cs`) and a stale doc comment plus an always-`null`
+  `InMemoryEventCandidates` parameter on `HeapIndexBuildResult` — there is no candidate
+  collection in the scan loop, no writer, and no reader. So `EventLeakAnalyzer`'s full
+  `heap.EnumerateObjects()` scan is real, but eliminating it means adding collection +
+  writer + reader, not just a reader. Keep the enum slot reserved (renumbering breaks
+  existing caches); re-scope or drop the item.
 - **`ConcatenateScratchFiles` runs fully after the parallel segment scan completes.**
   Segment scratch files are already ordered and each becomes ready independently, so
   concatenating segment 0's files could start as soon as segment 0 finishes, overlapping
@@ -59,10 +73,17 @@ actually hits.
   [docs/discrepancy/cache-footprint-comparison.md](../discrepancy/cache-footprint-comparison.md)).
   Full clean-slate design — true CSR for both edge directions (no directory overhead at all, not
   just narrower keys), `MethodTable` dictionary encoding, and block-level compression that preserves
-  point-lookup access — with a fully-derived projection (~45.7% from CSR + dictionary alone, real
-  arithmetic on measured counts; a further, unmeasured ~54–67% possible from compression on top) and
-  the full caveat list, in
-  [docs/analysis/phase1-redesigns/cache-format-clean-slate-redesign.md](../analysis/phase1-redesigns/cache-format-clean-slate-redesign.md).
+  point-lookup access — in [cache-format-clean-slate-redesign.md](cache-format-clean-slate-redesign.md).
+  **Since measured** ([cache-redesign-measurements.md](cache-redesign-measurements.md)): block
+  compression alone, on the format as it stands today with no CSR work at all, gives 83.6% on this
+  dump and 76.5% on a 27.5 GB one — more than CSR + dictionary + dominator combined (45.7%).
+  On size grounds that reorders the plan: compression first, CSR last, where CSR's remaining
+  argument becomes query speed and ~1,992 MiB of directory overhead at 27.5 GB scale, not raw size.
+  **But do not start there.** Scrutiny found compression's *runtime* cost on the edge index is
+  unmeasured and plausibly severe — those sections serve high-volume random `TryGetParents` lookups
+  from BFS traversals, and bucket assignment is hash-scattered, so block reuse is poor
+  ([format doc §7.2.1](cache-format-clean-slate-redesign.md)). Open question 1 in
+  [the measurements doc §7](cache-redesign-measurements.md) gates this and is cheap to answer.
 
 ## GC-root enumeration at scale (diagnosis is done — see cache-architecture.md § 8; only the fix is open)
 

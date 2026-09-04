@@ -201,7 +201,7 @@ tool's `cache.bin` is ~5x larger for the identical dump.
    saves another 82 MB for free, and block-compression (estimated, not yet measured) could plausibly
    take the whole file into the 250–350 MB range while keeping the same bounded-memory point-lookup
    properties the other tool's full-in-memory-decompress design doesn't have — in
-   [cache-format-clean-slate-redesign.md](../analysis/phase1-redesigns/cache-format-clean-slate-redesign.md).
+   [cache-format-clean-slate-redesign.md](../cache/cache-format-clean-slate-redesign.md).
    That doc also flags the one lever that would change the ceiling by a large factor rather than a
    percentage (not indexing objects no analyzer queries) and why it's in direct conflict with this
    project's own no-sampling/no-capping stance — surfaced, not decided, there.

@@ -1,3 +1,41 @@
+// Download JSON should read the same as the report did before the string pool existed
+// (docs/refactor/report-payload-size-reduction-design.md, F1) — resolve pooled cells back to
+// their literal values on a clone so the shared window.__REPORT__ cache is never mutated.
+function resolveStringPoolForDownload(payload) {
+  const report = payload && payload.report ? payload.report : payload;
+  const pool = report && Array.isArray(report.strings) ? report.strings : null;
+  if (!pool) return payload;
+  const clone = JSON.parse(JSON.stringify(payload));
+  const clonedReport = clone && clone.report ? clone.report : clone;
+  function resolveCell(v, meta) {
+    const isNumericColumn = !!(meta && (meta.type === 'number' || meta.type === 'bytes' || meta.format));
+    if (isNumericColumn || typeof v !== 'number') return v;
+    const resolved = pool[v];
+    return resolved !== undefined ? resolved : v;
+  }
+  function resolveSections(sections) {
+    if (!Array.isArray(sections)) return;
+    sections.forEach(function (section) {
+      if (!Array.isArray(section.compactTables)) return;
+      section.compactTables.forEach(function (ct) {
+        const headers = Array.isArray(ct.headers) ? ct.headers : [];
+        if (!Array.isArray(ct.rows)) return;
+        ct.rows.forEach(function (r) {
+          const values = Array.isArray(r) ? r : (r && Array.isArray(r.values) ? r.values : null);
+          if (!values) return;
+          for (let i = 0; i < values.length; i++) values[i] = resolveCell(values[i], headers[i]);
+        });
+      });
+    });
+  }
+  if (clonedReport) {
+    if (Array.isArray(clonedReport.domains)) clonedReport.domains.forEach(function (d) { resolveSections(d.sections); });
+    resolveSections(clonedReport.trendAnalyzerSections);
+    delete clonedReport.strings;
+  }
+  return clone;
+}
+
 export function setupExportActions(announce) {
   const btnJson = document.getElementById('btn-download-json');
   if (btnJson) btnJson.addEventListener('click', function () {
@@ -7,6 +45,7 @@ export function setupExportActions(announce) {
       if (jsonEl && jsonEl.textContent && jsonEl.textContent.trim()) {
         try { payload = JSON.parse(jsonEl.textContent); } catch (e) { payload = window.__REPORT__ || null; }
       } else payload = window.__REPORT__ || null;
+      payload = resolveStringPoolForDownload(payload);
       const json = JSON.stringify(payload, null, 2);
       const blob = new Blob([json], { type: 'application/json' });
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = (btnJson.dataset.filename || 'report') + '.json'; a.click(); URL.revokeObjectURL(a.href);

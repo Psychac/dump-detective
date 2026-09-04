@@ -43,13 +43,17 @@ public sealed class ObjectShapeSectionBuilderTests
     }
 
     [Fact]
-    public void Build_ReferenceHeavyTable_IncludesGen2Columns()
+    public void Build_Gen2RetainedTable_IncludesGen2Columns()
     {
-        var result = Result(topGen2RetainedTypes: [], totalGen2GcScanWork: 0);
+        // Reference-heavy/Value-heavy/Balanced types no longer get their own tables — they're
+        // an exact partition of TopGen2RetainedTypes by Category, so only that table is emitted
+        // (docs/refactor/report-payload-size-reduction-design.md, F3).
+        var gen2Type = Profile("Demo.Widget", refFields: 5, instanceCount: 1_000, gen2InstanceCount: 400);
+        var result = Result(topGen2RetainedTypes: [gen2Type], totalGen2GcScanWork: 0);
 
         var section = _builder.Build(result);
 
-        var table = section.CompactTables!.Should().ContainSingle(t => t.Title == "Reference-heavy types").Subject;
+        var table = section.CompactTables!.Should().ContainSingle(t => t.Title == "Gen2-retained types (retention-adjusted GC scan cost)").Subject;
         table.Headers.Should().Contain(h => h.Name == "Gen2 Instances");
         table.Headers.Should().Contain(h => h.Name == "Gen2 Scan Cost");
 
@@ -57,6 +61,18 @@ public sealed class ObjectShapeSectionBuilderTests
         int gen2ScanCostIdx = table.Headers.ToList().FindIndex(h => h.Name == "Gen2 Scan Cost");
         table.Rows[0].Values[gen2InstancesIdx].Should().Be(400L);
         table.Rows[0].Values[gen2ScanCostIdx].Should().Be(2_000L); // 5 ref fields * 400 Gen2 instances
+    }
+
+    [Fact]
+    public void Build_NoLongerEmitsRedundantCategoryTables()
+    {
+        var gen2Type = Profile("Demo.Widget", refFields: 5, instanceCount: 1_000, gen2InstanceCount: 400);
+        var result = Result(topGen2RetainedTypes: [gen2Type], totalGen2GcScanWork: 0);
+
+        var section = _builder.Build(result);
+
+        (section.CompactTables ?? []).Should().NotContain(t =>
+            t.Title == "Reference-heavy types" || t.Title == "Value-heavy types" || t.Title == "Balanced types");
     }
 
     [Fact]

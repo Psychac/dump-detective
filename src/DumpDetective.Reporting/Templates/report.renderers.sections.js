@@ -5,6 +5,24 @@ import { el, sevCss } from './report.dom.js';
 import { slugifyAnchor } from './report.renderers.shared.js';
 import { ensureUniqueDomId } from './report.renderers.shared.js';
 import { buildTreeWidget } from './report.renderers.shared.js';
+import { resolveStr } from './report.renderers.shared.js';
+
+// Resolves pooled-string cells (see report.renderers.shared.js) back to their literal value.
+// Only non-numeric columns can contain pooled indices — the producer never pools a cell in a
+// number/bytes/formatted column, so leaving those untouched avoids misreading a legitimate
+// small numeric value as a pool index.
+function resolvePooledRow(values, headerMeta) {
+  let resolved = values;
+  for (let i = 0; i < values.length; i++) {
+    const meta = headerMeta[i];
+    const isNumericColumn = !!(meta && (meta.type === 'number' || meta.type === 'bytes' || meta.format));
+    if (!isNumericColumn && typeof values[i] === 'number') {
+      if (resolved === values) resolved = values.slice();
+      resolved[i] = resolveStr(values[i]);
+    }
+  }
+  return resolved;
+}
 
 function extractCellDisplay(cellData) {
   if (cellData && cellData.display != null) return String(cellData.display);
@@ -323,7 +341,10 @@ export function buildAnalyzerSection(section, i) {
   const sectionTables = Array.isArray(section.compactTables) ? section.compactTables.map(function (ct) {
     const headers = Array.isArray(ct.headers) ? ct.headers.map(function (h) { return (h && h.name) ? String(h.name) : String(h || ''); }) : [];
     const headerMeta = Array.isArray(ct.headers) ? ct.headers.map(function (h) { return ({ type: h && h.type ? String(h.type) : 'string', format: h && h.format ? String(h.format) : null, sortable: (h && (h.sortable === undefined)) ? true : Boolean(h && h.sortable) }); }) : [];
-    const rows = Array.isArray(ct.rows) ? ct.rows.map(function (r) { return Array.isArray(r.values) ? r.values : (Array.isArray(r) ? r : []); }) : [];
+    const rows = Array.isArray(ct.rows) ? ct.rows.map(function (r) {
+      const values = Array.isArray(r.values) ? r.values : (Array.isArray(r) ? r : []);
+      return resolvePooledRow(values, headerMeta);
+    }) : [];
     return { title: ct.title, headers: headers, headerMeta: headerMeta, rows: rows, rowLimit: ct.rowLimit };
   }) : [];
   if (sectionTables && sectionTables.length) {
@@ -863,7 +884,12 @@ export function buildAnalyzerSection(section, i) {
       if (inst.hasLifetimeMismatch) addM('Lifetime Mismatch', 'Yes — Gen2 publisher retaining Gen0/Gen1 subscribers');
       iBody.appendChild(metaGrid);
 
-      const subDetails = Array.isArray(inst.subscriberDetails) ? inst.subscriberDetails : [];
+      // Elements are either an inline subscriber-detail object or an int index into
+      // section.subscriberDetailPool (docs/refactor/report-payload-size-reduction-design.md, F4).
+      const subscriberDetailPool = Array.isArray(section.subscriberDetailPool) ? section.subscriberDetailPool : null;
+      const subDetails = (Array.isArray(inst.subscriberDetails) ? inst.subscriberDetails : []).map(function (d) {
+        return (typeof d === 'number' && subscriberDetailPool) ? (subscriberDetailPool[d] || d) : d;
+      });
       if (subDetails.length) {
         const sdLabel = el('div', 'event-leak-card__sub-label'); sdLabel.textContent = 'Subscriber Details:'; iBody.appendChild(sdLabel);
         const sdList = el('div', 'event-leak-card__sub-list');

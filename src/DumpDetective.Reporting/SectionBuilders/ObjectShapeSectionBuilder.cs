@@ -42,30 +42,13 @@ internal sealed class ObjectShapeSectionBuilder : SectionBuilderBase, IAnalyzerS
             ["value_heavy_types"] = new NumericMetricValue(d.TopValueHeavyTypes.Count, MetricUnit.Count),
         };
 
-        if (d.TopReferenceHeavyTypes.Count > 0)
-        {
-            compactTables.Add(STCompact(
-                "Reference-heavy types",
-                ShapeTableHeaders,
-                BuildShapeRows(d.TopReferenceHeavyTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
-        }
-
-        if (d.TopValueHeavyTypes.Count > 0)
-        {
-            compactTables.Add(STCompact(
-                "Value-heavy types",
-                ShapeTableHeaders,
-                BuildShapeRows(d.TopValueHeavyTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
-        }
-
-        if (d.TopBalancedTypes.Count > 0)
-        {
-            compactTables.Add(STCompact(
-                "Balanced types",
-                ShapeTableHeaders,
-                BuildShapeRows(d.TopBalancedTypes).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
-        }
-
+        // Reference-heavy/Value-heavy/Balanced types are NOT emitted as their own tables: the
+        // analyzer builds TopGen2RetainedTypes as the exact concatenation of those three lists
+        // (ObjectShapeAnalyzer.cs), so emitting all four duplicated ~1.78 MB of identical rows on
+        // a large dump for no additional information (docs/refactor/report-payload-size-reduction-design.md,
+        // F3). The Category column below still distinguishes them; the existing per-table search
+        // box already filters rows by any visible column's text, so typing e.g. "ReferenceHeavy"
+        // reproduces what a dedicated table gave for free.
         if (d.TopGen2RetainedTypes.Count > 0)
         {
             compactTables.Add(STCompact(

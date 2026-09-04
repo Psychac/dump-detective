@@ -215,10 +215,14 @@ drops from 145 ms to 75 ms and peak browser heap roughly halves.
 
 ## Sequencing
 
-### Phase 1 — F7 transport (selected first)
+### Phase 1 — F7 transport (selected first) — done
 
 Self-contained, touches no analyzer or section builder, delivers 8× on its own, and is
 independently revertable.
+
+**Measured on the reference dump, full report (all 36 analyzers): 29.9 MB → 3.69 MB (8.1×).**
+Verified end-to-end in headless Chrome from `file://` — decompresses and renders with no
+content loss. Committed as `6bf41022`.
 
 - Producer: [HtmlReportRenderer.Render](../../src/DumpDetective.Reporting/Formatters/HtmlReportRenderer.cs#L37-L88)
   gzips `payloadJson` and base64s it into the template.
@@ -237,15 +241,80 @@ Two constraints this phase must respect:
   pre-rendering, so small reports stay diffable and greppable, and so there is a fallback if
   `DecompressionStream` is absent. The same branch covers `per-dump-json` in trend mode.
 
-### Phase 2 — F1 + F2 payload restructuring
+### Phase 2 — F1 + F2 payload restructuring — done
 
-F1 and F2 together are ~15.4 MB and share the serializer touchpoints; do them as one change.
-F2 is a one-line producer change given the client already tolerates bare arrays.
+F1 and F2 together are ~15.4 MB and share the serializer touchpoints; done as one change.
 
-### Phase 3 — F3 + F4 + F6 structural cleanups
+- F2: [CompactRow](../../src/DumpDetective.Reporting/Models/AnalyzerDetailSection.cs#L55) now
+  carries `[JsonConverter(typeof(CompactRowJsonConverter))]`
+  ([CompactRowJsonConverter.cs](../../src/DumpDetective.Reporting/Serialization/CompactRowJsonConverter.cs)),
+  writing/reading the bare-array shape the client already preferred.
+- F1: [ReportStringPool.cs](../../src/DumpDetective.Reporting/Formatters/ReportStringPool.cs)
+  builds a payload-level `strings` pool from every string cell across
+  `domains[].sections[].compactTables` (and trend mode's `trendAnalyzerSections`), gated by a
+  profitability check (`occurrences * (literalCost - indexCost) > literalCost`) rather than a
+  fixed length/frequency cutoff — this is what lets high-frequency short tokens like `"No"`
+  (259,887 occurrences) qualify for pooling alongside long type names, which a naive
+  length-based gate would have excluded. Applied in
+  [HtmlReportRenderer.Render](../../src/DumpDetective.Reporting/Formatters/HtmlReportRenderer.cs),
+  skipped for pre-rendered reports (their tables are already static server-rendered HTML, so
+  the client-side pool-resolution path below never runs for them).
+- Client resolution: `report.renderers.shared.js` (`setStringPool`/`resolveStr`) and
+  `report.renderers.sections.js` (`resolvePooledRow`) resolve pooled cells back to literals
+  *before* they reach display, sort, search, or filter — scoped to non-numeric columns only,
+  since the producer never pools a cell in a `number`/`bytes`/formatted column. "Download JSON"
+  (`report.ui.actions.js`) resolves the pool on a clone before export, so the downloaded file
+  reads exactly as it did before F1 existed.
+- **Scope cut, disclosed:** pooling covers `compactTables` cells only, not
+  `rootOwnedSubgraphGroups[].subgraphs[].hops` or `eventLeak*Cards[].subscriberDetails`/
+  `.publisherType`/`.eventFieldName` as F1 originally described. Those fields are typed
+  `string`/`IReadOnlyList<string>` in the object model (not `object?[]` like `CompactRow.Values`),
+  so pooling them would mean changing those types everywhere they're constructed and consumed.
+  `compactTables` is the dominant cost (21.44 MB of the original 28 MB) and captures the large
+  majority of F1's win; the remaining ~4.5 MB across hops/subscriberDetails/event-leak fields is
+  a follow-up if it's worth the type-model churn.
 
-Independent of each other and of Phase 2. F3 also warrants investigating the ~0.4% value drift
-between the Object Shape emit paths, which is a correctness question, not a size one.
+**Measured on the reference dump, full report: 29.9 MB → 2.81 MB (10.6×)** — noticeably better
+than Phase 1's gzip-only 3.69 MB, since pre-compaction reduces the raw redundancy gzip has to
+encode. Verified end-to-end in headless Chrome: rendered DOM shows resolved literal type names
+(`System.Data.DataColumn` × 20, `>No<` × 87, `>Yes<` × 205) with no leaked pool indices, and
+row/table counts match the Phase 1 baseline exactly.
+
+### Phase 3 — F3 + F4 + F6 structural cleanups — done
+
+Independent of each other and of Phase 2.
+
+- F3: [ObjectShapeSectionBuilder.cs](../../src/DumpDetective.Reporting/SectionBuilders/ObjectShapeSectionBuilder.cs)
+  no longer emits the Reference-heavy/Value-heavy/Balanced tables. Source inspection of
+  [ObjectShapeAnalyzer.cs](../../src/DumpDetective.Analysis/Analyzers/ObjectShapeAnalyzer.cs)
+  showed `TopGen2RetainedTypes` is built as the literal concatenation of the other three lists
+  (`gen2RetainedCandidates.AddRange(refHeavyCandidates); ... AddRange(valHeavyCandidates); ...
+  AddRange(balancedCandidates);`) — the same `TypeShapeProfile` object references, not a
+  re-derived copy. That supersedes the "~0.4% value drift" this doc originally flagged as worth
+  investigating: there is no second emit path to drift from, so the drift I measured earlier was
+  an artifact of the ad hoc comparison script, not a product bug. The existing per-table search
+  box (whole-row substring match) already reproduces a per-category view by typing e.g.
+  `ReferenceHeavy` into the filter, so no new client-side filtering UI was needed.
+- F4: [EventLeakSubscriberPool.cs](../../src/DumpDetective.Reporting/Formatters/EventLeakSubscriberPool.cs)
+  dedupes `eventLeakInstanceCards[].subscriberDetails` the same way F1 dedupes strings — entries
+  occurring once stay inline (a lone index reference costs more than the object it would
+  replace), repeated entries become indices into a new section-level `subscriberDetailPool`. The
+  element type change (`IReadOnlyList<SubscriberDetailEntry>?` → `IReadOnlyList<object>?`) is
+  carried by
+  [SubscriberDetailListJsonConverter.cs](../../src/DumpDetective.Reporting/Serialization/SubscriberDetailListJsonConverter.cs);
+  client resolution lives at the one render call site in `report.renderers.sections.js`.
+- F6: folded into
+  [CompactRowJsonConverter.cs](../../src/DumpDetective.Reporting/Serialization/CompactRowJsonConverter.cs) —
+  `double`/`float` cells round to 3 decimal places at write time. Scoped to compact-table cells
+  only (not every double in the document, e.g. confidence composites elsewhere) since that's
+  where the measured precision waste actually lives (`Gen2%` at full `83.11189368948767`
+  precision, etc.) and it's a single already-owned converter rather than new touchpoints.
+
+**Measured on the reference dump, full report: 29.9 MB → 2.65 MB (11.3×)**, a further ~5.7% off
+Phase 2's 2.81 MB. Verified end-to-end in headless Chrome: the Object Shape section shows only
+the Gen2-retained table (11,027 rows; no "Reference-heavy types"/"Balanced types" table markup
+anywhere), and all 7,815 rendered subscriber-detail type cells resolved to real type names with
+zero leaked pool indices.
 
 ### Phase 4 — F5 constant-column hoisting
 

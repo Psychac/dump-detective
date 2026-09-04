@@ -7,6 +7,21 @@
 // via normal JS function hoisting.
 import { el, t } from './report.dom.js';
 
+// ── Cross-table string pool (docs/refactor/report-payload-size-reduction-design.md, F1) ──────
+// A string-typed compact-table cell is unambiguous on the wire: a JSON string is a literal
+// value, a JSON number is an index into report.strings. Numeric-typed columns are never pooled
+// by the producer, so resolution must stay scoped to non-numeric columns — see resolvePooledRow
+// in report.renderers.sections.js, the only call site that applies this.
+let _stringPool = null;
+export function setStringPool(pool) {
+  _stringPool = Array.isArray(pool) ? pool : null;
+}
+export function resolveStr(value) {
+  if (typeof value !== 'number' || !_stringPool) return value;
+  const resolved = _stringPool[value];
+  return resolved !== undefined ? resolved : value;
+}
+
 // ── Severity ranking ─────────────────────────────────────────────────────────
 export function sevRank(sev) {
   if (sev == null) return -1;

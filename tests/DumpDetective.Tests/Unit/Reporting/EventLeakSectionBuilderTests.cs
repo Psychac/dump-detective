@@ -102,7 +102,10 @@ public sealed class EventLeakSectionBuilderTests
 
         AnalyzerDetailSection section = new EventLeakSectionBuilder().Build(result);
 
-        var details = section.EventLeakInstanceCards![0].SubscriberDetails!;
+        // Elements are SubscriberDetailEntry or an int pool index (see SubscriberDetails' doc
+        // comment); the section builder itself never pools — that's a render-time transform in
+        // EventLeakSubscriberPool — so every element here is guaranteed to be an entry.
+        var details = section.EventLeakInstanceCards![0].SubscriberDetails!.Cast<SubscriberDetailEntry>();
         details.Should().Contain(d => d.Type == "App.ExactSubscriber" && d.SizeIsExact);
         details.Should().Contain(d => d.Type == "App.EstimatedSubscriber" && !d.SizeIsExact);
     }

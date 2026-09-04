@@ -51,7 +51,11 @@ internal sealed record CompactHeader(
     bool Sortable = true);
 
 /// <summary>Compact row as a dense array of primitive values (strings, numbers, nulls).
-/// Numeric columns should be emitted as raw numbers; formatting belongs in the client layer.</summary>
+/// Numeric columns should be emitted as raw numbers; formatting belongs in the client layer.
+/// Serializes as a bare JSON array (see <see cref="DumpDetective.Reporting.Serialization.CompactRowJsonConverter"/>) —
+/// the client already accepts this shape (report.renderers.sections.js), and it saves the
+/// {"values":[...]} wrapper across every row (docs/refactor/report-payload-size-reduction-design.md, F2).</summary>
+[JsonConverter(typeof(DumpDetective.Reporting.Serialization.CompactRowJsonConverter))]
 internal sealed record CompactRow(object?[] Values);
 
 /// <summary>Compact table: headers carry typing/formatting metadata and rows are arrays-of-values.
@@ -163,7 +167,12 @@ internal sealed record EventLeakInstanceCard(
     int DuplicateSubscriptionCount,
     bool IsDisposedButSubscribed,
     bool HasLifetimeMismatch,
-    IReadOnlyList<SubscriberDetailEntry>? SubscriberDetails);
+    // Elements are either a SubscriberDetailEntry (inline) or an int index into the containing
+    // section's SubscriberDetailPool — see DumpDetective.Reporting.Formatters.EventLeakSubscriberPool
+    // (docs/refactor/report-payload-size-reduction-design.md, F4). Constructors can keep passing
+    // an IReadOnlyList<SubscriberDetailEntry> here unchanged; covariance handles the assignment.
+    [property: JsonConverter(typeof(DumpDetective.Reporting.Serialization.SubscriberDetailListJsonConverter))]
+    IReadOnlyList<object>? SubscriberDetails);
 
 /// <summary>A cluster of threads sharing the same stack signature.</summary>
 internal sealed record StackCluster(
@@ -245,6 +254,7 @@ internal sealed record AnalyzerDetailSection(
     IReadOnlyList<LeakCandidateCard>? LeakCandidateCards = null, // Scored leak candidates with explanation+impact text
     IReadOnlyList<EventLeakGroupCard>? EventLeakGroupCards = null,       // Event leak per-group drill-down
     IReadOnlyList<EventLeakInstanceCard>? EventLeakInstanceCards = null, // Event leak per-instance drill-down
+    IReadOnlyList<SubscriberDetailEntry>? SubscriberDetailPool = null,  // Pool referenced by EventLeakInstanceCards[].subscriberDetails indices (F4)
     IReadOnlyList<StackCluster>? StackClusters = null,           // Thread stack signature clusters
     IReadOnlyList<AnalyzerArtifact>? Artifacts = null,           // On-disk artifacts produced by the analyzer
     IReadOnlyList<TreeWidget>? TreeWidgets = null);               // Shared collapsible tree widget data (e.g. cluster shared-prefix tree)

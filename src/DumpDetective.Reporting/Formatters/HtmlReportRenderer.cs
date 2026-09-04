@@ -60,6 +60,37 @@ internal sealed class HtmlReportRenderer : IReportFormatter
             RenderMode = shouldPreRender ? "prerendered" : "client",
             ReportStyleVersion = settings.StyleVersion == ReportStyleVersion.V2 ? "v2" : "v1"
         };
+
+        // Skip string pooling for pre-rendered reports: their table markup is already baked
+        // into preAnalyzers as static HTML (ReportHtmlShared.RenderAnalyzerSections, above,
+        // using the original unpooled `doc`), so client-side interactivity that re-reads the
+        // embedded payload directly would need its own pool-resolution path we don't build here.
+        if (!shouldPreRender)
+        {
+            (IReadOnlyList<ReportDomainSection>? pooledDomains,
+                IReadOnlyList<AnalyzerDetailSection>? pooledTrendSections,
+                IReadOnlyList<string>? stringPool) = ReportStringPool.Apply(
+                    docForClient.Domains,
+                    (docForClient as TrendReportDocument)?.TrendAnalyzerSections);
+
+            if (stringPool != null)
+            {
+                docForClient = docForClient with { Domains = pooledDomains, Strings = stringPool };
+                if (docForClient is TrendReportDocument pooledTrendDoc && pooledTrendSections != null)
+                    docForClient = pooledTrendDoc with { TrendAnalyzerSections = pooledTrendSections };
+            }
+
+            docForClient = docForClient with { Domains = EventLeakSubscriberPool.Apply(docForClient.Domains) };
+            if (docForClient is TrendReportDocument trendForSubscriberPool)
+            {
+                docForClient = trendForSubscriberPool with
+                {
+                    TrendAnalyzerSections = EventLeakSubscriberPool.Apply(trendForSubscriberPool.TrendAnalyzerSections)
+                        ?? trendForSubscriberPool.TrendAnalyzerSections
+                };
+            }
+        }
+
         reportJson = JsonSerializer.Serialize(docForClient, ReportJsonContext.Default.AnalysisReportDocument);
         reportJson = CompactReportJson(docForClient, reportJson);
 

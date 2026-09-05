@@ -27,6 +27,9 @@ internal sealed class ObjectAddressLookup : IDisposable
     private readonly MemoryMappedViewAccessor _addr;
     private readonly MemoryMappedViewAccessor _mt;
     private readonly MemoryMappedViewAccessor _size;
+    // TypeId -> MethodTable, loaded once; see CacheSectionId.ObjectTypeDictionary.
+    private readonly ulong[] _typeDictionary;
+    private readonly int _typeIdWidth;
     // Sorted by Start — segment write order (segment index order) isn't guaranteed to be
     // address-sorted (see docs/cache/cache-architecture.md "why a naive global binary
     // search doesn't work"), so this instance sorts its own copy once at open time.
@@ -35,12 +38,14 @@ internal sealed class ObjectAddressLookup : IDisposable
 
     private ObjectAddressLookup(
         MemoryMappedViewAccessor addr, MemoryMappedViewAccessor mt, MemoryMappedViewAccessor size,
-        SegmentIndexEntry[] segmentsByStart)
+        SegmentIndexEntry[] segmentsByStart, ulong[] typeDictionary, int typeIdWidth)
     {
         _addr = addr;
         _mt = mt;
         _size = size;
         _segmentsByStart = segmentsByStart;
+        _typeDictionary = typeDictionary;
+        _typeIdWidth = typeIdWidth;
     }
 
     /// <summary>
@@ -76,6 +81,23 @@ internal sealed class ObjectAddressLookup : IDisposable
         if (segments.Count == 0)
             return false;
 
+        if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectTypeDictionary, out MemoryMappedViewAccessor? dictAcc, out long dictLen)
+            || dictAcc is null || dictLen <= 0 || dictLen % ColumnSize != 0)
+        {
+            dictAcc?.Dispose();
+            return false;
+        }
+
+        ulong[] typeDictionary;
+        using (dictAcc)
+        {
+            typeDictionary = new ulong[dictLen / ColumnSize];
+            for (int i = 0; i < typeDictionary.Length; i++)
+                typeDictionary[i] = dictAcc.ReadUInt64(i * (long)ColumnSize);
+        }
+
+        int typeIdWidth = typeDictionary.Length <= ushort.MaxValue ? sizeof(ushort) : sizeof(uint);
+
         if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectAddresses, out MemoryMappedViewAccessor? addrAcc, out _) || addrAcc is null)
             return false;
 
@@ -95,7 +117,7 @@ internal sealed class ObjectAddressLookup : IDisposable
         SegmentIndexEntry[] segmentsByStart = segments.ToArray();
         Array.Sort(segmentsByStart, static (a, b) => a.Start.CompareTo(b.Start));
 
-        lookup = new ObjectAddressLookup(addrAcc, mtAcc, sizeAcc, segmentsByStart);
+        lookup = new ObjectAddressLookup(addrAcc, mtAcc, sizeAcc, segmentsByStart, typeDictionary, typeIdWidth);
         return true;
     }
 
@@ -122,7 +144,10 @@ internal sealed class ObjectAddressLookup : IDisposable
             return false;
 
         long byteOffset = recordIndex * ColumnSize;
-        methodTable = _mt.ReadUInt64(byteOffset);
+        int typeId = _typeIdWidth == sizeof(ushort)
+            ? _mt.ReadUInt16(recordIndex * sizeof(ushort))
+            : (int)_mt.ReadUInt32(recordIndex * sizeof(uint));
+        methodTable = (uint)typeId < (uint)_typeDictionary.Length ? _typeDictionary[typeId] : 0;
         size = _size.ReadUInt64(byteOffset);
         return true;
     }

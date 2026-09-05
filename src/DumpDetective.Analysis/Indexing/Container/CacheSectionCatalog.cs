@@ -123,6 +123,7 @@ internal static class CacheSectionCatalog
         new(CacheSectionId.DominatorTreeMetadata, "DominatorTreeMetadata", CacheSectionRequirement.Conditional),
         new(CacheSectionId.DominatorRetainedBytes, "DominatorRetainedBytes", CacheSectionRequirement.Conditional),
         new(CacheSectionId.RootStackThreadAttribution, "RootStackThreadAttribution", CacheSectionRequirement.Conditional),
+        new(CacheSectionId.ObjectTypeDictionary, "ObjectTypeDictionary", CacheSectionRequirement.Required),
     ];
 
     /// <summary>

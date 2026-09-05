@@ -7,6 +7,7 @@ using DumpDetective.Analysis.Indexing.Satellite;
 using FluentAssertions;
 
 using Xunit;
+using DumpDetective.Tests.Helpers;
 
 namespace DumpDetective.Tests.Unit.Indexing;
 
@@ -148,7 +149,7 @@ public class ObjectAddressLookupTests : IDisposable
         using (var writer = new CacheContainerWriter(containerPath))
         {
             WriteUlongColumn(writer, CacheSectionId.ObjectAddresses, new ulong[] { 0x1000 });
-            WriteUlongColumn(writer, CacheSectionId.ObjectMethodTables, new ulong[] { 0xAA });
+            ObjectColumnSectionsWriter.WriteMethodTableColumns(writer, new ulong[] { 0xAA });
             WriteUlongColumn(writer, CacheSectionId.ObjectSizes, new ulong[] { 10 });
             writer.Finish();
         }
@@ -199,7 +200,7 @@ public class ObjectAddressLookupTests : IDisposable
         using (var writer = new CacheContainerWriter(containerPath))
         {
             WriteUlongColumn(writer, CacheSectionId.ObjectAddresses, all.Select(o => o.Address).ToArray());
-            WriteUlongColumn(writer, CacheSectionId.ObjectMethodTables, all.Select(o => o.MethodTable).ToArray());
+            ObjectColumnSectionsWriter.WriteMethodTableColumns(writer, all.Select(o => o.MethodTable).ToArray());
             WriteUlongColumn(writer, CacheSectionId.ObjectSizes, all.Select(o => o.Size).ToArray());
 
             // Segment table deliberately written in reverse-of-address order (B before A) to

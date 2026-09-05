@@ -564,7 +564,102 @@ that is already a third smaller.
 
 ---
 
-## 10. Open questions this pass did *not* close
+## 10. Post-removal composition — the ranking inverted
+
+Every percentage earlier in this doc predates § 9.2. With the `ForwardEdge*` sections gone the
+reference `cache.bin` is 935.9 MiB across 23 sections, and **the base columns are now the largest
+group, not the edge index**:
+
+| Group | Before (1,398.3 MiB) | After (935.9 MiB) |
+|---|---:|---:|
+| Base columns | 348.6 MiB — 24.9% | **348.6 MiB — 37.2%** |
+| Edge index | 837.8 MiB — 57.1% | 336.6 MiB — 36.0% |
+| Dominator tree | 228.4 MiB — 16.3% | 228.4 MiB — 24.4% |
+| StringDedup | 20.4 MiB — 1.5% | 20.4 MiB — 2.2% |
+| TypeAggregates + satellites | 1.9 MiB — 0.1% | 1.9 MiB — 0.2% |
+
+Largest individual sections now: `ReverseEdgeBuckets` 234.5 (25.1%), then
+`ObjectAddresses`/`ObjectMethodTables`/`ObjectSizes` at 111.5 each (11.9% each),
+then `ReverseEdgeDirectories` 102.0 (10.9%).
+
+### 10.1 Non-compression levers, sized against the current file
+
+| Lever | Saves | % of 935.9 MiB | Notes |
+|---|---:|---:|---|
+| CSR for the reverse edge index (§2) | ~245 MiB | ~26% | Largest, but also the largest build; needs the §2.2.1 scratch-file resolver. Deletes `ReverseEdgeDirectories` outright |
+| Dominator, aggressive — drop the child list (§4) | ~99 MiB | ~10.6% | Gated on the folded-leaf question and chain-tree UI usage |
+| `MethodTable` dictionary encoding (§3) | ~83.6 MiB | ~8.9% | 8 → 2 bytes over 14,003 distinct types; zero-copy compatible, needs no compression decision |
+| Dominator, conservative narrowing (§4) | ~48 MiB | ~5.1% | Alternative to the aggressive option, not additive |
+| `ObjectAddresses` fixed-width delta | ~55.8 MiB | ~6.0% | 8 → 4 bytes within a segment; needs checkpoints so `ObjectAddressLookup`'s binary search stays O(log n) |
+
+**Careful with the delta figure.** § 3 of this doc measured 35.60x on `ObjectAddresses`, but that was
+**delta *plus* zstd**. Standalone, a fixed-width 4-byte delta is a 2x saving — 55.8 MiB, as above.
+The 5.42x multiplier only materialises once compression ships, so delta's headline value is tied to
+the item being deferred.
+
+### 10.2 Format changes should be batched
+
+`MethodTable` dictionary encoding, `ObjectAddresses` delta, CSR, the § 3 section manifest, and
+promoting `RootStackThreadAttribution` to `Required` are all breaking on-disk changes. Each one
+alone forces a `CacheFileHeader.CurrentFormatVersion` bump, which invalidates every cache on disk —
+a full cold re-index, ~2 minutes on the 3.3 GB dump and considerably more on the 27.5 GB one.
+
+Doing them in separate releases pays that cost repeatedly for no benefit. Whatever is picked first
+should carry the bump, and the cheap riders (the manifest, the `RootStackThreadAttribution`
+promotion) should go in the same one.
+
+---
+
+## 11. ✅ `MethodTable` dictionary encoding shipped (format v5)
+
+`ObjectMethodTables` stored an 8-byte `MethodTable` per object for a column with ~1,044x redundancy
+(14,003 distinct types across 14.6M objects). It now stores a narrow `TypeId` indexing a new
+`ObjectTypeDictionary` section. Format version bumped 4 → 5.
+
+| | Bytes | MiB | Per record |
+|---|---:|---:|---:|
+| `ObjectMethodTables` before | 116,961,296 | 111.54 | 8.00 B |
+| `ObjectMethodTables` after | 29,240,324 | 27.89 | **2.00 B** |
+| `ObjectTypeDictionary` (new) | 112,024 | 0.11 | 8 B × 14,003 types |
+| **`cache.bin`** | 981,392,729 → **893,783,813** | 935.9 → **852.4** | **−83.6 MiB (−8.9%)** |
+
+Width is derived from the dictionary's entry count rather than stored in a flag — the writer picks
+the narrowest width the distinct-type count allows, so the count determines it unambiguously
+(2 bytes up to 65,535 types, 4 beyond).
+
+**Design notes, both from § 3.1 of the format doc and both load-bearing:**
+
+- The dictionary is a flat `ulong[]` indexed by `TypeId`, never a `Dictionary`. It is indexed once
+  per object in `ZeroCopyColumnReader.FillBatch`, the hottest loop in the codebase, so a hash lookup
+  there would be per-object cost. The width branch is also hoisted out of the batch loop.
+- `TryOpenColumns`' cross-column record-count check had to be reworked: the MethodTable column no
+  longer shares the 8-byte stride of Addresses/Sizes, so it is divided by its own width.
+
+**Scratch files deliberately keep the full 8-byte pointer.** Narrowing during the parallel scan would
+need the final distinct-type count before the scan has finished, and `ScratchFileObjectMetadataLookup`
+reads those same files during Stage B. Converting at container-write time costs no extra pass — it
+replaces a copy that already read every one of those bytes, and writes a quarter as many.
+
+### 11.1 Correctness verification, and a pre-existing nondeterminism it exposed
+
+Cold rebuild plus cache-hit run, with the full report payload decoded and compared field-by-field
+against the pre-change run. Excluding timings, per-run GUIDs and memory counters, 79 fields differed
+— all of them rows in *Object Shape Analysis*' "Gen2-retained types" table and two EventLeak
+`rootHint` values.
+
+Those are **not** a regression, and the check that establishes it is running the analysis twice
+against the *same* v5 cache with the *same* binary: that produces differences in exactly the same two
+places. The row multisets are identical — every value is preserved, only the order of rows with
+**tied sort keys** differs (the swapped pair at rows 742/743 both have GC Scan Cost 224).
+
+So the encoding round-trips exactly, and separately: **the report is not reproducible across runs.**
+Ties in at least two places break arbitrarily. That matters for the trend/diff feature, which would
+surface spurious changes between two runs of the same dump. Recorded here rather than fixed — it
+predates all of this work.
+
+---
+
+## 12. Open questions this pass did *not* close
 
 Recorded so the boundary of the evidence is explicit. Everything in §§ 1–6 is measured or
 statically derived; everything here is not, and no plan should assume an answer.

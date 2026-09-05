@@ -44,6 +44,7 @@ public class CacheSectionCatalogTests
             CacheSectionId.TypeAggregates,
             CacheSectionId.Roots,
             CacheSectionId.SegmentIndex,
+            CacheSectionId.ObjectTypeDictionary,
         });
     }
 

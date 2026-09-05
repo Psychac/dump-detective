@@ -6,6 +6,7 @@ using DumpDetective.Analysis.Indexing.Container;
 using FluentAssertions;
 
 using Xunit;
+using DumpDetective.Tests.Helpers;
 
 namespace DumpDetective.Tests.Unit.Indexing;
 
@@ -86,7 +87,7 @@ public class ObjectIndexReaderTests : IDisposable
         using (var writer = new CacheContainerWriter(containerPath))
         {
             WriteUlongColumn(writer, CacheSectionId.ObjectAddresses, new ulong[] { 0x1000, 0x1100, 0x1200 });
-            WriteUlongColumn(writer, CacheSectionId.ObjectMethodTables, new ulong[] { 0x2000, 0x2100 });
+            ObjectColumnSectionsWriter.WriteMethodTableColumns(writer, new ulong[] { 0x2000, 0x2100 });
             WriteUlongColumn(writer, CacheSectionId.ObjectSizes, new ulong[] { 100, 200, 300 });
             writer.Finish();
         }
@@ -98,7 +99,7 @@ public class ObjectIndexReaderTests : IDisposable
     {
         using var writer = new CacheContainerWriter(containerPath);
         WriteUlongColumn(writer, CacheSectionId.ObjectAddresses, records.Select(r => r.Address).ToArray());
-        WriteUlongColumn(writer, CacheSectionId.ObjectMethodTables, records.Select(r => r.MethodTable).ToArray());
+        ObjectColumnSectionsWriter.WriteMethodTableColumns(writer, records.Select(r => r.MethodTable).ToArray());
         WriteUlongColumn(writer, CacheSectionId.ObjectSizes, records.Select(r => r.Size).ToArray());
         WriteSbyteColumn(writer, CacheSectionId.ObjectGenerations, records.Select(r => r.Generation).ToArray());
         writer.Finish();

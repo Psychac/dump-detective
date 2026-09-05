@@ -150,6 +150,16 @@ Confirmed intrinsic native cost (per-thread stack unwinding inside ClrMD's DAC l
   lookups) is unimplemented. No current caller needs it — low priority, revisit only if
   one appears.
 
+## Reproducibility
+
+- **The report is not byte-reproducible across runs of the same dump.** Two analyses of the same
+  `cache.bin` with the same binary produce reports differing in *Object Shape Analysis*'
+  "Gen2-retained types" table and in two EventLeak `rootHint` values. The row multisets are
+  identical — only rows with **tied sort keys** swap. Predates the cache work; found while verifying
+  the v5 encoding ([cache-redesign-measurements.md](cache-redesign-measurements.md) § 11.1). Worth
+  fixing because the trend/diff feature compares two reports and would report these as real changes:
+  add a deterministic tie-breaker (type name, or MethodTable) to the affected sorts.
+
 ## Observability
 
 - **`CacheMetrics`/`GetHealth()` are fully implemented dead code.** All seven

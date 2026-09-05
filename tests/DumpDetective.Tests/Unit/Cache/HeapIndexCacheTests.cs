@@ -10,6 +10,7 @@ using DumpDetective.Core.Enums;
 using FluentAssertions;
 
 using Xunit;
+using DumpDetective.Tests.Helpers;
 
 namespace DumpDetective.Tests.Unit.Cache;
 
@@ -90,7 +91,7 @@ public class HeapIndexCacheTests : IDisposable
         using (var writer = new CacheContainerWriter(containerPath))
         {
             WriteUlongColumn(writer, CacheSectionId.ObjectAddresses, Objects.Select(o => o.Address).ToArray());
-            WriteUlongColumn(writer, CacheSectionId.ObjectMethodTables, Objects.Select(o => o.MethodTable).ToArray());
+            ObjectColumnSectionsWriter.WriteMethodTableColumns(writer, Objects.Select(o => o.MethodTable).ToArray());
             WriteUlongColumn(writer, CacheSectionId.ObjectSizes, Objects.Select(o => o.Size).ToArray());
             writer.Finish();
         }
@@ -119,7 +120,7 @@ public class HeapIndexCacheTests : IDisposable
         string containerPath = Path.Combine(_testDir, "cache.bin");
         using var writer = new CacheContainerWriter(containerPath);
         WriteUlongColumn(writer, CacheSectionId.ObjectAddresses, Objects.Select(o => o.Address).ToArray());
-        WriteUlongColumn(writer, CacheSectionId.ObjectMethodTables, Objects.Select(o => o.MethodTable).ToArray());
+        ObjectColumnSectionsWriter.WriteMethodTableColumns(writer, Objects.Select(o => o.MethodTable).ToArray());
         WriteUlongColumn(writer, CacheSectionId.ObjectSizes, Objects.Select(o => o.Size).ToArray());
 
         var segments = new List<SegmentIndexEntry> { new(0x1000, 0x1100, firstRecordIndex: 0, recordCount: Objects.Length) };

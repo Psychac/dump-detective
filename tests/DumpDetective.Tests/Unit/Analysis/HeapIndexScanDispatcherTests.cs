@@ -11,6 +11,7 @@ using DumpDetective.Core.Models;
 using FluentAssertions;
 
 using Xunit;
+using DumpDetective.Tests.Helpers;
 
 namespace DumpDetective.Tests.Unit.Analysis;
 
@@ -182,7 +183,7 @@ public sealed class HeapIndexScanDispatcherTests : IDisposable
         using CacheContainerWriter writer = new(containerPath);
 
         WriteColumn(writer, CacheSectionId.ObjectAddresses, entries.Select(e => e.Addr).ToArray());
-        WriteColumn(writer, CacheSectionId.ObjectMethodTables, entries.Select(e => e.Mt).ToArray());
+        ObjectColumnSectionsWriter.WriteMethodTableColumns(writer, entries.Select(e => e.Mt).ToArray());
         WriteColumn(writer, CacheSectionId.ObjectSizes, entries.Select(e => e.Size).ToArray());
         WriteGenerationColumn(writer, entries.Length);
 

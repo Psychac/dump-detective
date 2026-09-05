@@ -515,6 +515,12 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                 $"Replaced a whole-segment HeapEntry[] staging buffer measured at 512.0 MB peak.");
         }
 
+        // Built here rather than at the TypeAggregates write below, because the MethodTable column
+        // needs the distinct-type set to assign TypeIds. masterBuilder has been fully merged since
+        // the parallel scan joined above, and the result is reused for TypeAggregates and
+        // HeapIndexBuildResult, so Build() still runs exactly once.
+        var typeAggregates = masterBuilder.Build();
+
         // Concatenate the per-segment scratch files into the three columnar sections, one
         // column at a time, in segment order — this is what makes disk-mode entry order
         // deterministic and match memory-mode's segment-ordered output, and keeps each
@@ -528,8 +534,29 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         uint addrChecksum = ConcatenateScratchFiles(stream, segAddrScratchFiles, writeBuffer, deleteAfterCopy: !buildStageB);
         containerWriter.EndSection(objectCount, addrChecksum);
 
+        // §3: MethodTable is stored as a narrow TypeId indexing ObjectTypeDictionary, not as the
+        // full 8-byte pointer. 14,003 distinct types cover 14.6M objects on the reference dump, so
+        // this column drops 111.5 MiB -> 27.9 MiB.
+        var methodTableDictionary = new ulong[typeAggregates.Count];
+        int dictCursor = 0;
+        foreach (ulong methodTable in typeAggregates.Keys)
+            methodTableDictionary[dictCursor++] = methodTable;
+        Array.Sort(methodTableDictionary);
+
+        var typeIdByMethodTable = new Dictionary<ulong, int>(methodTableDictionary.Length);
+        for (int i = 0; i < methodTableDictionary.Length; i++)
+            typeIdByMethodTable[methodTableDictionary[i]] = i;
+
+        int typeIdWidth = methodTableDictionary.Length <= ushort.MaxValue ? sizeof(ushort) : sizeof(uint);
+
+        containerWriter.BeginSection(CacheSectionId.ObjectTypeDictionary);
+        uint dictChecksum = WriteMethodTableDictionary(stream, methodTableDictionary, writeBuffer);
+        containerWriter.EndSection(methodTableDictionary.Length, dictChecksum);
+
         containerWriter.BeginSection(CacheSectionId.ObjectMethodTables);
-        uint mtChecksum = ConcatenateScratchFiles(stream, segMtScratchFiles, writeBuffer, deleteAfterCopy: !buildStageB);
+        uint mtChecksum = ConvertMethodTablesToTypeIds(
+            stream, segMtScratchFiles, typeIdByMethodTable, typeIdWidth, writeBuffer,
+            deleteAfterCopy: !buildStageB);
         containerWriter.EndSection(objectCount, mtChecksum);
 
         containerWriter.BeginSection(CacheSectionId.ObjectSizes);
@@ -928,9 +955,6 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         if (forwardIndexStats is not null)
             DeleteForwardIndexScratchFiles(indexDir, forwardIndexBucketCount);
 
-        // Extract aggregates once so they can be passed both to HeapIndexBuildResult and to
-        // TypeAggregateIndexWriter without calling masterBuilder.Build() twice.
-        var typeAggregates = masterBuilder.Build();
         var globalSizeBuckets = masterBuilder.BuildSizeBuckets();
 
         // Write the TypeAggregates section LAST so its presence confirms a complete build.
@@ -1634,6 +1658,134 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     /// around for <see cref="ScratchFileObjectMetadataLookup"/> — the caller becomes responsible for
     /// deleting them once Stage B's metadata resolution finishes.
     /// </param>
+    /// <summary>
+    /// Writes the distinct-<c>MethodTable</c> dictionary as a dense ascending <c>ulong[]</c>; a
+    /// value's position is the <c>TypeId</c> that <see cref="CacheSectionId.ObjectMethodTables"/>
+    /// stores. Tiny — 112 KB for 14,003 types — so it is built in one buffer rather than streamed.
+    /// </summary>
+    private static uint WriteMethodTableDictionary(Stream stream, ulong[] methodTables, int bufferSize)
+    {
+        var hasher = new XxHash32();
+        byte[] buf = ArrayPool<byte>.Shared.Rent(bufferSize);
+
+        try
+        {
+            int perChunk = buf.Length / sizeof(ulong);
+            for (int start = 0; start < methodTables.Length; start += perChunk)
+            {
+                int count = Math.Min(perChunk, methodTables.Length - start);
+                for (int i = 0; i < count; i++)
+                {
+                    BinaryPrimitives.WriteUInt64LittleEndian(
+                        buf.AsSpan(i * sizeof(ulong)), methodTables[start + i]);
+                }
+
+                int bytes = count * sizeof(ulong);
+                stream.Write(buf, 0, bytes);
+                hasher.Append(buf.AsSpan(0, bytes));
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buf);
+        }
+
+        return hasher.GetCurrentHashAsUInt32();
+    }
+
+    /// <summary>
+    /// Streams the per-segment 8-byte <c>MethodTable</c> scratch files into the container as narrow
+    /// <c>TypeId</c> values — the <see cref="CacheSectionId.ObjectMethodTables"/> counterpart of
+    /// <see cref="ConcatenateScratchFiles"/>, which stays a straight byte copy for the columns whose
+    /// width doesn't change.
+    /// </summary>
+    /// <remarks>
+    /// The scratch files deliberately keep the full 8-byte pointer. Narrowing during the parallel
+    /// scan would need the final distinct-type count before the scan has finished, and
+    /// <see cref="ScratchFileObjectMetadataLookup"/> reads those same files during Stage B and
+    /// resolves real <c>MethodTable</c> values from them. Converting here costs no extra pass: it
+    /// replaces a copy that already read every one of these bytes, and writes a quarter as many.
+    /// </remarks>
+    private static uint ConvertMethodTablesToTypeIds(
+        Stream stream,
+        string[] files,
+        Dictionary<ulong, int> typeIdByMethodTable,
+        int typeIdWidth,
+        int bufferSize,
+        bool deleteAfterCopy)
+    {
+        var hasher = new XxHash32();
+        byte[] readBuf = ArrayPool<byte>.Shared.Rent(bufferSize);
+        byte[] writeBuf = ArrayPool<byte>.Shared.Rent(bufferSize);
+
+        try
+        {
+            int recordsPerRead = readBuf.Length / sizeof(ulong);
+            int usableReadBytes = recordsPerRead * sizeof(ulong);
+
+            for (int i = 0; i < files.Length; i++)
+            {
+                string segFile = files[i];
+                if (!File.Exists(segFile))
+                    continue;
+
+                using (FileStream segStream = new(segFile, FileMode.Open, FileAccess.Read, FileShare.None,
+                    bufferSize: bufferSize, FileOptions.SequentialScan))
+                {
+                    int carried = 0;
+                    int read;
+                    while ((read = segStream.Read(readBuf, carried, usableReadBytes - carried)) > 0)
+                    {
+                        int available = carried + read;
+                        int whole = available / sizeof(ulong);
+
+                        for (int r = 0; r < whole; r++)
+                        {
+                            ulong methodTable = BinaryPrimitives.ReadUInt64LittleEndian(
+                                readBuf.AsSpan(r * sizeof(ulong)));
+
+                            // A MethodTable the master type builder never saw would mean the scan and
+                            // the aggregate disagree, which is a bug rather than bad heap data — fail
+                            // loudly instead of silently writing a wrong TypeId.
+                            if (!typeIdByMethodTable.TryGetValue(methodTable, out int typeId))
+                            {
+                                throw new InvalidOperationException(
+                                    $"MethodTable 0x{methodTable:X} is present in the object column but absent " +
+                                    "from the type-aggregate dictionary.");
+                            }
+
+                            if (typeIdWidth == sizeof(ushort))
+                                BinaryPrimitives.WriteUInt16LittleEndian(writeBuf.AsSpan(r * sizeof(ushort)), (ushort)typeId);
+                            else
+                                BinaryPrimitives.WriteUInt32LittleEndian(writeBuf.AsSpan(r * sizeof(uint)), (uint)typeId);
+                        }
+
+                        int written = whole * typeIdWidth;
+                        stream.Write(writeBuf, 0, written);
+                        hasher.Append(writeBuf.AsSpan(0, written));
+
+                        // A read can stop mid-record; keep the tail for the next iteration.
+                        carried = available - whole * sizeof(ulong);
+                        if (carried > 0)
+                            readBuf.AsSpan(whole * sizeof(ulong), carried).CopyTo(readBuf);
+                    }
+                }
+
+                if (deleteAfterCopy)
+                {
+                    try { File.Delete(segFile); } catch { /* best-effort cleanup */ }
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(readBuf);
+            ArrayPool<byte>.Shared.Return(writeBuf);
+        }
+
+        return hasher.GetCurrentHashAsUInt32();
+    }
+
     private static uint ConcatenateScratchFiles(Stream stream, string[] files, int bufferSize, bool deleteAfterCopy = true)
     {
         var hasher = new XxHash32();

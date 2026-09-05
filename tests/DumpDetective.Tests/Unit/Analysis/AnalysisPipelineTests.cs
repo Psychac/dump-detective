@@ -16,6 +16,7 @@ using Xunit;
 namespace DumpDetective.Tests.Unit.Analysis;
 
 using CoreAnalysisContext = DumpDetective.Core.Abstractions.AnalysisContext;
+using DumpDetective.Tests.Helpers;
 
 public sealed class AnalysisPipelineTests
 {
@@ -150,7 +151,7 @@ public sealed class AnalysisPipelineTests
         using CacheContainerWriter writer = new(containerPath);
 
         WriteColumn(writer, CacheSectionId.ObjectAddresses, entries.Select(e => e.Addr).ToArray());
-        WriteColumn(writer, CacheSectionId.ObjectMethodTables, entries.Select(e => e.Mt).ToArray());
+        ObjectColumnSectionsWriter.WriteMethodTableColumns(writer, entries.Select(e => e.Mt).ToArray());
         WriteColumn(writer, CacheSectionId.ObjectSizes, entries.Select(e => e.Size).ToArray());
         WriteGenerationColumn(writer, entries.Length);
 

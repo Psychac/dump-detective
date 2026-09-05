@@ -104,6 +104,15 @@ internal enum CacheSectionId
     /// slot, which the field-name trailer already spends.
     /// </summary>
     RootStackThreadAttribution = 27,
+    /// <summary>
+    /// Dense <c>ulong[]</c> of every distinct <c>MethodTable</c> in the heap, ascending. A row's
+    /// position is its <c>TypeId</c>, which is what <see cref="ObjectMethodTables"/> stores instead
+    /// of the full 8-byte pointer — 14,003 distinct types for 14.6M objects on the reference dump,
+    /// so 2 bytes per object replaces 8 (docs/cache/cache-format-clean-slate-redesign.md §3).
+    /// Required whenever <see cref="ObjectMethodTables"/> is present: the column is meaningless
+    /// without it.
+    /// </summary>
+    ObjectTypeDictionary = 28,
 }
 
 /// <summary>
@@ -123,7 +132,11 @@ internal readonly struct CacheFileHeader
 {
     public const int Size = 64;
     /// <summary>
-    /// Bumped to 4 when the ReverseEdgeBuckets/ReverseEdgeDirectories/ReverseEdgeMetadata
+    /// Bumped to 5 when <see cref="CacheSectionId.ObjectMethodTables"/> changed from an 8-byte
+    /// <c>MethodTable</c> per object to a narrow <c>TypeId</c> index into the new
+    /// <see cref="CacheSectionId.ObjectTypeDictionary"/> section. A v4 reader would read the narrow
+    /// column as garbage addresses rather than fail, so this bump is load-bearing, not cosmetic.
+    /// Previously bumped to 4 when the ReverseEdgeBuckets/ReverseEdgeDirectories/ReverseEdgeMetadata
     /// sections were added for the disk-backed reverse-reference index — old cache.bin files
     /// fail <see cref="TryRead"/> and are rebuilt rather than misparsed.
     /// Previously bumped to 3 when the columnar ObjectGenerations section (per-object GC
@@ -131,7 +144,7 @@ internal readonly struct CacheFileHeader
     /// Previously bumped to 2 when the Objects section moved from an interleaved
     /// array-of-structs layout to those columnar sections.
     /// </summary>
-    public const int CurrentFormatVersion = 4;
+    public const int CurrentFormatVersion = 5;
 
     private const int MagicOffset = 0;
     private const int MagicSize = 8;

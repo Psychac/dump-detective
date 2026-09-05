@@ -135,7 +135,7 @@ public class ReverseEdgeContainerWriterTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Write_BumpsFormatVersionTo4()
+    public async Task Write_StampsCurrentFormatVersion()
     {
         var (bucketCount, stats, _, _) = await BuildSortedBuckets(1, [(0x1000UL, 0x0100UL)]);
 
@@ -148,7 +148,11 @@ public class ReverseEdgeContainerWriterTests : IAsyncLifetime
 
         byte[] headerBytes = File.ReadAllBytes(containerPath)[..CacheFileHeader.Size];
         int version = BitConverter.ToInt32(headerBytes, 8);
-        version.Should().Be(4);
+
+        // Asserted against the constant rather than a literal: the point is that the writer stamps
+        // whatever the current version is, not that the version happens to be any given number.
+        // Pinning the literal just meant editing this test on every format change.
+        version.Should().Be(CacheFileHeader.CurrentFormatVersion);
     }
 
     [Fact]

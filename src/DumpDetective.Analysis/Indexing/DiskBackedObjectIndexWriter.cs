@@ -909,15 +909,24 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             }
         }
 
-        // Forward-reference index Phase C: merge the loose files Phase B already sorted into the
-        // container, then delete them. Only runs if Phase B above actually succeeded.
+        // Forward-reference index: the loose files Phase B sorted have now served their only
+        // consumer — Stage A's reachability walk above — so they are deleted here.
+        //
+        // They are deliberately NOT merged into the container. That merge used to run as "Phase C"
+        // and wrote ForwardEdgeBuckets/ForwardEdgeDirectories/ForwardEdgeMetadata, which measured
+        // 462.4 MiB (33.1% of cache.bin) on a 3.3 GB dump and 3,087.8 MiB (32.8%) on a 27.5 GB one
+        // — and which nothing ever read: `IHeapAnalysisCache.TryGetForwardIndexProvider()` has no
+        // production callers, confirmed both by whole-repo search and by a run-time section-touch
+        // trace (docs/cache/cache-redesign-measurements.md § 9).
+        //
+        // The reader, provider and interface method are intentionally left in place. If a
+        // cache-hit-time forward-reference consumer is ever added it will need this section (a cache
+        // hit skips Phase 1 entirely, so no loose files exist then) — at which point restoring the
+        // merge is one `ForwardEdgeContainerWriter.Write` call here, plus a rebuild, which such a
+        // consumer would require regardless. ForwardEdgeContainerWriter itself stays in place
+        // and stays covered by ForwardEdgeIndexTests, so the capability is intact.
         if (forwardIndexStats is not null)
-        {
-            string? forwardIndexWarning = WriteForwardIndexSections(
-                containerWriter, indexDir, forwardIndexBucketCount, forwardIndexStats, progress);
-            if (forwardIndexWarning is not null)
-                satelliteWarnings.Add(forwardIndexWarning);
-        }
+            DeleteForwardIndexScratchFiles(indexDir, forwardIndexBucketCount);
 
         // Extract aggregates once so they can be passed both to HeapIndexBuildResult and to
         // TypeAggregateIndexWriter without calling masterBuilder.Build() twice.
@@ -1273,13 +1282,15 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     }
 
     /// <summary>
-    /// Forward-edge index Phase A→B only: flush/dispose the extractor, then sort its raw buckets
-    /// into loose, directory-indexed <c>.dat</c>/<c>.idx</c> scratch files. Split out from the old
-    /// single-call <c>WriteForwardIndexSections</c> so Stage A's reachability walk can run between
-    /// this and <see cref="WriteForwardIndexSections"/>'s merge, reading successors from these
-    /// loose files via <see cref="ForwardIndex.ForwardEdgeLooseFileReader"/> instead of a live
-    /// ClrMD walk — see
-    /// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §2.
+    /// Forward-edge index: flush/dispose the extractor, then sort its raw buckets into loose,
+    /// directory-indexed <c>.dat</c>/<c>.idx</c> scratch files.
+    ///
+    /// <para>Stage A's reachability walk reads successors from these loose files via
+    /// <see cref="ForwardIndex.ForwardEdgeLooseFileReader"/> instead of doing a live ClrMD walk — see
+    /// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §2. That walk is now
+    /// their <i>only</i> consumer: the container merge that used to follow it wrote sections nothing
+    /// read, and was removed (docs/cache/cache-redesign-measurements.md §9), so the caller deletes
+    /// these files once the walk is done.</para>
     /// </summary>
     private static (ForwardEdgeExtractionStats? Stats, string? Error) SortForwardIndexBuckets(
         string indexDir,
@@ -1307,32 +1318,6 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         {
             DeleteForwardIndexScratchFiles(indexDir, bucketCount);
             return (null, $"ForwardIndex: {ex.GetType().Name}: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Forward-edge index Phase C only: merges the loose <c>.dat</c>/<c>.idx</c> files
-    /// <see cref="SortForwardIndexBuckets"/> already produced into the container, then deletes
-    /// them. Callers must only invoke this after a successful <see cref="SortForwardIndexBuckets"/>
-    /// call — <paramref name="stats"/> is that call's output.
-    /// </summary>
-    private static string? WriteForwardIndexSections(
-        CacheContainerWriter containerWriter,
-        string indexDir,
-        int bucketCount,
-        ForwardEdgeExtractionStats stats,
-        IProgress<AnalyzerProgressReport>? progress)
-    {
-        try
-        {
-            ForwardEdgeContainerWriter.Write(containerWriter, indexDir, bucketCount, stats, progress);
-            return null;
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            DeleteForwardIndexScratchFiles(indexDir, bucketCount);
-            return $"ForwardIndex: {ex.GetType().Name}: {ex.Message}";
         }
     }
 

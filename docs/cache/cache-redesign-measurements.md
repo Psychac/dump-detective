@@ -445,7 +445,7 @@ index is viable, and the "unbreakable runtime cost" objection is withdrawn.
 
 ---
 
-## 9. ⚠ The `ForwardEdge*` sections are write-only — 33% of `cache.bin` is never read
+## 9. ✅ The `ForwardEdge*` sections were write-only — 33% of `cache.bin`, now removed
 
 Open question 1b asked whether `ForwardEdgeBuckets` is streamed or point-queried, so we could decide
 whether compression's zero-copy penalty (§ 4) applies to it. **The answer is neither: nothing reads
@@ -477,9 +477,74 @@ So a third of the cache file — 3.0 GiB on the largest real dump — is written
 Phase C merge I/O to produce, and is read by nothing. This is the `EventCandidates` situation (§ 1.1)
 at roughly 10,000x the size.
 
-### 9.1 What to do about it — not decided here
+### 9.1 Runtime proof, and a second write-only section
 
-Two coherent options, and the choice is a product call:
+The static finding above was checked against a real run rather than left as a search result. The
+per-section tally was extended to list every section the run *touched* and every one it never did
+(`DD_PERF_CACHE_SESSION=1`, full default analyzer set, cache-hit path, reference dump):
+
+> sections **TOUCHED**: TypeAggregates, Roots, Handles, Tasks, LargeObjects, LohFreeBlocks,
+> StringDedup, StringDedupMeta, ObjectAddresses, ObjectMethodTables, ObjectSizes, ObjectGenerations,
+> ReverseEdgeBuckets, ReverseEdgeDirectories, ReverseEdgeMetadata, SegmentIndex,
+> DominatorReachableAddresses, DominatorImmediateDominatorAddresses, DominatorChildOffsets,
+> DominatorChildAddresses, DominatorTreeMetadata, DominatorRetainedBytes
+>
+> sections **NEVER touched**: Objects, EventCandidates, **ForwardEdgeBuckets**,
+> **ForwardEdgeDirectories**, **ForwardEdgeMetadata**, **RootStackThreadAttribution**
+
+All 22 sections that have a reader were opened. `Objects` and `EventCandidates` are expected —
+neither is written. That leaves four sections that **are** written and never read, confirming the
+static result and adding one it had not flagged:
+
+| Never read | Bytes (reference dump) | MiB |
+|---|---:|---:|
+| `ForwardEdgeBuckets` | 362,117,408 | 345.3 |
+| `ForwardEdgeDirectories` | 122,747,944 | 117.1 |
+| `ForwardEdgeMetadata` | 888 | 0.0 |
+| `RootStackThreadAttribution` | 15,560 | 0.01 |
+
+`RootStackThreadAttribution` is a different case and **not** a defect: it and its
+`IThreadRetentionProvider` shipped for § 12.2, whose `ThreadAnalyzer` report-surface wiring was
+*deliberately deferred*. It is 15.5 KB, so it costs nothing — worth leaving as-is, and worth knowing
+it is unwired so the provider isn't mistaken for live code.
+
+**Scope of this evidence.** It shows those sections are never opened on a full default run of every
+analyzer over this dump. It cannot prove no code path anywhere would open them — but the static
+search independently shows `TryGetForwardIndexProvider()` has zero production callers at all, which
+covers every CLI mode, so the two lines of evidence agree.
+
+### 9.2 Resolved — the container merge was removed (2026-09-05)
+
+**Shipped.** Phase C no longer merges the loose forward-edge files into the container; the caller
+deletes them once Stage A's walk is done, which was already their only consumer. Extraction is
+untouched, so the walk keeps its ~2x advantage over a live ClrMD walk.
+
+Verified by a cold rebuild of the reference dump followed by a cache-hit run:
+
+| | Sections | `cache.bin` |
+|---|---:|---:|
+| Before | 26 | 1,466,259,011 B — 1,398.3 MiB |
+| After | **23** | **981,392,729 B — 935.9 MiB** |
+| **Saved** | 3 | **484,866,282 B — 462.4 MiB (33.1%)** |
+
+The saving lands within 42 bytes of the 484,866,240 B predicted from the TOC. Also confirmed:
+`ForwardEdge*` absent from the new TOC; `ReverseEdge*` and all six `Dominator*` sections still
+present and still read, so the reachability walk and Stage B are unaffected; the index directory
+contains only `cache.bin`, i.e. no leaked `.dat`/`.idx` scratch; and a subsequent cache-hit run is
+behaviourally identical (12 container opens, 82 section opens, 936.2 MiB hashed — unchanged, since
+these sections were never verified anyway) with the report rendering normally.
+
+The three ids are now `Unused` in `CacheSectionCatalog`, reserved but never expected.
+`ForwardEdgeContainerWriter` stays in place and stays covered by `ForwardEdgeIndexTests`, so
+restoring the merge for a future cache-hit-time consumer is one call plus a rebuild — which such a
+consumer would need regardless.
+
+Containers written before this change still carry the sections. That is harmless: nothing reads
+them, and they are classified `Unused` rather than `Required`, so no fast-path check rejects them.
+
+#### Options considered
+
+Two coherent options, and the choice was a product call:
 
 1. **Stop persisting the three sections.** Immediately removes 33% of `cache.bin` and the Phase C
    merge — a bigger, cheaper, more certain win than anything in the format redesign, with no

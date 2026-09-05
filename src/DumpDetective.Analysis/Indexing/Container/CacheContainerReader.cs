@@ -77,7 +77,12 @@ internal sealed class CacheContainerReader
         + (VerifiedPerSection.Any(kv => kv.Value > 1)
             ? string.Join(", ", VerifiedPerSection.Where(kv => kv.Value > 1)
                 .OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key}×{kv.Value}"))
-            : "(none)");
+            : "(none)")
+        + Environment.NewLine + "[PERF] CacheSession: sections TOUCHED: "
+        + string.Join(", ", VerifiedPerSection.Keys.OrderBy(k => (int)k))
+        + Environment.NewLine + "[PERF] CacheSession: sections NEVER touched: "
+        + string.Join(", ", Enum.GetValues<CacheSectionId>()
+            .Where(id => !VerifiedPerSection.ContainsKey(id)).OrderBy(id => (int)id));
 
     private CacheContainerReader(string containerPath, IReadOnlyDictionary<CacheSectionId, CacheTocEntry> sections, byte[] dumpContentHash)
     {

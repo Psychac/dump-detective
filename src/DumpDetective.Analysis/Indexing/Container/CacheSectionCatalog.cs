@@ -68,12 +68,22 @@ internal readonly record struct CacheSectionDescriptor(
 /// has to ride along with a format-version bump.
 /// </para>
 /// <para>
-/// <i>Deterministic failure at scale.</i> The reverse/forward edge sections depend on the
+/// <i>Deterministic failure at scale.</i> The <c>ReverseEdge*</c> sections depend on the
 /// reachability walk and the bucket sorts, which can fail repeatably on a very large heap (the
 /// <c>ChunkedBuffer</c> int-overflow guard, or OOM) and are caught and downgraded to a warning by
 /// design. Marking them Required would turn that into an unbreakable loop: cache rejected → full
 /// rebuild → same failure → cache rejected, paying a cold build every single run. Silent degradation
 /// is the lesser evil there, which is precisely why they stay Conditional.
+/// </para>
+/// <para>
+/// <i>No longer written.</i> The three <c>ForwardEdge*</c> sections are
+/// <see cref="CacheSectionRequirement.Unused"/> rather than Conditional: forward-edge extraction
+/// still runs (Stage A's reachability walk needs it) but its output is no longer merged into the
+/// container, because nothing ever read it — 462.4 MiB, 33% of <c>cache.bin</c>, on the reference
+/// dump (docs/cache/cache-redesign-measurements.md §9). The ids stay reserved and
+/// <c>ForwardEdgeContainerWriter</c> stays in place, so a future cache-hit-time consumer can restore
+/// the merge with one call; containers written before this change still carry the sections, which is
+/// harmless since nothing reads them.
 /// </para>
 /// <para>
 /// <see cref="CacheSectionId.DominatorReachableAddresses"/> and its siblings stay Conditional for a
@@ -103,9 +113,9 @@ internal static class CacheSectionCatalog
         new(CacheSectionId.ReverseEdgeDirectories, "ReverseEdgeDirectories", CacheSectionRequirement.Conditional),
         new(CacheSectionId.ReverseEdgeMetadata, "ReverseEdgeMetadata", CacheSectionRequirement.Conditional),
         new(CacheSectionId.SegmentIndex, "SegmentIndex", CacheSectionRequirement.Required),
-        new(CacheSectionId.ForwardEdgeBuckets, "ForwardEdgeBuckets", CacheSectionRequirement.Conditional),
-        new(CacheSectionId.ForwardEdgeDirectories, "ForwardEdgeDirectories", CacheSectionRequirement.Conditional),
-        new(CacheSectionId.ForwardEdgeMetadata, "ForwardEdgeMetadata", CacheSectionRequirement.Conditional),
+        new(CacheSectionId.ForwardEdgeBuckets, "ForwardEdgeBuckets", CacheSectionRequirement.Unused),
+        new(CacheSectionId.ForwardEdgeDirectories, "ForwardEdgeDirectories", CacheSectionRequirement.Unused),
+        new(CacheSectionId.ForwardEdgeMetadata, "ForwardEdgeMetadata", CacheSectionRequirement.Unused),
         new(CacheSectionId.DominatorReachableAddresses, "DominatorReachableAddresses", CacheSectionRequirement.Conditional),
         new(CacheSectionId.DominatorImmediateDominatorAddresses, "DominatorImmediateDominatorAddresses", CacheSectionRequirement.Conditional),
         new(CacheSectionId.DominatorChildOffsets, "DominatorChildOffsets", CacheSectionRequirement.Conditional),

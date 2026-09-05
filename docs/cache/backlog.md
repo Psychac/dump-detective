@@ -72,15 +72,21 @@ conclusions the two design docs originally reached.
 
 ## Real, measured disk-footprint win
 
-- **⚠ Biggest one, and it needs no encoding work: the three `ForwardEdge*` sections are write-only.**
-  `ForwardEdgeBuckets`/`ForwardEdgeDirectories`/`ForwardEdgeMetadata` are written by Phase C of every
-  build and read by nothing — `IHeapAnalysisCache.TryGetForwardIndexProvider()` has zero production
-  callers (declaration, implementation, and a throwing test stub are its only references). Forward-edge
-  *extraction* is essential (Stage A's reachability walk needs it, ~2x faster than a live ClrMD walk),
-  but the walk reads the loose scratch files, not the container. Measured cost of the dead copy:
-  **462.4 MiB (33.1%)** on the 3.3 GB dump, **3,087.8 MiB (32.8%)** on the 27.5 GB dump, plus the
-  Phase C merge I/O to produce it. Either stop persisting it or add the consumer it was built for —
-  see [cache-redesign-measurements.md](cache-redesign-measurements.md) § 9.
+- **✅ DONE (2026-09-05) — the three `ForwardEdge*` sections were write-only; the merge is gone.**
+  `ForwardEdgeBuckets`/`ForwardEdgeDirectories`/`ForwardEdgeMetadata` were written by Phase C of
+  every build and read by nothing: `IHeapAnalysisCache.TryGetForwardIndexProvider()` had zero
+  production callers (its declaration, its implementation, and a throwing test stub were the only
+  references), confirmed independently by a run-time section-touch trace. Forward-edge *extraction*
+  is essential and untouched — Stage A's reachability walk consumes it and is ~2x faster than a live
+  ClrMD walk — but the walk reads the loose scratch files, not the container, so only the merge was
+  removed.
+  Cold-rebuild verified on the reference dump: `cache.bin` **1,398.3 → 935.9 MiB
+  (−462.4 MiB, −33.1%)**, 26 → 23 sections, no leaked scratch, `ReverseEdge*` and all six
+  `Dominator*` sections still built and read, cache-hit behaviour unchanged. On the 27.5 GB dump the
+  same sections were 3,087.8 MiB (32.8%). The ids are now `Unused` and `ForwardEdgeContainerWriter`
+  remains (still covered by `ForwardEdgeIndexTests`), so a future cache-hit-time consumer can restore
+  the merge with one call plus a rebuild — see
+  [cache-redesign-measurements.md](cache-redesign-measurements.md) § 9.2.
 
 - **Edge-index and dominator-tree values stored as full 8-byte addresses instead of 4-byte node
   indices into the already-existing `ObjectAddresses` column.** Measured (not projected) on a real

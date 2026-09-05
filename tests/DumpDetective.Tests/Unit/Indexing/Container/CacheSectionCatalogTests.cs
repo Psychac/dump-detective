@@ -59,7 +59,6 @@ public class CacheSectionCatalogTests
         CacheSectionId[] gated =
         [
             CacheSectionId.ReverseEdgeBuckets,           // can fail deterministically at scale
-            CacheSectionId.ForwardEdgeBuckets,           // can fail deterministically at scale
             CacheSectionId.DominatorReachableAddresses,  // Stage B analyzer gating
             CacheSectionId.RootStackThreadAttribution,   // pre-dates its own additive introduction in some v4 caches
         ];
@@ -72,15 +71,25 @@ public class CacheSectionCatalogTests
     }
 
     /// <summary>
-    /// <c>EventCandidates</c> has no writer, reader, or collection in current code, and
-    /// <c>Objects</c> has been superseded by the columnar sections since format v2 — both slots stay
-    /// reserved so ids are never renumbered (that would misparse existing caches), but neither may
-    /// be treated as expected.
+    /// Sections no build writes. <c>Objects</c> was superseded by the columnar sections in format
+    /// v2; <c>EventCandidates</c> is a reserved slot that never had a writer; the three
+    /// <c>ForwardEdge*</c> sections had their container merge removed once it was shown nothing read
+    /// them. All slots stay reserved so ids are never renumbered (that would misparse existing
+    /// caches), but none may be treated as expected.
     /// </summary>
     [Fact]
     public void ReservedButUnwrittenSections_AreUnused()
     {
-        foreach (CacheSectionId id in new[] { CacheSectionId.Objects, CacheSectionId.EventCandidates })
+        CacheSectionId[] unused =
+        [
+            CacheSectionId.Objects,                  // superseded by the columnar sections in format v2
+            CacheSectionId.EventCandidates,          // reserved slot, never written
+            CacheSectionId.ForwardEdgeBuckets,       // extraction still runs; container merge removed
+            CacheSectionId.ForwardEdgeDirectories,
+            CacheSectionId.ForwardEdgeMetadata,
+        ];
+
+        foreach (CacheSectionId id in unused)
         {
             CacheSectionCatalog.All.Single(d => d.Id == id).Requirement
                 .Should().Be(CacheSectionRequirement.Unused, $"{id} has no writer or reader in current code");

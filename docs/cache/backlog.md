@@ -153,9 +153,11 @@ Confirmed intrinsic native cost (per-thread stack unwinding inside ClrMD's DAC l
 ## Reproducibility
 
 - **The report is not byte-reproducible across runs of the same dump.** Two analyses of the same
-  `cache.bin` with the same binary produce reports differing in *Object Shape Analysis*'
-  "Gen2-retained types" table and in two EventLeak `rootHint` values. The row multisets are
-  identical — only rows with **tied sort keys** swap. Predates the cache work; found while verifying
+  `cache.bin` with the same binary produce reports differing in two places. In *Object Shape
+  Analysis*' "Gen2-retained types" table the row multisets are identical — only rows with **tied
+  sort keys** swap. In EventLeak, two instance cards have a `rootHint` key **present in one run and
+  absent in the other**, which is the more serious of the two: a consumer sees a field appear and
+  disappear, not merely reorder. Predates the cache work; found while verifying
   the v5 encoding ([cache-redesign-measurements.md](cache-redesign-measurements.md) § 11.1). Worth
   fixing because the trend/diff feature compares two reports and would report these as real changes:
   add a deterministic tie-breaker (type name, or MethodTable) to the affected sorts.

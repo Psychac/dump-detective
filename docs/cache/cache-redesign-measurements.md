@@ -649,8 +649,13 @@ against the pre-change run. Excluding timings, per-run GUIDs and memory counters
 
 Those are **not** a regression, and the check that establishes it is running the analysis twice
 against the *same* v5 cache with the *same* binary: that produces differences in exactly the same two
-places. The row multisets are identical — every value is preserved, only the order of rows with
-**tied sort keys** differs (the swapped pair at rows 742/743 both have GC Scan Cost 224).
+places. In the table, the row multisets are identical — every value is preserved, only the order of
+rows with **tied sort keys** differs (the swapped pair at rows 742/743 both have GC Scan Cost 224).
+
+A second, independent line-level diff of the sorted JSON payloads agreed: 662 differing lines out of
+2,172,224, all timings apart from a two-line delta. That delta resolves to the two EventLeak cards,
+where `rootHint` is **present in one run and absent in the other** rather than holding a different
+value — a sharper statement of the same nondeterminism, and the worse of the two symptoms.
 
 So the encoding round-trips exactly, and separately: **the report is not reproducible across runs.**
 Ties in at least two places break arbitrarily. That matters for the trend/diff feature, which would

@@ -1,6 +1,16 @@
 # Cache Subsystem Docs
 
-Current state, backlog, and a four-doc redesign set.
+Current state, backlog, a four-doc redesign set, and a from-zero re-derivation.
+
+**Start here if you are deciding what to build next:**
+
+- **[cache-ideal-design.md](cache-ideal-design.md)** — the subsystem re-derived from scratch under
+  an explicit priority order (**RAM > runtime > disk**), then diffed against what exists. Result:
+  disk barely moves (the v5–v8 sequence already took it), but peak RAM on the 27.5 GB dump is
+  ≈2.6 GB against 12,976 MB measured — a ~5× gap on the axis that was never optimised. Three
+  structural rewrites (one object identity, swizzle-once edge pipeline, semi-external walk) plus
+  seven independent optimisations, each labelled measured / derived / unverified, with §10 listing
+  what must be measured before anything is spent. It supersedes C.2 and the Part F variant.
 
 **Current state and open work:**
 

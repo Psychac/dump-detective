@@ -11,13 +11,18 @@ Current state, backlog, a four-doc redesign set, and a from-zero re-derivation.
 
 **Start here if you are deciding what to build next:**
 
-- **[cache-ideal-design.md](cache-ideal-design.md)** — the subsystem re-derived from scratch under
-  an explicit priority order (**RAM > runtime > disk**), then diffed against what exists. Result:
-  disk barely moves (the v5–v8 sequence already took it), but peak RAM on the 27.5 GB dump is
-  ≈2.6 GB against 12,976 MB measured — a ~5× gap on the axis that was never optimised. Three
-  structural rewrites (one object identity, swizzle-once edge pipeline, semi-external walk) plus
-  seven independent optimisations, each labelled measured / derived / unverified, with §10 listing
-  what must be measured before anything is spent. It supersedes C.2 and the Part F variant.
+- **[cache-ideal-design.md](cache-ideal-design.md)** — the rebuild plan. The subsystem re-derived
+  from scratch under an explicit priority order (**RAM > runtime > disk**), then measured against
+  both reference dumps before anything was committed to. Headline: peak RAM on the 27.5 GB dump goes
+  ≈12,976 MB → ≈2,600 MB, while disk moves only −33% and runtime −28% — the v5–v8 sequence already
+  took most of the disk, and RAM is the axis nothing before it measured.
+
+  Three structural rewrites as one change (R1 one identity, R2 swizzle-once edge pipeline, R3
+  semi-external walk) plus six independent items (O1–O5, O8). **All six gating measurements are
+  closed, and three came back negative** — a `TypeId → rows` index, a `StaticFieldResolver` filter
+  reorder, and sorting the BFS frontier are all rejected on evidence, as is C.2 / the Part F
+  variant. §4 lists everything rejected and why; §7 is the evidence; §8 records the measurement
+  traps that produced a wrong number first.
 
 **Current state and open work:**
 

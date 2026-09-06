@@ -454,24 +454,100 @@ nothing to fix. Closed.
 
 ---
 
-## Open question — C.2, after C.1
+## Part D — The 27.5 GB dump, measured (2026-09-06)
 
-C.1 removed the reference dump's entire case for C.2. Cold peak is now 491 MB *below* the
-pre-redesign baseline, so there is no regression left to remedy at 3.3 GB.
+Run on `HEAD` + C.1, one cold rebuild, single process, nothing else running.
+`D:\DUmps\21-04\w3wp.exe_260421_175618.dmp`, 26,244 MB, 87,104,236 objects.
 
-What survives is the scaling argument alone. B.1's residency is `12 B/edge + 12 B/row + 8 B/row`,
-which at the 27.5 GB dump's ≈191M edges / ≈83M rows projects to ≈3.9 GB of peak inside
-`ReverseEdgeCsrBuilder` — against ≈215 MB for the retired per-bucket path — on a machine with
-15.7 GiB of RAM. That number is a projection from allocation shapes, not a measurement, and C.1 just
-demonstrated that projections of this kind can be off by 3× in either direction.
+### D.1 It fits — with thin margin and visible thrashing
 
-**Next step, pending approval: measure the 27.5 GB dump.** One cold rebuild for `HEAD` + C.1, run
-strictly alone in the foreground (per CLAUDE.md — these dumps have OOM-crashed this machine when run
-concurrently). If it completes with headroom, C.2 stays documented and unbuilt. If it thrashes or
-fails, C.2 is justified on evidence rather than arithmetic.
+| | |
+|---|---:|
+| Wall clock | **1,310.5 s** (21.8 min) |
+| **Peak private** | **13,276.3 MB (12.97 GB)** |
+| Peak working set | 9,262.4 MB (9.05 GB) — capped by physical RAM |
+| `cache.bin` | **2,418.1 MB** |
+| Exit | clean, no OOM |
 
-A baseline arm on that dump is probably not worth its runtime: the question is not "did we regress"
-— C.1 settled that — but "does the current build fit". One arm answers that.
+The 3.9 GB gap between peak private and peak working set is pagefile. System available memory bottomed
+at **356 MB** during the reachability walk, and the walk's throughput visibly decayed while it was
+there. The run survived on a 35.1 GB commit limit, not on RAM.
+
+**Disk result confirmed at scale.** The produced `cache.bin` is 2,418.1 MB, byte-for-byte the same
+size as the pre-existing v8 cache alongside the dump, whose v4 predecessor is still there as
+`cache.bin.bak` at 9,423.7 MB. That is **9,423.7 → 2,418.1 MiB = 25.7%**, tracking the reference
+dump's 24.5% closely. The redesign's size result holds at 8× the dump size.
+
+### D.2 Part B's scale projection was 40% too high
+
+| | Part B projected | Measured |
+|---|---:|---:|
+| Edges (E) | ~191M | **137,033,360** |
+| Reachable rows (R) | ~83M | **58,339,936** |
+
+The projection scaled by raw reverse-edge bytes from measurements §2, which over-counted. Re-deriving
+B.1's residency at the real E and R:
+
+| Live simultaneously in `ReverseEdgeCsrBuilder` | Size | Under C.2 |
+|---|---:|---|
+| `resolvedBuckets` — 2 × `int[E]` | 1.02 GB | removed |
+| `children` — `int[E]` | 0.51 GB | kept — it is the output |
+| `degree` + `offsets` + `cursor` — 3 × `int[R]` | 0.65 GB | `offsets` kept, rest removed |
+| `sortedReachableAddresses` — `ulong[R]` | 0.43 GB | removed |
+| **Total** | **2.62 GB** | **≈1.89 GB removed** |
+
+So C.2 is worth ≈1.9 GB of a 12.97 GB peak (**−15%**), plus 2.04 GB of scratch write-and-read-back
+that disappears entirely. It would take peak to ≈11.1 GB — enough to stop the run relying on the
+pagefile, not enough to make it comfortable.
+
+### D.3 The walk, not the builder, is the dominant resident consumer
+
+Sampled mid-run, the process was already at **10.4 GB commit while still inside the reachability
+walk** — before `ReverseEdgeCsrBuilder` had started. The builder took it from there to 13.0 GB.
+
+That reorders the remaining work. `ReachableGraphWalker` holds, concurrently: a
+`Dictionary<ulong,int>` `idMap` at 58.3M entries (≈2.0 GB), `ChunkedBuffer` `edgeFrom`/`edgeTo`
+(≈1.1 GB), the `fwdTargets`/`revTargets`/`fwdOffsets`/`revOffsets` CSR arrays (≈1.6 GB), plus
+`addresses`/`outDegree`/`isRoot`. Roughly 6 GB of the 13 GB peak is the walk.
+
+Two consequences:
+
+- C.2 is now **doubly attractive**, because the walk's `revOffsets`/`revTargets` are already paid for.
+  Reusing them removes the builder's duplicate without adding anything — the memory is resident
+  either way.
+- The larger remaining lever is the walk itself, which is out of scope here and belongs in its own
+  investigation. Noted, not pursued. §7.3 item 2 of the dominator integration doc already records a
+  failed attempt (`DenseIdMap`, 2.6× slower with no peak win) — that history should be read first.
+
+### D.4 Verdict
+
+The current build fits the 27.5 GB dump on a 15.7 GiB machine. It does so by paging ~3.9 GB and
+driving available memory to 356 MB, which is a real degradation, not a clean pass. C.1 already
+removed ≈3 GB that a previously-successful build was carrying, so today's build has meaningfully more
+headroom than the one that produced the `cache.bin` sitting next to that dump.
+
+**C.2 is justified** — 1.9 GB off peak and 2.04 GB of scratch I/O gone, on a run demonstrably short
+of memory — but it is a margin improvement, not a rescue. It does not need to be done urgently, and
+it should not be sold as making large dumps comfortable. Only attacking the walk would do that.
+
+---
+
+## Open question — ~~C.2, after C.1~~ RESOLVED by Part D
+
+C.1 removed the reference dump's entire case for C.2 — cold peak there is now 491 MB *below* the
+pre-redesign baseline. The scaling argument was then tested directly in Part D rather than left as
+arithmetic, which was the right call: the projection it rested on was 40% too high on both E and R.
+
+**Resolution: build C.2, but not urgently.** Part D measured the 27.5 GB dump at a 12.97 GB peak with
+available memory bottoming at 356 MB and 3.9 GB going to the pagefile. C.2 removes ≈1.9 GB of that
+plus 2.04 GB of scratch round-trip, and D.3 strengthens the case further — the walk already holds the
+`revOffsets`/`revTargets` C.2 would reuse, so the builder's copy is pure duplication of memory that is
+resident either way.
+
+It is a margin improvement, not a rescue. Roughly 6 GB of the 13 GB peak is the walk itself (D.3),
+which C.2 does not touch. Anyone reaching for "make large dumps comfortable" needs to look there
+instead, and should read §7.3 item 2 of the dominator integration doc first — a previous attempt
+(`DenseIdMap`) came back 2.6× slower with no peak-memory win.
 
 ## Status
 
@@ -488,7 +564,8 @@ A baseline arm on that dump is probably not worth its runtime: the question is n
 | B.5 — closed, no regression found | ✅ |
 | **C.1 — delete dead `_fanoutPerBucket`** | ✅ **shipped, −688 MB cold peak** |
 | C.1 verification — cold ×3, warm ×3, full suite | ✅ |
-| 27.5 GB dump measurement | ⬜ **awaiting approval to run** |
-| C.2 — CSR from the walk's in-memory reverse CSR | ⬜ gated on the above |
+| 27.5 GB dump measurement (Part D) | ✅ fits at 12.97 GB peak, thrashes |
+| C.2 — CSR from the walk's in-memory reverse CSR | ⬜ **justified, ≈1.9 GB + 2.04 GB scratch** |
 | C.3 — bound builder residency (fallback) | ⬜ only if C.2 is rejected |
 | C.4 — warm-path decode | ✅ dropped, gate not met |
+| Walk's own ≈6 GB residency (D.3) | ⬜ out of scope, own investigation |

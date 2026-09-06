@@ -4,6 +4,17 @@ Hard measurements backing [cache-format-clean-slate-redesign.md](cache-format-cl
 
 **Note:** This doc uses **MB = 10⁶ bytes**; the redesign docs use **MiB = 1024²** (4.9% apart). Reference `cache.bin` is 1,466.3 MB = 1,398.3 MiB. Ratios and byte counts are given together so either unit can be re-derived. Method: Five real `cache.bin` files parsed directly (no dump loads); compression via offline column scans.
 
+> **⚠ Scope: every number in this doc is a byte count.** Runtime and peak-memory evidence for the
+> same redesign lives in
+> [cache-redesign-runtime-rebalance.md](cache-redesign-runtime-rebalance.md) — including the only
+> end-to-end measurements taken on real dumps with a controlled baseline (`d1dc4dcc`): the 3.3 GB
+> reference dump cold/warm × before/after in its Part A-R, the **27.5 GB dump cold rebuild in its
+> Part D** (1,310.5 s, 12.97 GB peak private, 9,423.7 → 2,418.1 MiB on disk, full per-phase
+> instrumentation in D.5), and a second written-but-never-read section inventory in D.6 that
+> **qualifies §9's method** — the touch set turns out to be analyzer-path dependent, not format
+> dependent, so "never read on one run" is not on its own grounds to stop writing a section.
+> That doc also records the one regression this one's work caused (+197 MB cold peak) and its fix.
+
 ---
 
 ## 1. Structural survey — five real caches, not one
@@ -535,3 +546,37 @@ Measured `EnumerateRetainedSet` call frequency on 3 real dumps: **zero calls acr
 Replaces hash-bucket-sort-directory with compressed sparse row (offsets + row indices, keyed by reachable-node order). Format version 7 → 8.
 
 **Result**: 587.29 → 342.50 MiB (−244.79 MiB, −41.7%). Matches format doc §2.5 projection exactly. **Final: 1,398.3 → 342.50 MiB (24.5% of start), zero compression applied.** Verified internal consistency (17.37M edges counted exhaustively) and sampled live cross-check (41K edges, 0 mismatches).
+
+---
+
+## 16. Runtime and peak memory — see the rebalance doc
+
+Sections 1–15 measured bytes only. The other two axes were measured separately, against a
+`d1dc4dcc` baseline, and are recorded in
+[cache-redesign-runtime-rebalance.md](cache-redesign-runtime-rebalance.md) rather than duplicated
+here. Headlines:
+
+| | 3.3 GB reference dump | 27.5 GB dump |
+|---|---|---|
+| Disk | 1,398.3 → 342.5 MiB (24.5%) | 9,423.7 → 2,418.1 MiB (25.7%) |
+| Cold runtime | 105.5 → 94.8 s (**−10.1%**) | 1,310.5 s (after only) |
+| Cold peak private | 4,622.5 → 4,131.6 MB (**−10.6%**) | 13,276.3 MB (after only) |
+| Warm runtime / peak | unchanged (noise) | not measured |
+
+**The redesign did not cost runtime.** Cold rebuild is faster and warm analysis is unchanged; a third
+arm at `ca938bf4` attributes the speedup to the forward-index removal and shows the v5–v8 encodings
+are runtime-neutral. §5.1's concern about compressing the base columns to protect the streaming path
+is therefore still worth honouring, but the encodings that *did* ship on those columns cost nothing
+measurable — the 24 → 8 bytes/record traffic cut pays for the added per-record decode.
+
+The one regression was +197 MB of cold peak from `ReverseEdgeCsrBuilder` holding every resolved
+bucket resident, matching its allocation arithmetic to 5%. It was more than repaid by deleting a dead
+per-edge fanout dictionary that v8 had orphaned (−688 MB), which is why the after-figures above are
+*below* baseline on all three axes.
+
+**Standing lesson for §12's remaining item.** This doc ranked v9 block compression first on
+measured size-per-unit-of-work and never costed its runtime or memory. That was the same blind spot
+that let the +197 MB regression ship unnoticed. **v9 must be costed on all three axes**, using the
+harness described in the rebalance doc's §A.3/§A.5 — in particular peak *private* bytes, not peak
+working set, which on a run that memory-maps a multi-GB dump is dominated by file-backed pages and
+moves with unrelated system activity.

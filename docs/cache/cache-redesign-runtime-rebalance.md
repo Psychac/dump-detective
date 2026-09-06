@@ -530,6 +530,104 @@ headroom than the one that produced the `cache.bin` sitting next to that dump.
 of memory — but it is a margin improvement, not a rescue. It does not need to be done urgently, and
 it should not be sold as making large dumps comfortable. Only attacking the walk would do that.
 
+### D.5 Full instrumentation record
+
+Recorded here because the run's logs live in a session scratchpad that does not survive, and a
+27.5 GB cold rebuild is expensive enough that nobody should have to repeat it to recover these.
+
+**Scan shape** (`DD_PERF_INDEX_MEMORY=1`): 63 segments, DOP=8, 87,104,236 objects, per-worker
+columnar chunk buffers peaking at 100.0 MB concurrent (524,288 entries/column), zero leaked-live.
+For comparison the reference dump was 8 segments, DOP=4, 12.5 MB concurrent.
+
+**Cumulative allocation by phase** — total 116.16 GB, 1,431 B/object. Note this is bytes *allocated*,
+which the GC recycles continuously; it is not residency, and on this page it has repeatedly moved in
+the opposite direction from peak (see A-R.5):
+
+| Phase | Allocated | % |
+|---|---:|---:|
+| parallel heap scan (incl. edge extraction) | 51,227.9 MB | 43.1% |
+| satellite sections | 40,671.3 MB | 34.2% |
+| reverse index (CSR build + write) | 19,333.8 MB | 16.3% |
+| reachability walk | 5,468.8 MB | 4.6% |
+| forward index (sort + write) + TypeAggregates | 2,239.3 MB | 1.9% |
+| columnar scratch concatenation | 4.4 MB | 0.0% |
+
+**GC**: gen0 = 16,644, gen1 = 7,464, gen2 = 108. Managed heap at exit 12,153.5 MB.
+
+**Wall-clock breakdown** (total 1,310.5 s):
+
+| Phase | Time |
+|---|---:|
+| Load dump (DAC 448 ms) | 0.7 s |
+| **Scan + index heap** | **1,105.3 s** |
+| ↳ indexing heap | 335.5 s |
+| ↳ computing exact dominator tree (tracing heap graph) | 213.7 s |
+| ↳ shared heap index scan | 127.5 s |
+| ↳ computing exact dominator tree (resolving node metadata) | 46.7 s |
+| ↳ **building reverse-index CSR** | **39.6 s** |
+| ↳ flushing reverse-index edges | 2.2 s |
+| ↳ flushing forward-index edges | 1.0 s |
+| Run analyzers — of which `building publisher registry` (EventLeak) | 127.3 s |
+| Build report | 81.4 s |
+
+The reverse-index CSR phase is **39.6 s of 1,310.5 s — 3.0% of the run**, which is what caps C.2's
+runtime upside regardless of how much work it removes. Inside it: 32.6 s resolving 53 buckets at
+DOP 4 (per-bucket 1.8–5.8 s), 7.0 s prefix-sum + fill of 137,033,360 child entries, 8.5 s writing
+both sections into the container.
+
+**Checksum session** (`DD_PERF_CACHE_SESSION=1`): 11 container opens, 131 section opens, 24 verified
+/ 107 skipped by memoisation, 2,386.9 MiB hashed. `Roots`, `Handles` and `LargeObjects` are each
+still verified twice — the residual §6.1 gap, unchanged at this scale.
+
+### D.6 Five sections written and never read on this dump
+
+The same check that condemned the `ForwardEdge*` sections in measurements §9, re-run at 27.5 GB on a
+full default analyzer set. Sections the run **never touched**:
+
+| Never read | Note |
+|---|---|
+| `TypeAggregates` | read on the reference dump, not here |
+| `StringDedup`, `StringDedupMeta` | read on the reference dump, not here |
+| `ObjectAddressOverflow` | genuinely empty — no address delta escaped at 4 bytes |
+| `SectionManifest` | v6 rider; never read on either dump |
+| `ForwardEdgeBuckets/Directories/Metadata` | not written since `ca938bf4` |
+| `ReverseEdgeBuckets/Directories/Metadata` | not written since v8 |
+| `DominatorChildOffsets/ChildAddresses` | not written since v7 |
+| `Objects`, `EventCandidates` | never written |
+| `RootStackThreadAttribution` | known — §12.2's report wiring is deliberately deferred |
+
+`TypeAggregates`, `StringDedup` and `StringDedupMeta` being read on the 3.3 GB dump but not the
+27.5 GB one is the interesting part: it means the touch set is **analyzer-path dependent, not
+format dependent**, so "never read" from a single run is not sufficient grounds to stop writing a
+section. That is a correction to how measurements §9's method should be applied — §9 happened to be
+safe because the `ForwardEdge*` sections had no reader at all, which a source search confirmed
+independently of any run. `SectionManifest` is the one entry here that looks like a genuine §9-style
+candidate, and it is small enough not to matter.
+
+Not actioned. Recorded so the next person to run this check has a second data point rather than
+re-deriving one.
+
+### D.7 What was *not* measured
+
+Only the **after** arm (`HEAD` + C.1) was run on this dump. There is no baseline arm, so:
+
+| Axis | Before | After | Status |
+|---|---|---|---|
+| Disk index size | 9,423.7 MiB (`cache.bin.bak`, format v4) | 2,418.1 MiB | ✅ both measured |
+| Cold runtime | — | 1,310.5 s | ⚠ after only |
+| Peak memory | — | 13,276.3 MB | ⚠ after only |
+
+The disk comparison is real: `cache.bin.bak` is a format-v4 container sitting next to the dump, and
+the run reproduced the v8 size exactly. Runtime and peak memory have **no before figure on this
+dump** — that arm was deliberately skipped, since Part A had already settled "did we regress" on the
+reference dump and the 27.5 GB question was only "does the current build fit".
+
+Anyone wanting the full 3×2 grid needs one more cold rebuild at `d1dc4dcc`. Expect it to be slower
+(it persists the forward index) and to peak meaningfully higher (it carries the ~3 GB fanout
+dictionary C.1 removed, at this dump's 58.3M distinct children) — plausibly 16 GB+ against a 35.1 GB
+commit limit and 15.7 GiB of RAM. That is a real OOM risk on this machine, which is why it has not
+been run speculatively.
+
 ---
 
 ## Open question — ~~C.2, after C.1~~ RESOLVED by Part D

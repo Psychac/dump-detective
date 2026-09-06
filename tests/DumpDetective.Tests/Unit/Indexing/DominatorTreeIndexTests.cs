@@ -73,6 +73,55 @@ public class DominatorTreeIndexTests : IDisposable
 
     private string WriteContainer(params (ulong Address, ulong DominatorAddress)[] entries) => WriteContainer(entries, retainedBytesByAddress: null);
 
+    /// <summary>
+    /// All three sections now close with a checksum computed in flight rather than by re-reading the
+    /// written bytes (docs/cache/cache-redesign-runtime-rebalance.md §E.1). A checksum that disagreed
+    /// with the bytes would not throw — <c>CacheContainerReader</c> treats a mismatch as a missing
+    /// section — so the failure mode is a silently empty dominator tree, which is exactly what this
+    /// test exists to catch. The row count deliberately crosses the writers' 64 KB buffer boundary
+    /// several times and ends mid-buffer, since a single-flush payload cannot exercise the chunk
+    /// accounting where an off-by-one would hide.
+    /// </summary>
+    [Fact]
+    public void Write_ChecksumsComputedInFlight_SurviveVerificationAcrossBufferBoundaries()
+    {
+        const int rowCount = 40_000;
+        var entries = new (ulong Address, ulong DominatorAddress)[rowCount];
+        var retainedBytesByAddress = new Dictionary<ulong, ulong>(rowCount);
+        for (int i = 0; i < rowCount; i++)
+        {
+            ulong address = 0x10000UL + ((ulong)i * 0x20UL);
+            // Row 0 is the virtual root's child; every other row is dominated by its predecessor,
+            // giving a deep chain rather than a flat fan so the idom column holds varied values.
+            entries[i] = (address, i == 0 ? 0UL : 0x10000UL + ((ulong)(i - 1) * 0x20UL));
+            retainedBytesByAddress[address] = (ulong)(rowCount - i) * 64UL;
+        }
+
+        string containerPath = WriteContainer(entries, retainedBytesByAddress);
+
+        CacheContainerReader.TryOpen(containerPath, out var containerReader).Should().BeTrue();
+
+        // TryOpen verifies each section's checksum and reports a mismatch as "not present".
+        DominatorTreeIndexReader.TryOpen(containerReader!, out var indexReader).Should().BeTrue();
+        using (indexReader)
+        {
+            indexReader!.TryGetImmediateDominator(entries[0].Address, out ulong firstDominator).Should().BeTrue();
+            firstDominator.Should().Be(0UL);
+
+            // Spot-check across every buffer boundary the write crossed, plus the final partial one.
+            foreach (int row in new[] { 1, 8_191, 8_192, 16_383, 16_384, 32_767, 32_768, rowCount - 1 })
+            {
+                indexReader.TryGetImmediateDominator(entries[row].Address, out ulong dominator)
+                    .Should().BeTrue($"row {row} must round-trip");
+                dominator.Should().Be(entries[row].DominatorAddress, $"row {row}'s dominator");
+
+                indexReader.TryGetRetainedBytes(entries[row].Address, out ulong retained)
+                    .Should().BeTrue($"row {row} retained bytes must round-trip");
+                retained.Should().Be(retainedBytesByAddress[entries[row].Address], $"row {row}'s retained bytes");
+            }
+        }
+    }
+
     [Fact]
     public void Write_AddsBothColumnarSections()
     {

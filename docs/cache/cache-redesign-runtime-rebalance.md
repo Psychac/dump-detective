@@ -655,48 +655,85 @@ measured phase durations from the 27.5 GB run, not to reading the code alone.
 Two items in that table were invisible before Part D and are the interesting ones: root enumeration
 at 15.3%, and checksum verification at 2.7% *from only three labelled sections* out of 24 verified.
 
-### E.1 Stop re-verifying sections this same process just wrote — ≈36 s, no tradeoff
+### E.1 ✅ SHIPPED — compute the dominator sections' checksums in flight
 
-The cold build writes every section and computes its `XxHash32` **during** the write. Then, in the
-same process, the analysis phase re-opens those sections and re-hashes **2,386.9 MiB** to verify them
-— essentially the whole container, immediately after producing it.
+**⚠ This section's original diagnosis was wrong and is corrected here.** It attributed the measured
+35.9 s to the *reader* re-hashing sections on open. It is not: the `verifying <X> section` progress
+label is emitted by **`CacheContainerWriter.ComputeChecksum`** — the *writer* re-reading each section
+it has just written in order to hash it. Reader-side verification turned out to be 0.5 s (§E.2).
 
-That is not a CPU cost. `VerifyChecksumZeroCopy` hashes through the memory-mapped view, so its real
-cost is demand-paging the section back off disk, and Part D's run was doing that with system
-available memory at 356 MB. The measured numbers prove it is I/O, not hashing:
+`CacheContainerWriter` has two ways to close a section. `EndSection(recordCount)` re-reads the
+section's bytes off the stream to hash them; `EndSection(recordCount, precomputedChecksum)` takes a
+hash the caller computed while writing and skips that pass entirely. The second exists precisely for
+"multi-GB on large dumps where a full re-read is real added wall-clock", and the object columns,
+forward-edge and reverse-edge sections all already use it.
 
-| Section | Size | Verify time | Effective rate |
+The three dominator sections did not:
+
+| Section | 27.5 GB size | Re-read measured |
+|---|---:|---:|
+| `DominatorReachableAddresses` | 233 MB | **28.2 s** |
+| `DominatorRetainedBytes` | 467 MB | 4.0 s |
+| `DominatorImmediateDominatorAddresses` | 233 MB | 3.7 s |
+| **Total** | | **35.9 s** |
+
+All three are single contiguous streaming passes with no patched-placeholder header, so they meet the
+precomputed overload's stated precondition. Fixed by hashing each chunk as it is written.
+
+Both writers also emitted the column one value at a time — `Stream.Write` plus (now)
+`XxHash32.Append` per row, 58.3M rows per column on the 27.5 GB dump. They now fill a 64 KB pooled
+buffer, matching what `BlockDeltaColumn.WriteBlockBases` and `ColumnOverflowTable.Write` already do.
+
+**Correctness.** A checksum that disagreed with the bytes would not throw — `CacheContainerReader`
+reports a mismatch as a *missing* section — so the failure mode is a silently empty dominator tree.
+New test `Write_ChecksumsComputedInFlight_SurviveVerificationAcrossBufferBoundaries` writes 40,000
+rows (crossing the 64 KB buffer several times and ending mid-buffer, since a single-flush payload
+cannot exercise the chunk accounting) and round-trips through the verifying reader. It was
+mutation-checked: perturbing the emitted checksum by 1 makes it fail. Full suite green, 1,162 passed.
+
+**⚠ Not confirmed end-to-end.** A same-session alternating A/B on the 3.3 GB dump found **no
+measurable difference**:
+
+| Arm | run 1 | run 2 | mean |
 |---|---:|---:|---:|
-| `DominatorReachableAddresses` | 233 MB | **28.2 s** | 8.3 MB/s |
-| `DominatorRetainedBytes` | 467 MB | 4.0 s | 117 MB/s |
-| `DominatorImmediateDominatorAddresses` | 233 MB | 3.7 s | 63 MB/s |
+| C.1 only | 87.3 s | 94.6 s | 90.9 s |
+| C.1 + E.1 | 90.0 s | 93.0 s | 91.5 s |
 
-The *smaller* section took 7× longer than the larger one. XxHash32 measured 4.6–6.9 GB/s in
-measurements §5, so at 233 MB the hashing itself is ~40 ms. The 28.2 s is page faults, paid because
-that section is opened first — at peak memory pressure.
+That is the expected result, not a contradiction. On the 3.3 GB dump those sections are 26/26/53 MB,
+so the removed re-read is ~105 MB — invisible against this dump's ±7 s run-to-run spread. It is also
+why no `verifying <X> section` label appears on that dump in *either* arm: the writer only reports
+progress every 64 MB, which a 53 MB section never reaches. **This dump structurally cannot measure
+this change.** The 35.9 s figure it targets comes from the 27.5 GB run, and confirming the saving
+end-to-end needs a 27.5 GB re-run.
 
-**Fix:** have `CacheContainerWriter` publish the checksums it already computed into the session's
-`VerifyOnce` memo, so a reader in the same process that just wrote the container starts
-pre-verified. A separate process (every warm run) keeps verifying exactly as today.
+**⚠ Methodology lesson, recorded because it nearly produced a false claim.** A first pass measured
+E.1 at 80.7 s against C.1's earlier 94.8 s and looked like a 14.9% win. It was entirely
+cross-session drift: allocation totals (8.74 GB) and GC counts (gen0 947 vs 943, gen2 11 vs 12) were
+identical between the two arms, and ambient free memory had moved from 7,243 MB to 5,794 MB between
+the two measurement sessions — which changes .NET's heap-growth behaviour and therefore peak private
+bytes. **Cold-run wall clock and peak private on this machine are only comparable within one
+alternating session.** A-R.5 flagged run-to-run spread; it understated that the drift is *between*
+sessions, not just within them. Every cross-session comparison earlier on this page should be read
+with that caveat, including C.1's headline −688 MB.
 
-**Tradeoff: none.** This trusts bytes written microseconds earlier by this process, through a handle
-never closed, whose checksum we computed ourselves. §6.1 already established the memoisation
-machinery; this is one more source of truth feeding it. Highest value-to-risk item on this page.
+### E.2 ❌ DROPPED — reader-side verification measured 0.5 s, and the mapping change is rejected prior art
 
-### E.2 Verify by sequential read, not by faulting in a mapped view — folded into E.1's ≈36 s
+Both halves of this item fell over on inspection.
 
-Independent of E.1, and it helps the warm path too, where E.1 by construction cannot. Hashing through
-`MemoryMappedViewAccessor` makes verification cost equal to demand-paging the whole section and leaves
-those pages resident competing with the live working set. A plain buffered `FileStream` read is
-sequential, lets the OS drop pages behind the cursor, and is what `VerifyChecksum` (the `Stream`
-overload) already does.
+**The cost is not there.** Instrumenting `VerifyOnce` with elapsed time (new to
+`DD_PERF_CACHE_SESSION=1`, since the existing counter reported bytes but not time) gives, on the
+3.3 GB dump: **320.9 MiB hashed in 0.5 s (683 MiB/s)** out of a ~91 s run. Extrapolating the 27.5 GB
+run's 2,386.9 MiB at that rate is ~3.5 s. Real but not worth a contract change, and nowhere near the
+35.9 s this item was written to explain — that was all writer-side (§E.1).
 
-Also here: `TryOpenSectionAccessor` builds a fresh `MemoryMappedFile` per call — 131 times on the
-27.5 GB run — where one mapping per container per session would do.
+**The mapping change was already tried and reverted.** `CacheContainerReader`'s own remarks record
+it: holding one `MemoryMappedFile` per session "locks `cache.bin` on Windows and breaks any caller
+that later deletes or replaces the index directory", and the saving is a `CreateFileMapping` syscall.
+Proposing it in the first draft of Part E was a failure to read the class doc before recommending a
+change to it.
 
-**Tradeoff: none.** Verification is inherently a sequential full-section scan; the zero-copy pointer
-path buys nothing for it. Note the mmap *read* path for `ObjectIndexReader` should stay as-is — that
-one is a genuine hot path and measurements §4 rules out changing it.
+The elapsed-time instrumentation is kept — it is what settled this, and it closes the gap where the
+read side's share of verification cost was unmeasurable.
 
 ### E.3 The 200.3 s root phase cannot be optimised until it is split — measure first
 
@@ -751,26 +788,36 @@ than the 3.0% ceiling Part D quoted for C.2, which counted only the CSR phase.
   either dump, so it should go on hygiene grounds (same class as C.1), but it measured **0.0 s** —
   claiming it as a speedup would be false.
 
-### E.6 Ranked
+### E.6 Ranked — revised after shipping E.1 and dropping E.2
 
-| # | Item | Measured saving | Tradeoff | Confidence |
-|---|---|---:|---|---|
-| 1 | E.1 same-process checksum trust | ≈36 s (2.7%) | none | high — measured |
-| 2 | E.2 sequential verify + one mapping per session | folded into #1, also helps warm | none | high |
-| 3 | C.2-variant (delete the extractor pipeline) | ≈50–60 s (4%) + 1.9 GB peak + 4.1 GB scratch | one path replaces two | med-high |
-| 4 | E.4 batch reverse-edge writes | ~10–20 s | none | medium — estimated, not measured |
-| 5 | E.3 static-field-map filter order | unknown, up to 15.3% | none | **unmeasured — instrument first** |
+| # | Item | Saving | Status |
+|---|---|---:|---|
+| 1 | E.1 dominator checksums in flight | 35.9 s of writer re-read on 27.5 GB | ✅ shipped, **not confirmed end-to-end** |
+| 2 | C.2-variant (delete the extractor pipeline) | ≈50–60 s + 1.9 GB peak + 4.1 GB scratch | ⬜ open, best remaining item |
+| 3 | E.4 batch reverse-edge writes | ~10–20 s, estimated | ⬜ open, subsumed by #2 |
+| 4 | E.3 static-field-map filter order | unknown, up to 15.3% | ⬜ **instrument first** |
+| — | ~~E.2 reader-side verification~~ | measured 0.5 s | ❌ dropped |
 
-Realistic total from items 1–4: **≈100–115 s of 1,310 s, ~8%**, with no accuracy tradeoff taken —
-which is worth noting given tradeoffs were on the table. E.3 is the only item that could be large,
-and it is the only one not yet measured.
+Revised expectation: the honest total for what is *shipped* is 35.9 s on the 27.5 GB dump and nothing
+measurable on the 3.3 GB dump. Part E's first draft claimed ~100–115 s (~8%) from items 1–4; that
+figure double-counted E.2's 36 s, which turned out to be E.1's, and E.2's real value is 0.5 s. The
+corrected ceiling for everything still open is ≈60–80 s plus whatever E.3 turns out to be.
 
-The two biggest phases — the 335.5 s parallel scan and the 213.7 s walk — are ClrMD/DAC-bound and
-are not addressed by anything above. Beyond E.4's slice of the walk, cutting those means changing
-what is asked of ClrMD, which is a different investigation from this one. Part D.3's note stands:
-`DenseIdMap` was already tried on the walk and came back 2.6× slower with no peak-memory win.
+The two biggest phases — the 335.5 s parallel scan and the 213.7 s walk — remain ClrMD/DAC-bound and
+untouched by any of this. Part D.3's note stands: `DenseIdMap` was already tried on the walk and came
+back 2.6× slower with no peak-memory win.
 
----
+### E.7 Measurement protocol correction — mandatory for anything on this page
+
+The E.1 near-miss (§E.1's methodology note) established that **cold-run wall clock and peak private
+bytes on this machine are only comparable within a single alternating A/B session.** Ambient free
+memory moved 7,243 → 5,794 MB between two measurement sessions hours apart, which changes .NET's
+heap-growth behaviour and shifted peak private by ~500 MB and wall clock by ~14 s with *identical*
+allocation totals and GC counts.
+
+Any future item on this page must be measured by alternating the two arms inside one session
+(`A, B, A, B`), not by comparing against a figure recorded earlier. The harness supports this
+directly — build both binaries into separate worktrees and alternate `--cache-dir` targets.
 
 ## Open question — ~~C.2, after C.1~~ RESOLVED by Part D
 
@@ -810,7 +857,9 @@ instead, and should read §7.3 item 2 of the dominator integration doc first —
 | C.4 — warm-path decode | ✅ dropped, gate not met |
 | Walk's own ≈6 GB residency (D.3) | ⬜ out of scope, own investigation |
 | **Part E — cold-build speedup review** | ✅ done, ranked in E.6 |
-| E.1 same-process checksum trust (≈36 s) | ⬜ ready, no tradeoff |
-| E.2 sequential verify + one mapping per session | ⬜ ready, no tradeoff |
-| E.4 batch reverse-edge writes (~10–20 s) | ⬜ ready, subsumed by C.2-variant |
+| **E.1 dominator checksums in flight** | ✅ **shipped** — 35.9 s of writer re-read removed |
+| E.1 confirmation on the 27.5 GB dump | ⬜ **not run** — 3.3 GB cannot measure it |
+| E.2 reader-side verification | ✅ dropped — measured 0.5 s |
+| E.4 batch reverse-edge writes (~10–20 s) | ⬜ open, subsumed by C.2-variant |
 | E.3 static-field-map filter order | ⬜ **instrument before touching** |
+| E.7 alternating-session A/B protocol | ✅ adopted after a near-miss |

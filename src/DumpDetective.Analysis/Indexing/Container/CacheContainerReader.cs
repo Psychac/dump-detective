@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO.Hashing;
 using System.IO.MemoryMappedFiles;
 
@@ -63,6 +64,12 @@ internal sealed class CacheContainerReader
     internal static long VerificationsPerformed;
     internal static long VerificationsSkipped;
     internal static long BytesVerified;
+    // Wall-clock spent inside verify() calls. Separate from BytesVerified because the two diverge
+    // wildly under memory pressure: hashing runs at 4.6–6.9 GB/s (measurements § 5) but hashes
+    // through a mapped view, so the real cost is demand-paging the section in — 8.3 MB/s observed on
+    // the 27.5 GB run's first dominator section (docs/cache/cache-redesign-runtime-rebalance.md §E.1).
+    // Without this counter the read-side share of that cost is invisible.
+    internal static long VerificationTicks;
     // Per-section verification tally: which sections are hashed more than once per run, i.e. which
     // are reached through more than one CacheContainerReader instance.
     internal static readonly ConcurrentDictionary<CacheSectionId, int> VerifiedPerSection = new();
@@ -72,7 +79,9 @@ internal sealed class CacheContainerReader
         $"{Interlocked.Read(ref SectionOpens):N0} section opens, " +
         $"{Interlocked.Read(ref VerificationsPerformed):N0} verified / " +
         $"{Interlocked.Read(ref VerificationsSkipped):N0} skipped by memoization, " +
-        $"{Interlocked.Read(ref BytesVerified) / (1024.0 * 1024):N1} MiB hashed"
+        $"{Interlocked.Read(ref BytesVerified) / (1024.0 * 1024):N1} MiB hashed in " +
+        $"{TimeSpan.FromTicks(Interlocked.Read(ref VerificationTicks)).TotalSeconds:N1} s " +
+        $"({(Interlocked.Read(ref VerificationTicks) == 0 ? 0 : Interlocked.Read(ref BytesVerified) / (1024.0 * 1024) / TimeSpan.FromTicks(Interlocked.Read(ref VerificationTicks)).TotalSeconds):N1} MiB/s)"
         + Environment.NewLine + "[PERF] CacheSession: sections verified more than once: "
         + (VerifiedPerSection.Any(kv => kv.Value > 1)
             ? string.Join(", ", VerifiedPerSection.Where(kv => kv.Value > 1)
@@ -122,7 +131,11 @@ internal sealed class CacheContainerReader
                     Interlocked.Add(ref BytesVerified, e.Length);
             }
 
+            long startTicks = PerfLogSession ? Stopwatch.GetTimestamp() : 0;
             bool ok = verify();
+            if (PerfLogSession)
+                Interlocked.Add(ref VerificationTicks, Stopwatch.GetElapsedTime(startTicks).Ticks);
+
             _verified[id] = ok;
             return ok;
         }

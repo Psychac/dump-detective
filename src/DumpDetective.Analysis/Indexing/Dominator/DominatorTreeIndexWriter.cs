@@ -1,3 +1,7 @@
+using System.Buffers;
+using System.Buffers.Binary;
+using System.IO.Hashing;
+
 using DumpDetective.Analysis.Indexing.Container;
 
 namespace DumpDetective.Analysis.Indexing.Dominator;
@@ -41,13 +45,30 @@ internal static class DominatorTreeIndexWriter
     public static void WriteImmediateDominatorRows(CacheContainerWriter containerWriter, uint[] dominatorRowByRow)
     {
         containerWriter.BeginSection(CacheSectionId.DominatorImmediateDominatorAddresses);
-        Span<byte> buf = stackalloc byte[sizeof(uint)];
-        foreach (uint row in dominatorRowByRow)
+
+        var hasher = new XxHash32();
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(WriteBufferSize);
+        try
         {
-            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(buf, row);
-            containerWriter.Stream.Write(buf);
+            int offset = 0;
+            foreach (uint row in dominatorRowByRow)
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(offset), row);
+                offset += sizeof(uint);
+
+                if (offset + sizeof(uint) > buffer.Length)
+                    FlushChunk(containerWriter.Stream, hasher, buffer, ref offset);
+            }
+
+            if (offset > 0)
+                FlushChunk(containerWriter.Stream, hasher, buffer, ref offset);
         }
-        containerWriter.EndSection(dominatorRowByRow.Length);
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+
+        containerWriter.EndSection(dominatorRowByRow.Length, hasher.GetCurrentHashAsUInt32());
     }
 
     /// <param name="retainedBytesByRow">
@@ -58,12 +79,46 @@ internal static class DominatorTreeIndexWriter
     public static void WriteRetainedBytes(CacheContainerWriter containerWriter, ulong[] retainedBytesByRow)
     {
         containerWriter.BeginSection(CacheSectionId.DominatorRetainedBytes);
-        Span<byte> buf = stackalloc byte[sizeof(ulong)];
-        foreach (ulong value in retainedBytesByRow)
+
+        var hasher = new XxHash32();
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(WriteBufferSize);
+        try
         {
-            System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(buf, value);
-            containerWriter.Stream.Write(buf);
+            int offset = 0;
+            foreach (ulong value in retainedBytesByRow)
+            {
+                BinaryPrimitives.WriteUInt64LittleEndian(buffer.AsSpan(offset), value);
+                offset += sizeof(ulong);
+
+                if (offset + sizeof(ulong) > buffer.Length)
+                    FlushChunk(containerWriter.Stream, hasher, buffer, ref offset);
+            }
+
+            if (offset > 0)
+                FlushChunk(containerWriter.Stream, hasher, buffer, ref offset);
         }
-        containerWriter.EndSection(retainedBytesByRow.Length);
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+
+        containerWriter.EndSection(retainedBytesByRow.Length, hasher.GetCurrentHashAsUInt32());
     }
+
+    /// <summary>
+    /// Writes the filled prefix of <paramref name="buffer"/> and folds it into
+    /// <paramref name="hasher"/>, so both columns close via
+    /// <see cref="CacheContainerWriter.EndSection(long, uint)"/> rather than that class's re-read
+    /// overload. On the 27.5 GB dump these two sections are 233 MB and 467 MB and their re-reads
+    /// measured 3.7 s and 4.0 s (docs/cache/cache-redesign-runtime-rebalance.md §E.1), on top of one
+    /// stream write and one hash append per row — 58.3M of each, per column — that the buffer removes.
+    /// </summary>
+    private static void FlushChunk(Stream stream, XxHash32 hasher, byte[] buffer, ref int offset)
+    {
+        stream.Write(buffer, 0, offset);
+        hasher.Append(buffer.AsSpan(0, offset));
+        offset = 0;
+    }
+
+    private const int WriteBufferSize = 64 * 1024;
 }

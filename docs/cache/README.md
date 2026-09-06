@@ -1,6 +1,6 @@
 # Cache Subsystem Docs
 
-Current state, backlog, and a three-doc redesign set.
+Current state, backlog, and a four-doc redesign set.
 
 **Current state and open work:**
 
@@ -45,8 +45,18 @@ for last per an explicit user call rather than measurement ranking it low, is in
 - **[cache-implementation-clean-slate-redesign.md](cache-implementation-clean-slate-redesign.md)**
   — the code around the bytes: shared session, section descriptors, column projection. Start at
   §6.0 (zero-dependency fixes); design risks in §6.4.
+- **[cache-redesign-runtime-rebalance.md](cache-redesign-runtime-rebalance.md)** — the other two
+  axes. Every number in the three docs above is a byte count; this one measures what the redesign
+  did to wall clock and peak memory, against a `d1dc4dcc` baseline. Result: **runtime never
+  regressed** (cold rebuild 8% faster, warm unchanged), the one real regression was +197 MB of cold
+  peak from `ReverseEdgeCsrBuilder`'s resident buckets, and deleting a dead per-edge fanout
+  dictionary (§C.1) took cold peak 688 MB *below* that. Net against pre-redesign: 24.5% of the disk,
+  −10.1% cold time, −10.6% cold peak. Also holds the remaining unbuilt items (§C.2/§C.3) and their
+  gates.
 
-The two design docs are independent of each other — neither blocks the other.
+The two design docs are independent of each other — neither blocks the other. The rebalance doc
+depends on both, and on §7.1.1's ordering in particular: **v9 block compression should be costed on
+all three axes**, which is this doc's standing lesson.
 
 For the exact byte-level `cache.bin` layout, see
 [docs/binary-format.md](../binary-format.md). For the disk-backed reverse-reference

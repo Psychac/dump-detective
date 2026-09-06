@@ -1,5 +1,6 @@
 using DumpDetective.Analysis.Indexing.ReverseIndex;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Tests.Helpers;
 
 using FluentAssertions;
 
@@ -41,34 +42,46 @@ public class ReverseEdgeExtractorTests : IAsyncLifetime
             await extractor.DisposeAsync();
         }
 
-        // Verify bucket files exist
-        var bucket0 = Path.Combine(_tempDir, "reverse_edges_bucket_0.tmp");
-        var bucket1 = Path.Combine(_tempDir, "reverse_edges_bucket_1.tmp");
+        File.Exists(ReverseEdgeBucketFileReader.BucketPath(_tempDir, 0)).Should().BeTrue();
+        File.Exists(ReverseEdgeBucketFileReader.BucketPath(_tempDir, 1)).Should().BeTrue();
 
-        File.Exists(bucket0).Should().BeTrue();
-        File.Exists(bucket1).Should().BeTrue();
+        // Every edge sharing a child must land in exactly one bucket — the invariant
+        // ReverseEdgeCsrBuilder's lock-free counting and filling passes depend on.
+        for (int bucket = 0; bucket < 2; bucket++)
+        {
+            foreach ((ulong child, _) in ReverseEdgeBucketFileReader.ReadBucket(_tempDir, bucket))
+                ReverseIndexConstants.ChildBucketHash(child, 2).Should().Be((uint)bucket);
+        }
+
+        ReverseEdgeBucketFileReader.ReadAll(_tempDir, 2).Should().BeEquivalentTo(new[]
+        {
+            (Child: 0x0100UL, Parent: 0x1000UL),
+            (Child: 0x0200UL, Parent: 0x2000UL),
+            (Child: 0x0100UL, Parent: 0x3000UL),
+        });
     }
 
     [Fact]
     public async Task RecordEdge_NoFanoutCap_RecordsEveryEdgeForAHubChild()
     {
+        const ulong child = 0x0100;
+        const int edgeCount = 10_100; // well past the old 10,000 cap
+
         await using (var extractor = new ReverseEdgeExtractor(bucketCount: 1, _tempDir))
         {
-            const ulong child = 0x0100;
-            const int edgeCount = 10_100; // well past the old 10,000 cap
-
             for (int i = 0; i < edgeCount; i++)
             {
                 extractor.RecordEdge(parent: (ulong)(0x10000 + i), child: child);
             }
 
-            var stats = extractor.GetStatistics();
-
             await extractor.DisposeAsync();
-
-            // Uncapped since §4.2/§7.4 — every edge for the child is recorded, not truncated.
-            stats.BucketStats[0].EdgeCount.Should().Be(edgeCount);
         }
+
+        // Uncapped since §4.2/§7.4 — every edge for the child is recorded, not truncated.
+        List<(ulong Child, ulong Parent)> edges = ReverseEdgeBucketFileReader.ReadBucket(_tempDir, 0);
+        edges.Should().HaveCount(edgeCount);
+        edges.Should().OnlyContain(e => e.Child == child);
+        edges.Select(e => e.Parent).Should().OnlyHaveUniqueItems();
     }
 
     [Fact]
@@ -85,36 +98,35 @@ public class ReverseEdgeExtractorTests : IAsyncLifetime
                 }
             }
 
-            var stats = extractor.GetStatistics();
-
             await extractor.DisposeAsync();
-
-            // Should have 10 children × 5 parents each = 50 edges
-            stats.TotalEdgesRecorded.Should().Be(50);
-            stats.BucketStats[0].UniqueChildrenCount.Should().Be(10);
         }
+
+        // Should have 10 children × 5 parents each = 50 edges
+        ReverseEdgeBucketFileReader.TotalEdges(_tempDir, bucketCount: 1).Should().Be(50);
+        ReverseEdgeBucketFileReader.DistinctChildren(_tempDir, bucketIndex: 0).Should().Be(10);
     }
 
     [Fact]
-    public async Task GetStatistics_ReflectsRecordedEdges()
+    public async Task RecordEdgesBatch_WritesEveryEdgeAndClearsTheBuffer()
     {
-        await using (var extractor = new ReverseEdgeExtractor(bucketCount: 4, _tempDir))
+        var buffer = new List<(ulong Child, ulong Parent)>
         {
-            // Record 100 edges across different buckets
-            for (int i = 0; i < 100; i++)
-            {
-                extractor.RecordEdge(parent: (ulong)(0x2000 + i), child: (ulong)(0x0100 + i));
-            }
+            (0x0100UL, 0x1000UL),
+            (0x0100UL, 0x2000UL),
+            (0x0100UL, 0x3000UL),
+        };
 
-            var stats = extractor.GetStatistics();
-
+        await using (var extractor = new ReverseEdgeExtractor(bucketCount: 1, _tempDir))
+        {
+            extractor.RecordEdgesBatch(bucketIdx: 0, buffer);
             await extractor.DisposeAsync();
-
-            stats.BucketCount.Should().Be(4);
-            stats.TotalEdgesRecorded.Should().Be(100);
-            stats.BucketStats.Should().HaveCount(4);
-            stats.BucketStats.Sum(s => s.EdgeCount).Should().Be(100);
         }
+
+        buffer.Should().BeEmpty();
+        ReverseEdgeBucketFileReader.ReadBucket(_tempDir, 0).Should().Equal(
+            (0x0100UL, 0x1000UL),
+            (0x0100UL, 0x2000UL),
+            (0x0100UL, 0x3000UL));
     }
 
     [Fact]
@@ -137,11 +149,18 @@ public class ReverseEdgeExtractorTests : IAsyncLifetime
             }
 
             await Task.WhenAll(tasks);
-            var stats = extractor.GetStatistics();
-
             await extractor.DisposeAsync();
+        }
 
-            stats.TotalEdgesRecorded.Should().Be(1000); // 10 threads × 100 edges each
+        // 10 threads × 100 edges each, with no interleaved-write corruption: a torn write would
+        // leave a file length that isn't a whole number of 16-byte edges, or a child in the wrong
+        // bucket, both of which the reads below would catch.
+        ReverseEdgeBucketFileReader.TotalEdges(_tempDir, bucketCount: 4).Should().Be(1000);
+
+        foreach ((ulong child, ulong parent) in ReverseEdgeBucketFileReader.ReadAll(_tempDir, 4))
+        {
+            child.Should().BeInRange(0x0100, 0x0163);
+            parent.Should().Be(0x1000 + (child - 0x0100));
         }
     }
 
@@ -155,7 +174,7 @@ public class ReverseEdgeExtractorTests : IAsyncLifetime
             extractor.RecordEdge(parent: 0x1000, child: 0x0100);
             extractor.RecordEdge(parent: 0x2000, child: 0x0100);
 
-            bucket0 = Path.Combine(_tempDir, "reverse_edges_bucket_0.tmp");
+            bucket0 = ReverseEdgeBucketFileReader.BucketPath(_tempDir, 0);
 
             await extractor.DisposeAsync();
         }
@@ -194,26 +213,29 @@ public class ReverseEdgeExtractorTests : IAsyncLifetime
     [Fact]
     public async Task RecordEdge_BucketDistributionRoughlyUniform()
     {
-        await using (var extractor = new ReverseEdgeExtractor(bucketCount: 4, _tempDir))
+        const int bucketCount = 4;
+        const int edgeCount = 1000;
+
+        await using (var extractor = new ReverseEdgeExtractor(bucketCount, _tempDir))
         {
-            // Record 1000 edges
-            for (ulong i = 0; i < 1000; i++)
+            for (ulong i = 0; i < edgeCount; i++)
             {
                 extractor.RecordEdge(parent: 0x1000, child: i);
             }
 
-            var stats = extractor.GetStatistics();
-
             await extractor.DisposeAsync();
+        }
 
-            // Distribution should be roughly uniform (within ±30%)
-            var average = stats.TotalEdgesRecorded / stats.BucketCount;
-            var tolerance = average * 0.3;
+        // Distribution should be roughly uniform (within ±30%)
+        long[] counts = ReverseEdgeBucketFileReader.EdgeCountsPerBucket(_tempDir, bucketCount);
+        counts.Sum().Should().Be(edgeCount);
 
-            foreach (var bucket in stats.BucketStats)
-            {
-                bucket.EdgeCount.Should().BeCloseTo(average, (uint)tolerance);
-            }
+        long average = edgeCount / bucketCount;
+        var tolerance = (uint)(average * 0.3);
+
+        foreach (long count in counts)
+        {
+            count.Should().BeCloseTo(average, tolerance);
         }
     }
 }

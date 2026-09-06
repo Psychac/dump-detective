@@ -681,7 +681,7 @@ statically derived; everything here is not, and no plan should assume an answer.
 | 1b | ~~Is `ForwardEdgeBuckets` streamed or point-queried?~~ **CLOSED — § 9. Neither: it has zero production readers.** 33% of `cache.bin` is write-only | — | — |
 | 2 | ~~Opens per run~~ **CLOSED** — see § 7. Predicted ≈20 enumerations, observed ≈20.5; hashing down 78.5%, wall clock within noise | — | — |
 | 3 | ~~Does `DominatorImmediateDominatorAddresses` carry rows for folded leaves?~~ **CLOSED — § 13.3. Yes, every one of them** | — | — |
-| 4 | ~~How often is the dominance-chain-tree UI actually exercised per build?~~ **WRONG QUESTION — § 13.3.** The chain tree never reads the child list; `StaticRootLeakDetector` does | [format doc §4](cache-format-clean-slate-redesign.md)'s aggressive option | Restated as "how many static-root candidates per run?", still open |
+| 4 | ~~How often is the dominance-chain-tree UI actually exercised per build?~~ **WRONG QUESTION — § 13.3, then CLOSED — § 15.** The chain tree never reads the child list; `StaticRootLeakDetector` does, 0 times on 3 real dumps measured | — | — |
 | 5 | What does CSR cost/save *after* compression, rather than instead of it? | [format doc §7.1](cache-format-clean-slate-redesign.md) item 5 | Requires a CSR prototype to compress |
 
 Question 1 is the one that matters. It is cheap to answer relative to what it gates: a counter on
@@ -902,3 +902,69 @@ be rejected rather than silently decoded.
 fixed-stride zero-copy read for. Everything else on § 13.1's list is a later bump: the dominator
 decision (v7, ~98 or ~46 MiB), CSR (v8, ~245 MiB), and block compression (v9), per
 [format doc §7.1.1](cache-format-clean-slate-redesign.md).
+
+---
+
+## 15. v7 unblocked — `EnumerateRetainedSet` call frequency measured, and a bigger finding under it (2026-09-06)
+
+[Format doc §4](cache-format-clean-slate-redesign.md)'s remaining open item was reframed by §13.3 to
+"how many static-root candidates does `StaticRootLeakDetector` push through `EnumerateRetainedSet`
+per run, and is an O(R) in-memory `idom[]` inversion acceptable at that frequency." Instrumented the
+call site directly (`DD_PERF_RETAINED_SET=1`, counters on `StaticRootLeakDetector`'s three branches:
+shape-pre-check skip, the `EnumerateRetainedSet` path, and the no-tree-provider fallback) and ran a
+full CLI pass against three real dumps.
+
+| Dump | `allRoots` | `staticRootedAddresses` | `EnumerateRetainedSet` calls |
+|---|---:|---:|---:|
+| Reference (3.51 GB) | 1,411 | **0** | **0** |
+| 06-04 12:58 (3.3 GB) | 742 | **0** | **0** |
+| 21-04 (27.5 GB) | 5,037 | **0** | **0** |
+
+**Zero on all three, and it goes deeper than the retained-set call.** `StaticRootLeakDetector`'s
+whole main branch is gated on `staticRootedAddresses`, which is empty on every dump measured — the
+analyzer's core logic (not just the dominator-child-list-consuming part) doesn't execute at all on
+any of them.
+
+### 15.1 Verified independent of this project's own pipeline
+
+Before treating "zero" as an answer, checked whether it was a real dump characteristic or a bug in
+this project's root classification (`RootSetCache.RootRecord.IsStatic`, hard-coded `Kind` bytes 9/10
+against `ClrRootKind`). Two independent checks:
+
+- **Reflected the installed ClrMD 4.0.732401's actual `ClrRootKind` enum values** rather than trusting
+  the hard-coded constants match: `ThreadStaticVar = 9`, `StaticVar = 10` — exactly what
+  `RootSetCache` assumes. Ruled out an enum-value drift from the ClrMD 4 upgrade.
+- **Added `RootKindHistogramDiagnosticTests`**, which calls `heap.EnumerateRoots()` directly with zero
+  dependency on this project's root cache, index writer, or classification logic, and tallies
+  `ClrRoot.RootKind` on its own. Same result, at the ClrMD level, on both dumps checked:
+
+  | Dump | Stack | StrongHandle | Pinned | AsyncPinned | SizedRef | StaticVar/ThreadStaticVar | Total |
+  |---|---:|---:|---:|---:|---:|---:|---:|
+  | Reference | 971 | 395 | 26 | 11 | 8 | **0** | 1,411 |
+  | 21-04 | 3,465 | 1,500 | 26 | 14 | 32 | **0** | 5,037 |
+
+  Both totals account for every root exactly (971+395+26+11+8 = 1,411; 3,465+1,500+26+14+32 = 5,037)
+  — not a rounding artifact or a dropped category, genuinely zero `StaticVar`/`ThreadStaticVar` roots
+  reported by ClrMD's own root walker on either dump.
+
+**Not settled: why.** Three same-environment IIS `w3wp.exe` crash dumps (likely captured by the same
+tooling) agreeing doesn't rule out a shared cause specific to how *these* dumps were captured (dump
+type/flags, .NET runtime version, or a ClrMD limitation for that combination) rather than a universal
+property of real-world dumps. That's a question about `StaticRootLeakDetector`'s real-world hit rate
+in general, out of scope for the cache redesign — flagging it, not chasing it further here.
+
+### 15.2 What this settles for v7
+
+Given zero measured calls across every dump available, an O(R) `idom[]`-inversion recompute on the
+rare dump where a static root *does* exist costs nothing that matters in the aggregate — there is no
+"repeated inversion" cost to weigh against the conservative option's smaller saving, because the
+aggressive path was never exercised on any dump in this pass. **Recommendation: take the aggressive
+option** — drop `DominatorChildOffsets`/`DominatorChildAddresses`, narrow
+`ImmediateDominatorAddresses`, derive the child direction on demand by inverting `idom[]` — for
+~98 MiB (11.5% of 852.4 MiB, format doc §4).
+
+The caveat in §15.1 is the reason this is a recommendation, not a closed decision the way v6's items
+were: it rests on the call frequency being genuinely low in general, which 0-for-3 supports but
+doesn't prove for every real dump this tool will ever see. If a future dump does exercise this path
+heavily, the conservative option (§4, ~46 MiB) remains available with no new measurement needed —
+this doesn't foreclose it.

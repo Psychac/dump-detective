@@ -361,13 +361,31 @@ chain-tree UI shows rather than just moving where it is computed. Note also that
 **new code**, not existing code relocated: the current builder consumes Lengauer-Tarjan output, not
 a persisted `idom[]`.
 
-**Recommendation**: count how many static-root candidates a real run pushes through
-`EnumerateRetainedSet` before choosing. If it's a handful, the aggressive option is a clean win —
-one R-sized inversion, reused across all of them. If it's frequent enough that the ~51 MiB of
-resident `int[]` the inversion needs at 6.69M rows would sit live for most of a run, that is a
-bounded-memory cost the conservative option avoids at a smaller (but still real) disk saving. This
-doc doesn't have that count — flagging the fork, not resolving it, same discipline as the width-flag
-boundary case in §2.4 that also can't be validated without real data at the relevant scale.
+> **✅ MEASURED (2026-09-06) — recommendation resolved to the aggressive option.**
+> [cache-redesign-measurements.md](cache-redesign-measurements.md) § 15 instrumented the
+> `EnumerateRetainedSet` call site directly and ran it against three real dumps (3.51 GB, 3.3 GB,
+> 27.5 GB): **zero calls on all three**, because `staticRootedAddresses` — the whole analyzer's
+> gating set, not just this code path — was empty on every one. Verified independent of this
+> project's own root classification by reflecting ClrMD 4's actual `ClrRootKind` enum values (rules
+> out an enum-drift bug from the ClrMD 4 upgrade) and by tallying `heap.EnumerateRoots()` directly
+> with no dependency on this project's cache or index writer at all — same zero, at the ClrMD level,
+> on both dumps checked that way.
+>
+> At zero measured calls, there is no "repeated inversion" cost to weigh — the aggressive option's
+> O(R) recompute was never exercised on any dump in this pass, so it costs nothing that matters in
+> the aggregate. **Take the aggressive option**, ~98 MiB. This is a recommendation, not a fully
+> closed question: it rests on the call frequency being genuinely low in general, which 0-for-3
+> supports but doesn't prove for every dump this tool will ever see, and measurements § 15.1 flags
+> that the three dumps tested share an environment (IIS `w3wp.exe` crash dumps) that could itself be
+> the reason, not a universal property. If a future dump exercises this path heavily, the
+> conservative option above remains available with no new measurement needed.
+
+**Superseded reasoning kept for record.** The recommendation originally here asked to count how many
+static-root candidates a real run pushes through `EnumerateRetainedSet` before choosing: a handful
+would make the aggressive option's one R-sized inversion (reused across all of them) a clean win;
+frequent enough that the ~51 MiB of resident `int[]` at 6.69M rows sat live for most of a run would
+make the conservative option's smaller-but-real saving the safer bet. The count above settles it in
+the first direction.
 
 ## 5. Block-compressed sections — the actual resolution to compression vs. point-lookup
 

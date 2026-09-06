@@ -15,6 +15,40 @@ namespace DumpDetective.Analysis.Analyzers
     {
         private readonly record struct ObjectMetadata(bool IsValid, string TypeName, ulong Size, ulong MethodTable);
 
+        // ── Measurement scaffolding: open question in docs/cache/cache-format-clean-slate-redesign.md
+        // §4 — how many times a run actually calls IDominatorTreeProvider.EnumerateRetainedSet, which
+        // is the only production consumer of the persisted dominator child list. That count (not "how
+        // often is a UI opened") is what the aggressive child-list-removal option is gated on: if an
+        // on-demand idom[] inversion replaced the persisted list, it would be built once per run and
+        // reused, so what matters is whether the call ever happens and how large a subtree it walks,
+        // not the count on its own. Recording only — no behaviour change. Set
+        // DD_PERF_RETAINED_SET=1 to print a summary line on Dispose.
+        internal static readonly bool PerfLogRetainedSet =
+            Environment.GetEnvironmentVariable("DD_PERF_RETAINED_SET") == "1";
+        private static long s_shapePreCheckSkips;
+        private static long s_enumerateRetainedSetCalls;
+        private static long s_enumerateRetainedSetObjectsTotal;
+        private static long s_enumerateRetainedSetObjectsMax;
+        private static long s_noTreeProviderFallbacks;
+        private static long s_rootsScanned;
+        private static long s_staticRootedAddressCount;
+        private static long s_allRootsCount;
+
+        /// <summary>Writes the recorded call counts as a one-line summary; returns it for tests to assert on.</summary>
+        internal static string DumpRetainedSetTrace()
+        {
+            long calls = Interlocked.Read(ref s_enumerateRetainedSetCalls);
+            long total = Interlocked.Read(ref s_enumerateRetainedSetObjectsTotal);
+            double avg = calls > 0 ? total / (double)calls : 0.0;
+            return $"[PERF] RetainedSet: allRoots={Interlocked.Read(ref s_allRootsCount):N0}, " +
+                $"staticRootedAddresses={Interlocked.Read(ref s_staticRootedAddressCount):N0}, " +
+                $"rootsScanned={Interlocked.Read(ref s_rootsScanned):N0}, " +
+                $"EnumerateRetainedSet called {calls:N0} times, " +
+                $"{total:N0} objects visited total (avg {avg:N1}/call, max {Interlocked.Read(ref s_enumerateRetainedSetObjectsMax):N0}), " +
+                $"{Interlocked.Read(ref s_shapePreCheckSkips):N0} roots skipped by the shape pre-check, " +
+                $"{Interlocked.Read(ref s_noTreeProviderFallbacks):N0} roots fell back (no tree provider or no retained bytes)";
+        }
+
         public string Name => "Static Root Leak Detection";
         public string Category => "Memory";
 
@@ -136,6 +170,12 @@ namespace DumpDetective.Analysis.Analyzers
             progress?.Report(new(0, "resolving static roots"));
             IReadOnlyList<(string RootKind, ulong TargetAddr, ulong RootAddr)> allRoots = cache.GetOrBuildRootTriples(heap);
             HashSet<ulong> staticRootedAddresses = cache.GetStaticRootedAddresses(heap);
+
+            if (PerfLogRetainedSet)
+            {
+                Interlocked.Add(ref s_allRootsCount, allRoots.Count);
+                Interlocked.Add(ref s_staticRootedAddressCount, staticRootedAddresses.Count);
+            }
             var staticFieldsByRootAddress = cache.GetStaticFieldsByRootAddress(heap);
 
             // §12.1 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): null
@@ -155,6 +195,8 @@ namespace DumpDetective.Analysis.Analyzers
                     continue;
 
                 rootsScanned++;
+                if (PerfLogRetainedSet)
+                    Interlocked.Increment(ref s_rootsScanned);
                 if (rootsScanned % 50 == 0)
                     progress?.Report(new(rootsScanned, "scanning static roots", $"{results.Count} significant"));
 
@@ -178,6 +220,9 @@ namespace DumpDetective.Analysis.Analyzers
                 // single-entry result directly from already-resolved rootMetadata.
                 if (!RetainedSizeCandidateSelector.RequiresWalk(cache, heap, rootMetadata.MethodTable))
                 {
+                    if (PerfLogRetainedSet)
+                        Interlocked.Increment(ref s_shapePreCheckSkips);
+
                     objectsKeptAlive = 1;
                     totalSize = rootMetadata.Size;
                     topRetainedTypes = new List<RetainedTypeInfo>(1)
@@ -207,6 +252,9 @@ namespace DumpDetective.Analysis.Analyzers
                     containsEventHandlers = false;
                     int count = 0;
                     ulong gen2OrLohBytes = 0;
+
+                    if (PerfLogRetainedSet)
+                        Interlocked.Increment(ref s_enumerateRetainedSetCalls);
 
                     foreach (ulong address in treeProvider.EnumerateRetainedSet(rootAddress))
                     {
@@ -259,6 +307,12 @@ namespace DumpDetective.Analysis.Analyzers
                             gen2OrLohBytes += size;
                     }
 
+                    if (PerfLogRetainedSet)
+                    {
+                        Interlocked.Add(ref s_enumerateRetainedSetObjectsTotal, count);
+                        InterlockedMax(ref s_enumerateRetainedSetObjectsMax, count);
+                    }
+
                     objectsKeptAlive = count;
                     scanWasCapped = false;
                     topRetainedTypes = GetTopRetainedTypes(typeStats);
@@ -267,6 +321,9 @@ namespace DumpDetective.Analysis.Analyzers
                 }
                 else
                 {
+                    if (PerfLogRetainedSet)
+                        Interlocked.Increment(ref s_noTreeProviderFallbacks);
+
                     // Dominator tree unavailable for this run (Stage B not built, or this root
                     // wasn't reachable when the tree was built) — no exact retained-set analysis
                     // possible; report the direct object only rather than guess.
@@ -332,7 +389,23 @@ namespace DumpDetective.Analysis.Analyzers
                 results.Add(analysis);
             }
 
+            if (PerfLogRetainedSet)
+                Console.Error.WriteLine(DumpRetainedSetTrace());
+
             return results;
+        }
+
+        /// <summary>Interlocked running-max — there is no built-in for this shape.</summary>
+        private static void InterlockedMax(ref long location, long candidate)
+        {
+            long observed = Interlocked.Read(ref location);
+            while (candidate > observed)
+            {
+                long prior = Interlocked.CompareExchange(ref location, candidate, observed);
+                if (prior == observed)
+                    return;
+                observed = prior;
+            }
         }
 
         private List<RetainedTypeInfo> GetTopRetainedTypes(Dictionary<string, RetainedTypeInfo> typeStats)

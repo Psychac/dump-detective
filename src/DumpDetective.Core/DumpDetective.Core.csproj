@@ -19,5 +19,6 @@
     <InternalsVisibleTo Include="DumpDetective.Reporting" />
     <InternalsVisibleTo Include="DumpDetective.Cli" />
     <InternalsVisibleTo Include="DumpDetective.Tests" />
+    <InternalsVisibleTo Include="ProfileRootPhase" />
   </ItemGroup>
 </Project>

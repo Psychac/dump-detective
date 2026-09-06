@@ -24,5 +24,6 @@
     <InternalsVisibleTo Include="DumpDetective.Tests" />
     <InternalsVisibleTo Include="BenchmarkSuite1" />
     <InternalsVisibleTo Include="ProfileRootEnumeration" />
+    <InternalsVisibleTo Include="ProfileRootPhase" />
   </ItemGroup>
 </Project>

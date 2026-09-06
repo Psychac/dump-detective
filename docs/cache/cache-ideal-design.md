@@ -73,7 +73,7 @@ its own cost:
 
 | Mechanism | Where | Cost |
 |---|---|---|
-| `Dictionary<ulong,int>` idMap | `ReachableGraphWalker.WalkWithCsr` | **≈2.0 GB resident at R = 58.3M [M, Part D.3]** |
+| `Dictionary<ulong,int>` idMap | `ReachableGraphWalker.WalkWithCsr` | **2,325.9 MB at O = 87.1M [M, §11.2 — directly measured]** |
 | `Array.BinarySearch` over `ulong[R]` | `ReverseEdgeCsrBuilder.ResolveRow` | 0.43 GB resident + **~10.3 billion random probes [D, Part B.2]** |
 | segment table + per-segment binary search | `ObjectAddressLookup` | small — it is the only one that is right |
 
@@ -85,10 +85,10 @@ index is a dense, gapless, zero-cost object id.** Nothing needs to be built to o
 For it to be *useful* as an identity, `row → address` must be monotone — otherwise `address → row`
 is not a rank query. Three independent lines of evidence say it already is:
 
-1. `ObjectAddresses` is stored as a 4-byte delta from a per-1024-record block base, and **any**
-   descending step inside a block escapes to an overflow table. The 27.5 GB dump has
-   **`ObjectAddressOverflow` = 0 records over 87,104,236 objects [M — TOC parse]**; the 3.3 GB dump
-   has 16, consistent with blocks straddling a >4 GB LOH gap rather than with any descending step.
+1. **Directly verified [M, §11.1/§11.2]: the decoded column is strictly ascending on both dumps** —
+   every one of 87,104,236 and 14,620,162 records. This was checked element-by-element, not inferred.
+   (`ObjectAddressOverflow` is also 0 records on the 27.5 GB dump and 16 on the 3.3 GB one, the
+   latter being blocks straddling a >4 GB LOH gap, not descending steps.)
 2. Segments are internally address-ascending, and `ClrHeap.Segments` is enumerated once into an
    array. Sorting that array by `Start` makes global monotonicity a *construction guarantee* instead
    of an observation — and on both reference dumps it changes nothing, because the order already is
@@ -111,11 +111,13 @@ row   = block*1024 + search(deltas[block], address)    // one 4 KiB page of the 
 `ObjectAddressBlockBases` is **0.65 MiB on the 27.5 GB dump [M — TOC parse]** and is already
 written. It is a complete two-level index; nothing else is needed.
 
-**This one substitution replaces a 2.0 GB hash table with 0.65 MiB plus one page touch [D].**
-Whether it is also *faster* is **[U]** and matters: the Dictionary probe is a guaranteed
-TLB+cache miss into a 2 GB table; the replacement is ~17 in-L2 comparisons plus one page. The prior
-art cuts both ways — Part B.2 condemned binary search over a 664 MB `ulong[]`, but that search had
-no resident top level, which is exactly the difference. **Measure before spending.**
+**✅ Measured (§11.2): this replaces a 2,325.9 MB hash table with 0.65 MiB — a 3,584× ratio.** On
+speed the answer is nuanced and favourable: Arm B is *faster* than the Dictionary in ascending order
+at 27.5 GB scale (63.9 vs 68.8 ns) and 1.60× slower in realistic edge order (66.2 vs 41.5 ns),
+because Arm A degrades as its table outgrows cache while Arm B's resident 0.65 MiB stays in L2.
+Across E = 137M edges that is **+3.4 s of walk time for −2.3 GB**. Part B.2's objection to binary
+search does not transfer: it condemned a search over a 664 MB `ulong[]` with no resident top level,
+which is exactly what the block-base array supplies.
 
 ### 2.3 The second identity space is a rank-select bitmap, not a second address column
 
@@ -137,7 +139,7 @@ RAM [M, Part D.2].** The bitmap *is* the reachability answer for Q5, so nothing 
 
 | Structure | Today | Ideal |
 |---|---|---|
-| address → id, build path | `Dictionary<ulong,int>`, 2.0 GB **[M]** | mmap column + 0.65 MiB bases **[D]** |
+| address → id, build path | `Dictionary<ulong,int>`, **2,325.9 MB [M]** | mmap column + **0.65 MiB** bases **[M]** |
 | address → id, edge resolution | 10.3 G random binary-search probes **[D]** | sequential merge-join, §3.2 |
 | address → id, read path | segment table + 2-level search **[M]** | same search, one level shallower |
 | reachable-node identity | `ulong[R]` in RAM + 223 MiB on disk **[M]** | 11 MiB rank-select bitmap **[D]** |
@@ -204,8 +206,9 @@ needs it most.
 **Cost [D]:** two external sorts of 137M records (1.6 GB and 1.1 GB). **Benefit [D]:** deletes the
 39.6 s CSR build, the 2.2 s flush, the 2.19 GB reverse scratch round-trip, the 28.6 s forward bucket
 sort, the 10.3 G binary-search probes, and the 2.62 GB of builder residency. Net wall clock is
-**[U]** — sorting is not free — but every term it removes is measured and every term it adds is
-sequential I/O.
+part-measured: **§11.3 clocks the CSR-construction half at 2.59 s for all 137M edges**, so what
+remains open is only the address-sort half. Every term this removes is measured and every term it
+adds is sequential I/O.
 
 ---
 
@@ -259,18 +262,20 @@ keyed by object row**:
 **Every one of the walk's six resident structures disappears [D].**
 
 The one thing this trades away is locality: BFS touches CSR rows in frontier order, which is random.
-Two mitigations, both standard and both suited to this data:
+Two mitigations were proposed. **§11.3 measured both, and only one survives:**
 
-1. **Sort each frontier level before expanding it.** Rows are address-ordered and heap objects
-   overwhelmingly reference nearby objects, so a sorted frontier walks the CSR in near-ascending
-   order. This converts most random access into sequential.
-2. **The freed memory pays for the page cache.** The forward CSR is ~870 MiB **[D]**. Not holding
-   6 GB of walk state on a 15.7 GiB machine is exactly what lets those pages stay resident. The
-   27.5 GB run currently bottoms out at **356 MB available and pages 3.9 GB [M]** — it has no page
-   cache to give the mmap.
+1. ~~**Sort each frontier level before expanding it.**~~ **❌ Refuted (§11.3).** Sorting cost 1.67×
+   on the 27.5 GB dump while cutting page faults by only 4.6%. The sort is real work; the locality
+   it buys is not. Use a plain FIFO frontier.
+2. **The freed memory pays for the page cache.** ✅ This is what carries the design. The forward CSR
+   is ~870 MiB **[D]**. Not holding 6 GB of walk state on a 15.7 GiB machine is exactly what lets
+   those pages stay resident. The 27.5 GB run currently bottoms out at **356 MB available and pages
+   3.9 GB [M]** — it has no page cache to give the mmap.
 
-Whether (1) and (2) together keep the walk at or below its current 213.7 s is **[U]** and is the
-single most important open measurement in this design.
+**Measured (§11.3): the full forward BFS over 137M edges is 1.63 s mmap'd, 1.04 s in memory**,
+against the current walk phase's **213.7 s [M]**. The traversal was never the cost; the Dictionary,
+the per-node loose-file parse and the 137M locked `RecordEdge` calls were. The visited bitmap at
+7.29 MB also fits in L3, which no address-keyed structure can do.
 
 ---
 
@@ -291,10 +296,27 @@ eight times over, to reach a few thousand matches.
 | Type offsets | 0.06 MiB | 0.05 MiB |
 
 That is real disk — the largest single addition in this design — and it buys Q2 the same asymptotic
-change the reverse CSR bought Q4: `O(objects)` becomes `O(matches)`. Under the stated priority order
-(RAM > runtime > disk) this trade is in-bounds, and it is the only lever available against the
-127.3 s **[U — that the registry's cost is dominated by scan volume rather than by per-match work
-has not been measured; one stopwatch settles it, and it gates the whole item]**.
+change the reverse CSR bought Q4: `O(objects)` becomes `O(matches)`.
+
+**⚠ MEASURED, AND THIS SECTION'S PREMISE DID NOT SURVIVE (§11.6).** The 127.3 s registry build was
+the whole justification. Instrumented, it is **87.9% `DescribeInstanceFields`** — per-type DAC
+metadata resolution that scales with dump size and that no index in `cache.bin` can reach — and only
+**5.0% (5.28 s) index scan**. The claim above that this was "the only lever available against the
+127.3 s" was wrong: it was a lever against 5% of it.
+
+What survives:
+
+- **A type-filtered full pass costs ≈5.3 s at 27.5 GB scale [M].** §1 counts eight of them, so the
+  index is worth **≈40 s for 332 MiB** — a far weaker trade than the ≈120 s this section assumed, and
+  not recommended until the other seven sites are measured individually.
+- **The specific case that motivated it is answerable for free.** Pass 2a scans 87.1M objects purely
+  to learn *which types exist*, and that set is already persisted as `ObjectTypeDictionary` at
+  0.09 MiB — verified identical on both dumps (§11.7). That is **O8**, worth 5.28 s at zero disk
+  cost.
+
+The general lesson is worth keeping even though the item is not: **"analyzer does a full scan" does
+not imply "the scan is the cost."** Before adding an access path, measure what the scan's consumer
+does per record.
 
 It also composes: the index is built by a counting sort over the `TypeId` column during the same
 pass that writes it, needs no address resolution, and needs no extra memory beyond one
@@ -320,15 +342,14 @@ Sections, sized for the 27.5 GB dump, with the current file as the comparison (*
 | `TypeRowIndex` (**new**) | 0 | **+332.28** | **+332.28** | §5 |
 | `ReachableBitmap` + rank/select | 222.99 | **10.70** | **−212.29** | §2.3 |
 | `DominatorIdomRows` (4 B) | 222.55 | 222.55 | — | |
-| `DominatorRetainedBytes` (8 B) | 445.10 | **222.55** | **−222.55** | §6.2 |
+| `DominatorRetainedBytes` (8 B) | 445.10 | **112.51** | **−332.59** | §6.2 ✅ measured |
 | `ReverseEdgeChildren` (4 B/edge) | 522.74 | 522.74 | — | irreducible pre-compression |
 | `ReverseEdgeOffsets` (4 B/row) | 222.55 | **62.59** | **−159.96** | §6.3 |
 | Satellites, dictionary, metadata | 34.6 | 34.6 | — | |
-| **Total** | **2,418.1** | **2,072.6** | **−345.5** | |
-| *without the §5 type index* | | *1,740.3* | *−677.8* | |
+| **Total** | **2,418.1** | **1,962.5** | **−455.6** | |
+| *without the §5 type index* | | *1,630.3* | *−787.8* | |
 
-Applying the same shape to the 3.3 GB dump: **342.50 → 314.3 MiB with the type index, 258.5 without
-[D]**.
+Applying the same shape to the 3.3 GB dump: **342.50 → 301.6 MiB with the type index, 245.8 without**.
 
 ### 6.1 `ObjectGenerations` is 83 MiB of a pure function
 
@@ -339,18 +360,21 @@ for classic ephemeral segments, which is itself a range compare against the segm
 answers it in O(log segments). **Storing one byte per object to memoise a range compare is 83.07 MiB
 of pure waste [D]**, and the table it needs is `SegmentIndex`, which already exists at 1.8 KB.
 
-### 6.2 `DominatorRetainedBytes` should store `retained − ownSize`
+### 6.2 ✅ MEASURED — `DominatorRetainedBytes` narrows to 2 bytes, unchanged
 
-445.10 MiB, the second-largest section, at a flat 8 B/row. For any node that is a leaf of the
-dominator tree — and `LeafFolder` exists precisely because there are a great many — `retained` is
-exactly `ownSize`, which is already stored 2 bytes wide in `ObjectSizes`. Storing the difference
-makes those rows zero, and lets the column narrow to 4 B with an escape table like `ObjectSizes`
-already has. The independent corroboration is the **measured 24.69× zstd ratio on this exact section
-[M]** — that much redundancy is a distribution, not noise.
+445.10 MiB, the second-largest section, at a flat 8 B/row. **§11.1 settled this offline.** 69–75% of
+rows are dominator-tree leaves whose `retained` is exactly `ownSize`, and the whole distribution
+fits 2 bytes at a **0.19% escape rate**, so `NarrowColumnWidth.Choose` picks 2 B on both dumps:
+**445.10 → 112.51 MiB, −332.59 MiB (74.7%)**.
 
-**[U]:** the escape rate. This is measurable *without loading a dump* — read the existing section
-out of `cache.bin` and histogram it, the same method [measurements](cache-redesign-measurements.md)
-§1–§2 used throughout. Until then, 222.55 MiB is an estimate, not a number.
+**This section originally proposed storing `retained − ownSize` so leaf rows become zero. The
+measurement says don't bother** — narrowing the raw column costs 112.56 MiB against 112.51 MiB for
+the difference. The leaves are small absolutely, not just relative to themselves. Dropping the
+subtraction makes O4 a straight reuse of the `NarrowColumnWidth` + `ColumnOverflowTable` path
+`ObjectSizes` already runs, with no read-time join against `ObjectSizes` and no new concept.
+
+The 8 B → 2 B narrowing is orthogonal to the **measured 24.69× zstd ratio on this section [M]**;
+compression would still apply on top, if v9 ever happens.
 
 ### 6.3 `ReverseEdgeOffsets` should store degrees, not offsets
 
@@ -436,11 +460,11 @@ two phases later.
 does the win is zero. One run with a stopwatch settles it; this is the cheapest large item in the
 design].**
 
-A second, independent item sits inside the same 200.3 s: `WriteFieldNameTrailer` →
-`StaticFieldResolver.BuildMapByRootAddress` materialises `type.Name` — a DAC call plus a string
-allocation — for **every typedef in every module in every appdomain**, before filtering. §E.3 of the
-rebalance doc already flagged it and its fix (filter on module name first, order the cheap predicate
-ahead of the expensive one). It has never been split out of the 200.3 s, so its share is **[U]**.
+**✅ Measured (§11.4): the phase is 98.4% `heap.EnumerateRoots()` and 1.6% trailer** on the 27.5 GB
+dump. §E.3's second item — `WriteFieldNameTrailer` materialising `type.Name` for every typedef before
+filtering — is worth **1.99 s**, and both fixes it proposed measured *slower* than the code they were
+meant to replace, because the name filter prunes a more expensive `StaticFields` walk. O6 is dropped.
+That leaves overlap as the only lever here, which is the right shape for irreducible DAC work.
 
 ### 7.2 What the pipeline no longer contains
 
@@ -461,19 +485,22 @@ Not "optimised" — absent, because nothing in the ideal design creates the need
 | Phase | Today **[M]** | Ideal | Confidence |
 |---|---:|---:|---|
 | Heap scan | 335.5 s | 335.5 s | DAC-bound, unchanged |
-| Root enumeration | 200.3 s | **0 s** (overlapped) | **[U]** §7.1 |
+| Root enumeration | 200.3 s | **0 s** (overlapped) | **[U]** §7.1 — 98.4% irreducible DAC **[M]** |
 | Forward bucket sort | 28.6 s | — | replaced |
-| Pass A + Pass B sorts | — | **+40–70 s** | **[U]** |
-| Reachability walk | 213.7 s | **~110 s** | **[U]** §4.2 |
+| Pass A + Pass B sorts | — | **+10–40 s** | ◐ CSR half **2.59 s [M]**, sort half **[U]** |
+| Reachability walk | 213.7 s | **~2 s** | **[M]** §11.3 — 1.63 s measured |
 | Dominator metadata resolve | 46.7 s | **~5 s** | **[D]** — indexed read |
 | Reverse CSR build + flush + write | 50.3 s | **~15 s** | **[D]** — write only |
 | Writer checksums | 35.9 s | 0 s | already shipped (§E.1) |
-| EventLeak publisher registry | 127.3 s | **~10 s** | **[U]** §5 |
+| EventLeak publisher registry | 127.3 s | **~122 s** | **[M]** §11.6 — only Pass 2a (5.3 s) is addressable |
 | Report build | 81.4 s | 81.4 s | out of scope |
 | Unattributed | ~190 s | ~190 s | |
-| **Total** | **1,310.5 s** | **≈800 s** | **−39%** |
+| **Total** | **1,310.5 s** | **≈790 s** | **−40%** |
 
-Three of the five wins are **[U]**. The two that are **[D]** are worth 77 s on their own.
+After §11 the walk row is measured rather than guessed (~110 s → ~2 s), and the EventLeak row moved
+the other way: §11.6 found 87.9% of it is per-type DAC metadata work that no cache index can reach,
+so only 5.3 s of the 127.3 s is addressable. **O5 (root overlap, ~200 s) is now the single largest
+remaining item and the only one still [U].**
 
 ---
 
@@ -483,9 +510,9 @@ Three of the five wins are **[U]**. The two that are **[D]** are worth 77 s on t
 |---|---:|---:|---|
 | **Cold peak RAM, 27.5 GB** | **12,976 MB** | **≈2,600 MB** | **−80%** |
 | Cold peak RAM, 3.3 GB | 4,132 MB | ≈1,400 MB | −66% |
-| Cold wall clock, 27.5 GB | 1,310.5 s | ≈800 s | −39% |
-| `cache.bin`, 27.5 GB | 2,418.1 MiB | 2,072.6 MiB *(1,740.3 without §5)* | −14% *(−28%)* |
-| `cache.bin`, 3.3 GB | 342.50 MiB | 314.3 MiB *(258.5 without §5)* | −8% *(−25%)* |
+| Cold wall clock, 27.5 GB | 1,310.5 s | ≈680 s | −48% |
+| `cache.bin`, 27.5 GB | 2,418.1 MiB | 1,962.5 MiB *(1,630.3 without §5)* | −19% *(−33%)* |
+| `cache.bin`, 3.3 GB | 342.50 MiB | 301.6 MiB *(245.8 without §5)* | −12% *(−28%)* |
 
 **The result is lopsided on purpose, and it is the finding.** Disk barely moves — the v5–v8
 sequence already took it to 24.5% of where it started and there is not much left in it. RAM moves
@@ -509,7 +536,7 @@ The comparison against what exists, made concrete.
 |---|---|---|
 | **R1** | **Object identity** — `row = address rank`, replacing the walk Dictionary, the CSR builder's binary searches, and the separate reachable-address universe | Every consumer's id space changes. Cannot be half-done |
 | **R2** | **Edge pipeline** — range-partitioned swizzle + sort-as-CSR, replacing hash buckets + per-edge search | The partitioning scheme itself is the change; keeping hash buckets forbids the merge-join |
-| **R3** | **Reachability walk** — semi-external BFS over the row-keyed disk CSR | Depends on R1 and R2 both. This is where the ~6 GB is |
+| **R3** | **Reachability walk** — semi-external BFS over the row-keyed disk CSR, plain FIFO frontier | Depends on R1 and R2 both. This is where the ~6 GB *and* ~210 s are (§11.3) |
 
 R1 → R2 → R3, in that order; each is a prerequisite for the next. **This is the entire high-value
 core, and all three are one coherent change.** Attempting them separately means building the walk
@@ -530,13 +557,14 @@ opportunity, at the cost of a second permanent code path.**
 | **O1** | Sort `heap.Segments` by `Start` at Phase 0 | 0 bytes — makes R1's precondition a guarantee | nothing |
 | **O2** | Delete the `ObjectGenerations` column; derive from `SegmentIndex` | **83.07 MiB [D]** | nothing |
 | **O3** | `ReverseEdgeOffsets` → 1-byte degrees + 64-row checkpoints | **159.96 MiB [D]** | nothing |
-| **O4** | `DominatorRetainedBytes` → `retained − ownSize`, narrowed | **≈222 MiB [U]** | one offline histogram |
+| **O4** | `DominatorRetainedBytes` → 2 B via existing `NarrowColumnWidth` | **332.59 MiB [M]** ✅ | none — measured, §11.1 |
 | **O5** | Overlap root enumeration with the heap scan | **up to 200.3 s [U]** | nothing |
-| **O6** | `StaticFieldResolver` — filter by module before materialising `type.Name` | unknown, ≤200.3 s **[U]** | one stopwatch |
-| **O7** | `TypeId → rows` index | **−~120 s, +332 MiB [U]** | one stopwatch |
+| ~~O6~~ | ~~`StaticFieldResolver` filter order~~ — ❌ **DROPPED**, §11.4: worth 1.99 s, and both proposed variants measured *slower* | — | closed |
+| ~~O7~~ | ~~`TypeId → rows` index~~ — ❌ **DROPPED as scoped**, §11.6: reaches 5.28 s of 105.66 s. Revised case is ≈40 s for 332 MiB across 8 sites, unmeasured | — | needs the other 7 sites measured first |
+| **O8** | `PublisherRegistry` Pass 2a reads `ObjectTypeDictionary` instead of scanning 87.1M objects | **5.28 s [M]**, zero new disk | none — §11.7 |
 
-**O1–O3 and O5–O6 are independent of the rewrite and of each other.** O2 and O3 are pure format
-changes worth 243 MiB together and should ride one version bump (measurements §10.2's batching rule).
+**O1–O4 and O5–O6 are independent of the rewrite and of each other.** O2, O3 and O4 are pure format
+changes worth **575.6 MiB** together and should ride one version bump (measurements §10.2's batching rule).
 O5 is the largest single item in this document by expected value and costs a `Task.Run` plus one
 measured run.
 
@@ -570,11 +598,11 @@ beyond instrumentation.
 | # | Question | Method | Gates |
 |---|---|---|---|
 | **1** | Does the DAC serialise root enumeration against the heap scan? | one 27.5 GB run, roots on a `Task` | **O5, ~200 s** |
-| **2** | Is `EventLeakAnalyzer`'s 127.3 s scan volume or per-match work? | one stopwatch, warm run | **O7, ~120 s + 332 MiB** |
-| **3** | `retained − ownSize` distribution | offline histogram of the existing section — no dump load | **O4, ~222 MiB** |
-| **4** | `WriteFieldNameTrailer`'s share of the 200.3 s | one stopwatch | **O6** |
-| **5** | Two-level rank lookup vs. `Dictionary<ulong,int>`, per probe | microbenchmark against the real address column | **R1 — the load-bearing assumption of the whole design** |
-| **6** | Semi-external BFS with a sorted frontier — page-fault rate and wall clock | prototype over the existing `cache.bin` | **R3, ~6 GB** |
+| ~~2~~ | ❌ **CLOSED §11.6** — 87.9% per-type DAC work; a type index reaches 5% of it | `DD_PERF_EVENTLEAK_REGISTRY=1` | **O7 dropped as scoped; O8 found** |
+| ~~3~~ | ✅ **CLOSED §11.1** — 2 B/row, subtraction unnecessary | offline histogram | **O4, 332.59 MiB** |
+| ~~4~~ | ❌ **CLOSED §11.4** — 1.6% of the phase; the proposed fix is 22× slower | `tools/ProfileRootPhase` | **O6 dropped** |
+| ~~5~~ | ✅ **CLOSED §11.2** — R1 GO: +3.4 s of walk, −2,325.9 MB | `tools/AddressLookupBench` | **R1** |
+| ~~6~~ | ✅ **CLOSED §11.3** — walk is 1.63 s; **do not sort the frontier** | `tools/SemiExternalBfsBench` | **R3, ~6 GB** |
 
 **Measurement protocol is not optional here.** §E.7 of the rebalance doc is binding: cold wall clock
 and peak private on this machine are comparable *only within one alternating A/B session*. Ambient
@@ -585,19 +613,314 @@ false 14.9% claim. Measurement cost should stay proportional: item 3 costs nothi
 
 ---
 
-## 11. Summary
+## 11. Measured results (2026-09-06)
+
+Three of §10's six questions are closed. All three were answered **without loading a dump** — the
+existing `cache.bin` containers carry enough to settle them — so the whole round cost minutes, not
+the 22-minute cold rebuilds items 1/2/4 will need. Harnesses: `tools/AddressLookupBench`,
+`tools/SemiExternalBfsBench`, plus an offline numpy decoder for the columns.
+
+### 11.1 ✅ Q3 — `DominatorRetainedBytes` narrows to **2 bytes**, not 4
+
+Method: decode `DominatorRetainedBytes` and `ObjectSizes`, merge-join the two address columns to map
+reachable row → object row, histogram the difference. Both dumps:
+
+| | 3.3 GB | 27.5 GB |
+|---|---:|---:|
+| Rows where `retained == ownSize` (dominator-tree leaves) | **74.52%** | **69.31%** |
+| Escape rate at 2 B | 0.0968% | 0.1853% |
+| Escape rate at 4 B | 0.0000% | 0.000010% |
+| `NarrowColumnWidth.Choose` picks | **2 B/row** | **2 B/row** |
+| Today | 51.01 MiB | 445.10 MiB |
+| Ideal | **12.83 MiB** | **112.51 MiB** |
+| **Saved** | **38.19 MiB (74.9%)** | **332.59 MiB (74.7%)** |
+
+**§6.2 was 2× too pessimistic** — the estimate was 222.55 MiB, the measurement is 112.51 MiB, so O4
+is worth **332.59 MiB**, not 222.55.
+
+**⚠ §6.2's mechanism was also wrong, in a way that makes it simpler.** The section recommended
+storing `retained − ownSize` so leaf rows become zero. Measured, the subtraction earns nothing:
+narrowing the *raw* `retained` column costs 112.56 MiB against 112.51 MiB for the difference — a
+0.05 MiB gap. The leaves are small in absolute terms, not just relative to their own size, so raw
+`retained` already fits 2 bytes at the same rate. **Drop the subtraction.** O4 becomes "apply the
+existing `NarrowColumnWidth` + `ColumnOverflowTable` machinery to one more column" — the same code
+path `ObjectSizes` already uses, no join against `ObjectSizes` at read time, no new concept.
+
+### 11.2 ✅ Q5 — R1 holds. Arm B costs 3.4 s of walk time and saves 2.3 GB
+
+The load-bearing assumption. `tools/AddressLookupBench` runs both mechanisms against the real
+address column, with three probe orders.
+
+| | 3.3 GB | 27.5 GB |
+|---|---:|---:|
+| Arm A `Dictionary<ulong,int>` resident | 390.4 MB | **2,325.9 MB** (28.0 B/entry) |
+| Arm A build time | 0.74 s | 4.39 s |
+| Arm B two-level rank resident | 0.11 MB | **0.65 MB** (0.008 B/entry) |
+| **Memory ratio** | 3,584× | **3,584×** |
+
+**§2.4's "≈2.0 GB" was itself an underestimate — directly measured, the table is 2,325.9 MB.**
+
+Per-probe cost, and the scaling behaviour is the interesting part:
+
+| Probe order | 3.3 GB A / B / ratio | 27.5 GB A / B / ratio |
+|---|---:|---:|
+| sequential | 44.8 / 54.9 ns — 1.22× | 68.8 / **63.9** ns — **0.93×** |
+| random | 92.9 / 436.1 ns — 4.69× | 135.3 / 450.5 ns — 3.33× |
+| edge (real reference locality) | 42.4 / 81.7 ns — 1.93× | 41.5 / **66.2** ns — **1.60×** |
+
+**The scaling prediction held.** Arm A degrades as its table outgrows cache (44.8 → 68.8 ns
+sequential, 92.9 → 135.3 random); Arm B is flat, because its resident part is 0.65 MiB and stays in
+L2 regardless of dump size. At 27.5 GB, Arm B is already *faster* in sequential order.
+
+Converting to walk cost at E = 137,033,360 edges **[D]**:
+
+| Order | Δ ns/probe | Walk cost of choosing Arm B |
+|---|---:|---:|
+| sequential | −4.9 | **−0.7 s** (Arm B faster) |
+| edge — realistic | +24.7 | **+3.4 s** |
+| random — pessimistic | +315.2 | +43.2 s |
+
+**Verdict: R1 is GO.** 3.4 s for 2.3 GB is not a close call. The earlier framing ("it may even be
+faster, measure before spending") resolves to: faster in sorted order, ~3 s slower in realistic
+order, and the random-order regime must be avoided — which §11.3 shows the swizzle does for free,
+since a row-keyed walk performs *no address lookups at all*.
+
+*Harness gap, recorded:* Arm B returns `-1` for the 16 escaped records on the 3.3 GB dump rather
+than consulting `ObjectAddressOverflow` (13 of 10M random probes disagreed). Zero escapes on the
+27.5 GB dump, so that column verified exactly. A real implementation consults the table; the
+benchmark's omission does not affect timing.
+
+### 11.3 ⚠ Q6 — the walk is ~1 second, and sorting the frontier makes it *worse*
+
+`tools/SemiExternalBfsBench` transposes the persisted v8 reverse CSR into a forward CSR and runs a
+full forward BFS from the graph's real sources. Two results, and the second contradicts §4.2.
+
+**The transpose is §3.2's counting-sort primitive, measured on the real edge set:**
+
+| | 3.3 GB (E = 17.4M) | 27.5 GB (E = 137.0M) |
+|---|---:|---:|
+| Counting sort → CSR | **0.35 s** | **2.59 s** |
+| Resident (offsets + targets) | 117 MB | 968 MB |
+
+**A CSR over 137M edges is built in 2.59 seconds.** §7.3 budgeted "+40–70 s" for Pass A + Pass B;
+the CSR-construction half of that is 2.59 s. The remaining half — the external sort by address plus
+the merge-join — is still **[U]**, but the estimate should be revised down.
+
+**Full forward BFS, 58,324,726 rows and 136,993,584 edges visited:**
+
+| Arm | 3.3 GB | 27.5 GB | ns/edge (27.5 GB) | soft faults |
+|---|---:|---:|---:|---:|
+| A in-memory CSR, FIFO frontier | 0.10 s | **1.04 s** | 7.6 | 44,279 |
+| B mmap'd CSR, FIFO frontier | 0.16 s | **1.63 s** | 11.9 | 228,830 |
+| C mmap'd CSR, **sorted** frontier | 0.29 s | **2.72 s** | 19.8 | 218,319 |
+
+**The reachability walk over 137M edges is 1.0–1.6 seconds.** The current walk phase measures
+**213.7 s [M]**. The difference is not traversal — it is the 2.3 GB Dictionary, the per-node loose-file
+parse, the 137M individually-locked `RecordEdge` calls (§E.4) and the `ChunkedBuffer` appends. The
+graph walk itself is nearly free once identity is a dense row and the CSR is materialised.
+
+Part of why: the visited bitmap at R = 58.3M is **7.29 MB, which fits in L3**. That is a structural
+property of the bitmap representation, not a tuning result, and it is unavailable to any
+address-keyed structure.
+
+**⚠ §4.2's mitigation (1) is refuted. Do not sort the frontier.** Sorting cost 1.67× on the 27.5 GB
+dump and 1.81× on the 3.3 GB one, while reducing faults by only 4.6% (228,830 → 218,319). The sort
+is real work; the locality it buys is not worth it. **§4.2's mitigation (2) — that the freed ~6 GB
+keeps the CSR page-cache resident — is what carries the semi-external design**, and arm B's 1.57×
+against in-memory is the price.
+
+*Limitation, stated:* the temp CSR was written immediately before arms B and C ran, so it was
+page-cache resident. This measures the warm case — which is the case §4.2 argues for — and **not**
+a cold-storage BFS. Under genuine memory pressure the faults become hard and the ranking could
+change; that regime is exactly what freeing 6 GB is meant to prevent.
+
+### 11.4 ✅ Q4 — the root phase is 98.4% DAC walk. O6 is dropped
+
+`tools/ProfileRootPhase` runs the root phase in isolation — dump load, `heap.EnumerateRoots()`, then
+`BuildMapByRootAddress` — instead of the full cold build `tools/ProfileRootEnumeration` costs. One
+dump load plus ~2 minutes rather than 22.
+
+| | 3.3 GB | 27.5 GB |
+|---|---:|---:|
+| Phase 1 `heap.EnumerateRoots()` | 12.11 s — **87.6%** | **124.33 s — 98.4%** |
+| Phase 2 `BuildMapByRootAddress` | 1.71 s — 12.4% | **1.99 s — 1.6%** |
+| Roots enumerated | 1,411 | 5,037 |
+| Typedefs walked | 36,646 | 38,372 |
+
+**§E.3's suspicion was structurally accurate and quantitatively wrong.** The loop does walk every
+typedef in every module and does materialise `type.Name` before filtering — but the typedef universe
+is 38,372 against 12,376 live types, i.e. **3.1×, not the orders of magnitude implied**, and the
+whole thing costs **1.99 s of a 126 s phase**. Cost centres inside it: `type.Name` + filters 0.60 s,
+`EnumerateTypeDefToMethodTableMap` 0.37 s, `GetTypeByMethodTable` 0.24 s, `StaticFields` 0.15 s.
+
+**⚠ Worse, §E.3's proposed fix is a pessimisation.** Both variants were built and A/B'd warm against
+the real implementation, all three producing byte-identical maps:
+
+| Variant | 3.3 GB | 27.5 GB |
+|---|---:|---:|
+| real `StaticFieldResolver` | **0.03 s** | **0.03 s** |
+| "reorder" — defer `type.Name` until after the address test | 0.66 s | 0.67 s (**22× slower**) |
+| "module prefilter" — skip framework modules by name | 0.09 s | 0.10 s (3× slower) |
+
+The name filter is not overhead ahead of the real work — it is a **pruning step**. It cuts 38,222
+resolved types down to 11,572 before `type.StaticFields` is enumerated, and that enumeration is what
+deferring the filter forces on every type. §E.3 read the loop as "expensive predicate first" when it
+is actually "cheap predicate that avoids an expensive walk".
+
+**O6 is dropped.** This is exactly what "instrument before touching" was written to catch: the item
+had a plausible mechanism, a real code smell behind it, and a negative expected value.
+
+*On the absolute number:* the cold build labels this phase **200.3 s [M]** while this tool measures
+124.33 s for the DAC walk. The tool measures the walk alone — the build's label also covers
+`RootIndexWriter`'s record packing, section writes and progress reporting — and this run had a warmer
+OS page cache after a session of reading the same file. **The 98.4/1.6 split is the robust result;
+124.33 s is a lower bound on the walk, not a restatement of the 200.3 s.**
+
+**O5 is unaffected and now stands alone.** With the trailer worth ~2 s, essentially the entire root
+phase is native DAC stack unwinding, which `cache-architecture.md` §8 documents as irreducible.
+Irreducible work is the right kind to *overlap* (§7.1), and O5 is now the only lever on this phase.
+
+### 11.5 ⚠ Incidental — static-root detection is inert under ClrMD 4
+
+Both dumps report **0 static/thread-static roots**, which is why `BuildMapByRootAddress` returns an
+empty map in every measurement above. That is not a property of the dumps.
+
+`RootIndexWriter` selects them with `private const byte ThreadStaticVarKind = 9` /
+`StaticVarKind = 10` against `(byte)root.RootKind`. **`ClrRootKind` in ClrMD 4.0.722401 has no such
+members** — enumerated directly, it is `None=0, FinalizerQueue=1, StrongHandle=2, PinnedHandle=3,
+Stack=4, RefCountedHandle=5, AsyncPinnedHandle=7, SizedRefHandle=8`. Values 9 and 10 are ClrMD 3
+values that no longer exist, so the predicate can never fire.
+
+Consequences, unverified beyond the above but following directly from it: `staticRootAddresses` is
+always empty, so `WriteFieldNameTrailer` early-returns, so the v2 `Roots` field-name trailer is
+always empty, so `RootSetCache.GetStaticFieldsByRootAddress` always returns an empty map — and
+`GCRootAnalyzer`, `StaticRootLeakDetector` and `FinalizableObjectAnalyzer` lose static-field
+attribution silently.
+
+Note the fix is probably **not** "change the constants". ClrMD 4's root enumeration appears to cover
+handles, stacks and the finalizer queue only; if it emits no static-variable roots at all, then the
+trailer's whole approach — match a static field's storage address against an *enumerated static
+root* — has nothing to match against, and `StaticFieldResolver`'s map would need to be keyed without
+that filter. **This is outside the cache redesign's scope and is reported, not fixed.** It belongs to
+the `upgrade/clrmd-4` branch's own work and may already be known there.
+
+### 11.6 ❌ Q2 — `EventLeakAnalyzer`'s cost is per-type DAC work, not scan volume. O7 is dropped as scoped
+
+The 127.3 s registry build was §5's entire justification — the largest proposed disk *addition* in
+this document rested on it. Instrumented per pass (`DD_PERF_EVENTLEAK_REGISTRY=1`, warm cache,
+`--include-analyzers "Event Leak Analysis"`):
+
+| Pass | 3.3 GB | 27.5 GB |
+|---|---:|---:|
+| **total** | **18.11 s** | **105.66 s** |
+| 1 — typedef walk + `DescribeStaticFields` | 8.47 s (46.8%) | 7.51 s (7.1%) |
+| 2a — full index scan → distinct MethodTables | 1.51 s (8.3%) | **5.28 s (5.0%)** |
+| 2b — `DescribeInstanceFields` over live MTs | 8.13 s (44.9%) | **92.87 s (87.9%)** |
+
+**The answer is per-match work.** Pass 2b is 87.9% of the build, and its scaling is the giveaway: it
+went from 8.13 s over **14,003** MethodTables to 92.87 s over **12,376** — *fewer* types, 11× slower.
+It is not per-type-count work at all. `DescribeInstanceFields` "touches every field's `ClrType` to
+check for a delegate base type" (the class's own doc comment), and those are DAC metadata reads whose
+cost scales with dump size. **No index in `cache.bin` can touch that** — it is ClrMD metadata
+resolution, not heap-index access.
+
+**O7 is dropped as scoped.** A `TypeId → rows` index would have targeted Pass 2a: **5.28 s of
+105.66 s**, bought with 332.28 MiB of new disk. That is not a trade worth making, and §5's
+"only lever available against the 127.3 s" was wrong — it was a lever against 5% of it.
+
+*Revised, weaker case for O7:* Pass 2a is a fair measurement of what one type-filtered full pass
+costs — **≈5.3 s at 27.5 GB scale** — and §1 counted eight such passes, so the index is worth
+**≈40 s, not ≈120 s**, for 332 MiB. That is a much weaker trade and it is no longer recommended
+without separately measuring the other seven sites, several of which may be answerable from sections
+that already exist (below).
+
+*On the absolute number:* this warm, single-analyzer run measured 105.66 s against the cold build's
+**127.3 s [M]**. The cold run had a colder DAC and was under real memory pressure (356 MB available,
+3.9 GB paged). The **pass split is the robust result**, not the total.
+
+### 11.7 ✅ Free win found instead — Pass 2a is already persisted
+
+Pass 2a walks all 87,104,236 indexed objects for one reason: to collect the **set of distinct
+MethodTables**. `ObjectTypeDictionary` is defined as exactly that set. Verified offline on both
+dumps — no dump load:
+
+| | 3.3 GB | 27.5 GB |
+|---|---:|---:|
+| `ObjectTypeDictionary` entries | 14,003 | 12,376 |
+| Distinct `TypeId`s actually used in `ObjectMethodTables` | 14,003 | 12,376 |
+| Every dictionary slot used | **yes** | **yes** |
+| Dictionary strictly ascending | yes | yes |
+| Bytes Pass 2a reads to derive it | 27.9 MiB | **166.1 MiB** |
+| Bytes the answer occupies | 0.11 MiB | **0.09 MiB** |
+| Amplification | 261× | **1,760×** |
+
+The sets are identical by construction and confirmed empirically. **Replacing Pass 2a's scan with a
+read of `ObjectTypeDictionary` removes 5.28 s for a ~10-line change and zero new disk** — strictly
+better than what O7 proposed to buy with 332 MiB, and independent of the rewrite.
+
+New item, call it **O8**: expose the type dictionary through `IHeapAnalysisCache` and have
+`PublisherRegistry` Pass 2a read it. Any other consumer that scans the index solely to learn *which
+types exist* is the same case; §1's Q2 sites should be re-read with that question in mind before O7
+is reconsidered.
+
+### 11.8 Incidental — 4–5 reachable rows are not live objects
+
+The Q3 merge-join is not quite total: 5 of 6,686,490 rows on the 3.3 GB dump and 4 of 58,339,936 on
+the 27.5 GB dump have no matching object row. Every one sits outside the heap's address range —
+`0x000000ffffff`, `0x0084d3b7db20`, `0x1000007ffa899b53`, `0x2000009ac41c4ad1` — i.e. tagged or
+garbage pointers that arrive as `root.Object.Address` from conservative stack scanning and are
+seeded into the walk without validation.
+
+They occupy real rows in `DominatorReachableAddresses`, `DominatorIdomRows`, `DominatorRetainedBytes`
+and the reverse CSR today. Two consequences: R2's merge-join swizzle needs a defined behaviour for
+them (drop the node — the rank-select bitmap simply never sets that bit), and filtering root
+addresses against the segment ranges at seed time would remove them at source. Tiny, but it is a
+correctness detail the swizzle must not trip over.
+
+### 11.9 Revised sizing
+
+Folding §11.1 into §6's table (`DominatorRetainedBytes` 222.55 → 112.51 MiB):
+
+| | Today | Ideal, with §5 type index | Ideal, without |
+|---|---:|---:|---:|
+| 27.5 GB | 2,418.1 MiB | **1,962.5 MiB (81.2%)** | **1,630.3 MiB (67.4%)** |
+| 3.3 GB | 342.50 MiB | **301.6 MiB (88.1%)** | **245.8 MiB (71.8%)** |
+
+### 11.10 What the round changed
+
+| Claim | Status |
+|---|---|
+| §2.1 address column is monotone | ✅ **directly verified** — strictly ascending on both dumps, not inferred from escape counts |
+| §2.2/§2.4 rank index replaces the Dictionary | ✅ confirmed, and the Dictionary is *larger* than stated (2,325.9 MB) |
+| §2.2 "may also be faster" | ◐ faster in sorted order, +3.4 s in realistic order — worth it either way |
+| §3.2 sort-as-CSR is cheap | ✅ 2.59 s for 137M edges |
+| §4.2 the walk stops being a memory consumer | ✅ and it stops being a *time* consumer too — 1.0–1.6 s vs 213.7 s |
+| §4.2 mitigation (1), sort the frontier | ❌ **refuted** — 1.67× slower, 4.6% fewer faults |
+| §6.2 `retained − ownSize`, ~222 MiB at 4 B | ◐ **saving is larger (332.59 MiB at 2 B); mechanism is unnecessary — drop the subtraction** |
+| §7.3 Pass A + Pass B cost +40–70 s | ◐ CSR half measured at 2.59 s; sort half still open |
+| §7.1/§E.3 `WriteFieldNameTrailer` is a large share of the 200.3 s | ❌ **refuted** — 1.6%, and both proposed fixes measured slower. **O6 dropped** |
+| §7.1 root phase is irreducible DAC work | ✅ confirmed — 98.4% of the phase. O5 (overlap) is the only lever |
+| §5/§7.3 EventLeak's 127.3 s is scan volume | ❌ **refuted** — 87.9% is per-type DAC metadata work. **O7 dropped as scoped** |
+| §5 a type index is the only lever there | ❌ wrong — it reaches 5.0%. Revised worth: ≈40 s for 332 MiB across 8 sites, unmeasured |
+| — | ✅ **new O8**: Pass 2a's 87.1M-object scan is already persisted as `ObjectTypeDictionary` — 5.28 s, zero disk (§11.7) |
+| — | ⚠ **new**: static-root detection is inert under ClrMD 4 (§11.5) — outside scope, reported |
+
+---
+
+## 12. Summary
 
 A from-zero design changes three things and inherits the rest.
 
 1. **One identity.** The object's row in the address-ordered columnar table, established free during
    the scan, resolved by rank over a 0.65 MiB index that is already on disk. The reachable-node space
-   is a rank-select bitmap over it, not a second address universe. **Kills 2.4 GB of RAM and 223 MiB
-   of disk [D].**
+   is a rank-select bitmap over it, not a second address universe. **Kills 2,325.9 MB of RAM and
+   223 MiB of disk, for +3.4 s of walk time [M, §11.2].**
 2. **Swizzle once, sort instead of search.** Edges carry the parent's row from birth; one
    range-partitioned sort resolves the child and *is* the reverse CSR; a second *is* the forward CSR.
    **Kills 2.6 GB of RAM, 2.2 GB of scratch I/O, 68 s, and 10.3 billion random probes [M/D].**
 3. **A memory budget per phase.** Peak becomes the max of stated budgets rather than an emergent
-   property. **≈2.6 GB against 12,976 MB measured [D].**
+   property. **≈2.6 GB against 12,976 MB measured [D].** The walk, today ~6 GB and 213.7 s, becomes
+   ~64 MB and ~2 s **[M, §11.3]**.
 
 Everything else — the container, the checksum discipline, the column encodings, the
 degrade-never-fail contract, LT, the scan itself — a from-zero design would build the way it is

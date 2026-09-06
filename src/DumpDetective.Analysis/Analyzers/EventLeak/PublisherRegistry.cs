@@ -77,10 +77,21 @@ internal sealed class PublisherRegistry
     // hot per-type/per-object path.
     private const int CancellationCheckMask = 8191;
 
+    // Q2 measurement pass (docs/cache/cache-ideal-design.md §10): set DD_PERF_EVENTLEAK_REGISTRY=1
+    // to split this build's wall clock across its three passes, answering whether the cost is scan
+    // volume (Pass 2a walks every indexed object solely to collect the distinct-MethodTable set) or
+    // per-type work (Passes 1 and 2b). Also reports the size of that set, which is what a
+    // replacement would have to reproduce.
+    private static readonly bool PerfLogRegistryBuild =
+        Environment.GetEnvironmentVariable("DD_PERF_EVENTLEAK_REGISTRY") == "1";
+
     public static PublisherRegistry Build(
         ClrHeap heap, IHeapAnalysisCache? cache, IReadOnlyList<IPublisherShape>? shapes = null,
         CancellationToken cancellationToken = default)
     {
+        var perfSw = PerfLogRegistryBuild ? System.Diagnostics.Stopwatch.StartNew() : null;
+        System.TimeSpan perfPass1 = default, perfPass2a = default;
+
         var eventNames = new EventNameResolver();
         var delegateOffsets = DelegateLayoutDiscovery.Discover(heap);
 
@@ -134,6 +145,8 @@ internal sealed class PublisherRegistry
             }
         }
 
+        if (perfSw is not null) perfPass1 = perfSw.Elapsed;
+
         // Pass 2: only MethodTables with a live heap instance, instance fields only (matches
         // BuildFieldLayouts's scope — the expensive per-field ClrType resolution here must not
         // run over every module type).
@@ -168,6 +181,8 @@ internal sealed class PublisherRegistry
             }
         }
 
+        if (perfSw is not null) perfPass2a = perfSw.Elapsed - perfPass1;
+
         int liveMtsVisited = 0;
         foreach (ulong mt in liveMts)
         {
@@ -201,6 +216,17 @@ internal sealed class PublisherRegistry
                     descriptorsByMt[mt] = [.. buf];
                 }
             }
+        }
+
+        if (perfSw is not null)
+        {
+            System.TimeSpan total = perfSw.Elapsed;
+            System.TimeSpan pass2b = total - perfPass1 - perfPass2a;
+            Console.Error.WriteLine(
+                $"[PERF] PublisherRegistry.Build: total {total.TotalSeconds:N2}s | " +
+                $"pass1 typedef walk {perfPass1.TotalSeconds:N2}s ({100 * perfPass1.TotalSeconds / total.TotalSeconds:N1}%, {typesVisited:N0} typedefs) | " +
+                $"pass2a index scan {perfPass2a.TotalSeconds:N2}s ({100 * perfPass2a.TotalSeconds / total.TotalSeconds:N1}%, {objectsVisited:N0} objects -> {liveMts.Count:N0} distinct MTs) | " +
+                $"pass2b instance fields {pass2b.TotalSeconds:N2}s ({100 * pass2b.TotalSeconds / total.TotalSeconds:N1}%)");
         }
 
         return new PublisherRegistry(descriptorsByMt, eventNames, delegateOffsets, staticPublisherMTs);

@@ -1,6 +1,7 @@
 using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 
+using DumpDetective.Analysis.Indexing.Columns;
 using DumpDetective.Analysis.Indexing.Container;
 
 namespace DumpDetective.Analysis.Indexing;
@@ -65,17 +66,12 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
     /// </summary>
     internal static IEnumerable<HeapEntry> ReadDiskEntries(CacheContainerReader reader)
     {
-        if (!TryOpenColumns(reader, out MemoryMappedViewAccessor? addr, out MemoryMappedViewAccessor? mt,
-                out MemoryMappedViewAccessor? size, out MemoryMappedViewAccessor? gen,
-                out ulong[]? typeDictionary, out int typeIdWidth, out long recordCount))
+        if (!ObjectColumnSet.TryOpen(reader, out ObjectColumnSet? columns) || columns is null)
             yield break;
 
-        using MemoryMappedViewAccessor? addrDisp = addr;
-        using MemoryMappedViewAccessor? mtDisp = mt;
-        using MemoryMappedViewAccessor? sizeDisp = size;
-        using MemoryMappedViewAccessor? genDisp = gen;
+        using ObjectColumnSet ownedColumns = columns;
 
-        foreach (HeapEntry entry in ReadColumnRange(addr!, mt!, size!, gen!, typeDictionary!, typeIdWidth, 0, recordCount))
+        foreach (HeapEntry entry in ReadColumnRange(ownedColumns, 0, ownedColumns.RecordCount))
             yield return entry;
     }
 
@@ -103,130 +99,25 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
         if (startRecord < 0 || recordCount <= 0)
             yield break;
 
-        if (!TryOpenColumns(reader, out MemoryMappedViewAccessor? addr, out MemoryMappedViewAccessor? mt,
-                out MemoryMappedViewAccessor? size, out MemoryMappedViewAccessor? gen,
-                out ulong[]? typeDictionary, out int typeIdWidth, out long totalRecordCount))
+        if (!ObjectColumnSet.TryOpen(reader, out ObjectColumnSet? columns) || columns is null)
             yield break;
 
-        using MemoryMappedViewAccessor? addrDisp = addr;
-        using MemoryMappedViewAccessor? mtDisp = mt;
-        using MemoryMappedViewAccessor? sizeDisp = size;
-        using MemoryMappedViewAccessor? genDisp = gen;
+        using ObjectColumnSet ownedColumns = columns;
 
-        long clampedCount = Math.Min(recordCount, totalRecordCount - startRecord);
+        long clampedCount = Math.Min(recordCount, ownedColumns.RecordCount - startRecord);
         if (clampedCount <= 0)
             yield break;
 
-        foreach (HeapEntry entry in ReadColumnRange(addr!, mt!, size!, gen!, typeDictionary!, typeIdWidth, startRecord, clampedCount))
+        foreach (HeapEntry entry in ReadColumnRange(ownedColumns, startRecord, clampedCount))
             yield return entry;
     }
 
-    /// <summary>
-    /// Loads the <c>ObjectTypeDictionary</c> section as a flat <c>ulong[]</c> indexed by
-    /// <c>TypeId</c>. Deliberately an array and not a <c>Dictionary</c>: it is indexed once per
-    /// object in <see cref="ZeroCopyColumnReader.FillBatch"/>, so a hash lookup there would be
-    /// per-object cost on the hottest loop in the codebase. 14,003 types is ~112 KB.
-    /// </summary>
-    private static bool TryLoadTypeDictionary(CacheContainerReader reader, out ulong[]? methodTables)
-    {
-        methodTables = null;
-
-        if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectTypeDictionary, out MemoryMappedViewAccessor? dictAcc, out long dictLen)
-            || dictAcc is null)
-            return false;
-
-        using (dictAcc)
-        {
-            if (dictLen <= 0 || dictLen % ColumnSize != 0)
-                return false;
-
-            var values = new ulong[dictLen / ColumnSize];
-            for (int i = 0; i < values.Length; i++)
-                values[i] = dictAcc.ReadUInt64(i * (long)ColumnSize);
-
-            methodTables = values;
-            return true;
-        }
-    }
-
-    private static bool TryOpenColumns(
-        CacheContainerReader reader,
-        out MemoryMappedViewAccessor? addr,
-        out MemoryMappedViewAccessor? mt,
-        out MemoryMappedViewAccessor? size,
-        out MemoryMappedViewAccessor? gen,
-        out ulong[]? typeDictionary,
-        out int typeIdWidth,
-        out long recordCount)
-    {
-        addr = null;
-        mt = null;
-        size = null;
-        gen = null;
-        typeDictionary = null;
-        typeIdWidth = 0;
-        recordCount = 0;
-
-        if (!TryLoadTypeDictionary(reader, out ulong[]? methodTables) || methodTables is null)
-            return false;
-
-        // Derived from the dictionary rather than stored: the writer picks the narrowest width the
-        // distinct-type count allows, so the count determines it unambiguously.
-        typeIdWidth = methodTables.Length <= ushort.MaxValue ? sizeof(ushort) : sizeof(uint);
-
-        if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectAddresses, out MemoryMappedViewAccessor? addrAcc, out long addrLen))
-            return false;
-        if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectMethodTables, out MemoryMappedViewAccessor? mtAcc, out long mtLen))
-        {
-            addrAcc?.Dispose();
-            return false;
-        }
-        if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectSizes, out MemoryMappedViewAccessor? sizeAcc, out long sizeLen))
-        {
-            addrAcc?.Dispose();
-            mtAcc?.Dispose();
-            return false;
-        }
-        if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectGenerations, out MemoryMappedViewAccessor? genAcc, out long genLen))
-        {
-            addrAcc?.Dispose();
-            mtAcc?.Dispose();
-            sizeAcc?.Dispose();
-            return false;
-        }
-
-        // The MethodTable column is TypeId-width now, so it no longer shares the 8-byte stride the
-        // other two use — the cross-column check has to divide it by its own width.
-        long candidateRecordCount = addrLen / ColumnSize;
-        if (candidateRecordCount == 0 ||
-            mtLen / typeIdWidth != candidateRecordCount || sizeLen / ColumnSize != candidateRecordCount ||
-            genLen / GenColumnSize != candidateRecordCount)
-        {
-            addrAcc.Dispose();
-            mtAcc.Dispose();
-            sizeAcc.Dispose();
-            genAcc.Dispose();
-            return false;
-        }
-
-        addr = addrAcc;
-        mt = mtAcc;
-        size = sizeAcc;
-        gen = genAcc;
-        typeDictionary = methodTables;
-        recordCount = candidateRecordCount;
-        return true;
-    }
-
-    private static IEnumerable<HeapEntry> ReadColumnRange(
-        MemoryMappedViewAccessor addr, MemoryMappedViewAccessor mt, MemoryMappedViewAccessor size, MemoryMappedViewAccessor gen,
-        ulong[] typeDictionary, int typeIdWidth,
-        long startRecord, long recordCount)
+    private static IEnumerable<HeapEntry> ReadColumnRange(ObjectColumnSet columns, long startRecord, long recordCount)
     {
         HeapEntry[] batch = System.Buffers.ArrayPool<HeapEntry>.Shared.Rent(BatchRecords);
         try
         {
-            using var columnReader = new ZeroCopyColumnReader(addr, mt, size, gen, typeDictionary, typeIdWidth);
+            using var columnReader = new ZeroCopyColumnReader(columns, startRecord);
             long remaining = recordCount;
             long start = startRecord;
             while (remaining > 0)
@@ -255,10 +146,7 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
     // this app targets.
     private sealed unsafe class ZeroCopyColumnReader : IDisposable
     {
-        private readonly MemoryMappedViewAccessor _addr;
-        private readonly MemoryMappedViewAccessor _mt;
-        private readonly MemoryMappedViewAccessor _size;
-        private readonly MemoryMappedViewAccessor _gen;
+        private readonly ObjectColumnSet _columns;
         private readonly byte* _addrPtr;
         private readonly byte* _mtPtr;
         private readonly byte* _sizePtr;
@@ -266,52 +154,53 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
 
         private readonly ulong[] _typeDictionary;
         private readonly int _typeIdWidth;
+        private readonly int _sizeWidth;
+        private ColumnOverflowTable.Cursor _sizeOverflowCursor;
 
-        public ZeroCopyColumnReader(
-            MemoryMappedViewAccessor addr, MemoryMappedViewAccessor mt, MemoryMappedViewAccessor size, MemoryMappedViewAccessor gen,
-            ulong[] typeDictionary, int typeIdWidth)
+        public ZeroCopyColumnReader(ObjectColumnSet columns, long startRecord)
         {
-            _addr = addr;
-            _mt = mt;
-            _size = size;
-            _gen = gen;
-            _typeDictionary = typeDictionary;
-            _typeIdWidth = typeIdWidth;
+            _columns = columns;
+            _typeDictionary = columns.TypeDictionary;
+            _typeIdWidth = columns.TypeIdWidth;
+            _sizeWidth = columns.SizeWidth;
+            _sizeOverflowCursor = columns.SizeOverflow.OpenCursor(startRecord);
 
             byte* p = null;
-            _addr.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
-            _addrPtr = p + _addr.PointerOffset;
+            columns.Addresses.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
+            _addrPtr = p + columns.Addresses.PointerOffset;
 
             p = null;
-            _mt.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
-            _mtPtr = p + _mt.PointerOffset;
+            columns.MethodTables.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
+            _mtPtr = p + columns.MethodTables.PointerOffset;
 
             p = null;
-            _size.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
-            _sizePtr = p + _size.PointerOffset;
+            columns.Sizes.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
+            _sizePtr = p + columns.Sizes.PointerOffset;
 
             p = null;
-            _gen.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
-            _genPtr = p + _gen.PointerOffset;
+            columns.Generations.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
+            _genPtr = p + columns.Generations.PointerOffset;
         }
 
         public void FillBatch(long startIndex, HeapEntry[] destination, int count)
         {
             byte* addrBase = _addrPtr + startIndex * ColumnSize;
             byte* mtBase = _mtPtr + startIndex * _typeIdWidth;
-            byte* sizeBase = _sizePtr + startIndex * ColumnSize;
+            byte* sizeBase = _sizePtr + startIndex * _sizeWidth;
             byte* genBase = _genPtr + startIndex * GenColumnSize;
             ulong[] dictionary = _typeDictionary;
 
             // Split on width outside the loop rather than inside it: the branch is loop-invariant,
-            // and this is the per-object path for every enumeration in the process.
+            // and this is the per-object path for every enumeration in the process. The size
+            // column's own width branch stays inside ReadSize — splitting on that too would mean
+            // six copies of this loop, and the narrowing it enables removes far more read traffic
+            // per record than the branch costs.
             if (_typeIdWidth == sizeof(ushort))
             {
                 for (int i = 0; i < count; i++)
                 {
-                    int off = i * ColumnSize;
-                    ulong address = Unsafe.ReadUnaligned<ulong>(addrBase + off);
-                    ulong objSize = Unsafe.ReadUnaligned<ulong>(sizeBase + off);
+                    ulong address = Unsafe.ReadUnaligned<ulong>(addrBase + i * ColumnSize);
+                    ulong objSize = ReadSize(sizeBase, i, startIndex + i);
                     ulong methodTable = dictionary[Unsafe.ReadUnaligned<ushort>(mtBase + i * sizeof(ushort))];
                     sbyte generation = unchecked((sbyte)genBase[i]);
                     destination[i] = new HeapEntry(address, methodTable, objSize, generation);
@@ -321,9 +210,8 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
             {
                 for (int i = 0; i < count; i++)
                 {
-                    int off = i * ColumnSize;
-                    ulong address = Unsafe.ReadUnaligned<ulong>(addrBase + off);
-                    ulong objSize = Unsafe.ReadUnaligned<ulong>(sizeBase + off);
+                    ulong address = Unsafe.ReadUnaligned<ulong>(addrBase + i * ColumnSize);
+                    ulong objSize = ReadSize(sizeBase, i, startIndex + i);
                     ulong methodTable = dictionary[Unsafe.ReadUnaligned<uint>(mtBase + i * sizeof(uint))];
                     sbyte generation = unchecked((sbyte)genBase[i]);
                     destination[i] = new HeapEntry(address, methodTable, objSize, generation);
@@ -331,12 +219,29 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
             }
         }
 
+        private ulong ReadSize(byte* sizeBase, int offsetInBatch, long recordIndex)
+        {
+            if (_sizeWidth == sizeof(ushort))
+            {
+                ushort narrow = Unsafe.ReadUnaligned<ushort>(sizeBase + offsetInBatch * sizeof(ushort));
+                return narrow == ushort.MaxValue ? _sizeOverflowCursor.Read(recordIndex) : narrow;
+            }
+
+            if (_sizeWidth == sizeof(uint))
+            {
+                uint narrow = Unsafe.ReadUnaligned<uint>(sizeBase + offsetInBatch * sizeof(uint));
+                return narrow == uint.MaxValue ? _sizeOverflowCursor.Read(recordIndex) : narrow;
+            }
+
+            return Unsafe.ReadUnaligned<ulong>(sizeBase + offsetInBatch * ColumnSize);
+        }
+
         public void Dispose()
         {
-            _addr.SafeMemoryMappedViewHandle.ReleasePointer();
-            _mt.SafeMemoryMappedViewHandle.ReleasePointer();
-            _size.SafeMemoryMappedViewHandle.ReleasePointer();
-            _gen.SafeMemoryMappedViewHandle.ReleasePointer();
+            _columns.Addresses.SafeMemoryMappedViewHandle.ReleasePointer();
+            _columns.MethodTables.SafeMemoryMappedViewHandle.ReleasePointer();
+            _columns.Sizes.SafeMemoryMappedViewHandle.ReleasePointer();
+            _columns.Generations.SafeMemoryMappedViewHandle.ReleasePointer();
         }
     }
 }

@@ -124,6 +124,7 @@ internal static class CacheSectionCatalog
         new(CacheSectionId.DominatorRetainedBytes, "DominatorRetainedBytes", CacheSectionRequirement.Conditional),
         new(CacheSectionId.RootStackThreadAttribution, "RootStackThreadAttribution", CacheSectionRequirement.Conditional),
         new(CacheSectionId.ObjectTypeDictionary, "ObjectTypeDictionary", CacheSectionRequirement.Required),
+        new(CacheSectionId.ObjectSizeOverflow, "ObjectSizeOverflow", CacheSectionRequirement.Conditional),
     ];
 
     /// <summary>

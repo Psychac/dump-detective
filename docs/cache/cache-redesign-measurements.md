@@ -584,6 +584,12 @@ then `ReverseEdgeDirectories` 102.0 (10.9%).
 
 ### 10.1 Non-compression levers, sized against the current file
 
+> **⚠ Sizing superseded by § 13.1.** This table predates the format-v5 `MethodTable` dictionary
+> (§ 11), so its denominator is 935.9 MiB and it still lists that lever as pending. § 13.1 re-sizes
+> the whole list against the 852.4 MiB file that exists today, and the two address/size levers below
+> are costed there from real column data rather than from record-width arithmetic. Keep this table
+> for the CSR and dominator rows; take the base-column rows from § 13.1.
+
 | Lever | Saves | % of 935.9 MiB | Notes |
 |---|---:|---:|---|
 | CSR for the reverse edge index (§2) | ~245 MiB | ~26% | Largest, but also the largest build; needs the §2.2.1 scratch-file resolver. Deletes `ReverseEdgeDirectories` outright |
@@ -674,11 +680,177 @@ statically derived; everything here is not, and no plan should assume an answer.
 | 1 | ~~`TryGetParents` call volume and block hit-rate~~ **CLOSED — see § 8.** 8,851 calls, 710 distinct blocks, 87.9% hit rate on a 16.8 MB cache, 34 ms with zstd. The objection is withdrawn | — | — |
 | 1b | ~~Is `ForwardEdgeBuckets` streamed or point-queried?~~ **CLOSED — § 9. Neither: it has zero production readers.** 33% of `cache.bin` is write-only | — | — |
 | 2 | ~~Opens per run~~ **CLOSED** — see § 7. Predicted ≈20 enumerations, observed ≈20.5; hashing down 78.5%, wall clock within noise | — | — |
-| 3 | Does `DominatorImmediateDominatorAddresses` carry rows for folded leaves? | [format doc §4](cache-format-clean-slate-redesign.md)'s aggressive option | Answerable by reading the writer; not done in this pass |
-| 4 | How often is the dominance-chain-tree UI actually exercised per build? | Same | Usage data, not code |
+| 3 | ~~Does `DominatorImmediateDominatorAddresses` carry rows for folded leaves?~~ **CLOSED — § 13.3. Yes, every one of them** | — | — |
+| 4 | ~~How often is the dominance-chain-tree UI actually exercised per build?~~ **WRONG QUESTION — § 13.3.** The chain tree never reads the child list; `StaticRootLeakDetector` does | [format doc §4](cache-format-clean-slate-redesign.md)'s aggressive option | Restated as "how many static-root candidates per run?", still open |
 | 5 | What does CSR cost/save *after* compression, rather than instead of it? | [format doc §7.1](cache-format-clean-slate-redesign.md) item 5 | Requires a CSR prototype to compress |
 
 Question 1 is the one that matters. It is cheap to answer relative to what it gates: a counter on
 `TryGetParents` plus a simulated block-index histogram over the existing `cache.bin`, on the dump
 already used throughout this doc. It should be settled before any compression work starts, not
 after.
+
+---
+
+## 13. Base-column narrowing measured, and two code findings (2026-09-06)
+
+Same method as §§ 2–4: the TOC and the raw columns were read straight out of the two real
+`cache.bin` files with numpy. No dump was loaded, nothing was rebuilt.
+
+### 13.1 Composition after format v5, and the lever list re-sized
+
+The reference `cache.bin` is now **852.4 MiB across 24 sections**. § 10's table was written between
+the `ForwardEdge*` removal and the `MethodTable` dictionary, so it is one step stale; this is where
+the file actually stands:
+
+| Group | Sections | MiB | Share |
+|---|---:|---:|---:|
+| Reverse edge index | 3 | 336.6 | 39.5% |
+| Base columns (+ `ObjectTypeDictionary`) | 5 | 265.0 | 31.1% |
+| Dominator tree | 6 | 228.4 | 26.8% |
+| StringDedup (+ meta) | 2 | 20.5 | 2.4% |
+| TypeAggregates + satellites | 8 | 1.9 | 0.2% |
+
+Individually: `ReverseEdgeBuckets` 234.5, `ObjectAddresses` 111.5, `ObjectSizes` 111.5,
+`ReverseEdgeDirectories` 102.0, then the three 51.0 MiB dominator scalar columns.
+
+Every non-compression lever, re-sized against 852.4 MiB:
+
+| Lever | Saves | % of 852.4 | Status |
+|---|---:|---:|---|
+| CSR reverse edge index (§2) | ~245 MiB | 28.7% | arithmetic only; largest build |
+| Dominator aggressive — drop child list, narrow `idom` (§4) | ~98 MiB | 11.5% | precondition now verified (§ 13.3) |
+| `ObjectSizes` narrowing (§ 13.2) | **83.6 MiB** | **9.8%** | **measured on both caches** |
+| `ObjectAddresses` block-delta (§ 13.2) | **55.7 MiB** | **6.5%** | **measured on both caches** |
+| *Dominator conservative narrowing (§4) — alternative to the aggressive row, not additive* | ~46 MiB | 5.4% | arithmetic only |
+| `DominatorReachableAddresses` block-delta (§ 13.2) | **25.5 MiB** | **3.0%** | **measured (reference only)** |
+| `ObjectGenerations` 1 byte → 2 bits | ~10.4 MiB | 1.2% | not recommended — breaks the fixed-stride zero-copy read for 1.2% |
+
+The three measured rows are the ones compression can never reach, because § 4 rules compression out
+for the streamed base columns and `DominatorReachableAddresses` is binary-searched. They are
+therefore additive with everything in § 2, not substitutes for it.
+
+### 13.2 `ObjectSizes`, `ObjectAddresses`, `DominatorReachableAddresses` — measured
+
+**`ObjectSizes` — 8 bytes per object buys a value that never exceeds 24 bits on either dump.**
+
+| Dump | Records | Max size | Not a multiple of 8 | Escapes at 2 B | Saved at 2 B | Escapes at 4 B | Saved at 4 B |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Reference (3.51 GB) | 14,620,162 | 19,117,318 | 1,947,966 (13.32%) | 3,843 (0.0263%) | **83.61 MiB** | 0 | 55.77 MiB |
+| 21-04 (27.52 GB) | 87,104,236 | 23,340,790 | 17,960,061 (20.62%) | 31,760 (0.0365%) | **498.05 MiB** | 0 | 332.28 MiB |
+
+Two things this settles. First, **no unit-of-8 scaling**: 13–21% of sizes are not multiples of 8, so
+`size / 8` is lossy and the column has to store the value as-is. Second, **2 bytes is the right
+width, not 4**: the escape rate is 0.026–0.037% on both dumps, three orders of magnitude below the
+point where a per-record escape branch stops predicting, and the side table costs 5–372 KB. Choosing
+4 bytes to avoid the escape mechanism gives up 27.8 MiB on the reference dump and 165.8 MiB on the
+21-04 one for complexity that a sorted 12-byte side table does not actually have.
+
+**`ObjectAddresses` — 8-byte-aligned and globally non-decreasing on both dumps.** Encoded as a raw
+4-byte delta from a per-block base, one base per N records:
+
+| Column | Dump | Records | N=256 | N=1,024 | N=4,096 |
+|---|---|---:|---:|---:|---:|
+| `ObjectAddresses` | Reference | 14,620,162 | 0 escaped / 55.34 MiB | **16 / 55.66 MiB** | 16 / 55.74 MiB |
+| `ObjectAddresses` | 21-04 | 87,104,236 | 0 / 329.68 MiB | **0 / 331.63 MiB** | 0 / 332.11 MiB |
+| `DominatorReachableAddresses` | Reference | 6,686,490 | 258 / 25.30 MiB | **1,246 / 25.44 MiB** | 4,318 / 25.45 MiB |
+
+Escape counts are records, not blocks. N=1024 is the pick: 0.00011% escapes on `ObjectAddresses`
+(all 16 at the column's single 3.94 GB inter-segment gap, the largest gap present), 0.019% on
+`DominatorReachableAddresses`, and 114 KB / 664 KB of checkpoints respectively. The N sweep is flat
+enough that the choice is not load-bearing.
+
+**Scaling the delta by 8 was measured and rejected.** Both dumps' addresses are entirely 8-aligned,
+so `(address − base) / 8` at 4 bytes reaches 34.4 GB per block and takes the reference dump's 16
+escapes to zero. But a 32-bit dump's addresses are 4-byte aligned, where every second record would
+escape — trading 16 measured records against half a column on an unmeasured but entirely real dump
+class. `DominatorReachableAddresses` settles it independently: it is **not** 8-aligned even on this
+dump, so a shared primitive cannot scale anyway.
+
+Note the encoding does **not** depend on the column being sorted — a descending step simply produces
+a delta that does not fit and escapes; global monotonicity is reported here because it was measured,
+not because the design needs it. `DominatorReachableAddresses` is absent from the 21-04 cache
+(Stage B was not run there), so that row is reference-dump only.
+
+**Combined.** 83.61 + 55.66 + 25.44 = **164.7 MiB**, taking the reference `cache.bin` from 852.4 to
+**687.7 MiB (−19.3%)**. On the 21-04 cache the two applicable levers total 829.7 MiB — 8.8% of that
+file as it stands at 9,423.7 MiB, or **13.1% of the 6,335.9 MiB it would be** once the `ForwardEdge*`
+removal (§ 9.2) is applied to it.
+
+### 13.3 Two findings from reading the dominator code
+
+**Open question 3 is closed: `DominatorImmediateDominatorAddresses` carries a row for every folded
+leaf.** `DiskBackedObjectIndexWriter`'s per-row loop iterates `oldId` over all *n* rows, and the
+`newId < 0` branch — the folded-leaf branch — writes the folding parent's address rather than
+skipping the row. So inverting `idom[]` reproduces the persisted child list exactly, which is the
+precondition [format doc §4](cache-format-clean-slate-redesign.md) flagged as needing confirmation
+before the aggressive dominator option could be costed. It holds.
+
+**Open question 4 was aimed at the wrong consumer.** Format doc §4 states that the dominance-chain
+tree is the only consumer of the child-list direction. It is not a consumer at all: `DominatorAnalyzer`'s
+chain detection walks *upward* via `TryGetImmediateDominator`. The child list's only production
+consumer is `IDominatorTreeProvider.EnumerateRetainedSet`, and its only production caller is
+`StaticRootLeakDetector`, which enumerates a candidate root's dominator subtree to build the
+per-type/per-namespace retained breakdown. That reframes the question the aggressive option is
+gated on: not "how often does someone open a UI", but "how many static-root candidates does a run
+process, and is an O(R) in-memory inversion of `idom[]` acceptable at that frequency" — roughly
+51 MiB of `int[]` at 6.69M rows, which is a bounded-memory question, not a usage question. A counter
+on that one call site answers it.
+
+### 13.4 What this makes v6
+
+The three measured levers share one primitive — a narrow fixed-width column with an escape sentinel
+and a sorted side table — and none of them touches a structural index, so they batch cleanly into a
+single format bump per § 10.2. Spec in [format doc §10](cache-format-clean-slate-redesign.md);
+CSR (§2) and the dominator decision (§4) stay out of it and take their own bumps later.
+
+---
+
+## 14. ✅ v6 part 1 — narrowed `ObjectSizes` shipped
+
+The first of § 13.4's three levers is in. `ObjectSizes` stored a fixed 8 bytes per object; it now
+stores the narrowest of 2, 4 or 8 that the dump's own size distribution allows, with the values that
+don't fit moved to the new `ObjectSizeOverflow` section. Format version bumped 5 → 6.
+
+Measured on a cold rebuild of the reference dump:
+
+| | Bytes | MiB | Per record |
+|---|---:|---:|---:|
+| `ObjectSizes` before | 116,961,296 | 111.54 | 8.00 B |
+| `ObjectSizes` after | 29,240,324 | 27.89 | **2.00 B** |
+| `ObjectSizeOverflow` (new) | 46,116 | 0.04 | 3,843 escaped records — **0.0263%** |
+| **`cache.bin`** | 893,783,813 → **806,108,957** | 852.4 → **768.8** | **−83.6 MiB (−9.8%)** |
+
+The escape count came back at exactly the 3,843 predicted statically in § 13.2, and the chosen width
+matches the prediction too — the writer's own scan counters reproduce what the offline column scan
+found.
+
+**Width selection is a writer decision, recovered by readers from the TOC.** Two counters per
+segment during the heap scan (values ≥ 2¹⁶−1 and ≥ 2³²−1) feed a cost model at container-write time
+that minimises `records × width + escapes × 12`, subject to an escape rate under 1% so the streaming
+decoder's escape branch stays predictable. Nothing about the choice is stored: readers recover it as
+`Length / RecordCount`, so a dump whose sizes genuinely need 8 bytes writes the pre-v6 column and is
+read by the pre-v6 path with no flag anywhere.
+
+### 14.1 Correctness verification
+
+The escaped population is 0.026% of records, which is well under what the existing every-100,000th
+sampling in `HeapAnalysisCacheObjectMetadataDiscrepancyTests` would be expected to hit even once.
+A dedicated real-dump test (`NarrowSizeColumnRealDumpTests`) therefore checks **every** escaped
+record rather than a sample: it builds a fresh index, reads back all 14.6M entries, and for each of
+the 3,843 records at or above the sentinel compares the index's size against live
+`ClrObject.Size`. Zero mismatches, and the count read back matches the overflow section's record
+count exactly — a sentinel silently surviving as a real size is the failure mode that would
+otherwise be invisible.
+
+Also re-run green afterwards: `HeapAnalysisCacheObjectMetadataDiscrepancyTests` (disk mode,
+in-memory mode and live `heap.GetObject` agreeing) and `ObjectAddressLookupDiscrepancyTests`, plus
+1,045 unit tests including round-trip cases at all three widths, a mid-column range enumeration that
+exercises cursor seeding, and a narrowed-column-without-its-overflow-section case that must be
+rejected rather than degraded.
+
+### 14.2 Still open in v6
+
+`ObjectAddresses` and `DominatorReachableAddresses` block-delta encoding (§ 13.2, a further
+55.7 + 25.4 MiB) and the section manifest rider
+([format doc §10.5](cache-format-clean-slate-redesign.md)). Both ride this same version bump — the
+cache is already invalidated, so they cost nothing extra to land now.

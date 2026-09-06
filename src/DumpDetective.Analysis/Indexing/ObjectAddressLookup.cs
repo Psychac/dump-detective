@@ -1,5 +1,6 @@
 using System.IO.MemoryMappedFiles;
 
+using DumpDetective.Analysis.Indexing.Columns;
 using DumpDetective.Analysis.Indexing.Container;
 using DumpDetective.Analysis.Indexing.Satellite;
 
@@ -30,6 +31,9 @@ internal sealed class ObjectAddressLookup : IDisposable
     // TypeId -> MethodTable, loaded once; see CacheSectionId.ObjectTypeDictionary.
     private readonly ulong[] _typeDictionary;
     private readonly int _typeIdWidth;
+    // Both derived from the TOC rather than stored; see ObjectColumnSet.
+    private readonly int _sizeWidth;
+    private readonly ColumnOverflowTable _sizeOverflow;
     // Sorted by Start — segment write order (segment index order) isn't guaranteed to be
     // address-sorted (see docs/cache/cache-architecture.md "why a naive global binary
     // search doesn't work"), so this instance sorts its own copy once at open time.
@@ -38,7 +42,8 @@ internal sealed class ObjectAddressLookup : IDisposable
 
     private ObjectAddressLookup(
         MemoryMappedViewAccessor addr, MemoryMappedViewAccessor mt, MemoryMappedViewAccessor size,
-        SegmentIndexEntry[] segmentsByStart, ulong[] typeDictionary, int typeIdWidth)
+        SegmentIndexEntry[] segmentsByStart, ulong[] typeDictionary, int typeIdWidth,
+        int sizeWidth, ColumnOverflowTable sizeOverflow)
     {
         _addr = addr;
         _mt = mt;
@@ -46,6 +51,8 @@ internal sealed class ObjectAddressLookup : IDisposable
         _segmentsByStart = segmentsByStart;
         _typeDictionary = typeDictionary;
         _typeIdWidth = typeIdWidth;
+        _sizeWidth = sizeWidth;
+        _sizeOverflow = sizeOverflow;
     }
 
     /// <summary>
@@ -98,7 +105,7 @@ internal sealed class ObjectAddressLookup : IDisposable
 
         int typeIdWidth = typeDictionary.Length <= ushort.MaxValue ? sizeof(ushort) : sizeof(uint);
 
-        if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectAddresses, out MemoryMappedViewAccessor? addrAcc, out _) || addrAcc is null)
+        if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectAddresses, out MemoryMappedViewAccessor? addrAcc, out long addrLen) || addrAcc is null)
             return false;
 
         if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectMethodTables, out MemoryMappedViewAccessor? mtAcc, out _) || mtAcc is null)
@@ -107,17 +114,28 @@ internal sealed class ObjectAddressLookup : IDisposable
             return false;
         }
 
-        if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectSizes, out MemoryMappedViewAccessor? sizeAcc, out _) || sizeAcc is null)
+        if (!reader.TryOpenSectionAccessor(CacheSectionId.ObjectSizes, out MemoryMappedViewAccessor? sizeAcc, out long sizeLen) || sizeAcc is null)
         {
             addrAcc.Dispose();
             mtAcc.Dispose();
             return false;
         }
 
+        long recordCount = addrLen / ColumnSize;
+        int sizeWidth = recordCount > 0 && sizeLen % recordCount == 0 ? (int)(sizeLen / recordCount) : 0;
+        ColumnOverflowTable sizeOverflow = ColumnOverflowTable.Empty;
+        if (!TryResolveSizeEncoding(reader, sizeWidth, ref sizeOverflow))
+        {
+            addrAcc.Dispose();
+            mtAcc.Dispose();
+            sizeAcc.Dispose();
+            return false;
+        }
+
         SegmentIndexEntry[] segmentsByStart = segments.ToArray();
         Array.Sort(segmentsByStart, static (a, b) => a.Start.CompareTo(b.Start));
 
-        lookup = new ObjectAddressLookup(addrAcc, mtAcc, sizeAcc, segmentsByStart, typeDictionary, typeIdWidth);
+        lookup = new ObjectAddressLookup(addrAcc, mtAcc, sizeAcc, segmentsByStart, typeDictionary, typeIdWidth, sizeWidth, sizeOverflow);
         return true;
     }
 
@@ -143,12 +161,48 @@ internal sealed class ObjectAddressLookup : IDisposable
         if (recordIndex < 0)
             return false;
 
-        long byteOffset = recordIndex * ColumnSize;
         int typeId = _typeIdWidth == sizeof(ushort)
             ? _mt.ReadUInt16(recordIndex * sizeof(ushort))
             : (int)_mt.ReadUInt32(recordIndex * sizeof(uint));
         methodTable = (uint)typeId < (uint)_typeDictionary.Length ? _typeDictionary[typeId] : 0;
-        size = _size.ReadUInt64(byteOffset);
+        size = ReadSize(recordIndex);
+        return true;
+    }
+
+    private ulong ReadSize(long recordIndex)
+    {
+        if (_sizeWidth == sizeof(ushort))
+        {
+            ushort narrow = _size.ReadUInt16(recordIndex * sizeof(ushort));
+            return narrow == ushort.MaxValue && _sizeOverflow.TryGetValue(recordIndex, out ulong wide) ? wide : narrow;
+        }
+
+        if (_sizeWidth == sizeof(uint))
+        {
+            uint narrow = _size.ReadUInt32(recordIndex * sizeof(uint));
+            return narrow == uint.MaxValue && _sizeOverflow.TryGetValue(recordIndex, out ulong wide) ? wide : narrow;
+        }
+
+        return _size.ReadUInt64(recordIndex * ColumnSize);
+    }
+
+    /// <summary>
+    /// Validates the width recovered from the TOC and, when the column is narrowed, loads its escape
+    /// table. A narrowed column whose escape table is missing would report sentinels as real sizes,
+    /// so that is a failed open rather than a degraded one.
+    /// </summary>
+    private static bool TryResolveSizeEncoding(CacheContainerReader reader, int sizeWidth, ref ColumnOverflowTable overflow)
+    {
+        if (!NarrowColumnWidth.IsSupported(sizeWidth))
+            return false;
+
+        if (sizeWidth == NarrowColumnWidth.Full)
+            return true;
+
+        if (!ColumnOverflowTable.TryLoad(reader, CacheSectionId.ObjectSizeOverflow, out ColumnOverflowTable? loaded) || loaded is null)
+            return false;
+
+        overflow = loaded;
         return true;
     }
 

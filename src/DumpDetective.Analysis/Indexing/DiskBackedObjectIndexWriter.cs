@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Cache;
+using DumpDetective.Analysis.Indexing.Columns;
 using DumpDetective.Analysis.Indexing.Container;
 using DumpDetective.Analysis.Indexing.Dominator;
 using DumpDetective.Analysis.Indexing.ForwardIndex;
@@ -187,6 +188,10 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // SegmentIndex satellite (docs/cache/cache-architecture.md): each worker writes its
         // own segIdx slot exactly once below, so no lock is needed despite the parallel scan.
         long[] segRecordCounts = new long[segments.Length];
+        // Same per-slot ownership: the ObjectSizes width can only be chosen once the whole heap's
+        // size distribution is known, and the container write that applies it is a streaming pass.
+        long[] segSizeEscapesAtTwoBytes = new long[segments.Length];
+        long[] segSizeEscapesAtFourBytes = new long[segments.Length];
         for (int i = 0; i < segments.Length; i++)
         {
             segAddrScratchFiles[i] = Path.Combine(indexDir, $"ObjectIndex.bin.seg{i}.addr.tmp");
@@ -421,6 +426,8 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                 // segment order after the scan completes, one column at a time.
                 columnWriter.Complete();
                 segRecordCounts[segIdx] = columnWriter.EntryCount;
+                segSizeEscapesAtTwoBytes[segIdx] = columnWriter.SizeEscapesAtTwoBytes;
+                segSizeEscapesAtFourBytes[segIdx] = columnWriter.SizeEscapesAtFourBytes;
 
                 return state;
             },
@@ -559,9 +566,32 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             deleteAfterCopy: !buildStageB);
         containerWriter.EndSection(objectCount, mtChecksum);
 
+        // §10.2: an object size never came close to needing 8 bytes on any real dump measured
+        // (23.3 MB maximum across a 3.5 GB and a 27.5 GB dump), so the column is narrowed to the
+        // width the distribution allows and the few values that don't fit move to a side table.
+        long sizeEscapesAtTwoBytes = 0;
+        long sizeEscapesAtFourBytes = 0;
+        for (int i = 0; i < segments.Length; i++)
+        {
+            sizeEscapesAtTwoBytes += segSizeEscapesAtTwoBytes[i];
+            sizeEscapesAtFourBytes += segSizeEscapesAtFourBytes[i];
+        }
+
+        int sizeWidth = NarrowColumnWidth.Choose(objectCount, sizeEscapesAtTwoBytes, sizeEscapesAtFourBytes);
+        List<(uint RecordIndex, ulong Value)> sizeOverflow = [];
+
         containerWriter.BeginSection(CacheSectionId.ObjectSizes);
-        uint sizeChecksum = ConcatenateScratchFiles(stream, segSizeScratchFiles, writeBuffer, deleteAfterCopy: !buildStageB);
+        uint sizeChecksum = sizeWidth == NarrowColumnWidth.Full
+            ? ConcatenateScratchFiles(stream, segSizeScratchFiles, writeBuffer, deleteAfterCopy: !buildStageB)
+            : NarrowScratchFiles(stream, segSizeScratchFiles, sizeWidth, sizeOverflow, writeBuffer, deleteAfterCopy: !buildStageB);
         containerWriter.EndSection(objectCount, sizeChecksum);
+
+        if (sizeWidth != NarrowColumnWidth.Full)
+        {
+            containerWriter.BeginSection(CacheSectionId.ObjectSizeOverflow);
+            uint sizeOverflowChecksum = ColumnOverflowTable.Write(stream, sizeOverflow, writeBuffer);
+            containerWriter.EndSection(sizeOverflow.Count, sizeOverflowChecksum);
+        }
 
         containerWriter.BeginSection(CacheSectionId.ObjectGenerations);
         uint genChecksum = ConcatenateScratchFiles(stream, segGenScratchFiles, writeBuffer);
@@ -1374,6 +1404,16 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         /// <summary>Entries accepted so far — feeds the SegmentIndex satellite's per-segment count.</summary>
         public long EntryCount { get; private set; }
 
+        /// <summary>
+        /// How many of this segment's sizes would need the escape table at each candidate narrow
+        /// width, which is what <see cref="NarrowColumnWidth.Choose"/> needs to pick one. Counted
+        /// here because the container write is a streaming pass and cannot look ahead — see
+        /// docs/cache/cache-format-clean-slate-redesign.md §10.2.
+        /// </summary>
+        public long SizeEscapesAtTwoBytes { get; private set; }
+
+        public long SizeEscapesAtFourBytes { get; private set; }
+
         public SegmentColumnWriter(
             string addrPath, string mtPath, string sizePath, string genPath,
             int chunkEntries, int fileBufferSize, Action<long>? trackBufferBytes = null)
@@ -1402,6 +1442,13 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             BinaryPrimitives.WriteUInt64LittleEndian(_mtBuf.AsSpan(off), entry.MethodTable);
             BinaryPrimitives.WriteUInt64LittleEndian(_sizeBuf.AsSpan(off), entry.Size);
             _genBuf[_chunkCount] = unchecked((byte)entry.Generation);
+
+            if (entry.Size >= ushort.MaxValue)
+            {
+                SizeEscapesAtTwoBytes++;
+                if (entry.Size >= uint.MaxValue)
+                    SizeEscapesAtFourBytes++;
+            }
 
             _chunkCount++;
             EntryCount++;
@@ -1768,6 +1815,95 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         carried = available - whole * sizeof(ulong);
                         if (carried > 0)
                             readBuf.AsSpan(whole * sizeof(ulong), carried).CopyTo(readBuf);
+                    }
+                }
+
+                if (deleteAfterCopy)
+                {
+                    try { File.Delete(segFile); } catch { /* best-effort cleanup */ }
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(readBuf);
+            ArrayPool<byte>.Shared.Return(writeBuf);
+        }
+
+        return hasher.GetCurrentHashAsUInt32();
+    }
+
+    /// <summary>
+    /// Streams the per-segment 8-byte scratch files into the container at <paramref name="width"/>
+    /// bytes per record, diverting the values that don't fit into <paramref name="overflow"/> and
+    /// storing the escape sentinel in their place — the narrowed-column counterpart of
+    /// <see cref="ConcatenateScratchFiles"/> (docs/cache/cache-format-clean-slate-redesign.md §10.1).
+    /// </summary>
+    /// <remarks>
+    /// Like <see cref="ConvertMethodTablesToTypeIds"/>, this costs no extra pass: it replaces a copy
+    /// that already read every one of these bytes. The scratch files themselves stay 8 bytes wide,
+    /// because <see cref="ScratchFileObjectMetadataLookup"/> reads them during Stage B and wants the
+    /// real values.
+    /// </remarks>
+    private static uint NarrowScratchFiles(
+        Stream stream,
+        string[] files,
+        int width,
+        List<(uint RecordIndex, ulong Value)> overflow,
+        int bufferSize,
+        bool deleteAfterCopy)
+    {
+        ulong sentinel = NarrowColumnWidth.Sentinel(width);
+        var hasher = new XxHash32();
+        byte[] readBuf = ArrayPool<byte>.Shared.Rent(bufferSize);
+        byte[] writeBuf = ArrayPool<byte>.Shared.Rent(bufferSize);
+        long recordIndex = 0;
+
+        try
+        {
+            int recordsPerRead = readBuf.Length / ColumnSize;
+            int usableReadBytes = recordsPerRead * ColumnSize;
+
+            foreach (string segFile in files)
+            {
+                if (!File.Exists(segFile))
+                    continue;
+
+                using (FileStream segStream = new(segFile, FileMode.Open, FileAccess.Read, FileShare.None,
+                    bufferSize: bufferSize, FileOptions.SequentialScan))
+                {
+                    int carried = 0;
+                    int read;
+                    while ((read = segStream.Read(readBuf, carried, usableReadBytes - carried)) > 0)
+                    {
+                        int available = carried + read;
+                        int whole = available / ColumnSize;
+
+                        for (int r = 0; r < whole; r++)
+                        {
+                            ulong value = BinaryPrimitives.ReadUInt64LittleEndian(readBuf.AsSpan(r * ColumnSize));
+                            ulong stored = value;
+                            if (value >= sentinel)
+                            {
+                                overflow.Add(((uint)(recordIndex + r), value));
+                                stored = sentinel;
+                            }
+
+                            if (width == sizeof(ushort))
+                                BinaryPrimitives.WriteUInt16LittleEndian(writeBuf.AsSpan(r * sizeof(ushort)), (ushort)stored);
+                            else
+                                BinaryPrimitives.WriteUInt32LittleEndian(writeBuf.AsSpan(r * sizeof(uint)), (uint)stored);
+                        }
+
+                        int written = whole * width;
+                        stream.Write(writeBuf, 0, written);
+                        hasher.Append(writeBuf.AsSpan(0, written));
+                        recordIndex += whole;
+
+                        // A read can stop mid-record; keep the tail for the next iteration.
+                        carried = available - whole * ColumnSize;
+                        if (carried > 0)
+                            readBuf.AsSpan(whole * ColumnSize, carried).CopyTo(readBuf);
                     }
                 }
 

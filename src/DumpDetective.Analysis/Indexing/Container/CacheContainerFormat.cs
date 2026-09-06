@@ -113,6 +113,14 @@ internal enum CacheSectionId
     /// without it.
     /// </summary>
     ObjectTypeDictionary = 28,
+    /// <summary>
+    /// Sorted <c>RecordIndex(4) | Size(8)</c> pairs holding the object sizes too large for
+    /// <see cref="ObjectSizes"/>' narrowed width, which stores an all-ones escape sentinel in their
+    /// place (docs/cache/cache-format-clean-slate-redesign.md §10.2). Present but empty when the
+    /// column narrowed with no escapes; absent when the writer kept the full 8-byte width, in which
+    /// case there is nothing to escape to.
+    /// </summary>
+    ObjectSizeOverflow = 29,
 }
 
 /// <summary>
@@ -132,7 +140,12 @@ internal readonly struct CacheFileHeader
 {
     public const int Size = 64;
     /// <summary>
-    /// Bumped to 5 when <see cref="CacheSectionId.ObjectMethodTables"/> changed from an 8-byte
+    /// Bumped to 6 when <see cref="CacheSectionId.ObjectSizes"/> changed from a fixed 8 bytes per
+    /// object to the narrowest width that dump's size distribution allows, with
+    /// <see cref="CacheSectionId.ObjectSizeOverflow"/> holding the values that don't fit
+    /// (docs/cache/cache-format-clean-slate-redesign.md §10.2). A v5 reader would read the narrowed
+    /// column as garbage sizes rather than fail, so this bump is load-bearing.
+    /// Previously bumped to 5 when <see cref="CacheSectionId.ObjectMethodTables"/> changed from an 8-byte
     /// <c>MethodTable</c> per object to a narrow <c>TypeId</c> index into the new
     /// <see cref="CacheSectionId.ObjectTypeDictionary"/> section. A v4 reader would read the narrow
     /// column as garbage addresses rather than fail, so this bump is load-bearing, not cosmetic.
@@ -144,7 +157,7 @@ internal readonly struct CacheFileHeader
     /// Previously bumped to 2 when the Objects section moved from an interleaved
     /// array-of-structs layout to those columnar sections.
     /// </summary>
-    public const int CurrentFormatVersion = 5;
+    public const int CurrentFormatVersion = 6;
 
     private const int MagicOffset = 0;
     private const int MagicSize = 8;

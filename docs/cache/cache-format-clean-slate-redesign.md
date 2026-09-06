@@ -325,13 +325,28 @@ structural change:
 - Total dominator: 228.4 MB → ~180.6 MB (**21.0% reduction**)
 
 **Aggressive option** — keep `ImmediateDominatorAddresses` narrowed, but stop persisting
-`DominatorChildOffsets`/`DominatorChildAddresses` entirely (75.4 MB combined today). The
-dominance-chain-tree UI feature (`MEMORY.md` `project_dominator-p3-3-chain-tree-20260827`) is the
-only consumer of the child-list direction; `idom[]` alone is enough to walk *up* from any node, and
-a child-list can be derived on-demand by inverting the (now-small, R-sized) `idom[]` array in
-memory — O(R) work, done only when a user actually opens the chain-tree UI for a specific node, not
-on every build or every query.
+`DominatorChildOffsets`/`DominatorChildAddresses` entirely (75.4 MB combined today). `idom[]` alone
+is enough to walk *up* from any node, and a child-list can be derived on-demand by inverting the
+(now-small, R-sized) `idom[]` array in memory — O(R) work, done only when something actually needs
+the child direction, not on every build or every query.
 - Total dominator: 228.4 MB → ~129.25 MB (**43.4% reduction**)
+
+> **⚠ CORRECTED — the consumer named here was the wrong one.** This paragraph originally said the
+> dominance-chain-tree UI (`MEMORY.md` `project_dominator-p3-3-chain-tree-20260827`) is the only
+> consumer of the child-list direction. It is not a consumer at all: `DominatorAnalyzer`'s chain
+> detection walks *upward* via `TryGetImmediateDominator`. The child list's only production consumer
+> is `IDominatorTreeProvider.EnumerateRetainedSet`, called only from `StaticRootLeakDetector` to
+> build a candidate root's per-type/per-namespace retained breakdown. See
+> [cache-redesign-measurements.md](cache-redesign-measurements.md) § 13.3.
+
+> **✅ PRECONDITION VERIFIED (2026-09-06).** The paragraph below asked for the writer to be checked
+> before the aggressive option could be costed. It has been:
+> `DiskBackedObjectIndexWriter`'s per-row loop iterates every one of the *n* rows, and its
+> `newId < 0` branch writes a folded leaf's folding-parent address rather than skipping the row, so
+> `DominatorImmediateDominatorAddresses` does cover every node the child list covers. Inverting
+> `idom[]` reproduces the persisted child list exactly. The remaining open item is not correctness
+> but frequency — see the corrected consumer above and
+> [cache-redesign-measurements.md](cache-redesign-measurements.md) § 13.3.
 
 **Precondition the aggressive option depends on, found in review.** "Invert the `idom[]` array"
 is only equivalent to the persisted child list if `idom[]` covers every node the child list
@@ -346,13 +361,13 @@ chain-tree UI shows rather than just moving where it is computed. Note also that
 **new code**, not existing code relocated: the current builder consumes Lengauer-Tarjan output, not
 a persisted `idom[]`.
 
-**Recommendation**: measure how often the chain-tree UI is actually exercised relative to build
-frequency before choosing. If it's rare, the aggressive option is a clean win (recomputing an R-sized
-inversion on the rare occasions it's needed is cheap). If it's common enough that repeated O(R)
-inversions would be noticeable, the conservative option avoids that cost at a smaller (but still
-real) disk saving. This doc doesn't have the usage data to decide — flagging the fork, not resolving
-it, same discipline as the width-flag boundary case in §2.4 that also can't be validated without
-real data at the relevant scale.
+**Recommendation**: count how many static-root candidates a real run pushes through
+`EnumerateRetainedSet` before choosing. If it's a handful, the aggressive option is a clean win —
+one R-sized inversion, reused across all of them. If it's frequent enough that the ~51 MiB of
+resident `int[]` the inversion needs at 6.69M rows would sit live for most of a run, that is a
+bounded-memory cost the conservative option avoids at a smaller (but still real) disk saving. This
+doc doesn't have that count — flagging the fork, not resolving it, same discipline as the width-flag
+boundary case in §2.4 that also can't be validated without real data at the relevant scale.
 
 ## 5. Block-compressed sections — the actual resolution to compression vs. point-lookup
 
@@ -459,21 +474,21 @@ validated on a real, small-block prototype before being treated as a real number
 Raised in discussion, real but higher-complexity-per-byte-saved than everything above — listed here
 so they aren't re-derived from scratch later, not because they're endorsed for immediate work:
 
-- **Address delta-encoding within a segment.** Objects inside a GC segment are laid out
-  contiguously, so `ObjectAddresses[i+1] - ObjectAddresses[i]` is usually a small gap (roughly the
-  previous object's size), not a random 64-bit jump. A checkpoint-every-256-records-plus-narrow-
-  deltas scheme (the same technique time-series databases use for timestamps) could plausibly shrink
-  `ObjectAddresses` well below its current 8 bytes/object. Needs measuring actual real-heap packing
-  tightness first — free-list gaps, pinned objects, and dead space between GCs all break the delta
-  assumption to varying degrees, and the projected ratio is unknown without that data.
-- **Size-via-type-fixed-layout.** Most non-array, non-string types have a constant instance size —
-  `ObjectSizes` is redundant with type metadata for that subset. Storing size explicitly only for
-  genuinely variable-length instances could be a bigger win than the `MethodTable` dictionary, but
-  it's data-dependent (needs checking what fraction of this dump's objects are fixed-size types
-  before promising a number) and, unlike `MethodTable` dictionary encoding, interacts with the
-  fixed-stride point-lookup story (`ObjectAddressLookup` returns size directly today; a mixed
-  fixed/variable scheme needs a per-object "is this a lookup or a type-derived value" flag, adding
-  real complexity for an unmeasured payoff).
+- **Address delta-encoding within a segment.** ✅ **MEASURED AND PROMOTED — §10.** Objects inside a
+  GC segment are laid out contiguously, so `ObjectAddresses[i+1] - ObjectAddresses[i]` is usually a
+  small gap (roughly the previous object's size), not a random 64-bit jump. A checkpoint-plus-narrow-
+  deltas scheme (the same technique time-series databases use for timestamps) was the guess here;
+  the packing tightness this bullet asked to measure first has now been measured on both real caches
+  ([measurements](cache-redesign-measurements.md) § 13.2) and the answer is 55.66 MiB / 331.63 MiB
+  with zero overflow blocks. Spec in §10.
+- **Size-via-type-fixed-layout.** Still unmeasured, and now largely moot: this bullet's premise was
+  that `ObjectSizes`' redundancy has to be attacked through type metadata. It doesn't. The column's
+  actual problem is that it spends 8 bytes on a value whose measured maximum is 23.3 MB — 25 bits —
+  across both real dumps. Plain width narrowing with an escape (§10) captures 83.6 MiB / 498.1 MiB
+  without a per-object "lookup or derive" flag, without depending on what fraction of the heap is
+  fixed-size types, and without touching the fixed-stride point-lookup story. Type-derived sizes
+  would have to beat *that* residue, not the original 8 bytes, which is a much worse trade than this
+  bullet assumed.
 - **Varint/checkpointed `RetainedBytes`.** Heavy-tailed distribution (most objects retain their own
   small shallow size; a few hub objects retain gigabytes) — same checkpoint-block technique as
   addresses would exploit that, same complexity cost, same "measure the real distribution first"
@@ -576,6 +591,29 @@ makes queries faster, which compression alone does not — that, more than size,
 The one number still missing is the run-level multiplier on § 5's per-open cost — how many times a
 real run opens each section. That needs an instrumented cache-hit run against a real dump; see
 [cache-redesign-measurements.md](cache-redesign-measurements.md) § 6.
+
+## 7.1.1 Ordering with compression deliberately deferred (2026-09-06)
+
+§7.1 orders by measured size-per-unit-of-work and puts compression first. That ordering stands on
+the numbers, but compression is the one item that introduces a third-party codec dependency (there
+is no compression library in the repo at all today), a block-framing change to every point-lookup
+section, and a read-path behavioural change. The decision taken here is to **land the encoding work
+first and hold compression for last**, on the grounds that the encoding levers are the ones
+compression can never reach anyway (§5.1 rules it out for the streamed base columns) and are
+therefore not wasted work under either ordering.
+
+The resulting sequence, each step its own `CurrentFormatVersion` bump per [measurements
+§10.2](cache-redesign-measurements.md):
+
+| Version | Contents | Saves | % of 852.4 MiB |
+|---|---|---:|---:|
+| **v6** | Base + sorted-column narrowing: `ObjectSizes` width, `ObjectAddresses` block-delta, `DominatorReachableAddresses` block-delta, plus the §3 section manifest as a rider (§10) | **164.7 MiB** | **19.3%** |
+| v7 | Dominator: aggressive or conservative (§4), once the `EnumerateRetainedSet` frequency count exists | ~98 or ~46 MiB | 11.5% / 5.4% |
+| v8 | CSR edge indices (§2) | ~245 MiB | 28.7% |
+| v9 | Block compression + per-block checksums (§5) | remainder | — |
+
+Compression's own arithmetic is unaffected by going last: it applies to whatever the file is at
+that point, and the three v6 columns are excluded from it either way.
 
 ## 7.2 Design scrutiny — three problems with the plan above
 
@@ -747,3 +785,102 @@ decide a philosophical tradeoff that isn't this doc's call to make.
 - **§8 is explicitly excluded from any implementation plan** derived from this doc unless a separate,
   explicit decision is made to revisit `feedback_exact-full-data-no-topn-sampling`. Nothing in §2–§7
   depends on or assumes that decision either way.
+
+---
+
+## 10. Format v6 — narrow columns with escapes (specified, 2026-09-06)
+
+The v6 batch from §7.1.1. All three levers are the same primitive applied three ways, so they share
+one encoder, one decoder, and one set of tests. Sizing and the distribution evidence behind every
+width choice below are in [cache-redesign-measurements.md](cache-redesign-measurements.md) § 13.2.
+
+### 10.1 The shared primitive
+
+A **narrow column with escapes** is a fixed-stride array of *w*-byte little-endian values plus a
+sorted side table of the values that don't fit:
+
+- The all-ones value at width *w* (`0xFFFF` at 2 bytes, `0xFFFFFFFF` at 4) is the **escape
+  sentinel**, never a real value.
+- The **overflow table** is a sorted `(uint32 recordIndex, uint64 value)` array, 12 bytes per entry,
+  in its own section. Record indices fit in `uint32`: the largest real dump measured has 87.1M
+  objects.
+- **Streaming decode** (`ZeroCopyColumnReader.FillBatch`) keeps a cursor into the overflow table and
+  advances it in record order — O(1) amortized, no search, one predictable compare per record.
+- **Point decode** (`ObjectAddressLookup`) binary-searches the overflow table only on a sentinel
+  hit — a few thousand entries, so ~12 probes, on a path that already does two binary searches.
+
+Fixed stride is preserved, which is the property §5.1 protects: `base + i * w` still addresses
+record *i* directly, so the zero-copy streaming path and the mmap'd binary search both survive.
+
+### 10.2 `ObjectSizes` — width 2, absolute values ✅ SHIPPED (format v6)
+
+> Landed as specified: 111.54 → 27.89 MiB, 3,843 escaped records, `cache.bin` 852.4 → 768.8 MiB.
+> See [cache-redesign-measurements.md](cache-redesign-measurements.md) § 14.
+
+Sizes are stored as-is, not scaled: 13.3% of them on the reference dump and 20.6% on 21-04 are not
+multiples of 8, so `size / 8` is lossy. The measured maximum across both dumps is 23.3 MB, and the
+escape rate at 2 bytes is 0.026–0.037%.
+
+The width is **chosen by the writer, not hard-coded**, from a running histogram maintained during
+the heap scan (three counters — values ≥ 2¹⁶−1, ≥ 2³²−1, and the max — merged per segment like the
+type aggregates already are). The writer picks the *w* ∈ {2, 4, 8} minimising
+`n·w + escapes·12`, subject to an escape rate below 1% so the hot-loop branch stays predictable and
+the table stays small. On both real dumps that picks 2. A dump full of giant arrays picks 4 or 8 and
+degrades to today's behaviour rather than to a pathological side table.
+
+The width is a writer decision but it does **not** need to be stored: the TOC already carries each
+section's `Length` and `RecordCount`, so `w = Length / RecordCount` recovers it unambiguously, the
+same way §3's `TypeId` width is recovered from the dictionary's record count. That also gives the
+fallback for free — a column the writer couldn't narrow is simply written at `w = 8` and read as
+today's plain column, with no flag anywhere.
+
+### 10.3 `ObjectAddresses` — 4-byte block delta, unscaled
+
+The stored value is `address − blockBase` at width 4, with one base per **N = 1024 records**.
+Measured escape rates: **16 records of 14.6M** on the reference dump (0.00011%, all of them at the
+one 3.94 GB inter-segment gap) and **zero of 87.1M** on 21-04.
+
+Scaling the delta by 8 was considered and rejected. Both dumps are entirely 8-byte-aligned, and
+scaling would widen a block's reach from 4 GB to 34.4 GB and take the reference dump's 16 escapes to
+zero — but a 32-bit dump's addresses are 4-byte aligned, and there every second record would escape.
+The measured cost of not scaling is 16 records; the cost of scaling on an unmeasured but entirely
+real dump class is half the column. Unscaled is bitness-agnostic and needs no alignment check in
+either the writer or the reader.
+
+The block base array is a separate section, loaded into memory at open (it is small enough that
+mmap'ing it would buy nothing) — 114 KB at 14.6M objects, 664 KB at 87.1M. Decode is
+`base[i >> 10] + delta[i]`, O(1) for both access paths; the checkpoint interval is a power of two
+precisely so record → block is a shift, not a search. N is a format constant, not a stored
+parameter: changing it is a version bump, which this format already has a mechanism for.
+
+**The encoding does not assume the column is sorted.** A descending step produces a delta that
+doesn't fit and escapes. Global monotonicity happens to hold on both dumps and is recorded in the
+measurements, but nothing here depends on it, and after dropping the scaling there is no alignment
+assumption left either — the encoding is total over `ulong`.
+
+### 10.4 `DominatorReachableAddresses` — 4-byte block delta
+
+Same primitive, same encoding, same N: 6,686,490 rows, 6,530 blocks, **1,246 escaped records**
+(0.019%), **25.44 MiB saved**. It is binary-searched by `DominatorScalarReader`, so it needs the
+same point-decode path as `ObjectAddresses` and gets it from the shared primitive for free.
+
+### 10.5 Section manifest — the rider
+
+[measurements §10.2](cache-redesign-measurements.md) argues cheap breaking changes should ride the
+next bump rather than pay for their own. v6 carries one: a manifest section listing the sections
+the writer *intended* to write, so a lost conditional section (`Handles`, `Tasks`, the edge indices,
+the dominator sections) is detectable on the cache-hit path. Today the TOC lists only sections that
+were successfully closed, so a section lost to a transient write failure leaves nothing to diff
+against — the open remainder of the fast-path-validation item in [backlog.md](backlog.md).
+
+This rider is purely opportunistic: §§10.2–10.4 need nowhere to store encoding parameters, because
+widths derive from the TOC and N is a format constant. The manifest rides v6 only because it is a
+breaking change that would otherwise buy its own bump, and it is independent enough to be dropped
+from the batch without touching the three columns.
+
+### 10.6 What v6 does not do
+
+No structural index changes (that's §2, v8), no dominator child-list decision (that's §4, v7), no
+compression or block framing (§5, v9), and no change to `ObjectMethodTables`, which format v5
+already narrowed, or to `ObjectGenerations`, whose remaining 10.4 MiB is not worth breaking fixed
+stride for.

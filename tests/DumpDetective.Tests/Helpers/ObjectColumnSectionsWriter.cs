@@ -64,6 +64,50 @@ internal static class ObjectColumnSectionsWriter
         writer.EndSection(methodTables.Length);
     }
 
+    /// <summary>
+    /// Writes <c>ObjectSizes</c> narrowed to <paramref name="width"/> bytes per record plus the
+    /// matching <c>ObjectSizeOverflow</c> section, the way the format-v6 writer does. The full
+    /// 8-byte form stays available through <see cref="WriteUlongColumn"/>, since v6 readers accept
+    /// both.
+    /// </summary>
+    public static void WriteNarrowedSizeColumns(CacheContainerWriter writer, ulong[] sizes, int width)
+    {
+        ulong sentinel = width == sizeof(ushort) ? ushort.MaxValue : uint.MaxValue;
+        var overflow = new List<(uint RecordIndex, ulong Value)>();
+        byte[] buffer = new byte[sizes.Length * width];
+
+        for (int i = 0; i < sizes.Length; i++)
+        {
+            ulong stored = sizes[i];
+            if (stored >= sentinel)
+            {
+                overflow.Add(((uint)i, sizes[i]));
+                stored = sentinel;
+            }
+
+            if (width == sizeof(ushort))
+                BinaryPrimitives.WriteUInt16LittleEndian(buffer.AsSpan(i * sizeof(ushort)), (ushort)stored);
+            else
+                BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(i * sizeof(uint)), (uint)stored);
+        }
+
+        writer.BeginSection(CacheSectionId.ObjectSizes);
+        writer.Stream.Write(buffer, 0, buffer.Length);
+        writer.EndSection(sizes.Length);
+
+        byte[] overflowBuffer = new byte[overflow.Count * 12];
+        for (int i = 0; i < overflow.Count; i++)
+        {
+            Span<byte> slot = overflowBuffer.AsSpan(i * 12);
+            BinaryPrimitives.WriteUInt32LittleEndian(slot, overflow[i].RecordIndex);
+            BinaryPrimitives.WriteUInt64LittleEndian(slot[sizeof(uint)..], overflow[i].Value);
+        }
+
+        writer.BeginSection(CacheSectionId.ObjectSizeOverflow);
+        writer.Stream.Write(overflowBuffer, 0, overflowBuffer.Length);
+        writer.EndSection(overflow.Count);
+    }
+
     public static void WriteUlongColumn(CacheContainerWriter writer, CacheSectionId id, ulong[] values)
     {
         byte[] buffer = new byte[values.Length * sizeof(ulong)];

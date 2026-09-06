@@ -298,7 +298,7 @@ eight times over, to reach a few thousand matches.
 That is real disk — the largest single addition in this design — and it buys Q2 the same asymptotic
 change the reverse CSR bought Q4: `O(objects)` becomes `O(matches)`.
 
-**⚠ MEASURED, AND THIS SECTION'S PREMISE DID NOT SURVIVE (§11.6).** The 127.3 s registry build was
+**⚠ MEASURED, AND THIS SECTION'S PREMISE DID NOT SURVIVE (§11.7).** The 127.3 s registry build was
 the whole justification. Instrumented, it is **87.9% `DescribeInstanceFields`** — per-type DAC
 metadata resolution that scales with dump size and that no index in `cache.bin` can reach — and only
 **5.0% (5.28 s) index scan**. The claim above that this was "the only lever available against the
@@ -311,7 +311,7 @@ What survives:
   not recommended until the other seven sites are measured individually.
 - **The specific case that motivated it is answerable for free.** Pass 2a scans 87.1M objects purely
   to learn *which types exist*, and that set is already persisted as `ObjectTypeDictionary` at
-  0.09 MiB — verified identical on both dumps (§11.7). That is **O8**, worth 5.28 s at zero disk
+  0.09 MiB — verified identical on both dumps (§11.8). That is **O8**, worth 5.28 s at zero disk
   cost.
 
 The general lesson is worth keeping even though the item is not: **"analyzer does a full scan" does
@@ -455,12 +455,16 @@ Intrinsic does not mean unschedulable. Root enumeration walks **thread stacks**;
 **heap segments**. Nothing in the data flow orders them — Phase 1b's output is consumed by Phase 4,
 two phases later.
 
-**Running 1a and 1b concurrently is worth up to 200 s of the 1,310 s run [D], and costs one
-`Task.Run` [U — whether the DAC serialises the two readers on a shared lock is unknown, and if it
-does the win is zero. One run with a stopwatch settles it; this is the cheapest large item in the
-design].**
+**⚠ Measured (§11.4): the DAC partially serialises them, and only ~25% of the overlap is
+achievable.** So this is worth **≈50 s, not ≈200 s [D]** — and the contention is a lock, not CPU
+saturation (four idle cores at DOP 4 barely help). Giving each workload its own `DataTarget` was
+tested and is *worse than serial*, so there is no way to dodge it.
 
-**✅ Measured (§11.4): the phase is 98.4% `heap.EnumerateRoots()` and 1.6% trailer** on the 27.5 GB
+O5 survives as a ~4%-of-run item that must justify reordering the pipeline's phases. Before building
+it, re-run the probe at 27.5 GB against the *real* scan rather than the proxy — §11.4 states both
+reasons that could move the number upward.
+
+**✅ Measured (§11.5): the phase is 98.4% `heap.EnumerateRoots()` and 1.6% trailer** on the 27.5 GB
 dump. §E.3's second item — `WriteFieldNameTrailer` materialising `type.Name` for every typedef before
 filtering — is worth **1.99 s**, and both fixes it proposed measured *slower* than the code they were
 meant to replace, because the name filter prunes a more expensive `StaticFields` walk. O6 is dropped.
@@ -485,22 +489,23 @@ Not "optimised" — absent, because nothing in the ideal design creates the need
 | Phase | Today **[M]** | Ideal | Confidence |
 |---|---:|---:|---|
 | Heap scan | 335.5 s | 335.5 s | DAC-bound, unchanged |
-| Root enumeration | 200.3 s | **0 s** (overlapped) | **[U]** §7.1 — 98.4% irreducible DAC **[M]** |
+| Root enumeration | 200.3 s | **~150 s** | **[M]** §11.4 — only ~25% overlaps |
 | Forward bucket sort | 28.6 s | — | replaced |
 | Pass A + Pass B sorts | — | **+10–40 s** | ◐ CSR half **2.59 s [M]**, sort half **[U]** |
 | Reachability walk | 213.7 s | **~2 s** | **[M]** §11.3 — 1.63 s measured |
 | Dominator metadata resolve | 46.7 s | **~5 s** | **[D]** — indexed read |
 | Reverse CSR build + flush + write | 50.3 s | **~15 s** | **[D]** — write only |
 | Writer checksums | 35.9 s | 0 s | already shipped (§E.1) |
-| EventLeak publisher registry | 127.3 s | **~122 s** | **[M]** §11.6 — only Pass 2a (5.3 s) is addressable |
+| EventLeak publisher registry | 127.3 s | **~122 s** | **[M]** §11.7 — only Pass 2a (5.3 s) is addressable |
 | Report build | 81.4 s | 81.4 s | out of scope |
 | Unattributed | ~190 s | ~190 s | |
-| **Total** | **1,310.5 s** | **≈790 s** | **−40%** |
+| **Total** | **1,310.5 s** | **≈940 s** | **−28%** |
 
-After §11 the walk row is measured rather than guessed (~110 s → ~2 s), and the EventLeak row moved
-the other way: §11.6 found 87.9% of it is per-type DAC metadata work that no cache index can reach,
-so only 5.3 s of the 127.3 s is addressable. **O5 (root overlap, ~200 s) is now the single largest
-remaining item and the only one still [U].**
+**Every row is now measured.** The walk moved down hard (~110 s → ~2 s, §11.3); EventLeak and root
+overlap both moved up, because §11.7 found 87.9% of EventLeak is unreachable DAC metadata work and
+§11.4 found only ~25% of the root phase can overlap. The honest projection is **≈940 s, −28%** — not
+the −48% that stood when three of these rows were still guesses. **The RAM result (§8) is unaffected
+and remains the reason to do this work.**
 
 ---
 
@@ -558,10 +563,10 @@ opportunity, at the cost of a second permanent code path.**
 | **O2** | Delete the `ObjectGenerations` column; derive from `SegmentIndex` | **83.07 MiB [D]** | nothing |
 | **O3** | `ReverseEdgeOffsets` → 1-byte degrees + 64-row checkpoints | **159.96 MiB [D]** | nothing |
 | **O4** | `DominatorRetainedBytes` → 2 B via existing `NarrowColumnWidth` | **332.59 MiB [M]** ✅ | none — measured, §11.1 |
-| **O5** | Overlap root enumeration with the heap scan | **up to 200.3 s [U]** | nothing |
-| ~~O6~~ | ~~`StaticFieldResolver` filter order~~ — ❌ **DROPPED**, §11.4: worth 1.99 s, and both proposed variants measured *slower* | — | closed |
-| ~~O7~~ | ~~`TypeId → rows` index~~ — ❌ **DROPPED as scoped**, §11.6: reaches 5.28 s of 105.66 s. Revised case is ≈40 s for 332 MiB across 8 sites, unmeasured | — | needs the other 7 sites measured first |
-| **O8** | `PublisherRegistry` Pass 2a reads `ObjectTypeDictionary` instead of scanning 87.1M objects | **5.28 s [M]**, zero new disk | none — §11.7 |
+| **O5** | Overlap root enumeration with the heap scan | **≈50 s [D]** — ~25% overlap measured, not ~100% | re-probe at 27.5 GB with the real scan |
+| ~~O6~~ | ~~`StaticFieldResolver` filter order~~ — ❌ **DROPPED**, §11.5: worth 1.99 s, and both proposed variants measured *slower* | — | closed |
+| ~~O7~~ | ~~`TypeId → rows` index~~ — ❌ **DROPPED as scoped**, §11.7: reaches 5.28 s of 105.66 s. Revised case is ≈40 s for 332 MiB across 8 sites, unmeasured | — | needs the other 7 sites measured first |
+| **O8** | `PublisherRegistry` Pass 2a reads `ObjectTypeDictionary` instead of scanning 87.1M objects | **5.28 s [M]**, zero new disk | none — §11.8 |
 
 **O1–O4 and O5–O6 are independent of the rewrite and of each other.** O2, O3 and O4 are pure format
 changes worth **575.6 MiB** together and should ride one version bump (measurements §10.2's batching rule).
@@ -597,10 +602,10 @@ beyond instrumentation.
 
 | # | Question | Method | Gates |
 |---|---|---|---|
-| **1** | Does the DAC serialise root enumeration against the heap scan? | one 27.5 GB run, roots on a `Task` | **O5, ~200 s** |
-| ~~2~~ | ❌ **CLOSED §11.6** — 87.9% per-type DAC work; a type index reaches 5% of it | `DD_PERF_EVENTLEAK_REGISTRY=1` | **O7 dropped as scoped; O8 found** |
+| ~~1~~ | ◐ **CLOSED §11.4** — partially: ~25% overlap, and it is a lock. Split `DataTarget`s refuted | `tools/ProfileDacConcurrency` | **O5 downgraded ~200 s → ~50 s** |
+| ~~2~~ | ❌ **CLOSED §11.7** — 87.9% per-type DAC work; a type index reaches 5% of it | `DD_PERF_EVENTLEAK_REGISTRY=1` | **O7 dropped as scoped; O8 found** |
 | ~~3~~ | ✅ **CLOSED §11.1** — 2 B/row, subtraction unnecessary | offline histogram | **O4, 332.59 MiB** |
-| ~~4~~ | ❌ **CLOSED §11.4** — 1.6% of the phase; the proposed fix is 22× slower | `tools/ProfileRootPhase` | **O6 dropped** |
+| ~~4~~ | ❌ **CLOSED §11.5** — 1.6% of the phase; the proposed fix is 22× slower | `tools/ProfileRootPhase` | **O6 dropped** |
 | ~~5~~ | ✅ **CLOSED §11.2** — R1 GO: +3.4 s of walk, −2,325.9 MB | `tools/AddressLookupBench` | **R1** |
 | ~~6~~ | ✅ **CLOSED §11.3** — walk is 1.63 s; **do not sort the frontier** | `tools/SemiExternalBfsBench` | **R3, ~6 GB** |
 
@@ -734,7 +739,63 @@ page-cache resident. This measures the warm case — which is the case §4.2 arg
 a cold-storage BFS. Under genuine memory pressure the faults become hard and the ranking could
 change; that regime is exactly what freeing 6 GB is meant to prevent.
 
-### 11.4 ✅ Q4 — the root phase is 98.4% DAC walk. O6 is dropped
+### 11.4 ◐ Q1 — the DAC partially serialises. O5 survives at ~1/4 of its assumed value
+
+`tools/ProfileDacConcurrency`, 3.3 GB dump, **n=5**, medians. Each arm on a fresh `DataTarget` —
+ClrMD caches root enumeration per runtime, so a second `EnumerateRoots()` in one process returns in
+~0.02 s against ~6 s for the first. The tool's first version reused one runtime and reported a
+meaningless "349% overlap"; that is why every arm reloads.
+
+| Arm | total s | roots s | scan s |
+|---|---:|---:|---:|
+| 1 roots alone | 6.35 | 6.35 | — |
+| 2 scan alone, DOP 8 | 5.40 | — | 5.40 |
+| 3 roots ∥ scan, DOP 8 | **11.01** | 9.75 | 10.30 |
+| 4 roots ∥ scan, DOP 4 | 10.01 | 9.60 | 10.01 |
+| 5 roots ∥ scan, **split `DataTarget`s** | 11.99 | 9.51 | 11.99 |
+
+Serialised would be 11.75 s; fully concurrent would be 6.35 s. Measured 11.01 s.
+
+| Configuration | Overlap achieved (median, n=5) | Range |
+|---|---:|---:|
+| DOP 8 | **25.4%** | 8.7 – 29.2% |
+| DOP 4 | 32.0% | 2.2 – 52.3% |
+| Split `DataTarget`s | **−8.2%** | −42.1 – 17.1% |
+
+**Three findings.**
+
+1. **Overlap is real but small — ~25–30%, not the ~100% §7.1 assumed.** Mutual slowdown is heavy:
+   root enumeration runs 1.54× slower while scanning, and the scan runs 2.02× slower while roots
+   enumerate.
+2. **It is a lock, not the scheduler.** At DOP 4 there are four idle cores, and overlap barely
+   improves (32.0% vs 25.4%, well inside the run-to-run range). CPU saturation would have been
+   relieved by slack cores; this is not.
+3. **❌ Separate `DataTarget`s are refuted, and are actively worse than serial** (median −8.2%
+   overlap). The contention is not a per-`DacLibrary` lock that a second instance could dodge — and
+   two DAC instances double the dump mapping, which on the RAM-first priority order was already the
+   wrong direction.
+
+**Revised value of O5.** At the 27.5 GB dump's phase times, today's serial cost is
+200.3 + 335.5 = 535.8 s. Full overlap would save 200.3 s; **~25% overlap saves ≈50 s [D]** — 3.8% of
+the 1,310.5 s run rather than 15.3%. O5 is not dead, but it is a **4× downgrade** and it now has to
+justify restructuring the pipeline's phase order, plus running `heap.EnumerateRoots()` concurrently
+with a `Parallel.For` heap scan, for ~4%.
+
+**⚠ Two limits on this result, both of which could move it upward.**
+
+- **The scan is a proxy.** Arm 2 enumerates segment objects and touches `obj.Type`; it runs 5.40 s
+  where the real cold scan phase is a large fraction of 94.8 s. The real scan does more per-object
+  work *outside* the DAC (type-shape computation, columnar writes), so it plausibly holds the
+  contended lock a smaller fraction of the time — which would raise achievable overlap.
+- **Scale is untested.** At 27.5 GB, root enumeration is ~97% native stack unwinding (architecture
+  §8) while the scan is far more page-fault-bound, and the machine is under real memory pressure.
+  The mix is different enough that 25% should not be assumed to transfer.
+
+**Gate verdict: O5 is not refuted, but its headline number is.** Anyone building it should first
+re-run this probe at 27.5 GB with the *real* scan rather than the proxy — that is the measurement
+that would justify the pipeline change, and it is much cheaper than the full A/B.
+
+### 11.5 ✅ Q4 — the root phase is 98.4% DAC walk. O6 is dropped
 
 `tools/ProfileRootPhase` runs the root phase in isolation — dump load, `heap.EnumerateRoots()`, then
 `BuildMapByRootAddress` — instead of the full cold build `tools/ProfileRootEnumeration` costs. One
@@ -780,7 +841,7 @@ OS page cache after a session of reading the same file. **The 98.4/1.6 split is 
 phase is native DAC stack unwinding, which `cache-architecture.md` §8 documents as irreducible.
 Irreducible work is the right kind to *overlap* (§7.1), and O5 is now the only lever on this phase.
 
-### 11.5 ⚠ Incidental — static-root detection is inert under ClrMD 4
+### 11.6 ⚠ Incidental — static-root detection is inert under ClrMD 4
 
 Both dumps report **0 static/thread-static roots**, which is why `BuildMapByRootAddress` returns an
 empty map in every measurement above. That is not a property of the dumps.
@@ -804,7 +865,7 @@ root* — has nothing to match against, and `StaticFieldResolver`'s map would ne
 that filter. **This is outside the cache redesign's scope and is reported, not fixed.** It belongs to
 the `upgrade/clrmd-4` branch's own work and may already be known there.
 
-### 11.6 ❌ Q2 — `EventLeakAnalyzer`'s cost is per-type DAC work, not scan volume. O7 is dropped as scoped
+### 11.7 ❌ Q2 — `EventLeakAnalyzer`'s cost is per-type DAC work, not scan volume. O7 is dropped as scoped
 
 The 127.3 s registry build was §5's entire justification — the largest proposed disk *addition* in
 this document rested on it. Instrumented per pass (`DD_PERF_EVENTLEAK_REGISTRY=1`, warm cache,
@@ -838,7 +899,7 @@ that already exist (below).
 **127.3 s [M]**. The cold run had a colder DAC and was under real memory pressure (356 MB available,
 3.9 GB paged). The **pass split is the robust result**, not the total.
 
-### 11.7 ✅ Free win found instead — Pass 2a is already persisted
+### 11.8 ✅ Free win found instead — Pass 2a is already persisted
 
 Pass 2a walks all 87,104,236 indexed objects for one reason: to collect the **set of distinct
 MethodTables**. `ObjectTypeDictionary` is defined as exactly that set. Verified offline on both
@@ -863,7 +924,7 @@ New item, call it **O8**: expose the type dictionary through `IHeapAnalysisCache
 types exist* is the same case; §1's Q2 sites should be re-read with that question in mind before O7
 is reconsidered.
 
-### 11.8 Incidental — 4–5 reachable rows are not live objects
+### 11.9 Incidental — 4–5 reachable rows are not live objects
 
 The Q3 merge-join is not quite total: 5 of 6,686,490 rows on the 3.3 GB dump and 4 of 58,339,936 on
 the 27.5 GB dump have no matching object row. Every one sits outside the heap's address range —
@@ -877,7 +938,7 @@ them (drop the node — the rank-select bitmap simply never sets that bit), and 
 addresses against the segment ranges at seed time would remove them at source. Tiny, but it is a
 correctness detail the swizzle must not trip over.
 
-### 11.9 Revised sizing
+### 11.10 Revised sizing
 
 Folding §11.1 into §6's table (`DominatorRetainedBytes` 222.55 → 112.51 MiB):
 
@@ -886,7 +947,7 @@ Folding §11.1 into §6's table (`DominatorRetainedBytes` 222.55 → 112.51 MiB)
 | 27.5 GB | 2,418.1 MiB | **1,962.5 MiB (81.2%)** | **1,630.3 MiB (67.4%)** |
 | 3.3 GB | 342.50 MiB | **301.6 MiB (88.1%)** | **245.8 MiB (71.8%)** |
 
-### 11.10 What the round changed
+### 11.11 What the round changed
 
 | Claim | Status |
 |---|---|
@@ -898,12 +959,14 @@ Folding §11.1 into §6's table (`DominatorRetainedBytes` 222.55 → 112.51 MiB)
 | §4.2 mitigation (1), sort the frontier | ❌ **refuted** — 1.67× slower, 4.6% fewer faults |
 | §6.2 `retained − ownSize`, ~222 MiB at 4 B | ◐ **saving is larger (332.59 MiB at 2 B); mechanism is unnecessary — drop the subtraction** |
 | §7.3 Pass A + Pass B cost +40–70 s | ◐ CSR half measured at 2.59 s; sort half still open |
-| §7.1/§E.3 `WriteFieldNameTrailer` is a large share of the 200.3 s | ❌ **refuted** — 1.6%, and both proposed fixes measured slower. **O6 dropped** |
-| §7.1 root phase is irreducible DAC work | ✅ confirmed — 98.4% of the phase. O5 (overlap) is the only lever |
+| §7.1/§E.3 `WriteFieldNameTrailer` is a large share of the 200.3 s | ❌ **refuted** (§11.5) — 1.6%, and both proposed fixes measured slower. **O6 dropped** |
+| §7.1 root phase is irreducible DAC work | ✅ confirmed (§11.5) — 98.4% of the phase. O5 (overlap) is the only lever |
+| §7.1 overlapping roots with the scan is worth ~200 s | ◐ **downgraded 4×** — the DAC partially serialises; ~25% overlap, so ≈50 s (§11.4) |
+| — | ❌ **new**: separate `DataTarget`s per workload are *worse than serial* (§11.4) |
 | §5/§7.3 EventLeak's 127.3 s is scan volume | ❌ **refuted** — 87.9% is per-type DAC metadata work. **O7 dropped as scoped** |
 | §5 a type index is the only lever there | ❌ wrong — it reaches 5.0%. Revised worth: ≈40 s for 332 MiB across 8 sites, unmeasured |
-| — | ✅ **new O8**: Pass 2a's 87.1M-object scan is already persisted as `ObjectTypeDictionary` — 5.28 s, zero disk (§11.7) |
-| — | ⚠ **new**: static-root detection is inert under ClrMD 4 (§11.5) — outside scope, reported |
+| — | ✅ **new O8**: Pass 2a's 87.1M-object scan is already persisted as `ObjectTypeDictionary` — 5.28 s, zero disk (§11.8) |
+| — | ⚠ **new**: static-root detection is inert under ClrMD 4 (§11.6) — outside scope, reported |
 
 ---
 

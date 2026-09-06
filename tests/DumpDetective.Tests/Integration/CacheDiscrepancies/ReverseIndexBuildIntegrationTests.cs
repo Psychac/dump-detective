@@ -84,7 +84,7 @@ public sealed class ReverseIndexBuildIntegrationTests(ITestOutputHelper output)
 
             string containerPath = DumpIndexPaths.CacheContainer(dumpPath);
             Assert.True(CacheContainerReader.TryOpen(containerPath, out CacheContainerReader? container), "cache.bin failed to open");
-            Assert.True(container!.ContainsSection(CacheSectionId.ReverseEdgeMetadata), "ReverseEdgeMetadata section missing");
+            Assert.True(container!.ContainsSection(CacheSectionId.ReverseEdgeOffsets), "ReverseEdgeOffsets section missing");
 
             Assert.True(ReverseEdgeIndexReader.TryOpen(container, out ReverseEdgeIndexReader? reader), "ReverseEdgeIndexReader.TryOpen failed");
             using (reader)

@@ -62,9 +62,10 @@ public class CacheSectionCatalogTests
     {
         CacheSectionId[] gated =
         [
-            CacheSectionId.ReverseEdgeBuckets,           // can fail deterministically at scale
-            CacheSectionId.DominatorReachableAddresses,  // Stage B analyzer gating
-            CacheSectionId.RootStackThreadAttribution,   // pre-dates its own additive introduction in some v4 caches
+            CacheSectionId.ReverseEdgeOffsets,            // can fail deterministically at scale
+            CacheSectionId.ReverseEdgeChildren,
+            CacheSectionId.DominatorReachableAddresses,   // Stage B analyzer gating
+            CacheSectionId.RootStackThreadAttribution,    // pre-dates its own additive introduction in some v4 caches
         ];
 
         foreach (CacheSectionId id in gated)
@@ -78,8 +79,9 @@ public class CacheSectionCatalogTests
     /// Sections no build writes. <c>Objects</c> was superseded by the columnar sections in format
     /// v2; <c>EventCandidates</c> is a reserved slot that never had a writer; the three
     /// <c>ForwardEdge*</c> sections had their container merge removed once it was shown nothing read
-    /// them. All slots stay reserved so ids are never renumbered (that would misparse existing
-    /// caches), but none may be treated as expected.
+    /// them; the three <c>ReverseEdge{Buckets,Directories,Metadata}</c> sections were replaced
+    /// outright by true CSR in format v8. All slots stay reserved so ids are never renumbered (that
+    /// would misparse existing caches), but none may be treated as expected.
     /// </summary>
     [Fact]
     public void ReservedButUnwrittenSections_AreUnused()
@@ -91,6 +93,9 @@ public class CacheSectionCatalogTests
             CacheSectionId.ForwardEdgeBuckets,       // extraction still runs; container merge removed
             CacheSectionId.ForwardEdgeDirectories,
             CacheSectionId.ForwardEdgeMetadata,
+            CacheSectionId.ReverseEdgeBuckets,       // replaced outright by true CSR (format v8)
+            CacheSectionId.ReverseEdgeDirectories,
+            CacheSectionId.ReverseEdgeMetadata,
         ];
 
         foreach (CacheSectionId id in unused)

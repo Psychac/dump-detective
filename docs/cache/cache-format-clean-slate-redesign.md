@@ -122,6 +122,17 @@ Carried forward from the existing format, non-negotiable for any redesign:
 
 ## 2. True CSR for both edge directions (replaces hash-bucket-sort-directory entirely)
 
+> **✅ SHIPPED (2026-09-06), reverse direction only — format v8.** The title's "both edge
+> directions" is now stale: the write-only `ForwardEdge*` removal (§9.2 of the measurements doc)
+> landed before this section was reached, so there is no persisted forward index left to build a
+> forward CSR for — nothing reads one. `ReverseEdgeOffsets`/`ReverseEdgeChildren` replaced
+> `ReverseEdgeBuckets`/`ReverseEdgeDirectories`/`ReverseEdgeMetadata` exactly as specified below.
+> Measured on the reference dump: `cache.bin` 587.29 → **342.50 MiB** (−244.79 MiB, −41.7%),
+> matching §2.5's projection closely. §2.2.1's resolver design was corrected during implementation,
+> not superseded by it — see [cache-redesign-measurements.md](cache-redesign-measurements.md) §17.1
+> for why the reverse direction never needed the scratch-file resolver §2.2.1 specifies. Full
+> writeup: measurements §17.
+
 ### 2.1 What changes and why it's bigger than narrowing values
 
 Today's format: `[key: 8-byte address][count: 4][pad][values: N × 8-byte address]` per unique
@@ -159,6 +170,15 @@ doesn't need segment base-offsets to be known mid-scan (the concern that ruled o
 inline during the main scan, per the superseded doc's §1).
 
 #### 2.2.1 The resolver cannot be `ObjectAddressLookup` — use the scratch-file pattern instead
+
+> **⚠ Scoped down during implementation — applies to a forward CSR, not the reverse one shipped.**
+> This whole subsection reasons about the general case (full N-object space). The reverse index
+> actually built doesn't need it: `ReachableGraphWalker` guarantees every edge's both endpoints are
+> already in its own in-memory `ReachableAddresses` output by the time Phase B runs, so the resolver
+> is a plain `Array.BinarySearch` against that array — no scratch files, no container, no "resolver
+> miss" fallback (§2.6 below). See [cache-redesign-measurements.md](cache-redesign-measurements.md)
+> §17.1 for the construction argument and where it was verified against the walker's actual code.
+> This subsection's reasoning stays correct and would still apply if a forward CSR were ever built.
 
 An earlier draft of this doc said step 1 would call `ObjectAddressLookup.TryGetNodeIndex`,
 "reused unchanged" from the superseded doc. **That cannot work**, and the reason is
@@ -637,11 +657,12 @@ The resulting sequence, each step its own `CurrentFormatVersion` bump per [measu
 |---|---|---:|---:|---|
 | **v6** | Base + sorted-column narrowing: `ObjectSizes` width, `ObjectAddresses` block-delta, `DominatorReachableAddresses` block-delta, plus the §3 section manifest as a rider (§10) | **164.7 MiB** | 19.3% of 852.4 | ✅ shipped |
 | **v7** | Dominator: aggressive option (§4) — the `EnumerateRetainedSet` frequency count came back zero on every dump measured | **100.4 MiB** | 14.6% of 687.7 | ✅ shipped |
-| v8 | CSR edge indices (§2) | ~245 MiB | ~35% of 587.29 | open |
+| **v8** | CSR reverse edge index (§2) — the forward CSR half was never needed; nothing persists a forward index any more | **244.79 MiB** | 41.7% of 587.29 | ✅ shipped |
 | v9 | Block compression + per-block checksums (§5) | remainder | — | open |
 
-Compression's own arithmetic is unaffected by going last: it applies to whatever the file is at
-that point, and the base columns (v6) plus the dominator idom column (v7) are excluded from it
+**Whole redesign so far: 1,398.3 → 342.50 MiB, 24.5% of where it started, no compression written
+yet.** Compression's own arithmetic is unaffected by going last: it applies to whatever the file is
+at that point, and the base columns (v6) plus the dominator idom column (v7) are excluded from it
 either way.
 
 ## 7.2 Design scrutiny — three problems with the plan above

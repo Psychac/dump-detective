@@ -420,10 +420,6 @@ namespace DumpDetective.Analysis.Cache
 
             if (Indexing.Container.CacheContainerReader.PerfLogSession)
                 Console.Error.WriteLine(Indexing.Container.CacheContainerReader.PerfSummary());
-
-            if (Indexing.ReverseIndex.ReverseEdgeIndexReader.PerfLogBlocks)
-                Console.Error.WriteLine(
-                    Indexing.ReverseIndex.ReverseEdgeIndexReader.DumpBlockTrace(Path.GetTempPath()));
         }
     }
 

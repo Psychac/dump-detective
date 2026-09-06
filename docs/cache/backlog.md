@@ -92,27 +92,29 @@ conclusions the two design docs originally reached.
   the merge with one call plus a rebuild — see
   [cache-redesign-measurements.md](cache-redesign-measurements.md) § 9.2.
 
-- **Edge-index and dominator-tree values stored as full 8-byte addresses instead of 4-byte node
-  indices into the already-existing `ObjectAddresses` column.** Measured (not projected) on a real
-  14.6M-object dump: the combined forward+reverse edge index is 57.1% of `cache.bin` (799 MB of
-  1.37 GB), the dominator tree another 16.3% (228 MB) — together 73.4% of the file, discovered while
-  investigating why `cache.bin` runs ~5x the size of a comparable tool's cache for the same dump (see
+- **✅ DONE (2026-09-06) — edge-index and dominator-tree values narrowed/CSR'd; `cache.bin` down to
+  24.5% of its original size across formats v5–v8, with only block compression (v9) left.**
+  Originally: edge-index and dominator-tree values stored as full 8-byte addresses instead of
+  4-byte node indices. Measured (not projected) on a real 14.6M-object dump: the combined
+  forward+reverse edge index was 57.1% of `cache.bin` (799 MB of 1.37 GB), the dominator tree
+  another 16.3% (228 MB) — together 73.4% of the file, discovered while investigating why
+  `cache.bin` ran ~5x the size of a comparable tool's cache for the same dump (see
   [docs/discrepancy/cache-footprint-comparison.md](../discrepancy/cache-footprint-comparison.md)).
-  Full clean-slate design — true CSR for both edge directions (no directory overhead at all, not
-  just narrower keys), `MethodTable` dictionary encoding, and block-level compression that preserves
-  point-lookup access — in [cache-format-clean-slate-redesign.md](cache-format-clean-slate-redesign.md).
-  **Since measured** ([cache-redesign-measurements.md](cache-redesign-measurements.md)): block
-  compression alone, on the format as it stands today with no CSR work at all, gives 83.6% on this
-  dump and 76.5% on a 27.5 GB one — more than CSR + dictionary + dominator combined (45.7%).
-  On size grounds that reorders the plan: compression first, CSR last, where CSR's remaining
-  argument becomes query speed and ~1,992 MiB of directory overhead at 27.5 GB scale, not raw size.
-  A scrutiny pass then argued compression's *runtime* cost on the edge index would be severe
-  (high-volume random `TryGetParents` lookups over hash-scattered buckets). **That objection was
-  measured and withdrawn**: a real run makes only 8,851 such lookups across 710 distinct 64 KB
-  blocks, so a 16.8 MB LRU cache gives an 87.9% hit rate and ~34 ms with zstd
-  ([measurements § 8](cache-redesign-measurements.md)). Compression of the reverse-edge index is
-  viable. **Do the write-only `ForwardEdge*` item above first** — it is larger, cheaper and needs
-  no encoding work, and it shrinks the file this design would then compress.
+  Full clean-slate design in [cache-format-clean-slate-redesign.md](cache-format-clean-slate-redesign.md);
+  every non-compression lever it specified has since shipped, in this order (measured, not
+  projected, at each step — [cache-redesign-measurements.md](cache-redesign-measurements.md)):
+  the write-only `ForwardEdge*` sections stopped being persisted (§9.2, −462.4 MiB); `MethodTable`
+  dictionary encoding (§11, format v5, −83.6 MiB); narrowed `ObjectSizes`/block-delta address
+  columns/section manifest (§14, format v6, −164.7 MiB); the dominator child list derived on
+  demand instead of persisted (§16, format v7, −100.4 MiB); true CSR for the reverse edge index
+  (§17, format v8, −244.79 MiB, replacing the hash-bucket-sort-directory format this item
+  originally proposed narrowing). Reference dump: **1,398.3 → 342.50 MiB.**
+  Block compression (format doc §5/§7.1.1, v9) is the one item left, deliberately held for last —
+  not because measurement ranks it low; it's still the single biggest remaining lever
+  (83.6%/76.5% measured on the two real dumps) — but because it's the one item that introduces a
+  third-party codec dependency, a block-framing change to every point-lookup section, and a
+  read-path behavioural change, and the user made an explicit call to sequence it after every
+  simpler, lower-risk encoding win landed.
 
 ## GC-root enumeration at scale (diagnosis is done — see cache-architecture.md § 8; only the fix is open)
 

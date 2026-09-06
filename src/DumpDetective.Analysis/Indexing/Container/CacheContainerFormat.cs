@@ -29,17 +29,15 @@ internal enum CacheSectionId
     /// <summary>Columnar <c>sbyte[]</c> of per-object GC generations, aligned with <see cref="ObjectAddresses"/>.</summary>
     ObjectGenerations = 13,
     /// <summary>
-    /// Concatenated sorted-group payloads (<c>.dat</c>) from every reverse-edge bucket, back to
-    /// back in bucket order. Per-bucket byte ranges are recorded in <see cref="ReverseEdgeMetadata"/>
-    /// since the container's TOC has one fixed slot per <see cref="CacheSectionId"/>, not one per bucket.
+    /// Reserved, no longer written (format v8). Held concatenated sorted-group payloads
+    /// (<c>.dat</c>) from every reverse-edge hash bucket until true CSR
+    /// (<see cref="ReverseEdgeOffsets"/>/<see cref="ReverseEdgeChildren"/>) replaced the whole
+    /// hash-bucket-sort-directory format — docs/cache/cache-format-clean-slate-redesign.md §2.
     /// </summary>
     ReverseEdgeBuckets = 14,
-    /// <summary>
-    /// Concatenated directory-index payloads (<c>.idx</c>) from every reverse-edge bucket, back to
-    /// back in bucket order, mirroring <see cref="ReverseEdgeBuckets"/>.
-    /// </summary>
+    /// <summary>Reserved, no longer written — see <see cref="ReverseEdgeBuckets"/>.</summary>
     ReverseEdgeDirectories = 15,
-    /// <summary>JSON <see cref="Indexing.ReverseIndex.ReverseIndexMetadata"/>: bucket count and per-bucket offsets/lengths into the two sections above, plus extraction stats.</summary>
+    /// <summary>Reserved, no longer written — see <see cref="ReverseEdgeBuckets"/>.</summary>
     ReverseEdgeMetadata = 16,
     /// <summary>
     /// Small per-segment table of (Start, End, FirstRecordIndex, RecordCount) — see
@@ -154,6 +152,21 @@ internal enum CacheSectionId
     /// against this manifest can (docs/cache/cache-format-clean-slate-redesign.md §10.5).
     /// </summary>
     SectionManifest = 34,
+    /// <summary>
+    /// Columnar <c>int32[R+1]</c> CSR offsets into <see cref="ReverseEdgeChildren"/>, indexed by the
+    /// same reachable-node row as <see cref="DominatorReachableAddresses"/> — format v8's true CSR
+    /// replacement for the hash-bucket-sort-directory format
+    /// (docs/cache/cache-format-clean-slate-redesign.md §2). Row <c>r</c>'s parents are
+    /// <c>Children[Offsets[r]..Offsets[r+1]]</c> — a direct array slice, no directory, no second
+    /// binary search.
+    /// </summary>
+    ReverseEdgeOffsets = 35,
+    /// <summary>
+    /// Flat <c>int32[]</c> column of parent *row indices* (not addresses), grouped by child row —
+    /// see <see cref="ReverseEdgeOffsets"/>. Row indices rather than addresses is what makes this
+    /// smaller than the retired directory-based format: no per-entry address, no per-key header.
+    /// </summary>
+    ReverseEdgeChildren = 36,
 }
 
 /// <summary>
@@ -173,7 +186,14 @@ internal readonly struct CacheFileHeader
 {
     public const int Size = 64;
     /// <summary>
-    /// Bumped to 7 when <see cref="CacheSectionId.DominatorImmediateDominatorAddresses"/> changed
+    /// Bumped to 8 when the reverse-reference index changed from an address-keyed
+    /// hash-bucket-sort-directory format (<see cref="CacheSectionId.ReverseEdgeBuckets"/>/
+    /// <see cref="CacheSectionId.ReverseEdgeDirectories"/>/<see cref="CacheSectionId.ReverseEdgeMetadata"/>)
+    /// to true CSR (<see cref="CacheSectionId.ReverseEdgeOffsets"/>/<see cref="CacheSectionId.ReverseEdgeChildren"/>)
+    /// — format doc §2, closing the largest remaining lever in the redesign. A v7 reader would
+    /// misparse the flat CSR arrays as a JSON metadata blob plus grouped-address payloads rather
+    /// than fail, so this bump is load-bearing, not cosmetic.
+    /// Previously bumped to 7 when <see cref="CacheSectionId.DominatorImmediateDominatorAddresses"/> changed
     /// from an 8-byte dominator *address* per row to a 4-byte dominator *row* index, and the
     /// persisted dominator child list (<see cref="CacheSectionId.DominatorChildOffsets"/>/
     /// <see cref="CacheSectionId.DominatorChildAddresses"/>) stopped being written — format doc §4's
@@ -197,7 +217,7 @@ internal readonly struct CacheFileHeader
     /// Previously bumped to 2 when the Objects section moved from an interleaved
     /// array-of-structs layout to those columnar sections.
     /// </summary>
-    public const int CurrentFormatVersion = 7;
+    public const int CurrentFormatVersion = 8;
 
     private const int MagicOffset = 0;
     private const int MagicSize = 8;

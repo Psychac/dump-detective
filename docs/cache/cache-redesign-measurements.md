@@ -1029,3 +1029,94 @@ Three layers, same discipline as v6:
 1,051 unit tests pass (three fewer than v6's 1,054 — the retired `DominatorChildIndexBuilderTests`
 class's synthetic-graph scenarios moved into `DominatorChildIndexTests` as full round trips, and its
 one unrelated `DominatorRowMapping` test moved to its own file).
+
+---
+
+## 17. ✅ v8 shipped — true CSR reverse-edge index, `cache.bin` 587.29 → 342.50 MiB
+
+Format doc §2's true CSR replaces the hash-bucket-sort-directory reverse-reference index entirely.
+Format version bumped 7 → 8. `ReverseEdgeBuckets`/`ReverseEdgeDirectories`/`ReverseEdgeMetadata` are
+no longer written; `ReverseEdgeOffsets`/`ReverseEdgeChildren` replace them, keyed by the same
+reachable-node row order `DominatorReachableAddresses` already establishes.
+
+Measured on a cold rebuild of the reference dump:
+
+| | Before (v7) | After (v8) |
+|---|---:|---:|
+| `ReverseEdgeBuckets` | 245,919,712 B — 234.53 MiB | *(removed)* |
+| `ReverseEdgeDirectories` | 106,977,960 B — 102.02 MiB | *(removed)* |
+| `ReverseEdgeMetadata` | present | *(removed)* |
+| `ReverseEdgeOffsets` (new) | — | 26,745,964 B — 25.51 MiB |
+| `ReverseEdgeChildren` (new) | — | 69,470,960 B — 66.25 MiB |
+| Sections | 27 | 27 (churn: 3 removed, 2 added) |
+| **`cache.bin`** | 615,819,113 B — 587.29 MiB | **359,137,480 B — 342.50 MiB** |
+| **Saved** | | **256,681,633 B — 244.79 MiB (−41.7%)** |
+
+Matches format doc §2.5's projection closely: 91.76 MiB CSR vs 336.55 MiB retired hash-bucket
+format, projected 96.2 MB vs 336.5 MB — same shape, right order of magnitude, exact once MB/MiB
+convention is accounted for. `ReverseEdgeChildren`'s record count (17,367,740) matches the
+format doc's independently-measured `E_reverse` exactly.
+
+**The whole redesign so far: 1,398.3 → 342.50 MiB — 24.5% of where it started, with no compression
+written yet.** Every non-compression lever in the original design is now shipped; only CSR's
+original companion (a full-object-space forward CSR) was never built, because the write-only
+`ForwardEdge*` removal (§9.2) made it moot before this section was reached — nothing persists a
+forward index at all any more, so there is no forward-direction CSR to build.
+
+### 17.1 A design correction found while implementing, not while measuring
+
+Format doc §2.2.1 argued the CSR resolver "cannot be `ObjectAddressLookup`" and specified extending
+`ScratchFileObjectMetadataLookup` instead, reasoning that address→index resolution needs the
+full-object-space (N) columns, which aren't available before `CacheContainerWriter.Finish`. That
+reasoning is correct for a *forward* CSR (full object space), but doesn't apply to the *reverse* one
+actually built: `ReachableGraphWalker` guarantees, by construction, that every edge it hands to
+`ReverseEdgeExtractor.RecordEdge` has both endpoints already in its own `ReachableAddresses` output
+(a parent is only ever the walk's current node, already visited when dequeued; a child is added to
+the visited set in the same statement the edge is recorded) — verified by reading
+`ReachableGraphWalker.cs`'s both walk variants, not assumed. That sorted array is already resident
+in memory as a walk result, the same one `DominatorReachableAddressWriter` persists, so Phase B's
+resolver is a plain `Array.BinarySearch` against it — no scratch-file lookup, no container, and,
+because resolution is total by the same construction argument, no "resolver miss" fallback path
+either (`ReverseEdgeCsrBuilder.ResolveRow` throws on a miss, matching `DominatorRowMapping.Compute`'s
+existing "this should be impossible" convention, rather than the whole-section fallback §2.6
+specified).
+
+A second, smaller correction: §2.2's "readers gain the same new coupling to `ObjectAddresses`"
+turned into a coupling to `DominatorReachableAddresses`/`DominatorRowIndex` instead — reused
+unchanged as the reverse index's address↔row resolver at read time too, since both sections are
+written from the exact same walk result and share the exact same row numbering by construction. No
+new resolver infrastructure was needed on either side of the format.
+
+### 17.2 Correctness verification, and a real mistake caught mid-run
+
+Two layers, run one at a time on the reference dump:
+
+- **Internal consistency, exhaustive.** `EnumerateChildCounts`' own total against
+  `ReverseEdgeChildren`'s TOC record count — 17,367,740 both ways, exactly. Costs nothing beyond the
+  sequential scan the method already does; touches every one of the 6,686,490 rows.
+- **Live-heap cross-check, sampled** (`ReverseEdgeCsrRealDumpTests`): a stride sample of 20,019
+  reachable nodes (~1/334, fixed target size regardless of dump size), each checked with one live
+  `obj.EnumerateReferences` call against `TryGetParents` — 41,831 live edges checked, 0 mismatches.
+
+**The first version of this test was a real mistake, caught by the user asking why a test had been
+running for 30 minutes.** It did a full independent BFS over all 6,686,490 reachable nodes via
+`heap.GetObject`/`obj.EnumerateReferences` to build a from-scratch oracle — exactly the "live ClrMD
+walk at scale" this project's own docs already establish as the slow path production deliberately
+avoids (measured ~2x slower than the pre-extracted-loose-file walk on a 25 GB dump,
+docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §2/§8.8). Killed after 30+
+minutes with no completion in sight; replaced with the bounded sample above, which finished in 1m23s
+end-to-end (including the full cold index rebuild) and gives the same kind of independent evidence
+at a cost proportional to a fixed sample size instead of the whole reachable graph.
+
+Also re-run one at a time and green: `ReverseIndexBuildIntegrationTests`,
+`DominatorAnalyzerExactTreeRealDumpTests`, `DominatorChildIndexRealDumpTests`,
+`StaticRootLeakDetectorDominatorTreeDiscrepancyTests`,
+`HeapAnalysisCacheObjectMetadataDiscrepancyTests`, `ObjectAddressLookupDiscrepancyTests`,
+`NarrowColumnsRealDumpTests` — none of these consume the reverse index directly, but several go
+through analyzers that do (`DominatorAnalyzer`'s chain detection, `GCRootAnalyzer`'s path search),
+so this confirms the format change didn't regress anything downstream.
+
+1,051 unit tests pass. The retired `ReverseEdgeSorterTests` (hash-bucket-sort-directory format,
+9 tests) is replaced by `ReverseEdgeCsrBuilderTests` (7 tests, same coverage shape re-targeted at the
+CSR build: grouping, hub fan-in, cross-bucket correctness, and a new resolver-miss-throws case the
+old format had no equivalent of since it never resolved addresses to anything).

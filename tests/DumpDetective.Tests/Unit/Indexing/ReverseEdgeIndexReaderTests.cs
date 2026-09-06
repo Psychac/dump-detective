@@ -1,5 +1,7 @@
 using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Analysis.Indexing.Dominator;
 using DumpDetective.Analysis.Indexing.ReverseIndex;
+using DumpDetective.Tests.Helpers;
 
 using FluentAssertions;
 
@@ -26,21 +28,12 @@ public class ReverseEdgeIndexReaderTests : IAsyncLifetime
         await Task.CompletedTask;
     }
 
-    private async Task<string> BuildContainer(int bucketCount, (ulong parent, ulong child)[] edges)
+    private async Task<string> BuildContainer(int bucketCount, (ulong Parent, ulong Child)[] edges)
     {
-        var extractor = new ReverseEdgeExtractor(bucketCount, _tempDir);
-        foreach (var (parent, child) in edges)
-            extractor.RecordEdge(parent, child);
-        var stats = extractor.GetStatistics();
-        await extractor.DisposeAsync();
-
-        var sorter = new ReverseEdgeSorter();
-        await sorter.SortBucketsAsync(_tempDir, bucketCount, CancellationToken.None);
-
-        string containerPath = Path.Combine(_tempDir, "cache.bin");
+        string containerPath = Path.Combine(_tempDir, $"cache-{Guid.NewGuid():N}.bin");
         using (var writer = new CacheContainerWriter(containerPath))
         {
-            ReverseEdgeContainerWriter.Write(writer, _tempDir, bucketCount, stats);
+            await ReverseEdgeCsrTestWriter.WriteAsync(writer, _tempDir, bucketCount, edges);
             writer.Finish();
         }
 
@@ -85,13 +78,31 @@ public class ReverseEdgeIndexReaderTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task TryGetParents_ReachableRowWithZeroParents_ReturnsFalse()
+    {
+        // 0x1000 is only ever a parent, never a child -- reachable (it's in the address set), but
+        // with zero recorded in-degree. Matches the retired hash-directory format's "no recorded
+        // parents" contract exactly, rather than the finer "reachable but zero-degree" distinction
+        // true CSR happens to make available (see the reader's TryGetParents doc comment).
+        string containerPath = await BuildContainer(1, [(0x1000UL, 0x0100UL)]);
+
+        CacheContainerReader.TryOpen(containerPath, out var container).Should().BeTrue();
+        ReverseEdgeIndexReader.TryOpen(container!, out var reader).Should().BeTrue();
+
+        using (reader)
+        {
+            reader!.TryGetParents(0x1000UL, out var parents, out bool truncated).Should().BeFalse();
+            parents.Should().BeEmpty();
+            truncated.Should().BeFalse();
+        }
+    }
+
+    [Fact]
     public async Task TryGetParents_HubChildWithManyParents_ReturnsAllUncappedAndNeverTruncated()
     {
-        // Uncapped since §4.2/§7.4 (dominator-tree-phase1-integration.md) — a hub child well past
-        // the old 10,000 cap gets every one of its parents back, and truncated is always false.
         const ulong hotChild = 0x0100UL;
         const int edgeCount = 10_050;
-        var edges = new (ulong parent, ulong child)[edgeCount];
+        var edges = new (ulong Parent, ulong Child)[edgeCount];
         for (int i = 0; i < edges.Length; i++)
             edges[i] = ((ulong)(0x10000 + i), hotChild);
 
@@ -111,7 +122,7 @@ public class ReverseEdgeIndexReaderTests : IAsyncLifetime
     [Fact]
     public async Task TryGetParents_ManyChildrenAcrossBuckets_AllResolveCorrectly()
     {
-        var edges = new List<(ulong parent, ulong child)>();
+        var edges = new List<(ulong Parent, ulong Child)>();
         var expectedByChild = new Dictionary<ulong, List<ulong>>();
         for (ulong child = 0; child < 500; child++)
         {
@@ -144,7 +155,7 @@ public class ReverseEdgeIndexReaderTests : IAsyncLifetime
     [Fact]
     public async Task EnumerateChildCounts_MatchesTryGetParents_ForEveryChild()
     {
-        var edges = new List<(ulong parent, ulong child)>();
+        var edges = new List<(ulong Parent, ulong Child)>();
         var expectedByChild = new Dictionary<ulong, int>();
         for (ulong child = 0; child < 500; child++)
         {
@@ -177,11 +188,49 @@ public class ReverseEdgeIndexReaderTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task EnumerateChildCounts_SkipsRowsWithZeroParents()
+    {
+        // Mirrors TryGetParents_ReachableRowWithZeroParents_ReturnsFalse: 0x1000 is reachable
+        // (it's a recorded parent) but never a child, so it must not appear in the callback at all.
+        string containerPath = await BuildContainer(1, [(0x1000UL, 0x0100UL)]);
+
+        CacheContainerReader.TryOpen(containerPath, out var container).Should().BeTrue();
+        ReverseEdgeIndexReader.TryOpen(container!, out var reader).Should().BeTrue();
+
+        using (reader)
+        {
+            var seen = new HashSet<ulong>();
+            reader!.EnumerateChildCounts((child, _, _) => seen.Add(child));
+
+            seen.Should().BeEquivalentTo([0x0100UL]);
+        }
+    }
+
+    [Fact]
     public void TryOpen_NoReverseIndexSections_ReturnsFalse()
     {
         string containerPath = Path.Combine(_tempDir, "cache.bin");
         using (var writer = new CacheContainerWriter(containerPath))
         {
+            writer.Finish();
+        }
+
+        CacheContainerReader.TryOpen(containerPath, out var container).Should().BeTrue();
+        ReverseEdgeIndexReader.TryOpen(container!, out var reader).Should().BeFalse();
+        reader.Should().BeNull();
+    }
+
+    [Fact]
+    public void TryOpen_ReachableAddressesPresentButNoCsr_ReturnsFalse()
+    {
+        // The two sections are written together in production, but the reader's own precondition
+        // (docs/cache/cache-format-clean-slate-redesign.md §2) is specifically that ReverseEdgeOffsets
+        // must agree with DominatorReachableAddresses' row count -- absent entirely must fail, same
+        // as any other missing satellite section.
+        string containerPath = Path.Combine(_tempDir, "cache.bin");
+        using (var writer = new CacheContainerWriter(containerPath))
+        {
+            DominatorReachableAddressWriter.Write(writer, [0x100UL, 0x200UL]);
             writer.Finish();
         }
 

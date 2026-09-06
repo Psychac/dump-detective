@@ -18,18 +18,21 @@ Current state, backlog, and a three-doc redesign set.
 conclusions the two design docs originally reached, and both docs carry `⚠` markers where that
 happened.
 
-Shipped so far, on the reference dump's `cache.bin`: 1,398.3 → **587.29 MiB, 42.0% of where it
+Shipped so far, on the reference dump's `cache.bin`: 1,398.3 → **342.50 MiB, 24.5% of where it
 started**, with no compression written yet. The implementation doc's §6 (shared `CacheSession`,
 section catalog, generic provider cache) is closed; the write-only `ForwardEdge*` sections are no
 longer persisted (−462.4 MiB, measurements §9.2); `MethodTable` dictionary encoding shipped as
 format v5 (−83.6 MiB, measurements §11); **format v6** — narrowed `ObjectSizes`, block-delta
 `ObjectAddresses` and `DominatorReachableAddresses`, plus the section manifest — shipped in full
-(−164.7 MiB, measurements §14); and **format v7** — the dominator child list derived on demand
+(−164.7 MiB, measurements §14); **format v7** — the dominator child list derived on demand
 instead of persisted, resolved to that option by measuring its real consumer's call frequency
 (zero, across three real dumps) rather than left as an open fork — shipped (−100.4 MiB,
-measurements §16). Spec in [format doc §4](cache-format-clean-slate-redesign.md) (dominator) and
-[§10](cache-format-clean-slate-redesign.md) (v6 base columns); the sequence for everything still
-open (CSR, then compression last) is in §7.1.1.
+measurements §16); and **format v8** — true CSR for the reverse edge index, replacing the
+hash-bucket-sort-directory format entirely — shipped (−244.79 MiB, measurements §17). Only
+compression (v9) is left. Spec in [format doc §2](cache-format-clean-slate-redesign.md) (CSR),
+[§4](cache-format-clean-slate-redesign.md) (dominator), and
+[§10](cache-format-clean-slate-redesign.md) (v6 base columns); the sequence, with compression held
+for last per an explicit user call rather than measurement ranking it low, is in §7.1.1.
 
 - **[cache-redesign-measurements.md](cache-redesign-measurements.md)** — the evidence base.
   Structural survey of five real `cache.bin` files, measured block-compression ratios on real

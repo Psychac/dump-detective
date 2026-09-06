@@ -1,4 +1,5 @@
 using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Analysis.Indexing.Dominator;
 using DumpDetective.Analysis.Indexing.ForwardIndex;
 using DumpDetective.Analysis.Indexing.ReverseIndex;
 using DumpDetective.Analysis.Traversal.Dominator;
@@ -205,22 +206,25 @@ public sealed class ReachableGraphWalkerTests : IDisposable
             (0x10UL, 0x20UL), (0x10UL, 0x30UL), (0x20UL, 0x40UL), (0x30UL, 0x40UL));
 
         var extractor = new ReverseEdgeExtractor(bucketCount: 1, _testDir);
-        ReachableGraphWalker.Walk(
+        ReachableGraphWalkResult walkResult = ReachableGraphWalker.Walk(
             [0x10UL], successors, extractor, buildCsr: false,
             captureSortedAddresses: true, CancellationToken.None);
 
-        ReverseEdgeExtractionStats stats = extractor.GetStatistics();
         extractor.DisposeAsync().AsTask().GetAwaiter().GetResult();
 
-        var sorter = new ReverseEdgeSorter();
-        sorter.SortBucketsAsync(_testDir, bucketCount: 1, CancellationToken.None)
+        ReverseEdgeCsrResult csr = ReverseEdgeCsrBuilder
+            .BuildAsync(_testDir, bucketCount: 1, walkResult.ReachableAddresses, CancellationToken.None)
             .GetAwaiter().GetResult();
 
         // Phase C — a fresh container just for this merge; unrelated to any object-index container.
+        // DominatorReachableAddresses is written alongside the CSR, same as production does, since
+        // format v8's reader resolves address<->row through it (docs/cache/cache-format-clean-slate-
+        // redesign.md §2).
         string reverseIndexContainerPath = Path.Combine(_testDir, "reverse-index.bin");
         using (var reverseWriter = new CacheContainerWriter(reverseIndexContainerPath))
         {
-            ReverseEdgeContainerWriter.Write(reverseWriter, _testDir, bucketCount: 1, stats, progress: null);
+            DominatorReachableAddressWriter.Write(reverseWriter, walkResult.ReachableAddresses);
+            ReverseEdgeContainerWriter.Write(reverseWriter, csr);
             reverseWriter.Finish();
         }
 
@@ -257,17 +261,17 @@ public sealed class ReachableGraphWalkerTests : IDisposable
         result.NodeCount.Should().Be(2); // root 0x10 and reachable child 0x20 only
         result.EdgeCount.Should().Be(1); // only 0x10 -> 0x20 was ever crossed
 
-        ReverseEdgeExtractionStats stats = extractor.GetStatistics();
         extractor.DisposeAsync().AsTask().GetAwaiter().GetResult();
 
-        var sorter = new ReverseEdgeSorter();
-        sorter.SortBucketsAsync(_testDir, bucketCount: 1, CancellationToken.None)
+        ReverseEdgeCsrResult csr = ReverseEdgeCsrBuilder
+            .BuildAsync(_testDir, bucketCount: 1, result.ReachableAddresses, CancellationToken.None)
             .GetAwaiter().GetResult();
 
         string reverseIndexContainerPath = Path.Combine(_testDir, "reverse-index-unreachable.bin");
         using (var reverseWriter = new CacheContainerWriter(reverseIndexContainerPath))
         {
-            ReverseEdgeContainerWriter.Write(reverseWriter, _testDir, bucketCount: 1, stats, progress: null);
+            DominatorReachableAddressWriter.Write(reverseWriter, result.ReachableAddresses);
+            ReverseEdgeContainerWriter.Write(reverseWriter, csr);
             reverseWriter.Finish();
         }
 

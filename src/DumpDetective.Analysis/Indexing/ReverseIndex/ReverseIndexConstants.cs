@@ -2,12 +2,13 @@ namespace DumpDetective.Analysis.Indexing.ReverseIndex;
 
 internal static class ReverseIndexConstants
 {
-    public const uint Magic = 0xDEADBEEF;
-    public const uint DirectoryVersion = 1;
-
     /// <summary>
     /// Deterministic Fnv1a 64-bit hash for partitioning child addresses into buckets.
-    /// Essential for cache reuse across runs: same child → same bucket always.
+    /// Essential for cache reuse across runs: same child → same bucket always. Still load-bearing
+    /// under true CSR (format v8, docs/cache/cache-format-clean-slate-redesign.md §2) — it's what
+    /// guarantees every edge sharing a child lands in exactly one bucket, which is what lets Phase B
+    /// count and fill the CSR across buckets in parallel with no locking (see
+    /// <see cref="ReverseEdgeCsrBuilder"/>'s remarks).
     /// </summary>
     public static uint ChildBucketHash(ulong child, int bucketCount)
     {
@@ -35,17 +36,11 @@ internal static class ReverseIndexConstants
     }
 
     /// <summary>
-    /// Temporary scratch file suffix for raw edge data during Phase A.
+    /// Phase A's raw <c>(child, parent)</c> address-pair scratch file suffix — the only scratch file
+    /// this index still produces since format v8 removed the per-bucket sorted <c>.dat</c>/<c>.idx</c>
+    /// intermediates (docs/cache/cache-format-clean-slate-redesign.md §2.2): Phase B now resolves
+    /// these files directly into the CSR arrays in memory, with nothing written back to disk until
+    /// the finished container.
     /// </summary>
     public const string TemporaryScratchSuffix = ".tmp";
-
-    /// <summary>
-    /// Sorted data file suffix (Phase B output).
-    /// </summary>
-    public const string SortedDataSuffix = ".dat";
-
-    /// <summary>
-    /// Directory index file suffix (Phase B output).
-    /// </summary>
-    public const string DirectorySuffix = ".idx";
 }

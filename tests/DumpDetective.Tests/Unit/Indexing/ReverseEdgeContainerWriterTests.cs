@@ -1,8 +1,5 @@
-using System.Text.Json;
-
 using DumpDetective.Analysis.Indexing.Container;
 using DumpDetective.Analysis.Indexing.ReverseIndex;
-using DumpDetective.Core.Abstractions;
 
 using FluentAssertions;
 
@@ -10,6 +7,13 @@ using Xunit;
 
 namespace DumpDetective.Tests.Unit.Indexing;
 
+/// <summary>
+/// Phase C of format v8's true CSR reverse-edge index — writes an already-built
+/// <see cref="ReverseEdgeCsrResult"/> straight into the container, the same shape
+/// <see cref="Dominator.DominatorTreeIndexWriter"/> uses for its own row-aligned columns. No merge,
+/// no per-bucket byte ranges, no separate metadata section, since a reader recovers the row count
+/// from the TOC.
+/// </summary>
 public class ReverseEdgeContainerWriterTests : IAsyncLifetime
 {
     private string _tempDir = null!;
@@ -29,120 +33,82 @@ public class ReverseEdgeContainerWriterTests : IAsyncLifetime
         await Task.CompletedTask;
     }
 
-    private async Task<(int BucketCount, ReverseEdgeExtractionStats Stats, byte[][] DatBytes, byte[][] IdxBytes)>
-        BuildSortedBuckets(int bucketCount, (ulong parent, ulong child)[] edges)
-    {
-        var extractor = new ReverseEdgeExtractor(bucketCount, _tempDir);
-        foreach (var (parent, child) in edges)
-            extractor.RecordEdge(parent, child);
-        var stats = extractor.GetStatistics();
-        await extractor.DisposeAsync();
-
-        var sorter = new ReverseEdgeSorter();
-        await sorter.SortBucketsAsync(_tempDir, bucketCount, CancellationToken.None);
-
-        var datBytes = new byte[bucketCount][];
-        var idxBytes = new byte[bucketCount][];
-        for (int i = 0; i < bucketCount; i++)
-        {
-            string datFile = Path.Combine(_tempDir, $"reverse_edges_bucket_{i}.dat");
-            string idxFile = Path.Combine(_tempDir, $"reverse_edges_bucket_{i}.idx");
-            datBytes[i] = File.Exists(datFile) ? File.ReadAllBytes(datFile) : Array.Empty<byte>();
-            idxBytes[i] = File.Exists(idxFile) ? File.ReadAllBytes(idxFile) : Array.Empty<byte>();
-        }
-
-        return (bucketCount, stats, datBytes, idxBytes);
-    }
+    private static ReverseEdgeCsrResult SampleCsr() =>
+        // Row 0: no parents. Row 1: parents at rows 0 and 2. Row 2: no parents.
+        new(offsets: [0, 0, 2, 2], children: [0, 2], totalEdges: 2);
 
     [Fact]
-    public async Task Write_AddsAllThreeSectionsToContainer()
+    public void Write_AddsBothSectionsToContainer()
     {
-        var (bucketCount, stats, _, _) = await BuildSortedBuckets(3,
-            [(0x1000UL, 0x0100UL), (0x2000UL, 0x0200UL), (0x3000UL, 0x0100UL)]);
-
         string containerPath = Path.Combine(_tempDir, "cache.bin");
         using (var writer = new CacheContainerWriter(containerPath))
         {
-            ReverseEdgeContainerWriter.Write(writer, _tempDir, bucketCount, stats);
+            ReverseEdgeContainerWriter.Write(writer, SampleCsr());
             writer.Finish();
         }
 
         CacheContainerReader.TryOpen(containerPath, out var reader).Should().BeTrue();
-        reader!.ContainsSection(CacheSectionId.ReverseEdgeBuckets).Should().BeTrue();
-        reader.ContainsSection(CacheSectionId.ReverseEdgeDirectories).Should().BeTrue();
-        reader.ContainsSection(CacheSectionId.ReverseEdgeMetadata).Should().BeTrue();
+        reader!.ContainsSection(CacheSectionId.ReverseEdgeOffsets).Should().BeTrue();
+        reader.ContainsSection(CacheSectionId.ReverseEdgeChildren).Should().BeTrue();
+        reader.ContainsSection(CacheSectionId.ReverseEdgeMetadata).Should().BeFalse("format v8 needs no separate metadata section");
     }
 
     [Fact]
-    public async Task Write_MetadataDescribesEachBucketByteRangeCorrectly()
+    public void Write_RoundTripsOffsetsAndChildrenExactly()
     {
-        var (bucketCount, stats, expectedDat, expectedIdx) = await BuildSortedBuckets(3,
-            [(0x1000UL, 0x0100UL), (0x2000UL, 0x0200UL), (0x3000UL, 0x0100UL), (0x4000UL, 0x0300UL)]);
-
+        ReverseEdgeCsrResult csr = SampleCsr();
         string containerPath = Path.Combine(_tempDir, "cache.bin");
         using (var writer = new CacheContainerWriter(containerPath))
         {
-            ReverseEdgeContainerWriter.Write(writer, _tempDir, bucketCount, stats);
+            ReverseEdgeContainerWriter.Write(writer, csr);
             writer.Finish();
         }
 
         CacheContainerReader.TryOpen(containerPath, out var reader).Should().BeTrue();
 
-        reader!.TryOpenSection(CacheSectionId.ReverseEdgeMetadata, out var metaStream).Should().BeTrue();
-        var metadata = JsonSerializer.Deserialize<ReverseIndexMetadata>(metaStream!)!;
-        metadata.BucketCount.Should().Be(bucketCount);
-        metadata.Buckets.Should().HaveCount(bucketCount);
-
-        reader.TryOpenSection(CacheSectionId.ReverseEdgeBuckets, out var dataSectionStream).Should().BeTrue();
-        using var dataMs = new MemoryStream();
-        dataSectionStream!.CopyTo(dataMs);
-        byte[] dataSectionBytes = dataMs.ToArray();
-
-        reader.TryOpenSection(CacheSectionId.ReverseEdgeDirectories, out var dirSectionStream).Should().BeTrue();
-        using var dirMs = new MemoryStream();
-        dirSectionStream!.CopyTo(dirMs);
-        byte[] dirSectionBytes = dirMs.ToArray();
-
-        foreach (var bucket in metadata.Buckets)
+        reader!.TryOpenSectionAccessor(CacheSectionId.ReverseEdgeOffsets, out var offsetsAccessor, out long offsetsLength).Should().BeTrue();
+        using (offsetsAccessor)
         {
-            byte[] actualDat = dataSectionBytes.AsSpan((int)bucket.DataOffset, (int)bucket.DataLength).ToArray();
-            byte[] actualIdx = dirSectionBytes.AsSpan((int)bucket.DirectoryOffset, (int)bucket.DirectoryLength).ToArray();
+            (offsetsLength / sizeof(int)).Should().Be(csr.Offsets.Length);
+            for (int i = 0; i < csr.Offsets.Length; i++)
+                offsetsAccessor!.ReadInt32(i * (long)sizeof(int)).Should().Be(csr.Offsets[i]);
+        }
 
-            actualDat.Should().Equal(expectedDat[bucket.BucketIndex]);
-            actualIdx.Should().Equal(expectedIdx[bucket.BucketIndex]);
+        reader.TryOpenSectionAccessor(CacheSectionId.ReverseEdgeChildren, out var childrenAccessor, out long childrenLength).Should().BeTrue();
+        using (childrenAccessor)
+        {
+            (childrenLength / sizeof(int)).Should().Be(csr.Children.Length);
+            for (int i = 0; i < csr.Children.Length; i++)
+                childrenAccessor!.ReadInt32(i * (long)sizeof(int)).Should().Be(csr.Children[i]);
         }
     }
 
     [Fact]
-    public async Task Write_DeletesScratchFilesAfterMerging()
+    public void Write_EmptyChildren_StillOpensAsPresentNotMissing()
     {
-        var (bucketCount, stats, _, _) = await BuildSortedBuckets(2,
-            [(0x1000UL, 0x0100UL), (0x2000UL, 0x0200UL)]);
-
+        // A dump with reachable rows but literally zero recorded edges is a legitimate (if
+        // unusual) answer, not a corrupt container -- ReverseEdgeChildren length 0 must still open.
+        var csr = new ReverseEdgeCsrResult(offsets: [0, 0], children: [], totalEdges: 0);
         string containerPath = Path.Combine(_tempDir, "cache.bin");
         using (var writer = new CacheContainerWriter(containerPath))
         {
-            ReverseEdgeContainerWriter.Write(writer, _tempDir, bucketCount, stats);
+            ReverseEdgeContainerWriter.Write(writer, csr);
             writer.Finish();
         }
 
-        for (int i = 0; i < bucketCount; i++)
-        {
-            File.Exists(Path.Combine(_tempDir, $"reverse_edges_bucket_{i}.tmp")).Should().BeFalse();
-            File.Exists(Path.Combine(_tempDir, $"reverse_edges_bucket_{i}.dat")).Should().BeFalse();
-            File.Exists(Path.Combine(_tempDir, $"reverse_edges_bucket_{i}.idx")).Should().BeFalse();
-        }
+        CacheContainerReader.TryOpen(containerPath, out var reader).Should().BeTrue();
+        reader!.TryOpenSectionAccessor(CacheSectionId.ReverseEdgeChildren, out var accessor, out long length).Should().BeTrue();
+        length.Should().Be(0);
+        accessor?.Dispose();
     }
 
     [Fact]
-    public async Task Write_StampsCurrentFormatVersion()
+    public void Write_StampsCurrentFormatVersion()
     {
-        var (bucketCount, stats, _, _) = await BuildSortedBuckets(1, [(0x1000UL, 0x0100UL)]);
-
         string containerPath = Path.Combine(_tempDir, "cache.bin");
         using (var writer = new CacheContainerWriter(containerPath))
         {
-            ReverseEdgeContainerWriter.Write(writer, _tempDir, bucketCount, stats);
+            ReverseEdgeContainerWriter.Write(writer, SampleCsr());
             writer.Finish();
         }
 
@@ -151,14 +117,13 @@ public class ReverseEdgeContainerWriterTests : IAsyncLifetime
 
         // Asserted against the constant rather than a literal: the point is that the writer stamps
         // whatever the current version is, not that the version happens to be any given number.
-        // Pinning the literal just meant editing this test on every format change.
         version.Should().Be(CacheFileHeader.CurrentFormatVersion);
     }
 
     [Fact]
     public void TryOpen_RejectsPreExistingV3Container()
     {
-        // Simulate a cache.bin written by pre-Phase-C code (FormatVersion 3): a v4 reader must
+        // Simulate a cache.bin written by pre-Phase-C code (FormatVersion 3): a current reader must
         // fail cleanly (treated as a cold cache) rather than misinterpret the missing sections.
         string containerPath = Path.Combine(_tempDir, "v3-cache.bin");
         using (var fs = File.Create(containerPath))
@@ -173,34 +138,5 @@ public class ReverseEdgeContainerWriterTests : IAsyncLifetime
 
         CacheContainerReader.TryOpen(containerPath, out var reader).Should().BeFalse();
         reader.Should().BeNull();
-    }
-
-    [Fact]
-    public async Task Write_ReportsProgressForBothDataAndDirectoryPasses()
-    {
-        var (bucketCount, stats, _, _) = await BuildSortedBuckets(3,
-            [(0x1000UL, 0x0100UL), (0x2000UL, 0x0200UL), (0x3000UL, 0x0100UL)]);
-
-        var reports = new List<AnalyzerProgressReport>();
-        var progress = new SynchronousProgress<AnalyzerProgressReport>(r => reports.Add(r));
-
-        string containerPath = Path.Combine(_tempDir, "cache.bin");
-        using (var writer = new CacheContainerWriter(containerPath))
-        {
-            ReverseEdgeContainerWriter.Write(writer, _tempDir, bucketCount, stats, progress);
-            writer.Finish();
-        }
-
-        reports.Should().OnlyContain(r => r.Phase == "merging reverse-index into cache.bin");
-        reports.Where(r => r.Detail!.Contains("data")).Should().HaveCount(bucketCount);
-        reports.Where(r => r.Detail!.Contains("directory")).Should().HaveCount(bucketCount);
-    }
-
-    /// <summary>Invokes the callback synchronously — unlike <see cref="Progress{T}"/>, which posts
-    /// to the captured SynchronizationContext (or the thread pool) and could race with assertions
-    /// made immediately after a synchronous call returns.</summary>
-    private sealed class SynchronousProgress<T>(Action<T> callback) : IProgress<T>
-    {
-        public void Report(T value) => callback(value);
     }
 }

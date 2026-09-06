@@ -972,10 +972,10 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                     }
                 }
 
-                MarkAlloc("reverse index (sort + write)");
+                MarkAlloc("reverse index (CSR build + write)");
                 string? reverseIndexWarning = WriteReverseIndexSections(
                     containerWriter, indexDir, reverseIndexBucketCount, reverseEdgeExtractor,
-                    cancellationToken, progress, stopwatch);
+                    walkResult.ReachableAddresses, cancellationToken, progress);
                 if (reverseIndexWarning is not null)
                     satelliteWarnings.Add(reverseIndexWarning);
             }
@@ -1294,34 +1294,33 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     }
 
     /// <summary>
-    /// Phase B + C for the reverse-reference index: flushes and sorts the buckets
-    /// <paramref name="extractor"/> collected during the heap scan, then merges them into
-    /// <paramref name="containerWriter"/>'s <c>ReverseEdgeBuckets</c>/<c>ReverseEdgeDirectories</c>/
-    /// <c>ReverseEdgeMetadata</c> sections. Non-fatal like the other satellite sections above — a
-    /// failure here just means <see cref="ReverseIndex.ReverseEdgeIndexReader.TryOpen"/> reports no
-    /// index available later, same as any other missing/corrupt section.
+    /// Phase B + C for the reverse-reference index: resolves the buckets <paramref name="extractor"/>
+    /// collected during the heap scan into true CSR (docs/cache/cache-format-clean-slate-redesign.md
+    /// §2) against <paramref name="sortedReachableAddresses"/> — the same reachable-address set
+    /// <see cref="Dominator.DominatorReachableAddressWriter"/> just persisted — then writes the
+    /// resulting <c>ReverseEdgeOffsets</c>/<c>ReverseEdgeChildren</c> sections. Non-fatal like the
+    /// other satellite sections above — a failure here just means
+    /// <see cref="ReverseIndex.ReverseEdgeIndexReader.TryOpen"/> reports no index available later,
+    /// same as any other missing/corrupt section.
     /// </summary>
     private static string? WriteReverseIndexSections(
         CacheContainerWriter containerWriter,
         string indexDir,
         int bucketCount,
         ReverseEdgeExtractor extractor,
+        ulong[] sortedReachableAddresses,
         CancellationToken cancellationToken,
-        IProgress<AnalyzerProgressReport>? progress,
-        Stopwatch stopwatch)
+        IProgress<AnalyzerProgressReport>? progress)
     {
         try
         {
-            progress?.Report(new(0, "collecting reverse-index statistics", Detail: null, Elapsed: stopwatch.Elapsed));
-            ReverseEdgeExtractionStats stats = extractor.GetStatistics();
-
             extractor.DisposeAsync(progress).AsTask().GetAwaiter().GetResult();
 
-            var sorter = new ReverseEdgeSorter();
-            sorter.SortBucketsAsync(indexDir, bucketCount, cancellationToken, progress)
+            ReverseEdgeCsrResult csr = ReverseEdgeCsrBuilder
+                .BuildAsync(indexDir, bucketCount, sortedReachableAddresses, cancellationToken, progress)
                 .GetAwaiter().GetResult();
 
-            ReverseEdgeContainerWriter.Write(containerWriter, indexDir, bucketCount, stats, progress);
+            ReverseEdgeContainerWriter.Write(containerWriter, csr, progress);
             return null;
         }
         catch (OperationCanceledException) { throw; }
@@ -1671,13 +1670,16 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     }
 
     /// <summary>Best-effort cleanup of reverse-index bucket scratch files (<c>.tmp</c>/<c>.dat</c>/<c>.idx</c>) after a failed or abandoned build — mirrors <see cref="DeleteScratchFiles"/> for the segment scratch files.</summary>
+    // §2 (docs/cache/cache-format-clean-slate-redesign.md): format v8's Phase B resolves each
+    // bucket's raw .tmp file directly into in-memory CSR arrays and deletes the .tmp itself once
+    // resolved (ReverseEdgeCsrBuilder) — there is no intermediate sorted .dat/.idx pair to clean up
+    // any more, so this only needs to catch whatever a failure left behind before that per-bucket
+    // deletion ran.
     private static void DeleteReverseIndexScratchFiles(string indexDir, int bucketCount)
     {
         for (int i = 0; i < bucketCount; i++)
         {
             try { File.Delete(Path.Combine(indexDir, $"reverse_edges_bucket_{i}{ReverseIndexConstants.TemporaryScratchSuffix}")); } catch { /* best-effort */ }
-            try { File.Delete(Path.Combine(indexDir, $"reverse_edges_bucket_{i}{ReverseIndexConstants.SortedDataSuffix}")); } catch { /* best-effort */ }
-            try { File.Delete(Path.Combine(indexDir, $"reverse_edges_bucket_{i}{ReverseIndexConstants.DirectorySuffix}")); } catch { /* best-effort */ }
         }
     }
 

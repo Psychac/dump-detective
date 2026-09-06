@@ -101,6 +101,19 @@ internal readonly record struct CacheSectionDescriptor(
 /// producing these ids at all, so nothing restores the merge later; the ids stay reserved purely so a
 /// v6 container's leftover sections are never misread as something else.
 /// </para>
+/// <para>
+/// <i>No longer written, third case — a format replaced, not removed.</i>
+/// <see cref="CacheSectionId.ReverseEdgeBuckets"/>, <see cref="CacheSectionId.ReverseEdgeDirectories"/>
+/// and <see cref="CacheSectionId.ReverseEdgeMetadata"/> are <see cref="CacheSectionRequirement.Unused"/>
+/// because format v8 replaced the whole hash-bucket-sort-directory shape with true CSR
+/// (<see cref="CacheSectionId.ReverseEdgeOffsets"/>/<see cref="CacheSectionId.ReverseEdgeChildren"/>,
+/// docs/cache/cache-format-clean-slate-redesign.md §2) — unlike the first two cases, this isn't
+/// "stop persisting something nothing reads," it's a different on-disk representation of data every
+/// analyzer still needs, so the replacement pair is <see cref="CacheSectionRequirement.Conditional"/>
+/// for the same reason the retired sections were: the reachability walk that produces them can fail
+/// repeatably at scale (same OOM/int-overflow-guard case documented above), and silent degradation
+/// to "no reverse index this run" is the lesser evil there too.
+/// </para>
 /// </remarks>
 internal static class CacheSectionCatalog
 {
@@ -120,9 +133,9 @@ internal static class CacheSectionCatalog
         new(CacheSectionId.ObjectMethodTables, "ObjectMethodTables", CacheSectionRequirement.Required),
         new(CacheSectionId.ObjectSizes, "ObjectSizes", CacheSectionRequirement.Required),
         new(CacheSectionId.ObjectGenerations, "ObjectGenerations", CacheSectionRequirement.Required),
-        new(CacheSectionId.ReverseEdgeBuckets, "ReverseEdgeBuckets", CacheSectionRequirement.Conditional),
-        new(CacheSectionId.ReverseEdgeDirectories, "ReverseEdgeDirectories", CacheSectionRequirement.Conditional),
-        new(CacheSectionId.ReverseEdgeMetadata, "ReverseEdgeMetadata", CacheSectionRequirement.Conditional),
+        new(CacheSectionId.ReverseEdgeBuckets, "ReverseEdgeBuckets", CacheSectionRequirement.Unused),
+        new(CacheSectionId.ReverseEdgeDirectories, "ReverseEdgeDirectories", CacheSectionRequirement.Unused),
+        new(CacheSectionId.ReverseEdgeMetadata, "ReverseEdgeMetadata", CacheSectionRequirement.Unused),
         new(CacheSectionId.SegmentIndex, "SegmentIndex", CacheSectionRequirement.Required),
         new(CacheSectionId.ForwardEdgeBuckets, "ForwardEdgeBuckets", CacheSectionRequirement.Unused),
         new(CacheSectionId.ForwardEdgeDirectories, "ForwardEdgeDirectories", CacheSectionRequirement.Unused),
@@ -141,6 +154,8 @@ internal static class CacheSectionCatalog
         new(CacheSectionId.DominatorReachableBlockBases, "DominatorReachableBlockBases", CacheSectionRequirement.Conditional),
         new(CacheSectionId.DominatorReachableOverflow, "DominatorReachableOverflow", CacheSectionRequirement.Conditional),
         new(CacheSectionId.SectionManifest, "SectionManifest", CacheSectionRequirement.Required),
+        new(CacheSectionId.ReverseEdgeOffsets, "ReverseEdgeOffsets", CacheSectionRequirement.Conditional),
+        new(CacheSectionId.ReverseEdgeChildren, "ReverseEdgeChildren", CacheSectionRequirement.Conditional),
     ];
 
     /// <summary>

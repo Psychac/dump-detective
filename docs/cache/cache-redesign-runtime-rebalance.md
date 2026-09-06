@@ -819,6 +819,118 @@ Any future item on this page must be measured by alternating the two arms inside
 (`A, B, A, B`), not by comparing against a figure recorded earlier. The harness supports this
 directly — build both binaries into separate worktrees and alternate `--cache-dir` targets.
 
+## Part F — C.2-variant explored (2026-09-06)
+
+Design exploration only; nothing implemented. Three questions had to be answered before the shape
+was decidable, and two of the answers changed it.
+
+### F.1 The transform is cheaper than expected — the mapping already exists
+
+`ReachableGraphWalker.WalkWithCsr` produces `revOffsets` (`int[N+1]`) and `revTargets` (`int[E]`) in
+**walk-id (discovery-order)** space. The persisted format is keyed by **row** — index into the sorted
+`DominatorReachableAddresses` column. The bridge between them, `oldId → row`, is
+`DominatorRowMapping.Compute`, which **the Stage B path already computes and pays for** (Part D's
+timeline: `row mapping` runs right after the walk).
+
+So the transform is:
+
+```
+newDegree[oldIdToRow[c]] = revOffsets[c+1] - revOffsets[c]     // one pass over N
+newOffsets                = prefix sum of newDegree             // one pass over N
+rowToOldId[oldIdToRow[c]] = c                                   // one pass over N (inverse perm)
+for row in 0..N-1:                                              // one pass over N + E
+    oldId = rowToOldId[row]
+    for k in revOffsets[oldId] .. revOffsets[oldId+1]:
+        emit oldIdToRow[revTargets[k]]
+```
+
+The emit loop walks rows in ascending order, which **is** the container's `ReverseEdgeChildren`
+layout — so it streams straight to the container stream, hashing as it goes via §E.1's
+just-established buffered pattern. **No `int[E]` is materialised at all.**
+
+Memory added: `newOffsets` + `rowToOldId`, 2 × `int[N]` ≈ **0.47 GB** at the 27.5 GB dump's
+N = 58,339,936.
+
+Memory removed (Part D.2's table): `resolvedBuckets` 1.02 GB + `children` 0.51 GB +
+`degree`/`cursor` 0.47 GB ≈ **2.00 GB**. Net **≈ −1.5 GB**, plus 2.19 GB of scratch written and read
+straight back.
+
+Time removed, measured: `building reverse-index CSR` 39.6 s + `flushing reverse-index edges` 2.2 s =
+**41.8 s**, plus the walk's 137,033,360 individually-locked `RecordEdge` calls (§E.4, estimated
+10–20 s, not measured). Time added: four sequential passes over N and one over E.
+
+### F.2 ⚠ The extractor cannot be deleted — `buildCsr: false` still needs the reverse index
+
+This was the open question and the answer is no, which kills the "one path replaces two" framing that
+made this variant attractive over C.2-as-scoped.
+
+`buildStageB` is `reverseEdgeExtractor != null && enableExactDominatorTree && <any
+IRequiresDominatorTreeIndex analyzer active>`. It is true by default, but false when
+`EnableExactDominatorTree` is set false or all five requirers (`DominatorAnalyzer`,
+`EventLeakAnalyzer`, `FinalizableObjectAnalyzer`, `GCRootAnalyzer`, `StaticRootLeakDetector`) are
+excluded. In that case the walk runs `WalkWithoutCsr`, which tracks a bare `HashSet<ulong> visited`
+and returns **empty** `revOffsets`/`revTargets` — no edge data whatsoever.
+
+And the reverse index is still needed there: `CollectionAnalyzer` and
+`IndexBackedBidirectionalSearch` (root-path/reference-chain search) consume it through
+`IBackwardReferenceProvider`, and neither is an `IRequiresDominatorTreeIndex`. So the section must
+still be produced on the no-Stage-B path.
+
+Making `WalkWithoutCsr` build a reverse CSR instead was costed and rejected: it needs
+`Dictionary<ulong,int>` in place of `HashSet<ulong>` (+≈0.5 GB), edge storage to counting-sort
+(`edgeTo` `int[E]` + `outDegree` `int[N]` ≈ 0.74 GB, exploiting the fact that BFS discovery makes
+`edgeFrom` non-decreasing), plus the CSR arrays (≈0.74 GB) — roughly **+2.0 GB on a path whose memory
+profile has never been measured**, to save the 2.62 GB the extractor costs there. Near break-even, on
+an unmeasured path, for no benefit to the default path. Not worth it.
+
+**So the shape is: bypass, not replacement.** When `buildStageB` is true, pass
+`reverseEdgeExtractor: null` into the walk and derive the section from `walkResult`; otherwise
+current behaviour, untouched. The extractor and `ReverseEdgeCsrBuilder` stay exactly as they are —
+this adds no duplicate logic, it adds a bypass around existing tested code, and `reverseEdgeExtractor`
+is already nullable and already conditionally passed. That is a materially smaller change than
+"delete the pipeline", and materially less attractive, because the maintenance win evaporates and
+only the perf win remains.
+
+### F.3 ⚠ "Byte-identical output" is the wrong acceptance criterion
+
+Part C.2 stated byte-identical `ReverseEdgeOffsets`/`ReverseEdgeChildren` as the gate. On inspection
+that is not guaranteed, and asserting it would be asserting something the current code does not
+promise either.
+
+What *is* guaranteed: the two sources see the **identical edge multiset**.
+`ReachableGraphWalker` line 257 calls `RecordEdge(address, childAddr)` and lines 259–261 append to
+`edgeFrom`/`edgeTo` — same iteration, no `continue` between them, no filtering difference.
+
+What is *not* guaranteed: parent ordering within one child's list. Today's order is each child's
+bucket-file order, which is the order `RecordEdge` was called for that child, i.e. walk-discovery
+order. The walk's `revTargets` counting-sort also fills in edge-append order. So the two orders are
+very likely the same — but that is a coincidence of two implementations, not a documented invariant,
+and `ReverseEdgeCsrBuilder`'s bucket-parallel fill makes it non-obvious.
+
+Revised criterion: **assert `Offsets` byte-identical and each row's parent list equal as a multiset**,
+then check byte-identity of `Children` empirically on the reference dump and, if it holds, record it
+as an observation rather than promoting it to a guarantee. No consumer depends on parent order —
+`TryGetParents` returns the slice and every caller treats it as a set.
+
+### F.4 Verdict
+
+| | |
+|---|---|
+| Time | **−41.8 s measured** (+10–20 s estimated from §E.4), of 1,310.5 s → **~3–5%** |
+| Peak memory | **≈ −1.5 GB** of 12.97 GB → **~12%** |
+| Scratch I/O | −2.19 GB written, −2.19 GB read back |
+| Code | a bypass around existing code, **not** a deletion (§F.2) |
+| Risk | medium — touches the walk↔index seam; correctness gate is §F.3, not byte-identity |
+
+Still the best remaining item on this page, and the memory number is the real prize on a dump that
+peaks at 12.97 GB against 15.7 GiB of RAM. But it is a bypass with a permanent second path, so it
+should be judged as a perf change on its own merits rather than as a simplification.
+
+Not started. §E.3 (the unmeasured 200.3 s root phase) remains the only candidate that could be
+larger, and it costs one stopwatch to size.
+
+---
+
 ## Open question — ~~C.2, after C.1~~ RESOLVED by Part D
 
 C.1 removed the reference dump's entire case for C.2 — cold peak there is now 491 MB *below* the
@@ -852,13 +964,13 @@ instead, and should read §7.3 item 2 of the dominator integration doc first —
 | **C.1 — delete dead `_fanoutPerBucket`** | ✅ **shipped, −688 MB cold peak** |
 | C.1 verification — cold ×3, warm ×3, full suite | ✅ |
 | 27.5 GB dump measurement (Part D) | ✅ fits at 12.97 GB peak, thrashes |
-| C.2 — CSR from the walk's in-memory reverse CSR | ⬜ **justified, ≈1.9 GB + 2.04 GB scratch** |
+| C.2 — CSR from the walk's in-memory reverse CSR | ⬜ explored in **Part F**; bypass not deletion |
 | C.3 — bound builder residency (fallback) | ⬜ only if C.2 is rejected |
 | C.4 — warm-path decode | ✅ dropped, gate not met |
 | Walk's own ≈6 GB residency (D.3) | ⬜ out of scope, own investigation |
 | **Part E — cold-build speedup review** | ✅ done, ranked in E.6 |
 | **E.1 dominator checksums in flight** | ✅ **shipped** — 35.9 s of writer re-read removed |
-| E.1 confirmation on the 27.5 GB dump | ⬜ **not run** — 3.3 GB cannot measure it |
+| E.1 confirmation on the 27.5 GB dump | ❌ **not pursued** — 2×22 min to confirm sound arithmetic |
 | E.2 reader-side verification | ✅ dropped — measured 0.5 s |
 | E.4 batch reverse-edge writes (~10–20 s) | ⬜ open, subsumed by C.2-variant |
 | E.3 static-field-map filter order | ⬜ **instrument before touching** |

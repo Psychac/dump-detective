@@ -841,7 +841,7 @@ OS page cache after a session of reading the same file. **The 98.4/1.6 split is 
 phase is native DAC stack unwinding, which `cache-architecture.md` §8 documents as irreducible.
 Irreducible work is the right kind to *overlap* (§7.1), and O5 is now the only lever on this phase.
 
-### 11.6 ⚠ Incidental — static-root detection is inert under ClrMD 4
+### 11.6 ⚠ Incidental — static-root detection has never worked (RESOLVED to a backlog entry)
 
 Both dumps report **0 static/thread-static roots**, which is why `BuildMapByRootAddress` returns an
 empty map in every measurement above. That is not a property of the dumps.
@@ -857,6 +857,13 @@ always empty, so `WriteFieldNameTrailer` early-returns, so the v2 `Roots` field-
 always empty, so `RootSetCache.GetStaticFieldsByRootAddress` always returns an empty map — and
 `GCRootAnalyzer`, `StaticRootLeakDetector` and `FinalizableObjectAnalyzer` lose static-field
 attribution silently.
+
+> **Followed up 2026-09-07.** Diagnosis confirmed and extended: the same enum is present in ClrMD
+> **3.1**, and the feature postdates the v4 upgrade by a month, so this was never a regression — it
+> has never worked. A fix is written and verified on branch `fix/static-root-detection`
+> (`4d7e267b`) but deliberately **not merged**: it switches on an analyzer that has never run, at
+> **+453.7 s on the 3.3 GB dump**. It also voids format v7's justification. The full record is
+> [backlog.md](backlog.md)'s first entry — that is the live document for this, not here.
 
 Note the fix is probably **not** "change the constants". ClrMD 4's root enumeration appears to cover
 handles, stacks and the finalizer queue only; if it emits no static-variable roots at all, then the

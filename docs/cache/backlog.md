@@ -18,6 +18,54 @@ conclusions the two design docs originally reached.
 
 ## Real bounded-memory / correctness gaps
 
+- 🔴 **`StaticRootLeakDetector` has never produced a finding, and the fix is written but
+  unmerged on branch `fix/static-root-detection` (commit `4d7e267b`).** Read this before
+  touching roots, `StaticRootLeakDetector`, or the dominator child index.
+
+  **The bug.** `RootIndexWriter` collected static roots by filtering `heap.EnumerateRoots()`
+  for `RootKind` 9/10 (`ThreadStaticVar`/`StaticVar`). Those members do not exist in
+  `ClrRootKind` — in ClrMD **4.0.722401 or 3.1.512801** — which ends at 8, `SizedRefHandle`.
+  The predicate can never fire. ClrMD 3+ does not report statics as roots at all; they are
+  rooted by the loader heap and reachable only by walking `ClrType.StaticFields` per app
+  domain. Not a v4 regression: the feature landed 2026-08-13 (`174222e9`), the v4 upgrade was
+  2026-07-09 (`bb514e91`). It has never worked. Verify with `tools/ProfileStaticRoots`, or
+  offline — the persisted `Roots` sections carry only kinds 2/3/4/7/8 and
+  `IndexHeader.Reserved` (the field-name trailer count) is 0 on both reference dumps.
+
+  **Blast radius, all silent.** `GetStaticRootedAddresses` returns an empty set, so
+  `StaticRootLeakDetector`'s `if (!staticRootedAddresses.Contains(rootAddress)) continue;`
+  skips every root and the analyzer returns nothing. `LeakCandidateAnalyzer` loses static
+  classification; the field-name trailer is never written, so `ReferenceChainAnalyzer` and
+  `GCRootAnalysisProjection` have no static-field attribution either.
+
+  **Why the fix is not merged.** It works — cold rebuild on the 3.3 GB dump takes `Roots`
+  from 1,411 to 7,805 records (6,394 kind-10) and the trailer from 0 to 904 entries, with
+  handle/stack counts byte-identical. But switching the analyzer on for the first time costs
+  **453.7 s on the 3.3 GB dump** (warm, that analyzer alone), against ~0 s today because it
+  did nothing. It scans 6,041 roots, calls `EnumerateRetainedSet` **4,427 times**, visits
+  4.14M objects (avg 936/call, max 2,250,363) and allocates 63.7 GB. **Merging the fix alone
+  makes every run ~8 minutes longer on a small dump.** The analyzer's cost must be addressed
+  in the same change — it has never been performance-tested, because it has never run.
+
+  Options sketched, none measured: derive the type/namespace breakdown from the dominator
+  tree instead of walking each root's retained set (`TryGetRetainedBytes` is already a binary
+  search, §12.1); or restore the child index dropped in v7. A cap is not an option — this
+  project removed sampling deliberately.
+
+  **⚠ This invalidates format v7's justification.** v7 dropped the persisted dominator child
+  index (−100.4 MiB) on the measurement that `EnumerateRetainedSet` is called *"zero times
+  across all three real dumps (0-for-1,411/742/5,037 roots)"*
+  ([measurements §14](cache-redesign-measurements.md)). That zero was **this bug** — the only
+  caller was disabled. The real figure is 4,427 calls on the 3.3 GB dump, and
+  `DominatorChildIndexReader`'s in-memory inversion, documented in v7 as *"it does not run"*,
+  does run. v7's disk saving may still be right, but its evidence is void and must be
+  re-derived against the fixed analyzer.
+
+  Also recorded so it is not re-derived: seeding the reachability walk with static targets
+  was tried and is a **measured no-op** — `DominatorReachableAddresses` stayed byte-identical
+  at 6,686,490, because CoreCLR already roots statics transitively through pinned handles on
+  the statics blobs.
+
 - **Unbounded satellite candidate collections.** `taskCandidates` and
   `lohFreeBlockCandidates` in `DiskBackedObjectIndexWriter` are `ConcurrentBag<...>`
   with no cap, unlike `masterStringDedup` (capped at 500k). A dump with millions of

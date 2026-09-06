@@ -2,6 +2,13 @@
 
 Current state, backlog, a four-doc redesign set, and a from-zero re-derivation.
 
+> 🔴 **Open correctness bug, fix written but unmerged.** `StaticRootLeakDetector` has never
+> produced a finding — static-root detection filters for a `ClrRootKind` member that does not exist
+> in ClrMD 3.1 or 4.0. The fix is on branch `fix/static-root-detection` (`4d7e267b`) and is held
+> because it costs +453.7 s on the 3.3 GB dump by switching on an analyzer that has never run. It
+> also **voids format v7's justification** (measurements §14). Full record:
+> [backlog.md](backlog.md), first entry.
+
 **Start here if you are deciding what to build next:**
 
 - **[cache-ideal-design.md](cache-ideal-design.md)** — the subsystem re-derived from scratch under

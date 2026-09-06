@@ -535,6 +535,14 @@ Three measured levers (§ 10.1), batched into one format bump per [format doc §
 
 ## 14. ✅ Format v7: Dominator child index derived on demand
 
+> 🔴 **This section's evidence is void — see [backlog.md](backlog.md)'s first entry (2026-09-07).**
+> The "zero calls across three dumps" below was produced by a bug, not by the workload:
+> `StaticRootLeakDetector` is `EnumerateRetainedSet`'s only caller, and it was skipping every root
+> because static-root detection never worked (`ClrRootKind` has no `StaticVar` member, so
+> `RootIndexWriter`'s kind-9/10 filter never fired). With the fix applied the real figure on the
+> 3.3 GB dump is **4,427 calls**. v7's 100.4 MiB saving may still be correct; its justification is
+> not, and must be re-derived once the analyzer is fixed and its cost addressed.
+
 Measured `EnumerateRetainedSet` call frequency on 3 real dumps: **zero calls across all three** (0-for-1,411/742/5,037 roots). Aggressive dominator option shipped: drop persisted child index, narrow `idom[]` to row indices, invert on demand. Format version 6 → 7.
 
 **Result**: 687.7 → 587.29 MiB (−100.4 MiB, −14.6%). **Cumulative from start: 1,398.3 → 587.29 MiB (42.0%), no compression yet.** Verified with exhaustive round-trip on real dump (6.69M rows, independent parent/child cross-check).

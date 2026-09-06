@@ -9,9 +9,9 @@ conflict the earlier wins. That order is *not* the one the shipped v5–v8 seque
 optimised disk with a byte count as its only metric — and it is the single reason this plan reaches
 a different answer.
 
-**Status: designed and measured, not started.** All six gating measurements are closed (§7). Three
-of them killed items that looked good on paper. Nothing below waits on further evidence except
-where marked.
+**Status: measured; O1 shipped, the rest not started.** All six gating measurements are closed (§7),
+and three of them killed items that looked good on paper. Nothing below waits on further evidence
+except where marked.
 
 | | |
 |---|---|
@@ -87,11 +87,11 @@ during the scan (it *is* the record index). `address → row` becomes a rank que
 mmap'd delta column. The reachable-node space becomes a rank-select bitmap over object rows
 (11 MiB) instead of a second persisted address column (222.99 MiB).
 
-Preconditions, both verified **[M]**: the address column is strictly ascending on both dumps
-(checked element-by-element, not inferred), and no capped-scan analyzer remains that depends on
-segment-iteration order — all eight index consumers are full passes. `cache-architecture.md` §7
-constraint 6 exists to protect a behaviour that no longer exists; sorting `heap.Segments` by `Start`
-makes monotonicity a construction guarantee at zero observable change.
+Preconditions, both verified **[M]** and now both guaranteed rather than observed: the address column
+is strictly ascending on both dumps (checked element-by-element), and no capped-scan analyzer remains
+that depends on segment-iteration order — all eight index consumers are full passes. **O1 shipped the
+sort**, so `cache-architecture.md` §7 constraint 6 has been replaced: monotonicity is now a property
+of the writer, not of what ClrMD happened to return.
 
 > Buys **−2,325.9 MB** and −223 MiB. Costs **+3.4 s** of walk time **[M, §7.2]**.
 
@@ -137,12 +137,21 @@ None of these depend on the rewrite or on each other.
 
 | # | Item | Worth | Evidence |
 |---|---|---:|---|
-| **O1** | Sort `heap.Segments` by `Start` at load | 0 bytes — makes R1's precondition a guarantee | §7.2 |
+| ✅ **O1** | Sort `heap.Segments` by `Start` at load — **SHIPPED** | 0 bytes — makes R1's precondition a guarantee | §7.2, §7.6 |
 | **O2** | Delete `ObjectGenerations`; derive from `SegmentIndex` | **83.07 MiB [D]** | below |
 | **O3** | `ReverseEdgeOffsets` → 1-byte degrees + 64-row checkpoints | **159.96 MiB [D]** | below |
 | **O4** | Narrow `DominatorRetainedBytes` to 2 B | **332.59 MiB [M]** | §7.1 |
 | **O5** | Overlap root enumeration with the heap scan | **≈50 s [D]** | §7.5 |
 | **O8** | `PublisherRegistry` Pass 2a reads `ObjectTypeDictionary` | **5.28 s [M]**, zero disk | §7.4 |
+
+**O1 — shipped.** `DiskBackedObjectIndexWriter` sorts the segment array by `Start` before anything
+else touches it. Verified a no-op on the reference dump in the strongest available form: a cold
+rebuild before and after produced a **byte-identical `ObjectAddresses` column** — along with
+`ObjectMethodTables`, `ObjectSizes`, `ObjectGenerations`, `ObjectAddressBlockBases`,
+`ObjectAddressOverflow` and `SegmentIndex`, i.e. everything segment order can reach. The new
+`Segments_SortedByStart_AreDisjoint_...` test reports **7/7 adjacent pairs already ascending** as
+ClrMD returned them and **0 overlaps**, and the exhaustive oracle still matches live enumeration on
+all 14,620,162 records with 0 mismatches. See §7.6 for the nondeterminism this surfaced.
 
 **O2** — generation is `f(segment, address)`: `segment.Kind` under regions GC, or a range compare
 against the segment's `Generation0/1/2` sub-ranges otherwise. That is exactly what
@@ -415,7 +424,30 @@ It is a lock, not the scheduler: at DOP 4 four cores sit idle and overlap barely
 real scan phase is far heavier and plausibly holds the lock a smaller fraction of the time; and the
 27.5 GB regime differs enough that 25% should not be assumed to transfer.
 
-### 7.6 Where estimates were wrong
+### 7.6 Incidental — the cold build is not byte-reproducible
+
+Surfaced while verifying O1: **two cold rebuilds of the same dump with identical code produce
+different `cache.bin` bytes.** Five sections differ, and the set varies between runs:
+
+| Section | Signature |
+|---|---|
+| `TypeAggregates` | identical length + record count, different checksum |
+| `LargeObjects` | ditto |
+| `LohFreeBlocks` | ditto |
+| `DominatorTreeMetadata` | ditto |
+| `ReverseEdgeChildren` | identical length + record count (17,367,740), different checksum |
+
+Every one has an **identical length and record count** — only ordering differs, which is the
+signature of hash-container iteration order and `ConcurrentBag` drain order, not of a content
+change. `ReverseEdgeChildren` is the one worth knowing about: Part F §F.3 already noted that parent
+ordering within a child's list is "a coincidence of two implementations, not a documented
+invariant", and this confirms it empirically.
+
+Not actioned — no consumer depends on within-list order, and every caller treats a parent list as a
+set. Recorded because it means **byte-identity is not a valid acceptance criterion** for any future
+cache change; compare per-section lengths and record counts, or content as a multiset, instead.
+
+### 7.7 Where estimates were wrong
 
 Recorded because the pattern matters more than the individual items.
 

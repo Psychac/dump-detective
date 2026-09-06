@@ -113,10 +113,11 @@ Backs `IHeapAnalysisCache.TryGetObjectMetadata(heap, address)` — an
 (BFS frontier, handle record, reverse-index neighbor) and need type/size without a live
 `ClrObject`.
 
-- **Why not a single global binary search**: segment write/concatenation order isn't
-  address-sorted (mirrors `heap.EnumerateObjects()`'s own segment-iteration order, kept
-  deterministic on purpose — see § 6), so a flat search over the whole `ObjectAddresses`
-  column doesn't work. Instead: a small in-memory `SegmentIndexEntry[]` table
+- **Why two levels rather than one global binary search**: this predates § 6's change. Segment
+  write/concatenation order used not to be address-sorted, so a flat search over the whole
+  `ObjectAddresses` column could not work. It now is sorted, so a flat rank lookup *would* work —
+  this two-level form is simply what ships today and is correct either way. Instead: a small
+  in-memory `SegmentIndexEntry[]` table
   (`Start`, `End`, `FirstRecordIndex`, `RecordCount` — one row per non-empty GC segment,
   segment-count-sized, not object-count-sized) is binary-searched first to find the
   owning segment, then a second binary search runs over just that segment's slice of
@@ -192,12 +193,28 @@ never built; § 5's narrower parent-lookup index shipped instead):
    (reverse index, `SegmentIndex`, task/event/LOH candidates) has an explicit fallback
    path; a build that couldn't write one section still produces a usable cache and a
    correct (if slower) analysis run.
-6. **Disk/memory determinism was a real, solved problem — don't reopen it.** Disk-mode
-   enumeration order intentionally matches `heap.EnumerateObjects()`'s own segment
-   iteration order (not address-sorted) because capped-scan analyzers depend on *which*
-   objects populate a partial scan. This is why `ObjectAddressLookup` needs a two-level
-   segment-then-record search instead of one flat sorted index, and why a "just
-   re-sort everything by address" shortcut was rejected during `SegmentIndex`'s design.
+6. **Segments are processed in ascending `Start` order, so the object column is globally
+   monotonic by construction.** `DiskBackedObjectIndexWriter` sorts `heap.Segments` by `Start`
+   before anything else touches it; every downstream structure (scratch files, the parallel
+   scan, column concatenation, `SegmentIndex`'s cumulative offsets, `ScratchSegmentSource`)
+   iterates that one array, so they stay coherent. Together with
+   `SegmentAddressContiguityDiscrepancyTests`' two invariants — each segment yields strictly
+   increasing addresses, and segments are disjoint — this makes `row → address` monotonic, which
+   is what allows `address → row` to be a rank query over `ObjectAddressBlockBases`
+   (docs/cache/cache-ideal-design.md §3.1 R1, worth 2,325.9 MB).
+
+   > **This replaces the previous constraint, which said the opposite.** Enumeration order used
+   > to match `heap.EnumerateObjects()`'s segment order deliberately, *"because capped-scan
+   > analyzers depend on which objects populate a partial scan"*, and a re-sort was rejected on
+   > that basis. **There are no capped-scan analyzers left** — all eight
+   > `EnumerateIndexedEntries*` consumers are full passes with no `Take` and no scan cap, since
+   > the project removed every top-K/sampling pattern. The constraint outlived its premise. On
+   > both reference dumps the sort changes nothing observable: ClrMD already returned segments in
+   > ascending order there, and the decoded column measured strictly ascending
+   > element-by-element. The sort removes the dependency on that continuing to hold.
+
+   `ObjectAddressLookup`'s two-level segment-then-record search still works and is still what
+   ships; monotonicity now also permits a single flat rank lookup, which is what R1 will use.
 
 ## 8. Known, accepted, intrinsic cost: GC-root enumeration at scale
 

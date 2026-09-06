@@ -22,11 +22,12 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 /// </summary>
 /// <remarks>
 /// The oracle here is a live re-enumeration of the heap, independent of the disk index. It relies on
-/// the documented guarantee that disk-mode enumeration order matches
-/// <see cref="ClrSegment.EnumerateObjects"/>'s own segment-iteration order
-/// (docs/binary-format.md, docs/cache/cache-format-clean-slate-redesign.md §1) — a guarantee
-/// <see cref="SegmentAddressContiguityDiscrepancyTests"/> already validates independently, so this
-/// test doesn't re-prove it, just relies on it to zip the two sequences positionally.
+/// disk-mode enumeration order matching a segment walk taken in **ascending <c>Start</c> order** —
+/// the order <c>DiskBackedObjectIndexWriter</c> sorts into, which is what makes the persisted column
+/// globally monotonic by construction (docs/cache/cache-ideal-design.md §3.1 R1). The per-segment
+/// half of that guarantee is validated independently by
+/// <see cref="SegmentAddressContiguityDiscrepancyTests"/>, so this test doesn't re-prove it, just
+/// relies on it to zip the two sequences positionally.
 /// </remarks>
 public sealed class BlockDeltaAddressExhaustiveOracleTests(ITestOutputHelper output)
 {
@@ -113,7 +114,14 @@ public sealed class BlockDeltaAddressExhaustiveOracleTests(ITestOutputHelper out
     /// </summary>
     private static IEnumerable<ulong> EnumerateLiveAddresses(ClrHeap heap)
     {
-        foreach (ClrSegment segment in heap.Segments)
+        // Ascending Start, matching DiskBackedObjectIndexWriter's own sort. The two sequences are
+        // zipped positionally, so the oracle has to iterate segments in the writer's order or it is
+        // comparing different orderings — which would still pass on a dump where ClrMD happens to
+        // return segments already sorted, i.e. pass by luck rather than by construction.
+        ClrSegment[] segments = heap.Segments.ToArray();
+        Array.Sort(segments, static (a, b) => a.Start.CompareTo(b.Start));
+
+        foreach (ClrSegment segment in segments)
         {
             foreach (ClrObject obj in segment.EnumerateObjects())
             {

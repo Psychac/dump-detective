@@ -181,6 +181,22 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // DAC-side segment-list resolution rather than lumping it in with the setup around it.
         progress?.Report(new(0, "enumerating heap segments", Detail: null, Elapsed: stopwatch.Elapsed));
         ClrSegment[] segments = heap.Segments.ToArray();
+
+        // Ascending Start order makes the persisted ObjectAddresses column globally monotonic by
+        // construction rather than by observation. Every downstream structure iterates this array
+        // in the same order — scratch-file assignment, the parallel scan, column concatenation,
+        // SegmentIndex's cumulative record offsets and ScratchSegmentSource — so sorting once here
+        // keeps all of them coherent.
+        //
+        // Combined with SegmentAddressContiguityDiscrepancyTests' two invariants (each segment
+        // yields objects in strictly increasing address order, and segments do not overlap), this
+        // makes `row -> address` monotonic, which is what turns `address -> row` into a rank query
+        // over ObjectAddressBlockBases — see docs/cache/cache-ideal-design.md §3.1 R1.
+        //
+        // Measured to change nothing on either reference dump: ClrMD already returns segments in
+        // ascending Start order there, and the decoded column was verified strictly ascending
+        // element-by-element on both (§7.2). This removes the dependency on that happening to hold.
+        Array.Sort(segments, static (a, b) => a.Start.CompareTo(b.Start));
         string[] segAddrScratchFiles = new string[segments.Length];
         string[] segMtScratchFiles = new string[segments.Length];
         string[] segSizeScratchFiles = new string[segments.Length];

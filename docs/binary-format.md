@@ -169,9 +169,11 @@ satellite indexes (magic `"SEGX"`, version 1):
 
 Segments with zero objects are omitted entirely (a lookup can never land in one). Point lookup does
 a two-level binary search — segment table, then in-segment slice of the mmap'd `ObjectAddresses`
-column — because disk-mode enumeration order intentionally matches `heap.EnumerateObjects()`'s own
-segment-iteration order, not a globally address-sorted order (capped-scan analyzers depend on
-*which* objects populate a partial scan). See
+column. That two-level shape is what ships, but it is no longer *required*: segments are now
+processed in ascending `Start` order and are disjoint, so the column is globally monotonic and a
+single flat rank lookup is also valid. (It used to be required, because enumeration order
+deliberately mirrored `heap.EnumerateObjects()`'s segment order for the benefit of capped-scan
+analyzers — none of which remain.) See
 [docs/cache/cache-architecture.md § 4 and § 7](cache/cache-architecture.md) for the full rationale.
 A lookup miss (address falls in a segment gap, free block, padding, or doesn't land exactly on a
 record boundary — interior pointers are out of scope) returns `false`, not an error.

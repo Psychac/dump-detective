@@ -85,4 +85,66 @@ public sealed class SegmentAddressContiguityDiscrepancyTests
             $"checked {segmentsChecked} segments ({kindsSummary}), {objectsChecked} objects total; " +
             "any violation invalidates the SegmentIndex binary-search design in docs/cache/cache-architecture.md");
     }
+
+    /// <summary>
+    /// The second half of the global-monotonicity guarantee. The test above proves each segment
+    /// yields ascending addresses; this proves segments occupy disjoint ranges, so concatenating
+    /// them in ascending <c>Start</c> order — which <c>DiskBackedObjectIndexWriter</c> now sorts
+    /// into — produces a strictly ascending <c>ObjectAddresses</c> column for the whole heap.
+    /// </summary>
+    /// <remarks>
+    /// Both halves are needed. Sorting by <c>Start</c> alone would not give a monotonic column if
+    /// two segments overlapped: the tail of the earlier one would exceed the head of the later.
+    /// Global monotonicity is what makes <c>address -> row</c> a rank query instead of a hash
+    /// lookup, which is worth 2,325.9 MB — see docs/cache/cache-ideal-design.md §3.1 R1 and §7.2.
+    ///
+    /// Deliberately asserted rather than assumed: the previous design took ClrMD's segment order as
+    /// given and the column happened to come out ascending on both reference dumps. That is an
+    /// observation about two dumps, not a property of the format.
+    /// </remarks>
+    [DiscrepancyFact]
+    public void Segments_SortedByStart_AreDisjoint_SoTheConcatenatedColumnIsGloballyAscending()
+    {
+        string dumpPath = DumpPath;
+        if (!File.Exists(dumpPath)) return;
+
+        using DataTarget dataTarget = DataTarget.LoadDump(dumpPath);
+        ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();
+        ClrHeap heap = runtime.Heap;
+
+        ClrSegment[] segments = heap.Segments.ToArray();
+        Array.Sort(segments, static (a, b) => a.Start.CompareTo(b.Start));
+
+        var violations = new List<string>();
+        int alreadyAscending = 0;
+
+        ClrSegment[] asClrMdReturnedThem = heap.Segments.ToArray();
+        for (int i = 1; i < asClrMdReturnedThem.Length; i++)
+            if (asClrMdReturnedThem[i].Start > asClrMdReturnedThem[i - 1].Start)
+                alreadyAscending++;
+
+        for (int i = 1; i < segments.Length; i++)
+        {
+            ClrSegment previous = segments[i - 1];
+            ClrSegment current = segments[i];
+
+            if (current.Start < previous.End)
+            {
+                violations.Add(
+                    $"segment {current.Kind} [0x{current.Start:X}-0x{current.End:X}] overlaps " +
+                    $"{previous.Kind} [0x{previous.Start:X}-0x{previous.End:X}]");
+            }
+        }
+
+        _output.WriteLine($"segments: {segments.Length}");
+        _output.WriteLine($"already ascending as ClrMD returned them: {alreadyAscending}/{Math.Max(0, segments.Length - 1)} adjacent pairs");
+        _output.WriteLine($"overlaps after sorting by Start: {violations.Count}");
+        foreach (string v in violations.Take(20))
+            _output.WriteLine(v);
+
+        violations.Should().BeEmpty(
+            $"checked {segments.Length} segments; an overlap would break global monotonicity of the " +
+            "ObjectAddresses column even with segments sorted by Start, and with it the rank-query " +
+            "address lookup in docs/cache/cache-ideal-design.md §3.1 R1");
+    }
 }

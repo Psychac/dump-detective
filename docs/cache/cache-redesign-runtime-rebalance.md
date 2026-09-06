@@ -630,6 +630,148 @@ been run speculatively.
 
 ---
 
+## Part E — Where the cold build's time actually goes, and what can be cut
+
+Single-pass review of the indexing/caching path against Part D's phase timings, on the explicit
+premise that **some accuracy or robustness tradeoff is acceptable**. Everything below is anchored to
+measured phase durations from the 27.5 GB run, not to reading the code alone.
+
+### E.0 Time budget, 27.5 GB cold build (1,310.5 s)
+
+| Phase | Time | % of run | In scope here |
+|---|---:|---:|---|
+| `indexing heap` — parallel scan + forward-edge extraction (DOP 8) | 335.5 s | 25.6% | yes |
+| `computing exact dominator tree (tracing heap graph)` — the walk | 213.7 s | 16.3% | yes |
+| `enumerating GC roots` — `Roots` section + field-name trailer | **200.3 s** | **15.3%** | yes |
+| `building publisher registry` — EventLeakAnalyzer | 127.3 s | 9.7% | no — analyzer |
+| Build report | 81.4 s | 6.2% | no |
+| `computing exact dominator tree (resolving node metadata)` | 46.7 s | 3.6% | yes |
+| `building reverse-index CSR` | 39.6 s | 3.0% | yes |
+| **Section checksum verification** (3 labelled sections only) | **35.9 s** | **2.7%** | yes |
+| `sorting forward-index buckets` | 28.6 s | 2.2% | yes |
+| `writing reverse-index CSR into cache.bin` | 8.5 s | 0.6% | yes |
+| Identified subtotal | ~1,117 s | ~85% | |
+
+Two items in that table were invisible before Part D and are the interesting ones: root enumeration
+at 15.3%, and checksum verification at 2.7% *from only three labelled sections* out of 24 verified.
+
+### E.1 Stop re-verifying sections this same process just wrote — ≈36 s, no tradeoff
+
+The cold build writes every section and computes its `XxHash32` **during** the write. Then, in the
+same process, the analysis phase re-opens those sections and re-hashes **2,386.9 MiB** to verify them
+— essentially the whole container, immediately after producing it.
+
+That is not a CPU cost. `VerifyChecksumZeroCopy` hashes through the memory-mapped view, so its real
+cost is demand-paging the section back off disk, and Part D's run was doing that with system
+available memory at 356 MB. The measured numbers prove it is I/O, not hashing:
+
+| Section | Size | Verify time | Effective rate |
+|---|---:|---:|---:|
+| `DominatorReachableAddresses` | 233 MB | **28.2 s** | 8.3 MB/s |
+| `DominatorRetainedBytes` | 467 MB | 4.0 s | 117 MB/s |
+| `DominatorImmediateDominatorAddresses` | 233 MB | 3.7 s | 63 MB/s |
+
+The *smaller* section took 7× longer than the larger one. XxHash32 measured 4.6–6.9 GB/s in
+measurements §5, so at 233 MB the hashing itself is ~40 ms. The 28.2 s is page faults, paid because
+that section is opened first — at peak memory pressure.
+
+**Fix:** have `CacheContainerWriter` publish the checksums it already computed into the session's
+`VerifyOnce` memo, so a reader in the same process that just wrote the container starts
+pre-verified. A separate process (every warm run) keeps verifying exactly as today.
+
+**Tradeoff: none.** This trusts bytes written microseconds earlier by this process, through a handle
+never closed, whose checksum we computed ourselves. §6.1 already established the memoisation
+machinery; this is one more source of truth feeding it. Highest value-to-risk item on this page.
+
+### E.2 Verify by sequential read, not by faulting in a mapped view — folded into E.1's ≈36 s
+
+Independent of E.1, and it helps the warm path too, where E.1 by construction cannot. Hashing through
+`MemoryMappedViewAccessor` makes verification cost equal to demand-paging the whole section and leaves
+those pages resident competing with the live working set. A plain buffered `FileStream` read is
+sequential, lets the OS drop pages behind the cursor, and is what `VerifyChecksum` (the `Stream`
+overload) already does.
+
+Also here: `TryOpenSectionAccessor` builds a fresh `MemoryMappedFile` per call — 131 times on the
+27.5 GB run — where one mapping per container per session would do.
+
+**Tradeoff: none.** Verification is inherently a sequential full-section scan; the zero-copy pointer
+path buys nothing for it. Note the mmap *read* path for `ObjectIndexReader` should stay as-is — that
+one is a genuine hot path and measurements §4 rules out changing it.
+
+### E.3 The 200.3 s root phase cannot be optimised until it is split — measure first
+
+15.3% of the run, and currently one opaque number covering two very different things:
+
+1. `heap.EnumerateRoots()` — ClrMD's conservative stack walk across every thread, plus handles.
+   Largely irreducible; it is DAC work.
+2. `WriteFieldNameTrailer` → `StaticFieldResolver.BuildMapByRootAddress`.
+
+The second is structurally suspicious. It walks **every typedef in every module in every appdomain**,
+and for each one calls `heap.GetTypeByMethodTable(mt)` and materialises `type.Name` — an expensive
+DAC call plus a string allocation — *before* filtering with `IsSystemType(type.Name)` /
+`IsCompilerGenerated`. The typedef universe is far larger than the 12,376 types with live instances
+on this dump, and the entire result is then discarded except for fields whose address happens to be
+in `staticRootAddresses`.
+
+If it dominates, the fixes are cheap and low-risk: reject framework modules by module name before
+touching their types, and put any predicate that does not need `type.Name` ahead of the one that
+does. If it does not dominate, the 200 s is DAC stack-walking and there is nothing here.
+
+**One stopwatch around the trailer call settles it.** Not guessing which, and not optimising on a
+guess — that is the mistake this whole document exists to correct. Note the trailer itself is *not*
+redundant work: `RootSetCache` reads the persisted trailer and only falls back to rebuilding the map
+if that read fails, so it is written once and read cheaply thereafter.
+
+### E.4 Batch the walk's reverse-edge writes — seconds, and it strengthens C.2
+
+`ReverseEdgeExtractor.RecordEdgesBatch` exists precisely because "at hundreds of millions of edges
+the fixed per-call cost of `lock` is the dominant overhead of `RecordEdge`" — and the forward path
+uses it (`DiskBackedObjectIndexWriter` lines 350, 446). The **reverse path does not**:
+`ReachableGraphWalker` calls `RecordEdge` once per edge, so the 27.5 GB walk takes **137,033,360
+individually-locked** acquire/write/release round trips plus 274M `BinaryWriter.Write(ulong)` calls,
+inside the 213.7 s walk.
+
+Order-of-magnitude only: ~137M uncontended lock pairs plus buffered writes is plausibly 10–20 s.
+Batching mirrors code that already exists for the sibling path, so it is low-risk.
+
+**But note what this implies for C.2.** The C.2-variant (§below) deletes this write path entirely,
+so it collects this saving *plus* the 39.6 s CSR build *plus* the 2.2 s flush — call it 50–60 s, ~4%
+of the run, on top of its 1.9 GB peak and 4.1 GB of scratch I/O. That is a materially better case
+than the 3.0% ceiling Part D quoted for C.2, which counted only the CSR phase.
+
+### E.5 Deliberately not recommended
+
+- **Dropping the forward-edge index to skip its 28.6 s sort + extraction share.** It exists solely to
+  feed the walk, and the loose-file walk is measured ~2× faster than live ClrMD. Removing it would
+  hand back well over 200 s to save ~30 s. Keep it.
+- **Compressing the base object columns** to cut I/O. Measurements §4 already ruled this out — it
+  costs the 10.49 GB/s streaming path a 22× zero-copy penalty.
+- **Reducing DOP.** The scan is already at DOP 8 on 8 cores.
+- **Deleting `RootStackThreadAttribution`** as a *speed* measure. It is written and never read on
+  either dump, so it should go on hygiene grounds (same class as C.1), but it measured **0.0 s** —
+  claiming it as a speedup would be false.
+
+### E.6 Ranked
+
+| # | Item | Measured saving | Tradeoff | Confidence |
+|---|---|---:|---|---|
+| 1 | E.1 same-process checksum trust | ≈36 s (2.7%) | none | high — measured |
+| 2 | E.2 sequential verify + one mapping per session | folded into #1, also helps warm | none | high |
+| 3 | C.2-variant (delete the extractor pipeline) | ≈50–60 s (4%) + 1.9 GB peak + 4.1 GB scratch | one path replaces two | med-high |
+| 4 | E.4 batch reverse-edge writes | ~10–20 s | none | medium — estimated, not measured |
+| 5 | E.3 static-field-map filter order | unknown, up to 15.3% | none | **unmeasured — instrument first** |
+
+Realistic total from items 1–4: **≈100–115 s of 1,310 s, ~8%**, with no accuracy tradeoff taken —
+which is worth noting given tradeoffs were on the table. E.3 is the only item that could be large,
+and it is the only one not yet measured.
+
+The two biggest phases — the 335.5 s parallel scan and the 213.7 s walk — are ClrMD/DAC-bound and
+are not addressed by anything above. Beyond E.4's slice of the walk, cutting those means changing
+what is asked of ClrMD, which is a different investigation from this one. Part D.3's note stands:
+`DenseIdMap` was already tried on the walk and came back 2.6× slower with no peak-memory win.
+
+---
+
 ## Open question — ~~C.2, after C.1~~ RESOLVED by Part D
 
 C.1 removed the reference dump's entire case for C.2 — cold peak there is now 491 MB *below* the
@@ -667,3 +809,8 @@ instead, and should read §7.3 item 2 of the dominator integration doc first —
 | C.3 — bound builder residency (fallback) | ⬜ only if C.2 is rejected |
 | C.4 — warm-path decode | ✅ dropped, gate not met |
 | Walk's own ≈6 GB residency (D.3) | ⬜ out of scope, own investigation |
+| **Part E — cold-build speedup review** | ✅ done, ranked in E.6 |
+| E.1 same-process checksum trust (≈36 s) | ⬜ ready, no tradeoff |
+| E.2 sequential verify + one mapping per session | ⬜ ready, no tradeoff |
+| E.4 batch reverse-edge writes (~10–20 s) | ⬜ ready, subsumed by C.2-variant |
+| E.3 static-field-map filter order | ⬜ **instrument before touching** |

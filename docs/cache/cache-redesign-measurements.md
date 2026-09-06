@@ -852,6 +852,21 @@ container with a deliberately aborted section reports it.
 
 ### 14.1 Correctness verification
 
+> **⚠ Gap found and closed after initial verification (2026-09-06).** The checks originally
+> described below take each entry's decoded `Address` as given and check something else against
+> it — live size at that address, or agreement between the streaming and lookup decode paths.
+> Neither is an independent oracle for the address itself, and the streaming/lookup cross-check is
+> not one either: both paths call the same `BlockDeltaColumn.Decode`, so a systematic bug in that
+> one method would make both agree while both are wrong. Added
+> `BlockDeltaAddressExhaustiveOracleTests`, which re-enumerates the live heap independently
+> (`heap.Segments` → `segment.EnumerateObjects()`, the same primitive and the same
+> `!IsValid || Type is null || MethodTable == 0` filter `DiskBackedObjectIndexWriter`'s scan loop
+> uses, applied by a completely separate code path with no shared decode logic) and zips it against
+> the disk-decoded stream in order. **All 14,620,162 records matched exactly, 0 mismatches.** This
+> is what actually closes the address-encoding correctness question; everything below it was
+> necessary but not sufficient on its own.
+
+
 Escaped records are 0.026% of sizes and 0.0001% of addresses — well under what the existing
 every-100,000th sampling in `HeapAnalysisCacheObjectMetadataDiscrepancyTests` would be expected to
 hit even once. A dedicated real-dump test (`NarrowColumnsRealDumpTests`) therefore checks **every**

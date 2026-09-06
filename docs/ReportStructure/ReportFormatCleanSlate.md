@@ -2,10 +2,10 @@
 
 ## Status
 
-Design proposal. Nothing here is implemented. Supersedes the incremental direction in
-[SingleDumpReportFormat.v2.md](SingleDumpReportFormat.v2.md) and
-[TrendReportFormat.v2.md](TrendReportFormat.v2.md) *if adopted* — those remain authoritative
-until then.
+Design proposal. Nothing here is implemented. One of three baseline documents for the reporting
+layer — see [README.md](README.md). The incremental single-dump and trend format specs this
+supersedes were deleted 2026-09-06 and are in git history; no document describes the shipped
+report, so read the code for current behavior.
 
 ## Purpose
 

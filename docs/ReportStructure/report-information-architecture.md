@@ -4,7 +4,7 @@
 
 **Companion docs:**
 - [report-cross-analyzer-data-plane.md](report-cross-analyzer-data-plane.md) — the *data* plane: many analyzers measuring the same entities and each publishing its own top-N table. **Read that one first** — it is the more fundamental problem, and several issues raised below dissolve once it is fixed.
-- [report-display-vision.md](report-display-vision.md) — *visual* presentation (charts, cards, CSS).
+- Visual presentation (charts, cards, CSS) and the design baseline are specified in the three docs listed in [README.md](README.md).
 
 This doc covers the *findings* plane: what gets grouped with what once diagnoses exist. Renderer-agnostic throughout.
 

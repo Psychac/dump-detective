@@ -2,7 +2,7 @@
 
 **Companion docs:**
 - [report-information-architecture.md](report-information-architecture.md) — the *findings* plane (correlating diagnoses). Complementary, lower priority than this.
-- [report-display-vision.md](report-display-vision.md) — visual presentation.
+- Visual presentation and the design baseline are specified in the three docs listed in [README.md](README.md).
 
 **This doc is about the data plane:** many analyzers independently measuring the *same entities* and each publishing its own table, instead of contributing columns to one.
 

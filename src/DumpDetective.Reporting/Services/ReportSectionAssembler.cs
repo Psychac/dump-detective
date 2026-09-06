@@ -1,4 +1,4 @@
-using DumpDetective.Core.Enums;
+﻿using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
@@ -227,18 +227,17 @@ internal static class ReportSectionAssembler
         var memoryDiagnostics = new List<AnalyzerMemoryDiagnosticRecord>();
         var limitations = new List<string>
         {
-            // Z3 canonical list from SingleDumpReportFormat.md
-            "Retained size is bounded BFS, not a true dominator tree (affects A3, A4).",
-            "GC root retained bytes are estimated from average type size, not exact measurement (A5).",
+            // Hand-maintained and published to users in every report, so it drifts silently as
+            // analyzers gain capability. Re-verify each entry against the analyzer it names when
+            // changing that analyzer; a stale entry understates accuracy the tool actually has.
+            "Dominator suspect ranking uses bounded BFS; exact Lengauer-Tarjan retained bytes cover the Gen2/LOH per-type breakdown only, and fall back to bounded BFS when the dominator tree is unavailable for the run (A3, A4).",
+            "GC root retained bytes are exact dominator-tree measurements when the dominator tree is available, and bounded-BFS retained size otherwise (A5).",
             "Allocation sites are unavailable from .dmp files; ETW capture is required (B2).",
-            "Gen byte counts are approximated as avg-size × gen count, not measured per-object (B1).",
             "Task orphan detection relies on CLR private field name stability across runtime versions (E1).",
             "FOH/POH sizes include runtime-internal objects that are not application objects (B3).",
             "ClrThread.StackBase/StackLimit may be 0 for GC and finalizer threads (D1).",
             "Deadlock detection is a heuristic based on held sync blocks and top-frame wait patterns, not a verified wait-for graph; ClrMD does not expose per-thread blocking-object data (D3).",
             "String encoding waste (UTF-16 overhead vs ASCII content) is not detected (A7).",
-            "Async state machine state-value distribution is unavailable; only averages are reported (E2).",
-            "Collection generation field is not yet available from ClrMD; generation breakdown for collections is omitted (C3).",
             "Gen0/Gen1 pinned object generation correlation is not computed (B7).",
             "RuntimeQueueLength is obtained via reflection probe and may be null when inaccessible (D2).",
         };

@@ -361,6 +361,16 @@ chain-tree UI shows rather than just moving where it is computed. Note also that
 **new code**, not existing code relocated: the current builder consumes Lengauer-Tarjan output, not
 a persisted `idom[]`.
 
+> **✅ SHIPPED (2026-09-06) — aggressive option implemented.** `DominatorImmediateDominatorAddresses`
+> now stores a row index (4 bytes, format v7) instead of an 8-byte address, and
+> `DominatorChildOffsets`/`DominatorChildAddresses` are no longer written at all —
+> `DominatorChildIndexReader` inverts the idom column in memory on first use. Measured on the
+> reference dump: `cache.bin` 687.7 → **587.29 MiB** (−100.4 MiB, close to the ~98 MiB estimate).
+> Verified exhaustively against the real dump — every one of 6,686,490 rows' listed children checked
+> against that child's own persisted dominator, 0 mismatches, and the total child-edge count
+> (6,469,153) matches the old persisted CSR's record count exactly
+> (`DominatorChildIndexRealDumpTests`, cache-redesign-measurements.md §16).
+>
 > **✅ MEASURED (2026-09-06) — recommendation resolved to the aggressive option.**
 > [cache-redesign-measurements.md](cache-redesign-measurements.md) § 15 instrumented the
 > `EnumerateRetainedSet` call site directly and ran it against three real dumps (3.51 GB, 3.3 GB,
@@ -623,15 +633,16 @@ therefore not wasted work under either ordering.
 The resulting sequence, each step its own `CurrentFormatVersion` bump per [measurements
 §10.2](cache-redesign-measurements.md):
 
-| Version | Contents | Saves | % of 852.4 MiB |
-|---|---|---:|---:|
-| **v6** | Base + sorted-column narrowing: `ObjectSizes` width, `ObjectAddresses` block-delta, `DominatorReachableAddresses` block-delta, plus the §3 section manifest as a rider (§10) | **164.7 MiB** | **19.3%** |
-| v7 | Dominator: aggressive or conservative (§4), once the `EnumerateRetainedSet` frequency count exists | ~98 or ~46 MiB | 11.5% / 5.4% |
-| v8 | CSR edge indices (§2) | ~245 MiB | 28.7% |
-| v9 | Block compression + per-block checksums (§5) | remainder | — |
+| Version | Contents | Saves | % of prior | Status |
+|---|---|---:|---:|---|
+| **v6** | Base + sorted-column narrowing: `ObjectSizes` width, `ObjectAddresses` block-delta, `DominatorReachableAddresses` block-delta, plus the §3 section manifest as a rider (§10) | **164.7 MiB** | 19.3% of 852.4 | ✅ shipped |
+| **v7** | Dominator: aggressive option (§4) — the `EnumerateRetainedSet` frequency count came back zero on every dump measured | **100.4 MiB** | 14.6% of 687.7 | ✅ shipped |
+| v8 | CSR edge indices (§2) | ~245 MiB | ~35% of 587.29 | open |
+| v9 | Block compression + per-block checksums (§5) | remainder | — | open |
 
 Compression's own arithmetic is unaffected by going last: it applies to whatever the file is at
-that point, and the three v6 columns are excluded from it either way.
+that point, and the base columns (v6) plus the dominator idom column (v7) are excluded from it
+either way.
 
 ## 7.2 Design scrutiny — three problems with the plan above
 

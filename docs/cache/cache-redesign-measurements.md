@@ -968,3 +968,64 @@ were: it rests on the call frequency being genuinely low in general, which 0-for
 doesn't prove for every real dump this tool will ever see. If a future dump does exercise this path
 heavily, the conservative option (§4, ~46 MiB) remains available with no new measurement needed —
 this doesn't foreclose it.
+
+---
+
+## 16. ✅ v7 shipped — dominator child index derived on demand, `cache.bin` 687.7 → 587.29 MiB
+
+The aggressive option from format doc §4 is implemented. Format version bumped 6 → 7:
+
+- `DominatorImmediateDominatorAddresses` — 8-byte dominator *address* per row → 4-byte dominator
+  *row* index (or `NoParentRow` = `uint.MaxValue` for a direct child of the virtual root). Correct
+  as a sentinel because `RowCount` is always far below `uint.MaxValue` — the largest measured dump
+  has 87.1M rows.
+- `DominatorChildOffsets`/`DominatorChildAddresses` — no longer written at all.
+  `DominatorChildIndexReader` inverts the persisted idom-row column into an in-memory CSR
+  (offsets + child rows) the first time a query actually needs the child direction, guarded so
+  concurrent first-callers still only pay the build once. Given §15's zero measured calls, most
+  runs never build it at all.
+
+Measured on a cold rebuild of the reference dump:
+
+| | Before (v6) | After (v7) |
+|---|---:|---:|
+| `DominatorImmediateDominatorAddresses` | 53,491,920 B — 51.01 MiB | 26,745,960 B — **25.51 MiB** |
+| `DominatorChildOffsets` | 26,745,964 B — 25.51 MiB | *(removed)* |
+| `DominatorChildAddresses` | 51,753,224 B — 49.36 MiB | *(removed)* |
+| Sections | 30 | 28 |
+| **`cache.bin`** | 721,064,269 B — 687.7 MiB | **615,819,113 B — 587.29 MiB** |
+| **Saved** | | **105,245,156 B — 100.4 MiB (−14.6%)** |
+
+Matches the projected saving almost exactly: 25.5 MiB (idom narrowing) + 74.87 MiB (dropped child
+list) = 100.37 MiB predicted, 100.4 MiB measured. **The whole redesign so far: 1,398.3 → 587.29 MiB,
+42.0% of where it started, with no compression written yet.**
+
+### 16.1 Correctness verification
+
+Three layers, same discipline as v6:
+
+- **Synthetic unit tests** (`DominatorChildIndexTests`) port the exact fold scenarios the retired
+  write-time `DominatorChildIndexBuilder` used to cover — diamond dominance, a single folded leaf
+  surfacing as an ordinary child, several leaves folded under one hub, and the zero-edges case — as
+  full write-then-read round trips through the new format, since the equivalent logic now lives
+  inside the reader rather than a separately-callable pure function.
+- **Real-dump exhaustive round-trip** (`DominatorChildIndexRealDumpTests`, new): for every one of the
+  reference dump's 6,686,490 rows, reads that row's children from the inverted index and checks each
+  child's own persisted immediate-dominator points back to it — independent of the inversion
+  algorithm itself, since it re-derives the parent side through
+  `DominatorTreeIndexReader.TryGetImmediateDominator`, a different code path reading a different
+  section. **Zero mismatches.** Total child edges (6,469,153) plus root-level rows (217,337) sum to
+  exactly R (6,686,490), and 6,469,153 matches the *old* v6 `DominatorChildAddresses` record count
+  exactly — the on-demand inversion reproduces what the retired persisted CSR used to contain, byte
+  for byte in effect, on the real 14.6M-object dump.
+- **Existing real-dump regression suite**, re-run one at a time: `DominatorAnalyzerExactTreeRealDumpTests`
+  (tree vs. ground truth, GCRootAnalyzer's exact ByKind rollup, per-thread retention),
+  `StaticRootLeakDetectorDominatorTreeDiscrepancyTests`, `HeapAnalysisCacheObjectMetadataDiscrepancyTests`,
+  `ObjectAddressLookupDiscrepancyTests`, `SegmentIndexBuildDiscrepancyTests`,
+  `NarrowColumnsRealDumpTests`, `BlockDeltaAddressExhaustiveOracleTests` — all green against the v7
+  format. Not re-run against the 27.5 GB dump for this change: the algorithm has no dump-size-dependent
+  branch, and the exhaustive reference-dump check already covers 6.69M rows with zero deviation.
+
+1,051 unit tests pass (three fewer than v6's 1,054 — the retired `DominatorChildIndexBuilderTests`
+class's synthetic-graph scenarios moved into `DominatorChildIndexTests` as full round trips, and its
+one unrelated `DominatorRowMapping` test moved to its own file).

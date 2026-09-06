@@ -18,6 +18,16 @@ namespace DumpDetective.Analysis.Indexing.Dominator;
 /// </remarks>
 internal sealed unsafe class DominatorRowIndex : IDisposable
 {
+    /// <summary>
+    /// Reserved value for a row-index column keyed by this index (currently just
+    /// <c>DominatorImmediateDominatorAddresses</c>, format v7 —
+    /// docs/cache/cache-format-clean-slate-redesign.md §4's aggressive option) meaning "this row's
+    /// dominator is the virtual root, not another reachable node." Safe as a sentinel because
+    /// <see cref="RowCount"/> is always far below <see cref="uint.MaxValue"/> in practice — the
+    /// largest measured dump has 87.1M reachable nodes.
+    /// </summary>
+    public const uint NoParentRow = uint.MaxValue;
+
     private readonly MemoryMappedViewAccessor _accessor;
     private readonly byte* _addressesPtr;
     private readonly BlockDeltaColumn? _deltas;

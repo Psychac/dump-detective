@@ -16,26 +16,26 @@ namespace DumpDetective.Analysis.Indexing.Dominator;
 internal sealed unsafe class DominatorTreeIndexReader : IDisposable
 {
     private readonly DominatorRowIndex _rows;
-    private readonly MemoryMappedViewAccessor _dominatorsAccessor;
+    private readonly MemoryMappedViewAccessor _dominatorRowsAccessor;
     // Nullable: DominatorRetainedBytes was added after DominatorImmediateDominatorAddresses
     // (§10.4 Batch 3) — a cache.bin written by an earlier build has idom data but not this column.
     private readonly MemoryMappedViewAccessor? _retainedBytesAccessor;
-    private readonly byte* _dominatorsPtr;
+    private readonly byte* _dominatorRowsPtr;
     private readonly byte* _retainedBytesPtr;
     private bool _disposed;
 
     private DominatorTreeIndexReader(
         DominatorRowIndex rows,
-        MemoryMappedViewAccessor dominatorsAccessor,
+        MemoryMappedViewAccessor dominatorRowsAccessor,
         MemoryMappedViewAccessor? retainedBytesAccessor)
     {
         _rows = rows;
-        _dominatorsAccessor = dominatorsAccessor;
+        _dominatorRowsAccessor = dominatorRowsAccessor;
         _retainedBytesAccessor = retainedBytesAccessor;
 
         byte* p = null;
-        _dominatorsAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
-        _dominatorsPtr = p + _dominatorsAccessor.PointerOffset;
+        _dominatorRowsAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
+        _dominatorRowsPtr = p + _dominatorRowsAccessor.PointerOffset;
 
         if (_retainedBytesAccessor is not null)
         {
@@ -58,21 +58,23 @@ internal sealed unsafe class DominatorTreeIndexReader : IDisposable
         if (!DominatorRowIndex.TryOpen(container, out DominatorRowIndex? rows) || rows is null)
             return false;
 
-        // Compared against the row-aligned length rather than against the address column's own
-        // length: since v6 the address column can be 4 bytes per row while these stay 8.
-        long rowAlignedLength = rows.RowAlignedColumnLength;
+        // DominatorImmediateDominatorAddresses is a fixed 4 bytes/row since format v7 — no width
+        // variability to detect the way the narrowed object columns have, because a v6 container
+        // (8 bytes/row, address-keyed) never reaches this reader at all: CacheFileHeader.TryRead
+        // already rejects any format version other than the current one before any section is opened.
+        long expectedLength = rows.RowCount * sizeof(uint);
 
-        if (!container.TryOpenSectionAccessor(CacheSectionId.DominatorImmediateDominatorAddresses, out MemoryMappedViewAccessor? dominatorsAccessor, out long dominatorsLength)
-            || dominatorsAccessor is null || dominatorsLength != rowAlignedLength)
+        if (!container.TryOpenSectionAccessor(CacheSectionId.DominatorImmediateDominatorAddresses, out MemoryMappedViewAccessor? dominatorRowsAccessor, out long dominatorRowsLength)
+            || dominatorRowsAccessor is null || dominatorRowsLength != expectedLength)
         {
             rows.Dispose();
-            dominatorsAccessor?.Dispose();
+            dominatorRowsAccessor?.Dispose();
             return false;
         }
 
         MemoryMappedViewAccessor? retainedBytesAccessor = null;
         if (container.TryOpenSectionAccessor(CacheSectionId.DominatorRetainedBytes, out MemoryMappedViewAccessor? candidateAccessor, out long retainedBytesLength)
-            && candidateAccessor is not null && retainedBytesLength == rowAlignedLength)
+            && candidateAccessor is not null && retainedBytesLength == rows.RowAlignedColumnLength)
         {
             retainedBytesAccessor = candidateAccessor;
         }
@@ -81,7 +83,7 @@ internal sealed unsafe class DominatorTreeIndexReader : IDisposable
             candidateAccessor?.Dispose();
         }
 
-        reader = new DominatorTreeIndexReader(rows, dominatorsAccessor, retainedBytesAccessor);
+        reader = new DominatorTreeIndexReader(rows, dominatorRowsAccessor, retainedBytesAccessor);
         return true;
     }
 
@@ -89,7 +91,8 @@ internal sealed unsafe class DominatorTreeIndexReader : IDisposable
     /// Retrieves the immediate-dominator address for <paramref name="address"/>. Returns
     /// <c>false</c> if <paramref name="address"/> wasn't part of the reachable graph when this
     /// section was written (not an error — could be a stale/different snapshot, or an address this
-    /// tree never reached).
+    /// tree never reached). <paramref name="dominatorAddress"/> is <c>0</c> — not a failure — when
+    /// <paramref name="address"/> is a direct child of the virtual root (a real GC root object).
     /// </summary>
     public bool TryGetImmediateDominator(ulong address, out ulong dominatorAddress)
     {
@@ -99,7 +102,8 @@ internal sealed unsafe class DominatorTreeIndexReader : IDisposable
         if (row < 0)
             return false;
 
-        dominatorAddress = ReadUInt64(_dominatorsPtr, row * sizeof(ulong));
+        uint dominatorRow = ReadUInt32(_dominatorRowsPtr, row * sizeof(uint));
+        dominatorAddress = dominatorRow == DominatorRowIndex.NoParentRow ? 0UL : _rows.ReadAddress(dominatorRow);
         return true;
     }
 
@@ -129,6 +133,7 @@ internal sealed unsafe class DominatorTreeIndexReader : IDisposable
         return _rows.FindRow(address);
     }
 
+    private static uint ReadUInt32(byte* basePtr, long offset) => Unsafe.ReadUnaligned<uint>(basePtr + offset);
     private static ulong ReadUInt64(byte* basePtr, long offset) => Unsafe.ReadUnaligned<ulong>(basePtr + offset);
 
     public void Dispose()
@@ -138,8 +143,8 @@ internal sealed unsafe class DominatorTreeIndexReader : IDisposable
         _disposed = true;
 
         _rows.Dispose();
-        _dominatorsAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
-        _dominatorsAccessor.Dispose();
+        _dominatorRowsAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
+        _dominatorRowsAccessor.Dispose();
 
         if (_retainedBytesAccessor is not null)
         {

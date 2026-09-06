@@ -6,51 +6,41 @@ using DumpDetective.Analysis.Indexing.Container;
 namespace DumpDetective.Analysis.Indexing.Dominator;
 
 /// <summary>
-/// Read-only query path over the dominator child index (§10.4, Batch 2b,
-/// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md) — "what would freeing this
-/// object free, one level down." Deliberately minimal: this exists to round-trip-test the on-disk
-/// format the writer produces. The richer query surface (<c>EnumerateRetainedSet</c>,
-/// <c>TryGetRetainedBytes</c>'s subtree-sum walk, the <c>IDominatorTreeProvider</c> facade) is
-/// Batch 3 (§10.6), not this class.
+/// Answers "what would freeing this object free, one level down" — the dominator-tree child
+/// direction — without a persisted child-list section. Format v7 (the aggressive option in
+/// docs/cache/cache-format-clean-slate-redesign.md §4) derives it on demand by inverting the
+/// persisted <c>DominatorImmediateDominatorAddresses</c> row-index column once, in memory, the first
+/// time a query actually needs it — not on every build, and not even on every run: measurements §15
+/// found this direction's only production consumer, <c>StaticRootLeakDetector</c>, called zero times
+/// across every real dump tested.
 /// </summary>
 internal sealed unsafe class DominatorChildIndexReader : IDisposable
 {
     private readonly DominatorRowIndex _rows;
-    private readonly MemoryMappedViewAccessor _childOffsetsAccessor;
-    // Nullable: legitimately absent (zero-length, not missing/corrupt) whenever nothing in the
-    // whole graph has any dominator-tree children at all — e.g. every reachable node is a direct
-    // GC root with no children of its own.
-    private readonly MemoryMappedViewAccessor? _childAddressesAccessor;
-    private readonly byte* _childOffsetsPtr;
-    private readonly byte* _childAddressesPtr;
+    private readonly MemoryMappedViewAccessor _dominatorRowsAccessor;
+    private readonly byte* _dominatorRowsPtr;
+    private readonly object _buildGate = new();
+    // Both null until EnsureChildIndexBuilt's first call; published together (offsets last) so a
+    // racing reader either sees neither or both fully populated, never a half-built pair.
+    private int[]? _childRowsByRow;
+    private int[]? _childOffsetsByRow;
     private bool _disposed;
 
-    private DominatorChildIndexReader(
-        DominatorRowIndex rows,
-        MemoryMappedViewAccessor childOffsetsAccessor,
-        MemoryMappedViewAccessor? childAddressesAccessor)
+    private DominatorChildIndexReader(DominatorRowIndex rows, MemoryMappedViewAccessor dominatorRowsAccessor)
     {
         _rows = rows;
-        _childOffsetsAccessor = childOffsetsAccessor;
-        _childAddressesAccessor = childAddressesAccessor;
+        _dominatorRowsAccessor = dominatorRowsAccessor;
 
         byte* p = null;
-        _childOffsetsAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
-        _childOffsetsPtr = p + _childOffsetsAccessor.PointerOffset;
-
-        if (_childAddressesAccessor is not null)
-        {
-            p = null;
-            _childAddressesAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
-            _childAddressesPtr = p + _childAddressesAccessor.PointerOffset;
-        }
+        _dominatorRowsAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
+        _dominatorRowsPtr = p + _dominatorRowsAccessor.PointerOffset;
     }
 
     /// <summary>
-    /// Attempts to open the child-index sections. Returns <c>false</c> — same as any missing/corrupt
-    /// satellite section — if <c>DominatorReachableAddresses</c>/<c>DominatorChildOffsets</c> are
-    /// absent or the offsets column's length doesn't match the row count + 1.
-    /// <c>DominatorChildAddresses</c> being empty is not treated as a failure — see the field comment.
+    /// Attempts to open the sections the inversion needs. Returns <c>false</c> — same as any
+    /// missing/corrupt satellite section — if <c>DominatorReachableAddresses</c>/
+    /// <c>DominatorImmediateDominatorAddresses</c> are absent or the latter's length doesn't match
+    /// the row count. Does no inversion work itself — see <see cref="EnsureChildIndexBuilt"/>.
     /// </summary>
     public static bool TryOpen(CacheContainerReader container, out DominatorChildIndexReader? reader)
     {
@@ -59,20 +49,16 @@ internal sealed unsafe class DominatorChildIndexReader : IDisposable
         if (!DominatorRowIndex.TryOpen(container, out DominatorRowIndex? rows) || rows is null)
             return false;
 
-        if (!container.TryOpenSectionAccessor(CacheSectionId.DominatorChildOffsets, out MemoryMappedViewAccessor? childOffsetsAccessor, out long childOffsetsLength)
-            || childOffsetsAccessor is null || childOffsetsLength != (rows.RowCount + 1) * sizeof(int))
+        long expectedLength = rows.RowCount * sizeof(uint);
+        if (!container.TryOpenSectionAccessor(CacheSectionId.DominatorImmediateDominatorAddresses, out MemoryMappedViewAccessor? dominatorRowsAccessor, out long dominatorRowsLength)
+            || dominatorRowsAccessor is null || dominatorRowsLength != expectedLength)
         {
             rows.Dispose();
-            childOffsetsAccessor?.Dispose();
+            dominatorRowsAccessor?.Dispose();
             return false;
         }
 
-        // A missing DominatorChildAddresses accessor here is only ever the legitimate
-        // zero-total-children case (see the field comment) — TryOpenSectionAccessor already
-        // distinguishes that from a genuinely absent/corrupt section (it would have returned false).
-        container.TryOpenSectionAccessor(CacheSectionId.DominatorChildAddresses, out MemoryMappedViewAccessor? childAddressesAccessor, out _);
-
-        reader = new DominatorChildIndexReader(rows, childOffsetsAccessor, childAddressesAccessor);
+        reader = new DominatorChildIndexReader(rows, dominatorRowsAccessor);
         return true;
     }
 
@@ -92,20 +78,66 @@ internal sealed unsafe class DominatorChildIndexReader : IDisposable
         if (row < 0)
             return false;
 
-        int start = ReadInt32(_childOffsetsPtr, row * sizeof(int));
-        int end = ReadInt32(_childOffsetsPtr, (row + 1) * sizeof(int));
+        EnsureChildIndexBuilt();
+
+        int start = _childOffsetsByRow![(int)row];
+        int end = _childOffsetsByRow[(int)row + 1];
         if (end == start)
             return true;
 
         children = new ulong[end - start];
         for (int i = 0; i < children.Length; i++)
-            children[i] = ReadUInt64(_childAddressesPtr, (start + i) * (long)sizeof(ulong));
+            children[i] = _rows.ReadAddress(_childRowsByRow![start + i]);
 
         return true;
     }
 
-    private static int ReadInt32(byte* basePtr, long offset) => Unsafe.ReadUnaligned<int>(basePtr + offset);
-    private static ulong ReadUInt64(byte* basePtr, long offset) => Unsafe.ReadUnaligned<ulong>(basePtr + offset);
+    /// <summary>
+    /// Builds the inverted child-row CSR from the persisted idom column, once, on first use. Same
+    /// counting-sort-into-CSR shape the old write-time <c>DominatorChildIndexBuilder</c> used, just
+    /// with one source (idom rows) instead of two merged sources (real dominator-tree edges + folded
+    /// leaves) — the persisted idom row already carries both, which is exactly the precondition
+    /// verified in docs/cache/cache-format-clean-slate-redesign.md §4 before this option was chosen.
+    /// </summary>
+    private void EnsureChildIndexBuilt()
+    {
+        if (Volatile.Read(ref _childOffsetsByRow) is not null)
+            return;
+
+        lock (_buildGate)
+        {
+            if (_childOffsetsByRow is not null)
+                return;
+
+            int rowCount = (int)_rows.RowCount;
+            var offsets = new int[rowCount + 1];
+
+            for (int row = 0; row < rowCount; row++)
+            {
+                uint parentRow = ReadDominatorRow(row);
+                if (parentRow != DominatorRowIndex.NoParentRow)
+                    offsets[parentRow + 1]++;
+            }
+
+            for (int i = 0; i < rowCount; i++)
+                offsets[i + 1] += offsets[i];
+
+            var cursor = (int[])offsets.Clone();
+            var childRows = new int[offsets[rowCount]];
+
+            for (int row = 0; row < rowCount; row++)
+            {
+                uint parentRow = ReadDominatorRow(row);
+                if (parentRow != DominatorRowIndex.NoParentRow)
+                    childRows[cursor[parentRow]++] = row;
+            }
+
+            _childRowsByRow = childRows;
+            Volatile.Write(ref _childOffsetsByRow, offsets);
+        }
+    }
+
+    private uint ReadDominatorRow(long row) => Unsafe.ReadUnaligned<uint>(_dominatorRowsPtr + row * sizeof(uint));
 
     public void Dispose()
     {
@@ -114,13 +146,7 @@ internal sealed unsafe class DominatorChildIndexReader : IDisposable
         _disposed = true;
 
         _rows.Dispose();
-        _childOffsetsAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
-        _childOffsetsAccessor.Dispose();
-
-        if (_childAddressesAccessor is not null)
-        {
-            _childAddressesAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
-            _childAddressesAccessor.Dispose();
-        }
+        _dominatorRowsAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
+        _dominatorRowsAccessor.Dispose();
     }
 }

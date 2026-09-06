@@ -1234,28 +1234,34 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                 parentNewIdOfFoldedOldId[fold.FoldedLeafOldIds[e]] = parentNewId;
         }
 
-        var dominatorAddressesByRow = new ulong[n];
+        // §4's aggressive option (docs/cache/cache-format-clean-slate-redesign.md): a row index into
+        // this same DominatorReachableAddresses ordering, not an address — what makes
+        // DominatorChildIndexReader's in-memory inversion possible without a search per row. A
+        // node's own row is already known (oldIdToRow[oldId]); its *dominator's* row is the same
+        // lookup applied to the dominator's old id, so no address round-trip is needed either
+        // direction.
+        var dominatorRowByRow = new uint[n];
         for (int oldId = 0; oldId < n; oldId++)
         {
             int newId = fold.OldToNewId[oldId];
-            ulong dominatorAddress;
+            uint dominatorRow;
             if (newId >= 0)
             {
                 int dominatorNewId = tree.Idom[newId];
-                dominatorAddress = dominatorNewId == tree.VirtualRoot
-                    ? 0UL
-                    : graph.Addresses[fold.NewToOldId[dominatorNewId]];
+                dominatorRow = dominatorNewId == tree.VirtualRoot
+                    ? DominatorRowIndex.NoParentRow
+                    : (uint)oldIdToRow[fold.NewToOldId[dominatorNewId]];
             }
             else
             {
                 int parentNewId = parentNewIdOfFoldedOldId[oldId];
-                dominatorAddress = graph.Addresses[fold.NewToOldId[parentNewId]];
+                dominatorRow = (uint)oldIdToRow[fold.NewToOldId[parentNewId]];
             }
 
-            dominatorAddressesByRow[oldIdToRow[oldId]] = dominatorAddress;
+            dominatorRowByRow[oldIdToRow[oldId]] = dominatorRow;
         }
 
-        DominatorTreeIndexWriter.WriteImmediateDominatorAddresses(containerWriter, dominatorAddressesByRow);
+        DominatorTreeIndexWriter.WriteImmediateDominatorRows(containerWriter, dominatorRowByRow);
 
         // §10.4 Batch 3: exact retained bytes per row — same "newId >= 0 ? tree.RetainedBytes[newId]
         // : shallow size" rule DominatorRetainedBytesRollup uses, so a folded leaf's retained bytes
@@ -1273,35 +1279,11 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         DominatorTreeIndexWriter.WriteRetainedBytes(containerWriter, retainedBytesByRow);
         LogPhase("idom + retained-bytes persistence (per-row rewrite + write)");
 
-        // §10.4 Batch 2b: the dominator child index — same row order as above.
-        DominatorChildIndexBuildResult childIndex = DominatorChildIndexBuilder.Build(graph, tree, oldIdToRow);
-        DominatorChildIndexWriter.Write(containerWriter, childIndex.ChildOffsetsByRow, childIndex.ChildAddressesByRow);
-        LogPhase("child-index re-keying (DominatorChildIndexBuilder.Build + write)");
-
-        if (PerfLogDominatorStageB)
-        {
-            // §10.8 hub-overflow sizing: the widest single row in the dominator child index — the
-            // real-dump number needed to decide whether a dominance-tree parent can have enough
-            // direct children to threaten a hub-overflow scenario analogous to §8.3's reverse-edge
-            // MaxParentsPerChild measurement, without adding a second pass (the CSR is already built).
-            int[] offsets = childIndex.ChildOffsetsByRow;
-            int widestRow = -1;
-            int widestRowChildCount = 0;
-            for (int row = 0; row < n; row++)
-            {
-                int childCount = offsets[row + 1] - offsets[row];
-                if (childCount > widestRowChildCount)
-                {
-                    widestRowChildCount = childCount;
-                    widestRow = row;
-                }
-            }
-
-            ulong widestRowAddress = widestRow >= 0 ? walkResult.ReachableAddresses[widestRow] : 0UL;
-            Console.Error.WriteLine($"[PERF] DominatorStageB: widest dominator child-index row has " +
-                $"{widestRowChildCount:N0} direct children (address 0x{widestRowAddress:X}), " +
-                $"out of {n:N0} rows / {offsets[n]:N0} total child entries");
-        }
+        // §4's aggressive option: no dominator child index is written any more.
+        // DominatorChildIndexReader derives the child direction on demand by inverting the idom rows
+        // written above. The hub-overflow sizing this write-time diagnostic block used to produce is
+        // already recorded (docs/cache/cache-redesign-measurements.md, no capping needed) rather than
+        // re-instrumented against a structure this writer no longer builds.
 
         // §10.4 Batch 2b: whole-tree total + per-MethodTable rollup, now consumed by
         // IDominatorTreeProvider (§10.6/§10.7, Batch 3) instead of DominatorAnalyzer recomputing it

@@ -71,7 +71,7 @@ public class DominatorTreeReaderProviderTests : IDisposable
                 parentNewIdOfFoldedOldId[fold.FoldedLeafOldIds[e]] = parentNewId;
         }
 
-        var dominatorAddressesByRow = new ulong[graph.NodeCount];
+        var dominatorRowByRow = new uint[graph.NodeCount];
         var retainedBytesByRow = new ulong[graph.NodeCount];
         for (int oldId = 0; oldId < graph.NodeCount; oldId++)
         {
@@ -80,26 +80,26 @@ public class DominatorTreeReaderProviderTests : IDisposable
             if (newId >= 0)
             {
                 int dominatorNewId = tree.Idom[newId];
-                dominatorAddressesByRow[row] = dominatorNewId == tree.VirtualRoot ? 0UL : graph.Addresses[fold.NewToOldId[dominatorNewId]];
+                dominatorRowByRow[row] = dominatorNewId == tree.VirtualRoot
+                    ? DominatorRowIndex.NoParentRow
+                    : (uint)oldIdToRow[fold.NewToOldId[dominatorNewId]];
                 retainedBytesByRow[row] = tree.RetainedBytes[newId];
             }
             else
             {
                 int parentNewId = parentNewIdOfFoldedOldId[oldId];
-                dominatorAddressesByRow[row] = graph.Addresses[fold.NewToOldId[parentNewId]];
+                dominatorRowByRow[row] = (uint)oldIdToRow[fold.NewToOldId[parentNewId]];
                 retainedBytesByRow[row] = graph.ShallowSizes[oldId];
             }
         }
 
-        DominatorChildIndexBuildResult childIndex = DominatorChildIndexBuilder.Build(graph, tree, oldIdToRow);
         DominatorRetainedBytesRollupResult rollup = DominatorRetainedBytesRollup.Compute(graph, tree);
 
         string containerPath = Path.Combine(_tempDir, "cache.bin");
         using var writer = new CacheContainerWriter(containerPath);
         DominatorReachableAddressWriter.Write(writer, walk.ReachableAddresses);
-        DominatorTreeIndexWriter.WriteImmediateDominatorAddresses(writer, dominatorAddressesByRow);
+        DominatorTreeIndexWriter.WriteImmediateDominatorRows(writer, dominatorRowByRow);
         DominatorTreeIndexWriter.WriteRetainedBytes(writer, retainedBytesByRow);
-        DominatorChildIndexWriter.Write(writer, childIndex.ChildOffsetsByRow, childIndex.ChildAddressesByRow);
         DominatorTreeMetadataWriter.Write(writer, rollup);
         writer.Finish();
 
@@ -202,8 +202,11 @@ public class DominatorTreeReaderProviderTests : IDisposable
     }
 
     [Fact]
-    public void TryOpen_MissingChildIndex_ReturnsFalse()
+    public void TryOpen_MissingMetadata_ReturnsFalse()
     {
+        // Format v7 no longer has a separate persisted child index to be missing (it's derived from
+        // the idom rows on demand), so DominatorTreeMetadata is the remaining section whose absence
+        // must still fail the whole provider open.
         var successors = SyntheticSuccessors.Build((0x1UL, 0x2UL));
         ReachableGraphWalkResult walk = ReachableGraphWalker.Walk(
             [0x1UL], successors, reverseEdgeExtractor: null, buildCsr: true,
@@ -213,8 +216,8 @@ public class DominatorTreeReaderProviderTests : IDisposable
         using (var writer = new CacheContainerWriter(containerPath))
         {
             DominatorReachableAddressWriter.Write(writer, walk.ReachableAddresses);
-            DominatorTreeIndexWriter.WriteImmediateDominatorAddresses(writer, new ulong[walk.NodeCount]);
-            // Deliberately no child index / metadata sections.
+            DominatorTreeIndexWriter.WriteImmediateDominatorRows(writer, new uint[walk.NodeCount]);
+            // Deliberately no metadata section.
             writer.Finish();
         }
 

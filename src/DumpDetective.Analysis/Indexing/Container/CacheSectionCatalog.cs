@@ -90,6 +90,17 @@ internal readonly record struct CacheSectionDescriptor(
 /// third reason that no toggle removal touches: Stage B is gated on an analyzer implementing
 /// <c>IRequiresDominatorTreeIndex</c>, a genuine per-run condition.
 /// </para>
+/// <para>
+/// <i>No longer written, second case.</i> <see cref="CacheSectionId.DominatorChildOffsets"/> and
+/// <see cref="CacheSectionId.DominatorChildAddresses"/> are <see cref="CacheSectionRequirement.Unused"/>
+/// for the same reason the <c>ForwardEdge*</c> sections are: format v7 derives the dominator child
+/// direction on demand by inverting <see cref="CacheSectionId.DominatorImmediateDominatorAddresses"/>
+/// in memory (<c>DominatorChildIndexReader</c>) instead of reading a persisted list — ~75 MiB on the
+/// reference dump (docs/cache/cache-format-clean-slate-redesign.md §4, resolved by measurement in
+/// cache-redesign-measurements.md §15). Unlike the <c>ForwardEdge*</c> case there is no writer left
+/// producing these ids at all, so nothing restores the merge later; the ids stay reserved purely so a
+/// v6 container's leftover sections are never misread as something else.
+/// </para>
 /// </remarks>
 internal static class CacheSectionCatalog
 {
@@ -118,8 +129,8 @@ internal static class CacheSectionCatalog
         new(CacheSectionId.ForwardEdgeMetadata, "ForwardEdgeMetadata", CacheSectionRequirement.Unused),
         new(CacheSectionId.DominatorReachableAddresses, "DominatorReachableAddresses", CacheSectionRequirement.Conditional),
         new(CacheSectionId.DominatorImmediateDominatorAddresses, "DominatorImmediateDominatorAddresses", CacheSectionRequirement.Conditional),
-        new(CacheSectionId.DominatorChildOffsets, "DominatorChildOffsets", CacheSectionRequirement.Conditional),
-        new(CacheSectionId.DominatorChildAddresses, "DominatorChildAddresses", CacheSectionRequirement.Conditional),
+        new(CacheSectionId.DominatorChildOffsets, "DominatorChildOffsets", CacheSectionRequirement.Unused),
+        new(CacheSectionId.DominatorChildAddresses, "DominatorChildAddresses", CacheSectionRequirement.Unused),
         new(CacheSectionId.DominatorTreeMetadata, "DominatorTreeMetadata", CacheSectionRequirement.Conditional),
         new(CacheSectionId.DominatorRetainedBytes, "DominatorRetainedBytes", CacheSectionRequirement.Conditional),
         new(CacheSectionId.RootStackThreadAttribution, "RootStackThreadAttribution", CacheSectionRequirement.Conditional),

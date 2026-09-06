@@ -4,13 +4,11 @@ namespace DumpDetective.Analysis.Indexing.Dominator;
 
 /// <summary>
 /// Writes the two per-node scalar columns row-aligned with the already-written
-/// <c>DominatorReachableAddresses</c> section — <c>DominatorImmediateDominatorAddresses</c> (§D7/§10.4)
-/// and <c>DominatorRetainedBytes</c> (§10.4, Batch 3) — mirroring the existing "Object index
+/// <c>DominatorReachableAddresses</c> section — <c>DominatorImmediateDominatorAddresses</c> (§D7/§10.4,
+/// row-index encoded since format v7, docs/cache/cache-format-clean-slate-redesign.md §4's aggressive
+/// option) and <c>DominatorRetainedBytes</c> (§10.4, Batch 3) — mirroring the existing "Object index
 /// (columnar)" pattern rather than a dense-id encoding, so <see cref="DominatorTreeIndexReader"/>
-/// needs no dependency on any other section's id numbering. Kept together in one writer since both
-/// are the same shape (one scalar per row) and always computed by the same caller in the same pass;
-/// the dominator child index (variable-length CSR, not a fixed scalar) is structurally different and
-/// stays in its own <see cref="DominatorChildIndexWriter"/>.
+/// needs no dependency on any other section's id numbering.
 ///
 /// Split from an earlier version of this class that also wrote <c>DominatorReachableAddresses</c>
 /// itself — Stage A (§4/§7) already writes that section via <c>DominatorReachableAddressWriter</c>
@@ -22,21 +20,34 @@ namespace DumpDetective.Analysis.Indexing.Dominator;
 ///
 /// §10.4 Batch 2b: neither method sorts internally. The caller
 /// (<c>DiskBackedObjectIndexWriter.BuildAndPersistDominatorTree</c>) computes each node's row in
-/// <c>DominatorReachableAddresses</c>' sorted order once (<c>DominatorRowMapping</c>) — shared with
-/// the dominator child index instead of each writer re-deriving that order separately — and passes
+/// <c>DominatorReachableAddresses</c>' sorted order once (<c>DominatorRowMapping</c>) and passes
 /// values already placed into that row order. These methods just write the arrays.
+///
+/// No separate dominator child index is written any more — format v7 derives "what does this object
+/// dominate" on demand by inverting <see cref="CacheSectionId.DominatorImmediateDominatorAddresses"/>
+/// in memory (<see cref="DominatorChildIndexReader"/>), which is what makes the row-index encoding
+/// here load-bearing rather than cosmetic: address-keyed values can't be inverted without a search
+/// per row, row indices can.
 /// </summary>
 internal static class DominatorTreeIndexWriter
 {
-    /// <param name="dominatorAddressesByRow">
-    /// Length must equal the reachable-node count. Entry <c>i</c> is the immediate-dominator address
-    /// of the node at row <c>i</c> in the already-written <c>DominatorReachableAddresses</c> section
-    /// (<c>0</c> for a direct child of the virtual root — no real dominator address). The caller is
-    /// responsible for the row ordering; this method trusts it and does not re-derive or validate it.
+    /// <param name="dominatorRowByRow">
+    /// Length must equal the reachable-node count. Entry <c>i</c> is the row (in the same
+    /// <c>DominatorReachableAddresses</c> ordering, not an address) of node <c>i</c>'s immediate
+    /// dominator, or <see cref="DominatorRowIndex.NoParentRow"/> for a direct child of the virtual
+    /// root. The caller is responsible for the row ordering; this method trusts it and does not
+    /// re-derive or validate it.
     /// </param>
-    public static void WriteImmediateDominatorAddresses(CacheContainerWriter containerWriter, ulong[] dominatorAddressesByRow)
+    public static void WriteImmediateDominatorRows(CacheContainerWriter containerWriter, uint[] dominatorRowByRow)
     {
-        WriteRowAlignedColumn(containerWriter, CacheSectionId.DominatorImmediateDominatorAddresses, dominatorAddressesByRow);
+        containerWriter.BeginSection(CacheSectionId.DominatorImmediateDominatorAddresses);
+        Span<byte> buf = stackalloc byte[sizeof(uint)];
+        foreach (uint row in dominatorRowByRow)
+        {
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(buf, row);
+            containerWriter.Stream.Write(buf);
+        }
+        containerWriter.EndSection(dominatorRowByRow.Length);
     }
 
     /// <param name="retainedBytesByRow">
@@ -46,18 +57,13 @@ internal static class DominatorTreeIndexWriter
     /// </param>
     public static void WriteRetainedBytes(CacheContainerWriter containerWriter, ulong[] retainedBytesByRow)
     {
-        WriteRowAlignedColumn(containerWriter, CacheSectionId.DominatorRetainedBytes, retainedBytesByRow);
-    }
-
-    private static void WriteRowAlignedColumn(CacheContainerWriter containerWriter, CacheSectionId sectionId, ulong[] valuesByRow)
-    {
-        containerWriter.BeginSection(sectionId);
-        Span<byte> buf = stackalloc byte[8];
-        foreach (ulong value in valuesByRow)
+        containerWriter.BeginSection(CacheSectionId.DominatorRetainedBytes);
+        Span<byte> buf = stackalloc byte[sizeof(ulong)];
+        foreach (ulong value in retainedBytesByRow)
         {
             System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(buf, value);
             containerWriter.Stream.Write(buf);
         }
-        containerWriter.EndSection(valuesByRow.Length);
+        containerWriter.EndSection(retainedBytesByRow.Length);
     }
 }

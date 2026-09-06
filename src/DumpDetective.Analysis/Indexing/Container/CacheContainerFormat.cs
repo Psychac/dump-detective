@@ -73,16 +73,24 @@ internal enum CacheSectionId
     /// comment used to raise never actually applied once everything runs before <c>Finish()</c>.
     /// </summary>
     DominatorReachableAddresses = 21,
-    /// <summary>Columnar <c>ulong[]</c> of each node's immediate-dominator address, aligned with <see cref="DominatorReachableAddresses"/>.</summary>
+    /// <summary>
+    /// Columnar <c>uint[]</c> of each node's immediate-dominator *row* (not address) in
+    /// <see cref="DominatorReachableAddresses"/>' ordering, or
+    /// <see cref="Indexing.Dominator.DominatorRowIndex.NoParentRow"/> for a direct child of the
+    /// virtual root. Row-indexed since format v7 — docs/cache/cache-format-clean-slate-redesign.md
+    /// §4's aggressive option — specifically so <see cref="Indexing.Dominator.DominatorChildIndexReader"/>
+    /// can invert this column into "what does this row dominate" in memory without a search per row;
+    /// an address-keyed column couldn't be inverted that cheaply.
+    /// </summary>
     DominatorImmediateDominatorAddresses = 22,
     /// <summary>
-    /// Columnar <c>int[]</c> CSR offsets into <see cref="DominatorChildAddresses"/>, row-aligned with
-    /// <see cref="DominatorReachableAddresses"/> — §10.4 (Batch 2b,
-    /// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): what would freeing this
-    /// object free, one level down. Length = reachable-node count + 1.
+    /// Reserved, no longer written (format v7). Held a columnar <c>int[]</c> CSR of dominator-tree
+    /// child offsets until <see cref="DominatorImmediateDominatorAddresses"/> became invertible in
+    /// memory — see <see cref="Indexing.Dominator.DominatorChildIndexReader"/> and
+    /// docs/cache/cache-format-clean-slate-redesign.md §4.
     /// </summary>
     DominatorChildOffsets = 23,
-    /// <summary>Flat <c>ulong[]</c> column of dominator-tree child addresses, grouped by parent row — see <see cref="DominatorChildOffsets"/>.</summary>
+    /// <summary>Reserved, no longer written — see <see cref="DominatorChildOffsets"/>.</summary>
     DominatorChildAddresses = 24,
     /// <summary>JSON <see cref="Indexing.Dominator.DominatorTreeMetadata"/>: whole-tree total retained bytes and the per-<c>MethodTable</c> rollup (§10.4, Batch 2b).</summary>
     DominatorTreeMetadata = 25,
@@ -165,7 +173,14 @@ internal readonly struct CacheFileHeader
 {
     public const int Size = 64;
     /// <summary>
-    /// Bumped to 6 when <see cref="CacheSectionId.ObjectSizes"/> changed from a fixed 8 bytes per
+    /// Bumped to 7 when <see cref="CacheSectionId.DominatorImmediateDominatorAddresses"/> changed
+    /// from an 8-byte dominator *address* per row to a 4-byte dominator *row* index, and the
+    /// persisted dominator child list (<see cref="CacheSectionId.DominatorChildOffsets"/>/
+    /// <see cref="CacheSectionId.DominatorChildAddresses"/>) stopped being written — format doc §4's
+    /// aggressive option, resolved by measurement in cache-redesign-measurements.md §15. A v6 reader
+    /// would read the narrowed idom column as garbage addresses rather than fail, so this bump is
+    /// load-bearing, not cosmetic.
+    /// Previously bumped to 6 when <see cref="CacheSectionId.ObjectSizes"/> changed from a fixed 8 bytes per
     /// object to the narrowest width that dump's size distribution allows, with
     /// <see cref="CacheSectionId.ObjectSizeOverflow"/> holding the values that don't fit
     /// (docs/cache/cache-format-clean-slate-redesign.md §10.2). A v5 reader would read the narrowed
@@ -182,7 +197,7 @@ internal readonly struct CacheFileHeader
     /// Previously bumped to 2 when the Objects section moved from an interleaved
     /// array-of-structs layout to those columnar sections.
     /// </summary>
-    public const int CurrentFormatVersion = 6;
+    public const int CurrentFormatVersion = 7;
 
     private const int MagicOffset = 0;
     private const int MagicSize = 8;

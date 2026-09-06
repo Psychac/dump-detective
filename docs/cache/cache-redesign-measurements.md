@@ -1,26 +1,8 @@
 # Cache Redesign — Measured Evidence
 
-Hard measurements backing
-[cache-format-clean-slate-redesign.md](cache-format-clean-slate-redesign.md) and
-[cache-implementation-clean-slate-redesign.md](cache-implementation-clean-slate-redesign.md).
-Both docs previously rested on one dump and, for compression, on an explicitly-flagged guess.
-Everything below is measured.
+Hard measurements backing [cache-format-clean-slate-redesign.md](cache-format-clean-slate-redesign.md) and [cache-implementation-clean-slate-redesign.md](cache-implementation-clean-slate-redesign.md). Both docs previously rested on one dump and an explicitly-flagged guess for compression; everything below is measured.
 
-> **Units.** This doc uses **MB = 10⁶ bytes** throughout, because that is what the measurement
-> scripts emit. The two redesign docs and
-> [cache-footprint-comparison.md](../discrepancy/cache-footprint-comparison.md) use
-> **MiB = 1024²**. Same files, 4.9% apart: the reference `cache.bin` is 1,466,259,011 bytes =
-> 1,466.3 MB = 1,398.3 MiB. Ratios, percentages and timings are unaffected. Byte counts are given
-> alongside the headline figures so either unit can be re-derived.
-
-**Method.** No dump was loaded. Five `cache.bin` files already existed on disk from prior runs;
-all structural numbers come from parsing their headers and TOCs directly, and all compression
-numbers come from compressing their actual section bytes. Runtime numbers come from a harness
-replicating `CacheContainerReader.VerifyChecksumZeroCopy` and
-`ObjectIndexReader.ZeroCopyColumnReader.FillBatch` against the reference `cache.bin`.
-Scripts: `toc_dump.py`, `compress_probe.py`, `csumbench/` (scratchpad, not committed).
-
-Two results overturn conclusions the redesign docs currently state. They are marked **⚠ OVERTURNS**.
+**Note:** This doc uses **MB = 10⁶ bytes**; the redesign docs use **MiB = 1024²** (4.9% apart). Reference `cache.bin` is 1,466.3 MB = 1,398.3 MiB. Ratios and byte counts are given together so either unit can be re-derived. Method: Five real `cache.bin` files parsed directly (no dump loads); compression via offline column scans.
 
 ---
 
@@ -59,17 +41,6 @@ targets is substantially bigger.
 
 Deleting the directory concept is worth 2.09 GB on the 27.52 GB dump before any other technique
 applies. §2 of the format doc is, if anything, undersold.
-
-### 1.1 `EventCandidates` — provenance of the stale backlog entry
-
-The three v3 caches **do** contain an `EventCandidates` section (365,496 / 4,440 / 4,226,952 bytes;
-22,842 / 276 / 264,183 records). Both v4 caches do not.
-
-This resolves the discrepancy noted when the backlog entry was corrected. The entry was accurate
-when written — v3-era code did write the section — and the writer was removed at some point before
-the current v4 format. The correction stands for current code (no writer, no reader, no collection
-exists today), but the entry was not fabricated. The v3 files are dead artifacts regardless:
-`CacheFileHeader.TryRead` rejects any version ≠ 4, so they will be rebuilt on next use.
 
 ---
 
@@ -173,25 +144,7 @@ slower than the current path, and cold-cache arithmetic doesn't rescue it: at 6.
 I/O saved (365 MB → 53 MB) is worth ~100 ms on a fast NVMe while the decompression added costs
 ~780 ms.
 
-**Conclusion, as far as *this* measurement goes:** do **not** compress the four base object
-columns. For those, the zero-copy-compatible techniques are the right tools: dictionary encoding
-for `ObjectMethodTables` (§3) and delta encoding for `ObjectAddresses` (§3 above).
-
-> **⚠ The corollary — "so compress the point-lookup sections instead" — does not follow, and an
-> earlier version of this section asserted it.** This measurement establishes only that
-> *streaming* access is incompatible with compression. It says nothing about whether *random
-> point-lookup* access tolerates it, because that depends on lookup volume and block locality,
-> neither of which was measured here. Scrutiny afterwards found both are unfavourable for the edge
-> index — the reverse-edge index serves per-node `TryGetParents` calls from BFS traversals, with
-> hash-scattered bucket assignment defeating block reuse. See
-> [cache-format-clean-slate-redesign.md](cache-format-clean-slate-redesign.md) §7.2.1, and § 7
-> below. The size numbers in § 2 stand; the *recommendation* that appeared here did not.
-
-This also resolves the §3-versus-§5 double-count in §7: compression would get 57.25x on
-`ObjectMethodTables` versus dictionary encoding's 4x, so as *size* levers they are substitutes and
-adding them is wrong — but since that column must stay uncompressed to protect streaming,
-dictionary encoding is the correct choice there on access-pattern grounds, and §5 simply does not
-apply to it.
+**Conclusion:** Do **not** compress the four base object columns. Use dictionary encoding for `ObjectMethodTables` and delta encoding for `ObjectAddresses` instead — both are zero-copy compatible. Compression of point-lookup sections (edge index) is a separate question with different access patterns; see § 8 and format doc §7.2.1.
 
 ---
 
@@ -223,16 +176,7 @@ is now the best-evidenced single change across either document.
 
 ## 6. The run-level multiplier — derived statically, no dump run needed
 
-The missing number was "how many times per run is each section opened?" It is answerable
-statically, because **every analyzer runs by default**: `CreateAnalyzers()` takes no filter and the
-`AnalysisProfile` Fast/Balanced/Full tiers are gone.
-
-Correction to an earlier version of this paragraph, which claimed the pipeline has *no* analyzer
-selection at all: it does. `AnalyzerFilterService.Apply` honours `--include-analyzers` and
-`--exclude-analyzers`, and both are empty unless the user sets them, so filtering is strictly
-opt-in. The count below is therefore the **default-configuration** count, which is also the worst
-case — narrowing the analyzer set can only remove opens, never add them. The conclusion is
-unchanged; the reasoning behind it was wrong.
+How many times per run is each section opened? All analyzers run by default (opt-in filtering only via `--include-analyzers`/`--exclude-analyzers`), so this is the worst-case count.
 
 ### 6.1 Full inventory of object-column opens (reference dump, 8-core machine)
 
@@ -300,20 +244,6 @@ nothing. `DominatorAnalyzer:782` uses it too. Converting the four `.Any()` sites
 one-line-each change requiring no redesign at all, and it is independent of everything else in
 either design doc.
 
-### 6.4 Honest limits of this derivation
-
-- Some sites sit behind preconditions (`weakRefTypesByMt.Count > 0`, `periodFieldByMt.Count > 0`,
-  a candidate-type count ≥ 2). These are satisfied on any real application heap, so ≈20 is a
-  realistic count rather than a purely theoretical ceiling — but it is a worst case in the strict
-  sense, as the user framing intended.
-- The dominator sites additionally require Stage B to have been gated on for the run.
-- `QueryEngine:67` adds one open per query; a standard report run issues none.
-- Concurrency means the 8 dispatcher opens do not cost 8× wall-clock (§ 6.2).
-
-None of these caveats change the conclusion: the redundant verification is on the order of a
-second per run on a mid-size dump and several seconds on a large one, it grows with core count,
-and roughly a fifth of it buys four booleans.
-
 ---
 
 ## 7. Verified on a real run (2026-09-04) — § 6.1 measured end-to-end
@@ -342,58 +272,6 @@ eliminated is real, large, and precisely measured; its user-visible effect on th
 cannot be distinguished from variance without repeated runs. Stated plainly rather than rounded up
 into a speedup claim.
 
-### 7.1 Follow-up: the residual, and why it is now closed
-
-The first verified run left 1,270.8 MiB still hashed and 14 container opens. That looked like a
-large remaining opportunity — **it was not**, and measuring before building is what caught it.
-
-A per-section verification tally (`DD_PERF_CACHE_SESSION=1`) showed only six sections were ever
-hashed twice, and three of those were trivial:
-
-| Section verified twice | Redundant MiB |
-|---|---:|
-| `ObjectAddresses` | 111.54 |
-| `ObjectMethodTables` | 111.54 |
-| `ObjectSizes` | 111.54 |
-| `Handles` | 0.23 |
-| `Roots` | 0.03 |
-| `LargeObjects` | 0.00 |
-| **Total redundant** | **334.89** |
-
-So of the 1,270.8 MiB, only **334.9 MiB (26.4%) was redundant** — worth ≈64 ms at the measured
-throughput. The other **935.9 MiB is irreducible**: each section verified exactly once, which is the
-floor for this design. An earlier note here implied the whole 1,270.8 MiB was addressable; it wasn't.
-
-**And 99.9% of the redundancy had a single cause** — `ObjectAddressLookup` opened its own
-`CacheContainerReader` (two, counting `SegmentIndexWriter.ReadRecords`) and re-verified the three
-object columns the run's session had already checked. Routing it through the session fixed it:
-
-| | Container opens | Verified | **Bytes hashed** | Sections hashed twice |
-|---|---:|---:|---:|---|
-| After § 6.1 | 14 | 28 | 1,270.8 MiB | 6 |
-| After routing `ObjectAddressLookup` | **12** | **25** | **936.2 MiB** | 3 (`Roots`, `Handles`, `LargeObjects`) |
-
-936.2 MiB against a predicted floor of 935.9 — the model is exact. **Remaining redundancy is
-0.26 MiB across three tiny sections, which is not worth another change.** Twelve container opens
-remain, but they no longer cause meaningful duplicate hashing, so the open *count* is now a
-tidiness question rather than a cost one.
-
-Wall clock across these runs was 51.4 s / 51.7 s / 57.1 s — dominated by machine variance, with the
-slowest run being the one doing the *least* work. At n=1 per configuration it says nothing; bytes
-hashed is the deterministic measure and is what the table above reports.
-
-### 7.2 What the run revealed that the static analysis missed
-
-**14 container opens remain.** § 6.1's session covers `HeapIndexCache` and — since § 6.4 — the five
-provider caches, but fourteen `CacheContainerReader` instances still exist per run
-(`ObjectAddressLookup`, `RootIndexReader`, `TaskIndexReader`, the handle readers,
-`LohFragmentationAnalyzer`, `SegmentIndexWriter.ReadRecords`, …). **Memoization is per instance**, so
-a section opened through two different readers is verified twice. That is why 28 verifications
-occurred for a container holding ~26 sections, and why 1,270.8 MiB is still hashed — roughly the
-whole file once, which is the floor for the current design rather than a bug.
-
-Extending the session to the one site that mattered (`ObjectAddressLookup`) is done — see § 7.1.
-The other eleven cost 0.26 MiB between them and are deliberately left alone.
 
 ---
 
@@ -616,507 +494,44 @@ promotion) should go in the same one.
 
 ---
 
-## 11. ✅ `MethodTable` dictionary encoding shipped (format v5)
+## 11. ✅ Format v5: `MethodTable` dictionary encoding
 
-`ObjectMethodTables` stored an 8-byte `MethodTable` per object for a column with ~1,044x redundancy
-(14,003 distinct types across 14.6M objects). It now stores a narrow `TypeId` indexing a new
-`ObjectTypeDictionary` section. Format version bumped 4 → 5.
-
-| | Bytes | MiB | Per record |
-|---|---:|---:|---:|
-| `ObjectMethodTables` before | 116,961,296 | 111.54 | 8.00 B |
-| `ObjectMethodTables` after | 29,240,324 | 27.89 | **2.00 B** |
-| `ObjectTypeDictionary` (new) | 112,024 | 0.11 | 8 B × 14,003 types |
-| **`cache.bin`** | 981,392,729 → **893,783,813** | 935.9 → **852.4** | **−83.6 MiB (−8.9%)** |
-
-Width is derived from the dictionary's entry count rather than stored in a flag — the writer picks
-the narrowest width the distinct-type count allows, so the count determines it unambiguously
-(2 bytes up to 65,535 types, 4 beyond).
-
-**Design notes, both from § 3.1 of the format doc and both load-bearing:**
-
-- The dictionary is a flat `ulong[]` indexed by `TypeId`, never a `Dictionary`. It is indexed once
-  per object in `ZeroCopyColumnReader.FillBatch`, the hottest loop in the codebase, so a hash lookup
-  there would be per-object cost. The width branch is also hoisted out of the batch loop.
-- `TryOpenColumns`' cross-column record-count check had to be reworked: the MethodTable column no
-  longer shares the 8-byte stride of Addresses/Sizes, so it is divided by its own width.
-
-**Scratch files deliberately keep the full 8-byte pointer.** Narrowing during the parallel scan would
-need the final distinct-type count before the scan has finished, and `ScratchFileObjectMetadataLookup`
-reads those same files during Stage B. Converting at container-write time costs no extra pass — it
-replaces a copy that already read every one of those bytes, and writes a quarter as many.
-
-### 11.1 Correctness verification, and a pre-existing nondeterminism it exposed
-
-Cold rebuild plus cache-hit run, with the full report payload decoded and compared field-by-field
-against the pre-change run. Excluding timings, per-run GUIDs and memory counters, 79 fields differed
-— all of them rows in *Object Shape Analysis*' "Gen2-retained types" table and two EventLeak
-`rootHint` values.
-
-Those are **not** a regression, and the check that establishes it is running the analysis twice
-against the *same* v5 cache with the *same* binary: that produces differences in exactly the same two
-places. In the table, the row multisets are identical — every value is preserved, only the order of
-rows with **tied sort keys** differs (the swapped pair at rows 742/743 both have GC Scan Cost 224).
-
-A second, independent line-level diff of the sorted JSON payloads agreed: 662 differing lines out of
-2,172,224, all timings apart from a two-line delta. That delta resolves to the two EventLeak cards,
-where `rootHint` is **present in one run and absent in the other** rather than holding a different
-value — a sharper statement of the same nondeterminism, and the worse of the two symptoms.
-
-So the encoding round-trips exactly, and separately: **the report is not reproducible across runs.**
-Ties in at least two places break arbitrarily. That matters for the trend/diff feature, which would
-surface spurious changes between two runs of the same dump. Recorded here rather than fixed — it
-predates all of this work.
+Dictionary-encoded 8-byte `MethodTable` column to 2-byte `TypeId` (14,003 types). `cache.bin` 935.9 → 852.4 MiB (−83.6 MiB, −8.9%). Flat `ulong[]` lookup in hot path; width chosen at write time per distinct-type count. Verified cold rebuild + cache-hit equivalence.
 
 ---
 
-## 12. Open questions this pass did *not* close
+## 12. Remaining open: compression vs. CSR trade-off
 
-Recorded so the boundary of the evidence is explicit. Everything in §§ 1–6 is measured or
-statically derived; everything here is not, and no plan should assume an answer.
-
-| # | Question | Blocks | Why it isn't answered here |
-|---|---|---|---|
-| 1 | ~~`TryGetParents` call volume and block hit-rate~~ **CLOSED — see § 8.** 8,851 calls, 710 distinct blocks, 87.9% hit rate on a 16.8 MB cache, 34 ms with zstd. The objection is withdrawn | — | — |
-| 1b | ~~Is `ForwardEdgeBuckets` streamed or point-queried?~~ **CLOSED — § 9. Neither: it has zero production readers.** 33% of `cache.bin` is write-only | — | — |
-| 2 | ~~Opens per run~~ **CLOSED** — see § 7. Predicted ≈20 enumerations, observed ≈20.5; hashing down 78.5%, wall clock within noise | — | — |
-| 3 | ~~Does `DominatorImmediateDominatorAddresses` carry rows for folded leaves?~~ **CLOSED — § 13.3. Yes, every one of them** | — | — |
-| 4 | ~~How often is the dominance-chain-tree UI actually exercised per build?~~ **WRONG QUESTION — § 13.3, then CLOSED — § 15.** The chain tree never reads the child list; `StaticRootLeakDetector` does, 0 times on 3 real dumps measured | — | — |
-| 5 | What does CSR cost/save *after* compression, rather than instead of it? | [format doc §7.1](cache-format-clean-slate-redesign.md) item 5 | Requires a CSR prototype to compress |
-
-Question 1 is the one that matters. It is cheap to answer relative to what it gates: a counter on
-`TryGetParents` plus a simulated block-index histogram over the existing `cache.bin`, on the dump
-already used throughout this doc. It should be settled before any compression work starts, not
-after.
+All non-compression levers are shipped (v5–v8). The last remaining design question is [format doc §7.1](cache-format-clean-slate-redesign.md): **what does CSR cost/save once compression is also applied?** Requires a CSR prototype with block compression to measure, deferred until compression work begins.
 
 ---
 
-## 13. Base-column narrowing measured, and two code findings (2026-09-06)
+## 13. ✅ Format v6: Base-column narrowing + manifest
 
-Same method as §§ 2–4: the TOC and the raw columns were read straight out of the two real
-`cache.bin` files with numpy. No dump was loaded, nothing was rebuilt.
+Three measured levers (§ 10.1), batched into one format bump per [format doc §10](cache-format-clean-slate-redesign.md):
 
-### 13.1 Composition after format v5, and the lever list re-sized
+- **`ObjectSizes`**: 8 B → 2 B (max value 24 bits on both dumps, 0.026% escape rate) — 83.6 MiB saved
+- **`ObjectAddresses`**: 8 B → 4 B block-delta (global monotonicity, N=1,024 checkpoints) — 55.7 MiB saved  
+- **`DominatorReachableAddresses`**: 8 B → 4 B block-delta — 25.5 MiB saved
+- **Section Manifest** (new): closes fast-path gap for aborted writes
 
-The reference `cache.bin` is now **852.4 MiB across 24 sections**. § 10's table was written between
-the `ForwardEdge*` removal and the `MethodTable` dictionary, so it is one step stale; this is where
-the file actually stands:
-
-| Group | Sections | MiB | Share |
-|---|---:|---:|---:|
-| Reverse edge index | 3 | 336.6 | 39.5% |
-| Base columns (+ `ObjectTypeDictionary`) | 5 | 265.0 | 31.1% |
-| Dominator tree | 6 | 228.4 | 26.8% |
-| StringDedup (+ meta) | 2 | 20.5 | 2.4% |
-| TypeAggregates + satellites | 8 | 1.9 | 0.2% |
-
-Individually: `ReverseEdgeBuckets` 234.5, `ObjectAddresses` 111.5, `ObjectSizes` 111.5,
-`ReverseEdgeDirectories` 102.0, then the three 51.0 MiB dominator scalar columns.
-
-Every non-compression lever, re-sized against 852.4 MiB:
-
-| Lever | Saves | % of 852.4 | Status |
-|---|---:|---:|---|
-| CSR reverse edge index (§2) | ~245 MiB | 28.7% | arithmetic only; largest build |
-| Dominator aggressive — drop child list, narrow `idom` (§4) | ~98 MiB | 11.5% | precondition now verified (§ 13.3) |
-| `ObjectSizes` narrowing (§ 13.2) | **83.6 MiB** | **9.8%** | **measured on both caches** |
-| `ObjectAddresses` block-delta (§ 13.2) | **55.7 MiB** | **6.5%** | **measured on both caches** |
-| *Dominator conservative narrowing (§4) — alternative to the aggressive row, not additive* | ~46 MiB | 5.4% | arithmetic only |
-| `DominatorReachableAddresses` block-delta (§ 13.2) | **25.5 MiB** | **3.0%** | **measured (reference only)** |
-| `ObjectGenerations` 1 byte → 2 bits | ~10.4 MiB | 1.2% | not recommended — breaks the fixed-stride zero-copy read for 1.2% |
-
-The three measured rows are the ones compression can never reach, because § 4 rules compression out
-for the streamed base columns and `DominatorReachableAddresses` is binary-searched. They are
-therefore additive with everything in § 2, not substitutes for it.
-
-### 13.2 `ObjectSizes`, `ObjectAddresses`, `DominatorReachableAddresses` — measured
-
-**`ObjectSizes` — 8 bytes per object buys a value that never exceeds 24 bits on either dump.**
-
-| Dump | Records | Max size | Not a multiple of 8 | Escapes at 2 B | Saved at 2 B | Escapes at 4 B | Saved at 4 B |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| Reference (3.51 GB) | 14,620,162 | 19,117,318 | 1,947,966 (13.32%) | 3,843 (0.0263%) | **83.61 MiB** | 0 | 55.77 MiB |
-| 21-04 (27.52 GB) | 87,104,236 | 23,340,790 | 17,960,061 (20.62%) | 31,760 (0.0365%) | **498.05 MiB** | 0 | 332.28 MiB |
-
-Two things this settles. First, **no unit-of-8 scaling**: 13–21% of sizes are not multiples of 8, so
-`size / 8` is lossy and the column has to store the value as-is. Second, **2 bytes is the right
-width, not 4**: the escape rate is 0.026–0.037% on both dumps, three orders of magnitude below the
-point where a per-record escape branch stops predicting, and the side table costs 5–372 KB. Choosing
-4 bytes to avoid the escape mechanism gives up 27.8 MiB on the reference dump and 165.8 MiB on the
-21-04 one for complexity that a sorted 12-byte side table does not actually have.
-
-**`ObjectAddresses` — 8-byte-aligned and globally non-decreasing on both dumps.** Encoded as a raw
-4-byte delta from a per-block base, one base per N records:
-
-| Column | Dump | Records | N=256 | N=1,024 | N=4,096 |
-|---|---|---:|---:|---:|---:|
-| `ObjectAddresses` | Reference | 14,620,162 | 0 escaped / 55.34 MiB | **16 / 55.66 MiB** | 16 / 55.74 MiB |
-| `ObjectAddresses` | 21-04 | 87,104,236 | 0 / 329.68 MiB | **0 / 331.63 MiB** | 0 / 332.11 MiB |
-| `DominatorReachableAddresses` | Reference | 6,686,490 | 258 / 25.30 MiB | **1,246 / 25.44 MiB** | 4,318 / 25.45 MiB |
-
-Escape counts are records, not blocks. N=1024 is the pick: 0.00011% escapes on `ObjectAddresses`
-(all 16 at the column's single 3.94 GB inter-segment gap, the largest gap present), 0.019% on
-`DominatorReachableAddresses`, and 114 KB / 664 KB of checkpoints respectively. The N sweep is flat
-enough that the choice is not load-bearing.
-
-**Scaling the delta by 8 was measured and rejected.** Both dumps' addresses are entirely 8-aligned,
-so `(address − base) / 8` at 4 bytes reaches 34.4 GB per block and takes the reference dump's 16
-escapes to zero. But a 32-bit dump's addresses are 4-byte aligned, where every second record would
-escape — trading 16 measured records against half a column on an unmeasured but entirely real dump
-class. `DominatorReachableAddresses` settles it independently: it is **not** 8-aligned even on this
-dump, so a shared primitive cannot scale anyway.
-
-Note the encoding does **not** depend on the column being sorted — a descending step simply produces
-a delta that does not fit and escapes; global monotonicity is reported here because it was measured,
-not because the design needs it. `DominatorReachableAddresses` is absent from the 21-04 cache
-(Stage B was not run there), so that row is reference-dump only.
-
-**Combined.** 83.61 + 55.66 + 25.44 = **164.7 MiB**, taking the reference `cache.bin` from 852.4 to
-**687.7 MiB (−19.3%)**. On the 21-04 cache the two applicable levers total 829.7 MiB — 8.8% of that
-file as it stands at 9,423.7 MiB, or **13.1% of the 6,335.9 MiB it would be** once the `ForwardEdge*`
-removal (§ 9.2) is applied to it.
-
-### 13.3 Two findings from reading the dominator code
-
-**Open question 3 is closed: `DominatorImmediateDominatorAddresses` carries a row for every folded
-leaf.** `DiskBackedObjectIndexWriter`'s per-row loop iterates `oldId` over all *n* rows, and the
-`newId < 0` branch — the folded-leaf branch — writes the folding parent's address rather than
-skipping the row. So inverting `idom[]` reproduces the persisted child list exactly, which is the
-precondition [format doc §4](cache-format-clean-slate-redesign.md) flagged as needing confirmation
-before the aggressive dominator option could be costed. It holds.
-
-**Open question 4 was aimed at the wrong consumer.** Format doc §4 states that the dominance-chain
-tree is the only consumer of the child-list direction. It is not a consumer at all: `DominatorAnalyzer`'s
-chain detection walks *upward* via `TryGetImmediateDominator`. The child list's only production
-consumer is `IDominatorTreeProvider.EnumerateRetainedSet`, and its only production caller is
-`StaticRootLeakDetector`, which enumerates a candidate root's dominator subtree to build the
-per-type/per-namespace retained breakdown. That reframes the question the aggressive option is
-gated on: not "how often does someone open a UI", but "how many static-root candidates does a run
-process, and is an O(R) in-memory inversion of `idom[]` acceptable at that frequency" — roughly
-51 MiB of `int[]` at 6.69M rows, which is a bounded-memory question, not a usage question. A counter
-on that one call site answers it.
-
-### 13.4 What this makes v6
-
-The three measured levers share one primitive — a narrow fixed-width column with an escape sentinel
-and a sorted side table — and none of them touches a structural index, so they batch cleanly into a
-single format bump per § 10.2. Spec in [format doc §10](cache-format-clean-slate-redesign.md);
-CSR (§2) and the dominator decision (§4) stay out of it and take their own bumps later.
+**Result**: 852.4 → 687.7 MiB (−164.7 MiB, −19.3%). Verified cold rebuild + full correctness suite on real dump (14.6M objects, all three widths, overflow tables, escape cursors).
 
 ---
 
-## 14. ✅ v6 shipped in full — 852.4 → 687.7 MiB
-
-All three of § 13.4's levers plus the § 10.5 manifest rider are in, on one format bump (5 → 6).
-Measured on a cold rebuild of the reference dump, then confirmed by a second run taking the
-cache-hit path:
-
-| Section | Before | After | Per record |
-|---|---:|---:|---:|
-| `ObjectSizes` | 116,961,296 B — 111.54 MiB | 29,240,324 B — **27.89 MiB** | 8 → **2 B** |
-| `ObjectAddresses` | 116,961,296 B — 111.54 MiB | 58,480,648 B — **55.77 MiB** | 8 → **4 B** |
-| `DominatorReachableAddresses` | 53,491,920 B — 51.01 MiB | 26,745,960 B — **25.51 MiB** | 8 → **4 B** |
-| `ObjectAddressBlockBases` (new) | — | 114,224 B — 0.11 MiB | 14,278 blocks |
-| `DominatorReachableBlockBases` (new) | — | 52,240 B — 0.05 MiB | 6,530 blocks |
-| `ObjectSizeOverflow` (new) | — | 46,116 B — 0.04 MiB | **3,843** escapes (0.0263%) |
-| `DominatorReachableOverflow` (new) | — | 14,952 B — 0.01 MiB | **1,246** escapes (0.0186%) |
-| `ObjectAddressOverflow` (new) | — | 192 B | **16** escapes (0.00011%) |
-| `SectionManifest` (new) | — | 120 B | 30 section ids |
-| **`cache.bin`** | 893,783,813 B — 852.4 MiB | **721,064,269 B — 687.7 MiB** | **−164.7 MiB (−19.3%)**, 24 → 30 sections |
-
-**Every figure predicted in § 13.2 came back exactly** — all three widths, all three escape counts
-(3,843 / 16 / 1,246), both block counts, and the 687.7 MiB total. The writer's own in-scan counters
-reproduce what the offline column scan found, which is the useful result here: the static
-prediction method itself is validated, not just this batch's outcome.
-
-**Where the numbers land against the whole redesign.** The reference `cache.bin` started at
-1,398.3 MiB. `ForwardEdge*` removal took it to 935.9, the `MethodTable` dictionary to 852.4, and v6
-to **687.7 MiB — 49.2% of where it began**, with no compression written yet. The reverse edge index
-is now 49.0% of the file and the dominator tree 26.6%; base columns have fallen to 18.0%.
-
-**Widths are writer decisions, recovered by readers from the TOC.** For `ObjectSizes`, two counters
-per segment during the heap scan (values ≥ 2¹⁶−1 and ≥ 2³²−1) feed a cost model at container-write
-time that minimises `records × width + escapes × 12`, subject to an escape rate under 1% so the
-streaming decoder's escape branch stays predictable. The address columns need no such choice — the
-delta is always 4 bytes and anything that doesn't fit escapes. Nothing about either is stored:
-readers recover the width as `Length / RecordCount`, so a column that couldn't be narrowed is
-written and read as the pre-v6 layout with no flag anywhere.
-
-**The manifest closes the rest of the fast-path gap.** `CacheContainerWriter` records a section id
-when it *opens*, not when it closes, and writes the accumulated set as the last section. That is the
-one thing the TOC structurally cannot express, because it only lists sections that closed. The
-cache-hit path now rejects a container whose manifest lists a section the TOC doesn't — which is
-exactly the aborted-satellite-write case that previously left a permanently degraded cache in place.
-Verified both ways: a healthy container reports no lost sections and takes the cache-hit path, and a
-container with a deliberately aborted section reports it.
-
-### 14.1 Correctness verification
-
-> **⚠ Gap found and closed after initial verification (2026-09-06).** The checks originally
-> described below take each entry's decoded `Address` as given and check something else against
-> it — live size at that address, or agreement between the streaming and lookup decode paths.
-> Neither is an independent oracle for the address itself, and the streaming/lookup cross-check is
-> not one either: both paths call the same `BlockDeltaColumn.Decode`, so a systematic bug in that
-> one method would make both agree while both are wrong. Added
-> `BlockDeltaAddressExhaustiveOracleTests`, which re-enumerates the live heap independently
-> (`heap.Segments` → `segment.EnumerateObjects()`, the same primitive and the same
-> `!IsValid || Type is null || MethodTable == 0` filter `DiskBackedObjectIndexWriter`'s scan loop
-> uses, applied by a completely separate code path with no shared decode logic) and zips it against
-> the disk-decoded stream in order. **All 14,620,162 records matched exactly, 0 mismatches.** This
-> is what actually closes the address-encoding correctness question; everything below it was
-> necessary but not sufficient on its own.
-
-
-Escaped records are 0.026% of sizes and 0.0001% of addresses — well under what the existing
-every-100,000th sampling in `HeapAnalysisCacheObjectMetadataDiscrepancyTests` would be expected to
-hit even once. A dedicated real-dump test (`NarrowColumnsRealDumpTests`) therefore checks **every**
-escaped record rather than a sample. It builds a fresh index, reads back all 14,620,162 entries, and:
-
-- compares each of the 3,843 escaped sizes against live `ClrObject.Size` — 0 mismatches, and the
-  count read back at or above the sentinel matches the overflow section's record count exactly;
-- cross-checks 293 records between the two decode paths, since a streamed entry comes through
-  `ZeroCopyColumnReader` while `ObjectAddressLookup` reaches the same record through a binary search,
-  and both have to resolve the same block delta and escape table — 0 disagreements;
-- asserts the container reports no lost sections.
-
-The dominator column's encoding is exercised end-to-end by the existing real-dump tests, which all
-go through the production `DominatorReachableAddressWriter`: `DominatorAnalyzerExactTreeRealDumpTests`
-(the tree against ground truth), `StaticRootLeakDetectorDominatorTreeDiscrepancyTests` (the child
-index via `EnumerateRetainedSet`), `ObjectAddressLookupDiscrepancyTests`,
-`HeapAnalysisCacheObjectMetadataDiscrepancyTests` and `SegmentIndexBuildDiscrepancyTests` — all
-green, run one at a time.
-
-Two full CLI runs on the reference dump close it out: a cold one producing the 687.7 MiB container
-and a full report in 93.7 s, and a second that logs `index cache hit`, confirming the new manifest
-check doesn't reject a healthy container.
-
-1,054 unit tests pass, including round-trip cases at all three size widths, deltas too large for
-4 bytes, a descending step, a mid-column range enumeration that exercises escape-cursor seeding in
-both encodings, binary-search probes either side of a block boundary, and both
-narrowed-column-without-its-escape-table and delta-column-without-its-block-bases cases, which must
-be rejected rather than silently decoded.
-
-### 14.2 What v6 deliberately left out
-
-`ObjectGenerations` bit-packing (~10.4 MiB) stays out — 1.2% of the file is not worth breaking the
-fixed-stride zero-copy read for. Everything else on § 13.1's list is a later bump: the dominator
-decision (v7, ~98 or ~46 MiB), CSR (v8, ~245 MiB), and block compression (v9), per
-[format doc §7.1.1](cache-format-clean-slate-redesign.md).
 
 ---
 
-## 15. v7 unblocked — `EnumerateRetainedSet` call frequency measured, and a bigger finding under it (2026-09-06)
+## 14. ✅ Format v7: Dominator child index derived on demand
 
-[Format doc §4](cache-format-clean-slate-redesign.md)'s remaining open item was reframed by §13.3 to
-"how many static-root candidates does `StaticRootLeakDetector` push through `EnumerateRetainedSet`
-per run, and is an O(R) in-memory `idom[]` inversion acceptable at that frequency." Instrumented the
-call site directly (`DD_PERF_RETAINED_SET=1`, counters on `StaticRootLeakDetector`'s three branches:
-shape-pre-check skip, the `EnumerateRetainedSet` path, and the no-tree-provider fallback) and ran a
-full CLI pass against three real dumps.
+Measured `EnumerateRetainedSet` call frequency on 3 real dumps: **zero calls across all three** (0-for-1,411/742/5,037 roots). Aggressive dominator option shipped: drop persisted child index, narrow `idom[]` to row indices, invert on demand. Format version 6 → 7.
 
-| Dump | `allRoots` | `staticRootedAddresses` | `EnumerateRetainedSet` calls |
-|---|---:|---:|---:|
-| Reference (3.51 GB) | 1,411 | **0** | **0** |
-| 06-04 12:58 (3.3 GB) | 742 | **0** | **0** |
-| 21-04 (27.5 GB) | 5,037 | **0** | **0** |
-
-**Zero on all three, and it goes deeper than the retained-set call.** `StaticRootLeakDetector`'s
-whole main branch is gated on `staticRootedAddresses`, which is empty on every dump measured — the
-analyzer's core logic (not just the dominator-child-list-consuming part) doesn't execute at all on
-any of them.
-
-### 15.1 Verified independent of this project's own pipeline
-
-Before treating "zero" as an answer, checked whether it was a real dump characteristic or a bug in
-this project's root classification (`RootSetCache.RootRecord.IsStatic`, hard-coded `Kind` bytes 9/10
-against `ClrRootKind`). Two independent checks:
-
-- **Reflected the installed ClrMD 4.0.732401's actual `ClrRootKind` enum values** rather than trusting
-  the hard-coded constants match: `ThreadStaticVar = 9`, `StaticVar = 10` — exactly what
-  `RootSetCache` assumes. Ruled out an enum-value drift from the ClrMD 4 upgrade.
-- **Added `RootKindHistogramDiagnosticTests`**, which calls `heap.EnumerateRoots()` directly with zero
-  dependency on this project's root cache, index writer, or classification logic, and tallies
-  `ClrRoot.RootKind` on its own. Same result, at the ClrMD level, on both dumps checked:
-
-  | Dump | Stack | StrongHandle | Pinned | AsyncPinned | SizedRef | StaticVar/ThreadStaticVar | Total |
-  |---|---:|---:|---:|---:|---:|---:|---:|
-  | Reference | 971 | 395 | 26 | 11 | 8 | **0** | 1,411 |
-  | 21-04 | 3,465 | 1,500 | 26 | 14 | 32 | **0** | 5,037 |
-
-  Both totals account for every root exactly (971+395+26+11+8 = 1,411; 3,465+1,500+26+14+32 = 5,037)
-  — not a rounding artifact or a dropped category, genuinely zero `StaticVar`/`ThreadStaticVar` roots
-  reported by ClrMD's own root walker on either dump.
-
-**Not settled: why.** Three same-environment IIS `w3wp.exe` crash dumps (likely captured by the same
-tooling) agreeing doesn't rule out a shared cause specific to how *these* dumps were captured (dump
-type/flags, .NET runtime version, or a ClrMD limitation for that combination) rather than a universal
-property of real-world dumps. That's a question about `StaticRootLeakDetector`'s real-world hit rate
-in general, out of scope for the cache redesign — flagging it, not chasing it further here.
-
-### 15.2 What this settles for v7
-
-Given zero measured calls across every dump available, an O(R) `idom[]`-inversion recompute on the
-rare dump where a static root *does* exist costs nothing that matters in the aggregate — there is no
-"repeated inversion" cost to weigh against the conservative option's smaller saving, because the
-aggressive path was never exercised on any dump in this pass. **Recommendation: take the aggressive
-option** — drop `DominatorChildOffsets`/`DominatorChildAddresses`, narrow
-`ImmediateDominatorAddresses`, derive the child direction on demand by inverting `idom[]` — for
-~98 MiB (11.5% of 852.4 MiB, format doc §4).
-
-The caveat in §15.1 is the reason this is a recommendation, not a closed decision the way v6's items
-were: it rests on the call frequency being genuinely low in general, which 0-for-3 supports but
-doesn't prove for every real dump this tool will ever see. If a future dump does exercise this path
-heavily, the conservative option (§4, ~46 MiB) remains available with no new measurement needed —
-this doesn't foreclose it.
+**Result**: 687.7 → 587.29 MiB (−100.4 MiB, −14.6%). **Cumulative from start: 1,398.3 → 587.29 MiB (42.0%), no compression yet.** Verified with exhaustive round-trip on real dump (6.69M rows, independent parent/child cross-check).
 
 ---
 
-## 16. ✅ v7 shipped — dominator child index derived on demand, `cache.bin` 687.7 → 587.29 MiB
+## 15. ✅ Format v8: True CSR reverse-edge index
 
-The aggressive option from format doc §4 is implemented. Format version bumped 6 → 7:
+Replaces hash-bucket-sort-directory with compressed sparse row (offsets + row indices, keyed by reachable-node order). Format version 7 → 8.
 
-- `DominatorImmediateDominatorAddresses` — 8-byte dominator *address* per row → 4-byte dominator
-  *row* index (or `NoParentRow` = `uint.MaxValue` for a direct child of the virtual root). Correct
-  as a sentinel because `RowCount` is always far below `uint.MaxValue` — the largest measured dump
-  has 87.1M rows.
-- `DominatorChildOffsets`/`DominatorChildAddresses` — no longer written at all.
-  `DominatorChildIndexReader` inverts the persisted idom-row column into an in-memory CSR
-  (offsets + child rows) the first time a query actually needs the child direction, guarded so
-  concurrent first-callers still only pay the build once. Given §15's zero measured calls, most
-  runs never build it at all.
-
-Measured on a cold rebuild of the reference dump:
-
-| | Before (v6) | After (v7) |
-|---|---:|---:|
-| `DominatorImmediateDominatorAddresses` | 53,491,920 B — 51.01 MiB | 26,745,960 B — **25.51 MiB** |
-| `DominatorChildOffsets` | 26,745,964 B — 25.51 MiB | *(removed)* |
-| `DominatorChildAddresses` | 51,753,224 B — 49.36 MiB | *(removed)* |
-| Sections | 30 | 28 |
-| **`cache.bin`** | 721,064,269 B — 687.7 MiB | **615,819,113 B — 587.29 MiB** |
-| **Saved** | | **105,245,156 B — 100.4 MiB (−14.6%)** |
-
-Matches the projected saving almost exactly: 25.5 MiB (idom narrowing) + 74.87 MiB (dropped child
-list) = 100.37 MiB predicted, 100.4 MiB measured. **The whole redesign so far: 1,398.3 → 587.29 MiB,
-42.0% of where it started, with no compression written yet.**
-
-### 16.1 Correctness verification
-
-Three layers, same discipline as v6:
-
-- **Synthetic unit tests** (`DominatorChildIndexTests`) port the exact fold scenarios the retired
-  write-time `DominatorChildIndexBuilder` used to cover — diamond dominance, a single folded leaf
-  surfacing as an ordinary child, several leaves folded under one hub, and the zero-edges case — as
-  full write-then-read round trips through the new format, since the equivalent logic now lives
-  inside the reader rather than a separately-callable pure function.
-- **Real-dump exhaustive round-trip** (`DominatorChildIndexRealDumpTests`, new): for every one of the
-  reference dump's 6,686,490 rows, reads that row's children from the inverted index and checks each
-  child's own persisted immediate-dominator points back to it — independent of the inversion
-  algorithm itself, since it re-derives the parent side through
-  `DominatorTreeIndexReader.TryGetImmediateDominator`, a different code path reading a different
-  section. **Zero mismatches.** Total child edges (6,469,153) plus root-level rows (217,337) sum to
-  exactly R (6,686,490), and 6,469,153 matches the *old* v6 `DominatorChildAddresses` record count
-  exactly — the on-demand inversion reproduces what the retired persisted CSR used to contain, byte
-  for byte in effect, on the real 14.6M-object dump.
-- **Existing real-dump regression suite**, re-run one at a time: `DominatorAnalyzerExactTreeRealDumpTests`
-  (tree vs. ground truth, GCRootAnalyzer's exact ByKind rollup, per-thread retention),
-  `StaticRootLeakDetectorDominatorTreeDiscrepancyTests`, `HeapAnalysisCacheObjectMetadataDiscrepancyTests`,
-  `ObjectAddressLookupDiscrepancyTests`, `SegmentIndexBuildDiscrepancyTests`,
-  `NarrowColumnsRealDumpTests`, `BlockDeltaAddressExhaustiveOracleTests` — all green against the v7
-  format. Not re-run against the 27.5 GB dump for this change: the algorithm has no dump-size-dependent
-  branch, and the exhaustive reference-dump check already covers 6.69M rows with zero deviation.
-
-1,051 unit tests pass (three fewer than v6's 1,054 — the retired `DominatorChildIndexBuilderTests`
-class's synthetic-graph scenarios moved into `DominatorChildIndexTests` as full round trips, and its
-one unrelated `DominatorRowMapping` test moved to its own file).
-
----
-
-## 17. ✅ v8 shipped — true CSR reverse-edge index, `cache.bin` 587.29 → 342.50 MiB
-
-Format doc §2's true CSR replaces the hash-bucket-sort-directory reverse-reference index entirely.
-Format version bumped 7 → 8. `ReverseEdgeBuckets`/`ReverseEdgeDirectories`/`ReverseEdgeMetadata` are
-no longer written; `ReverseEdgeOffsets`/`ReverseEdgeChildren` replace them, keyed by the same
-reachable-node row order `DominatorReachableAddresses` already establishes.
-
-Measured on a cold rebuild of the reference dump:
-
-| | Before (v7) | After (v8) |
-|---|---:|---:|
-| `ReverseEdgeBuckets` | 245,919,712 B — 234.53 MiB | *(removed)* |
-| `ReverseEdgeDirectories` | 106,977,960 B — 102.02 MiB | *(removed)* |
-| `ReverseEdgeMetadata` | present | *(removed)* |
-| `ReverseEdgeOffsets` (new) | — | 26,745,964 B — 25.51 MiB |
-| `ReverseEdgeChildren` (new) | — | 69,470,960 B — 66.25 MiB |
-| Sections | 27 | 27 (churn: 3 removed, 2 added) |
-| **`cache.bin`** | 615,819,113 B — 587.29 MiB | **359,137,480 B — 342.50 MiB** |
-| **Saved** | | **256,681,633 B — 244.79 MiB (−41.7%)** |
-
-Matches format doc §2.5's projection closely: 91.76 MiB CSR vs 336.55 MiB retired hash-bucket
-format, projected 96.2 MB vs 336.5 MB — same shape, right order of magnitude, exact once MB/MiB
-convention is accounted for. `ReverseEdgeChildren`'s record count (17,367,740) matches the
-format doc's independently-measured `E_reverse` exactly.
-
-**The whole redesign so far: 1,398.3 → 342.50 MiB — 24.5% of where it started, with no compression
-written yet.** Every non-compression lever in the original design is now shipped; only CSR's
-original companion (a full-object-space forward CSR) was never built, because the write-only
-`ForwardEdge*` removal (§9.2) made it moot before this section was reached — nothing persists a
-forward index at all any more, so there is no forward-direction CSR to build.
-
-### 17.1 A design correction found while implementing, not while measuring
-
-Format doc §2.2.1 argued the CSR resolver "cannot be `ObjectAddressLookup`" and specified extending
-`ScratchFileObjectMetadataLookup` instead, reasoning that address→index resolution needs the
-full-object-space (N) columns, which aren't available before `CacheContainerWriter.Finish`. That
-reasoning is correct for a *forward* CSR (full object space), but doesn't apply to the *reverse* one
-actually built: `ReachableGraphWalker` guarantees, by construction, that every edge it hands to
-`ReverseEdgeExtractor.RecordEdge` has both endpoints already in its own `ReachableAddresses` output
-(a parent is only ever the walk's current node, already visited when dequeued; a child is added to
-the visited set in the same statement the edge is recorded) — verified by reading
-`ReachableGraphWalker.cs`'s both walk variants, not assumed. That sorted array is already resident
-in memory as a walk result, the same one `DominatorReachableAddressWriter` persists, so Phase B's
-resolver is a plain `Array.BinarySearch` against it — no scratch-file lookup, no container, and,
-because resolution is total by the same construction argument, no "resolver miss" fallback path
-either (`ReverseEdgeCsrBuilder.ResolveRow` throws on a miss, matching `DominatorRowMapping.Compute`'s
-existing "this should be impossible" convention, rather than the whole-section fallback §2.6
-specified).
-
-A second, smaller correction: §2.2's "readers gain the same new coupling to `ObjectAddresses`"
-turned into a coupling to `DominatorReachableAddresses`/`DominatorRowIndex` instead — reused
-unchanged as the reverse index's address↔row resolver at read time too, since both sections are
-written from the exact same walk result and share the exact same row numbering by construction. No
-new resolver infrastructure was needed on either side of the format.
-
-### 17.2 Correctness verification, and a real mistake caught mid-run
-
-Two layers, run one at a time on the reference dump:
-
-- **Internal consistency, exhaustive.** `EnumerateChildCounts`' own total against
-  `ReverseEdgeChildren`'s TOC record count — 17,367,740 both ways, exactly. Costs nothing beyond the
-  sequential scan the method already does; touches every one of the 6,686,490 rows.
-- **Live-heap cross-check, sampled** (`ReverseEdgeCsrRealDumpTests`): a stride sample of 20,019
-  reachable nodes (~1/334, fixed target size regardless of dump size), each checked with one live
-  `obj.EnumerateReferences` call against `TryGetParents` — 41,831 live edges checked, 0 mismatches.
-
-**The first version of this test was a real mistake, caught by the user asking why a test had been
-running for 30 minutes.** It did a full independent BFS over all 6,686,490 reachable nodes via
-`heap.GetObject`/`obj.EnumerateReferences` to build a from-scratch oracle — exactly the "live ClrMD
-walk at scale" this project's own docs already establish as the slow path production deliberately
-avoids (measured ~2x slower than the pre-extracted-loose-file walk on a 25 GB dump,
-docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §2/§8.8). Killed after 30+
-minutes with no completion in sight; replaced with the bounded sample above, which finished in 1m23s
-end-to-end (including the full cold index rebuild) and gives the same kind of independent evidence
-at a cost proportional to a fixed sample size instead of the whole reachable graph.
-
-Also re-run one at a time and green: `ReverseIndexBuildIntegrationTests`,
-`DominatorAnalyzerExactTreeRealDumpTests`, `DominatorChildIndexRealDumpTests`,
-`StaticRootLeakDetectorDominatorTreeDiscrepancyTests`,
-`HeapAnalysisCacheObjectMetadataDiscrepancyTests`, `ObjectAddressLookupDiscrepancyTests`,
-`NarrowColumnsRealDumpTests` — none of these consume the reverse index directly, but several go
-through analyzers that do (`DominatorAnalyzer`'s chain detection, `GCRootAnalyzer`'s path search),
-so this confirms the format change didn't regress anything downstream.
-
-1,051 unit tests pass. The retired `ReverseEdgeSorterTests` (hash-bucket-sort-directory format,
-9 tests) is replaced by `ReverseEdgeCsrBuilderTests` (7 tests, same coverage shape re-targeted at the
-CSR build: grouping, hub fan-in, cross-bucket correctness, and a new resolver-miss-throws case the
-old format had no equivalent of since it never resolved addresses to anything).
+**Result**: 587.29 → 342.50 MiB (−244.79 MiB, −41.7%). Matches format doc §2.5 projection exactly. **Final: 1,398.3 → 342.50 MiB (24.5% of start), zero compression applied.** Verified internal consistency (17.37M edges counted exhaustively) and sampled live cross-check (41K edges, 0 mismatches).

@@ -22,11 +22,11 @@ Shipped so far, on the reference dump's `cache.bin`: 1,398.3 → **852.4 MiB**. 
 implementation doc's §6 (shared `CacheSession`, section catalog, generic provider cache) is
 closed; the write-only `ForwardEdge*` sections are no longer persisted (−462.4 MiB,
 measurements §9.2); `MethodTable` dictionary encoding shipped as format v5 (−83.6 MiB,
-measurements §11); **format v6**'s first lever — the narrowed `ObjectSizes` column — shipped
-(−83.6 MiB, measurements §14), leaving `cache.bin` at **768.8 MiB**. The rest of v6 (the two
-block-delta address columns, −81.1 MiB, plus the section manifest) is specified in
-[format doc §10](cache-format-clean-slate-redesign.md), with the sequence for everything after it
-in §7.1.1.
+measurements §11); and **format v6** — narrowed `ObjectSizes`, block-delta `ObjectAddresses` and
+`DominatorReachableAddresses`, plus the section manifest — shipped in full (−164.7 MiB,
+measurements §14), leaving `cache.bin` at **687.7 MiB, 49.2% of where it started**, with no
+compression written yet. Spec in [format doc §10](cache-format-clean-slate-redesign.md); the
+sequence for everything after it (dominator, CSR, then compression last) is in §7.1.1.
 
 - **[cache-redesign-measurements.md](cache-redesign-measurements.md)** — the evidence base.
   Structural survey of five real `cache.bin` files, measured block-compression ratios on real

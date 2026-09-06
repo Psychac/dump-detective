@@ -29,8 +29,8 @@ public class CacheSectionCatalogTests
     /// <summary>
     /// The Required set drives the cache-hit fast path, so widening it silently would start
     /// rejecting containers that are actually fine — including ones already on disk. These are the
-    /// sections <c>DiskBackedObjectIndexWriter</c> writes unconditionally *and* that every existing
-    /// v4 container is known to contain.
+    /// sections <c>DiskBackedObjectIndexWriter</c> writes unconditionally *and* that every container
+    /// of the current format version is known to contain.
     /// </summary>
     [Fact]
     public void Required_IsExactlyTheAlwaysWrittenAndAlwaysPresentSections()
@@ -45,6 +45,9 @@ public class CacheSectionCatalogTests
             CacheSectionId.Roots,
             CacheSectionId.SegmentIndex,
             CacheSectionId.ObjectTypeDictionary,
+            CacheSectionId.ObjectAddressBlockBases,
+            CacheSectionId.ObjectAddressOverflow,
+            CacheSectionId.SectionManifest,
         });
     }
 

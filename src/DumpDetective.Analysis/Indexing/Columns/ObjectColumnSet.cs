@@ -18,7 +18,6 @@ namespace DumpDetective.Analysis.Indexing.Columns;
 /// </remarks>
 internal sealed class ObjectColumnSet : IDisposable
 {
-    private const int AddressWidth = sizeof(ulong);
     private const int GenerationWidth = sizeof(sbyte);
 
     public required MemoryMappedViewAccessor Addresses { get; init; }
@@ -33,6 +32,14 @@ internal sealed class ObjectColumnSet : IDisposable
     public required int SizeWidth { get; init; }
     public required ColumnOverflowTable SizeOverflow { get; init; }
     public required long RecordCount { get; init; }
+
+    /// <summary>
+    /// Width of one <c>ObjectAddresses</c> record: 4 when the column is block-delta encoded (§10.3),
+    /// 8 for the pre-v6 plain column. <see cref="AddressDeltas"/> is non-null exactly when it is 4.
+    /// </summary>
+    public required int AddressWidth { get; init; }
+
+    public required BlockDeltaColumn? AddressDeltas { get; init; }
 
     public static bool TryOpen(CacheContainerReader reader, out ObjectColumnSet? columns)
     {
@@ -64,20 +71,37 @@ internal sealed class ObjectColumnSet : IDisposable
                 return false;
             }
 
-            long recordCount = addressesLength / AddressWidth;
-            if (recordCount == 0
+            // Once the address column can be either 4 or 8 bytes wide, its length no longer implies
+            // its record count — so the count comes from the TOC, which is authoritative, and every
+            // column's width is then derived against it.
+            if (!reader.TryGetSectionInfo(CacheSectionId.ObjectAddresses, out CacheTocEntry addressesEntry))
+                return false;
+
+            long recordCount = addressesEntry.RecordCount;
+            if (recordCount <= 0
                 || methodTablesLength / typeIdWidth != recordCount
                 || generationsLength / GenerationWidth != recordCount)
             {
                 return false;
             }
 
-            // The size column no longer shares the address column's stride, so its width comes from
-            // its own length. A width the format doesn't define means a container this build can't
-            // read, which is a cold cache rather than an error.
-            int sizeWidth = sizesLength % recordCount == 0 ? (int)(sizesLength / recordCount) : 0;
-            if (!NarrowColumnWidth.IsSupported(sizeWidth))
+            // A width the format doesn't define means a container this build can't read, which is a
+            // cold cache rather than an error.
+            int addressWidth = WidthOf(addressesLength, recordCount);
+            int sizeWidth = WidthOf(sizesLength, recordCount);
+            if (addressWidth is not (BlockDeltaColumn.DeltaWidth or NarrowColumnWidth.Full)
+                || !NarrowColumnWidth.IsSupported(sizeWidth))
+            {
                 return false;
+            }
+
+            BlockDeltaColumn? addressDeltas = null;
+            if (addressWidth == BlockDeltaColumn.DeltaWidth
+                && !BlockDeltaColumn.TryLoad(reader, CacheSectionId.ObjectAddressBlockBases,
+                    CacheSectionId.ObjectAddressOverflow, recordCount, out addressDeltas))
+            {
+                return false;
+            }
 
             ColumnOverflowTable sizeOverflow = ColumnOverflowTable.Empty;
             if (sizeWidth != NarrowColumnWidth.Full)
@@ -105,6 +129,8 @@ internal sealed class ObjectColumnSet : IDisposable
                 SizeWidth = sizeWidth,
                 SizeOverflow = sizeOverflow,
                 RecordCount = recordCount,
+                AddressWidth = addressWidth,
+                AddressDeltas = addressDeltas,
             };
             return true;
         }
@@ -119,6 +145,10 @@ internal sealed class ObjectColumnSet : IDisposable
             }
         }
     }
+
+    /// <summary>Bytes per record, or 0 when the section length isn't a whole number of records.</summary>
+    internal static int WidthOf(long sectionLength, long recordCount) =>
+        recordCount > 0 && sectionLength % recordCount == 0 ? (int)(sectionLength / recordCount) : 0;
 
     /// <summary>
     /// Loads the <c>ObjectTypeDictionary</c> section as a flat <c>ulong[]</c> indexed by

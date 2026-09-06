@@ -537,9 +537,24 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // on disk past this point for ScratchFileObjectMetadataLookup — deleted explicitly once
         // Stage B's metadata resolution finishes (see the reverseEdgeExtractor block below), instead
         // of here.
+        // §10.3: addresses are stored as a 4-byte delta from a per-block base. Unlike the size
+        // column below there is no width to choose — anything that doesn't fit escapes, which was
+        // 16 records of 14.6M on the reference dump and none of 87.1M on the 27.5 GB one.
+        List<ulong> addressBlockBases = new(BlockDeltaColumn.BlockCountFor(objectCount));
+        List<(uint RecordIndex, ulong Value)> addressOverflow = [];
+
         containerWriter.BeginSection(CacheSectionId.ObjectAddresses);
-        uint addrChecksum = ConcatenateScratchFiles(stream, segAddrScratchFiles, writeBuffer, deleteAfterCopy: !buildStageB);
+        uint addrChecksum = BlockDeltaScratchFiles(
+            stream, segAddrScratchFiles, addressBlockBases, addressOverflow, writeBuffer, deleteAfterCopy: !buildStageB);
         containerWriter.EndSection(objectCount, addrChecksum);
+
+        containerWriter.BeginSection(CacheSectionId.ObjectAddressBlockBases);
+        uint addressBasesChecksum = BlockDeltaColumn.WriteBlockBases(stream, addressBlockBases, writeBuffer);
+        containerWriter.EndSection(addressBlockBases.Count, addressBasesChecksum);
+
+        containerWriter.BeginSection(CacheSectionId.ObjectAddressOverflow);
+        uint addressOverflowChecksum = ColumnOverflowTable.Write(stream, addressOverflow, writeBuffer);
+        containerWriter.EndSection(addressOverflow.Count, addressOverflowChecksum);
 
         // §3: MethodTable is stored as a narrow TypeId indexing ObjectTypeDictionary, not as the
         // full 8-byte pointer. 14,003 distinct types cover 14.6M objects on the reference dump, so
@@ -1655,6 +1670,13 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                 return false;
         }
 
+        // §10.5: the remainder of the same gap, now closable. A *conditional* section lost to the
+        // same disk-full or AV blip leaves the Required check above green, because absence there is
+        // otherwise indistinguishable from "this build wasn't asked to produce it". The manifest
+        // records what the build opened, so the two can finally be told apart.
+        if (reader.LostSections().Count > 0)
+            return false;
+
         return TypeAggregateIndexReader.TryLoad(reader, containerPath, objEntry.RecordCount, out result);
     }
 
@@ -1896,6 +1918,79 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         }
 
                         int written = whole * width;
+                        stream.Write(writeBuf, 0, written);
+                        hasher.Append(writeBuf.AsSpan(0, written));
+                        recordIndex += whole;
+
+                        // A read can stop mid-record; keep the tail for the next iteration.
+                        carried = available - whole * ColumnSize;
+                        if (carried > 0)
+                            readBuf.AsSpan(whole * ColumnSize, carried).CopyTo(readBuf);
+                    }
+                }
+
+                if (deleteAfterCopy)
+                {
+                    try { File.Delete(segFile); } catch { /* best-effort cleanup */ }
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(readBuf);
+            ArrayPool<byte>.Shared.Return(writeBuf);
+        }
+
+        return hasher.GetCurrentHashAsUInt32();
+    }
+
+    /// <summary>
+    /// Streams the per-segment 8-byte address scratch files into the container as 4-byte deltas from
+    /// a per-block base, collecting the bases and the escaped records as it goes — see
+    /// <see cref="BlockDeltaColumn"/>. Same shape and same no-extra-pass property as
+    /// <see cref="NarrowScratchFiles"/>.
+    /// </summary>
+    private static uint BlockDeltaScratchFiles(
+        Stream stream,
+        string[] files,
+        List<ulong> blockBases,
+        List<(uint RecordIndex, ulong Value)> overflow,
+        int bufferSize,
+        bool deleteAfterCopy)
+    {
+        var hasher = new XxHash32();
+        byte[] readBuf = ArrayPool<byte>.Shared.Rent(bufferSize);
+        byte[] writeBuf = ArrayPool<byte>.Shared.Rent(bufferSize);
+        long recordIndex = 0;
+
+        try
+        {
+            int recordsPerRead = readBuf.Length / ColumnSize;
+            int usableReadBytes = recordsPerRead * ColumnSize;
+
+            foreach (string segFile in files)
+            {
+                if (!File.Exists(segFile))
+                    continue;
+
+                using (FileStream segStream = new(segFile, FileMode.Open, FileAccess.Read, FileShare.None,
+                    bufferSize: bufferSize, FileOptions.SequentialScan))
+                {
+                    int carried = 0;
+                    int read;
+                    while ((read = segStream.Read(readBuf, carried, usableReadBytes - carried)) > 0)
+                    {
+                        int available = carried + read;
+                        int whole = available / ColumnSize;
+
+                        for (int r = 0; r < whole; r++)
+                        {
+                            ulong address = BinaryPrimitives.ReadUInt64LittleEndian(readBuf.AsSpan(r * ColumnSize));
+                            uint delta = BlockDeltaColumn.Encode(address, recordIndex + r, blockBases, overflow);
+                            BinaryPrimitives.WriteUInt32LittleEndian(writeBuf.AsSpan(r * sizeof(uint)), delta);
+                        }
+
+                        int written = whole * BlockDeltaColumn.DeltaWidth;
                         stream.Write(writeBuf, 0, written);
                         hasher.Append(writeBuf.AsSpan(0, written));
                         recordIndex += whole;

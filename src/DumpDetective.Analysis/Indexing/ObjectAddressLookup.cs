@@ -34,6 +34,8 @@ internal sealed class ObjectAddressLookup : IDisposable
     // Both derived from the TOC rather than stored; see ObjectColumnSet.
     private readonly int _sizeWidth;
     private readonly ColumnOverflowTable _sizeOverflow;
+    // Null for a pre-v6 plain 8-byte address column; otherwise every probe below decodes through it.
+    private readonly BlockDeltaColumn? _addressDeltas;
     // Sorted by Start — segment write order (segment index order) isn't guaranteed to be
     // address-sorted (see docs/cache/cache-architecture.md "why a naive global binary
     // search doesn't work"), so this instance sorts its own copy once at open time.
@@ -43,8 +45,9 @@ internal sealed class ObjectAddressLookup : IDisposable
     private ObjectAddressLookup(
         MemoryMappedViewAccessor addr, MemoryMappedViewAccessor mt, MemoryMappedViewAccessor size,
         SegmentIndexEntry[] segmentsByStart, ulong[] typeDictionary, int typeIdWidth,
-        int sizeWidth, ColumnOverflowTable sizeOverflow)
+        int sizeWidth, ColumnOverflowTable sizeOverflow, BlockDeltaColumn? addressDeltas)
     {
+        _addressDeltas = addressDeltas;
         _addr = addr;
         _mt = mt;
         _size = size;
@@ -121,10 +124,17 @@ internal sealed class ObjectAddressLookup : IDisposable
             return false;
         }
 
-        long recordCount = addrLen / ColumnSize;
-        int sizeWidth = recordCount > 0 && sizeLen % recordCount == 0 ? (int)(sizeLen / recordCount) : 0;
+        // Record count comes from the TOC, not from the address section's length: since v6 that
+        // section can be 4 or 8 bytes per record, so its length no longer implies the count.
+        reader.TryGetSectionInfo(CacheSectionId.ObjectAddresses, out CacheTocEntry addrEntry);
+        long recordCount = addrEntry.RecordCount;
+        int addressWidth = ObjectColumnSet.WidthOf(addrLen, recordCount);
+        int sizeWidth = ObjectColumnSet.WidthOf(sizeLen, recordCount);
+
         ColumnOverflowTable sizeOverflow = ColumnOverflowTable.Empty;
-        if (!TryResolveSizeEncoding(reader, sizeWidth, ref sizeOverflow))
+        BlockDeltaColumn? addressDeltas = null;
+        if (!TryResolveSizeEncoding(reader, sizeWidth, ref sizeOverflow)
+            || !TryResolveAddressEncoding(reader, addressWidth, recordCount, out addressDeltas))
         {
             addrAcc.Dispose();
             mtAcc.Dispose();
@@ -135,7 +145,8 @@ internal sealed class ObjectAddressLookup : IDisposable
         SegmentIndexEntry[] segmentsByStart = segments.ToArray();
         Array.Sort(segmentsByStart, static (a, b) => a.Start.CompareTo(b.Start));
 
-        lookup = new ObjectAddressLookup(addrAcc, mtAcc, sizeAcc, segmentsByStart, typeDictionary, typeIdWidth, sizeWidth, sizeOverflow);
+        lookup = new ObjectAddressLookup(
+            addrAcc, mtAcc, sizeAcc, segmentsByStart, typeDictionary, typeIdWidth, sizeWidth, sizeOverflow, addressDeltas);
         return true;
     }
 
@@ -206,6 +217,24 @@ internal sealed class ObjectAddressLookup : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Loads the block bases and escape table when the address column is delta encoded. Same
+    /// all-or-nothing rule as the size column: a delta column without its bases decodes to addresses
+    /// that would never match, which would look like an empty heap rather than a broken cache.
+    /// </summary>
+    private static bool TryResolveAddressEncoding(
+        CacheContainerReader reader, int addressWidth, long recordCount, out BlockDeltaColumn? deltas)
+    {
+        deltas = null;
+
+        if (addressWidth == ColumnSize)
+            return true;
+
+        return addressWidth == BlockDeltaColumn.DeltaWidth
+            && BlockDeltaColumn.TryLoad(reader, CacheSectionId.ObjectAddressBlockBases,
+                CacheSectionId.ObjectAddressOverflow, recordCount, out deltas);
+    }
+
     /// <summary>Binary search over the small in-memory segment table for the range containing <paramref name="address"/>.</summary>
     private int FindSegment(ulong address)
     {
@@ -242,7 +271,7 @@ internal sealed class ObjectAddressLookup : IDisposable
         while (lo <= hi)
         {
             long mid = lo + (hi - lo) / 2;
-            ulong candidate = _addr.ReadUInt64(mid * ColumnSize);
+            ulong candidate = ReadAddress(mid);
 
             if (address < candidate)
                 hi = mid - 1;
@@ -254,6 +283,11 @@ internal sealed class ObjectAddressLookup : IDisposable
 
         return -1;
     }
+
+    private ulong ReadAddress(long recordIndex) =>
+        _addressDeltas is null
+            ? _addr.ReadUInt64(recordIndex * ColumnSize)
+            : _addressDeltas.Decode(_addr.ReadUInt32(recordIndex * BlockDeltaColumn.DeltaWidth), recordIndex);
 
     public void Dispose()
     {

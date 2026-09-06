@@ -155,7 +155,10 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
         private readonly ulong[] _typeDictionary;
         private readonly int _typeIdWidth;
         private readonly int _sizeWidth;
+        private readonly int _addressWidth;
+        private readonly BlockDeltaColumn? _addressDeltas;
         private ColumnOverflowTable.Cursor _sizeOverflowCursor;
+        private ColumnOverflowTable.Cursor _addressOverflowCursor;
 
         public ZeroCopyColumnReader(ObjectColumnSet columns, long startRecord)
         {
@@ -163,7 +166,10 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
             _typeDictionary = columns.TypeDictionary;
             _typeIdWidth = columns.TypeIdWidth;
             _sizeWidth = columns.SizeWidth;
+            _addressWidth = columns.AddressWidth;
+            _addressDeltas = columns.AddressDeltas;
             _sizeOverflowCursor = columns.SizeOverflow.OpenCursor(startRecord);
+            _addressOverflowCursor = columns.AddressDeltas?.OpenCursor(startRecord) ?? default;
 
             byte* p = null;
             columns.Addresses.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
@@ -184,7 +190,7 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
 
         public void FillBatch(long startIndex, HeapEntry[] destination, int count)
         {
-            byte* addrBase = _addrPtr + startIndex * ColumnSize;
+            byte* addrBase = _addrPtr + startIndex * _addressWidth;
             byte* mtBase = _mtPtr + startIndex * _typeIdWidth;
             byte* sizeBase = _sizePtr + startIndex * _sizeWidth;
             byte* genBase = _genPtr + startIndex * GenColumnSize;
@@ -199,7 +205,7 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
             {
                 for (int i = 0; i < count; i++)
                 {
-                    ulong address = Unsafe.ReadUnaligned<ulong>(addrBase + i * ColumnSize);
+                    ulong address = ReadAddress(addrBase, i, startIndex + i);
                     ulong objSize = ReadSize(sizeBase, i, startIndex + i);
                     ulong methodTable = dictionary[Unsafe.ReadUnaligned<ushort>(mtBase + i * sizeof(ushort))];
                     sbyte generation = unchecked((sbyte)genBase[i]);
@@ -210,13 +216,22 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
             {
                 for (int i = 0; i < count; i++)
                 {
-                    ulong address = Unsafe.ReadUnaligned<ulong>(addrBase + i * ColumnSize);
+                    ulong address = ReadAddress(addrBase, i, startIndex + i);
                     ulong objSize = ReadSize(sizeBase, i, startIndex + i);
                     ulong methodTable = dictionary[Unsafe.ReadUnaligned<uint>(mtBase + i * sizeof(uint))];
                     sbyte generation = unchecked((sbyte)genBase[i]);
                     destination[i] = new HeapEntry(address, methodTable, objSize, generation);
                 }
             }
+        }
+
+        private ulong ReadAddress(byte* addrBase, int offsetInBatch, long recordIndex)
+        {
+            if (_addressDeltas is null)
+                return Unsafe.ReadUnaligned<ulong>(addrBase + offsetInBatch * ColumnSize);
+
+            uint delta = Unsafe.ReadUnaligned<uint>(addrBase + offsetInBatch * BlockDeltaColumn.DeltaWidth);
+            return _addressDeltas.Decode(delta, recordIndex, ref _addressOverflowCursor);
         }
 
         private ulong ReadSize(byte* sizeBase, int offsetInBatch, long recordIndex)

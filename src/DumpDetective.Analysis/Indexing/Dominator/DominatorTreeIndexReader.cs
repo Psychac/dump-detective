@@ -15,33 +15,25 @@ namespace DumpDetective.Analysis.Indexing.Dominator;
 /// </summary>
 internal sealed unsafe class DominatorTreeIndexReader : IDisposable
 {
-    private readonly MemoryMappedViewAccessor _addressesAccessor;
+    private readonly DominatorRowIndex _rows;
     private readonly MemoryMappedViewAccessor _dominatorsAccessor;
     // Nullable: DominatorRetainedBytes was added after DominatorImmediateDominatorAddresses
     // (§10.4 Batch 3) — a cache.bin written by an earlier build has idom data but not this column.
     private readonly MemoryMappedViewAccessor? _retainedBytesAccessor;
-    private readonly byte* _addressesPtr;
     private readonly byte* _dominatorsPtr;
     private readonly byte* _retainedBytesPtr;
-    private readonly long _count;
     private bool _disposed;
 
     private DominatorTreeIndexReader(
-        MemoryMappedViewAccessor addressesAccessor,
+        DominatorRowIndex rows,
         MemoryMappedViewAccessor dominatorsAccessor,
-        MemoryMappedViewAccessor? retainedBytesAccessor,
-        long count)
+        MemoryMappedViewAccessor? retainedBytesAccessor)
     {
-        _addressesAccessor = addressesAccessor;
+        _rows = rows;
         _dominatorsAccessor = dominatorsAccessor;
         _retainedBytesAccessor = retainedBytesAccessor;
-        _count = count;
 
         byte* p = null;
-        _addressesAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
-        _addressesPtr = p + _addressesAccessor.PointerOffset;
-
-        p = null;
         _dominatorsAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
         _dominatorsPtr = p + _dominatorsAccessor.PointerOffset;
 
@@ -63,22 +55,24 @@ internal sealed unsafe class DominatorTreeIndexReader : IDisposable
     {
         reader = null;
 
-        if (!container.TryOpenSectionAccessor(CacheSectionId.DominatorReachableAddresses, out MemoryMappedViewAccessor? addressesAccessor, out long addressesLength)
-            || addressesAccessor is null || addressesLength == 0)
-        {
+        if (!DominatorRowIndex.TryOpen(container, out DominatorRowIndex? rows) || rows is null)
             return false;
-        }
+
+        // Compared against the row-aligned length rather than against the address column's own
+        // length: since v6 the address column can be 4 bytes per row while these stay 8.
+        long rowAlignedLength = rows.RowAlignedColumnLength;
 
         if (!container.TryOpenSectionAccessor(CacheSectionId.DominatorImmediateDominatorAddresses, out MemoryMappedViewAccessor? dominatorsAccessor, out long dominatorsLength)
-            || dominatorsAccessor is null || dominatorsLength != addressesLength)
+            || dominatorsAccessor is null || dominatorsLength != rowAlignedLength)
         {
-            addressesAccessor.Dispose();
+            rows.Dispose();
+            dominatorsAccessor?.Dispose();
             return false;
         }
 
         MemoryMappedViewAccessor? retainedBytesAccessor = null;
         if (container.TryOpenSectionAccessor(CacheSectionId.DominatorRetainedBytes, out MemoryMappedViewAccessor? candidateAccessor, out long retainedBytesLength)
-            && candidateAccessor is not null && retainedBytesLength == addressesLength)
+            && candidateAccessor is not null && retainedBytesLength == rowAlignedLength)
         {
             retainedBytesAccessor = candidateAccessor;
         }
@@ -87,7 +81,7 @@ internal sealed unsafe class DominatorTreeIndexReader : IDisposable
             candidateAccessor?.Dispose();
         }
 
-        reader = new DominatorTreeIndexReader(addressesAccessor, dominatorsAccessor, retainedBytesAccessor, addressesLength / sizeof(ulong));
+        reader = new DominatorTreeIndexReader(rows, dominatorsAccessor, retainedBytesAccessor);
         return true;
     }
 
@@ -132,23 +126,7 @@ internal sealed unsafe class DominatorTreeIndexReader : IDisposable
     private long FindRow(ulong address)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        long lo = 0, hi = _count - 1;
-        while (lo <= hi)
-        {
-            long mid = lo + (hi - lo) / 2;
-            ulong midAddress = ReadUInt64(_addressesPtr, mid * sizeof(ulong));
-
-            if (midAddress == address)
-                return mid;
-
-            if (midAddress < address)
-                lo = mid + 1;
-            else
-                hi = mid - 1;
-        }
-
-        return -1;
+        return _rows.FindRow(address);
     }
 
     private static ulong ReadUInt64(byte* basePtr, long offset) => Unsafe.ReadUnaligned<ulong>(basePtr + offset);
@@ -159,9 +137,8 @@ internal sealed unsafe class DominatorTreeIndexReader : IDisposable
             return;
         _disposed = true;
 
-        _addressesAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
+        _rows.Dispose();
         _dominatorsAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
-        _addressesAccessor.Dispose();
         _dominatorsAccessor.Dispose();
 
         if (_retainedBytesAccessor is not null)

@@ -185,6 +185,51 @@ internal sealed class CacheContainerReader
 
     public bool ContainsSection(CacheSectionId id) => _sections.ContainsKey(id);
 
+    /// <summary>
+    /// Section ids the build that wrote this container opened but never closed — i.e. writes that
+    /// failed and were downgraded to a warning. Empty for a healthy container, and also empty for
+    /// one written without a <see cref="CacheSectionId.SectionManifest"/>, which cannot be
+    /// distinguished from healthy and so is not treated as a fault.
+    /// </summary>
+    public IReadOnlyList<CacheSectionId> LostSections()
+    {
+        if (!_sections.TryGetValue(CacheSectionId.SectionManifest, out CacheTocEntry manifest)
+            || manifest.Length <= 0
+            || manifest.Length % sizeof(int) != 0)
+        {
+            return [];
+        }
+
+        try
+        {
+            using var stream = new FileStream(_containerPath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                bufferSize: 4096, FileOptions.SequentialScan);
+            stream.Position = manifest.Offset;
+
+            byte[] buffer = new byte[manifest.Length];
+            if (stream.ReadAtLeast(buffer, buffer.Length, throwOnEndOfStream: false) < buffer.Length)
+                return [];
+
+            var lost = new List<CacheSectionId>();
+            for (int i = 0; i < buffer.Length; i += sizeof(int))
+            {
+                var id = (CacheSectionId)BitConverter.ToInt32(buffer, i);
+                if (!_sections.ContainsKey(id))
+                    lost.Add(id);
+            }
+
+            return lost;
+        }
+        catch (IOException)
+        {
+            return [];
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
     public bool TryGetSectionInfo(CacheSectionId id, out CacheTocEntry entry) => _sections.TryGetValue(id, out entry);
 
     private const int ChecksumBufferSize = 64 * 1024;

@@ -121,6 +121,31 @@ internal enum CacheSectionId
     /// case there is nothing to escape to.
     /// </summary>
     ObjectSizeOverflow = 29,
+    /// <summary>
+    /// One 8-byte base address per 1024-record block of <see cref="ObjectAddresses"/>, which stores
+    /// a 4-byte delta from its block's base rather than the full address
+    /// (docs/cache/cache-format-clean-slate-redesign.md §10.3). Required whenever
+    /// <see cref="ObjectAddresses"/> is 4 bytes wide.
+    /// </summary>
+    ObjectAddressBlockBases = 30,
+    /// <summary>
+    /// Sorted <c>RecordIndex(4) | Address(8)</c> pairs for the <see cref="ObjectAddresses"/> records
+    /// whose delta from their block base doesn't fit 4 bytes — 16 of 14.6M on the reference dump,
+    /// none of 87.1M on the 27.5 GB one.
+    /// </summary>
+    ObjectAddressOverflow = 31,
+    /// <summary>Block bases for <see cref="DominatorReachableAddresses"/>; see <see cref="ObjectAddressBlockBases"/>.</summary>
+    DominatorReachableBlockBases = 32,
+    /// <summary>Escaped rows of <see cref="DominatorReachableAddresses"/>; see <see cref="ObjectAddressOverflow"/>.</summary>
+    DominatorReachableOverflow = 33,
+    /// <summary>
+    /// Dense <c>int32[]</c> of every section id the build <i>intended</i> to write, recorded when
+    /// each section was opened rather than when it closed. The TOC lists only sections that closed
+    /// successfully, so on its own it cannot distinguish "this build wasn't asked to produce that
+    /// section" from "that section's write failed and was downgraded to a warning" — diffing it
+    /// against this manifest can (docs/cache/cache-format-clean-slate-redesign.md §10.5).
+    /// </summary>
+    SectionManifest = 34,
 }
 
 /// <summary>

@@ -805,52 +805,85 @@ CSR (§2) and the dominator decision (§4) stay out of it and take their own bum
 
 ---
 
-## 14. ✅ v6 part 1 — narrowed `ObjectSizes` shipped
+## 14. ✅ v6 shipped in full — 852.4 → 687.7 MiB
 
-The first of § 13.4's three levers is in. `ObjectSizes` stored a fixed 8 bytes per object; it now
-stores the narrowest of 2, 4 or 8 that the dump's own size distribution allows, with the values that
-don't fit moved to the new `ObjectSizeOverflow` section. Format version bumped 5 → 6.
+All three of § 13.4's levers plus the § 10.5 manifest rider are in, on one format bump (5 → 6).
+Measured on a cold rebuild of the reference dump, then confirmed by a second run taking the
+cache-hit path:
 
-Measured on a cold rebuild of the reference dump:
-
-| | Bytes | MiB | Per record |
+| Section | Before | After | Per record |
 |---|---:|---:|---:|
-| `ObjectSizes` before | 116,961,296 | 111.54 | 8.00 B |
-| `ObjectSizes` after | 29,240,324 | 27.89 | **2.00 B** |
-| `ObjectSizeOverflow` (new) | 46,116 | 0.04 | 3,843 escaped records — **0.0263%** |
-| **`cache.bin`** | 893,783,813 → **806,108,957** | 852.4 → **768.8** | **−83.6 MiB (−9.8%)** |
+| `ObjectSizes` | 116,961,296 B — 111.54 MiB | 29,240,324 B — **27.89 MiB** | 8 → **2 B** |
+| `ObjectAddresses` | 116,961,296 B — 111.54 MiB | 58,480,648 B — **55.77 MiB** | 8 → **4 B** |
+| `DominatorReachableAddresses` | 53,491,920 B — 51.01 MiB | 26,745,960 B — **25.51 MiB** | 8 → **4 B** |
+| `ObjectAddressBlockBases` (new) | — | 114,224 B — 0.11 MiB | 14,278 blocks |
+| `DominatorReachableBlockBases` (new) | — | 52,240 B — 0.05 MiB | 6,530 blocks |
+| `ObjectSizeOverflow` (new) | — | 46,116 B — 0.04 MiB | **3,843** escapes (0.0263%) |
+| `DominatorReachableOverflow` (new) | — | 14,952 B — 0.01 MiB | **1,246** escapes (0.0186%) |
+| `ObjectAddressOverflow` (new) | — | 192 B | **16** escapes (0.00011%) |
+| `SectionManifest` (new) | — | 120 B | 30 section ids |
+| **`cache.bin`** | 893,783,813 B — 852.4 MiB | **721,064,269 B — 687.7 MiB** | **−164.7 MiB (−19.3%)**, 24 → 30 sections |
 
-The escape count came back at exactly the 3,843 predicted statically in § 13.2, and the chosen width
-matches the prediction too — the writer's own scan counters reproduce what the offline column scan
-found.
+**Every figure predicted in § 13.2 came back exactly** — all three widths, all three escape counts
+(3,843 / 16 / 1,246), both block counts, and the 687.7 MiB total. The writer's own in-scan counters
+reproduce what the offline column scan found, which is the useful result here: the static
+prediction method itself is validated, not just this batch's outcome.
 
-**Width selection is a writer decision, recovered by readers from the TOC.** Two counters per
-segment during the heap scan (values ≥ 2¹⁶−1 and ≥ 2³²−1) feed a cost model at container-write time
-that minimises `records × width + escapes × 12`, subject to an escape rate under 1% so the streaming
-decoder's escape branch stays predictable. Nothing about the choice is stored: readers recover it as
-`Length / RecordCount`, so a dump whose sizes genuinely need 8 bytes writes the pre-v6 column and is
-read by the pre-v6 path with no flag anywhere.
+**Where the numbers land against the whole redesign.** The reference `cache.bin` started at
+1,398.3 MiB. `ForwardEdge*` removal took it to 935.9, the `MethodTable` dictionary to 852.4, and v6
+to **687.7 MiB — 49.2% of where it began**, with no compression written yet. The reverse edge index
+is now 49.0% of the file and the dominator tree 26.6%; base columns have fallen to 18.0%.
+
+**Widths are writer decisions, recovered by readers from the TOC.** For `ObjectSizes`, two counters
+per segment during the heap scan (values ≥ 2¹⁶−1 and ≥ 2³²−1) feed a cost model at container-write
+time that minimises `records × width + escapes × 12`, subject to an escape rate under 1% so the
+streaming decoder's escape branch stays predictable. The address columns need no such choice — the
+delta is always 4 bytes and anything that doesn't fit escapes. Nothing about either is stored:
+readers recover the width as `Length / RecordCount`, so a column that couldn't be narrowed is
+written and read as the pre-v6 layout with no flag anywhere.
+
+**The manifest closes the rest of the fast-path gap.** `CacheContainerWriter` records a section id
+when it *opens*, not when it closes, and writes the accumulated set as the last section. That is the
+one thing the TOC structurally cannot express, because it only lists sections that closed. The
+cache-hit path now rejects a container whose manifest lists a section the TOC doesn't — which is
+exactly the aborted-satellite-write case that previously left a permanently degraded cache in place.
+Verified both ways: a healthy container reports no lost sections and takes the cache-hit path, and a
+container with a deliberately aborted section reports it.
 
 ### 14.1 Correctness verification
 
-The escaped population is 0.026% of records, which is well under what the existing every-100,000th
-sampling in `HeapAnalysisCacheObjectMetadataDiscrepancyTests` would be expected to hit even once.
-A dedicated real-dump test (`NarrowSizeColumnRealDumpTests`) therefore checks **every** escaped
-record rather than a sample: it builds a fresh index, reads back all 14.6M entries, and for each of
-the 3,843 records at or above the sentinel compares the index's size against live
-`ClrObject.Size`. Zero mismatches, and the count read back matches the overflow section's record
-count exactly — a sentinel silently surviving as a real size is the failure mode that would
-otherwise be invisible.
+Escaped records are 0.026% of sizes and 0.0001% of addresses — well under what the existing
+every-100,000th sampling in `HeapAnalysisCacheObjectMetadataDiscrepancyTests` would be expected to
+hit even once. A dedicated real-dump test (`NarrowColumnsRealDumpTests`) therefore checks **every**
+escaped record rather than a sample. It builds a fresh index, reads back all 14,620,162 entries, and:
 
-Also re-run green afterwards: `HeapAnalysisCacheObjectMetadataDiscrepancyTests` (disk mode,
-in-memory mode and live `heap.GetObject` agreeing) and `ObjectAddressLookupDiscrepancyTests`, plus
-1,045 unit tests including round-trip cases at all three widths, a mid-column range enumeration that
-exercises cursor seeding, and a narrowed-column-without-its-overflow-section case that must be
-rejected rather than degraded.
+- compares each of the 3,843 escaped sizes against live `ClrObject.Size` — 0 mismatches, and the
+  count read back at or above the sentinel matches the overflow section's record count exactly;
+- cross-checks 293 records between the two decode paths, since a streamed entry comes through
+  `ZeroCopyColumnReader` while `ObjectAddressLookup` reaches the same record through a binary search,
+  and both have to resolve the same block delta and escape table — 0 disagreements;
+- asserts the container reports no lost sections.
 
-### 14.2 Still open in v6
+The dominator column's encoding is exercised end-to-end by the existing real-dump tests, which all
+go through the production `DominatorReachableAddressWriter`: `DominatorAnalyzerExactTreeRealDumpTests`
+(the tree against ground truth), `StaticRootLeakDetectorDominatorTreeDiscrepancyTests` (the child
+index via `EnumerateRetainedSet`), `ObjectAddressLookupDiscrepancyTests`,
+`HeapAnalysisCacheObjectMetadataDiscrepancyTests` and `SegmentIndexBuildDiscrepancyTests` — all
+green, run one at a time.
 
-`ObjectAddresses` and `DominatorReachableAddresses` block-delta encoding (§ 13.2, a further
-55.7 + 25.4 MiB) and the section manifest rider
-([format doc §10.5](cache-format-clean-slate-redesign.md)). Both ride this same version bump — the
-cache is already invalidated, so they cost nothing extra to land now.
+Two full CLI runs on the reference dump close it out: a cold one producing the 687.7 MiB container
+and a full report in 93.7 s, and a second that logs `index cache hit`, confirming the new manifest
+check doesn't reject a healthy container.
+
+1,054 unit tests pass, including round-trip cases at all three size widths, deltas too large for
+4 bytes, a descending step, a mid-column range enumeration that exercises escape-cursor seeding in
+both encodings, binary-search probes either side of a block boundary, and both
+narrowed-column-without-its-escape-table and delta-column-without-its-block-bases cases, which must
+be rejected rather than silently decoded.
+
+### 14.2 What v6 deliberately left out
+
+`ObjectGenerations` bit-packing (~10.4 MiB) stays out — 1.2% of the file is not worth breaking the
+fixed-stride zero-copy read for. Everything else on § 13.1's list is a later bump: the dominator
+decision (v7, ~98 or ~46 MiB), CSR (v8, ~245 MiB), and block compression (v9), per
+[format doc §7.1.1](cache-format-clean-slate-redesign.md).

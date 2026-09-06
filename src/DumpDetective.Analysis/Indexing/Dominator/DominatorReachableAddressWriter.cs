@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 
+using DumpDetective.Analysis.Indexing.Columns;
 using DumpDetective.Analysis.Indexing.Container;
 
 namespace DumpDetective.Analysis.Indexing.Dominator;
@@ -23,17 +24,37 @@ internal static class DominatorReachableAddressWriter
     /// already is when <c>captureSortedAddresses: true</c>. Not re-sorted here; <see cref="DominatorReachableAddressReader"/>'s binary
     /// search depends on this.
     /// </param>
+    /// <remarks>
+    /// Format v6 stores a 4-byte delta from a per-block base rather than the full address
+    /// (docs/cache/cache-format-clean-slate-redesign.md §10.4), so this writes three sections, not
+    /// one. The column is small enough to encode in a single pass over the caller's list — no
+    /// scratch files involved, unlike the object columns.
+    /// </remarks>
     public static void Write(CacheContainerWriter containerWriter, IReadOnlyList<ulong> sortedAddresses)
     {
+        List<ulong> blockBases = new(BlockDeltaColumn.BlockCountFor(sortedAddresses.Count));
+        List<(uint RecordIndex, ulong Value)> overflow = [];
+
         containerWriter.BeginSection(CacheSectionId.DominatorReachableAddresses);
 
-        Span<byte> buf = stackalloc byte[8];
-        foreach (ulong address in sortedAddresses)
+        Span<byte> buf = stackalloc byte[BlockDeltaColumn.DeltaWidth];
+        for (int row = 0; row < sortedAddresses.Count; row++)
         {
-            BinaryPrimitives.WriteUInt64LittleEndian(buf, address);
+            uint delta = BlockDeltaColumn.Encode(sortedAddresses[row], row, blockBases, overflow);
+            BinaryPrimitives.WriteUInt32LittleEndian(buf, delta);
             containerWriter.Stream.Write(buf);
         }
 
         containerWriter.EndSection(sortedAddresses.Count);
+
+        containerWriter.BeginSection(CacheSectionId.DominatorReachableBlockBases);
+        uint basesChecksum = BlockDeltaColumn.WriteBlockBases(containerWriter.Stream, blockBases, BlockBaseWriteBufferSize);
+        containerWriter.EndSection(blockBases.Count, basesChecksum);
+
+        containerWriter.BeginSection(CacheSectionId.DominatorReachableOverflow);
+        uint overflowChecksum = ColumnOverflowTable.Write(containerWriter.Stream, overflow, BlockBaseWriteBufferSize);
+        containerWriter.EndSection(overflow.Count, overflowChecksum);
     }
+
+    private const int BlockBaseWriteBufferSize = 64 * 1024;
 }

@@ -29,6 +29,7 @@ internal sealed class CacheContainerWriter : IDisposable
     private readonly IProgress<AnalyzerProgressReport>? _progress;
     private readonly FileStream _stream;
     private readonly List<CacheTocEntry> _entries = new(ReservedSectionCount);
+    private readonly HashSet<CacheSectionId> _intendedSections = new(ReservedSectionCount);
 
     private CacheSectionId _activeSectionId;
     private long _activeSectionStart;
@@ -78,6 +79,10 @@ internal sealed class CacheContainerWriter : IDisposable
         _activeSectionId = id;
         _activeSectionStart = _stream.Position;
         _sectionOpen = true;
+
+        // Recorded on open, not on close, which is the whole point: a section that opens and then
+        // aborts is exactly the case the TOC can't distinguish from one that was never attempted.
+        _intendedSections.Add(id);
     }
 
     /// <summary>
@@ -182,6 +187,28 @@ internal sealed class CacheContainerWriter : IDisposable
         }
     }
 
+    /// <summary>
+    /// Writes the ids of every section this build opened, itself included, as the last section
+    /// before the TOC. See <see cref="CacheSectionId.SectionManifest"/> for why open rather than
+    /// close is the right moment to have recorded them.
+    /// </summary>
+    private void WriteSectionManifest()
+    {
+        BeginSection(CacheSectionId.SectionManifest);
+
+        CacheSectionId[] ids = [.. _intendedSections.Order()];
+        var hasher = new XxHash32();
+        Span<byte> buf = stackalloc byte[sizeof(int)];
+        foreach (CacheSectionId id in ids)
+        {
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(buf, (int)id);
+            _stream.Write(buf);
+            hasher.Append(buf);
+        }
+
+        EndSection(ids.Length, hasher.GetCurrentHashAsUInt32());
+    }
+
     private uint ComputeChecksum(long start, long length)
     {
         bool reportProgress = _progress is not null && length >= ChecksumProgressThresholdBytes;
@@ -234,6 +261,7 @@ internal sealed class CacheContainerWriter : IDisposable
         if (_sectionOpen)
             throw new InvalidOperationException($"Section {_activeSectionId} was never closed.");
 
+        WriteSectionManifest();
         _stream.Flush();
 
         long tocOffset = CacheFileHeader.Size;

@@ -125,6 +125,11 @@ internal static class CacheSectionCatalog
         new(CacheSectionId.RootStackThreadAttribution, "RootStackThreadAttribution", CacheSectionRequirement.Conditional),
         new(CacheSectionId.ObjectTypeDictionary, "ObjectTypeDictionary", CacheSectionRequirement.Required),
         new(CacheSectionId.ObjectSizeOverflow, "ObjectSizeOverflow", CacheSectionRequirement.Conditional),
+        new(CacheSectionId.ObjectAddressBlockBases, "ObjectAddressBlockBases", CacheSectionRequirement.Required),
+        new(CacheSectionId.ObjectAddressOverflow, "ObjectAddressOverflow", CacheSectionRequirement.Required),
+        new(CacheSectionId.DominatorReachableBlockBases, "DominatorReachableBlockBases", CacheSectionRequirement.Conditional),
+        new(CacheSectionId.DominatorReachableOverflow, "DominatorReachableOverflow", CacheSectionRequirement.Conditional),
+        new(CacheSectionId.SectionManifest, "SectionManifest", CacheSectionRequirement.Required),
     ];
 
     /// <summary>

@@ -15,34 +15,26 @@ namespace DumpDetective.Analysis.Indexing.Dominator;
 /// </summary>
 internal sealed unsafe class DominatorChildIndexReader : IDisposable
 {
-    private readonly MemoryMappedViewAccessor _addressesAccessor;
+    private readonly DominatorRowIndex _rows;
     private readonly MemoryMappedViewAccessor _childOffsetsAccessor;
     // Nullable: legitimately absent (zero-length, not missing/corrupt) whenever nothing in the
     // whole graph has any dominator-tree children at all — e.g. every reachable node is a direct
     // GC root with no children of its own.
     private readonly MemoryMappedViewAccessor? _childAddressesAccessor;
-    private readonly byte* _addressesPtr;
     private readonly byte* _childOffsetsPtr;
     private readonly byte* _childAddressesPtr;
-    private readonly long _rowCount;
     private bool _disposed;
 
     private DominatorChildIndexReader(
-        MemoryMappedViewAccessor addressesAccessor,
+        DominatorRowIndex rows,
         MemoryMappedViewAccessor childOffsetsAccessor,
-        MemoryMappedViewAccessor? childAddressesAccessor,
-        long rowCount)
+        MemoryMappedViewAccessor? childAddressesAccessor)
     {
-        _addressesAccessor = addressesAccessor;
+        _rows = rows;
         _childOffsetsAccessor = childOffsetsAccessor;
         _childAddressesAccessor = childAddressesAccessor;
-        _rowCount = rowCount;
 
         byte* p = null;
-        _addressesAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
-        _addressesPtr = p + _addressesAccessor.PointerOffset;
-
-        p = null;
         _childOffsetsAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
         _childOffsetsPtr = p + _childOffsetsAccessor.PointerOffset;
 
@@ -64,18 +56,13 @@ internal sealed unsafe class DominatorChildIndexReader : IDisposable
     {
         reader = null;
 
-        if (!container.TryOpenSectionAccessor(CacheSectionId.DominatorReachableAddresses, out MemoryMappedViewAccessor? addressesAccessor, out long addressesLength)
-            || addressesAccessor is null || addressesLength == 0)
-        {
+        if (!DominatorRowIndex.TryOpen(container, out DominatorRowIndex? rows) || rows is null)
             return false;
-        }
-
-        long rowCount = addressesLength / sizeof(ulong);
 
         if (!container.TryOpenSectionAccessor(CacheSectionId.DominatorChildOffsets, out MemoryMappedViewAccessor? childOffsetsAccessor, out long childOffsetsLength)
-            || childOffsetsAccessor is null || childOffsetsLength != (rowCount + 1) * sizeof(int))
+            || childOffsetsAccessor is null || childOffsetsLength != (rows.RowCount + 1) * sizeof(int))
         {
-            addressesAccessor.Dispose();
+            rows.Dispose();
             childOffsetsAccessor?.Dispose();
             return false;
         }
@@ -85,7 +72,7 @@ internal sealed unsafe class DominatorChildIndexReader : IDisposable
         // distinguishes that from a genuinely absent/corrupt section (it would have returned false).
         container.TryOpenSectionAccessor(CacheSectionId.DominatorChildAddresses, out MemoryMappedViewAccessor? childAddressesAccessor, out _);
 
-        reader = new DominatorChildIndexReader(addressesAccessor, childOffsetsAccessor, childAddressesAccessor, rowCount);
+        reader = new DominatorChildIndexReader(rows, childOffsetsAccessor, childAddressesAccessor);
         return true;
     }
 
@@ -101,7 +88,7 @@ internal sealed unsafe class DominatorChildIndexReader : IDisposable
 
         children = Array.Empty<ulong>();
 
-        long row = FindRow(address);
+        long row = _rows.FindRow(address);
         if (row < 0)
             return false;
 
@@ -117,26 +104,6 @@ internal sealed unsafe class DominatorChildIndexReader : IDisposable
         return true;
     }
 
-    private long FindRow(ulong address)
-    {
-        long lo = 0, hi = _rowCount - 1;
-        while (lo <= hi)
-        {
-            long mid = lo + (hi - lo) / 2;
-            ulong candidate = ReadUInt64(_addressesPtr, mid * sizeof(ulong));
-
-            if (candidate == address)
-                return mid;
-
-            if (candidate < address)
-                lo = mid + 1;
-            else
-                hi = mid - 1;
-        }
-
-        return -1;
-    }
-
     private static int ReadInt32(byte* basePtr, long offset) => Unsafe.ReadUnaligned<int>(basePtr + offset);
     private static ulong ReadUInt64(byte* basePtr, long offset) => Unsafe.ReadUnaligned<ulong>(basePtr + offset);
 
@@ -146,9 +113,8 @@ internal sealed unsafe class DominatorChildIndexReader : IDisposable
             return;
         _disposed = true;
 
-        _addressesAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
+        _rows.Dispose();
         _childOffsetsAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
-        _addressesAccessor.Dispose();
         _childOffsetsAccessor.Dispose();
 
         if (_childAddressesAccessor is not null)

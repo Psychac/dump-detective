@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 
+using DumpDetective.Analysis.Indexing.Columns;
 using DumpDetective.Analysis.Indexing.Container;
 
 namespace DumpDetective.Tests.Helpers;
@@ -62,6 +63,37 @@ internal static class ObjectColumnSectionsWriter
         writer.BeginSection(CacheSectionId.ObjectMethodTables);
         writer.Stream.Write(buffer, 0, buffer.Length);
         writer.EndSection(methodTables.Length);
+    }
+
+    /// <summary>
+    /// Writes <c>ObjectAddresses</c> block-delta encoded plus its <c>ObjectAddressBlockBases</c> and
+    /// <c>ObjectAddressOverflow</c> sections, the way the format-v6 writer does. Shares
+    /// <see cref="BlockDeltaColumn.Encode"/> with production rather than re-deriving the encoding,
+    /// so a change to it can't leave the tests validating the old shape.
+    /// </summary>
+    public static void WriteBlockDeltaAddressColumns(CacheContainerWriter writer, ulong[] addresses)
+    {
+        var blockBases = new List<ulong>();
+        var overflow = new List<(uint RecordIndex, ulong Value)>();
+        byte[] buffer = new byte[addresses.Length * BlockDeltaColumn.DeltaWidth];
+
+        for (int i = 0; i < addresses.Length; i++)
+        {
+            uint delta = BlockDeltaColumn.Encode(addresses[i], i, blockBases, overflow);
+            BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(i * BlockDeltaColumn.DeltaWidth), delta);
+        }
+
+        writer.BeginSection(CacheSectionId.ObjectAddresses);
+        writer.Stream.Write(buffer, 0, buffer.Length);
+        writer.EndSection(addresses.Length);
+
+        writer.BeginSection(CacheSectionId.ObjectAddressBlockBases);
+        uint basesChecksum = BlockDeltaColumn.WriteBlockBases(writer.Stream, blockBases, 64 * 1024);
+        writer.EndSection(blockBases.Count, basesChecksum);
+
+        writer.BeginSection(CacheSectionId.ObjectAddressOverflow);
+        uint overflowChecksum = ColumnOverflowTable.Write(writer.Stream, overflow, 64 * 1024);
+        writer.EndSection(overflow.Count, overflowChecksum);
     }
 
     /// <summary>

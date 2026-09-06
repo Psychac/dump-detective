@@ -35,10 +35,12 @@ conclusions the two design docs originally reached.
   **What remains:** the original fix ("confirm every section the *previous* build wrote") turned
   out to be unimplementable as stated — the TOC only lists sections that were successfully
   closed, so a lost section leaves nothing to diff against. Catching a lost *conditional*
-  section (`Handles`, `Tasks`, the edge indices, the dominator sections) requires the writer to
-  persist a manifest of intended sections, which is an additive format change — **scheduled as a
-  rider on format v6**, see [cache-format-clean-slate-redesign.md](cache-format-clean-slate-redesign.md)
-  § 10.5, which needs a manifest section for its per-column encoding parameters anyway. Note also that
+  section (`Handles`, `Tasks`, the edge indices, the dominator sections) required the writer to
+  persist a manifest of intended sections, which is a format change — **✅ shipped as a rider on
+  format v6**, see [cache-format-clean-slate-redesign.md](cache-format-clean-slate-redesign.md)
+  § 10.5: `CacheContainerWriter` records each id at `BeginSection`, so an aborted write is now
+  distinguishable from a section that was never attempted, and the cache-hit path rejects the
+  former. Note also that
   presence is checked but **not** checksum validity — validating every section here would hash
   the whole file on every cache hit, defeating the per-session memoization. Full reasoning in
   [cache-implementation-clean-slate-redesign.md](cache-implementation-clean-slate-redesign.md)

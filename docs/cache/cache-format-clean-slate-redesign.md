@@ -834,7 +834,10 @@ same way §3's `TypeId` width is recovered from the dictionary's record count. T
 fallback for free — a column the writer couldn't narrow is simply written at `w = 8` and read as
 today's plain column, with no flag anywhere.
 
-### 10.3 `ObjectAddresses` — 4-byte block delta, unscaled
+### 10.3 `ObjectAddresses` — 4-byte block delta, unscaled ✅ SHIPPED (format v6)
+
+> Landed as specified: 111.54 → 55.77 MiB, 14,278 block bases, 16 escaped records.
+> See [cache-redesign-measurements.md](cache-redesign-measurements.md) § 14.
 
 The stored value is `address − blockBase` at width 4, with one base per **N = 1024 records**.
 Measured escape rates: **16 records of 14.6M** on the reference dump (0.00011%, all of them at the
@@ -858,13 +861,19 @@ doesn't fit and escapes. Global monotonicity happens to hold on both dumps and i
 measurements, but nothing here depends on it, and after dropping the scaling there is no alignment
 assumption left either — the encoding is total over `ulong`.
 
-### 10.4 `DominatorReachableAddresses` — 4-byte block delta
+### 10.4 `DominatorReachableAddresses` — 4-byte block delta ✅ SHIPPED (format v6)
+
+> Landed as specified: 51.01 → 25.51 MiB, 6,530 block bases, 1,246 escaped records.
 
 Same primitive, same encoding, same N: 6,686,490 rows, 6,530 blocks, **1,246 escaped records**
 (0.019%), **25.44 MiB saved**. It is binary-searched by `DominatorScalarReader`, so it needs the
 same point-decode path as `ObjectAddresses` and gets it from the shared primitive for free.
 
-### 10.5 Section manifest — the rider
+### 10.5 Section manifest — the rider ✅ SHIPPED (format v6)
+
+> Landed as specified, 120 bytes. Recorded at `BeginSection`, so an aborted write is now
+> distinguishable from a section the build never attempted; the cache-hit path rejects a container
+> whose manifest lists an id the TOC doesn't.
 
 [measurements §10.2](cache-redesign-measurements.md) argues cheap breaking changes should ride the
 next bump rather than pay for their own. v6 carries one: a manifest section listing the sections

@@ -987,6 +987,12 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                         fwdTargets: rowWalk.FwdTargets,
                         revOffsets: rowWalk.RevOffsets,
                         revTargets: rowWalk.RevTargets);
+
+                    // rowWalk stays reachable as this method's local for the rest of the build (its
+                    // RevOffsets/RevTargets/VisitedBitmap are read again below), so its own copy of
+                    // the forward-CSR reference must be dropped explicitly — walkResult now owns the
+                    // arrays going forward. See RowKeyedWalkResult.ReleaseForwardEdgeArrays.
+                    rowWalk.ReleaseForwardEdgeArrays();
                 }
                 finally
                 {
@@ -1282,9 +1288,14 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         {
             using (metadataLookup)
             {
-                // §10.8: one sort + sequential merge across all segments instead of one random-access
-                // binary search per node — see ResolveBatch's doc comment for the measured rationale.
-                metadataLookup!.ResolveBatch(walkResult.Addresses, methodTables, shallowSizes, cancellationToken);
+                // §10.8: sequential merge across all segments instead of one random-access binary
+                // search per node — see ResolveBatch's doc comment for the measured rationale.
+                // walkResult.Addresses is RowKeyedGraphWalker.BuildCsr's row-ordered (hence
+                // address-ordered) node ids, so the sorted-input fast path applies: no O(N log N)
+                // sort, no ~700 MB sort/order-tracking scratch at N=58.3M.
+                metadataLookup!.ResolveBatch(
+                    walkResult.Addresses, methodTables, shallowSizes, cancellationToken,
+                    assumeAscendingAddresses: true);
 
                 for (int id = 0; id < walkResult.NodeCount; id++)
                 {
@@ -1319,6 +1330,13 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         LogPhase("metadata resolution (ScratchFileObjectMetadataLookup / live-ClrMD fallback)");
 
         var graph = new ReachableGraph(walkResult, methodTables, shallowSizes, generationTags);
+
+        // walkResult (this method's parameter) aliases the same forward-CSR arrays graph just took
+        // — it stays reachable for the rest of this method's stack frame regardless of what graph's
+        // own release later clears, so without this that release frees nothing. See
+        // ReachableGraphWalkResult.ReleaseForwardEdgeArrays.
+        walkResult.ReleaseForwardEdgeArrays();
+
         DominatorTreeComputeResult tree = DominatorTreeComputer.Compute(graph, cancellationToken);
         LeafFoldResult fold = tree.LeafFold;
         int n = graph.NodeCount;

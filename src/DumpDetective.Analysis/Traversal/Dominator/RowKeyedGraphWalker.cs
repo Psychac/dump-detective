@@ -367,10 +367,24 @@ internal sealed class RowKeyedWalkResult
     public required int[] OutDegree { get; init; }
     public required int[] InDegree { get; init; }
     public required bool[] IsRoot { get; init; }
-    public required int[] FwdOffsets { get; init; }
-    public required int[] FwdTargets { get; init; }
+    public required int[] FwdOffsets { get; internal set; }
+    public required int[] FwdTargets { get; internal set; }
     public required int[] RevOffsets { get; init; }
     public required int[] RevTargets { get; init; }
+
+    /// <summary>
+    /// Drops this result's own copy of the forward-CSR reference once the
+    /// <see cref="ReachableGraphWalkResult"/> adapter built from it (see the call site in
+    /// <c>DiskBackedObjectIndexWriter.Build</c>) has its own copy — this object stays reachable as
+    /// the caller's <c>rowWalk</c> local for the rest of the build (its <c>RevOffsets</c>/
+    /// <c>RevTargets</c>/<c>VisitedBitmap</c> are read again later), so without this the forward
+    /// arrays it aliases stay live right alongside every downstream copy of them.
+    /// </summary>
+    internal void ReleaseForwardEdgeArrays()
+    {
+        FwdOffsets = Array.Empty<int>();
+        FwdTargets = Array.Empty<int>();
+    }
 
     public static RowKeyedWalkResult MembershipOnly(ulong[] visited, long objectRowCount, long reachableCount) =>
         new()

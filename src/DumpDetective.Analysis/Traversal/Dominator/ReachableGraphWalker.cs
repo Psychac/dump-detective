@@ -347,10 +347,24 @@ internal sealed class ReachableGraphWalkResult
     /// they have an "invisible" incoming edge from the virtual root the CSR doesn't represent.
     /// </summary>
     public bool[] IsRoot { get; }
-    public int[] FwdOffsets { get; }
-    public int[] FwdTargets { get; }
+    public int[] FwdOffsets { get; private set; }
+    public int[] FwdTargets { get; private set; }
     public int[] RevOffsets { get; }
     public int[] RevTargets { get; }
+
+    /// <summary>
+    /// Drops this result's own copy of the forward-CSR reference once <see cref="ReachableGraph"/>
+    /// has taken over the arrays — see <see cref="ReachableGraph.ReleaseForwardEdgeArrays"/>'s doc
+    /// comment. Without this, <c>ReachableGraph</c>'s release frees nothing: its constructor aliases
+    /// (not copies) these arrays, and this result stays reachable as a local in the caller for the
+    /// rest of the build, so the arrays are never actually unreachable. Measured: 745.3 MB (4x(N+1)+
+    /// 4xE at N=58.3M) freeing exactly 0.0 MB before this existed.
+    /// </summary>
+    internal void ReleaseForwardEdgeArrays()
+    {
+        FwdOffsets = Array.Empty<int>();
+        FwdTargets = Array.Empty<int>();
+    }
 
     public ReachableGraphWalkResult(
         int nodeCount,

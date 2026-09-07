@@ -345,15 +345,35 @@ internal sealed class ScratchFileObjectMetadataLookup : IObjectRowResolver, IDis
     /// Stage B's metadata resolution — its random-access binary search per node repeatedly re-walks
     /// each segment's mmap and thrashes the page cache at multi-million-node scale, even though every
     /// segment is confirmed address-sorted (see <see cref="VerifySegmentMonotonicity"/>). This resolves
-    /// every <paramref name="addresses"/> entry with one O(N log N) sort plus a single O(N + total
-    /// records) sequential merge across all segments (also sorted by <see cref="FindSegment"/>'s same
-    /// start-address order) instead of N random-access binary searches — addresses not covered by any
-    /// segment are left as the caller's existing default in <paramref name="methodTablesOut"/>/
-    /// <paramref name="sizesOut"/>, same "not an error" contract as <see cref="TryGetEntry"/>.
+    /// every <paramref name="addresses"/> entry with a single O(N + total records) sequential merge
+    /// across all segments (also sorted by <see cref="FindSegment"/>'s same start-address order)
+    /// instead of N random-access binary searches — addresses not covered by any segment are left as
+    /// the caller's existing default in <paramref name="methodTablesOut"/>/<paramref name="sizesOut"/>,
+    /// same "not an error" contract as <see cref="TryGetEntry"/>.
+    ///
+    /// <para>When <paramref name="assumeAscendingAddresses"/> is <see langword="true"/> — true of the
+    /// production caller, whose <c>addresses</c> come from <c>RowKeyedGraphWalker.BuildCsr</c>'s
+    /// row-ordered (hence address-ordered) node ids — the merge reads and writes
+    /// <paramref name="addresses"/>/<paramref name="methodTablesOut"/>/<paramref name="sizesOut"/> in
+    /// place, needing no O(N log N) sort and no <c>ulong[]</c>+<c>int[]</c> scratch to track original
+    /// positions (~700 MB at N=58.3M). The assumption is verified as a byproduct of the merge itself —
+    /// one comparison against the previous iteration's already-loaded address, not a separate pass — so
+    /// unlike <see cref="VerifyMonotonicity"/> this check is not gated behind a diagnostics flag: it
+    /// always runs, at zero extra cost, and throws rather than silently resolving wrong metadata if the
+    /// caller's ordering guarantee is ever violated.</para>
     /// </summary>
-    public void ResolveBatch(ulong[] addresses, ulong[] methodTablesOut, ulong[] sizesOut, CancellationToken cancellationToken)
+    public void ResolveBatch(
+        ulong[] addresses, ulong[] methodTablesOut, ulong[] sizesOut,
+        CancellationToken cancellationToken,
+        bool assumeAscendingAddresses = false)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (assumeAscendingAddresses)
+        {
+            ResolveBatchAscending(addresses, methodTablesOut, sizesOut, cancellationToken);
+            return;
+        }
 
         int n = addresses.Length;
         var sortedAddresses = new ulong[n];
@@ -398,6 +418,79 @@ internal sealed class ScratchFileObjectMetadataLookup : IObjectRowResolver, IDis
                 queryIdx++;
             }
         }
+    }
+
+    /// <summary>
+    /// Same merge as the general path in <see cref="ResolveBatch"/>, but over <paramref name="addresses"/>
+    /// directly — no sort, no original-position tracking, since input order already is output order.
+    /// Verifies that ordering as it goes; throws immediately (not a delayed/aggregate report) so a
+    /// violation is attributed to the exact index that broke it.
+    /// </summary>
+    private void ResolveBatchAscending(
+        ulong[] addresses, ulong[] methodTablesOut, ulong[] sizesOut, CancellationToken cancellationToken)
+    {
+        int n = addresses.Length;
+
+        // queryIdx only ever advances across this whole method (never resets), so tracking the
+        // previous address it read is a check against the merge's own loop state — not a second pass
+        // over addresses.
+        ulong previousAddress = 0;
+        int queryIdx = 0;
+        foreach (OpenSegment segment in _segmentsByStart)
+        {
+            while (queryIdx < n && addresses[queryIdx] < segment.Entry.Start)
+            {
+                VerifyAscending(addresses, queryIdx, ref previousAddress);
+                queryIdx++;
+            }
+
+            long recordIndex = 0;
+            long recordCount = segment.Entry.RecordCount;
+            while (queryIdx < n && addresses[queryIdx] < segment.Entry.End)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                ulong queryAddress = addresses[queryIdx];
+                VerifyAscending(addresses, queryIdx, ref previousAddress);
+
+                while (recordIndex < recordCount &&
+                    segment.AddressAccessor.ReadUInt64(recordIndex * ColumnSize) < queryAddress)
+                {
+                    recordIndex++;
+                }
+
+                if (recordIndex >= recordCount)
+                    break;
+
+                if (segment.AddressAccessor.ReadUInt64(recordIndex * ColumnSize) == queryAddress)
+                {
+                    long byteOffset = recordIndex * ColumnSize;
+                    methodTablesOut[queryIdx] = segment.MethodTableAccessor.ReadUInt64(byteOffset);
+                    sizesOut[queryIdx] = segment.SizeAccessor.ReadUInt64(byteOffset);
+                }
+
+                queryIdx++;
+            }
+        }
+
+        // Any addresses past the last segment's End never enter either while loop above (queryIdx
+        // stops advancing once no segment can match), so they'd otherwise go unverified.
+        for (int i = queryIdx; i < n; i++)
+            VerifyAscending(addresses, i, ref previousAddress);
+    }
+
+    private static void VerifyAscending(ulong[] addresses, int index, ref ulong previousAddress)
+    {
+        ulong current = addresses[index];
+        if (current < previousAddress)
+        {
+            throw new InvalidOperationException(
+                $"ResolveBatch received out-of-order addresses at index {index}: " +
+                $"0x{current:X} < previous 0x{previousAddress:X}, but " +
+                $"assumeAscendingAddresses=true requires strictly non-decreasing input.");
+        }
+
+        previousAddress = current;
     }
 
     public void Dispose()

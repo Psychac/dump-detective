@@ -6,6 +6,7 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Indexing.Dominator;
 using DumpDetective.Analysis.Indexing.ReverseIndex;
 using DumpDetective.Analysis.Indexing.ForwardIndex;
+using DumpDetective.Analysis.Indexing.Columns;
 using DumpDetective.Analysis.Indexing.Container;
 using DumpDetective.Core.Enums;
 using System.Linq;
@@ -151,6 +152,30 @@ namespace DumpDetective.Analysis.Cache
 
         public long[]? TryGetGlobalSizeBuckets() =>
             TryGetHeapIndex(out HeapIndexBuildResult? heapIndex) ? heapIndex.GlobalSizeBuckets : null;
+
+        // Read once per run and remembered, including the failure: the section is tens of KB and
+        // several analyzers want it, so re-reading per caller would reintroduce exactly the
+        // redundancy the container session exists to remove.
+        private IReadOnlyList<ulong>? _distinctMethodTables;
+        private bool _distinctMethodTablesAttempted;
+
+        public IReadOnlyList<ulong>? TryGetDistinctMethodTables()
+        {
+            if (_distinctMethodTablesAttempted)
+                return _distinctMethodTables;
+
+            _distinctMethodTablesAttempted = true;
+
+            CacheContainerReader? container = _heapIndexCache.GetOrOpenContainerSession();
+            if (container is not null
+                && ObjectColumnSet.TryLoadTypeDictionary(container, out ulong[]? methodTables)
+                && methodTables is not null)
+            {
+                _distinctMethodTables = methodTables;
+            }
+
+            return _distinctMethodTables;
+        }
 
         public IEnumerable<HeapEntry> EnumerateIndexedEntries() => _heapIndexCache.EnumerateIndexedEntries();
 

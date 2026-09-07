@@ -157,7 +157,13 @@ internal sealed class ObjectColumnSet : IDisposable
     /// object on the hottest loop in the codebase, so a hash lookup there would be per-object cost.
     /// 14,003 types is ~112 KB.
     /// </summary>
-    private static bool TryLoadTypeDictionary(CacheContainerReader reader, out ulong[]? methodTables)
+    /// <summary>
+    /// Every distinct <c>MethodTable</c> with at least one live instance, ascending — see
+    /// <see cref="CacheSectionId.ObjectTypeDictionary"/>. Public because it answers "which types
+    /// exist?" on its own, which several analyzers derive by scanning the whole object table
+    /// instead (docs/cache/cache-ideal-design.md §7.7, O8).
+    /// </summary>
+    public static bool TryLoadTypeDictionary(CacheContainerReader reader, out ulong[]? methodTables)
     {
         methodTables = null;
 

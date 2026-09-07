@@ -71,6 +71,8 @@ public sealed class DominatorAnalyzerChainTests
         public IThreadRetentionProvider? TryGetThreadRetentionProvider() => throw new NotSupportedException();
         public long[]? TryGetGlobalSizeBuckets() => throw new NotSupportedException();
 
+        public IReadOnlyList<ulong>? TryGetDistinctMethodTables() => throw new NotSupportedException();
+
         public IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> EnumerateIndexedEntriesAsTuples() => entries;
     }
 

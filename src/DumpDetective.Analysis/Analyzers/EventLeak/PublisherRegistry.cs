@@ -161,7 +161,18 @@ internal sealed class PublisherRegistry
         // looser check here previously meant Pass 2 could silently produce an empty liveMts set
         // — zero instance-field descriptors — for the exact FindEventLeaks fallback branch that
         // then goes on to do a real full heap scan expecting real descriptors.
-        if (cache is HeapAnalysisCache hc && hc.TryGetHeapIndex(out _))
+        // The distinct-MethodTable set is already persisted as ObjectTypeDictionary, so deriving it
+        // by enumerating every object read 166.1 MiB to produce 0.09 MiB on the 27.5 GB dump — a
+        // 1,760x amplification costing 5.28 s of this build's 105.66 s
+        // (docs/cache/cache-ideal-design.md §7.7, O8). The enumeration below stays as the fallback
+        // for a run with no disk index.
+        IReadOnlyList<ulong>? distinctMethodTables = cache?.TryGetDistinctMethodTables();
+        if (distinctMethodTables is not null)
+        {
+            foreach (ulong methodTable in distinctMethodTables)
+                liveMts.Add(methodTable);
+        }
+        else if (cache is HeapAnalysisCache hc && hc.TryGetHeapIndex(out _))
         {
             foreach ((ulong _, ulong methodTable, ulong _) in cache.EnumerateIndexedEntriesAsTuples())
             {

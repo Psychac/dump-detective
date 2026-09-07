@@ -948,10 +948,93 @@ which C.2 does not touch. Anyone reaching for "make large dumps comfortable" nee
 instead, and should read §7.3 item 2 of the dominator integration doc first — a previous attempt
 (`DenseIdMap`) came back 2.6× slower with no peak-memory win.
 
+## Part G — The rebuilt pipeline, measured at 27.5 GB (2026-09-07)
+
+This doc's whole premise is that the format work optimised one axis blind. The rebuild described in
+[cache-ideal-design.md](cache-ideal-design.md) then optimised *this* doc's axes explicitly — and got
+one of them badly wrong. Recorded here because Part D is the baseline it has to be read against.
+
+One cold rebuild, `HEAD` at `71539a09`, private commit sampled once a second.
+
+| Axis | Part D baseline | Rebuilt | Δ |
+|---|---:|---:|---:|
+| Cold wall clock | 1,310.5 s | **1,349.4 s** | +38.9 s (+3.0%) |
+| **Peak private** | **12,976.3 MB** | **12,143 MB** | **−833 MB (−6.4%)** |
+| `cache.bin` | 2,418.1 MiB | **1,627.4 MiB** | −790.7 MiB (−32.7%) |
+
+### G.1 The peak is Lengauer–Tarjan, not the walk
+
+Part D.3 concluded "roughly 6 GB of the 13 GB peak is the walk" and that the walk was therefore the
+lever. The rebuild removed ~3.1 GB of the walk's structures — the `Dictionary<ulong,int>` (2,326 MB)
+and the `edgeFrom`/`edgeTo` `ChunkedBuffer`s (~1,096 MB) — and peak private fell 833 MB.
+
+Sampling private commit through the build says why:
+
+| Point in build | Peak private |
+|---|---:|
+| heap scan | ~3.8–5.0 GB |
+| reachability walk | ~5.4 GB |
+| **dominator stage (LeafFolder + LT), 58,339,932 nodes** | **~10.2 GB** |
+| Leak Candidate Analysis — an *analyzer*, after the build | ~7.8 GB |
+
+**The walk is not the peak and, on this evidence, never was.** D.3's 10.4 GB sample was taken "while
+still inside the reachability walk", which is true but does not make the walk its *cause* — the
+dominator stage that follows it reaches 10.2 GB with the walk's structures already freed.
+
+That is now the second time the walk has been assumed to be the memory problem. §7.3 item 2 of the
+dominator integration doc records the first (`DenseIdMap`, 2.6× slower, no peak win). **Anyone
+reaching for peak memory next should profile `LeafFolder` + `LengauerTarjan` and the analyzers, not
+the index pipeline.**
+
+### G.2 Runtime distribution, and what is missing from it
+
+⚠ **Partial.** The run log was deleted during cleanup before the full per-phase table was extracted.
+These six phases were captured; the remaining ~406 s is unattributed rather than zero.
+
+| Phase | Part D | Rebuilt | Δ |
+|---|---:|---:|---:|
+| `indexing heap` (parallel scan + edge extraction) | 335.5 s | 399.4 s | +63.9 s |
+| `enumerating GC roots` | 200.3 s | 207.2 s | +6.9 s |
+| reachability walk | 213.7 s | **190.1 s** | −23.6 s |
+| **reference-graph build** (new second phase) | — | **+113.5 s** | +113.5 s |
+| dominator metadata resolve | 46.7 s | 26.4 s | −20.3 s |
+| reverse-index CSR build + flush + write | 50.3 s | **6.9 s** | **−43.4 s** |
+| *captured subtotal* | *846.5 s* | *943.5 s* | *+97.0 s* |
+| **unattributed** (analyzers, report, dominator compute) | *464.0 s* | *405.9 s* | — |
+| **total** | **1,310.5 s** | **1,349.4 s** | **+38.9 s** |
+
+Two structural changes are visible directly and are the ones to trust:
+
+- **The reverse CSR build is gone** — 50.3 s of build/flush/write becomes a 6.9 s write, because the
+  walk emits the CSR itself instead of it being rebuilt from hash-partitioned scratch.
+- **The walk is now two phases** — 190.1 s of reachability plus 113.5 s of reference-graph
+  construction, against a single 213.7 s pass. That +90 s net is the price of not holding every edge
+  in memory while ids are assigned, and it is what the ~3.1 GB bought.
+
+**The +63.9 s on `indexing heap` should not be believed.** Nothing in the rebuild touches the
+parallel scan, and §E.7 is explicit that cold wall clock on this machine is comparable only within
+one alternating session. This was a single run against a figure from a different session and a
+different code state, so per-phase deltas of that size are within the drift §E.7 documents
+(ambient free memory moved ~1.4 GB between sessions and shifted wall clock ~14 s with *identical*
+allocation totals). The two structural items above are safe because they are presence/absence of a
+phase, not a small delta on a shared one.
+
+### G.3 What this doc's standing lesson becomes
+
+§16 of the measurements doc said "v9 must be costed on all three axes", after this doc found the
+format work had moved runtime and memory blind. The rebuild did cost all three axes up front — and
+still missed, because it costed the *structures* rather than the *peak*. The sharper form of the
+lesson:
+
+> Sizing a structure tells you what removing it frees. It does not tell you whether the run's peak
+> is anywhere near it. Those are separate measurements, and only the second one predicts the result.
+
 ## Status
 
 | Step | State |
 |---|---|
+| **Part G — rebuilt pipeline measured at 27.5 GB** | ✅ disk −32.7%, runtime +3.0%, **peak private only −6.4%** |
+| **G.1 — peak is LT + analyzers, not the walk** | ⬜ **the open memory lever now; profile it before touching the index pipeline** |
 | A.1 baseline selected (`d1dc4dcc`) — verified at 1,398.3 MB | ✅ |
 | A.5 harness | ✅ |
 | Cell 1 — baseline cold ×6 | ✅ |

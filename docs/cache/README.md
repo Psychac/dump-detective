@@ -74,7 +74,10 @@ for last per an explicit user call rather than measurement ranking it low, is in
   peak from `ReverseEdgeCsrBuilder`'s resident buckets, and deleting a dead per-edge fanout
   dictionary (§C.1) took cold peak 688 MB *below* that. Net against pre-redesign: 24.5% of the disk,
   −10.1% cold time, −10.6% cold peak. Also holds the remaining unbuilt items (§C.2/§C.3) and their
-  gates.
+  gates. **Part G (2026-09-07)** adds the rebuilt pipeline's own measurement: disk −32.7% exactly as
+  predicted, runtime +3.0%, but **peak private only −6.4% against a projected −80%** — the peak turned
+  out to be Lengauer–Tarjan (~10.2 GB at 58.3M nodes) and the analyzers, not the walk. G.1 is the open
+  memory lever.
 
 The two design docs are independent of each other — neither blocks the other. The rebalance doc
 depends on both, and on §7.1.1's ordering in particular: **v9 block compression should be costed on

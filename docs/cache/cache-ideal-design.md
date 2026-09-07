@@ -9,9 +9,9 @@ conflict the earlier wins. That order is *not* the one the shipped v5–v8 seque
 optimised disk with a byte count as its only metric — and it is the single reason this plan reaches
 a different answer.
 
-**Status: measured; O1–O4 shipped (v9), O8 and R1 shipped (v10). R2, R3, O5 not started.** All six
-gating measurements are closed (§7), and three of them killed items that looked good on paper.
-Nothing below waits on further evidence except where marked.
+**Status: O1–O4 shipped (v9); O8 and R1 shipped (v10); O5 built, measured negative and reverted.
+R2/R3 are the only items left, and theirs is the RAM case.** All six gating measurements are closed
+(§7). Four proposed items have now died on measurement — O5, O6, O7 and the sorted BFS frontier.
 
 | | |
 |---|---|
@@ -181,7 +181,7 @@ None of these depend on the rewrite or on each other.
 | ✅ **O2** | `ObjectGenerations` → run-length encoded — **SHIPPED (v9)** | **83.07 MiB [M]** | below, §7.7 |
 | ✅ **O3** | `ReverseEdgeOffsets` → 1-byte degrees + 64-row checkpoints — **SHIPPED (v9)** | **159.96 MiB [D]** | below, §7.7 |
 | ✅ **O4** | Narrow `DominatorRetainedBytes` to 2 B — **SHIPPED (v9)** | **332.59 MiB [M]** | §7.1, §7.7 |
-| **O5** | Overlap root enumeration with the heap scan | **≈50 s [D]** | §7.5 |
+| ❌ **O5** | ~~Overlap root enumeration with the heap scan~~ — **BUILT, MEASURED NEGATIVE, REVERTED** | **−5 s to −2 s [M]** | §7.5, §7.9 |
 | ✅ **O8** | Pass 2a reads `ObjectTypeDictionary` — **SHIPPED** | **5.28 s → 0.01 s [M]**, zero disk | §7.4, §7.8 |
 
 **O1 — shipped.** `DiskBackedObjectIndexWriter` sorts the segment array by `Start` before anything
@@ -212,10 +212,11 @@ prefix sum in RAM would cost 222 MB resident, which is the priority order applie
 at a 0.19% escape rate. Straight reuse of the `NarrowColumnWidth` + `ColumnOverflowTable` path
 `ObjectSizes` already runs. **No `retained − ownSize` subtraction** — measured to earn 0.05 MiB.
 
-**O5** — the root phase is ~98% irreducible native DAC stack unwinding, which is the right kind of
-work to overlap rather than optimise. But only ~25% of the overlap is achievable, so this is a
-~4%-of-run item, not the ~15% it first looked like. Re-probe at 27.5 GB against the *real* scan
-before building it (§7.5).
+**O5 — built, measured negative, reverted (§7.9).** The root phase is ~98% irreducible native DAC
+stack unwinding, so overlapping rather than optimising was the right instinct. Implemented, the
+overlap works perfectly — the root phase drops from 4.1 s to 2 ms — but total wall clock is 2–5 s
+*worse*, because the enumeration slows the concurrent scan by more than it saves. The lock §7.5
+measured in isolation is more expensive inside the real pipeline than the phase it hides.
 
 **O8** — Pass 2a walks all 87.1M objects to derive the set of distinct MethodTables, which is
 already persisted as `ObjectTypeDictionary`. Verified identical on both dumps.
@@ -227,8 +228,8 @@ bump rather than three, per measurements §10.2's batching rule. Verified in §7
 
 1. ✅ **O1** shipped; ✅ **O2 + O3 + O4** shipped together as format v9.
 2. ✅ **O8** shipped.
-3. ✅ **R1** shipped as format v10. → **R2 → R3** remain, in that order.
-4. **O5** — only after its 27.5 GB re-probe.
+3. ✅ **R1** shipped as format v10. → **R2 → R3** remain — see §3.1's re-derivation.
+4. ❌ **O5** built, measured negative, reverted (§7.9).
 
 ---
 
@@ -312,7 +313,7 @@ exact Lengauer–Tarjan over 58.3M nodes genuinely needs ~7 dense arrays; nothin
 | Phase | Today **[M]** | Target | Basis |
 |---|---:|---:|---|
 | Heap scan | 335.5 s | 335.5 s | DAC-bound, untouched |
-| Root enumeration | 200.3 s | ~150 s | **[D]** ~25% overlaps (§7.5) |
+| Root enumeration | 200.3 s | 200.3 s | ❌ O5 reverted — measured negative (§7.9) |
 | Forward bucket sort | 28.6 s | — | replaced by R2 |
 | Pass A + Pass B | — | +10–40 s | CSR half **2.59 s [M]**; sort half **[U]** |
 | Reachability walk | 213.7 s | **~2 s** | **[M]** §7.3 |
@@ -583,7 +584,31 @@ row-aligned column, not just its own section; and `tools/ProbeCacheReaders` open
 against a `cache.bin` with no dump load, which located this in seconds after the symptom had wasted
 several minutes.
 
-### 7.9 Where estimates were wrong
+### 7.9 O5 built, measured negative, reverted
+
+The overlap was implemented (root enumeration on a `Task`, buffered into a `RootSnapshot`, written
+in the satellite pass) and A/B'd alternating in one session per §8's protocol:
+
+| Round | Serial | Overlapped | Roots phase, serial → overlapped |
+|---|---:|---:|---|
+| 1 | 77 s | **82 s** | 4.2 s → **2 ms** |
+| 2 | 78 s | **80 s** | 4.0 s → **2 ms** |
+
+**The mechanism works and the item still loses.** Root enumeration is completely hidden — the phase
+goes to 2 ms — but total wall clock is **2–5 s worse**, because the enumeration slows the concurrent
+scan by more than the 4.1 s it removes. That is the same lock §7.5 measured, now paid inside the
+real pipeline rather than in isolation.
+
+Reverted rather than kept. The code is recoverable from this commit's parent if a 27.5 GB A/B ever
+justifies it, and §7.5's two limits still apply — the 3.3 GB dump has root enumeration at 5.3% of
+its run against 15.3% at scale, so it structurally cannot show O5's upside. But it *can* show the
+contention cost, and it did.
+
+**What this changes about the ranking.** O5 was the largest remaining runtime item at ≈50 s. It is
+now unproven at best. That leaves **R2/R3 as the only remaining item with a measured case** — and
+theirs is the RAM case (≈3.4 GB), not a runtime one.
+
+### 7.10 Where estimates were wrong
 
 Recorded because the pattern matters more than the individual items.
 
@@ -594,7 +619,7 @@ Recorded because the pattern matters more than the individual items.
 | Sorted frontier recovers locality | **Refuted** — 1.67× slower |
 | EventLeak's 127.3 s is scan volume | **Refuted** — 87.9% is unreachable DAC work |
 | Root trailer is a large share of 200.3 s | **Refuted** — 1.6%, and the proposed fix is 22× slower |
-| Root overlap is worth ~200 s | **Downgraded 4×**, to ≈50 s |
+| Root overlap is worth ~200 s | ❌ **Built and reverted** — downgraded to ≈50 s by §7.5, then measured −5 s to −2 s in the real pipeline (§7.9) |
 | Pass A + Pass B cost +40–70 s | CSR half is 2.59 s; revised to +10–40 s |
 
 Three of six gates were negative. The projected runtime fell from −48% to **−28%** as estimates

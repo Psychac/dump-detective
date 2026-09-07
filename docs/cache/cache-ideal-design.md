@@ -31,6 +31,12 @@ items died on measurement — O5, O6, O7 and the sorted BFS frontier.
 > Disk landed almost exactly (1,627.4 MiB against 1,630.2 predicted). **The RAM projection was wrong
 > by 4.7×** — measured 12,143 MB, not ≈2,600 MB — because the peak turned out to be Lengauer–Tarjan
 > and the analyzers, not the walk this plan rebuilt. Read §7.11 before trusting anything below.
+>
+> **Update, §7.13:** profiling §7.11's ~10.2 GB dominator stage directly found two of it was an
+> already-planned release simply not running — `LeafFolder`'s forward-CSR release was freeing **0 of
+> an intended 745.3 MB**, and §7.11's "Leak Candidate Analysis ~7.8 GB" line was that same unreleased
+> data, not the analyzer's own cost. Both fixed and verified; the 12,143 MB headline itself has not
+> yet been re-measured under §7.11's own protocol.
 
 | Axis | Before **[M]** | Projected | **Measured** |
 |---|---:|---:|---:|
@@ -738,6 +744,84 @@ Recorded because the pattern matters more than the individual items.
 Three of six gates were negative. The projected runtime fell from −48% to **−28%** as estimates
 became measurements. **The RAM result never moved.**
 
+### 7.13 Two bugs found profiling the dominator stage, both fixed
+
+§7.11 flagged the dominator stage (~10.2 GB) and one analyzer sampled at ~7.8 GB as unexplained.
+Profiling that stage directly (`DD_PERF_DOMINATOR_STAGEB=1`, plus a new `DD_PERF_DOMINATOR_PEAK=1`
+probe added to `LeafFolder`) found two real, fixable causes — not a third structure this plan missed,
+but two places where an already-planned release simply wasn't running.
+
+**7.13.1 — `LeafFolder`'s forward-CSR release froze at 0 bytes freed.**
+
+`ReachableGraph`'s constructor (`ReachableGraph.cs:45-46`) aliases — does not copy —
+`walkResult.FwdOffsets`/`FwdTargets`. `walkResult` is a parameter of
+`DiskBackedObjectIndexWriter.BuildAndPersistDominatorTree` that stays alive for the method's entire
+remaining body, and — one layer further back — the `RowKeyedWalkResult` it was adapted from stays
+alive even longer, as the caller's own `rowWalk` local. So `LeafFolder.Fold`'s
+`ReleaseForwardEdgeArrays()` cleared the *graph's* copy of the reference, but two other live copies of
+the same arrays kept them reachable regardless:
+
+```
+[PERF] LeafFolder forward-CSR release: live 7,816.3 MB -> 7,816.2 MB (freed 0.0 MB; arrays were
+4x(N+1)+4xE = 745.3 MB, holder=ReachableGraph)
+```
+
+This is very likely §7.11's "Leak Candidate Analysis ~7.8 GB" line: that analyzer allocates ~130 MB
+and *shrinks* working set when it runs — confirmed directly on a real-dump run — so it was never that
+analyzer's own memory. The figure is, to the first decimal, the same 7.8 GB already resident and
+unreleased since the dominator-tree build.
+
+**Fixed:** `ReachableGraphWalkResult` and `RowKeyedWalkResult` each gained their own
+`ReleaseForwardEdgeArrays()`, called at the two points where one wrapper's arrays are handed to the
+next (`DiskBackedObjectIndexWriter.Build`/`BuildAndPersistDominatorTree`). Verified on the 25.6 GB
+dump, same probe, same structural point:
+
+```
+[PERF] LeafFolder forward-CSR release: live 7,838.1 MB -> 7,092.8 MB (freed 745.3 MB; arrays were
+4x(N+1)+4xE = 745.3 MB, holder=ReachableGraph)
+```
+
+Frees exactly the array size predicted. 141 pre-existing tests unaffected; no new unit test targets
+this fix specifically (it's exercised end-to-end by the real-dump probe above).
+
+**7.13.2 — `ScratchFileObjectMetadataLookup.ResolveBatch` sorted input it didn't need to.**
+
+`ResolveBatch` always sorted its input addresses and tracked their original positions
+(`sortedAddresses` + `order`, ~700 MB at N = 58.3M) to handle addresses arriving in arbitrary order.
+Its one production caller always supplies `RowKeyedGraphWalker.BuildCsr`'s row-ordered — hence
+address-ordered — node ids (rows are address-order by construction, per O1). The old,
+genuinely-unordered walker is no longer called anywhere in production.
+
+**Fixed:** added an `assumeAscendingAddresses` parameter (default `false`, so any other caller is
+unaffected). When `true`, a single sequential merge reads/writes in place — no sort, no scratch
+arrays — and verifies the ordering as a byproduct of the merge itself (one comparison against the
+previous iteration's already-loaded value, not a second pass), throwing rather than silently
+mis-resolving metadata if the assumption is ever violated. The one production call site now passes
+`true`. Covered by 3 new unit tests (fast path matches the default path on identical input; default
+path still resolves out-of-order input correctly; fast path throws on deliberately out-of-order
+input).
+
+Measured on the 25.6 GB dump, same phase, before vs. after both fixes:
+
+| | Before (neither fix) | After (both fixes) |
+|---|---:|---:|
+| `metadata resolution` (internal timer) | 15,376 ms | **14,270 ms** |
+| `resolving node metadata` (outer phase) | 25.8 s | **23.5 s** |
+| Peak process working set | 11.2 GB | **10.1 GB** |
+| Total wall clock | 915.3 s | 933.8 s |
+
+The metadata-resolution phase improved on both axes it targeted (time, and the ~700 MB of scratch).
+Total wall clock did **not** improve between these two runs — the walk phase alone varied
+163.8 s → 178.1 s between them, swamping the ~1-2 s phase-level saving, consistent with §8's point
+that ambient conditions move these numbers session to session.
+
+**Caveat, per §8's own rule ("peak private bytes, not working set"):** the working-set numbers above
+are the CLI's own diagnostics, not the *private bytes* §7.11's headline (12,143 MB) used, and these
+sessions were not run with §7.11's "sampled once a second" external methodology. They are real and
+directionally consistent with what both fixes should do, but **the 12,143 MB / 10.2 GB / 7.8 GB
+figures in §7.11 have not themselves been re-measured** — that needs a fresh cold 27.5 GB run under
+§7.11's exact protocol, which is still open (see §9).
+
 ---
 
 ## 8. Measurement protocol
@@ -768,6 +852,10 @@ Non-negotiable for anything on this page. Each of these produced a wrong number 
 - O5's 27.5 GB re-probe, against the real scan rather than the proxy (§7.5).
 - Pass A/Pass B's external-sort half; only the CSR-construction half is measured **[U]**.
 - Whether the other seven type-filtered scan sites justify anything. O8 may cover several for free.
+- **A fresh cold 27.5 GB run under §7.11's exact protocol** ("private bytes, sampled once a second"),
+  now that §7.13's two fixes are shipped, to get an honest updated figure for the 12,143 MB headline
+  and the ~10.2 GB / ~7.8 GB stage-level numbers — not yet done (§7.13's own before/after used the
+  CLI's working-set diagnostics, a different metric per §8).
 
 **Out of scope, noted so it is not mistaken for an oversight:**
 

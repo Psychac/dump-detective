@@ -47,7 +47,7 @@ internal readonly struct ScratchSegmentSource
 /// them) — deleting them once this lookup is disposed is the caller's responsibility, not this
 /// class's, mirroring how <c>ConcatenateScratchFiles</c> already owns deletion for the merged path.
 /// </summary>
-internal sealed class ScratchFileObjectMetadataLookup : IDisposable
+internal sealed class ScratchFileObjectMetadataLookup : IObjectRowResolver, IDisposable
 {
     private const int ColumnSize = sizeof(ulong);
 

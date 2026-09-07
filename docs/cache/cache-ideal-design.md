@@ -98,8 +98,45 @@ of the writer, not of what ClrMD happened to return.
 > `Dictionary<ulong,int>` until the semi-external walk replaces it. Stated plainly because the two
 > halves of R1's value land in different commits.
 
-**R2 — Swizzle once, sort instead of search.** The scan emits `(parentRow:u32, childAddr:u64)` —
-12 B, down from 16 B. Then:
+**⚠ R2/R3 re-derived after R1 shipped — the sort is unnecessary, and the scan need not change.**
+Two measurements from §7.2 collapse most of this section's machinery:
+
+1. **Rank lookups are 66 ns in edge order.** §3.2 below specified a range-partitioned external sort
+   *because it assumed resolving a child address per edge was too expensive*. It is not: 137M edges
+   resolve inline in ~9 s. The sort, the partition-boundary derivation and the merge-join all exist
+   to avoid a cost that was measured away.
+2. **Numbering walk nodes by rank makes `DominatorRowMapping` the identity.** The walk currently
+   assigns discovery-order ids and Stage B re-keys them into sorted-row order. If the walk numbers
+   nodes by their rank in the reachability bitmap instead, that re-keying disappears entirely.
+
+**Settled shape, requiring no change to the scan or the edge-file format:**
+
+- *Phase 1* — BFS with a bitmap over object rows (10.4 MB). Successors come from the existing loose
+  forward files; each child address resolves to a row via
+  `ScratchFileObjectMetadataLookup.TryGetRow` (shipped with R1, §7.8).
+- *Phase 2* — rank the bitmap to get reachable rows, re-read each reachable row's edges, and
+  counting-sort into forward+reverse CSR already in reachable-row space.
+
+Removes the walk's `Dictionary<ulong,int>` (**2,325.9 MB [M]**) and its `edgeFrom`/`edgeTo`
+`ChunkedBuffer`s (**~1.1 GB [D]**) — **≈3.4 GB** — plus the reverse extractor and its 2.19 GB scratch
+round-trip. Costs one extra pass over edge data already on disk.
+
+**A memory consumer this plan never counted.** `ForwardEdgeLooseFileReader` decodes each bucket's
+directory into managed arrays at 16 bytes per distinct parent — up to **1.4 GB at 87.1M objects**.
+It is part of Part D.3's "roughly 6 GB is the walk" but absent from §2's table. Replacing it with a
+row-keyed degree column (the O3 encoding) would be ~87 MB, and is the one part of R2 that still
+argues for changing the edge-file layout.
+
+**Not started, and deliberately not begun piecemeal.** A subtly wrong CSR corrupts the dominator
+tree silently — it does not throw. This project has shipped that failure mode twice (format v7's
+void evidence, §11.6's inert analyzer), so a half-migrated walk is worse than an unmigrated one. The
+acceptance gate is the v10 container as an oracle: the idom and retained-bytes columns must come out
+byte-identical, since row order and the edge multiset are both unchanged.
+
+---
+
+**Original §3.2 specification, superseded above but kept for the partitioning argument:** the scan
+emits `(parentRow:u32, childAddr:u64)` — 12 B, down from 16 B. Then:
 
 ```
 Pass A: range-partition edges by childAddr (partition boundaries are ROW boundaries,

@@ -192,6 +192,73 @@ internal sealed class ScratchFileObjectMetadataLookup : IDisposable
     }
 
     /// <summary>
+    /// <paramref name="address"/>'s row in the merged object column, or -1 when it is not a live
+    /// object. Returns the *global* row — <see cref="SegmentIndexEntry.FirstRecordIndex"/> plus the
+    /// record's index within its own scratch file — so it is the same identity the finished
+    /// container's <c>ObjectAddresses</c> column uses.
+    /// </summary>
+    /// <remarks>
+    /// This is the mid-build half of R1's one-identity change (docs/cache/cache-ideal-design.md
+    /// §3.1): the finished container has <c>MonotonicAddressColumn</c>, but Phase 1 needs the same
+    /// <c>address → row</c> answer before <c>Finish()</c> exists to reopen. Same two-level search,
+    /// sourced from the scratch files rather than the merged section.
+    ///
+    /// It replaces the walk's <c>Dictionary&lt;ulong,int&gt;</c>, measured at **2,325.9 MB resident**
+    /// on the 27.5 GB dump against this path's mapped pages plus a per-segment table (§7.2). The
+    /// dictionary was also the only reason the walk had to keep a parallel <c>addresses</c> array,
+    /// since a row already names its address.
+    /// </remarks>
+    public long TryGetRow(ulong address)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        int segIdx = FindSegment(address);
+        if (segIdx < 0)
+            return -1;
+
+        OpenSegment segment = _segmentsByStart[segIdx];
+        long recordIndex = FindRecord(segment, address);
+        return recordIndex < 0 ? -1 : segment.Entry.FirstRecordIndex + recordIndex;
+    }
+
+    /// <summary>The address at <paramref name="globalRow"/>, or 0 when the row is out of range.</summary>
+    public ulong GetAddress(long globalRow)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        // Segments are held sorted by Start, and O1 guarantees ascending Start also means ascending
+        // FirstRecordIndex, so a row range search over the same array works.
+        int lo = 0;
+        int hi = _segmentsByStart.Length - 1;
+        while (lo <= hi)
+        {
+            int mid = lo + ((hi - lo) >> 1);
+            SegmentIndexEntry entry = _segmentsByStart[mid].Entry;
+
+            if (globalRow < entry.FirstRecordIndex)
+                hi = mid - 1;
+            else if (globalRow >= entry.FirstRecordIndex + entry.RecordCount)
+                lo = mid + 1;
+            else
+                return _segmentsByStart[mid].AddressAccessor.ReadUInt64((globalRow - entry.FirstRecordIndex) * ColumnSize);
+        }
+
+        return 0;
+    }
+
+    /// <summary>Total object rows across every open segment.</summary>
+    public long RowCount
+    {
+        get
+        {
+            long total = 0;
+            foreach (OpenSegment segment in _segmentsByStart)
+                total += segment.Entry.RecordCount;
+            return total;
+        }
+    }
+
+    /// <summary>
     /// §10.8: confirms the assumption <see cref="FindRecord"/> relies on but that was never verified
     /// against a real per-segment scratch file — strictly increasing addresses within the segment.
     /// Diagnostic only (logs, doesn't throw); a violation means <see cref="FindRecord"/>'s binary

@@ -11,18 +11,21 @@ Current state, backlog, a four-doc redesign set, and a from-zero re-derivation.
 
 **Start here if you are deciding what to build next:**
 
-- **[cache-ideal-design.md](cache-ideal-design.md)** — the rebuild plan. The subsystem re-derived
-  from scratch under an explicit priority order (**RAM > runtime > disk**), then measured against
-  both reference dumps before anything was committed to. Headline: peak RAM on the 27.5 GB dump goes
-  ≈12,976 MB → ≈2,600 MB, while disk moves only −33% and runtime −28% — the v5–v8 sequence already
-  took most of the disk, and RAM is the axis nothing before it measured.
+- **[cache-ideal-design.md](cache-ideal-design.md)** — the rebuild plan, **now executed and
+  measured**. The subsystem re-derived from scratch under an explicit priority order (**RAM >
+  runtime > disk**), built, and then measured at 27.5 GB.
 
-  Three structural rewrites as one change (R1 one identity, R2 swizzle-once edge pipeline, R3
-  semi-external walk) plus six independent items (O1–O5, O8). **All six gating measurements are
-  closed, and three came back negative** — a `TypeId → rows` index, a `StaticFieldResolver` filter
-  reorder, and sorting the BFS frontier are all rejected on evidence, as is C.2 / the Part F
-  variant. §4 lists everything rejected and why; §7 is the evidence; §8 records the measurement
-  traps that produced a wrong number first.
+  **Result: disk landed, RAM did not.** `cache.bin` 2,418.1 → **1,627.4 MiB** (−32.7%), within 0.2%
+  of prediction on both dumps. But peak private went 12,976 → **12,143 MB — a −6.4% move against a
+  projected −80%.** The structures the plan targeted were removed (~3.1 GB out of the walk); the
+  run's peak simply was not there. It is Lengauer–Tarjan (~10.2 GB at 58.3M nodes) and the analyzers,
+  neither of which the plan touched. §7.11 is the write-up; **read it before building on §1–§6.**
+
+  Also useful for what it *rejected*. All six gating measurements closed, and **five proposed items
+  died on evidence** — a `TypeId → rows` index, a `StaticFieldResolver` filter reorder, sorting the
+  BFS frontier, overlapping root enumeration with the scan (built, then reverted), and C.2 / the
+  Part F variant. §4 lists them with the number that killed each; §8 records the measurement traps
+  that produced a wrong answer first.
 
 **Current state and open work:**
 

@@ -12,7 +12,6 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
     internal static readonly ObjectIndexReader Instance = new();
 
     private const int ColumnSize = sizeof(ulong);
-    private const int GenColumnSize = sizeof(sbyte);
 
     // Records materialized per batch before yielding. Pointers can't be used directly inside
     // this iterator (the C# compiler forbids unsafe/pointer syntax anywhere lexically inside a
@@ -150,7 +149,6 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
         private readonly byte* _addrPtr;
         private readonly byte* _mtPtr;
         private readonly byte* _sizePtr;
-        private readonly byte* _genPtr;
 
         private readonly ulong[] _typeDictionary;
         private readonly int _typeIdWidth;
@@ -159,6 +157,9 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
         private readonly BlockDeltaColumn? _addressDeltas;
         private ColumnOverflowTable.Cursor _sizeOverflowCursor;
         private ColumnOverflowTable.Cursor _addressOverflowCursor;
+        // Generation is run-length encoded rather than a column, so it advances with the batch
+        // instead of being indexed — see ObjectGenerationRunTable.
+        private ObjectGenerationRunTable.Cursor _generationCursor;
 
         public ZeroCopyColumnReader(ObjectColumnSet columns, long startRecord)
         {
@@ -170,6 +171,7 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
             _addressDeltas = columns.AddressDeltas;
             _sizeOverflowCursor = columns.SizeOverflow.OpenCursor(startRecord);
             _addressOverflowCursor = columns.AddressDeltas?.OpenCursor(startRecord) ?? default;
+            _generationCursor = columns.GenerationRuns.OpenCursor(startRecord);
 
             byte* p = null;
             columns.Addresses.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
@@ -182,10 +184,6 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
             p = null;
             columns.Sizes.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
             _sizePtr = p + columns.Sizes.PointerOffset;
-
-            p = null;
-            columns.Generations.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
-            _genPtr = p + columns.Generations.PointerOffset;
         }
 
         public void FillBatch(long startIndex, HeapEntry[] destination, int count)
@@ -193,7 +191,6 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
             byte* addrBase = _addrPtr + startIndex * _addressWidth;
             byte* mtBase = _mtPtr + startIndex * _typeIdWidth;
             byte* sizeBase = _sizePtr + startIndex * _sizeWidth;
-            byte* genBase = _genPtr + startIndex * GenColumnSize;
             ulong[] dictionary = _typeDictionary;
 
             // Split on width outside the loop rather than inside it: the branch is loop-invariant,
@@ -208,7 +205,7 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
                     ulong address = ReadAddress(addrBase, i, startIndex + i);
                     ulong objSize = ReadSize(sizeBase, i, startIndex + i);
                     ulong methodTable = dictionary[Unsafe.ReadUnaligned<ushort>(mtBase + i * sizeof(ushort))];
-                    sbyte generation = unchecked((sbyte)genBase[i]);
+                    sbyte generation = _generationCursor.Read(startIndex + i);
                     destination[i] = new HeapEntry(address, methodTable, objSize, generation);
                 }
             }
@@ -219,7 +216,7 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
                     ulong address = ReadAddress(addrBase, i, startIndex + i);
                     ulong objSize = ReadSize(sizeBase, i, startIndex + i);
                     ulong methodTable = dictionary[Unsafe.ReadUnaligned<uint>(mtBase + i * sizeof(uint))];
-                    sbyte generation = unchecked((sbyte)genBase[i]);
+                    sbyte generation = _generationCursor.Read(startIndex + i);
                     destination[i] = new HeapEntry(address, methodTable, objSize, generation);
                 }
             }
@@ -256,7 +253,6 @@ internal sealed class ObjectIndexReader : IObjectIndexReader
             _columns.Addresses.SafeMemoryMappedViewHandle.ReleasePointer();
             _columns.MethodTables.SafeMemoryMappedViewHandle.ReleasePointer();
             _columns.Sizes.SafeMemoryMappedViewHandle.ReleasePointer();
-            _columns.Generations.SafeMemoryMappedViewHandle.ReleasePointer();
         }
     }
 }

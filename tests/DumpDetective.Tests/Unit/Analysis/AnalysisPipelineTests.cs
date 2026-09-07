@@ -172,13 +172,9 @@ public sealed class AnalysisPipelineTests
         writer.EndSection(values.Length);
     }
 
-    private static void WriteGenerationColumn(CacheContainerWriter writer, int recordCount)
-    {
-        writer.BeginSection(CacheSectionId.ObjectGenerations);
-        for (int i = 0; i < recordCount; i++)
-            writer.Stream.WriteByte(0);
-        writer.EndSection(recordCount);
-    }
+    private static void WriteGenerationColumn(CacheContainerWriter writer, int recordCount) =>
+        // Delegates so the run-length encoding (format v9) lives in exactly one place.
+        ObjectColumnSectionsWriter.WriteGenerationColumn(writer, new sbyte[recordCount]);
 
     private sealed class TestAnalyzer(string name, int order, Action? onExecute = null, bool throwError = false, bool throwCanceled = false) : IAnalyzer
     {

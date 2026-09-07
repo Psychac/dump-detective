@@ -132,7 +132,7 @@ internal static class CacheSectionCatalog
         new(CacheSectionId.ObjectAddresses, "ObjectAddresses", CacheSectionRequirement.Required),
         new(CacheSectionId.ObjectMethodTables, "ObjectMethodTables", CacheSectionRequirement.Required),
         new(CacheSectionId.ObjectSizes, "ObjectSizes", CacheSectionRequirement.Required),
-        new(CacheSectionId.ObjectGenerations, "ObjectGenerations", CacheSectionRequirement.Required),
+        new(CacheSectionId.ObjectGenerations, "ObjectGenerations", CacheSectionRequirement.Unused),
         new(CacheSectionId.ReverseEdgeBuckets, "ReverseEdgeBuckets", CacheSectionRequirement.Unused),
         new(CacheSectionId.ReverseEdgeDirectories, "ReverseEdgeDirectories", CacheSectionRequirement.Unused),
         new(CacheSectionId.ReverseEdgeMetadata, "ReverseEdgeMetadata", CacheSectionRequirement.Unused),
@@ -154,8 +154,13 @@ internal static class CacheSectionCatalog
         new(CacheSectionId.DominatorReachableBlockBases, "DominatorReachableBlockBases", CacheSectionRequirement.Conditional),
         new(CacheSectionId.DominatorReachableOverflow, "DominatorReachableOverflow", CacheSectionRequirement.Conditional),
         new(CacheSectionId.SectionManifest, "SectionManifest", CacheSectionRequirement.Required),
-        new(CacheSectionId.ReverseEdgeOffsets, "ReverseEdgeOffsets", CacheSectionRequirement.Conditional),
+        new(CacheSectionId.ReverseEdgeOffsets, "ReverseEdgeOffsets", CacheSectionRequirement.Unused),
         new(CacheSectionId.ReverseEdgeChildren, "ReverseEdgeChildren", CacheSectionRequirement.Conditional),
+        new(CacheSectionId.DominatorRetainedBytesOverflow, "DominatorRetainedBytesOverflow", CacheSectionRequirement.Conditional),
+        new(CacheSectionId.ReverseEdgeDegrees, "ReverseEdgeDegrees", CacheSectionRequirement.Conditional),
+        new(CacheSectionId.ReverseEdgeDegreeCheckpoints, "ReverseEdgeDegreeCheckpoints", CacheSectionRequirement.Conditional),
+        new(CacheSectionId.ReverseEdgeDegreeOverflow, "ReverseEdgeDegreeOverflow", CacheSectionRequirement.Conditional),
+        new(CacheSectionId.ObjectGenerationRuns, "ObjectGenerationRuns", CacheSectionRequirement.Required),
     ];
 
     /// <summary>

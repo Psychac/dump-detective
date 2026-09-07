@@ -26,7 +26,11 @@ internal enum CacheSectionId
     ObjectMethodTables = 11,
     /// <summary>Columnar <c>ulong[]</c> of object sizes, aligned with <see cref="ObjectAddresses"/>.</summary>
     ObjectSizes = 12,
-    /// <summary>Columnar <c>sbyte[]</c> of per-object GC generations, aligned with <see cref="ObjectAddresses"/>.</summary>
+    /// <summary>
+    /// Reserved, no longer written (format v9) — superseded by <see cref="ObjectGenerationRuns"/>.
+    /// Held a columnar <c>sbyte[]</c> of per-object GC generations, aligned with
+    /// <see cref="ObjectAddresses"/>, at one byte per object.
+    /// </summary>
     ObjectGenerations = 13,
     /// <summary>
     /// Reserved, no longer written (format v8). Held concatenated sorted-group payloads
@@ -153,7 +157,8 @@ internal enum CacheSectionId
     /// </summary>
     SectionManifest = 34,
     /// <summary>
-    /// Columnar <c>int32[R+1]</c> CSR offsets into <see cref="ReverseEdgeChildren"/>, indexed by the
+    /// Reserved, no longer written (format v9) — superseded by <see cref="ReverseEdgeDegrees"/> plus
+    /// <see cref="ReverseEdgeDegreeCheckpoints"/>. Held columnar <c>int32[R+1]</c> CSR offsets into <see cref="ReverseEdgeChildren"/>, indexed by the
     /// same reachable-node row as <see cref="DominatorReachableAddresses"/> — format v8's true CSR
     /// replacement for the hash-bucket-sort-directory format
     /// (docs/cache/cache-format-clean-slate-redesign.md §2). Row <c>r</c>'s parents are
@@ -167,6 +172,42 @@ internal enum CacheSectionId
     /// smaller than the retired directory-based format: no per-entry address, no per-key header.
     /// </summary>
     ReverseEdgeChildren = 36,
+    /// <summary>
+    /// Sorted <c>RecordIndex(4) | RetainedBytes(8)</c> pairs for the rows whose retained bytes
+    /// exceed <see cref="DominatorRetainedBytes"/>' narrowed width, which stores an all-ones escape
+    /// sentinel in their place — the same scheme <see cref="ObjectSizeOverflow"/> uses for
+    /// <see cref="ObjectSizes"/>. 69–75% of rows are dominator-tree leaves whose retained bytes are
+    /// their own shallow size, so the column narrows to 2 bytes at a 0.19% escape rate
+    /// (docs/cache/cache-ideal-design.md §7.1).
+    /// </summary>
+    DominatorRetainedBytesOverflow = 37,
+    /// <summary>
+    /// One byte per reachable row: that row's recorded parent count, or
+    /// <see cref="Indexing.ReverseIndex.ReverseEdgeDegreeColumn.EscapeSentinel"/> if it did not fit.
+    /// Replaces <see cref="ReverseEdgeOffsets"/>' full-width offset column — the offsets are monotone
+    /// with a mean step of 2.35, so 4 bytes a row held a number that nearly always fits in one
+    /// (docs/cache/cache-ideal-design.md §3.2, O3).
+    /// </summary>
+    ReverseEdgeDegrees = 38,
+    /// <summary>
+    /// Absolute <c>int32</c> offset into <see cref="ReverseEdgeChildren"/> every
+    /// <see cref="Indexing.ReverseIndex.ReverseEdgeDegreeColumn.CheckpointStride"/> rows, so a row's
+    /// offset is one checkpoint plus a sum of at most 63 degree bytes rather than a scan from zero.
+    /// </summary>
+    ReverseEdgeDegreeCheckpoints = 39,
+    /// <summary>
+    /// Sorted <c>RecordIndex(4) | Degree(8)</c> pairs for rows whose in-degree reached
+    /// <see cref="Indexing.ReverseIndex.ReverseEdgeDegreeColumn.EscapeSentinel"/> — hub objects.
+    /// </summary>
+    ReverseEdgeDegreeOverflow = 40,
+    /// <summary>
+    /// Run-length encoded per-object GC generation — one <c>FirstRecordIndex(8) | Generation(1) |
+    /// Pad(3)</c> record per *change*, replacing <see cref="ObjectGenerations"/>' byte per object.
+    /// Generation is piecewise-constant over the object table: measured 13 runs over 14,620,162
+    /// objects and 50 over 87,104,236, so an 83.07 MiB column carried ~600 bytes of information
+    /// (docs/cache/cache-ideal-design.md §3.2, O2).
+    /// </summary>
+    ObjectGenerationRuns = 41,
 }
 
 /// <summary>
@@ -186,7 +227,20 @@ internal readonly struct CacheFileHeader
 {
     public const int Size = 64;
     /// <summary>
-    /// Bumped to 8 when the reverse-reference index changed from an address-keyed
+    /// Bumped to 9 for three independent size changes that share one bump, because each bump
+    /// invalidates every cache on disk and paying that cost three times buys nothing
+    /// (docs/cache/cache-redesign-measurements.md §10.2): <see cref="CacheSectionId.DominatorRetainedBytes"/>
+    /// narrowed from a flat 8 bytes to the width its distribution allows (2 on both reference dumps,
+    /// −332.59 MiB on the 27.5 GB one) with escapes in
+    /// <see cref="CacheSectionId.DominatorRetainedBytesOverflow"/>; the reverse CSR's
+    /// <see cref="CacheSectionId.ReverseEdgeOffsets"/> column replaced by
+    /// <see cref="CacheSectionId.ReverseEdgeDegrees"/> +
+    /// <see cref="CacheSectionId.ReverseEdgeDegreeCheckpoints"/> +
+    /// <see cref="CacheSectionId.ReverseEdgeDegreeOverflow"/> (−159.96 MiB); and
+    /// <see cref="CacheSectionId.ObjectGenerations"/> dropped entirely in favour of deriving
+    /// generation from the segment table (−83.07 MiB). A v8 reader would misparse all three rather
+    /// than fail, so this bump is load-bearing.
+    /// Previously bumped to 8 when the reverse-reference index changed from an address-keyed
     /// hash-bucket-sort-directory format (<see cref="CacheSectionId.ReverseEdgeBuckets"/>/
     /// <see cref="CacheSectionId.ReverseEdgeDirectories"/>/<see cref="CacheSectionId.ReverseEdgeMetadata"/>)
     /// to true CSR (<see cref="CacheSectionId.ReverseEdgeOffsets"/>/<see cref="CacheSectionId.ReverseEdgeChildren"/>)
@@ -217,7 +271,7 @@ internal readonly struct CacheFileHeader
     /// Previously bumped to 2 when the Objects section moved from an interleaved
     /// array-of-structs layout to those columnar sections.
     /// </summary>
-    public const int CurrentFormatVersion = 8;
+    public const int CurrentFormatVersion = 9;
 
     private const int MagicOffset = 0;
     private const int MagicSize = 8;

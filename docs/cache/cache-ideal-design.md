@@ -9,9 +9,9 @@ conflict the earlier wins. That order is *not* the one the shipped v5–v8 seque
 optimised disk with a byte count as its only metric — and it is the single reason this plan reaches
 a different answer.
 
-**Status: measured; O1 shipped, the rest not started.** All six gating measurements are closed (§7),
-and three of them killed items that looked good on paper. Nothing below waits on further evidence
-except where marked.
+**Status: measured; O1–O4 shipped as format v9, the rest not started.** All six gating measurements
+are closed (§7), and three of them killed items that looked good on paper. Nothing below waits on
+further evidence except where marked.
 
 | | |
 |---|---|
@@ -32,8 +32,8 @@ except where marked.
 | **Cold peak RAM, 27.5 GB** | **12,976 MB** | **≈2,600 MB [D]** | **−80%** |
 | Cold peak RAM, 3.3 GB | 4,132 MB | ≈1,400 MB **[D]** | −66% |
 | Cold wall clock, 27.5 GB | 1,310.5 s | ≈940 s **[D]** | −28% |
-| `cache.bin`, 27.5 GB | 2,418.1 MiB | 1,630.2 MiB **[D]** | −33% |
-| `cache.bin`, 3.3 GB | 342.50 MiB | 248.3 MiB **[D]** | −27% |
+| `cache.bin`, 27.5 GB | 2,418.1 MiB | 1,630.2 MiB **[D]** | −33% *(−576 already shipped as v9)* |
+| `cache.bin`, 3.3 GB | 342.50 MiB | 248.3 MiB **[D]** | −27% *(342.50 → **271.7** shipped **[M]**)* |
 
 **RAM is the whole point.** Disk moves modestly — v5–v8 already took most of it — and runtime moves
 less than it first appeared, once every estimate was replaced by a measurement. The 5× RAM result is
@@ -138,9 +138,9 @@ None of these depend on the rewrite or on each other.
 | # | Item | Worth | Evidence |
 |---|---|---:|---|
 | ✅ **O1** | Sort `heap.Segments` by `Start` at load — **SHIPPED** | 0 bytes — makes R1's precondition a guarantee | §7.2, §7.6 |
-| **O2** | Delete `ObjectGenerations`; derive from `SegmentIndex` | **83.07 MiB [D]** | below |
-| **O3** | `ReverseEdgeOffsets` → 1-byte degrees + 64-row checkpoints | **159.96 MiB [D]** | below |
-| **O4** | Narrow `DominatorRetainedBytes` to 2 B | **332.59 MiB [M]** | §7.1 |
+| ✅ **O2** | `ObjectGenerations` → run-length encoded — **SHIPPED (v9)** | **83.07 MiB [M]** | below, §7.7 |
+| ✅ **O3** | `ReverseEdgeOffsets` → 1-byte degrees + 64-row checkpoints — **SHIPPED (v9)** | **159.96 MiB [D]** | below, §7.7 |
+| ✅ **O4** | Narrow `DominatorRetainedBytes` to 2 B — **SHIPPED (v9)** | **332.59 MiB [M]** | §7.1, §7.7 |
 | **O5** | Overlap root enumeration with the heap scan | **≈50 s [D]** | §7.5 |
 | **O8** | `PublisherRegistry` Pass 2a reads `ObjectTypeDictionary` | **5.28 s [M]**, zero disk | §7.4 |
 
@@ -153,10 +153,14 @@ rebuild before and after produced a **byte-identical `ObjectAddresses` column** 
 ClrMD returned them and **0 overlaps**, and the exhaustive oracle still matches live enumeration on
 all 14,620,162 records with 0 mismatches. See §7.6 for the nondeterminism this surfaced.
 
-**O2** — generation is `f(segment, address)`: `segment.Kind` under regions GC, or a range compare
-against the segment's `Generation0/1/2` sub-ranges otherwise. That is exactly what
-`DiskBackedObjectIndexWriter.cs:256-259` and `:2054-2057` already do. Storing a byte per object to
-memoise a range compare over a 63-row table is 83.07 MiB of pure waste.
+**O2 — shipped, but not the way this plan first proposed.** The original idea was to derive
+generation from persisted segment ranges. That would have meant reimplementing ClrMD's own rules —
+`ClrSegment.GetGeneration` for Ephemeral segments, and LOH objects reporting generation **3**, which
+this plan had not accounted for. Instead the column is **run-length encoded**: generation is
+piecewise-constant over the object table, measured at **13 runs over 14,620,162 objects and 50 over
+87,104,236**, so an 83.07 MiB column carried ~600 bytes of information. The runs are built from the
+same per-object bytes the column held, in the same concatenation pass, so it is exact by
+construction rather than by re-derivation.
 
 **O3** — a monotone `int32[R+1]` whose successive differences are almost all 0/1/2 (mean degree
 **2.35 [M]**), stored at full width. Degrees at 1 B plus an absolute checkpoint every 64 rows is
@@ -176,14 +180,15 @@ before building it (§7.5).
 **O8** — Pass 2a walks all 87.1M objects to derive the set of distinct MethodTables, which is
 already persisted as `ObjectTypeDictionary`. Verified identical on both dumps.
 
-**O2, O3 and O4 are pure format changes worth 575.6 MiB together and must ride one version bump** —
-measurements §10.2's batching rule, since each bump invalidates every cache on disk.
+**O2, O3 and O4 shipped together as format v9** — 575.6 MiB projected on the 27.5 GB dump, and one
+bump rather than three, per measurements §10.2's batching rule. Verified in §7.7.
 
 ### 3.3 Sequencing
 
-1. **O1, O2, O3, O4, O8** — independent, no rewrite dependency. O2+O3+O4 in one format bump.
-2. **R1 → R2 → R3** — the core, in that order, as one change.
-3. **O5** — only after its 27.5 GB re-probe.
+1. ✅ **O1** shipped; ✅ **O2 + O3 + O4** shipped together as format v9.
+2. **O8** — independent, not started.
+3. **R1 → R2 → R3** — the core, in that order, as one change.
+4. **O5** — only after its 27.5 GB re-probe.
 
 ---
 
@@ -213,12 +218,12 @@ measurements §10.2's batching rule, since each bump invalidates every cache on 
 | `ObjectAddresses` (4 B block-delta) | 332.28 | 332.28 | — |
 | `ObjectTypeIds` (2 B) | 166.14 | 166.14 | — |
 | `ObjectSizes` (2 B + escape) | 166.14 | 166.14 | — |
-| `ObjectGenerations` | 83.07 | **0** | **−83.07** |
+| `ObjectGenerations` → runs | 83.07 | **~0.001** | **−83.07** ✅ v9 |
 | reachable addresses → **bitmap + rank/select** | 222.99 | **10.70** | **−212.29** |
 | `DominatorIdomRows` (4 B) | 222.55 | 222.55 | — |
-| `DominatorRetainedBytes` (8 B → 2 B) | 445.10 | **112.51** | **−332.59** |
+| `DominatorRetainedBytes` (8 B → 2 B) | 445.10 | **112.51** | **−332.59** ✅ v9 |
 | `ReverseEdgeChildren` (4 B/edge) | 522.74 | 522.74 | — |
-| `ReverseEdgeOffsets` → **degrees + checkpoints** | 222.55 | **62.59** | **−159.96** |
+| `ReverseEdgeOffsets` → **degrees + checkpoints** | 222.55 | **59.11** | **−163.44** ✅ v9 |
 | satellites, dictionary, metadata | 34.55 | 34.55 | — |
 | **Total** | **2,418.1** | **1,630.2** | **−787.9 (−33%)** |
 
@@ -447,7 +452,46 @@ Not actioned — no consumer depends on within-list order, and every caller trea
 set. Recorded because it means **byte-identity is not a valid acceptance criterion** for any future
 cache change; compare per-section lengths and record counts, or content as a multiset, instead.
 
-### 7.7 Where estimates were wrong
+### 7.7 Format v9 shipped — O2 + O3 + O4, verified against the v8 container
+
+One bump for all three, per §10.2's batching rule. Measured on the 3.3 GB dump, whose v8 cache was
+kept as the oracle:
+
+| | v8 | v9 | Δ |
+|---|---:|---:|---:|
+| `DominatorRetainedBytes` | 51.01 MiB @ 8 B | **12.75 MiB @ 2 B** | −38.26 |
+| `ReverseEdgeOffsets` → degrees + checkpoints | 25.51 MiB @ 4 B | **6.78 MiB** (6.38 + 0.40) | −18.73 |
+| `ObjectGenerations` → runs | 13.94 MiB @ 1 B | **156 bytes** (13 runs) | −13.94 |
+| **`cache.bin` total** | **342.50 MiB** | **271.7 MiB** | **−70.8 (−20.7%)** |
+
+Predicted −70.5 MiB, measured −70.8. Projected on the 27.5 GB dump: **−575.6 MiB**.
+
+**Correctness — exhaustive, not sampled.** Because the v8 container was still on disk, all three
+could be checked against it row by row rather than by sampling:
+
+| Check | Rows compared | Mismatches |
+|---|---:|---:|
+| Retained bytes: v9 narrowed == v8 full-width | 6,686,490 | **0** |
+| Offsets: v9 degrees + checkpoints rebuild v8's column | 6,686,491 | **0** |
+| Checkpoints equal the true offset at each stride boundary | 104,477 | **0** |
+| Generations: v9 runs expand to v8's byte column | 14,620,162 | **0** |
+
+Escape rates came out low enough that the narrow widths hold comfortably: 9,298 retained-bytes
+escapes (0.139%) and 1,907 degree escapes (0.029%) against a max in-degree of **192,940** — a hub
+that would silently corrupt every later offset if the escape path were wrong, which is why
+`Write_HubRowExceedingAByte_EscapesAndStillReconstructsOffsets` exists.
+
+Real-dump discrepancy tests re-run individually on the new format: `ReverseEdgeCsrRealDumpTests`
+(41,831 live edges checked, 0 mismatches), `NarrowColumnsRealDumpTests`,
+`BlockDeltaAddressExhaustiveOracleTests`, `SegmentIndexBuildDiscrepancyTests` — all pass.
+
+**One trap worth recording.** `CacheContainerReader.TryOpenSection` returns a
+`MemoryMappedViewStream` whose `Length` is rounded **up to the OS allocation granularity**, so it is
+not the section's byte length. `ObjectGenerationRunTable` initially sized its read from it and
+silently loaded nothing, which surfaced as 14 tests returning empty collections rather than as an
+error. Take record counts from the TOC, which is what `SegmentIndexWriter.ReadRecords` already does.
+
+### 7.8 Where estimates were wrong
 
 Recorded because the pattern matters more than the individual items.
 

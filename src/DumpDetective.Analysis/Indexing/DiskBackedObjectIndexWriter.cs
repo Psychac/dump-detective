@@ -624,10 +624,18 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             containerWriter.EndSection(sizeOverflow.Count, sizeOverflowChecksum);
         }
 
-        containerWriter.BeginSection(CacheSectionId.ObjectGenerations);
-        uint genChecksum = ConcatenateScratchFiles(stream, segGenScratchFiles, writeBuffer);
+        // Generation is run-length encoded instead of stored per object: it is piecewise-constant
+        // over the concatenated table, measuring 13 runs over 14.6M objects and 50 over 87.1M, so
+        // the byte column was 83.07 MiB carrying ~600 bytes of information (O2, §3.2 of
+        // docs/cache/cache-ideal-design.md). The runs come from the same per-object bytes the column
+        // used to hold, read back in the same concatenation order — not re-derived from segment
+        // metadata, which would mean reimplementing ClrMD's own Ephemeral/LOH generation rules.
+        List<(long FirstRecordIndex, sbyte Generation)> generationRuns =
+            BuildGenerationRuns(segGenScratchFiles, writeBuffer);
+        containerWriter.BeginSection(CacheSectionId.ObjectGenerationRuns);
+        uint genChecksum = ObjectGenerationRunTable.Write(stream, generationRuns);
         MarkAlloc("columnar scratch concatenation");
-        containerWriter.EndSection(objectCount, genChecksum);
+        containerWriter.EndSection(generationRuns.Count, genChecksum);
 
         // §10.1/§10.4: build the (SegmentIndexEntry, scratch-file-paths) triples
         // ScratchFileObjectMetadataLookup needs, mirroring the SegmentIndex satellite's own
@@ -2015,6 +2023,58 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         }
 
         return hasher.GetCurrentHashAsUInt32();
+    }
+
+    /// <summary>
+    /// Reads the per-segment generation scratch files in concatenation order and collapses them to
+    /// one record per change. Deletes each file as it goes, matching
+    /// <see cref="ConcatenateScratchFiles"/>' default.
+    /// </summary>
+    private static List<(long FirstRecordIndex, sbyte Generation)> BuildGenerationRuns(string[] files, int bufferSize)
+    {
+        var runs = new List<(long FirstRecordIndex, sbyte Generation)>(capacity: 64);
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(bufferSize);
+
+        try
+        {
+            long recordIndex = 0;
+            sbyte current = 0;
+            bool started = false;
+
+            for (int i = 0; i < files.Length; i++)
+            {
+                if (!File.Exists(files[i]))
+                    continue;
+
+                using (var fs = new FileStream(files[i], FileMode.Open, FileAccess.Read, FileShare.None, bufferSize, FileOptions.SequentialScan))
+                {
+                    int read;
+                    while ((read = fs.Read(buffer, 0, buffer.Length)) > 0)
+                    {
+                        for (int b = 0; b < read; b++)
+                        {
+                            sbyte generation = unchecked((sbyte)buffer[b]);
+                            if (!started || generation != current)
+                            {
+                                runs.Add((recordIndex, generation));
+                                current = generation;
+                                started = true;
+                            }
+
+                            recordIndex++;
+                        }
+                    }
+                }
+
+                File.Delete(files[i]);
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+
+        return runs;
     }
 
     private static uint ConcatenateScratchFiles(Stream stream, string[] files, int bufferSize, bool deleteAfterCopy = true)

@@ -17,30 +17,25 @@ namespace DumpDetective.Analysis.Indexing.ReverseIndex;
 internal sealed unsafe class ReverseEdgeIndexReader : IDisposable
 {
     private readonly DominatorRowIndex _rows;
-    private readonly MemoryMappedViewAccessor _offsetsAccessor;
+    private readonly ReverseEdgeDegreeColumn _rowDirectory;
     // Nullable: TryOpenSectionAccessor returns a null accessor (not a failure) for a present-but-
     // zero-length section, which is exactly what a dump with genuinely zero recorded edges looks
     // like. Never dereferenced in that case — every row's offsets are equal, so TryGetParents and
     // EnumerateChildCounts never index into it.
     private readonly MemoryMappedViewAccessor? _childrenAccessor;
-    private readonly byte* _offsetsPtr;
     private readonly byte* _childrenPtr;
     private bool _disposed;
 
     private ReverseEdgeIndexReader(
-        DominatorRowIndex rows, MemoryMappedViewAccessor offsetsAccessor, MemoryMappedViewAccessor? childrenAccessor)
+        DominatorRowIndex rows, ReverseEdgeDegreeColumn rowDirectory, MemoryMappedViewAccessor? childrenAccessor)
     {
         _rows = rows;
-        _offsetsAccessor = offsetsAccessor;
+        _rowDirectory = rowDirectory;
         _childrenAccessor = childrenAccessor;
-
-        byte* p = null;
-        _offsetsAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
-        _offsetsPtr = p + _offsetsAccessor.PointerOffset;
 
         if (_childrenAccessor is not null)
         {
-            p = null;
+            byte* p = null;
             _childrenAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
             _childrenPtr = p + _childrenAccessor.PointerOffset;
         }
@@ -61,12 +56,9 @@ internal sealed unsafe class ReverseEdgeIndexReader : IDisposable
         if (!DominatorRowIndex.TryOpen(container, out DominatorRowIndex? rows) || rows is null)
             return false;
 
-        long expectedOffsetsLength = (rows.RowCount + 1) * sizeof(int);
-        if (!container.TryOpenSectionAccessor(CacheSectionId.ReverseEdgeOffsets, out MemoryMappedViewAccessor? offsetsAccessor, out long offsetsLength)
-            || offsetsAccessor is null || offsetsLength != expectedOffsetsLength)
+        if (!ReverseEdgeDegreeColumn.TryOpen(container, rows.RowCount, out ReverseEdgeDegreeColumn? rowDirectory) || rowDirectory is null)
         {
             rows.Dispose();
-            offsetsAccessor?.Dispose();
             return false;
         }
 
@@ -76,11 +68,11 @@ internal sealed unsafe class ReverseEdgeIndexReader : IDisposable
         if (!container.TryOpenSectionAccessor(CacheSectionId.ReverseEdgeChildren, out MemoryMappedViewAccessor? childrenAccessor, out _))
         {
             rows.Dispose();
-            offsetsAccessor.Dispose();
+            rowDirectory.Dispose();
             return false;
         }
 
-        reader = new ReverseEdgeIndexReader(rows, offsetsAccessor, childrenAccessor);
+        reader = new ReverseEdgeIndexReader(rows, rowDirectory, childrenAccessor);
         return true;
     }
 
@@ -103,12 +95,12 @@ internal sealed unsafe class ReverseEdgeIndexReader : IDisposable
         if (row < 0)
             return false;
 
-        int start = ReadOffset(row);
-        int end = ReadOffset(row + 1);
-        if (end == start)
+        int start = _rowDirectory.GetOffset(row);
+        int count = _rowDirectory.GetDegree(row);
+        if (count == 0)
             return false;
 
-        var result = new ulong[end - start];
+        var result = new ulong[count];
         for (int i = 0; i < result.Length; i++)
         {
             int parentRow = ReadInt32(_childrenPtr, (start + i) * sizeof(int));
@@ -129,23 +121,13 @@ internal sealed unsafe class ReverseEdgeIndexReader : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        long rowCount = _rows.RowCount;
-        int previous = ReadOffset(0);
-        for (long row = 0; row < rowCount; row++)
+        // Reads the degree column straight through — no offsets, no differencing. The old format
+        // had to subtract consecutive offsets to recover exactly this number.
+        _rowDirectory.ForEachDegree((row, count) =>
         {
-            int next = ReadOffset(row + 1);
-            int count = next - previous;
             if (count > 0)
                 onChild(_rows.ReadAddress(row), count, false);
-
-            previous = next;
-        }
-    }
-
-    private int ReadOffset(long row)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        return ReadInt32(_offsetsPtr, row * sizeof(int));
+        });
     }
 
     private static int ReadInt32(byte* basePtr, long offset) => Unsafe.ReadUnaligned<int>(basePtr + offset);
@@ -157,8 +139,7 @@ internal sealed unsafe class ReverseEdgeIndexReader : IDisposable
         _disposed = true;
 
         _rows.Dispose();
-        _offsetsAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
-        _offsetsAccessor.Dispose();
+        _rowDirectory.Dispose();
 
         if (_childrenAccessor is not null)
         {

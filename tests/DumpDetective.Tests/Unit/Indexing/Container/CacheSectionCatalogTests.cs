@@ -40,7 +40,7 @@ public class CacheSectionCatalogTests
             CacheSectionId.ObjectAddresses,
             CacheSectionId.ObjectMethodTables,
             CacheSectionId.ObjectSizes,
-            CacheSectionId.ObjectGenerations,
+            CacheSectionId.ObjectGenerationRuns,
             CacheSectionId.TypeAggregates,
             CacheSectionId.Roots,
             CacheSectionId.SegmentIndex,
@@ -62,7 +62,9 @@ public class CacheSectionCatalogTests
     {
         CacheSectionId[] gated =
         [
-            CacheSectionId.ReverseEdgeOffsets,            // can fail deterministically at scale
+            CacheSectionId.ReverseEdgeDegrees,            // can fail deterministically at scale
+            CacheSectionId.ReverseEdgeDegreeCheckpoints,
+            CacheSectionId.ReverseEdgeDegreeOverflow,
             CacheSectionId.ReverseEdgeChildren,
             CacheSectionId.DominatorReachableAddresses,   // Stage B analyzer gating
             CacheSectionId.RootStackThreadAttribution,    // pre-dates its own additive introduction in some v4 caches
@@ -96,6 +98,8 @@ public class CacheSectionCatalogTests
             CacheSectionId.ReverseEdgeBuckets,       // replaced outright by true CSR (format v8)
             CacheSectionId.ReverseEdgeDirectories,
             CacheSectionId.ReverseEdgeMetadata,
+            CacheSectionId.ReverseEdgeOffsets,       // replaced by degrees + checkpoints (format v9)
+            CacheSectionId.ObjectGenerations,        // replaced by run-length encoding (format v9)
         ];
 
         foreach (CacheSectionId id in unused)

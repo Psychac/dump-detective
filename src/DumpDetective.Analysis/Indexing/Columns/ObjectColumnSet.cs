@@ -18,12 +18,16 @@ namespace DumpDetective.Analysis.Indexing.Columns;
 /// </remarks>
 internal sealed class ObjectColumnSet : IDisposable
 {
-    private const int GenerationWidth = sizeof(sbyte);
-
     public required MemoryMappedViewAccessor Addresses { get; init; }
     public required MemoryMappedViewAccessor MethodTables { get; init; }
     public required MemoryMappedViewAccessor Sizes { get; init; }
-    public required MemoryMappedViewAccessor Generations { get; init; }
+
+    /// <summary>
+    /// Per-object generation, run-length encoded rather than one byte per object — see
+    /// <see cref="ObjectGenerationRunTable"/>. Resident and tiny (tens of records), so unlike the
+    /// other columns it is not a mapped view.
+    /// </summary>
+    public required ObjectGenerationRunTable GenerationRuns { get; init; }
 
     /// <summary>TypeId → MethodTable, indexed once per object; see <see cref="CacheSectionId.ObjectTypeDictionary"/>.</summary>
     public required ulong[] TypeDictionary { get; init; }
@@ -55,7 +59,6 @@ internal sealed class ObjectColumnSet : IDisposable
         MemoryMappedViewAccessor? addresses = null;
         MemoryMappedViewAccessor? methodTables = null;
         MemoryMappedViewAccessor? sizes = null;
-        MemoryMappedViewAccessor? generations = null;
 
         try
         {
@@ -64,12 +67,15 @@ internal sealed class ObjectColumnSet : IDisposable
                 || !reader.TryOpenSectionAccessor(CacheSectionId.ObjectMethodTables, out methodTables, out long methodTablesLength)
                 || methodTables is null
                 || !reader.TryOpenSectionAccessor(CacheSectionId.ObjectSizes, out sizes, out long sizesLength)
-                || sizes is null
-                || !reader.TryOpenSectionAccessor(CacheSectionId.ObjectGenerations, out generations, out long generationsLength)
-                || generations is null)
+                || sizes is null)
             {
                 return false;
             }
+
+            // A missing generation table has to invalidate the whole set: absent, every object would
+            // silently read as generation 0 rather than fail, which is worse than a cold cache.
+            if (!ObjectGenerationRunTable.TryLoad(reader, out ObjectGenerationRunTable? generationRuns) || generationRuns is null)
+                return false;
 
             // Once the address column can be either 4 or 8 bytes wide, its length no longer implies
             // its record count — so the count comes from the TOC, which is authoritative, and every
@@ -78,12 +84,8 @@ internal sealed class ObjectColumnSet : IDisposable
                 return false;
 
             long recordCount = addressesEntry.RecordCount;
-            if (recordCount <= 0
-                || methodTablesLength / typeIdWidth != recordCount
-                || generationsLength / GenerationWidth != recordCount)
-            {
+            if (recordCount <= 0 || methodTablesLength / typeIdWidth != recordCount)
                 return false;
-            }
 
             // A width the format doesn't define means a container this build can't read, which is a
             // cold cache rather than an error.
@@ -123,7 +125,7 @@ internal sealed class ObjectColumnSet : IDisposable
                 Addresses = addresses,
                 MethodTables = methodTables,
                 Sizes = sizes,
-                Generations = generations,
+                GenerationRuns = generationRuns,
                 TypeDictionary = typeDictionary,
                 TypeIdWidth = typeIdWidth,
                 SizeWidth = sizeWidth,
@@ -141,7 +143,6 @@ internal sealed class ObjectColumnSet : IDisposable
                 addresses?.Dispose();
                 methodTables?.Dispose();
                 sizes?.Dispose();
-                generations?.Dispose();
             }
         }
     }
@@ -183,6 +184,5 @@ internal sealed class ObjectColumnSet : IDisposable
         Addresses.Dispose();
         MethodTables.Dispose();
         Sizes.Dispose();
-        Generations.Dispose();
     }
 }

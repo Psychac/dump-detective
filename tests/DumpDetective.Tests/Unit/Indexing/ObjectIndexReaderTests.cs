@@ -101,7 +101,7 @@ public class ObjectIndexReaderTests : IDisposable
         WriteUlongColumn(writer, CacheSectionId.ObjectAddresses, records.Select(r => r.Address).ToArray());
         ObjectColumnSectionsWriter.WriteMethodTableColumns(writer, records.Select(r => r.MethodTable).ToArray());
         WriteUlongColumn(writer, CacheSectionId.ObjectSizes, records.Select(r => r.Size).ToArray());
-        WriteSbyteColumn(writer, CacheSectionId.ObjectGenerations, records.Select(r => r.Generation).ToArray());
+        ObjectColumnSectionsWriter.WriteGenerationColumn(writer, records.Select(r => r.Generation).ToArray());
         writer.Finish();
     }
 

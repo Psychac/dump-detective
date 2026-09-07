@@ -1,6 +1,7 @@
 using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 
+using DumpDetective.Analysis.Indexing.Columns;
 using DumpDetective.Analysis.Indexing.Container;
 
 namespace DumpDetective.Analysis.Indexing.Dominator;
@@ -22,16 +23,24 @@ internal sealed unsafe class DominatorTreeIndexReader : IDisposable
     private readonly MemoryMappedViewAccessor? _retainedBytesAccessor;
     private readonly byte* _dominatorRowsPtr;
     private readonly byte* _retainedBytesPtr;
+    // Derived from the section's own length over the row count, the way ObjectColumnSet derives the
+    // object columns' widths — the width is not stored, because the TOC already implies it.
+    private readonly int _retainedBytesWidth;
+    private readonly ColumnOverflowTable _retainedBytesOverflow;
     private bool _disposed;
 
     private DominatorTreeIndexReader(
         DominatorRowIndex rows,
         MemoryMappedViewAccessor dominatorRowsAccessor,
-        MemoryMappedViewAccessor? retainedBytesAccessor)
+        MemoryMappedViewAccessor? retainedBytesAccessor,
+        int retainedBytesWidth,
+        ColumnOverflowTable retainedBytesOverflow)
     {
         _rows = rows;
         _dominatorRowsAccessor = dominatorRowsAccessor;
         _retainedBytesAccessor = retainedBytesAccessor;
+        _retainedBytesWidth = retainedBytesWidth;
+        _retainedBytesOverflow = retainedBytesOverflow;
 
         byte* p = null;
         _dominatorRowsAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref p);
@@ -73,17 +82,25 @@ internal sealed unsafe class DominatorTreeIndexReader : IDisposable
         }
 
         MemoryMappedViewAccessor? retainedBytesAccessor = null;
+        int retainedBytesWidth = NarrowColumnWidth.Full;
+        ColumnOverflowTable retainedBytesOverflow = ColumnOverflowTable.Empty;
+
         if (container.TryOpenSectionAccessor(CacheSectionId.DominatorRetainedBytes, out MemoryMappedViewAccessor? candidateAccessor, out long retainedBytesLength)
-            && candidateAccessor is not null && retainedBytesLength == rows.RowAlignedColumnLength)
+            && candidateAccessor is not null
+            && rows.RowCount > 0
+            && retainedBytesLength % rows.RowCount == 0
+            && NarrowColumnWidth.IsSupported((int)(retainedBytesLength / rows.RowCount))
+            && TryLoadRetainedOverflow(container, (int)(retainedBytesLength / rows.RowCount), out retainedBytesOverflow))
         {
             retainedBytesAccessor = candidateAccessor;
+            retainedBytesWidth = (int)(retainedBytesLength / rows.RowCount);
         }
         else
         {
             candidateAccessor?.Dispose();
         }
 
-        reader = new DominatorTreeIndexReader(rows, dominatorRowsAccessor, retainedBytesAccessor);
+        reader = new DominatorTreeIndexReader(rows, dominatorRowsAccessor, retainedBytesAccessor, retainedBytesWidth, retainedBytesOverflow);
         return true;
     }
 
@@ -123,7 +140,53 @@ internal sealed unsafe class DominatorTreeIndexReader : IDisposable
         if (row < 0)
             return false;
 
-        retainedBytes = ReadUInt64(_retainedBytesPtr, row * sizeof(ulong));
+        retainedBytes = ReadRetainedBytes(row);
+        return true;
+    }
+
+    /// <summary>
+    /// Decodes one narrowed row. The escape branch costs a binary search over a table measured at
+    /// 0.10-0.19% of rows, so it is rare enough not to matter on this point-query path.
+    /// </summary>
+    private ulong ReadRetainedBytes(long row)
+    {
+        switch (_retainedBytesWidth)
+        {
+            case sizeof(ushort):
+            {
+                ushort stored = Unsafe.ReadUnaligned<ushort>(_retainedBytesPtr + row * sizeof(ushort));
+                return stored == ushort.MaxValue && _retainedBytesOverflow.TryGetValue(row, out ulong escaped)
+                    ? escaped
+                    : stored;
+            }
+            case sizeof(uint):
+            {
+                uint stored = Unsafe.ReadUnaligned<uint>(_retainedBytesPtr + row * sizeof(uint));
+                return stored == uint.MaxValue && _retainedBytesOverflow.TryGetValue(row, out ulong escaped)
+                    ? escaped
+                    : stored;
+            }
+            default:
+                return ReadUInt64(_retainedBytesPtr, row * sizeof(ulong));
+        }
+    }
+
+    /// <summary>
+    /// All-or-nothing, matching <c>ObjectAddressLookup</c>'s rule for the object columns: a narrowed
+    /// column whose escape table is missing would silently report sentinel values as real retained
+    /// bytes, so the column is treated as unavailable instead.
+    /// </summary>
+    private static bool TryLoadRetainedOverflow(CacheContainerReader container, int width, out ColumnOverflowTable overflow)
+    {
+        overflow = ColumnOverflowTable.Empty;
+
+        if (width == NarrowColumnWidth.Full)
+            return true;
+
+        if (!ColumnOverflowTable.TryLoad(container, CacheSectionId.DominatorRetainedBytesOverflow, out ColumnOverflowTable? loaded) || loaded is null)
+            return false;
+
+        overflow = loaded;
         return true;
     }
 

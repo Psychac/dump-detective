@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.IO.Hashing;
 
+using DumpDetective.Analysis.Indexing.Columns;
 using DumpDetective.Analysis.Indexing.Container;
 
 namespace DumpDetective.Analysis.Indexing.Dominator;
@@ -76,8 +77,32 @@ internal static class DominatorTreeIndexWriter
     /// bytes (subtree sum, including its own shallow size; folded leaves get their own shallow size
     /// since as leaves their subtree is just themselves).
     /// </param>
+    /// <remarks>
+    /// Narrowed to the cheapest width the distribution allows, exactly like <c>ObjectSizes</c>:
+    /// values that don't fit store an all-ones sentinel and escape to
+    /// <see cref="CacheSectionId.DominatorRetainedBytesOverflow"/>. 69–75% of rows are
+    /// dominator-tree leaves whose retained bytes are just their own shallow size, so both reference
+    /// dumps pick 2 bytes at a 0.10–0.19% escape rate — 445.10 MiB to 112.51 MiB on the 27.5 GB dump
+    /// (docs/cache/cache-ideal-design.md §7.1).
+    ///
+    /// Storing <c>retained - ownSize</c> so leaf rows become zero was measured and rejected: it
+    /// costs 112.56 MiB against 112.51 for the raw column, because the leaves are small in absolute
+    /// terms, not just relative to themselves. Narrowing alone gets the whole saving.
+    /// </remarks>
     public static void WriteRetainedBytes(CacheContainerWriter containerWriter, ulong[] retainedBytesByRow)
     {
+        long escapesAtTwoBytes = 0;
+        long escapesAtFourBytes = 0;
+        foreach (ulong value in retainedBytesByRow)
+        {
+            if (value >= ushort.MaxValue) escapesAtTwoBytes++;
+            if (value >= uint.MaxValue) escapesAtFourBytes++;
+        }
+
+        int width = NarrowColumnWidth.Choose(retainedBytesByRow.Length, escapesAtTwoBytes, escapesAtFourBytes);
+        var overflow = new List<(uint RecordIndex, ulong Value)>(
+            capacity: (int)Math.Min(int.MaxValue, width == sizeof(ushort) ? escapesAtTwoBytes : width == sizeof(uint) ? escapesAtFourBytes : 0));
+
         containerWriter.BeginSection(CacheSectionId.DominatorRetainedBytes);
 
         var hasher = new XxHash32();
@@ -85,12 +110,43 @@ internal static class DominatorTreeIndexWriter
         try
         {
             int offset = 0;
-            foreach (ulong value in retainedBytesByRow)
+            for (int row = 0; row < retainedBytesByRow.Length; row++)
             {
-                BinaryPrimitives.WriteUInt64LittleEndian(buffer.AsSpan(offset), value);
-                offset += sizeof(ulong);
+                ulong value = retainedBytesByRow[row];
+                Span<byte> slot = buffer.AsSpan(offset);
 
-                if (offset + sizeof(ulong) > buffer.Length)
+                switch (width)
+                {
+                    case sizeof(ushort):
+                        if (value >= ushort.MaxValue)
+                        {
+                            overflow.Add(((uint)row, value));
+                            BinaryPrimitives.WriteUInt16LittleEndian(slot, ushort.MaxValue);
+                        }
+                        else
+                        {
+                            BinaryPrimitives.WriteUInt16LittleEndian(slot, (ushort)value);
+                        }
+                        break;
+                    case sizeof(uint):
+                        if (value >= uint.MaxValue)
+                        {
+                            overflow.Add(((uint)row, value));
+                            BinaryPrimitives.WriteUInt32LittleEndian(slot, uint.MaxValue);
+                        }
+                        else
+                        {
+                            BinaryPrimitives.WriteUInt32LittleEndian(slot, (uint)value);
+                        }
+                        break;
+                    default:
+                        BinaryPrimitives.WriteUInt64LittleEndian(slot, value);
+                        break;
+                }
+
+                offset += width;
+
+                if (offset + width > buffer.Length)
                     FlushChunk(containerWriter.Stream, hasher, buffer, ref offset);
             }
 
@@ -103,6 +159,15 @@ internal static class DominatorTreeIndexWriter
         }
 
         containerWriter.EndSection(retainedBytesByRow.Length, hasher.GetCurrentHashAsUInt32());
+
+        // Written even when empty, so a reader can distinguish "narrowed with no escapes" from
+        // "narrowed and the escape table failed to write" — same contract ObjectSizeOverflow has.
+        if (width != NarrowColumnWidth.Full)
+        {
+            containerWriter.BeginSection(CacheSectionId.DominatorRetainedBytesOverflow);
+            uint overflowChecksum = ColumnOverflowTable.Write(containerWriter.Stream, overflow, WriteBufferSize);
+            containerWriter.EndSection(overflow.Count, overflowChecksum);
+        }
     }
 
     /// <summary>

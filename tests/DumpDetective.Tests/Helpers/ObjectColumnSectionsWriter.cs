@@ -19,7 +19,7 @@ internal static class ObjectColumnSectionsWriter
 {
     /// <summary>
     /// Writes <c>ObjectAddresses</c>, <c>ObjectTypeDictionary</c>, <c>ObjectMethodTables</c>,
-    /// <c>ObjectSizes</c> and (when <paramref name="includeGenerations"/>) <c>ObjectGenerations</c>,
+    /// <c>ObjectSizes</c> and (when <paramref name="includeGenerations"/>) <c>ObjectGenerationRuns</c>,
     /// deriving the type dictionary from the distinct method tables in <paramref name="records"/>.
     /// </summary>
     public static void Write(
@@ -151,14 +151,21 @@ internal static class ObjectColumnSectionsWriter
         writer.EndSection(values.Length);
     }
 
+    /// <summary>
+    /// Writes the run-length encoded generation section (format v9). Kept named after the column it
+    /// replaced so the six call sites don't all have to change; the encoding is the writer's concern.
+    /// </summary>
     public static void WriteGenerationColumn(CacheContainerWriter writer, sbyte[] generations)
     {
-        byte[] buffer = new byte[generations.Length];
+        var runs = new List<(long FirstRecordIndex, sbyte Generation)>();
         for (int i = 0; i < generations.Length; i++)
-            buffer[i] = unchecked((byte)generations[i]);
+        {
+            if (i == 0 || generations[i] != generations[i - 1])
+                runs.Add((i, generations[i]));
+        }
 
-        writer.BeginSection(CacheSectionId.ObjectGenerations);
-        writer.Stream.Write(buffer, 0, buffer.Length);
-        writer.EndSection(generations.Length);
+        writer.BeginSection(CacheSectionId.ObjectGenerationRuns);
+        uint checksum = ObjectGenerationRunTable.Write(writer.Stream, runs);
+        writer.EndSection(runs.Count, checksum);
     }
 }

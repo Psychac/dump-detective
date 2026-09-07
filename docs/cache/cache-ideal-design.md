@@ -27,21 +27,32 @@ items died on measurement — O5, O6, O7 and the sorted BFS frontier.
 
 ## 1. Bottom line
 
-| Axis | Today **[M]** | After this plan | Change |
-|---|---:|---:|---|
-| **Cold peak RAM, 27.5 GB** | **12,976 MB** | **≈2,600 MB [D]** | **−80%** |
-| Cold peak RAM, 3.3 GB | 4,132 MB | ≈1,400 MB **[D]** | −66% |
-| Cold wall clock, 27.5 GB | 1,310.5 s | ≈940 s **[D]** | −28% |
-| `cache.bin`, 27.5 GB | 2,418.1 MiB | 1,630.2 MiB **[D]** | −33% *(−576 already shipped as v9)* |
-| `cache.bin`, 3.3 GB | 342.50 MiB | 248.3 MiB **[D]** | −27% *(342.50 → **248.0** shipped **[M]** — target reached)* |
+> ⚠ **The plan is now executed and measured. This table was the projection; §7.11 has the result.**
+> Disk landed almost exactly (1,627.4 MiB against 1,630.2 predicted). **The RAM projection was wrong
+> by 4.7×** — measured 12,143 MB, not ≈2,600 MB — because the peak turned out to be Lengauer–Tarjan
+> and the analyzers, not the walk this plan rebuilt. Read §7.11 before trusting anything below.
 
-**RAM is the whole point.** Disk moves modestly — v5–v8 already took most of it — and runtime moves
-less than it first appeared, once every estimate was replaced by a measurement. The 5× RAM result is
-the reason to do this work, and it is the axis nothing before this ever measured.
+| Axis | Before **[M]** | Projected | **Measured** |
+|---|---:|---:|---:|
+| **Cold peak RAM, 27.5 GB** | 12,976 MB | ≈2,600 MB | **12,143 MB** ❌ |
+| Cold peak RAM, 3.3 GB | 4,132 MB | ≈1,400 MB | peak WS 5.1→4.8 GB |
+| Cold wall clock, 27.5 GB | 1,310.5 s | ≈940 s | **1,349.4 s** |
+| `cache.bin`, 27.5 GB | 2,418.1 MiB | 1,630.2 MiB | **1,627.4 MiB** ✅ |
+| `cache.bin`, 3.3 GB | 342.50 MiB | 248.3 MiB | **248.0 MiB** ✅ |
 
-Why it matters concretely: the 27.5 GB dump currently peaks at 12.97 GB on a 15.7 GiB machine,
-bottoming out at **356 MB available and paging 3.9 GB [M]**. It survives on the commit limit, not on
-RAM.
+**RAM was meant to be the whole point, and that is where the plan failed.** Both disk targets landed
+within 0.2%, every correctness gate passed, and the structures §2 identified are gone. But peak RAM
+barely moved, because the peak was never in the code this plan rebuilt: it sits in Lengauer–Tarjan
+(~10 GB at 58.3M nodes, against §4.1's 1,000–1,700 MB budget) and in the analyzers, which §4.1 did
+not model at all.
+
+The lesson is the one §7.4 already taught about EventLeak, now repeated at the level of the whole
+plan: **knowing how big a structure is is not the same as knowing where the peak is.** §2 measured
+the first and assumed the second.
+
+The 27.5 GB dump still peaks near 12 GB on a 15.7 GiB machine. Anyone continuing should profile the
+dominator stage first — §9 records that the walk was *already* wrongly assumed to be the memory
+problem once before (`DenseIdMap`, 2.6× slower, no peak win). This makes twice.
 
 ---
 
@@ -662,7 +673,55 @@ index went missing — visible only to `ReverseEdgeCsrRealDumpTests`, which exer
 path (it registers no `IRequiresDominatorTreeIndex` analyzer). All three columns now outlive the
 walk on both paths, and all three are cleaned up on both.
 
-### 7.11 Where estimates were wrong
+### 7.11 ⚠ Measured at 27.5 GB — the disk result landed, the RAM headline did not
+
+One cold rebuild of the 27.5 GB dump on the finished pipeline, private commit sampled once a second.
+
+| Axis | Plan predicted | **Measured** | Part D baseline **[M]** |
+|---|---:|---:|---:|
+| `cache.bin` | 1,630.2 MiB | **1,627.4 MiB** ✅ | 2,418.1 MiB |
+| Cold wall clock | ≈940 s | **1,349.4 s** | 1,310.5 s |
+| **Peak private** | **≈2,600 MB** | **12,143 MB** ❌ | 12,976 MB |
+
+**Disk is exact** — 1,627.4 against 1,630.2 predicted, 0.2% out, a −32.7% reduction.
+
+**The RAM projection was wrong by 4.7×, and that was the entire justification for this plan.**
+Stating it plainly: §1 promised ≈2,600 MB and −80%; the measurement is 12,143 MB and −6.4% against
+Part D's baseline (a soft comparison — different code and session, per §8).
+
+**Why, and it is not that R2/R3 failed.** The structures §2 identified were removed and the
+arithmetic holds: dictionary 2,326 MB + edge buffers ~1,096 MB out, `objectRowOf` 233 MB +
+out-degree bytes 87 MB + bitmap 10 MB in — about **−3.1 GB from the walk**. Peak barely moved
+because **the peak was never the walk.** Sampling across the build:
+
+| Point in build | Peak private |
+|---|---:|
+| heap scan | ~3.8–5.0 GB |
+| reachability walk | ~5.4 GB |
+| **dominator stage (LeafFolder + LT), 58,339,932 nodes** | **~10.2 GB** |
+| Leak Candidate Analysis (an *analyzer*, after the build) | ~7.8 GB |
+
+§4.1 said "the dominator stage becomes the floor and everything else becomes noise" and budgeted
+that floor at **1,000–1,700 MB**. Measured, it is **~10 GB** — 6–10× the estimate. Removing 3 GB
+from a phase that peaks at 5.4 GB cannot lower a run whose peak is 10.2 GB somewhere else.
+
+§4.1 also omitted the analyzer phase entirely. It budgeted "the build", but peak private is a
+property of the *run*, and one analyzer reaches 7.8 GB on its own.
+
+**What this means for the plan.** R1/R2/R3 are still right on their own terms — they delete real
+structures, the disk result is exact, and the correctness gates all passed. But the case for them
+was "≈5× less RAM", and that case does not survive contact. **The remaining RAM is in Lengauer–Tarjan
+and in the analyzers, neither of which this plan touched.** Anyone continuing should profile Stage B
+before proposing anything else; §9's note that `DenseIdMap` was already tried on the walk and came
+back 2.6× slower is now the *second* time the walk was assumed to be the memory problem when it was
+not.
+
+**Runtime** is +38.9 s (+3.0%) against the baseline, in line with §7.10's +10% on the small dump
+scaled by the edge ratio. Weak evidence — cross-session — but the direction matches, and R2/R3's two
+phases show up directly: reachability 190.1 s + reference-graph 113.5 s against the single 213.7 s
+walk Part D recorded.
+
+### 7.12 Where estimates were wrong
 
 Recorded because the pattern matters more than the individual items.
 

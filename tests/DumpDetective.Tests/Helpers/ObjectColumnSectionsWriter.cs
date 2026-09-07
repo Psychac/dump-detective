@@ -140,6 +140,34 @@ internal static class ObjectColumnSectionsWriter
         writer.EndSection(overflow.Count);
     }
 
+    /// <summary>
+    /// Writes the pair that <c>DominatorRowIndex</c> derives the reachable-row space from since
+    /// format v10 (docs/cache/cache-ideal-design.md §3.1, R1): <c>ObjectAddresses</c> for the
+    /// addresses, and <c>ReachableRowBitmap</c> for membership. Replaces the single
+    /// <c>DominatorReachableAddresses</c> column tests used to write.
+    /// </summary>
+    /// <remarks>
+    /// Every object row is marked reachable, so reachable row == object row and the row ordering
+    /// every caller previously asserted against is preserved exactly. Writes the address column at
+    /// the full 8-byte width, which <c>MonotonicAddressColumn</c> accepts alongside the
+    /// block-delta form the production writer emits — no need to reproduce the encoding here.
+    ///
+    /// Use this *instead of* <see cref="Write"/>, not alongside it: both write
+    /// <c>ObjectAddresses</c>, and the container is write-once per section.
+    /// </remarks>
+    public static void WriteReachableRows(CacheContainerWriter writer, IReadOnlyList<ulong> sortedAddresses)
+    {
+        WriteUlongColumn(writer, CacheSectionId.ObjectAddresses, sortedAddresses.ToArray());
+
+        var allRows = new long[sortedAddresses.Count];
+        for (int i = 0; i < allRows.Length; i++)
+            allRows[i] = i;
+
+        writer.BeginSection(CacheSectionId.ReachableRowBitmap);
+        uint checksum = ReachableRowBitmap.Write(writer.Stream, sortedAddresses.Count, allRows);
+        writer.EndSection(sortedAddresses.Count, checksum);
+    }
+
     public static void WriteUlongColumn(CacheContainerWriter writer, CacheSectionId id, ulong[] values)
     {
         byte[] buffer = new byte[values.Length * sizeof(ulong)];

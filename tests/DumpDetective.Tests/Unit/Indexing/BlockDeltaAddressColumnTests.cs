@@ -125,7 +125,7 @@ public class BlockDeltaAddressColumnTests : IDisposable
 
         using (var writer = new CacheContainerWriter(containerPath))
         {
-            DominatorReachableAddressWriter.Write(writer, reachable);
+            ObjectColumnSectionsWriter.WriteReachableRows(writer, reachable);
             writer.Finish();
         }
 

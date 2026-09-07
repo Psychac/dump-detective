@@ -8,6 +8,8 @@ using FluentAssertions;
 
 using Xunit;
 
+using DumpDetective.Tests.Helpers;
+
 namespace DumpDetective.Tests.Unit.Indexing;
 
 /// <summary>
@@ -92,7 +94,7 @@ public class DominatorChildIndexTests : IDisposable
         string containerPath = Path.Combine(_tempDir, $"cache-{Guid.NewGuid():N}.bin");
         using (var writer = new CacheContainerWriter(containerPath))
         {
-            DominatorReachableAddressWriter.Write(writer, walk.ReachableAddresses);
+            ObjectColumnSectionsWriter.WriteReachableRows(writer, walk.ReachableAddresses);
             DominatorTreeIndexWriter.WriteImmediateDominatorRows(writer, dominatorRowByRow);
             writer.Finish();
         }
@@ -196,7 +198,7 @@ public class DominatorChildIndexTests : IDisposable
         string containerPath = Path.Combine(_tempDir, "cache-partial.bin");
         using (var writer = new CacheContainerWriter(containerPath))
         {
-            DominatorReachableAddressWriter.Write(writer, [0x100UL]);
+            ObjectColumnSectionsWriter.WriteReachableRows(writer, [0x100UL]);
             // Deliberately no DominatorImmediateDominatorAddresses — the inversion has nothing to invert.
             writer.Finish();
         }

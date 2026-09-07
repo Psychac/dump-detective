@@ -140,7 +140,7 @@ internal static class CacheSectionCatalog
         new(CacheSectionId.ForwardEdgeBuckets, "ForwardEdgeBuckets", CacheSectionRequirement.Unused),
         new(CacheSectionId.ForwardEdgeDirectories, "ForwardEdgeDirectories", CacheSectionRequirement.Unused),
         new(CacheSectionId.ForwardEdgeMetadata, "ForwardEdgeMetadata", CacheSectionRequirement.Unused),
-        new(CacheSectionId.DominatorReachableAddresses, "DominatorReachableAddresses", CacheSectionRequirement.Conditional),
+        new(CacheSectionId.DominatorReachableAddresses, "DominatorReachableAddresses", CacheSectionRequirement.Unused),
         new(CacheSectionId.DominatorImmediateDominatorAddresses, "DominatorImmediateDominatorAddresses", CacheSectionRequirement.Conditional),
         new(CacheSectionId.DominatorChildOffsets, "DominatorChildOffsets", CacheSectionRequirement.Unused),
         new(CacheSectionId.DominatorChildAddresses, "DominatorChildAddresses", CacheSectionRequirement.Unused),
@@ -151,8 +151,8 @@ internal static class CacheSectionCatalog
         new(CacheSectionId.ObjectSizeOverflow, "ObjectSizeOverflow", CacheSectionRequirement.Conditional),
         new(CacheSectionId.ObjectAddressBlockBases, "ObjectAddressBlockBases", CacheSectionRequirement.Required),
         new(CacheSectionId.ObjectAddressOverflow, "ObjectAddressOverflow", CacheSectionRequirement.Required),
-        new(CacheSectionId.DominatorReachableBlockBases, "DominatorReachableBlockBases", CacheSectionRequirement.Conditional),
-        new(CacheSectionId.DominatorReachableOverflow, "DominatorReachableOverflow", CacheSectionRequirement.Conditional),
+        new(CacheSectionId.DominatorReachableBlockBases, "DominatorReachableBlockBases", CacheSectionRequirement.Unused),
+        new(CacheSectionId.DominatorReachableOverflow, "DominatorReachableOverflow", CacheSectionRequirement.Unused),
         new(CacheSectionId.SectionManifest, "SectionManifest", CacheSectionRequirement.Required),
         new(CacheSectionId.ReverseEdgeOffsets, "ReverseEdgeOffsets", CacheSectionRequirement.Unused),
         new(CacheSectionId.ReverseEdgeChildren, "ReverseEdgeChildren", CacheSectionRequirement.Conditional),
@@ -161,6 +161,7 @@ internal static class CacheSectionCatalog
         new(CacheSectionId.ReverseEdgeDegreeCheckpoints, "ReverseEdgeDegreeCheckpoints", CacheSectionRequirement.Conditional),
         new(CacheSectionId.ReverseEdgeDegreeOverflow, "ReverseEdgeDegreeOverflow", CacheSectionRequirement.Conditional),
         new(CacheSectionId.ObjectGenerationRuns, "ObjectGenerationRuns", CacheSectionRequirement.Required),
+        new(CacheSectionId.ReachableRowBitmap, "ReachableRowBitmap", CacheSectionRequirement.Conditional),
     ];
 
     /// <summary>

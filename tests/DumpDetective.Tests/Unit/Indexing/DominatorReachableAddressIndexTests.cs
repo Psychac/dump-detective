@@ -5,6 +5,8 @@ using FluentAssertions;
 
 using Xunit;
 
+using DumpDetective.Tests.Helpers;
+
 namespace DumpDetective.Tests.Unit.Indexing;
 
 /// <summary>
@@ -32,7 +34,7 @@ public class DominatorReachableAddressIndexTests : IDisposable
     {
         string containerPath = Path.Combine(_tempDir, "cache.bin");
         using var writer = new CacheContainerWriter(containerPath);
-        DominatorReachableAddressWriter.Write(writer, sortedAddresses);
+        ObjectColumnSectionsWriter.WriteReachableRows(writer, sortedAddresses);
         writer.Finish();
         return containerPath;
     }
@@ -43,7 +45,7 @@ public class DominatorReachableAddressIndexTests : IDisposable
         string containerPath = WriteContainer(0x100UL, 0x200UL);
 
         CacheContainerReader.TryOpen(containerPath, out var reader).Should().BeTrue();
-        reader!.ContainsSection(CacheSectionId.DominatorReachableAddresses).Should().BeTrue();
+        reader!.ContainsSection(CacheSectionId.ReachableRowBitmap).Should().BeTrue();
     }
 
     [Fact]

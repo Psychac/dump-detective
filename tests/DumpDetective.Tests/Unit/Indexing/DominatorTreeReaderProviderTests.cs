@@ -8,6 +8,8 @@ using FluentAssertions;
 
 using Xunit;
 
+using DumpDetective.Tests.Helpers;
+
 namespace DumpDetective.Tests.Unit.Indexing;
 
 /// <summary>
@@ -97,7 +99,7 @@ public class DominatorTreeReaderProviderTests : IDisposable
 
         string containerPath = Path.Combine(_tempDir, "cache.bin");
         using var writer = new CacheContainerWriter(containerPath);
-        DominatorReachableAddressWriter.Write(writer, walk.ReachableAddresses);
+        ObjectColumnSectionsWriter.WriteReachableRows(writer, walk.ReachableAddresses);
         DominatorTreeIndexWriter.WriteImmediateDominatorRows(writer, dominatorRowByRow);
         DominatorTreeIndexWriter.WriteRetainedBytes(writer, retainedBytesByRow);
         DominatorTreeMetadataWriter.Write(writer, rollup);
@@ -215,7 +217,7 @@ public class DominatorTreeReaderProviderTests : IDisposable
         string containerPath = Path.Combine(_tempDir, "partial.bin");
         using (var writer = new CacheContainerWriter(containerPath))
         {
-            DominatorReachableAddressWriter.Write(writer, walk.ReachableAddresses);
+            ObjectColumnSectionsWriter.WriteReachableRows(writer, walk.ReachableAddresses);
             DominatorTreeIndexWriter.WriteImmediateDominatorRows(writer, new uint[walk.NodeCount]);
             // Deliberately no metadata section.
             writer.Finish();

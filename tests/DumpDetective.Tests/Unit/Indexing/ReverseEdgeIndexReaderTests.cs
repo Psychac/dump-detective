@@ -230,7 +230,7 @@ public class ReverseEdgeIndexReaderTests : IAsyncLifetime
         string containerPath = Path.Combine(_tempDir, "cache.bin");
         using (var writer = new CacheContainerWriter(containerPath))
         {
-            DominatorReachableAddressWriter.Write(writer, [0x100UL, 0x200UL]);
+            ObjectColumnSectionsWriter.WriteReachableRows(writer, [0x100UL, 0x200UL]);
             writer.Finish();
         }
 

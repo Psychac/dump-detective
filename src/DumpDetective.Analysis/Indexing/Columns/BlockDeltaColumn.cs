@@ -92,6 +92,51 @@ internal sealed class BlockDeltaColumn
     public ColumnOverflowTable.Cursor OpenCursor(long startRecordIndex) => _overflow.OpenCursor(startRecordIndex);
 
     /// <summary>
+    /// Narrows an ascending column to the one block that can contain <paramref name="value"/>, by
+    /// binary searching the resident block bases. Returns <c>false</c> when the value precedes the
+    /// first block, i.e. cannot be present.
+    /// </summary>
+    /// <remarks>
+    /// This is the resident half of <see cref="MonotonicAddressColumn"/>'s rank search, and the
+    /// reason it costs 0.65 MiB instead of 2,325.9 MB: the bases are ~85K entries on the largest
+    /// measured dump, so this half stays in cache at any dump size, and only the in-block probe
+    /// that follows touches a mapped page.
+    ///
+    /// A block's base is its *first* value, and the column ascends, so the last base at or below
+    /// the target names the only block that can hold it. Escaped records don't affect this — their
+    /// block base is still a real first-value.
+    /// </remarks>
+    public bool TryFindBlock(ulong value, long recordCount, out long blockStart, out long blockEnd)
+    {
+        blockStart = 0;
+        blockEnd = -1;
+
+        int lo = 0;
+        int hi = _blockBases.Length - 1;
+        int block = -1;
+        while (lo <= hi)
+        {
+            int mid = lo + ((hi - lo) >> 1);
+            if (_blockBases[mid] <= value)
+            {
+                block = mid;
+                lo = mid + 1;
+            }
+            else
+            {
+                hi = mid - 1;
+            }
+        }
+
+        if (block < 0)
+            return false;
+
+        blockStart = (long)block << BlockShift;
+        blockEnd = Math.Min(blockStart + BlockRecords, recordCount) - 1;
+        return true;
+    }
+
+    /// <summary>
     /// Encodes <paramref name="value"/> for <paramref name="recordIndex"/>, appending to
     /// <paramref name="blockBases"/> when a new block starts and to <paramref name="overflow"/> when
     /// the delta doesn't fit. Written as a free function so the writer can call it inside its

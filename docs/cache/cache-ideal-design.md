@@ -9,9 +9,9 @@ conflict the earlier wins. That order is *not* the one the shipped v5–v8 seque
 optimised disk with a byte count as its only metric — and it is the single reason this plan reaches
 a different answer.
 
-**Status: measured; O1–O4 shipped as format v9, the rest not started.** All six gating measurements
-are closed (§7), and three of them killed items that looked good on paper. Nothing below waits on
-further evidence except where marked.
+**Status: measured; O1–O4 shipped (v9), O8 and R1 shipped (v10). R2, R3, O5 not started.** All six
+gating measurements are closed (§7), and three of them killed items that looked good on paper.
+Nothing below waits on further evidence except where marked.
 
 | | |
 |---|---|
@@ -33,7 +33,7 @@ further evidence except where marked.
 | Cold peak RAM, 3.3 GB | 4,132 MB | ≈1,400 MB **[D]** | −66% |
 | Cold wall clock, 27.5 GB | 1,310.5 s | ≈940 s **[D]** | −28% |
 | `cache.bin`, 27.5 GB | 2,418.1 MiB | 1,630.2 MiB **[D]** | −33% *(−576 already shipped as v9)* |
-| `cache.bin`, 3.3 GB | 342.50 MiB | 248.3 MiB **[D]** | −27% *(342.50 → **271.7** shipped **[M]**)* |
+| `cache.bin`, 3.3 GB | 342.50 MiB | 248.3 MiB **[D]** | −27% *(342.50 → **248.0** shipped **[M]** — target reached)* |
 
 **RAM is the whole point.** Disk moves modestly — v5–v8 already took most of it — and runtime moves
 less than it first appeared, once every estimate was replaced by a measurement. The 5× RAM result is
@@ -93,7 +93,10 @@ that depends on segment-iteration order — all eight index consumers are full p
 sort**, so `cache-architecture.md` §7 constraint 6 has been replaced: monotonicity is now a property
 of the writer, not of what ClrMD happened to return.
 
-> Buys **−2,325.9 MB** and −223 MiB. Costs **+3.4 s** of walk time **[M, §7.2]**.
+> ✅ **SHIPPED as format v10 (§7.8).** Delivers the **−223 MiB of disk** now, and the rank primitive
+> R2/R3 are built on. The **−2,325.9 MB of RAM is not realised until R3** — the walk still builds its
+> `Dictionary<ulong,int>` until the semi-external walk replaces it. Stated plainly because the two
+> halves of R1's value land in different commits.
 
 **R2 — Swizzle once, sort instead of search.** The scan emits `(parentRow:u32, childAddr:u64)` —
 12 B, down from 16 B. Then:
@@ -142,7 +145,7 @@ None of these depend on the rewrite or on each other.
 | ✅ **O3** | `ReverseEdgeOffsets` → 1-byte degrees + 64-row checkpoints — **SHIPPED (v9)** | **159.96 MiB [D]** | below, §7.7 |
 | ✅ **O4** | Narrow `DominatorRetainedBytes` to 2 B — **SHIPPED (v9)** | **332.59 MiB [M]** | §7.1, §7.7 |
 | **O5** | Overlap root enumeration with the heap scan | **≈50 s [D]** | §7.5 |
-| **O8** | `PublisherRegistry` Pass 2a reads `ObjectTypeDictionary` | **5.28 s [M]**, zero disk | §7.4 |
+| ✅ **O8** | Pass 2a reads `ObjectTypeDictionary` — **SHIPPED** | **5.28 s → 0.01 s [M]**, zero disk | §7.4, §7.8 |
 
 **O1 — shipped.** `DiskBackedObjectIndexWriter` sorts the segment array by `Start` before anything
 else touches it. Verified a no-op on the reference dump in the strongest available form: a cold
@@ -186,8 +189,8 @@ bump rather than three, per measurements §10.2's batching rule. Verified in §7
 ### 3.3 Sequencing
 
 1. ✅ **O1** shipped; ✅ **O2 + O3 + O4** shipped together as format v9.
-2. **O8** — independent, not started.
-3. **R1 → R2 → R3** — the core, in that order, as one change.
+2. ✅ **O8** shipped.
+3. ✅ **R1** shipped as format v10. → **R2 → R3** remain, in that order.
 4. **O5** — only after its 27.5 GB re-probe.
 
 ---
@@ -219,7 +222,7 @@ bump rather than three, per measurements §10.2's batching rule. Verified in §7
 | `ObjectTypeIds` (2 B) | 166.14 | 166.14 | — |
 | `ObjectSizes` (2 B + escape) | 166.14 | 166.14 | — |
 | `ObjectGenerations` → runs | 83.07 | **~0.001** | **−83.07** ✅ v9 |
-| reachable addresses → **bitmap + rank/select** | 222.99 | **10.70** | **−212.29** |
+| reachable addresses → **bitmap + rank/select** | 222.99 | **10.70** | **−212.29** ✅ v10 |
 | `DominatorIdomRows` (4 B) | 222.55 | 222.55 | — |
 | `DominatorRetainedBytes` (8 B → 2 B) | 445.10 | **112.51** | **−332.59** ✅ v9 |
 | `ReverseEdgeChildren` (4 B/edge) | 522.74 | 522.74 | — |
@@ -491,7 +494,59 @@ not the section's byte length. `ObjectGenerationRunTable` initially sized its re
 silently loaded nothing, which surfaced as 14 tests returning empty collections rather than as an
 error. Take record counts from the TOC, which is what `SegmentIndexWriter.ReadRecords` already does.
 
-### 7.8 Where estimates were wrong
+### 7.8 O8 and R1 shipped — format v10
+
+**O8**, measured warm with that analyzer alone:
+
+| | pass 2a | distinct MethodTables |
+|---|---:|---:|
+| 3.3 GB | 1.51 s → **0.01 s** | 14,003, unchanged |
+| 27.5 GB | 5.28 s → **0.01 s** | 12,376, unchanged |
+
+**R1** replaces the stored `DominatorReachableAddresses` column with a bitmap over object rows plus
+a rank/select directory, and unifies the three address→row searches into one
+`MonotonicAddressColumn`. On the 3.3 GB dump:
+
+| | v9 | v10 |
+|---|---:|---:|
+| Reachable row space (column + bases + overflow) | 25.57 MiB | **1.85 MiB** |
+| `cache.bin` | 271.7 MiB | **248.0 MiB** |
+| Reachable rows | 6,686,490 | **6,686,485** |
+
+Projected on the 27.5 GB dump: 222.99 MiB → 10.70 MiB.
+
+**Oracle, exhaustive against the v8 container:** the derived row space contains **zero addresses v8
+did not have**, and the **5 it drops are exactly** `0xffffff`, `0x84d3b7db20`, `0x1000007ffa899b53`,
+`0x2000009ac41c4ad1`, `0x5000007ffa899b53` — none of which is a live object (§11.9's bogus root
+pointers). Row order is preserved strictly ascending, so every row-aligned column keeps its meaning.
+
+**⚠ R1's RAM saving is not in this commit.** The −2,325.9 MB is R3's, when the semi-external walk
+stops building the `Dictionary<ulong,int>`. R1 ships the disk saving and the rank primitive R2/R3
+need.
+
+#### The bug this surfaced, and why it was nearly invisible
+
+First v10 build ran **331 s and climbing** where v9 took 96.7 s. The index build itself was fine
+(`indexing heap · 15.4s`); the cost was `DominatorAnalyzer.AnalyzeObjectsPass` — its **no-index
+fallback** — walking the live heap at **1,225 objects/second**.
+
+Cause: the old address column could store *any* address, including the 5 bogus root pointers. A
+bitmap over object rows structurally cannot. So the bitmap held 6,686,485 rows while the idom,
+retained-bytes and reverse-CSR columns had all been written with 6,686,490 — and every reader
+correctly refuses to open on a row-count mismatch. **Nothing threw. Every analyzer silently fell
+back to live ClrMD walks**, which is a ~100× slowdown that looks like a hang.
+
+Fixed at the source: the walk is now seeded only with root targets that are real objects
+(`heap.GetObject(addr).IsValid`), which is independently correct — an address that is not an object
+is not reachable. A residual mismatch now throws rather than emitting a container whose readers all
+quietly decline.
+
+Two things worth keeping from this: a row-space change has to be checked against *every*
+row-aligned column, not just its own section; and `tools/ProbeCacheReaders` opens every reader
+against a `cache.bin` with no dump load, which located this in seconds after the symptom had wasted
+several minutes.
+
+### 7.9 Where estimates were wrong
 
 Recorded because the pattern matters more than the individual items.
 

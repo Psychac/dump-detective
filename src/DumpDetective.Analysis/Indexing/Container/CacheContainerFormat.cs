@@ -67,7 +67,9 @@ internal enum CacheSectionId
     /// <summary>JSON <see cref="Indexing.ForwardIndex.ForwardIndexMetadata"/>: bucket count and per-bucket offsets/lengths into the two sections above.</summary>
     ForwardEdgeMetadata = 20,
     /// <summary>
-    /// Columnar <c>ulong[]</c> of reachable-node addresses, sorted — every object Stage A's
+    /// Reserved, no longer written (format v10) — superseded by <see cref="ReachableRowBitmap"/>,
+    /// which records the same set as one bit per object row instead of a second copy of every
+    /// reachable address. Held a columnar <c>ulong[]</c> of reachable-node addresses, sorted — every object Stage A's
     /// reachability walk found reachable from a GC root (§4/§7,
     /// docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md). Written by
     /// <c>DominatorReachableAddressWriter</c> entirely inside Phase 1, before
@@ -208,6 +210,15 @@ internal enum CacheSectionId
     /// (docs/cache/cache-ideal-design.md §3.2, O2).
     /// </summary>
     ObjectGenerationRuns = 41,
+    /// <summary>
+    /// Which object rows the reachability walk reached, as a bitmap over object rows plus a rank
+    /// directory — see <see cref="Indexing.Columns.ReachableRowBitmap"/>. Replaces
+    /// <see cref="DominatorReachableAddresses"/>, which stored every reachable address a second time
+    /// (222.99 MiB with its bases and escape table on the 27.5 GB dump, against 10.70 MiB here).
+    /// Reachable-row order is unchanged — ascending object row is ascending address, because the
+    /// object column is monotonic by construction (O1).
+    /// </summary>
+    ReachableRowBitmap = 42,
 }
 
 /// <summary>
@@ -227,7 +238,15 @@ internal readonly struct CacheFileHeader
 {
     public const int Size = 64;
     /// <summary>
-    /// Bumped to 9 for three independent size changes that share one bump, because each bump
+    /// Bumped to 10 when the reachable-node row space stopped being a stored address column and
+    /// became a derived index: <see cref="CacheSectionId.ReachableRowBitmap"/> (one bit per object
+    /// row plus a rank directory) replaces <see cref="CacheSectionId.DominatorReachableAddresses"/>
+    /// and its block bases and escape table, which together were a second copy of every reachable
+    /// address — 222.99 MiB against 10.70 MiB on the 27.5 GB dump. Row order and every row-aligned
+    /// column keyed by it are unchanged, because ascending object row is ascending address
+    /// (docs/cache/cache-ideal-design.md §3.1, R1). A v9 reader would find no reachable column at
+    /// all and silently lose the dominator tree and reverse index, so this bump is load-bearing.
+    /// Previously bumped to 9 for three independent size changes that shared one bump, because each bump
     /// invalidates every cache on disk and paying that cost three times buys nothing
     /// (docs/cache/cache-redesign-measurements.md §10.2): <see cref="CacheSectionId.DominatorRetainedBytes"/>
     /// narrowed from a flat 8 bytes to the width its distribution allows (2 on both reference dumps,
@@ -271,7 +290,7 @@ internal readonly struct CacheFileHeader
     /// Previously bumped to 2 when the Objects section moved from an interleaved
     /// array-of-structs layout to those columnar sections.
     /// </summary>
-    public const int CurrentFormatVersion = 9;
+    public const int CurrentFormatVersion = 10;
 
     private const int MagicOffset = 0;
     private const int MagicSize = 8;

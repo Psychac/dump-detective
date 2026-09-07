@@ -38,7 +38,7 @@ internal static class ReverseEdgeCsrTestWriter
             .OrderBy(a => a)
             .ToArray();
 
-        DominatorReachableAddressWriter.Write(containerWriter, sortedReachableAddresses);
+        ObjectColumnSectionsWriter.WriteReachableRows(containerWriter, sortedReachableAddresses);
 
         ReverseEdgeCsrResult csr = await ReverseEdgeCsrBuilder.BuildAsync(
             scratchDir, bucketCount, sortedReachableAddresses, CancellationToken.None, progress);

@@ -5,6 +5,8 @@ using FluentAssertions;
 
 using Xunit;
 
+using DumpDetective.Tests.Helpers;
+
 namespace DumpDetective.Tests.Unit.Indexing;
 
 /// <summary>
@@ -55,7 +57,7 @@ public class DominatorTreeIndexTests : IDisposable
             .Select(a => byAddress[a] == 0 ? DominatorRowIndex.NoParentRow : (uint)rowByAddress[byAddress[a]])
             .ToArray();
 
-        DominatorReachableAddressWriter.Write(writer, sortedAddresses);
+        ObjectColumnSectionsWriter.WriteReachableRows(writer, sortedAddresses);
         DominatorTreeIndexWriter.WriteImmediateDominatorRows(writer, dominatorRowsByRow);
 
         // §10.4 Batch 3: DominatorRetainedBytes is optional in this test on purpose — omitting it
@@ -128,7 +130,7 @@ public class DominatorTreeIndexTests : IDisposable
         string containerPath = WriteContainer((0x100UL, 0x0UL), (0x200UL, 0x0UL));
 
         CacheContainerReader.TryOpen(containerPath, out var reader).Should().BeTrue();
-        reader!.ContainsSection(CacheSectionId.DominatorReachableAddresses).Should().BeTrue();
+        reader!.ContainsSection(CacheSectionId.ReachableRowBitmap).Should().BeTrue();
         reader.ContainsSection(CacheSectionId.DominatorImmediateDominatorAddresses).Should().BeTrue();
     }
 

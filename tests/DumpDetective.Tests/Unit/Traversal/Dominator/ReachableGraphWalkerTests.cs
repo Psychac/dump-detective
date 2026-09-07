@@ -8,6 +8,8 @@ using FluentAssertions;
 
 using Xunit;
 
+using DumpDetective.Tests.Helpers;
+
 namespace DumpDetective.Tests.Unit.Traversal.Dominator;
 
 /// <summary>
@@ -223,7 +225,7 @@ public sealed class ReachableGraphWalkerTests : IDisposable
         string reverseIndexContainerPath = Path.Combine(_testDir, "reverse-index.bin");
         using (var reverseWriter = new CacheContainerWriter(reverseIndexContainerPath))
         {
-            DominatorReachableAddressWriter.Write(reverseWriter, walkResult.ReachableAddresses);
+            ObjectColumnSectionsWriter.WriteReachableRows(reverseWriter, walkResult.ReachableAddresses);
             ReverseEdgeContainerWriter.Write(reverseWriter, csr);
             reverseWriter.Finish();
         }
@@ -270,7 +272,7 @@ public sealed class ReachableGraphWalkerTests : IDisposable
         string reverseIndexContainerPath = Path.Combine(_testDir, "reverse-index-unreachable.bin");
         using (var reverseWriter = new CacheContainerWriter(reverseIndexContainerPath))
         {
-            DominatorReachableAddressWriter.Write(reverseWriter, result.ReachableAddresses);
+            ObjectColumnSectionsWriter.WriteReachableRows(reverseWriter, result.ReachableAddresses);
             ReverseEdgeContainerWriter.Write(reverseWriter, csr);
             reverseWriter.Finish();
         }

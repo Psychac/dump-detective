@@ -560,8 +560,11 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         List<(uint RecordIndex, ulong Value)> addressOverflow = [];
 
         containerWriter.BeginSection(CacheSectionId.ObjectAddresses);
+        // deleteAfterCopy: false unconditionally — unlike the MethodTable/Size columns, the address
+        // scratch is needed again after the walk, by ReachableRowBitmapWriter's merge-join, on the
+        // non-Stage-B path too. Deleted at the two sites below once the bitmap is written.
         uint addrChecksum = BlockDeltaScratchFiles(
-            stream, segAddrScratchFiles, addressBlockBases, addressOverflow, writeBuffer, deleteAfterCopy: !buildStageB);
+            stream, segAddrScratchFiles, addressBlockBases, addressOverflow, writeBuffer, deleteAfterCopy: false);
         containerWriter.EndSection(objectCount, addrChecksum);
 
         containerWriter.BeginSection(CacheSectionId.ObjectAddressBlockBases);
@@ -864,11 +867,30 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             // an object toward a root, and a garbage object can have no such path by definition,
             // so this is not a loss of any answer the index used to give.
             progress?.Report(new(0, "walking reachable graph for reverse-edge index", Detail: null, Elapsed: stopwatch.Elapsed));
+            // Only real heap objects may seed the walk. Conservative stack scanning yields a
+            // handful of tagged or garbage pointers as root targets — 5 of 6,686,490 on the 3.3 GB
+            // dump and 4 of 58,339,936 on the 27.5 GB one, always outside the heap's address range
+            // (0xffffff, 0x1000007ffa899b53, ...). They used to enter the reachable set and occupy
+            // real rows in DominatorReachableAddresses, which could hold any address at all.
+            //
+            // Since format v10 the reachable row space is a bitmap over *object rows*
+            // (docs/cache/cache-ideal-design.md §3.1, R1), which structurally cannot represent an
+            // address that is not a live object. Admitting them would leave the bitmap 5 bits short
+            // of the row count every row-aligned column downstream was written with — idom rows,
+            // retained bytes and the reverse CSR — and those readers correctly refuse to open on a
+            // length mismatch, silently dropping every analyzer back to a live heap walk.
+            //
+            // Filtering here rather than after the walk keeps one row space for everything, and is
+            // the correct behaviour independently: an address that is not an object is not reachable.
             var walkRootAddresses = new List<ulong>(4096);
             foreach (ClrRoot root in heap.EnumerateRoots())
             {
                 ulong rootObjectAddress = root.Object.Address;
-                if (rootObjectAddress != 0)
+                if (rootObjectAddress == 0)
+                    continue;
+
+                ClrObject rootObject = heap.GetObject(rootObjectAddress);
+                if (rootObject.IsValid && rootObject.Type is not null)
                     walkRootAddresses.Add(rootObjectAddress);
             }
 
@@ -948,9 +970,11 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                 try { reverseEdgeExtractor.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { /* best-effort */ }
                 DeleteReverseIndexScratchFiles(indexDir, reverseIndexBucketCount);
 
+                // Address scratch is kept unconditionally now (see BlockDeltaScratchFiles above), so
+                // it has to be cleaned up here whether or not Stage B was gated on.
+                DeleteScratchFiles(segAddrScratchFiles);
                 if (buildStageB)
                 {
-                    DeleteScratchFiles(segAddrScratchFiles);
                     DeleteScratchFiles(segMtScratchFiles);
                     DeleteScratchFiles(segSizeScratchFiles);
                 }
@@ -966,11 +990,36 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             if (walkResult is not null)
             {
                 // §5 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): persist
-                // the walk's reachable-address set so "is this object reachable?" is answerable from
-                // disk without re-running the walk. DominatorReachableInDegree (also reserved in that
-                // section) is deliberately not persisted — it would duplicate the exact fan-in counts
-                // the reverse-edge index above already exposes via EnumerateChildCounts.
-                DominatorReachableAddressWriter.Write(containerWriter, walkResult.ReachableAddresses);
+                // which objects the walk reached, so "is this object reachable?" is answerable from
+                // disk without re-running it. Since format v10 that is one bit per object row rather
+                // than a second sorted copy of every reachable address — 222.99 MiB to 10.70 MiB on
+                // the 27.5 GB dump (docs/cache/cache-ideal-design.md §3.1, R1). Rows come from a
+                // sequential merge-join against the address scratch, since both sides ascend.
+                try
+                {
+                    long matchedRows = ReachableRowBitmapWriter.Write(
+                        containerWriter, segAddrScratchFiles, objectCount, walkResult.ReachableAddresses);
+
+                    // Every reachable address must map to an object row, or the bitmap's population
+                    // disagrees with the row count that idom rows, retained bytes and the reverse
+                    // CSR are all written with — and those readers refuse to open on a length
+                    // mismatch, dropping every analyzer to a live heap walk without saying why.
+                    // Root seeding above filters the only known source of unmatched addresses; if
+                    // one still appears, fail this section loudly rather than emit a container whose
+                    // readers silently all decline.
+                    if (matchedRows != walkResult.ReachableAddresses.Length)
+                    {
+                        throw new InvalidOperationException(
+                            $"reachable set has {walkResult.ReachableAddresses.Length:N0} addresses but only " +
+                            $"{matchedRows:N0} map to object rows; the row-aligned dominator and reverse-edge " +
+                            "columns would be misaligned against the bitmap");
+                    }
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    satelliteWarnings.Add($"ReachableRowBitmap: {ex.GetType().Name}: {ex.Message}");
+                }
 
                 // §10.4 Batch 2a: Stage B's fold + LT + idom persistence, using the CSR the walk
                 // above just built. The deferred Address/MethodTable/Size scratch files (kept on
@@ -990,11 +1039,14 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                     }
                     finally
                     {
-                        DeleteScratchFiles(segAddrScratchFiles);
                         DeleteScratchFiles(segMtScratchFiles);
                         DeleteScratchFiles(segSizeScratchFiles);
                     }
                 }
+
+                // Address scratch outlives Stage B's gating now — the bitmap above needed it either
+                // way, and this is the last reader of it.
+                DeleteScratchFiles(segAddrScratchFiles);
 
                 MarkAlloc("reverse index (CSR build + write)");
                 string? reverseIndexWarning = WriteReverseIndexSections(
@@ -1004,6 +1056,11 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                     satelliteWarnings.Add(reverseIndexWarning);
             }
         }
+
+        // The walk block above is the only consumer of the address scratch, and it is skipped
+        // entirely when no reverse-edge extractor was supplied. Without this the files would leak
+        // into the index directory, which is exactly what the cache-hit path checks for.
+        DeleteScratchFiles(segAddrScratchFiles);
 
         // Forward-reference index: the loose files Phase B sorted have now served their only
         // consumer — Stage A's reachability walk above — so they are deleted here.

@@ -25,5 +25,6 @@
     <InternalsVisibleTo Include="BenchmarkSuite1" />
     <InternalsVisibleTo Include="ProfileRootEnumeration" />
     <InternalsVisibleTo Include="ProfileRootPhase" />
+    <InternalsVisibleTo Include="ProbeCacheReaders" />
   </ItemGroup>
 </Project>

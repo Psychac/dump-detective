@@ -66,7 +66,7 @@ public class CacheSectionCatalogTests
             CacheSectionId.ReverseEdgeDegreeCheckpoints,
             CacheSectionId.ReverseEdgeDegreeOverflow,
             CacheSectionId.ReverseEdgeChildren,
-            CacheSectionId.DominatorReachableAddresses,   // Stage B analyzer gating
+            CacheSectionId.ReachableRowBitmap,            // Stage B analyzer gating
             CacheSectionId.RootStackThreadAttribution,    // pre-dates its own additive introduction in some v4 caches
         ];
 
@@ -100,6 +100,9 @@ public class CacheSectionCatalogTests
             CacheSectionId.ReverseEdgeMetadata,
             CacheSectionId.ReverseEdgeOffsets,       // replaced by degrees + checkpoints (format v9)
             CacheSectionId.ObjectGenerations,        // replaced by run-length encoding (format v9)
+            CacheSectionId.DominatorReachableAddresses,   // replaced by ReachableRowBitmap (format v10)
+            CacheSectionId.DominatorReachableBlockBases,
+            CacheSectionId.DominatorReachableOverflow,
         ];
 
         foreach (CacheSectionId id in unused)

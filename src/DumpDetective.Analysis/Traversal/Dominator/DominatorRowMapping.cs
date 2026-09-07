@@ -22,6 +22,19 @@ internal static class DominatorRowMapping
     /// </exception>
     public static int[] Compute(ReachableGraph graph, ulong[] sortedAddresses)
     {
+        // Since R2/R3 the walk numbers nodes by object row, which ascends by address — so ids are
+        // already rows and this is the identity. Recognised by reference rather than by comparing
+        // contents: the walk hands the same array to both, so the check is O(1) and cannot be
+        // fooled by two arrays that merely happen to be equal.
+        if (ReferenceEquals(graph.Addresses, sortedAddresses))
+        {
+            var identity = new int[graph.NodeCount];
+            for (int id = 0; id < identity.Length; id++)
+                identity[id] = id;
+
+            return identity;
+        }
+
         var oldIdToRow = new int[graph.NodeCount];
         for (int oldId = 0; oldId < graph.NodeCount; oldId++)
         {

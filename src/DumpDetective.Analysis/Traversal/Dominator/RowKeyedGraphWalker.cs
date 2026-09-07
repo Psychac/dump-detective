@@ -69,15 +69,24 @@ internal static class RowKeyedGraphWalker
         var visited = new ulong[(objectCount + 63) / 64];
         var childBuffer = new ulong[64];
 
+        // Out-degree is recorded during phase 1 rather than re-counted in phase 2, which removes an
+        // entire pass over successors. Sound because a child counts iff it resolves to a valid
+        // object row, and that is independent of visit order: every child of a reached node is
+        // itself reached, so "resolves to an object row" and "is in the reachable graph" coincide.
+        // One byte per object row (10.4 MB at 87.1M) with a side table for the rare hub above 254.
+        byte[]? outDegreeByRow = buildCsr ? new byte[objectCount] : null;
+        Dictionary<long, int>? outDegreeOverflow = buildCsr ? new Dictionary<long, int>() : null;
+
         long reachableCount = WalkMembership(
-            rootAddresses, successors, rows, visited, ref childBuffer, cancellationToken, progress);
+            rootAddresses, successors, rows, visited, outDegreeByRow, outDegreeOverflow,
+            ref childBuffer, cancellationToken, progress);
 
         if (!buildCsr)
             return RowKeyedWalkResult.MembershipOnly(visited, objectCount, reachableCount);
 
         return BuildCsr(
-            rootAddresses, successors, rows, visited, objectCount, reachableCount,
-            ref childBuffer, cancellationToken, progress);
+            rootAddresses, successors, rows, visited, outDegreeByRow!, outDegreeOverflow!,
+            objectCount, reachableCount, ref childBuffer, cancellationToken, progress);
     }
 
     /// <summary>
@@ -89,6 +98,8 @@ internal static class RowKeyedGraphWalker
         SuccessorsFunc successors,
         IObjectRowResolver rows,
         ulong[] visited,
+        byte[]? outDegreeByRow,
+        Dictionary<long, int>? outDegreeOverflow,
         ref ulong[] childBuffer,
         CancellationToken cancellationToken,
         IProgress<AnalyzerProgressReport>? progress)
@@ -121,6 +132,7 @@ internal static class RowKeyedGraphWalker
             scanCounter.Tick();
 
             int childCount = successors(rows.GetAddress(row), ref childBuffer);
+            int kept = 0;
             for (int c = 0; c < childCount; c++)
             {
                 ulong childAddress = childBuffer[c];
@@ -131,10 +143,25 @@ internal static class RowKeyedGraphWalker
                 if (childRow < 0)
                     continue;
 
+                kept++;
+
                 if (TrySetBit(visited, childRow))
                 {
                     reachableCount++;
                     frontier.Enqueue(childRow);
+                }
+            }
+
+            if (outDegreeByRow is not null)
+            {
+                if (kept >= DegreeEscape)
+                {
+                    outDegreeByRow[row] = DegreeEscape;
+                    outDegreeOverflow![row] = kept;
+                }
+                else
+                {
+                    outDegreeByRow[row] = (byte)kept;
                 }
             }
         }
@@ -154,6 +181,8 @@ internal static class RowKeyedGraphWalker
         SuccessorsFunc successors,
         IObjectRowResolver rows,
         ulong[] visited,
+        byte[] outDegreeByRow,
+        Dictionary<long, int> outDegreeOverflow,
         long objectCount,
         long reachableCount,
         ref ulong[] childBuffer,
@@ -201,36 +230,19 @@ internal static class RowKeyedGraphWalker
                 isRoot[id] = true;
         }
 
-        // Pass 2a — out-degrees, then the forward targets. Two passes over successors would cost a
-        // second full traversal, so the targets go into a growable buffer sized from the degrees.
+        // Degrees came from phase 1, so this is arithmetic rather than a second traversal.
         var outDegree = new int[nodeCount];
-        var scanCounter = new ObjectScanCounter("tracing heap graph (building reference graph)", progress);
         long edgeTotal = 0;
-
         for (int id = 0; id < nodeCount; id++)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            scanCounter.Tick();
-
-            int childCount = successors(addresses[id], ref childBuffer);
-            int kept = 0;
-            for (int c = 0; c < childCount; c++)
-            {
-                ulong childAddress = childBuffer[c];
-                if (childAddress == 0)
-                    continue;
-
-                long childObjectRow = rows.TryGetRow(childAddress);
-                if (childObjectRow < 0)
-                    continue;
-
-                if (Rank(visited, superblockRanks, childObjectRow) >= 0)
-                    kept++;
-            }
-
-            outDegree[id] = kept;
-            edgeTotal += kept;
+            long objectRow = objectRowOf[id];
+            byte stored = outDegreeByRow[objectRow];
+            int degree = stored == DegreeEscape ? outDegreeOverflow[objectRow] : stored;
+            outDegree[id] = degree;
+            edgeTotal += degree;
         }
+
+        var scanCounter = new ObjectScanCounter("tracing heap graph (building reference graph)", progress);
 
         var fwdOffsets = new int[nodeCount + 1];
         for (int id = 0; id < nodeCount; id++)
@@ -240,6 +252,7 @@ internal static class RowKeyedGraphWalker
         for (int id = 0; id < nodeCount; id++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            scanCounter.Tick();
 
             int childCount = successors(addresses[id], ref childBuffer);
             int cursor = fwdOffsets[id];
@@ -297,6 +310,9 @@ internal static class RowKeyedGraphWalker
     }
 
     private const int SuperblockWords = 8;
+
+    /// <summary>Out-degrees at or above this escape to a side table. Hub objects only.</summary>
+    private const byte DegreeEscape = byte.MaxValue;
 
     /// <summary>
     /// <paramref name="objectRow"/>'s dense reachable id, or -1 if it is not reachable. Superblock

@@ -9,9 +9,9 @@ conflict the earlier wins. That order is *not* the one the shipped v5–v8 seque
 optimised disk with a byte count as its only metric — and it is the single reason this plan reaches
 a different answer.
 
-**Status: O1–O4 shipped (v9); O8 and R1 shipped (v10); O5 built, measured negative and reverted.
-R2/R3 are the only items left, and theirs is the RAM case.** All six gating measurements are closed
-(§7). Four proposed items have now died on measurement — O5, O6, O7 and the sorted BFS frontier.
+**Status: the whole plan is executed. O1–O4 (v9), O8, R1 (v10) and R2/R3 all shipped; O5 built,
+measured negative and reverted.** All six gating measurements are closed (§7), and four proposed
+items died on measurement — O5, O6, O7 and the sorted BFS frontier.
 
 | | |
 |---|---|
@@ -127,11 +127,11 @@ It is part of Part D.3's "roughly 6 GB is the walk" but absent from §2's table.
 row-keyed degree column (the O3 encoding) would be ~87 MB, and is the one part of R2 that still
 argues for changing the edge-file layout.
 
-**Not started, and deliberately not begun piecemeal.** A subtly wrong CSR corrupts the dominator
-tree silently — it does not throw. This project has shipped that failure mode twice (format v7's
-void evidence, §11.6's inert analyzer), so a half-migrated walk is worse than an unmigrated one. The
-acceptance gate is the v10 container as an oracle: the idom and retained-bytes columns must come out
-byte-identical, since row order and the edge multiset are both unchanged.
+**✅ Shipped (§7.10).** The acceptance gate held: idom rows, retained bytes, the reachable bitmap and
+the reverse degrees all came out **byte-identical** against a v10 container, and every one of the
+6,686,485 rows' parent lists matched as a multiset. Measured −1.11 GB allocated and −0.3 to −0.5 GB
+peak working set on the 3.3 GB dump for +10% runtime; the RAM saving scales with objects while the
+cost scales with edges, so at 87.1M objects it is ≈3.4 GB for ~5% **[U at that scale]**.
 
 ---
 
@@ -228,7 +228,7 @@ bump rather than three, per measurements §10.2's batching rule. Verified in §7
 
 1. ✅ **O1** shipped; ✅ **O2 + O3 + O4** shipped together as format v9.
 2. ✅ **O8** shipped.
-3. ✅ **R1** shipped as format v10. → **R2 → R3** remain — see §3.1's re-derivation.
+3. ✅ **R1** shipped as format v10; ✅ **R2/R3** shipped (§7.10).
 4. ❌ **O5** built, measured negative, reverted (§7.9).
 
 ---
@@ -608,7 +608,61 @@ contention cost, and it did.
 now unproven at best. That leaves **R2/R3 as the only remaining item with a measured case** — and
 theirs is the RAM case (≈3.4 GB), not a runtime one.
 
-### 7.10 Where estimates were wrong
+### 7.10 R2/R3 shipped — the walk keyed by object row
+
+The dictionary is gone. `ReverseEdgeExtractor`, `ReverseEdgeCsrBuilder` and their hash-partitioned
+bucket set are gone with it: the walk now emits the reverse CSR directly in reachable-row space.
+
+| 3.3 GB dump, alternating A/B in one session | dictionary walk | row-keyed walk |
+|---|---:|---:|
+| Runtime | 77 / 77 s | **85 / 85 s (+10%)** |
+| Total allocated | 8.74 GB | **7.63 GB (−1.11 GB)** |
+| Peak working set | 5.1 / 5.3 GB | **4.8 / 4.8 GB** |
+
+**Correctness gate — passed.** Against a v10 container built from the previous commit:
+
+| Check | Result |
+|---|---|
+| `DominatorIdomRows` | **byte-identical** |
+| `DominatorRetainedBytes` | **byte-identical** |
+| `ReachableRowBitmap` | **byte-identical** |
+| `ReverseEdgeDegrees` + checkpoints | **byte-identical** |
+| Reverse CSR edge count | 17,367,740 both |
+| Per-row parent lists | **identical as multisets**, all 6,686,485 rows |
+
+`ReverseEdgeChildren`' bytes differ, which is permitted and expected: Part F §F.3 established that
+order *within* a row is not an invariant. The degrees being byte-identical is the stronger statement
+— every row has the same parents, in a different order. The other five differing sections are §7.6's
+pre-existing nondeterminism.
+
+**Why the trade is worth it despite +10% here.** The RAM saving scales with *objects* (the dictionary
+is 28 B each) while the added cost scales with *edges*. At 14.6M objects the dictionary is only
+~390 MB, so this dump pays the cost and collects little; at 87.1M it is **2,325.9 MB**. Extrapolating
+the time cost by the 7.9× edge ratio gives ≈+63 s on a 1,310 s run — **≈3.4 GB for ~5%**, which is
+the priority order working as intended. **[U]** — not measured at 27.5 GB.
+
+**Two design simplifications found on the way in, both from R1's measurements:**
+
+- Out-degree is recorded *during* phase 1 rather than re-counted in phase 2, removing an entire pass
+  over successors. Sound because a child counts iff it resolves to a valid object row, which is
+  independent of visit order — every child of a reached node is itself reached. First implementation
+  used three passes and cost +26%; this took it to +10%.
+- `DominatorRowMapping` short-circuits to the identity, recognised by reference equality rather than
+  by comparing contents.
+
+**And it resolves Part F §F.2.** F.2 killed C.2's "delete the pipeline" framing because
+`buildCsr: false` still needed a reverse index, forcing a permanent second code path. The CSR now
+comes from the walk on *both* paths, so there is no bypass and no second path — Stage A is
+unconditional.
+
+**One bug the real-dump suite caught that unit tests could not.** The row resolver opens the
+address/MethodTable/Size scratch triple together, but the MethodTable column was still deleted at
+concatenation on the *non-Stage-B* path. The resolver then failed, the walk threw, and the reverse
+index went missing — visible only to `ReverseEdgeCsrRealDumpTests`, which exercises exactly that
+path (it registers no `IRequiresDominatorTreeIndex` analyzer). All three columns now outlive the
+walk on both paths, and all three are cleaned up on both.
+
+### 7.11 Where estimates were wrong
 
 Recorded because the pattern matters more than the individual items.
 

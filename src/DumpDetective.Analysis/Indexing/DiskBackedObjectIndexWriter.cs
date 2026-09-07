@@ -155,8 +155,9 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // ReachableGraphWalker.Walk call right before WriteReverseIndexSections) — see
         // docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md §7 for why only
         // BFS-reachable objects getting entries is not a loss of accuracy for any current consumer.
-        int reverseIndexBucketCount = ReverseIndexConstants.CalculateBucketCount(new FileInfo(dumpPath).Length);
-        var reverseEdgeExtractor = new ReverseEdgeExtractor(reverseIndexBucketCount, indexDir);
+        // Stage A is unconditional now: the row-keyed walk emits the reverse CSR itself, so there is
+        // no ReverseEdgeExtractor and no hash-partitioned bucket set to flush, sort and read back.
+        const bool buildStageA = true;
 
         // Forward-reference index (§D5): extracted in the per-object foreach below that enumerates
         // obj.EnumerateReferences(carefully: true), keyed by parent. Reuses the reverse index's
@@ -172,7 +173,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // on `IRequiresReachableGraphIndex` — that would change already-shipped Stage A's behavior,
         // which is out of scope here (see §10.3's note on this).
         bool buildStageB =
-            reverseEdgeExtractor is not null
+            buildStageA
             && enableExactDominatorTree
             && (activeAnalyzers?.Any(a => a is IRequiresDominatorTreeIndex) ?? false);
 
@@ -514,11 +515,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             DeleteScratchFiles(segMtScratchFiles);
             DeleteScratchFiles(segSizeScratchFiles);
             DeleteScratchFiles(segGenScratchFiles);
-            if (reverseEdgeExtractor is not null)
-            {
-                try { reverseEdgeExtractor.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { /* best-effort */ }
-                DeleteReverseIndexScratchFiles(indexDir, reverseIndexBucketCount);
-            }
+
             if (forwardEdgeExtractor is not null)
             {
                 try { forwardEdgeExtractor.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { /* best-effort */ }
@@ -560,9 +557,10 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         List<(uint RecordIndex, ulong Value)> addressOverflow = [];
 
         containerWriter.BeginSection(CacheSectionId.ObjectAddresses);
-        // deleteAfterCopy: false unconditionally — unlike the MethodTable/Size columns, the address
-        // scratch is needed again after the walk, by ReachableRowBitmapWriter's merge-join, on the
-        // non-Stage-B path too. Deleted at the two sites below once the bitmap is written.
+        // deleteAfterCopy: false for all three columns since R2/R3, on both the Stage-B and
+        // Stage-A-only paths. ScratchFileObjectMetadataLookup opens the address/MethodTable/Size
+        // triple together and is what resolves address -> object row for the walk, so all three have
+        // to outlive the walk, not just Stage B's metadata resolution. Deleted after the walk block.
         uint addrChecksum = BlockDeltaScratchFiles(
             stream, segAddrScratchFiles, addressBlockBases, addressOverflow, writeBuffer, deleteAfterCopy: false);
         containerWriter.EndSection(objectCount, addrChecksum);
@@ -597,7 +595,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         containerWriter.BeginSection(CacheSectionId.ObjectMethodTables);
         uint mtChecksum = ConvertMethodTablesToTypeIds(
             stream, segMtScratchFiles, typeIdByMethodTable, typeIdWidth, writeBuffer,
-            deleteAfterCopy: !buildStageB);
+            deleteAfterCopy: false);
         containerWriter.EndSection(objectCount, mtChecksum);
 
         // §10.2: an object size never came close to needing 8 bytes on any real dump measured
@@ -616,8 +614,8 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 
         containerWriter.BeginSection(CacheSectionId.ObjectSizes);
         uint sizeChecksum = sizeWidth == NarrowColumnWidth.Full
-            ? ConcatenateScratchFiles(stream, segSizeScratchFiles, writeBuffer, deleteAfterCopy: !buildStageB)
-            : NarrowScratchFiles(stream, segSizeScratchFiles, sizeWidth, sizeOverflow, writeBuffer, deleteAfterCopy: !buildStageB);
+            ? ConcatenateScratchFiles(stream, segSizeScratchFiles, writeBuffer, deleteAfterCopy: false)
+            : NarrowScratchFiles(stream, segSizeScratchFiles, sizeWidth, sizeOverflow, writeBuffer, deleteAfterCopy: false);
         containerWriter.EndSection(objectCount, sizeChecksum);
 
         if (sizeWidth != NarrowColumnWidth.Full)
@@ -644,8 +642,9 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // ScratchFileObjectMetadataLookup needs, mirroring the SegmentIndex satellite's own
         // Start/End/FirstRecordIndex/RecordCount loop below — built here, before that satellite
         // write, since Stage B needs it whether or not the SegmentIndex write below succeeds.
-        List<ScratchSegmentSource>? scratchSegmentSources = null;
-        if (buildStageB)
+        // Built unconditionally since R2/R3: the row-keyed walk resolves address -> object row
+        // through these on both the Stage-B and Stage-A-only paths, not just Stage B's.
+        List<ScratchSegmentSource> scratchSegmentSources;
         {
             scratchSegmentSources = new List<ScratchSegmentSource>(segments.Length);
             long cumulativeRecordIndex = 0;
@@ -855,7 +854,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // Reverse-reference index (Phase B + C) — flush, sort and merge the buckets extracted
         // during the heap scan above. Kept before stopwatch.Stop() so its progress reports (sort
         // can take a while on many buckets) show a growing elapsed like the satellite sections.
-        if (reverseEdgeExtractor is not null)
+        if (buildStageA)
         {
             MarkAlloc("reachability walk");
 
@@ -948,14 +947,46 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             // the rest of this block. Everything outside it (columnar sections, satellite sections,
             // forward index, TypeAggregates) is unaffected and still gets written.
             ReachableGraphWalkResult? walkResult = null;
+            RowKeyedWalkResult? rowWalk = null;
             Stopwatch? walkStopwatch = PerfLogDominatorStageB ? Stopwatch.StartNew() : null;
             try
             {
                 try
                 {
-                    walkResult = ReachableGraphWalker.Walk(
-                        walkRootAddresses, walkSuccessors, reverseEdgeExtractor, buildCsr: buildStageB,
-                        captureSortedAddresses: true, cancellationToken, progress);
+                    // R2/R3: object rows are the walk's identity, so there is no
+                    // Dictionary<ulong,int> (2,325.9 MB at 87.1M objects), no id->address array and
+                    // no per-edge ChunkedBuffer. buildCsr is unconditional because the reverse index
+                    // now comes from this CSR rather than from a separately extracted bucket set —
+                    // which is what removes ReverseEdgeExtractor's 2.19 GB scratch round-trip and
+                    // resolves Part F §F.2's "the no-Stage-B path still needs the reverse index".
+                    if (!ScratchFileObjectMetadataLookup.TryOpen(scratchSegmentSources, out ScratchFileObjectMetadataLookup? rowResolver)
+                        || rowResolver is null)
+                    {
+                        throw new InvalidOperationException(
+                            "object row resolver unavailable: the per-segment address scratch files could not be opened");
+                    }
+
+                    using (rowResolver)
+                    {
+                        rowWalk = RowKeyedGraphWalker.Walk(
+                            walkRootAddresses, walkSuccessors, rowResolver, objectCount,
+                            buildCsr: true, cancellationToken, progress);
+                    }
+
+                    // Adapted at the boundary so Stage B is untouched. Addresses already ascend, so
+                    // they *are* the sorted set the previous result exposed separately.
+                    walkResult = new ReachableGraphWalkResult(
+                        nodeCount: rowWalk.NodeCount,
+                        edgeCount: rowWalk.EdgeCount,
+                        addresses: rowWalk.Addresses,
+                        reachableAddresses: rowWalk.Addresses,
+                        outDegree: rowWalk.OutDegree,
+                        inDegree: rowWalk.InDegree,
+                        isRoot: rowWalk.IsRoot,
+                        fwdOffsets: rowWalk.FwdOffsets,
+                        fwdTargets: rowWalk.FwdTargets,
+                        revOffsets: rowWalk.RevOffsets,
+                        revTargets: rowWalk.RevTargets);
                 }
                 finally
                 {
@@ -967,17 +998,12 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             {
                 satelliteWarnings.Add($"ReachableGraphWalk: {ex.GetType().Name}: {ex.Message}");
 
-                try { reverseEdgeExtractor.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { /* best-effort */ }
-                DeleteReverseIndexScratchFiles(indexDir, reverseIndexBucketCount);
 
-                // Address scratch is kept unconditionally now (see BlockDeltaScratchFiles above), so
-                // it has to be cleaned up here whether or not Stage B was gated on.
+                // All three columns are kept until after the walk now, so all three are cleaned up
+                // here whether or not Stage B was gated on.
                 DeleteScratchFiles(segAddrScratchFiles);
-                if (buildStageB)
-                {
-                    DeleteScratchFiles(segMtScratchFiles);
-                    DeleteScratchFiles(segSizeScratchFiles);
-                }
+                DeleteScratchFiles(segMtScratchFiles);
+                DeleteScratchFiles(segSizeScratchFiles);
             }
 
             if (walkStopwatch is not null)
@@ -997,8 +1023,15 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                 // sequential merge-join against the address scratch, since both sides ascend.
                 try
                 {
-                    long matchedRows = ReachableRowBitmapWriter.Write(
-                        containerWriter, segAddrScratchFiles, objectCount, walkResult.ReachableAddresses);
+                    // Straight from the walk: the bitmap *is* its visited set, so there is nothing
+                    // to merge-join and no chance of the population disagreeing with NodeCount —
+                    // the mismatch that made R1's first attempt drop every reader to a live walk.
+                    containerWriter.BeginSection(CacheSectionId.ReachableRowBitmap);
+                    uint bitmapChecksum = ReachableRowBitmap.Write(
+                        containerWriter.Stream, rowWalk!.VisitedBitmap, rowWalk.VisitedBitmap.LongLength);
+                    containerWriter.EndSection(objectCount, bitmapChecksum);
+
+                    long matchedRows = rowWalk.NodeCount;
 
                     // Every reachable address must map to an object row, or the bitmap's population
                     // disagrees with the row count that idom rows, retained bytes and the reverse
@@ -1010,9 +1043,8 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                     if (matchedRows != walkResult.ReachableAddresses.Length)
                     {
                         throw new InvalidOperationException(
-                            $"reachable set has {walkResult.ReachableAddresses.Length:N0} addresses but only " +
-                            $"{matchedRows:N0} map to object rows; the row-aligned dominator and reverse-edge " +
-                            "columns would be misaligned against the bitmap");
+                            $"bitmap population {matchedRows:N0} disagrees with the {walkResult.ReachableAddresses.Length:N0} " +
+                            "row-aligned entries the dominator and reverse-edge columns are written with");
                     }
                 }
                 catch (OperationCanceledException) { throw; }
@@ -1037,30 +1069,27 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                     {
                         satelliteWarnings.Add($"DominatorTree: {ex.GetType().Name}: {ex.Message}");
                     }
-                    finally
-                    {
-                        DeleteScratchFiles(segMtScratchFiles);
-                        DeleteScratchFiles(segSizeScratchFiles);
-                    }
                 }
 
-                // Address scratch outlives Stage B's gating now — the bitmap above needed it either
-                // way, and this is the last reader of it.
+                // Cleaned up here rather than in Stage B's finally: since R2/R3 all three columns
+                // are read by the walk's row resolver on both paths, so Stage B is no longer the
+                // last reader of any of them.
                 DeleteScratchFiles(segAddrScratchFiles);
+                DeleteScratchFiles(segMtScratchFiles);
+                DeleteScratchFiles(segSizeScratchFiles);
 
                 MarkAlloc("reverse index (CSR build + write)");
-                string? reverseIndexWarning = WriteReverseIndexSections(
-                    containerWriter, indexDir, reverseIndexBucketCount, reverseEdgeExtractor,
-                    walkResult.ReachableAddresses, cancellationToken, progress);
+                string? reverseIndexWarning = WriteReverseIndexSections(containerWriter, rowWalk!, progress);
                 if (reverseIndexWarning is not null)
                     satelliteWarnings.Add(reverseIndexWarning);
             }
         }
 
-        // The walk block above is the only consumer of the address scratch, and it is skipped
-        // entirely when no reverse-edge extractor was supplied. Without this the files would leak
-        // into the index directory, which is exactly what the cache-hit path checks for.
+        // Belt and braces: if the walk block above was skipped or bailed before its own cleanup,
+        // these would otherwise leak into the index directory. DeleteScratchFiles is idempotent.
         DeleteScratchFiles(segAddrScratchFiles);
+        DeleteScratchFiles(segMtScratchFiles);
+        DeleteScratchFiles(segSizeScratchFiles);
 
         // Forward-reference index: the loose files Phase B sorted have now served their only
         // consumer — Stage A's reachability walk above — so they are deleted here.
@@ -1384,30 +1413,33 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     /// <see cref="ReverseIndex.ReverseEdgeIndexReader.TryOpen"/> reports no index available later,
     /// same as any other missing/corrupt section.
     /// </summary>
+    /// <summary>
+    /// Writes the reverse CSR the row-keyed walk already produced.
+    /// </summary>
+    /// <remarks>
+    /// Until R2/R3 this flushed <c>ReverseEdgeExtractor</c>'s hash-partitioned buckets to disk
+    /// (2.19 GB on the 27.5 GB dump), read them back, and re-resolved both endpoints of every edge
+    /// with two binary searches per edge to rebuild a structure the walk had already built in
+    /// memory — 39.6 s and 2.62 GB resident (§2.2, Part B.1/B.2/B.3). The walk now emits the CSR
+    /// directly in reachable-row space, so this is a buffered write of two arrays.
+    ///
+    /// It also serves the no-Stage-B path, which is what Part F §F.2 said made the earlier C.2
+    /// framing impossible: the CSR no longer depends on Stage B being gated on.
+    /// </remarks>
     private static string? WriteReverseIndexSections(
         CacheContainerWriter containerWriter,
-        string indexDir,
-        int bucketCount,
-        ReverseEdgeExtractor extractor,
-        ulong[] sortedReachableAddresses,
-        CancellationToken cancellationToken,
+        RowKeyedWalkResult rowWalk,
         IProgress<AnalyzerProgressReport>? progress)
     {
         try
         {
-            extractor.DisposeAsync(progress).AsTask().GetAwaiter().GetResult();
-
-            ReverseEdgeCsrResult csr = ReverseEdgeCsrBuilder
-                .BuildAsync(indexDir, bucketCount, sortedReachableAddresses, cancellationToken, progress)
-                .GetAwaiter().GetResult();
-
+            var csr = new ReverseEdgeCsrResult(rowWalk.RevOffsets, rowWalk.RevTargets, rowWalk.EdgeCount);
             ReverseEdgeContainerWriter.Write(containerWriter, csr, progress);
             return null;
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
-            DeleteReverseIndexScratchFiles(indexDir, bucketCount);
             return $"ReverseIndex: {ex.GetType().Name}: {ex.Message}";
         }
     }

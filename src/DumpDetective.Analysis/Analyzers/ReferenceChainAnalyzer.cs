@@ -1,17 +1,36 @@
-﻿using Microsoft.Diagnostics.Runtime;
-using DumpDetective.Analysis.Cache;
+﻿using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Traversal;
-using DumpDetective.Core.Models;
-using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
-using DumpDetective.Core.Enums;
+using DumpDetective.Core.Utilities;
+
+using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    public class ReferenceChainAnalyzer : IAnalyzer
+    public class ReferenceChainAnalyzer : IAnalyzer, IRequiresReachableGraphIndex
     {
-        private readonly record struct ObjectMetadata(bool IsValid, string? TypeName, ulong Size);
+        private readonly record struct ObjectMetadata(bool IsValid, string? TypeName, ulong Size, ulong MethodTable);
+
+        /// <summary>Per-type state carried from the primary-sample pass to the multi-sample pass
+        /// (E-1, docs/analysis/phase1/reference-chain-analyzer-audit.md).</summary>
+        private readonly record struct PendingTypeSample(
+            string TypeName,
+            int Count,
+            ulong TotalSizeBytes,
+            ulong? SampleAddress,
+            string? SampleType,
+            ulong SampleSize,
+            ulong MethodTable,
+            bool HasGcRoot,
+            string? RootKind,
+            string? RootPath,
+            IReadOnlyList<string>? PathHops,
+            bool SearchTruncated,
+            ulong? RetainedBytes,
+            ulong? RootAddress,
+            string? LastHopFieldName);
 
         public string Name => "Reference Chain Analysis";
         public string Category => "Memory";
@@ -21,25 +40,18 @@ namespace DumpDetective.Analysis.Analyzers
             cancellationToken.ThrowIfCancellationRequested();
 
             ReferenceChainOptions options = context.AnalysisOptions.ReferenceChain;
-            ExecutionPolicy policy = context.AnalysisOptions.ExecutionPolicy;
 
-            return ValueTask.FromResult(AnalyzeTopTypes(context.Heap, context.Cache, options, policy, context.Progress).Stamp(this));
+            return ValueTask.FromResult(AnalyzeTopTypes(context.Heap, context.Cache, options, context.Progress, cancellationToken).Stamp(this));
         }
 
         internal AnalyzerDomainResult AnalyzeTopTypes(ClrHeap heap, IHeapAnalysisCache cache, ReferenceChainOptions options)
         {
-            return AnalyzeTopTypes(heap, cache, options, ExecutionPolicy.Default, progress: null);
+            return AnalyzeTopTypes(heap, cache, options, progress: null, CancellationToken.None);
         }
 
-        private AnalyzerDomainResult AnalyzeTopTypes(ClrHeap heap, IHeapAnalysisCache cache, ReferenceChainOptions options, ExecutionPolicy policy, IProgress<AnalyzerProgressReport>? progress)
+        private AnalyzerDomainResult AnalyzeTopTypes(ClrHeap heap, IHeapAnalysisCache cache, ReferenceChainOptions options, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
         {
-            int topCount = options.TopCount > 0 ? options.TopCount : options.FallbackTopCount;
-            int maxPathSearchObjects = policy.ReferenceChainMaxPathSearchObjects > 0
-                ? policy.ReferenceChainMaxPathSearchObjects
-                : options.FallbackMaxPathSearchObjects;
-            bool skipArrays = options.SkipArrays;
-            int largeFanoutThreshold = options.LargeFanoutThreshold > 0 ? options.LargeFanoutThreshold : 100;
-            var knownLeakPatterns = options.KnownLeakTypePatterns ?? Array.Empty<string>();
+            int topCount = options.TopCount;
 
             // Use cached type statistics instead of re-enumerating
             progress?.Report(new(0, "building type index"));
@@ -53,20 +65,38 @@ namespace DumpDetective.Analysis.Analyzers
             int retainedSamples = 0;
             int analyzedSamples = 0;
             int traversalLimitedSamples = 0;
-            var retainedTypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+            int noSampleAddressCount = 0;
+            var retainedTypeNames = new HashSet<string>(StringComparer.Ordinal);
+            var rootKindCounts = new Dictionary<string, int>(StringComparer.Ordinal);
             var sampleReferenceChains = new List<string>(capacity: 5);
-            var topTypeSampleTraces = new List<ReferenceTypeSampleSnapshot>(capacity: topTypes.Length);
+            var pendingTypes = new List<PendingTypeSample>(capacity: topTypes.Length);
+            // MethodTable -> primary sample address, for types with a valid primary sample. Feeds
+            // the E-7 multi-sample streaming pass below (dedup key + target-type filter).
+            var primaryAddressByMt = new Dictionary<ulong, ulong>(topTypes.Length);
             progress?.Report(new(0, "loading root list"));
             IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
-            // Sort retaining roots by likelihood of early hit (Stack first) and drop weak/dependent roots
-            // that can never prevent GC collection. Sorted once, reused for all top-N type samples.
-            List<(string RootKind, ulong Address)> prioritizedRoots = SortAndFilterRoots(roots);
+            // Sort retaining roots by likelihood of early hit (Stack first). Sorted once, reused
+            // for all top-N type samples.
+            List<(string RootKind, ulong Address)> prioritizedRoots = SortRootsByPriority(roots);
 
             var telemetry = new TelemetryCounters();
             int typeIndex = 0;
 
+            // Create ReferenceGraph once, shared across all top-N type iterations.
+            // This preserves the edge cache across iterations, reducing redundant ClrMD calls
+            // for objects referenced by multiple types.
+            var provider = new ReferenceGraph(heap);
+
+            // E-2 (docs/analysis/phase1/reference-chain-analyzer-audit.md): exact retained-subgraph
+            // bytes per type's representative sample, from the disk-backed dominator tree when
+            // available — a memory-mapped point lookup, not a new BFS. Null when unavailable (see
+            // IDominatorTreeProvider docs); SampleObjectSize remains the shallow-size fallback.
+            IDominatorTreeProvider? dominatorTreeProvider = cache.TryGetDominatorTreeProvider();
+
             foreach (var typeKvp in topTypes)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 typeIndex++;
                 progress?.Report(new(analyzedSamples, "tracing reference chains", $"{typeIndex}/{topTypes.Length} types"));
                 string typeName = typeKvp.Key;
@@ -76,9 +106,15 @@ namespace DumpDetective.Analysis.Analyzers
                 ulong? sampleAddress = cache.GetSampleInstanceAddress(typeName);
                 string? sampleType = null;
                 ulong sampleSize = 0;
+                ulong methodTable = 0;
                 bool hasGcRoot = false;
+                string? rootKind = null;
                 string? path = null;
+                IReadOnlyList<string>? pathHops = null;
                 bool searchTruncated = false;
+                ulong? retainedBytes = null;
+                ulong? rootAddress = null;
+                string? lastHopFieldName = null;
 
                 if (sampleAddress.HasValue)
                 {
@@ -88,15 +124,16 @@ namespace DumpDetective.Analysis.Analyzers
                         analyzedSamples++;
                         sampleType = sampleMetadata.TypeName ?? StringConstants.UnknownType;
                         sampleSize = sampleMetadata.Size;
+                        methodTable = sampleMetadata.MethodTable;
 
-                        hasGcRoot = TryFindAnyRootPath(heap, prioritizedRoots, sampleAddress.Value, options, policy, telemetry, out path, out searchTruncated);
+                        hasGcRoot = TryFindAnyRootPath(heap, provider, prioritizedRoots, sampleAddress.Value, options, telemetry, cache.TryGetReverseIndexProvider(), cache, cancellationToken, out rootKind, out path, out pathHops, out searchTruncated, out rootAddress, out lastHopFieldName);
                         if (hasGcRoot)
                         {
                             retainedSamples++;
-                            if (retainedTypeCounts.TryGetValue(typeName, out int current))
-                                retainedTypeCounts[typeName] = current + 1;
-                            else
-                                retainedTypeCounts[typeName] = 1;
+                            retainedTypeNames.Add(typeName);
+
+                            if (rootKind is not null)
+                                rootKindCounts[rootKind] = rootKindCounts.GetValueOrDefault(rootKind) + 1;
 
                             if (!string.IsNullOrWhiteSpace(path) && sampleReferenceChains.Count < 5)
                                 sampleReferenceChains.Add($"{typeName}: {path}");
@@ -105,299 +142,400 @@ namespace DumpDetective.Analysis.Analyzers
                         {
                             traversalLimitedSamples++;
                         }
+
+                        if (methodTable != 0)
+                            primaryAddressByMt[methodTable] = sampleAddress.Value;
+
+                        if (dominatorTreeProvider is not null
+                            && dominatorTreeProvider.TryGetRetainedBytes(sampleAddress.Value, out ulong exactRetainedBytes))
+                        {
+                            retainedBytes = exactRetainedBytes;
+                        }
+                    }
+                }
+                else
+                {
+                    noSampleAddressCount++;
+                }
+
+                pendingTypes.Add(new PendingTypeSample(
+                    typeName, stats.Count, stats.TotalSize, sampleAddress, sampleType, sampleSize,
+                    methodTable, hasGcRoot, rootKind, path, pathHops, searchTruncated, retainedBytes, rootAddress,
+                    lastHopFieldName));
+            }
+
+            Dictionary<ulong, List<ulong>> additionalSamplesByMt = CollectAdditionalSamples(
+                heap, cache, primaryAddressByMt, options.MultiSampleCount, progress, cancellationToken);
+
+            Dictionary<string, string> rootFieldNamesByTypeName = ResolveRootFieldNames(heap, cache, pendingTypes);
+
+            var topTypeSampleTraces = new List<ReferenceTypeSampleSnapshot>(capacity: pendingTypes.Count);
+            foreach (PendingTypeSample pending in pendingTypes)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                int sampleCount = 0;
+                var perTypeRootKindCounts = (Dictionary<string, int>?)null;
+
+                if (pending.SampleAddress.HasValue)
+                {
+                    sampleCount = 1;
+                    if (pending.HasGcRoot && pending.RootKind is not null)
+                    {
+                        perTypeRootKindCounts = new Dictionary<string, int>(StringComparer.Ordinal) { [pending.RootKind] = 1 };
+                    }
+                }
+
+                if (pending.MethodTable != 0 && additionalSamplesByMt.TryGetValue(pending.MethodTable, out List<ulong>? extraAddresses))
+                {
+                    foreach (ulong extraAddress in extraAddresses)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        sampleCount++;
+
+                        bool extraHasGcRoot = TryFindAnyRootPath(
+                            heap, provider, prioritizedRoots, extraAddress, options, telemetry,
+                            cache.TryGetReverseIndexProvider(), cache, cancellationToken,
+                            out string? extraRootKind, out _, out _, out _, out _, out _);
+
+                        if (extraHasGcRoot && extraRootKind is not null)
+                        {
+                            perTypeRootKindCounts ??= new Dictionary<string, int>(StringComparer.Ordinal);
+                            perTypeRootKindCounts[extraRootKind] = perTypeRootKindCounts.GetValueOrDefault(extraRootKind) + 1;
+                        }
+                    }
+                }
+
+                string? dominantRootKind = null;
+                int dominantRootKindCount = 0;
+                int retainedSampleCount = 0;
+                if (perTypeRootKindCounts is not null)
+                {
+                    foreach (KeyValuePair<string, int> kv in perTypeRootKindCounts)
+                    {
+                        retainedSampleCount += kv.Value;
+                        if (kv.Value > dominantRootKindCount
+                            || (kv.Value == dominantRootKindCount && string.CompareOrdinal(kv.Key, dominantRootKind) < 0))
+                        {
+                            dominantRootKind = kv.Key;
+                            dominantRootKindCount = kv.Value;
+                        }
                     }
                 }
 
                 topTypeSampleTraces.Add(new ReferenceTypeSampleSnapshot(
-                    typeName,
-                    stats.Count,
-                    stats.TotalSize,
-                    sampleAddress,
-                    sampleType,
-                    sampleSize,
-                    hasGcRoot,
-                    path,
-                    searchTruncated));
+                    pending.TypeName,
+                    pending.Count,
+                    pending.TotalSizeBytes,
+                    pending.SampleAddress,
+                    pending.SampleType,
+                    pending.SampleSize,
+                    pending.HasGcRoot,
+                    pending.RootKind,
+                    pending.RootPath,
+                    pending.PathHops,
+                    pending.SearchTruncated,
+                    sampleCount,
+                    retainedSampleCount,
+                    dominantRootKind,
+                    dominantRootKindCount,
+                    pending.RetainedBytes,
+                    pending.RootAddress,
+                    rootFieldNamesByTypeName.TryGetValue(pending.TypeName, out string? rootFieldName) ? rootFieldName : null,
+                    pending.LastHopFieldName));
             }
 
+            List<ReferenceChainSharedRootGroup> sharedRootGroups = BuildSharedRootGroups(topTypeSampleTraces);
+
             double retainedPct = analyzedSamples == 0 ? 0 : retainedSamples * 100.0 / analyzedSamples;
-            var topRetainedTypes = retainedTypeCounts
-                .OrderByDescending(kvp => kvp.Value)
-                .ThenBy(kvp => kvp.Key, StringComparer.Ordinal)
-                .Take(10)
-                .Select(kvp => new NameCountEntry(kvp.Key, kvp.Value))
+            var retainedTypeList = retainedTypeNames
+                .OrderBy(name => name, StringComparer.Ordinal)
                 .ToArray();
+
+            var rootKindDistribution = new List<ReferenceChainRootKindCount>(rootKindCounts.Count);
+            foreach (KeyValuePair<string, int> kv in rootKindCounts)
+                rootKindDistribution.Add(new ReferenceChainRootKindCount(kv.Key, kv.Value));
+            rootKindDistribution.Sort(static (a, b) =>
+            {
+                int byCount = b.RetainedTypeCount.CompareTo(a.RetainedTypeCount);
+                return byCount != 0 ? byCount : string.CompareOrdinal(a.RootKind, b.RootKind);
+            });
 
             return new ReferenceChainDomainResult(
                 analyzedSamples,
                 retainedSamples,
                 retainedPct,
-                topRetainedTypes,
+                retainedTypeList,
                 sampleReferenceChains,
                 topTypeSampleTraces,
-                traversalLimitedSamples);
+                traversalLimitedSamples,
+                rootKindDistribution,
+                noSampleAddressCount,
+                sharedRootGroups);
         }
 
-        internal bool AnalyzeObject(ClrHeap heap, IHeapAnalysisCache cache, ulong objectAddress)
+        /// <summary>
+        /// E-6 (docs/analysis/phase1/reference-chain-analyzer-audit.md): groups top types whose
+        /// representative sample resolved to the same root object address — a shared retention
+        /// hub (e.g. a static cache or singleton) rather than independent leaks. Scoped to the
+        /// representative sample only, since multi-sample extras (E-1/E-7) don't retain a path.
+        /// </summary>
+        private static List<ReferenceChainSharedRootGroup> BuildSharedRootGroups(
+            IReadOnlyList<ReferenceTypeSampleSnapshot> traces)
         {
-            IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
-            List<(string RootKind, ulong Address)> prioritizedRoots = SortAndFilterRoots(roots);
-            var options = new ReferenceChainOptions();
-            var telemetry = new TelemetryCounters();
-            return TryFindAnyRootPath(heap, prioritizedRoots, objectAddress, options, ExecutionPolicy.Default, telemetry, out _, out _);
+            var typeNamesByRootAddress = new Dictionary<ulong, List<string>>();
+            var rootKindByRootAddress = new Dictionary<ulong, string>();
+
+            for (int i = 0; i < traces.Count; i++)
+            {
+                ReferenceTypeSampleSnapshot trace = traces[i];
+                if (!trace.RootAddress.HasValue || trace.RootKind is null)
+                    continue;
+
+                ulong address = trace.RootAddress.Value;
+                if (!typeNamesByRootAddress.TryGetValue(address, out List<string>? typeNames))
+                {
+                    typeNames = new List<string>();
+                    typeNamesByRootAddress[address] = typeNames;
+                    rootKindByRootAddress[address] = trace.RootKind;
+                }
+
+                typeNames.Add(trace.TypeName);
+            }
+
+            var groups = new List<ReferenceChainSharedRootGroup>();
+            foreach (KeyValuePair<ulong, List<string>> kv in typeNamesByRootAddress)
+            {
+                if (kv.Value.Count < 2)
+                    continue;
+
+                groups.Add(new ReferenceChainSharedRootGroup(kv.Key, rootKindByRootAddress[kv.Key], kv.Value));
+            }
+
+            groups.Sort(static (a, b) =>
+            {
+                int byCount = b.TypeNames.Count.CompareTo(a.TypeNames.Count);
+                return byCount != 0 ? byCount : a.RootAddress.CompareTo(b.RootAddress);
+            });
+
+            return groups;
+        }
+
+        /// <summary>
+        /// E-3 (docs/analysis/phase1/reference-chain-analyzer-audit.md): resolves the static field
+        /// or stack frame owner that holds each retained type's root reference, keyed by type name.
+        /// <see cref="RootPathFinder"/>/<see cref="Traversal.BidirectionalGraphSearch"/> only ever
+        /// track the rooted <em>object's</em> address (<see cref="ReferenceTypeSampleSnapshot.RootAddress"/>),
+        /// never which specific root (field/stack slot) — collapsed by design: <c>BidirectionalGraphSearch</c>'s
+        /// forward frontier seeds one entry per target address via <c>TryAdd</c>, so two distinct
+        /// roots pointing at the same object are already indistinguishable before this method ever
+        /// runs. This does one filtered pass over <see cref="IHeapAnalysisCache.GetOrBuildRootTriples"/>
+        /// (the same pattern <c>StaticRootLeakDetector</c> already uses) to correlate each retained
+        /// type's root-target address back to a matching root's own storage address — filtered to
+        /// just the target addresses this run actually needs, not sized to the full root population.
+        /// </summary>
+        private static Dictionary<string, string> ResolveRootFieldNames(
+            ClrHeap heap, IHeapAnalysisCache cache, IReadOnlyList<PendingTypeSample> pendingTypes)
+        {
+            var result = new Dictionary<string, string>(StringComparer.Ordinal);
+
+            var neededTargets = new HashSet<ulong>();
+            foreach (PendingTypeSample pending in pendingTypes)
+            {
+                if (pending.HasGcRoot && pending.RootAddress.HasValue && pending.RootKind is not null)
+                    neededTargets.Add(pending.RootAddress.Value);
+            }
+
+            if (neededTargets.Count == 0)
+                return result;
+
+            var storageAddressByTarget = new Dictionary<ulong, ulong>(neededTargets.Count);
+            foreach ((string _, ulong targetAddr, ulong rootAddr) in cache.GetOrBuildRootTriples(heap))
+            {
+                if (neededTargets.Contains(targetAddr))
+                    storageAddressByTarget.TryAdd(targetAddr, rootAddr);
+            }
+
+            if (storageAddressByTarget.Count == 0)
+                return result;
+
+            foreach (PendingTypeSample pending in pendingTypes)
+            {
+                if (!pending.HasGcRoot || pending.RootKind is null || !pending.RootAddress.HasValue)
+                    continue;
+
+                if (!storageAddressByTarget.TryGetValue(pending.RootAddress.Value, out ulong storageAddress))
+                    continue;
+
+                string? fieldName = pending.RootKind switch
+                {
+                    "StaticVar" or "ThreadStaticVar" => ResolveStaticFieldName(cache, heap, storageAddress),
+                    "Stack" => ResolveStackFrameOwner(cache, heap, storageAddress),
+                    _ => null,
+                };
+
+                if (fieldName is not null)
+                    result[pending.TypeName] = fieldName;
+            }
+
+            return result;
+        }
+
+        private static string? ResolveStaticFieldName(IHeapAnalysisCache cache, ClrHeap heap, ulong storageAddress)
+        {
+            var staticFieldsByRootAddress = cache.GetStaticFieldsByRootAddress(heap);
+            if (!staticFieldsByRootAddress.TryGetValue(storageAddress, out (string TypeName, string FieldName, int AppDomainId) info))
+                return null;
+
+            return info.AppDomainId != 1
+                ? $"{info.TypeName}.{info.FieldName} [AppDomain#{info.AppDomainId}]"
+                : $"{info.TypeName}.{info.FieldName}";
+        }
+
+        private static string? ResolveStackFrameOwner(IHeapAnalysisCache cache, ClrHeap heap, ulong storageAddress)
+        {
+            return cache.TryResolveStackFrameOwner(heap, storageAddress, out string ownerType, out string methodName)
+                ? $"{ownerType}.{methodName}"
+                : null;
         }
 
         private bool TryFindAnyRootPath(
             ClrHeap heap,
+            ReferenceGraph provider,
             IReadOnlyList<(string RootKind, ulong Address)> roots,
             ulong objectAddress,
             ReferenceChainOptions options,
-            ExecutionPolicy policy,
             TelemetryCounters telemetry,
+            IBackwardReferenceProvider? reverseIndexProvider,
+            IHeapAnalysisCache? cache,
+            CancellationToken cancellationToken,
+            out string? rootKind,
             out string? path,
-            out bool searchTruncated)
+            out IReadOnlyList<string>? pathHops,
+            out bool searchTruncated,
+            out ulong? rootAddress,
+            out string? lastHopFieldName)
         {
+            rootKind = null;
             path = null;
+            pathHops = null;
             searchTruncated = false;
+            rootAddress = null;
+            lastHopFieldName = null;
 
             if (!TryGetValidObject(heap, objectAddress, out _))
                 return false;
 
-            if (options.SearchMode == ReferenceChainSearchMode.Fast)
-                return TryFindAnyRootPath_Fast(heap, roots, objectAddress, options, policy, telemetry, out path, out searchTruncated);
-
-            return TryFindAnyRootPath_Bidirectional(heap, roots, objectAddress, options, policy, telemetry, out path, out searchTruncated);
+            // Single bounded bidirectional search strategy — the former SearchMode
+            // Fast/Balanced/Deep parallel-profile enum was deleted (§9.20); a separate unbounded
+            // per-root BFS used to back Fast mode; removed because it scaled with GC root count
+            // instead of a shared bounded budget (see docs/analysis/root-path-search-blast-radius.md).
+            return TryFindAnyRootPath_Bidirectional(heap, provider, roots, objectAddress, options, telemetry, reverseIndexProvider, cache, cancellationToken, out rootKind, out path, out pathHops, out searchTruncated, out rootAddress, out lastHopFieldName);
         }
 
-        // ── Fast mode ─────────────────────────────────────────────────────────
-        private bool TryFindAnyRootPath_Fast(
-            ClrHeap heap,
-            IReadOnlyList<(string RootKind, ulong Address)> roots,
-            ulong objectAddress,
-            ReferenceChainOptions options,
-            ExecutionPolicy policy,
-            TelemetryCounters telemetry,
-            out string? path,
-            out bool searchTruncated)
-        {
-            path = null;
-            searchTruncated = false;
-
-            int maxPathSearchObjects = policy.ReferenceChainMaxPathSearchObjects > 0 ? policy.ReferenceChainMaxPathSearchObjects : options.FallbackMaxPathSearchObjects;
-
-            // Preallocate once and reuse across all root iterations.
-            var visited = new HashSet<ulong>(capacity: 1024);
-            var previous = new Dictionary<ulong, ulong>(capacity: 1024);
-            var queue = new Queue<(ulong Address, int Depth)>(capacity: 256);
-
-            var scanCounter = new ObjectScanCounter("Reference chain root scan", reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(2));
-            foreach ((string rootKind, ulong rootAddress) in roots)
-            {
-                scanCounter.Tick();
-                if (TryBuildPath(heap, rootAddress, objectAddress, maxPathSearchObjects, visited, previous, queue,
-                    options.SkipArrays, options.LargeFanoutThreshold, options.KnownLeakTypePatterns, policy.ReferenceChainMaxPathDepth, telemetry,
-                    out List<ulong>? addresses, out bool pathSearchLimited))
-                {
-                    scanCounter.Complete();
-                    path = FormatPath(heap, rootKind, addresses);
-                    return true;
-                }
-
-                if (pathSearchLimited)
-                    searchTruncated = true;
-            }
-
-            scanCounter.Complete();
-            return false;
-        }
-
-        // ── Balanced / Deep mode ──────────────────────────────────────────────
+        // ── Bidirectional bounded search ─────────────────────────────────────────
         private bool TryFindAnyRootPath_Bidirectional(
             ClrHeap heap,
+            ReferenceGraph provider,
             IReadOnlyList<(string RootKind, ulong Address)> roots,
             ulong objectAddress,
             ReferenceChainOptions options,
-            ExecutionPolicy policy,
             TelemetryCounters telemetry,
+            IBackwardReferenceProvider? reverseIndexProvider,
+            IHeapAnalysisCache? cache,
+            CancellationToken cancellationToken,
+            out string? rootKind,
             out string? path,
-            out bool searchTruncated)
+            out IReadOnlyList<string>? pathHops,
+            out bool searchTruncated,
+            out ulong? rootAddress,
+            out string? lastHopFieldName)
         {
+            rootKind = null;
             path = null;
+            pathHops = null;
             searchTruncated = false;
+            rootAddress = null;
+            lastHopFieldName = null;
 
-            // Phase 1: build candidate set via bidirectional expansion.
-            // Use ReferenceGraph as the reference provider — it caches edges, reducing re-fetching
-            // across the three phases (candidate set, reverse index, and constrained BFS).
-            var provider = new ReferenceGraph(heap);
-            var candidateBuilder = new CandidateSetBuilder(heap, provider, options, telemetry.AsProxy());
-            HashSet<ulong> candidateSet = candidateBuilder.Build(objectAddress, roots);
-
-            // Phase 2: build scoped reverse index over candidate set only.
-            var reverseIndex = new ReverseReferenceIndex();
-            reverseIndex.Build(candidateSet, heap, options, telemetry.AsProxy(), provider);
-
-            telemetry.TotalCandidateSetSize += candidateSet.Count;
-            telemetry.ReverseIndexEntries += reverseIndex.EntryCount;
-
-            // Phase 3: constrained BFS from roots, staying inside candidate set.
-            var finder = new BidirectionalPathFinder(heap, provider, candidateSet, reverseIndex, options, telemetry.AsProxy());
-
-            var scanCounter = new ObjectScanCounter("Bidir reference chain scan", reportEveryObjects: 500, reportEveryElapsed: TimeSpan.FromSeconds(2));
-            foreach ((string rootKind, ulong rootAddress) in roots)
+            // Use shared ReferenceGraph as the reference provider — it caches edges across
+            // all types, reducing redundant ClrMD calls for objects referenced by multiple types.
+            var limits = new RootPathSearchLimits
             {
-                scanCounter.Tick();
+                MaxCandidateNodes = options.MaxCandidateNodes,
+                MaxCandidateDepth = options.MaxCandidateDepth,
+                MaxRootExpansionDepth = options.MaxRootExpansionDepth,
+                LargeFanoutThreshold = options.LargeFanoutThreshold,
+            };
 
-                if (!candidateSet.Contains(rootAddress) && rootAddress != objectAddress)
-                    continue;
+            var finder = new RootPathFinder(
+                heap,
+                provider,
+                limits,
+                telemetry.AsProxy(),
+                IsNoisyType,
+                type => IsKnownLeakType(type, options.KnownLeakTypePatterns),
+                reverseIndexProvider,
+                cache);
 
-                if (finder.TryFindPath(rootAddress, objectAddress, out List<ulong>? addresses, out bool limited))
-                {
-                    scanCounter.Complete();
-                    path = FormatPath(heap, rootKind, addresses);
-                    return true;
-                }
+            bool found = finder.TryFindAnyRootPath(
+                objectAddress,
+                roots,
+                out string? foundRootKind,
+                out List<ulong>? addresses,
+                out searchTruncated,
+                out int candidateSetSize,
+                out int reverseIndexEntryCount,
+                cancellationToken);
 
-                if (limited)
-                    searchTruncated = true;
-            }
+            telemetry.TotalCandidateSetSize += candidateSetSize;
+            telemetry.ReverseIndexEntries += reverseIndexEntryCount;
 
-            scanCounter.Complete();
-            return false;
-        }
-
-        private static InsightFinding CreateTraversalLimitFinding(int analyzedSamples, int traversalLimitedSamples)
-        {
-            double limitedPct = analyzedSamples == 0 ? 0 : traversalLimitedSamples * 100.0 / analyzedSamples;
-            return new InsightFinding(
-                Analyzer: nameof(ReferenceChainAnalyzer),
-                Category: "Retention",
-                Severity: limitedPct >= 20 ? FindingSeverity.Warning : FindingSeverity.Info,
-                Title: "Reference-chain traversal limit reached",
-                Evidence: $"{traversalLimitedSamples:N0}/{analyzedSamples:N0} sampled type(s) hit traversal limits before a conclusive root-path result ({limitedPct:F1}%).",
-                Recommendation: "Increase sampling depth/path budget for inconclusive types and validate with targeted object tracing.",
-                Tags: ["reference-chain", "traversal-limit", "retention"],
-                MetricValue: limitedPct,
-                MetricUnit: "% traversal-limited-samples");
-        }
-
-        private static InsightFinding CreateFinding(int analyzedSamples, int retainedSamples)
-        {
-            if (analyzedSamples == 0)
+            if (found)
             {
-                return new InsightFinding(
-                    Analyzer: nameof(ReferenceChainAnalyzer),
-                    Category: "Retention",
-                    Severity: FindingSeverity.Info,
-                    Title: "No sample instances available for reference-chain tracing",
-                    Evidence: "Reference-chain analyzer could not obtain valid sample objects for configured top types.",
-                    Recommendation: "Review type statistics and dump integrity; re-run with broader type coverage if needed.",
-                    Tags: ["reference-chain", "roots", "retention"],
-                    MetricValue: 0,
-                    MetricUnit: "% retained-samples");
-            }
-
-            double retainedPct = retainedSamples * 100.0 / analyzedSamples;
-            FindingSeverity severity = retainedPct >= 70 ? FindingSeverity.Warning : FindingSeverity.Info;
-            return new InsightFinding(
-                Analyzer: nameof(ReferenceChainAnalyzer),
-                Category: "Retention",
-                Severity: severity,
-                Title: "Reference-chain retention coverage",
-                Evidence: $"{retainedSamples:N0}/{analyzedSamples:N0} sampled top types had at least one GC-root path ({retainedPct:F1}%).",
-                Recommendation: "Focus on root paths for retained top types to identify ownership leaks.",
-                Tags: ["reference-chain", "gc-roots", "retention"],
-                MetricValue: retainedPct,
-                MetricUnit: "% retained-samples");
-        }
-
-        private static bool TryBuildPath(
-            ClrHeap heap,
-            ulong startAddress,
-            ulong targetAddress,
-            int maxPathSearchObjects,
-            HashSet<ulong> visited,
-            Dictionary<ulong, ulong> previous,
-            Queue<(ulong Address, int Depth)> queue,
-            bool skipArrays,
-            int largeFanoutThreshold,
-            IReadOnlyList<string> knownLeakPatterns,
-            int maxPathDepth,
-            TelemetryCounters telemetry,
-            out List<ulong>? path,
-            out bool searchLimitReached)
-        {
-            path = null;
-            searchLimitReached = false;
-
-            if (startAddress == targetAddress)
-            {
-                path = new List<ulong> { startAddress };
+                rootKind = foundRootKind;
+                path = FormatPath(heap, foundRootKind!, addresses, out pathHops);
+                rootAddress = addresses is { Count: > 0 } ? addresses[0] : null;
+                lastHopFieldName = ResolveLastHopFieldName(heap, addresses);
                 return true;
             }
 
-            if (startAddress == 0 || targetAddress == 0)
-                return false;
-
-            visited.Clear();
-            visited.Add(startAddress);
-            previous.Clear();
-            queue.Clear();
-            queue.Enqueue((startAddress, 0));
-
-            int searched = 0;
-
-            while (queue.Count > 0 && searched++ < maxPathSearchObjects)
-            {
-                (ulong current, int depth) = queue.Dequeue();
-
-                if (depth >= maxPathDepth)
-                    continue;
-
-                foreach (ulong refAddress in EnumerateReferenceAddresses(heap, current, skipArrays, largeFanoutThreshold, knownLeakPatterns, telemetry))
-                {
-                    if (refAddress == targetAddress)
-                    {
-                        path = ReconstructPath(previous, startAddress, targetAddress, current);
-                        return true;
-                    }
-
-                    if (visited.Add(refAddress))
-                    {
-                        // increment telemetry if we detect a pruned node marker? (EnumerateReferenceAddresses will maintain counts via telemetry callbacks)
-                        previous[refAddress] = current;
-                        queue.Enqueue((refAddress, depth + 1));
-                    }
-                }
-            }
-
-            searchLimitReached = queue.Count > 0 && searched >= maxPathSearchObjects;
-
             return false;
         }
 
-        private static List<ulong> ReconstructPath(Dictionary<ulong, ulong> previous, ulong startAddress, ulong targetAddress, ulong? targetParent = null)
+        /// <summary>
+        /// E-3 (docs/analysis/phase1/reference-chain-analyzer-audit.md): the field on the
+        /// second-to-last path object that holds the reference to the last hop, via
+        /// <see cref="ClrObject.EnumerateReferencesWithFields"/> — the same ClrMD API SOS's
+        /// <c>!gcroot</c> draws field names from — filtered to the one entry matching the actual
+        /// last-hop address. Null when the path is too short to have a parent (the root points
+        /// directly at the target), the parent is no longer a valid object, or the edge was via an
+        /// array element/dependent handle rather than a named field.
+        /// </summary>
+        private static string? ResolveLastHopFieldName(ClrHeap heap, IReadOnlyList<ulong>? addresses)
         {
-            var reversed = new List<ulong>(capacity: 16) { targetAddress };
+            if (addresses is not { Count: >= 2 })
+                return null;
 
-            ulong cursor = targetAddress;
-            if (targetParent.HasValue)
+            ulong parentAddress = addresses[^2];
+            ulong childAddress = addresses[^1];
+
+            if (!TryGetValidObject(heap, parentAddress, out ClrObject parent))
+                return null;
+
+            foreach (ClrReference reference in parent.EnumerateReferencesWithFields(carefully: true))
             {
-                reversed.Add(targetParent.Value);
-                cursor = targetParent.Value;
+                if (reference.Object.Address == childAddress && reference.IsField && reference.Field is not null)
+                    return reference.Field.Name;
             }
 
-            while (cursor != startAddress && previous.TryGetValue(cursor, out ulong parent))
-            {
-                reversed.Add(parent);
-                cursor = parent;
-            }
-
-            reversed.Reverse();
-            return reversed;
+            return null;
         }
 
-        private static string FormatPath(ClrHeap heap, string rootKind, IReadOnlyList<ulong>? addresses)
+        private static string FormatPath(ClrHeap heap, string rootKind, IReadOnlyList<ulong>? addresses, out IReadOnlyList<string>? pathHops)
         {
+            pathHops = null;
+
             if (addresses is null || addresses.Count == 0)
                 return $"{rootKind}: <no path>";
 
@@ -406,6 +544,7 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 parts.Add(FormatNodeByAddress(heap, addresses[i]));
             }
+            pathHops = parts;
             string chain = string.Join(" -> ", parts);
             return $"{rootKind}: {chain}";
         }
@@ -413,51 +552,95 @@ namespace DumpDetective.Analysis.Analyzers
         private static ObjectMetadata GetObjectMetadata(ClrHeap heap, ulong address)
         {
             if (!TryGetValidObject(heap, address, out ClrObject obj))
-                return new ObjectMetadata(false, null, 0);
+                return new ObjectMetadata(false, null, 0, 0);
 
-            return new ObjectMetadata(true, obj.Type?.Name, obj.Size);
+            return new ObjectMetadata(true, obj.Type?.Name, obj.Size, obj.Type?.MethodTable ?? 0);
         }
 
-        private static IEnumerable<ulong> EnumerateReferenceAddresses(ClrHeap heap, ulong sourceAddress, bool skipArrays, int largeFanoutThreshold, IReadOnlyList<string> knownLeakPatterns, TelemetryCounters telemetry)
+        /// <summary>
+        /// E-7 (docs/analysis/phase1/reference-chain-analyzer-audit.md): one streaming pass over
+        /// the disk-backed object index — same single-pass-filtered-by-MethodTable-set idiom
+        /// already used by <c>WeakReferenceAnalyzer</c>, <c>TimerLeakAnalyzer</c>,
+        /// <c>AsyncStateMachineAnalyzer</c>, and <c>EventLeak/PublisherRegistry</c> — collecting up
+        /// to <paramref name="multiSampleCount"/> - 1 additional distinct instances per target
+        /// MethodTable, for E-1's root-consistency scoring. Deliberately not a per-type API: a
+        /// per-type call in <see cref="AnalyzeTopTypes"/>'s top-N loop would re-stream the entire
+        /// object index once per type. Falls back to a live <see cref="ClrHeap.EnumerateObjects"/>
+        /// walk when no disk index was built (in-memory mode), matching the same fallback those
+        /// other analyzers use. Exits early once every target MethodTable has reached quota.
+        /// </summary>
+        private static Dictionary<ulong, List<ulong>> CollectAdditionalSamples(
+            ClrHeap heap,
+            IHeapAnalysisCache cache,
+            Dictionary<ulong, ulong> primaryAddressByMt,
+            int multiSampleCount,
+            IProgress<AnalyzerProgressReport>? progress,
+            CancellationToken cancellationToken)
         {
-            if (!TryGetValidObject(heap, sourceAddress, out ClrObject sourceObject))
-                yield break;
+            var additionalByMt = new Dictionary<ulong, List<ulong>>(primaryAddressByMt.Count);
 
-            var sourceType = sourceObject.Type;
-            // If the source type looks noisy, skip expanding it.
-            if (IsNoisyType(sourceType, skipArrays))
+            int perTypeQuota = multiSampleCount - 1;
+            if (perTypeQuota <= 0 || primaryAddressByMt.Count == 0)
+                return additionalByMt;
+
+            // Ask whether a heap index exists rather than enumerating to find out: `.Any()`
+            // opens the container, maps all four object columns and checksums every byte of
+            // them (~365 MB / ~69 ms on a 14.6M-object dump) to yield a single record.
+            bool hasDiskIndex = cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out _);
+            IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> entries = hasDiskIndex
+                ? cache.EnumerateIndexedEntriesAsTuples()
+                : LiveHeapEntries(heap);
+
+            var scanCounter = new ObjectScanCounter(
+                "collecting multi-sample instances", progress, reportEveryObjects: 250_000, reportEveryElapsed: TimeSpan.FromSeconds(2));
+
+            int remainingTargets = primaryAddressByMt.Count;
+
+            foreach ((ulong address, ulong mt, ulong _) in entries)
             {
-                telemetry.PrunedNodes++;
-                yield break;
-            }
+                cancellationToken.ThrowIfCancellationRequested();
+                scanCounter.Tick();
 
-            // Enumerate and enforce a large-fanout threshold; if exceeded, treat node as noisy.
-            int counted = 0;
-            bool forceExpand = IsKnownLeakType(sourceType, knownLeakPatterns);
+                if (!primaryAddressByMt.TryGetValue(mt, out ulong primaryAddress) || address == primaryAddress)
+                    continue;
 
-            foreach (ClrObject reference in sourceObject.EnumerateReferences(carefully: true))
-            {
-                // count for fanout detection
-                counted++;
-                if (!forceExpand && counted > largeFanoutThreshold)
+                if (!additionalByMt.TryGetValue(mt, out List<ulong>? list))
                 {
-                    // Too many children: skip expanding this node (pruning).
-                    telemetry.LargeFanoutNodesSkipped++;
-                    yield break;
+                    list = new List<ulong>(perTypeQuota);
+                    additionalByMt[mt] = list;
                 }
 
-                if (!reference.IsValid)
+                if (list.Count >= perTypeQuota)
                     continue;
 
-                ulong referenceAddress = reference.Address;
-                if (referenceAddress == 0)
+                list.Add(address);
+                if (list.Count == perTypeQuota)
+                {
+                    remainingTargets--;
+                    if (remainingTargets <= 0)
+                        break;
+                }
+            }
+
+            scanCounter.Complete();
+            return additionalByMt;
+        }
+
+        private static IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> LiveHeapEntries(ClrHeap heap)
+        {
+            foreach (ClrObject obj in heap.EnumerateObjects())
+            {
+                if (!obj.IsValid || obj.Type is null)
                     continue;
 
-                yield return referenceAddress;
+                yield return (obj.Address, obj.Type.MethodTable, obj.Size);
             }
         }
 
-        private static bool IsNoisyType(ClrType? type, bool skipArrays)
+        // §9.20 (docs/refactor/analysis-profile-removal-plan.md): arrays are never treated as
+        // noise — confirmed by V3/§11.3 that skipping them was real traversal pruning, not a
+        // presentation concern, so excluding them would risk missing genuine retention chains.
+        internal static bool IsNoisyType(ClrType? type)
         {
             if (type is null)
                 return false;
@@ -466,18 +649,10 @@ namespace DumpDetective.Analysis.Analyzers
             if (string.IsNullOrEmpty(name))
                 return false;
 
-            // Skip System.String and System.Object
-            if (name == "System.String" || name == "System.Object")
-                return true;
-
-            // Optionally skip arrays
-            if (skipArrays && type.IsArray)
-                return true;
-
-            return false;
+            return name == "System.String" || name == "System.Object";
         }
 
-        private static bool IsKnownLeakType(ClrType? type, IReadOnlyList<string> knownLeakPatterns)
+        internal static bool IsKnownLeakType(ClrType? type, IReadOnlyList<string> knownLeakPatterns)
         {
             if (type is null)
                 return false;
@@ -518,31 +693,19 @@ namespace DumpDetective.Analysis.Analyzers
         /// Lightweight ref-struct-like proxy so nested helper classes (declared outside
         /// <see cref="ReferenceChainAnalyzer"/>) can update telemetry without exposing the full counter object.
         /// </summary>
-        internal sealed class TelemetryProxy(TelemetryCounters inner)
+        internal sealed class TelemetryProxy(TelemetryCounters inner) : IPathSearchTelemetry
         {
             public void IncrementPruned() => inner.PrunedNodes++;
             public void IncrementLargeFanout() => inner.LargeFanoutNodesSkipped++;
-            public long PrunedNodes { get => inner.PrunedNodes; set => inner.PrunedNodes = value; }
-            public long LargeFanoutNodesSkipped { get => inner.LargeFanoutNodesSkipped; set => inner.LargeFanoutNodesSkipped = value; }
         }
 
-        internal static bool IsKnownLeakTypePublic(ClrType? type, IReadOnlyList<string> patterns)
-            => IsKnownLeakType(type, patterns);
-
-        private static List<(string RootKind, ulong Address)> SortAndFilterRoots(
+        // No weak/dependent-handle filtering here: ClrHeap.EnumerateRoots() only yields handles
+        // where handle.IsStrong, and ClrRootKind has no Weak/Dependent member, so a root reaching
+        // this method can never represent one — there is nothing for this method to filter.
+        private static List<(string RootKind, ulong Address)> SortRootsByPriority(
             IReadOnlyList<(string RootKind, ulong Address)> roots)
         {
-            var result = new List<(string RootKind, ulong Address)>(roots.Count);
-            foreach ((string rootKind, ulong address) in roots)
-            {
-                // Weak and dependent roots never prevent collection — skip them entirely.
-                if (rootKind.Contains("Weak", StringComparison.OrdinalIgnoreCase) ||
-                    rootKind.Contains("Dependent", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                result.Add((rootKind, address));
-            }
-
+            var result = new List<(string RootKind, ulong Address)>(roots);
             result.Sort(static (a, b) => GetRootSearchPriority(a.RootKind).CompareTo(GetRootSearchPriority(b.RootKind)));
             return result;
         }
@@ -579,312 +742,4 @@ namespace DumpDetective.Analysis.Analyzers
 
     }
 
-    // ── ReverseReferenceIndex ─────────────────────────────────────────────────
-    /// <summary>
-    /// Builds a parent-lookup map scoped to a candidate set only.
-    /// Never indexes the full heap.
-    /// </summary>
-    internal sealed class ReverseReferenceIndex
-    {
-        private readonly Dictionary<ulong, List<ulong>> _map = new();
-
-        public int EntryCount => _map.Count;
-
-        /// <summary>
-        /// For every node in <paramref name="candidateSet"/>, enumerate its forward
-        /// references via <paramref name="heap"/> and record an edge child→parent
-        /// only when the child is also inside the candidate set.
-        /// </summary>
-        public void Build(
-            HashSet<ulong> candidateSet,
-            ClrHeap heap,
-            ReferenceChainOptions options,
-            ReferenceChainAnalyzer.TelemetryProxy telemetry,
-            DumpDetective.Core.Abstractions.IReferenceProvider provider)
-        {
-            foreach (ulong obj in candidateSet)
-            {
-                ClrObject clrObj = heap.GetObject(obj);
-                if (!clrObj.IsValid)
-                    continue;
-
-                int counted = 0;
-                bool forceExpand = ReferenceChainAnalyzer.IsKnownLeakTypePublic(clrObj.Type, options.KnownLeakTypePatterns);
-
-                foreach (var childAddr in provider.GetReferences(obj))
-                {
-                    counted++;
-                    if (!forceExpand && counted > options.LargeFanoutThreshold)
-                    {
-                        telemetry.LargeFanoutNodesSkipped++;
-                        break;
-                    }
-
-                    if (childAddr == 0)
-                        continue;
-
-                    if (!candidateSet.Contains(childAddr))
-                        continue;
-
-                    if (!_map.TryGetValue(childAddr, out var list))
-                    {
-                        list = new List<ulong>();
-                        _map[childAddr] = list;
-                    }
-
-                    list.Add(obj);
-                }
-            }
-        }
-
-        public IEnumerable<ulong> GetParents(ulong obj)
-            => _map.TryGetValue(obj, out var list) ? list : Enumerable.Empty<ulong>();
-    }
-
-    // ── CandidateSetBuilder ───────────────────────────────────────────────────
-    /// <summary>
-    /// Builds a bounded candidate set via true bidirectional expansion:
-    /// forward from roots (limited depth) and forward from target (simulating reverse via
-    /// the heap walk), meeting in the middle.
-    /// </summary>
-    internal sealed class CandidateSetBuilder
-    {
-        private readonly ClrHeap _heap;
-        private readonly DumpDetective.Core.Abstractions.IReferenceProvider _provider;
-        private readonly ReferenceChainOptions _options;
-        private readonly ReferenceChainAnalyzer.TelemetryProxy _telemetry;
-
-        public CandidateSetBuilder(ClrHeap heap, DumpDetective.Core.Abstractions.IReferenceProvider provider, ReferenceChainOptions options, ReferenceChainAnalyzer.TelemetryProxy telemetry)
-        {
-            _heap = heap;
-            _provider = provider;
-            _options = options;
-            _telemetry = telemetry;
-        }
-        private static readonly HashSet<string> _noiseTypes =
-            new(StringComparer.Ordinal) { "System.String", "System.Object" };
-
-        public HashSet<ulong> Build(
-            ulong target,
-            IReadOnlyList<(string RootKind, ulong Address)> roots)
-        {
-            int maxNodes = _options.ResolvedMaxCandidateNodes;
-            int maxDepth = _options.ResolvedMaxCandidateDepth;
-
-            var candidate = new HashSet<ulong> { target };
-
-            // Root frontier: expand forward from roots up to maxDepth levels.
-            var rootQueue = new Queue<(ulong Address, int Depth)>();
-            var rootVisited = new HashSet<ulong>();
-            foreach ((_, ulong addr) in roots)
-            {
-                if (addr == 0) continue;
-                if (rootVisited.Add(addr))
-                {
-                    rootQueue.Enqueue((addr, 0));
-                    candidate.Add(addr);
-                }
-            }
-
-            // Target frontier: expand forward from target (forward refs of target
-            // are not useful for reverse; instead we do a second BFS from target
-            // outward to find objects target references — useful to collect
-            // the "neighbourhood" that is likely on a retaining chain).
-            var targetQueue = new Queue<(ulong Address, int Depth)>();
-            var targetVisited = new HashSet<ulong> { target };
-            targetQueue.Enqueue((target, 0));
-
-            // Interleave both frontiers until they share a node or limits are hit.
-            while ((rootQueue.Count > 0 || targetQueue.Count > 0) && candidate.Count < maxNodes)
-            {
-                // Expand one step from root frontier.
-                if (rootQueue.Count > 0)
-                {
-                    (ulong cur, int depth) = rootQueue.Dequeue();
-                    if (depth < maxDepth)
-                        ExpandForward(cur, depth, rootVisited, rootQueue, candidate, maxNodes);
-                }
-
-                // Expand one step from target frontier.
-                if (targetQueue.Count > 0 && candidate.Count < maxNodes)
-                {
-                    (ulong cur, int depth) = targetQueue.Dequeue();
-                    if (depth < maxDepth)
-                        ExpandForward(cur, depth, targetVisited, targetQueue, candidate, maxNodes);
-                }
-            }
-
-            return candidate;
-        }
-
-        private void ExpandForward(
-            ulong address,
-            int depth,
-            HashSet<ulong> visited,
-            Queue<(ulong, int)> queue,
-            HashSet<ulong> candidate,
-            int maxNodes)
-        {
-            ClrObject obj = _heap.GetObject(address);
-            if (!obj.IsValid)
-                return;
-
-            if (IsNoise(obj.Type))
-            {
-                _telemetry.PrunedNodes++;
-                return;
-            }
-
-            int counted = 0;
-            bool forceExpand = ReferenceChainAnalyzer.IsKnownLeakTypePublic(obj.Type, _options.KnownLeakTypePatterns);
-
-            foreach (var childAddr in _provider.GetReferences(address))
-            {
-                counted++;
-                if (!forceExpand && counted > _options.LargeFanoutThreshold)
-                {
-                    _telemetry.LargeFanoutNodesSkipped++;
-                    break;
-                }
-
-                if (childAddr == 0)
-                    continue;
-
-                candidate.Add(childAddr);
-                if (candidate.Count >= maxNodes)
-                    return;
-
-                if (visited.Add(childAddr))
-                    queue.Enqueue((childAddr, depth + 1));
-            }
-        }
-
-        private bool IsNoise(ClrType? type)
-        {
-            if (type is null) return false;
-            string? name = type.Name;
-            if (string.IsNullOrEmpty(name)) return false;
-            if (_noiseTypes.Contains(name)) return true;
-            if (_options.SkipArrays && type.IsArray) return true;
-            return false;
-        }
-    }
-
-    // ── BidirectionalPathFinder ───────────────────────────────────────────────
-    /// <summary>
-    /// BFS from a single root constrained to the candidate set.
-    /// Uses the reverse index only for path reconstruction (backpointers),
-    /// NOT for forward traversal — keeping the search purely forward-constrained.
-    /// </summary>
-    internal sealed class BidirectionalPathFinder
-    {
-        private readonly ClrHeap _heap;
-        private readonly DumpDetective.Core.Abstractions.IReferenceProvider _provider;
-        private readonly HashSet<ulong> _candidateSet;
-        private readonly ReverseReferenceIndex _reverseIndex;
-        private readonly ReferenceChainOptions _options;
-        private readonly ReferenceChainAnalyzer.TelemetryProxy _telemetry;
-
-        public BidirectionalPathFinder(ClrHeap heap, DumpDetective.Core.Abstractions.IReferenceProvider provider, HashSet<ulong> candidateSet, ReverseReferenceIndex reverseIndex, ReferenceChainOptions options, ReferenceChainAnalyzer.TelemetryProxy telemetry)
-        {
-            _heap = heap;
-            _provider = provider;
-            _candidateSet = candidateSet;
-            _reverseIndex = reverseIndex;
-            _options = options;
-            _telemetry = telemetry;
-        }
-        private readonly HashSet<ulong> _visited = new(capacity: 256);
-        private readonly Dictionary<ulong, ulong> _previous = new(capacity: 256);
-        private readonly Queue<(ulong Address, int Depth)> _queue = new(capacity: 128);
-
-        public bool TryFindPath(
-            ulong start,
-            ulong target,
-            out List<ulong>? path,
-            out bool searchLimitReached)
-        {
-            path = null;
-            searchLimitReached = false;
-
-            if (start == target)
-            {
-                path = new List<ulong> { start };
-                return true;
-            }
-
-            int maxDepth = _options.ResolvedMaxRootExpansionDepth;
-
-            _visited.Clear();
-            _previous.Clear();
-            _queue.Clear();
-
-            _visited.Add(start);
-            _queue.Enqueue((start, 0));
-
-            int searched = 0;
-            int maxSearch = _options.ResolvedMaxCandidateNodes;
-
-            while (_queue.Count > 0 && searched++ < maxSearch)
-            {
-                (ulong current, int depth) = _queue.Dequeue();
-
-                if (depth >= maxDepth)
-                    continue;
-
-                ClrObject obj = _heap.GetObject(current);
-                if (!obj.IsValid)
-                    continue;
-
-                int counted = 0;
-                bool forceExpand = ReferenceChainAnalyzer.IsKnownLeakTypePublic(obj.Type, _options.KnownLeakTypePatterns);
-
-                foreach (var childAddr in _provider.GetReferences(current))
-                {
-                    counted++;
-                    if (!forceExpand && counted > _options.LargeFanoutThreshold)
-                    {
-                        _telemetry.LargeFanoutNodesSkipped++;
-                        break;
-                    }
-
-                    if (childAddr == 0)
-                        continue;
-
-                    // Constrain to candidate set.
-                    if (!_candidateSet.Contains(childAddr))
-                        continue;
-
-                    if (childAddr == target)
-                    {
-                        _previous[childAddr] = current;
-                        path = ReconstructPath(start, target);
-                        return true;
-                    }
-
-                    if (_visited.Add(childAddr))
-                    {
-                        _previous[childAddr] = current;
-                        _queue.Enqueue((childAddr, depth + 1));
-                    }
-                }
-            }
-
-            searchLimitReached = _queue.Count > 0 && searched >= maxSearch;
-            return false;
-        }
-
-        private List<ulong> ReconstructPath(ulong start, ulong target)
-        {
-            var reversed = new List<ulong>(capacity: 16) { target };
-            ulong cursor = target;
-            while (cursor != start && _previous.TryGetValue(cursor, out ulong parent))
-            {
-                reversed.Add(parent);
-                cursor = parent;
-            }
-            reversed.Reverse();
-            return reversed;
-        }
-    }
 }

@@ -10,8 +10,12 @@ internal sealed record StateMachineTypeProfile(
     string DeclaringType,
     int Count,
     ulong TotalBytes,
-    int AvgStateValue,
-    int ReferenceFieldCount);
+    int DominantState,
+    IReadOnlyList<(int State, int Count)> StateDistribution,
+    int ReferenceFieldCount,
+    long Gen2Count,
+    double Gen2Fraction,
+    bool IsAsyncVoid);
 
 internal sealed record HighCaptureStateMachine(
     ulong Address,
@@ -31,4 +35,6 @@ internal sealed record AsyncStateMachineDomainResult(
     IReadOnlyList<StateMachineTypeProfile> TopStateMachineTypes,
     IReadOnlyList<HighCaptureStateMachine> TopByCapturedSize,
     IReadOnlyList<SuspendedMethodEntry> SuspendedMethodMap,
-    bool ScanLimited) : AnalyzerDomainResult;
+    // Summed over all detected state-machine types, same population as TopStateMachineTypes,
+    // so it's a consistent denominator for Gen2 fraction (see AsyncStateMachineTrendComparer).
+    long TotalGen2Count = 0) : AnalyzerDomainResult;

@@ -1,354 +1,193 @@
-# 🧠 Project: High-Performance .NET Dump Analyzer (ClrMD 3.1.5)
-
-This project is a production-grade memory dump analyzer built on Microsoft.Diagnostics.Runtime (ClrMD 3.1.5).
-
-The system MUST handle extremely large dumps (1GB–25GB+) with even (1M-80M+) objects on heap and large heaps(1-21GB+) efficiently.
-
-## 📎 Reference Documents
-
-- **Architecture guidelines**: #file:'D:\POC\DumpAnalyzer\DumpDetective\docs\architecture.md'
-- **Disk-based indexing guidelines**: #file:'D:\POC\DumpAnalyzer\DumpDetective\docs\binary-format.md'
-- **Performance checklist**: #file:'D:\POC\DumpAnalyzer\DumpDetective\docs\performance-checklist.md'
-
-> All design decisions, storage formats, and performance requirements described in this file are elaborated in the reference documents above. When in doubt, consult them.
-
----
-
-# 🚨 Core Philosophy (MANDATORY)
-
-## ❌ Never Do This
-- Do NOT materialize full heap into memory
-- Do NOT use `.ToList()` on heap enumeration
-- Do NOT build full object graphs eagerly
-- Do NOT use LINQ in hot paths
-- Do NOT store large strings redundantly
-- Do NOT allocate per-object unnecessarily
-
-## ✅ Always Do This
-- Use streaming (`yield return`) wherever possible
-- Use `ulong address` as primary identity
-- Prefer structs over classes for hot data paths
-- Use disk-backed storage for large datasets
-- Build indices in a single pass
-- Perform deep analysis ONLY on filtered subsets
-
----
+ # 🧠 Project: High-Performance .NET Dump Analyzer (ClrMD 3.1.5)
+
+ Production-grade memory dump analyzer using Microsoft.Diagnostics.Runtime (ClrMD 3.1.5).
+ Handles very large dumps (1GB–25GB+), huge heaps, and millions of heap objects.
+
+ ## 📎 Reference Documents
+
+ - **Architecture guidelines**: #file:'D:\POC\DumpAnalyzer\DumpDetective\docs\architecture.md'
+ - **Disk-based indexing guidelines**: #file:'D:\POC\DumpAnalyzer\DumpDetective\docs\binary-format.md'
+ - **Performance checklist**: #file:'D:\POC\DumpAnalyzer\DumpDetective\docs\performance-checklist.md'
+
+ See referenced docs for design, formats, and perf requirements.
+
+ ---
+
+ # 🚨 Core Philosophy (MANDATORY)
 
-# 🏗️ Architecture Overview
-
-The system is divided into phases:
-
-## Phase 1: Streaming Index Build
-- Heap is scanned exactly once
-- Minimal metadata is extracted
-- Data is written to disk-backed storage
-
-## Phase 2: On-Demand Analysis
-- Graph traversal is lazy
-- Root paths are computed only when requested
-- Expensive operations are scoped to small subsets
-
----
-
-# 📦 Core Modules
-
-## Dump Layer
-- `DumpLoader` (in `Analysis.Dump`, registered as `IDumpLoader`)
-- `RuntimeFacade` (wraps ClrMD APIs; per-session MethodTable cache)
-
-## Heap Layer
-- `HeapStreamer` (stream objects)
-- `HeapEntry` (plain `readonly struct`)
-- `TypeIndexBuilder` (aggregation)
-- `IObjectIndexWriter` / `DiskBackedObjectIndexWriter` / `MemoryBackedObjectIndexWriter`
-
-## Storage Layer
-- `ObjectIndexReader` (`IObjectIndexReader`) — sequential `FileStream + ArrayPool` reads
-- Binary format: `Address (8) | MethodTable (8) | Size (8)` per record
-- Append-only, sequential writes, no random access
-
-## Cache Layer
-- `IHeapAnalysisCache` — read-only contract for analyzers
-- `IHeapIndexBuilder` — build-time contract (same instance)
-- `HeapAnalysisCache` — implements both interfaces
-
-## Graph Layer
-- `ReferenceGraph` (lazy forward traversal)
-- `ReverseReferenceIndex` (optional, partial, disk-backed)
-- `RootPathFinder` (bounded BFS, depth limit 20)
-
-## Analysis Layer (16 analyzers)
-- `MemoryLeakAnalyzer` + `StaticRootLeakDetector` (implement `LeakDetector` role)
-- `ThreadAnalyzer`
-- `GCHandleAnalyzer`
-- `SegmentAnalyzer`
-- `CollectionAnalyzer`
-- `EventLeakAnalyzer`
-- `LockGraphAnalyzer`
-- `CrashAnalyzer`
-- `HangAnalyzer`
-- `ThreadStackClusterAnalyzer`
-- `DependentHandleAnalyzer`
-- `ModuleAnalyzer`
-- `LohFragmentationAnalyzer`
-- `GCGenerationAnalyzer`
-- `ReferenceChainAnalyzer`
-
-## Query Layer
-- `QueryEngine` (`IQueryEngine`) — operates on indices, not raw heap
-- `TopTypesBySize(int n)`, `ObjectsOfType(string typeName)`
-- Exposed as `RuntimeAnalysisContext.Query`
-
-## Insight Layer
-- `InsightEngine` — cross-cutting pattern detection across `AnalyzerRunResult[]`
-- Emits ranked `InsightFinding` records (Critical → Warning → Info)
-- Runs after all analyzers and finding generators complete
+ ## ❌ Never
+ - Materialize full heap into memory
+ - Call `.ToList()` on heap enumeration
+ - Build full object graphs eagerly
+ - Use LINQ in hot paths
+ - Store large strings redundantly
+ - Allocate per-object unnecessarily
 
----
+ ## ✅ Do
+ - Stream (`yield return`)
+ - Use `ulong` address as identity
+ - Prefer `readonly struct` on hot paths
+ - Use disk-backed indices
+ - Build indices in one pass
+ - Run deep analysis only on filtered subsets
+
+ ---
+
+ # 🏗️ Architecture Overview
+
+ Phases:
+ - Phase 1: Streaming index build — single-pass heap scan, minimal metadata, append-only disk writes
+ - Phase 2: On-demand analysis — lazy graph traversal, root-paths on request, scoped expensive ops
+
+ ---
+
+ # 📦 Core Modules (high level)
+ - Dump layer: `DumpLoader`, `RuntimeFacade`
+ - Heap layer: `HeapStreamer`, `HeapEntry`, `TypeIndexBuilder`, object index writers
+ - Storage: `ObjectIndexReader` (FileStream + ArrayPool), binary format `Address|MethodTable|Size`
+ - Cache: `HeapAnalysisCache` (type/meta caches only)
+ - Graph: `ReferenceGraph`, optional `ReverseReferenceIndex`, `RootPathFinder` (BFS, depth 20)
+ - Analysis: set of analyzers (leaks, threads, GCHandles, modules, LOH, etc.)
+ - Query: `QueryEngine` for index-based queries
+ - Insight: `InsightEngine` ranks cross-analyzer findings
+
+ ---
+
+ # 🔥 Performance Rules (STRICT)
+
+ ## Heap Traversal
+ ALWAYS use:
+ ```csharp
+ foreach (var obj in heap.EnumerateObjects())
+ ```
+ NEVER:
+ ```csharp
+ heap.EnumerateObjects().ToList()
+ ```
 
-# 🔥 Performance Rules (STRICT)
-
-## Heap Traversal
+ ## Object Representation — keep minimal
+ ```csharp
+ internal readonly struct HeapEntry
+ {
+     public readonly ulong Address;
+     public readonly ulong MethodTable;
+     public readonly ulong Size;   // 8 bytes — object size can exceed int.MaxValue on large heaps
 
-✅ ALWAYS use:
-```csharp
-foreach (var obj in heap.EnumerateObjects())
-```
+     public HeapEntry(ulong address, ulong methodTable, ulong size)
+     {
+         Address = address;
+         MethodTable = methodTable;
+         Size = size;
+     }
+ }
+ ```
 
-❌ NEVER:
-```csharp
-heap.EnumerateObjects().ToList()
-```
+ - Avoid string allocations and per-object heap allocations in hot paths.
+ - Maintain `string->int` type id map; intern/dedupe type names.
+ - Use `ArrayPool` for buffers; reuse memory; avoid JSON for large datasets.
 
----
+ ---
 
-## Object Representation
+ # 🔗 Graph Rules
+ - Forward refs: compute lazily from `ClrObject` fields
+ - Reverse refs: never build full reverse graph in memory; build partial indexes scoped to types or suspects
+ - Root paths: BFS with depth limit (20), visited `HashSet<ulong>`, stop early when found
 
-Use minimal struct:
+ ---
 
-```csharp
-internal readonly struct HeapEntry
-{
-    public readonly ulong Address;
-    public readonly ulong MethodTable;
-    public readonly ulong Size;   // 8 bytes — object size can exceed int.MaxValue on large heaps
+ # 🧪 Leak Detection (short)
+ 1) Candidate selection: top types by size, long-lived (Gen2/LOH)
+ 2) Selective analysis: build ref paths, check GC roots, detect static/event/thread retention
+ 3) Score and rank suspects
 
-    public HeapEntry(ulong address, ulong methodTable, ulong size)
-    {
-        Address = address;
-        MethodTable = methodTable;
-        Size = size;
-    }
-}
-```
+ ---
 
-Avoid:
-- Strings in hot paths
-- Object allocations per entry
-- `record struct` — synthesized equality/ToString machinery is never needed on hot-path structs
+ # 🧵 Thread Analysis
+ - Enumerate threads; group stacks; detect blocking and deadlocks
 
-## Type Handling
-- Maintain mapping: `string → int` (TypeId)
-- Intern or deduplicate all type names
+ ---
 
-## Memory Management
-- Use `ArrayPool` for temporary buffers
-- Avoid large allocations
-- Reuse buffers wherever possible
+ # ⚙️ ClrMD Usage (must)
+ - Check `obj.IsValid` and `obj.Type != null`
+ - Read fields carefully: `field.ReadObject(obj.Address)`
+ - Cache `ClrType` metadata and field layouts to avoid repeated expensive calls
 
-## Disk Usage
-- Prefer append-only binary format
-- Use memory-mapped files for reads
-- Avoid JSON for large datasets
+ ---
 
----
+ # 🧠 Caching
+ - Allowed: type metadata, `MethodTable -> Type` maps
+ - Avoid: full object or full-graph caching
 
-# 🔗 Graph Traversal Rules
+ ---
 
-## Forward References
-- Compute lazily via `ClrObject` field inspection
+ # 🧩 Extensibility
+ - `IAnalyzer` contract must be implemented by analyzers.
 
-## Reverse References
-- NEVER build full reverse graph in memory
-- Build partial index ONLY when needed
-- Scope to:
-  - Specific types
-  - Suspicious objects
+ ```csharp
+ public interface IAnalyzer
+ {
+     string Name { get; }
+     string Category { get; }
+     IReadOnlyCollection<string> Tags { get; }
+     int Order { get; }
+     bool IsThreadSafe { get; }
+     ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken);
+ }
+ ```
 
-## Root Path Finding
-Use BFS with:
-- Depth limit (default: 20)
-- Visited set (`HashSet<ulong>`)
-- Stop traversal early when target found
+ - Analyzer must return domain result and call `result.Stamp(this)`.
 
----
+ ## Adding a new analyzer (summary)
+ 1. Add `XxxDomainResult` in models
+ 2. Implement `XxxAnalyzer.cs` using streaming heap loops
+ 3. Register in `DefaultAnalyzerFactory`
+ 4. Add finding generator, trend comparer, section builder, tests, docs
 
-# 🧪 Leak Detection Strategy
+ ---
 
-## Step 1: Identify Candidates
-- Top N types by total size
-- Long-lived objects (Gen2, LOH)
+ # 📊 Output
+ - Support CLI, JSON, structured reports
+ - Summarize and rank findings; avoid raw dumps
 
-## Step 2: Analyze Selectively
-- Build reference paths
-- Check GC roots
-- Detect patterns:
-  - Static retention
-  - Event handler leaks
-  - Thread retention
+ ---
 
-## Step 3: Score
-- Assign suspicion score per type
+ # 🧹 Code Style
+ - Avoid LINQ in hot paths; prefer explicit loops
+ - Use `Span<T>`/`Memory<T>` and `readonly struct` where applicable
 
----
+ ---
 
-# 🧵 Thread Analysis
-- Threads are safe to fully enumerate
-- Group stack traces by similarity
-- Detect:
-  - Blocking patterns
-  - Deadlocks (optional advanced)
+ # 🧪 Testing
+ - Support small and very large dumps
+ - Include perf benchmarks and memory validation
 
----
+ ---
 
-# ⚙️ ClrMD Usage Rules (IMPORTANT)
+ # 🚀 Advanced (optional)
+ - Dump diffing, async analysis, event/delegate graphs, LOH fragmentation
 
-Always check:
-- `obj.IsValid`
-- `obj.Type != null`
+ ---
 
-Access fields carefully:
-```csharp
-field.ReadObject(obj.Address)
-```
+ # ⚠️ Anti-patterns
+ - Don't load entire heap; don't build full adjacency lists; avoid heavy reflection in hot paths
 
-Avoid repeated expensive calls. Cache:
-- `ClrType` metadata
-- Field layouts
+ ---
 
----
+ # 🏁 Definition of Done
+ - Works on 10GB+ dumps without crashing
+ - Bounded memory usage, reasonable runtime, no unnecessary allocations
 
-# 🧠 Caching Strategy
+ ---
 
-## Allowed
-- Type metadata cache
-- `MethodTable` → Type info
+ ## Codebase Search (SocratiCode) — quick rules
+ 1) Start with `codebase_search` for discovery and symbol lookups
+ 2) Check index health with `codebase_status`; re-index if stale
+ 3) Use `codebase_graph_query` / `codebase_impact` before edits to check blast radius
+ 4) Use grep only when index unavailable or exact string known (include fallback preamble)
+ 5) Prefer search results to narrow files before opening
 
-## Avoid
-- Full object caching
-- Large graph caching
+ Short policy: always preface search actions with which tool and why; prefer semantic search.
 
----
+ ---
 
-# 🧩 Extensibility
-
-All analyzers must implement `IAnalyzer`:
-
-```csharp
-public interface IAnalyzer
-{
-    string Name { get; }
-    string Category { get; }     // default: inferred from Name
-    IReadOnlyCollection<string> Tags { get; }  // default: []
-    int Order { get; }           // default: 0
-    bool IsThreadSafe { get; }   // default: false
-    ValueTask<AnalyzerDomainResult> AnalyzeAsync(
-        AnalysisContext context,
-        CancellationToken cancellationToken);
-}
-```
-
-Return type `AnalyzerDomainResult` is an abstract record.
-Each analyzer defines a strongly-typed subtype (e.g. `MemoryDomainResult`) and
-calls `result.Stamp(this)` at the end of `AnalyzeAsync` to attach name/category.
-
-## Adding a New Analyzer — Required Steps (in order)
-
-> Full guide with rules and examples: `docs/ReportStructure/AnalyzerCoverageAnalysis.md` Part 7.
-
-1. **`XxxDomainResult`** in `AnalyzerDomainModels.cs` — plain CLR types only; no ClrMD objects; cap/limit fields explicit
-2. **`XxxAnalyzer.cs`** implements `IAnalyzer`; stream heap via `foreach`; call `result.Stamp(this)`
-3. **`DefaultAnalyzerFactory`** — register `new XxxAnalyzer()`; `Name` string must be identical to `IAnalyzer.Name`
-4. **`XxxFindingGenerator.cs`** — implements `IFindingGenerator`; `AnalyzerName` must match exactly; register in `ServiceRegistration.cs`
-5. **`XxxTrendComparer.cs`** — implements `IAnalyzerTrendComparer`; `AnalyzerName` must match; register in `ServiceRegistration.cs`
-6. **`XxxSectionBuilder.cs`** — implements `IAnalyzerSectionBuilder`; `AnalyzerName` must match; add to `DefaultSectionBuilderFactory.CreateBuilders()`
-7. **`ReportSerializer.BuildConfidenceNotes()`** — add cap/limit signal case if `XxxDomainResult` exposes one
-8. **`InsightEngine`** — add cross-cutting input handling only if new cross-analyzer detections are needed
-9. **Tests** — add `CanHandle` + block structure tests to `SectionBuilderTests.cs`; run `UPDATE_GOLDENS=1` to re-baseline
-10. **Docs** — mark covered §sections ✅ in `AnalyzerCoverageAnalysis.md`; create `docs/ReportStructure/Analyzers/XxxAnalyzer.md`
-
-**`IAnalyzer`, `AnalysisContext`, `ReportSerializer` core, `HtmlReportRenderer`, and all formatters require no changes.**
-
----
-
-# 📊 Output Guidelines
-
-Support:
-- Console output (CLI)
-- JSON export
-- Structured reports
-
-- Avoid dumping raw data
-- Always summarize + rank results
-
----
-
-# 🧹 Code Style Guidelines
-- Avoid LINQ in performance-critical paths
-- Prefer explicit loops
-- Use `Span<T>`/`Memory<T>` where applicable
-- Use `readonly struct` when possible
-- Minimize allocations
-
----
-
-# 🧪 Testing Strategy
-
-Must support:
-- Small dumps (fast iteration)
-- Large dumps (stress testing)
-
-Include:
-- Performance benchmarks
-- Memory usage validation
-
----
-
-# 🚀 Advanced Features (Optional but Encouraged)
-- Dump diffing (compare two dumps)
-- Async/Task analysis
-- Event/delegate graph
-- LOH fragmentation analysis
-
----
-
-# ⚠️ Anti-Patterns (Copilot MUST Avoid)
-- Loading entire heap into memory
-- Creating `List<ClrObject>`
-- Recursive graph traversal without limits
-- Using reflection-heavy logic repeatedly
-- Using string keys in hot paths
-- Building full adjacency lists for all objects
-
----
-
-# 🏁 Definition of Done
-
-A feature is complete only if:
-
-- It works on 10GB+ dumps without crashing
-- Memory usage stays bounded
-- Execution time is reasonable
-- No unnecessary allocations are introduced
-
----
-
-# 💡 Guiding Principle
-
-This is **NOT** a demo tool.
-
-This is a **high-performance diagnostic system**.
-
-Every line of code must justify its memory and CPU cost.
-
----
+ Terse style enforced: drop filler, use fragments, keep code and paths unchanged.

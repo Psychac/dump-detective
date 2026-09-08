@@ -51,9 +51,23 @@ internal sealed class InsightEngine
     private const double EphemeralFillCriticalPct = 90.0;
     private const int DynamicModuleWarning = 20;
     private const ulong JitHeapBloatThreshold = 500UL * 1024 * 1024;      // 500 MB
+    private const int JitModuleHotspotMinFrameHits = 50;
     private const int SuspendedMethodFireForgetThreshold = 100;
     private const ulong LohArrayPressureThreshold = 256UL * 1024 * 1024;  // 256 MB
     private const ulong GCRootLargeRetentionThreshold = 50UL * 1024 * 1024; // 50 MB
+    private const double ClusterHangOverlapWarningRatio = 0.60;
+    private const ulong MemoryGenerationCorrelationMinBytes = 10UL * 1024 * 1024;    // 10 MB
+    private const ulong MemoryGenerationCorrelationCriticalBytes = 100UL * 1024 * 1024; // 100 MB
+    private const double MemoryGenerationCorrelationGen2FractionPct = 85.0;
+    private const int MemoryGenerationCorrelationTopTypesScanned = 30;
+    private const ulong StringMemoryCorrelationMinWastedBytes = 5UL * 1024 * 1024; // 5 MB
+    private const int StringMemoryCorrelationMaxRank = 10;
+    private const ulong PinnedStringLeakMinBytes = 1UL * 1024 * 1024;   // 1 MB
+    private const ulong PinnedStringLeakCriticalBytes = 20UL * 1024 * 1024; // 20 MB
+    private const int CrashModuleHotspotMinActiveExceptions = 3;
+    private const double CrashModuleHotspotDominantSharePct = 50.0;
+    private const double ReferenceChainDominatorWarningPct = 10.0;
+    private const double ReferenceChainDominatorCriticalPct = 25.0;
 
     private const string Source = "InsightEngine";
 
@@ -74,8 +88,9 @@ internal sealed class InsightEngine
         HeapTopologyDomainResult? segments = FindResult<HeapTopologyDomainResult>(runs);
         ThreadDomainResult? threads = FindResult<ThreadDomainResult>(runs);
         HangDomainResult? hang = FindResult<HangDomainResult>(runs);
+        ThreadStackClusterDomainResult? clusters = FindResult<ThreadStackClusterDomainResult>(runs);
         AsyncTaskDomainResult? asyncTasks = FindResult<AsyncTaskDomainResult>(runs);
-        RetentionDomainResult? leak = FindResult<RetentionDomainResult>(runs);
+        DominatorDomainResult? leak = FindResult<DominatorDomainResult>(runs);
         GCHandleDomainResult? handles = FindResult<GCHandleDomainResult>(runs);
         CrashDomainResult? crash = FindResult<CrashDomainResult>(runs);
         CollectionDomainResult? collections = FindResult<CollectionDomainResult>(runs);
@@ -89,15 +104,19 @@ internal sealed class InsightEngine
         AsyncStateMachineDomainResult? stateMachines = FindResult<AsyncStateMachineDomainResult>(runs);
         WeakReferenceDomainResult? weakRef = FindResult<WeakReferenceDomainResult>(runs);
         SegmentReservationDomainResult? segReservation = FindResult<SegmentReservationDomainResult>(runs);
-        AppDomainDomainResult? appDomains = FindResult<AppDomainDomainResult>(runs);
+        ModuleDomainResult? appDomains = FindResult<ModuleDomainResult>(runs);
         JitDomainResult? jit = FindResult<JitDomainResult>(runs);
         BoxingDomainResult? boxing = FindResult<BoxingDomainResult>(runs);
         EventLeakDomainResult? eventLeaks = FindResult<EventLeakDomainResult>(runs);
 
         // Part 6 — Infrastructure domain results
         DbConnectionDomainResult? dbConn = FindResult<DbConnectionDomainResult>(runs);
+        SqlTransactionDomainResult? sqlTxn = FindResult<SqlTransactionDomainResult>(runs);
         WcfChannelDomainResult? wcf = FindResult<WcfChannelDomainResult>(runs);
         HttpObjectDomainResult? http = FindResult<HttpObjectDomainResult>(runs);
+        StaticRootDomainResult? staticRoot = FindResult<StaticRootDomainResult>(runs);
+        ReferenceChainDomainResult? referenceChain = FindResult<ReferenceChainDomainResult>(runs);
+        LockGraphDomainResult? lockGraph = FindResult<LockGraphDomainResult>(runs);
 
         var ruleContext = new InsightRuleContext(
             Runs: runs,
@@ -107,6 +126,7 @@ internal sealed class InsightEngine
             Segments: segments,
             Threads: threads,
             Hang: hang,
+            Clusters: clusters,
             AsyncTasks: asyncTasks,
             Leak: leak,
             Handles: handles,
@@ -125,8 +145,12 @@ internal sealed class InsightEngine
             Boxing: boxing,
             EventLeaks: eventLeaks,
             DbConn: dbConn,
+            SqlTxn: sqlTxn,
             Wcf: wcf,
-            Http: http);
+            Http: http,
+            StaticRoot: staticRoot,
+            ReferenceChain: referenceChain,
+            LockGraph: lockGraph);
 
         for (int i = 0; i < RuleGroups.Count; i++)
             RuleGroups[i].Apply(findings, in ruleContext);
@@ -149,8 +173,9 @@ internal sealed class InsightEngine
         HeapTopologyDomainResult? Segments,
         ThreadDomainResult? Threads,
         HangDomainResult? Hang,
+        ThreadStackClusterDomainResult? Clusters,
         AsyncTaskDomainResult? AsyncTasks,
-        RetentionDomainResult? Leak,
+        DominatorDomainResult? Leak,
         GCHandleDomainResult? Handles,
         CrashDomainResult? Crash,
         CollectionDomainResult? Collections,
@@ -162,13 +187,17 @@ internal sealed class InsightEngine
         AsyncStateMachineDomainResult? StateMachines,
         WeakReferenceDomainResult? WeakRef,
         SegmentReservationDomainResult? SegReservation,
-        AppDomainDomainResult? AppDomains,
+        ModuleDomainResult? AppDomains,
         JitDomainResult? Jit,
         BoxingDomainResult? Boxing,
         EventLeakDomainResult? EventLeaks,
         DbConnectionDomainResult? DbConn,
+        SqlTransactionDomainResult? SqlTxn,
         WcfChannelDomainResult? Wcf,
-        HttpObjectDomainResult? Http);
+        HttpObjectDomainResult? Http,
+        StaticRootDomainResult? StaticRoot,
+        ReferenceChainDomainResult? ReferenceChain,
+        LockGraphDomainResult? LockGraph);
 
     private sealed class BaselineRuleGroup : IInsightRuleGroup
     {
@@ -202,6 +231,7 @@ internal sealed class InsightEngine
             DetectDynamicAssemblyAccumulation(findings, context.AppDomains);
             DetectJitHeapBloat(findings, context.Jit, context.Threads);
             DetectBoxingGCCorrelation(findings, context.Boxing, context.GcGen);
+            DetectJitModuleHotspot(findings, context.Jit, context.AppDomains);
         }
     }
 
@@ -212,13 +242,21 @@ internal sealed class InsightEngine
             DetectFatalExceptionOnHeap(findings, context.Crash);
             DetectEventLeakPattern(findings, context.EventLeaks, context.GcGen, context.Finalizable);
             DetectDataTableLifecyclePattern(findings, context.Finalizable, context.Memory);
+            DetectStaticRootFinalizableCorrelation(findings, context.StaticRoot, context.Finalizable);
             DetectKnownLeakPatterns(findings, context.Memory);
-            DetectKnownFinalizerQueuePatterns(findings, context.Finalizable);
+            DetectMemoryTypeGenerationCorrelation(findings, context.Memory, context.GcGen);
+            DetectStringMemoryConcentration(findings, context.Memory, context.Strings);
+            DetectPinnedStringLeak(findings, context.Handles);
             DetectRecurringTimeoutPattern(findings, context.Crash);
 
             DetectDbConnectionLeak(findings, context.DbConn, context.Crash);
+            DetectLongHeldTransactionOnOpenConnection(findings, context.SqlTxn, context.DbConn);
+            DetectCrashModuleHotspot(findings, context.Crash, context.AppDomains);
             DetectWcfChannelFault(findings, context.Wcf, context.Crash);
+            DetectWcfOpeningTimeoutCorrelation(findings, context.Wcf, context.Crash);
             DetectHttpClientAccumulation(findings, context.Http);
+            DetectClusterHangCorrelation(findings, context.Clusters, context.Hang, context.Threads, context.LockGraph);
+            DetectReferenceChainDominatorCorrelation(findings, context.ReferenceChain, context.Leak);
         }
     }
 
@@ -373,7 +411,7 @@ internal sealed class InsightEngine
     private static void DetectFinalizerQueueBacklog(
         List<InsightFinding> findings,
         ThreadDomainResult? threads,
-        RetentionDomainResult? leak,
+        DominatorDomainResult? leak,
         FinalizableObjectDomainResult? finalizable)
     {
         int queueCount = finalizable?.FinalizerQueueCount ?? 0;
@@ -475,7 +513,7 @@ internal sealed class InsightEngine
 
     private static void DetectLeakSuspicion(
         List<InsightFinding> findings,
-        RetentionDomainResult? leak,
+        DominatorDomainResult? leak,
         StringDomainResult? strings)
     {
         if (leak is not null && leak.HighlyReferencedObjectCount > 0)
@@ -755,8 +793,9 @@ internal sealed class InsightEngine
             Severity: FindingSeverity.Info,
             Title: "High string duplication ratio detected",
             Evidence: $"{strings.DuplicationRatio:P0} of string instances are duplicates " +
-                      $"({strings.TotalStrings - strings.UniqueStrings:N0} duplicate out of {strings.TotalStrings:N0} total). " +
-                      $"Wasted: {FormatBytes(strings.DuplicateWastedBytes)}.",
+                      $"({strings.TotalStrings - strings.SampledUniquePatterns:N0} duplicate out of {strings.TotalStrings:N0} total). " +
+                      $"Wasted: {FormatBytes(strings.DuplicateWastedBytes)}. " +
+                      $"(Based on {strings.SamplingCoverage:P1} sampling coverage; interpret with caution at low coverage.)",
             Recommendation: "Consider string.Intern for frequently duplicated strings, " +
                             "or use a string→int dictionary for repeated tokens.",
             Tags: ["strings", "duplication", "memory"],
@@ -870,7 +909,7 @@ internal sealed class InsightEngine
             : FindingSeverity.Info;
 
         string staleNote = weakRef.StaleWrapperCount > 0
-            ? $" {weakRef.StaleWrapperCount:N0} stale WeakReference<T> wrapper object(s) detected."
+            ? $" {weakRef.StaleWrapperCount:N0}{(weakRef.StaleWrapperCountIsExact ? "" : " (estimated)")} stale WeakReference<T> wrapper object(s) detected."
             : string.Empty;
 
         findings.Add(new InsightFinding(
@@ -954,7 +993,7 @@ internal sealed class InsightEngine
     /// </summary>
     private static void DetectDynamicAssemblyAccumulation(
         List<InsightFinding> findings,
-        AppDomainDomainResult? appDomains)
+        ModuleDomainResult? appDomains)
     {
         if (appDomains is null || appDomains.TotalDynamicModules < DynamicModuleWarning)
             return;
@@ -1061,6 +1100,188 @@ internal sealed class InsightEngine
             MetricUnit: "objects"));
     }
 
+    /// <summary>
+    /// Correlates JitAnalyzer's per-module active-frame heatmap with ModuleAnalyzer's own
+    /// per-module size/version-conflict data. Neither analyzer can produce this alone: JitAnalyzer
+    /// has no module size/conflict data, and ModuleAnalyzer never walks thread stacks.
+    /// </summary>
+    private static void DetectJitModuleHotspot(
+        List<InsightFinding> findings,
+        JitDomainResult? jit,
+        ModuleDomainResult? modules)
+    {
+        if (jit is null || modules is null || jit.TopActiveModulesByFrameHits.Count == 0)
+            return;
+
+        NameCountEntry topModule = jit.TopActiveModulesByFrameHits[0];
+        if (topModule.Count < JitModuleHotspotMinFrameHits)
+            return;
+
+        LoadedModuleSnapshot? topModuleSizeMatch = FindModuleByName(modules.TopModulesBySize, topModule.Name);
+        bool topModuleInConflict = ContainsModuleName(modules.ConflictingAssemblyNames, topModule.Name);
+
+        if (topModuleSizeMatch is null && !topModuleInConflict)
+            return; // no cross-analyzer signal beyond what JitSectionBuilder's own heatmap already shows
+
+        int rowCount = Math.Min(jit.TopActiveModulesByFrameHits.Count, 5);
+        var rows = new List<IReadOnlyList<object?>>(rowCount);
+        for (int i = 0; i < rowCount; i++)
+        {
+            NameCountEntry entry = jit.TopActiveModulesByFrameHits[i];
+            LoadedModuleSnapshot? sizeMatch = FindModuleByName(modules.TopModulesBySize, entry.Name);
+            bool inConflict = ContainsModuleName(modules.ConflictingAssemblyNames, entry.Name);
+
+            rows.Add(new object?[]
+            {
+                entry.Name,
+                entry.Count,
+                sizeMatch is not null ? FormatBytes(sizeMatch.Size) : "n/a",
+                inConflict ? "Yes" : "No",
+            });
+        }
+
+        var evidenceTable = new FindingEvidenceTable(
+            "Per-module JIT stack heatmap (top active modules)",
+            ["Module", "Active JIT Frames", "Module Size", "Version Conflict"],
+            rows);
+
+        string sizeNote = topModuleSizeMatch is not null ? $" and is {FormatBytes(topModuleSizeMatch.Size)} on disk" : string.Empty;
+        string conflictNote = topModuleInConflict ? " and is involved in an assembly version conflict" : string.Empty;
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Performance",
+            Severity: FindingSeverity.Info,
+            Title: "Module with heavy active JIT stack presence also flagged by module analysis",
+            Evidence: $"Module '{topModule.Name}' accounts for {topModule.Count:N0} active JIT stack " +
+                      $"frames{sizeNote}{conflictNote}.",
+            Recommendation: "Correlate this module's size/version-conflict status with the JIT stack " +
+                            "heatmap to prioritize ReadyToRun/NativeAOT precompilation or dependency " +
+                            "deduplication for this assembly.",
+            Tags: ["jit", "modules", "cross-analyzer"],
+            MetricValue: topModule.Count,
+            MetricUnit: "frames",
+            EvidenceTables: [evidenceTable]));
+    }
+
+    /// <summary>
+    /// Correlates CrashAnalyzer's per-candidate top-user-frame module attribution with
+    /// ModuleAnalyzer's own per-module size/version-conflict data. Neither analyzer can produce
+    /// this alone: CrashAnalyzer resolves the owning module directly via ClrStackFrame but has no
+    /// module size/conflict data, and ModuleAnalyzer never walks exception thread stacks.
+    /// </summary>
+    private static void DetectCrashModuleHotspot(
+        List<InsightFinding> findings,
+        CrashDomainResult? crash,
+        ModuleDomainResult? modules)
+    {
+        if (crash is null || modules is null || crash.TopCrashThreadCandidates is not { Count: > 0 })
+            return;
+
+        var moduleActiveCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        int attributedActiveExceptions = 0;
+        for (int i = 0; i < crash.TopCrashThreadCandidates.Count; i++)
+        {
+            CrashThreadCandidateSnapshot candidate = crash.TopCrashThreadCandidates[i];
+            if (string.IsNullOrWhiteSpace(candidate.TopUserFrameModule))
+                continue;
+            moduleActiveCounts.TryGetValue(candidate.TopUserFrameModule, out int count);
+            moduleActiveCounts[candidate.TopUserFrameModule] = count + candidate.ActiveExceptionCount;
+            attributedActiveExceptions += candidate.ActiveExceptionCount;
+        }
+
+        if (attributedActiveExceptions < CrashModuleHotspotMinActiveExceptions)
+            return;
+
+        string topModuleName = string.Empty;
+        int topModuleCount = -1;
+        foreach (KeyValuePair<string, int> kvp in moduleActiveCounts)
+        {
+            if (kvp.Value > topModuleCount)
+            {
+                topModuleCount = kvp.Value;
+                topModuleName = kvp.Key;
+            }
+        }
+
+        double topModuleSharePct = 100.0 * topModuleCount / attributedActiveExceptions;
+        if (topModuleSharePct < CrashModuleHotspotDominantSharePct)
+            return;
+
+        LoadedModuleSnapshot? sizeMatch = FindModuleByName(modules.TopModulesBySize, topModuleName);
+        bool inConflict = ContainsModuleName(modules.ConflictingAssemblyNames, topModuleName);
+
+        if (sizeMatch is null && !inConflict)
+            return; // no cross-analyzer signal beyond what the Exception Analysis section's own attribution table already shows
+
+        var moduleEntries = new List<KeyValuePair<string, int>>(moduleActiveCounts);
+        moduleEntries.Sort(static (a, b) => b.Value.CompareTo(a.Value));
+
+        int rowCount = Math.Min(moduleEntries.Count, 5);
+        var rows = new List<IReadOnlyList<object?>>(rowCount);
+        for (int i = 0; i < rowCount; i++)
+        {
+            KeyValuePair<string, int> entry = moduleEntries[i];
+            LoadedModuleSnapshot? rowSizeMatch = FindModuleByName(modules.TopModulesBySize, entry.Key);
+            bool rowInConflict = ContainsModuleName(modules.ConflictingAssemblyNames, entry.Key);
+
+            rows.Add(new object?[]
+            {
+                entry.Key,
+                entry.Value,
+                rowSizeMatch is not null ? FormatBytes(rowSizeMatch.Size) : "n/a",
+                rowInConflict ? "Yes" : "No",
+            });
+        }
+
+        var evidenceTable = new FindingEvidenceTable(
+            "Active exception attribution by module (crash thread candidates)",
+            ["Module", "Active Exceptions", "Module Size", "Version Conflict"],
+            rows);
+
+        string sizeNote = sizeMatch is not null ? $" and is {FormatBytes(sizeMatch.Size)} on disk" : string.Empty;
+        string conflictNote = inConflict
+            ? " and has a conflicting assembly version loaded — a version mismatch may be the underlying cause"
+            : string.Empty;
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Crash",
+            Severity: inConflict ? FindingSeverity.Warning : FindingSeverity.Info,
+            Title: "Active exceptions concentrated in a module flagged by module analysis",
+            Evidence: $"Module '{topModuleName}' owns {topModuleSharePct:F1}% of attributed active exceptions " +
+                      $"({topModuleCount:N0} of {attributedActiveExceptions:N0}){sizeNote}{conflictNote}.",
+            Recommendation: inConflict
+                ? $"Check the module inventory for duplicate/conflicting assembly versions of '{topModuleName}' — " +
+                  "a version mismatch loading the wrong dependency is a common cause of concentrated runtime faults."
+                : $"Correlate '{topModuleName}'s size and load context with the exception attribution table to " +
+                  "prioritize investigation of this assembly's fault handling.",
+            Tags: ["crash", "modules", "cross-analyzer"],
+            MetricValue: topModuleSharePct,
+            MetricUnit: "% of active exceptions",
+            EvidenceTables: [evidenceTable]));
+    }
+
+    private static LoadedModuleSnapshot? FindModuleByName(IReadOnlyList<LoadedModuleSnapshot> modules, string name)
+    {
+        for (int i = 0; i < modules.Count; i++)
+        {
+            if (string.Equals(modules[i].Name, name, StringComparison.OrdinalIgnoreCase))
+                return modules[i];
+        }
+        return null;
+    }
+
+    private static bool ContainsModuleName(IReadOnlyList<string> names, string name)
+    {
+        for (int i = 0; i < names.Count; i++)
+        {
+            if (string.Equals(names[i], name, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
     // ── Utilities ─────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -1155,8 +1376,8 @@ internal sealed class InsightEngine
         if (finalizable is null && memory is null)
             return;
 
-        int dataColumnFinalizer = 0;
-        int dataTableFinalizer = 0;
+        long dataColumnFinalizer = 0;
+        long dataTableFinalizer = 0;
 
         if (finalizable is not null)
         {
@@ -1217,6 +1438,72 @@ internal sealed class InsightEngine
                             "Consider replacing DataTable/DataSet with strongly typed models to eliminate finalizer overhead.",
             Tags: ["datatable", "datarow", "finalizer", "memory-leak", "dispose"],
             MetricValue: dataColumnFinalizer + dataRowHeap,
+            MetricUnit: "objects"));
+    }
+
+    /// <summary>
+    /// P3-3 (docs/analysis/phase1/static-root-leak-detector-audit.md): cross-references each
+    /// static root's top retained types against <see cref="FinalizableObjectDomainResult.TopQueueTypesByCount"/>
+    /// — types with objects *currently* enqueued for finalization, not merely finalizable types —
+    /// by type name. No new heap walk or shared index is needed; both lists are already computed
+    /// by their respective analyzers.
+    /// </summary>
+    private static void DetectStaticRootFinalizableCorrelation(
+        List<InsightFinding> findings,
+        StaticRootDomainResult? staticRoot,
+        FinalizableObjectDomainResult? finalizable)
+    {
+        if (staticRoot is null || finalizable is null)
+            return;
+
+        if (staticRoot.TopRootsByRetainedBytes is null || finalizable.TopQueueTypesByCount.Count == 0)
+            return;
+
+        var queueCountByType = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (int i = 0; i < finalizable.TopQueueTypesByCount.Count; i++)
+        {
+            QueueTypeStatistic stat = finalizable.TopQueueTypesByCount[i];
+            queueCountByType[stat.TypeName] = stat.QueueCount;
+        }
+
+        string? bestRootDescription = null;
+        string? bestTypeName = null;
+        int bestQueueCount = 0;
+        int bestRetainedCount = 0;
+
+        foreach (StaticRootSnapshot root in staticRoot.TopRootsByRetainedBytes)
+        {
+            if (root.TopRetainedTypes is null)
+                continue;
+
+            foreach (RetainedTypeInfo typeInfo in root.TopRetainedTypes)
+            {
+                if (!queueCountByType.TryGetValue(typeInfo.TypeName, out int queueCount) || queueCount <= bestQueueCount)
+                    continue;
+
+                bestQueueCount = queueCount;
+                bestRootDescription = root.RootDescription;
+                bestTypeName = typeInfo.TypeName;
+                bestRetainedCount = typeInfo.Count;
+            }
+        }
+
+        if (bestRootDescription is null)
+            return;
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Memory",
+            Severity: FindingSeverity.Info,
+            Title: "Static root retains a type with objects queued for finalization",
+            Evidence: $"Static root '{bestRootDescription}' retains {bestRetainedCount:N0} instance(s) of " +
+                      $"{bestTypeName}, which also has {bestQueueCount:N0} instance(s) currently queued for " +
+                      "finalization — this root may be delaying their collection.",
+            Recommendation: "Confirm this static root's ownership of the type is intentional (e.g. a cache), " +
+                            "and that instances are removed or disposed once no longer needed so finalization " +
+                            "isn't delayed by long-lived static retention.",
+            Tags: ["static-root", "finalizer", "cross-cutting"],
+            MetricValue: bestQueueCount,
             MetricUnit: "objects"));
     }
 
@@ -1300,106 +1587,221 @@ internal sealed class InsightEngine
     }
 
     /// <summary>
-    /// Identifies well-known problematic types in the finalizer queue that indicate
-    /// specific resource management anti-patterns (abandoned threads, undisposed timers,
-    /// uncached dynamic code generation, old-style lock abandonment).
+    /// Cross-references the memory analyzer's top types by size with the GC generation
+    /// analyzer's per-type generation distribution. Neither analyzer alone shows this: Memory
+    /// ranks types by total bytes but has no generation breakdown, while GCGeneration has the
+    /// breakdown but doesn't rank by total size. A large type that is almost entirely stuck in
+    /// Gen2 is a strong long-lived-leak candidate rather than ordinary working-set memory.
+    /// The Gen2 fraction is computed from exact Gen2 bytes when the heap index provides them
+    /// (P2-4), falling back to instance-count fraction for older indices — a byte-based fraction
+    /// catches types whose surviving instances are disproportionately large.
     /// </summary>
-    private static void DetectKnownFinalizerQueuePatterns(
+    private static void DetectMemoryTypeGenerationCorrelation(
         List<InsightFinding> findings,
-        FinalizableObjectDomainResult? finalizable)
+        MemoryDomainResult? memory,
+        GCGenerationDomainResult? gcGen)
     {
-        if (finalizable is null || finalizable.TopFinalizableTypesByGen2Count.Count == 0)
+        if (memory is null || gcGen is null || gcGen.PerTypeGenerationProfiles is not { Count: > 0 } profiles)
             return;
 
-        int dynamicResolverCount = 0;
-        int threadCount = 0;
-        int timerHolderCount = 0;
-        int readerWriterLockCount = 0;
+        var profileByType = new Dictionary<string, TypeGenerationProfile>(profiles.Count, StringComparer.Ordinal);
+        for (int i = 0; i < profiles.Count; i++)
+            profileByType[profiles[i].TypeName] = profiles[i];
 
-        for (int i = 0; i < finalizable.TopFinalizableTypesByGen2Count.Count; i++)
+        int scanCount = Math.Min(memory.TopTypes.Count, MemoryGenerationCorrelationTopTypesScanned);
+        var matches = new List<(TypeSnapshot Snapshot, TypeGenerationProfile Profile, double Gen2FractionPct)>();
+
+        for (int i = 0; i < scanCount; i++)
         {
-            TypeGenerationProfile p = finalizable.TopFinalizableTypesByGen2Count[i];
-            int gen2 = p.Gen2Count;
-            if (gen2 == 0) continue;
+            TypeSnapshot snapshot = memory.TopTypes[i];
+            if (snapshot.TotalBytes < MemoryGenerationCorrelationMinBytes)
+                continue;
 
-            if (p.TypeName.Contains("DynamicResolver", StringComparison.OrdinalIgnoreCase))
-                dynamicResolverCount += gen2;
-            else if (p.TypeName is "System.Threading.Thread")
-                threadCount += gen2;
-            else if (p.TypeName.Contains("TimerHolder", StringComparison.OrdinalIgnoreCase) ||
-                     p.TypeName.Contains("TimerQueueTimer", StringComparison.OrdinalIgnoreCase))
-                timerHolderCount += gen2;
-            else if (p.TypeName is "System.Threading.ReaderWriterLock")
-                readerWriterLockCount += gen2;
+            if (!profileByType.TryGetValue(snapshot.TypeName, out TypeGenerationProfile profile))
+                continue;
+
+            long totalCounted = profile.Gen0Count + profile.Gen1Count + profile.Gen2Count + profile.LohCount;
+            if (totalCounted == 0)
+                continue;
+
+            // Prefer the exact byte-based Gen2 fraction (P2-4) over the count-based one: a type
+            // whose Gen2 instances happen to be much larger than its Gen0/Gen1 instances — e.g. a
+            // growing collection that keeps reallocating bigger backing arrays as it survives GCs —
+            // can look mild by count while actually retaining most of its bytes in Gen2.
+            double gen2FractionPct = profile.Gen2Bytes > 0 && profile.TotalBytes > 0
+                ? profile.Gen2Bytes * 100.0 / profile.TotalBytes
+                : profile.Gen2Count * 100.0 / totalCounted;
+            if (gen2FractionPct >= MemoryGenerationCorrelationGen2FractionPct)
+                matches.Add((snapshot, profile, gen2FractionPct));
         }
 
-        // DynamicResolver in finalizer queue — Expression.Compile / DynamicMethod without caching
-        if (dynamicResolverCount >= 50)
+        if (matches.Count == 0)
+            return;
+
+        matches.Sort(static (a, b) => b.Snapshot.TotalBytes.CompareTo(a.Snapshot.TotalBytes));
+
+        ulong worstBytes = matches[0].Snapshot.TotalBytes;
+        FindingSeverity sev = worstBytes >= MemoryGenerationCorrelationCriticalBytes
+            ? FindingSeverity.Warning
+            : FindingSeverity.Info;
+
+        int rowCount = Math.Min(matches.Count, 5);
+        var rows = new List<IReadOnlyList<object?>>(rowCount);
+        for (int i = 0; i < rowCount; i++)
         {
-            findings.Add(new InsightFinding(
-                Analyzer: Source,
-                Category: "Memory",
-                Severity: dynamicResolverCount >= 500 ? FindingSeverity.Warning : FindingSeverity.Info,
-                Title: "DynamicResolver accumulation — uncached dynamic code generation",
-                Evidence: $"{dynamicResolverCount:N0} DynamicResolver object(s) in Gen2 finalizer queue. " +
-                          "DynamicResolver is the CLR internal finalizable backing for DynamicMethod and compiled expressions.",
-                Recommendation: "Cache results of Expression.Compile<T>() and Delegate.CreateDelegate() in static fields. " +
-                                "Consider using a compile-once / reuse pattern for serializers, mappers, and validators.",
-                Tags: ["dynamic-method", "expression-compile", "finalizer", "memory-leak"],
-                MetricValue: dynamicResolverCount,
-                MetricUnit: "objects"));
+            (TypeSnapshot snapshot, TypeGenerationProfile profile, double gen2FractionPct) = matches[i];
+            rows.Add(new object?[]
+            {
+                snapshot.TypeName,
+                FormatBytes(snapshot.TotalBytes),
+                profile.Gen0Count,
+                profile.Gen1Count,
+                profile.Gen2Count,
+                profile.LohCount,
+                profile.Gen2Bytes > 0 ? FormatBytes(profile.Gen2Bytes) : "-",
+                $"{gen2FractionPct:F1}%",
+            });
         }
 
-        // Thread objects in finalizer queue — threads abandoned without Join()
-        if (threadCount >= 20)
+        var evidenceTable = new FindingEvidenceTable(
+            "Top memory-consuming types stuck in Gen2 (size × generation cross-reference)",
+            ["Type", "Total Bytes", "Gen0", "Gen1", "Gen2", "LOH", "Gen2 Bytes", "Gen2 %"],
+            rows);
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Memory",
+            Severity: sev,
+            Title: "Large heap types are almost entirely long-lived (Gen2)",
+            Evidence: $"{matches.Count:N0} of the top {scanCount} memory-consuming type(s) are ≥ " +
+                      $"{MemoryGenerationCorrelationGen2FractionPct:F0}% Gen2. Largest: '{matches[0].Snapshot.TypeName}' " +
+                      $"at {FormatBytes(matches[0].Snapshot.TotalBytes)} ({matches[0].Gen2FractionPct:F1}% Gen2).",
+            Recommendation: "High Gen2 residency for a top-size type usually means the instances are held by " +
+                            "long-lived roots (statics, caches, event subscriptions) rather than transient churn. " +
+                            "Cross-check the Dominator/GC Root analyzer findings for these type names to locate the " +
+                            "retaining reference chain.",
+            Tags: ["memory", "gc-generation", "cross-analyzer", "long-lived"],
+            MetricValue: (double)worstBytes,
+            MetricUnit: "bytes",
+            EvidenceTables: [evidenceTable]));
+    }
+
+    /// <summary>
+    /// Cross-references the memory analyzer's own top-types-by-size ranking with the string
+    /// analyzer's duplication data. The Memory section only ever sees <c>System.String</c> as one
+    /// more ranked type entry — it has no visibility into duplication. The String section computes
+    /// duplication in isolation and never learns whether that duplication is happening inside a
+    /// top-ranked heap consumer. Combining the two turns "String is duplicated somewhere" into
+    /// "String is your #N largest type, and here's why."
+    /// </summary>
+    private static void DetectStringMemoryConcentration(
+        List<InsightFinding> findings,
+        MemoryDomainResult? memory,
+        StringDomainResult? strings)
+    {
+        if (memory is null || strings is null || strings.TopDuplicates.Count == 0)
+            return;
+
+        if (strings.DuplicateWastedBytes < StringMemoryCorrelationMinWastedBytes)
+            return;
+
+        int stringRank = -1;
+        ulong stringTypeBytes = 0;
+        int scanCount = Math.Min(memory.TopTypes.Count, StringMemoryCorrelationMaxRank);
+        for (int i = 0; i < scanCount; i++)
         {
-            findings.Add(new InsightFinding(
-                Analyzer: Source,
-                Category: "Threads",
-                Severity: threadCount >= 100 ? FindingSeverity.Warning : FindingSeverity.Info,
-                Title: "Abandoned Thread objects in finalizer queue",
-                Evidence: $"{threadCount:N0} System.Threading.Thread object(s) in Gen2 finalizer queue. " +
-                          "Thread objects should be joined or tracked; abandonment leaves them in the finalizer queue until collection.",
-                Recommendation: "Always call thread.Join() or use a managed thread pool (Task, ThreadPool) instead of " +
-                                "raw Thread objects. Use CancellationToken to signal graceful thread exit.",
-                Tags: ["threads", "finalizer", "thread-abandonment"],
-                MetricValue: threadCount,
-                MetricUnit: "objects"));
+            if (string.Equals(memory.TopTypes[i].TypeName, "System.String", StringComparison.Ordinal))
+            {
+                stringRank = i + 1;
+                stringTypeBytes = memory.TopTypes[i].TotalBytes;
+                break;
+            }
         }
 
-        // TimerHolder in finalizer queue — System.Threading.Timer not disposed
-        if (timerHolderCount >= 20)
+        if (stringRank < 0)
+            return;
+
+        int rowCount = Math.Min(strings.TopDuplicates.Count, 5);
+        var rows = new List<IReadOnlyList<object?>>(rowCount);
+        for (int i = 0; i < rowCount; i++)
         {
-            findings.Add(new InsightFinding(
-                Analyzer: Source,
-                Category: "Memory",
-                Severity: timerHolderCount >= 100 ? FindingSeverity.Warning : FindingSeverity.Info,
-                Title: "Undisposed System.Threading.Timer instances detected",
-                Evidence: $"{timerHolderCount:N0} TimerHolder/TimerQueueTimer object(s) in Gen2 finalizer queue. " +
-                          "System.Threading.Timer has a finalizer; undisposed instances accumulate in the queue " +
-                          "and may fire callbacks after their intended lifetime.",
-                Recommendation: "Dispose System.Threading.Timer instances (timer.Dispose() or using) when they are " +
-                                "no longer needed. In .NET 6+, prefer PeriodicTimer which is designed for await loops.",
-                Tags: ["timer", "finalizer", "dispose", "memory-leak"],
-                MetricValue: timerHolderCount,
-                MetricUnit: "objects"));
+            DuplicateStringSnapshot d = strings.TopDuplicates[i];
+            rows.Add(new object?[] { d.Preview, d.Count, FormatBytes(d.WastedBytes) });
         }
 
-        // ReaderWriterLock in finalizer queue — old non-slim lock abandoned
-        if (readerWriterLockCount >= 10)
+        var evidenceTable = new FindingEvidenceTable(
+            "Top duplicate string values (System.String is a top memory-section consumer)",
+            ["Preview", "Occurrences", "Wasted Bytes"],
+            rows);
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Memory",
+            Severity: FindingSeverity.Info,
+            Title: "String data is a top heap consumer with significant duplication",
+            Evidence: $"System.String ranks #{stringRank} in the Memory section by size " +
+                      $"({FormatBytes(stringTypeBytes)}). {FormatBytes(strings.DuplicateWastedBytes)} of managed " +
+                      $"heap memory is wasted across {strings.DuplicatePatternCount:N0} duplicate string pattern(s).",
+            Recommendation: "Intern or cache the frequently duplicated string values below rather than allocating " +
+                            "fresh instances per request. See the String Analysis section for full duplicate detail.",
+            Tags: ["memory", "strings", "duplication", "cross-analyzer"],
+            MetricValue: (double)strings.DuplicateWastedBytes,
+            MetricUnit: "bytes",
+            EvidenceTables: [evidenceTable]));
+    }
+
+    /// <summary>
+    /// P2-4 (string-analyzer-audit.md): pinned System.String detection. Reuses the handle
+    /// classification GCHandleAnalyzer already performs during its single EnumerateHandles()
+    /// pass — rather than a second, redundant handle-table scan inside StringAnalyzer — and
+    /// looks for "System.String" among the ranked pinned-target-type breakdown.
+    /// </summary>
+    private static void DetectPinnedStringLeak(
+        List<InsightFinding> findings,
+        GCHandleDomainResult? handles)
+    {
+        if (handles is null) return;
+
+        ulong pinnedBytes = FindBytes(handles.TopPinnedObjectsBySize, "System.String")
+            + FindBytes(handles.TopAsyncPinnedObjectsBySize, "System.String");
+        if (pinnedBytes < PinnedStringLeakMinBytes)
+            return;
+
+        int pinnedCount = FindCount(handles.TopPinnedTargetTypes, "System.String");
+        FindingSeverity severity = pinnedBytes >= PinnedStringLeakCriticalBytes
+            ? FindingSeverity.Critical
+            : FindingSeverity.Warning;
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Memory",
+            Severity: severity,
+            Title: "Pinned strings detected — blocking GC compaction",
+            Evidence: $"{pinnedCount:N0} pinned System.String handle target(s) totaling {FormatBytes(pinnedBytes)}.",
+            Recommendation: "Pinning managed strings (e.g. via GCHandle.Alloc(pin: true) for P/Invoke marshalling) " +
+                            "prevents the GC from compacting the small object heap around them. Free pinned string " +
+                            "handles as soon as the interop call returns, or use Marshal.StringToHGlobalAnsi/Unicode " +
+                            "(which copies into unmanaged memory) instead of pinning the managed string itself.",
+            Tags: ["strings", "pinning", "gc", "handles", "cross-analyzer"],
+            MetricValue: (double)pinnedBytes,
+            MetricUnit: "bytes"));
+
+        static ulong FindBytes(IReadOnlyList<NameBytesEntry>? entries, string name)
         {
-            findings.Add(new InsightFinding(
-                Analyzer: Source,
-                Category: "Threads",
-                Severity: FindingSeverity.Warning,
-                Title: "Abandoned System.Threading.ReaderWriterLock instances detected",
-                Evidence: $"{readerWriterLockCount:N0} System.Threading.ReaderWriterLock object(s) in Gen2 finalizer queue. " +
-                          "The old (non-Slim) ReaderWriterLock has a finalizer and carries OS kernel resources.",
-                Recommendation: "Replace System.Threading.ReaderWriterLock with System.Threading.ReaderWriterLockSlim " +
-                                "which is lighter and has no finalizer. Ensure locks are not abandoned in error paths.",
-                Tags: ["reader-writer-lock", "finalizer", "threading", "legacy"],
-                MetricValue: readerWriterLockCount,
-                MetricUnit: "objects"));
+            if (entries is null) return 0;
+            foreach (NameBytesEntry e in entries)
+                if (string.Equals(e.Name, name, StringComparison.Ordinal))
+                    return e.Bytes;
+            return 0;
+        }
+
+        static int FindCount(IReadOnlyList<NameCountEntry>? entries, string name)
+        {
+            if (entries is null) return 0;
+            foreach (NameCountEntry e in entries)
+                if (string.Equals(e.Name, name, StringComparison.Ordinal))
+                    return e.Count;
+            return 0;
         }
     }
 
@@ -1407,6 +1809,12 @@ internal sealed class InsightEngine
     /// Raises a Warning when a large number of operational timeout exceptions are present on the heap,
     /// indicating systematic connection pool exhaustion, network instability, or slow dependencies.
     /// </summary>
+    private static bool IsTimeoutExceptionType(string typeName) =>
+        typeName is "System.TimeoutException" or
+            "System.OperationCanceledException" or
+            "System.Net.WebException" ||
+        typeName.EndsWith("TimeoutException", StringComparison.OrdinalIgnoreCase);
+
     private static void DetectRecurringTimeoutPattern(
         List<InsightFinding> findings,
         CrashDomainResult? crash)
@@ -1420,10 +1828,7 @@ internal sealed class InsightEngine
 
         foreach (KeyValuePair<string, int> kv in crash.ExceptionTypeCounts)
         {
-            if (kv.Key is "System.TimeoutException" or
-                "System.OperationCanceledException" or
-                "System.Net.WebException" ||
-                kv.Key.EndsWith("TimeoutException", StringComparison.OrdinalIgnoreCase))
+            if (IsTimeoutExceptionType(kv.Key))
             {
                 timeoutCount += kv.Value;
             }
@@ -1505,6 +1910,49 @@ internal sealed class InsightEngine
         }
     }
 
+    // R8 (docs/analysis/phase1/DbConnectionAnalyzer-audit.md): correlates SqlTransactionAnalyzer's
+    // Active transaction snapshots (still referencing their owning connection) against
+    // DbConnectionAnalyzer's TopOpenConnections addresses. "N active transactions" alone is already
+    // reported by SqlTransactionFindingGenerator; this rule adds the cross-analyzer signal that
+    // specific open connections are being held by a live transaction, not just idle.
+    private static void DetectLongHeldTransactionOnOpenConnection(
+        List<InsightFinding> findings,
+        SqlTransactionDomainResult? sqlTxn,
+        DbConnectionDomainResult? dbConn)
+    {
+        if (sqlTxn is null || dbConn is null) return;
+        if (sqlTxn.ActiveCount == 0 || dbConn.OpenConnections == 0) return;
+
+        var openConnectionAddresses = new HashSet<ulong>(dbConn.TopOpenConnections.Count);
+        foreach (DbConnectionSnapshot conn in dbConn.TopOpenConnections)
+            openConnectionAddresses.Add(conn.Address);
+
+        int correlatedCount = 0;
+        foreach (SqlTransactionSnapshot txn in sqlTxn.TopActiveTransactions)
+        {
+            if (txn.ConnectionAddress is ulong connAddress && openConnectionAddresses.Contains(connAddress))
+                correlatedCount++;
+        }
+
+        if (correlatedCount < 3) return;
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Infrastructure",
+            Severity: correlatedCount >= 15 ? FindingSeverity.Critical : FindingSeverity.Warning,
+            Title: $"{correlatedCount:N0} open DB connections are held by a live transaction",
+            Evidence: $"{correlatedCount:N0} of {dbConn.OpenConnections:N0} open connections on the heap are " +
+                      "referenced by an Active SqlTransaction/IDbTransaction object that has not yet been " +
+                      "Committed, Rolled back, or Disposed. These connections cannot return to the pool while " +
+                      "the transaction is held open.",
+            Recommendation: "Review call sites that open a transaction alongside its connection. Ensure both " +
+                            "are wrapped in using statements scoped tightly to the unit of work, and that no " +
+                            "unrelated I/O or awaits happen while the transaction is open.",
+            Tags: ["infrastructure", "connections", "transaction", "pool-exhaustion"],
+            MetricValue: correlatedCount,
+            MetricUnit: "connections held by open transactions"));
+    }
+
     private static void DetectWcfChannelFault(
         List<InsightFinding> findings,
         WcfChannelDomainResult? wcf,
@@ -1543,6 +1991,58 @@ internal sealed class InsightEngine
         }
     }
 
+    /// <summary>
+    /// Cross-correlates channels stuck in the Opening state with timeout exceptions elsewhere
+    /// on the heap. Opening is transient in healthy operation, so its presence alongside a
+    /// timeout exception is itself the signal (§P2-2,
+    /// docs/analysis/phase1/wcf-channel-analyzer-audit.md) — this is deliberately not gated on a
+    /// count threshold the way <see cref="DetectRecurringTimeoutPattern"/> is, since a co-occurring
+    /// timeout is a much stronger indicator here than raw timeout volume alone. Severity escalates
+    /// once either signal grows large enough to suggest an ongoing outage rather than one-off flakiness.
+    /// </summary>
+    private static void DetectWcfOpeningTimeoutCorrelation(
+        List<InsightFinding> findings,
+        WcfChannelDomainResult? wcf,
+        CrashDomainResult? crash)
+    {
+        if (wcf is null || !wcf.WcfPresent) return;
+        if (wcf.OpeningChannels == 0) return;
+
+        int timeoutCount = 0;
+        if (crash?.ExceptionTypeCounts is not null)
+        {
+            foreach (KeyValuePair<string, int> kv in crash.ExceptionTypeCounts)
+            {
+                if (IsTimeoutExceptionType(kv.Key))
+                    timeoutCount += kv.Value;
+            }
+        }
+
+        if (timeoutCount == 0) return;
+
+        FindingSeverity severity = wcf.OpeningChannels >= 5 || timeoutCount >= 10
+            ? FindingSeverity.Warning
+            : FindingSeverity.Info;
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Infrastructure",
+            Severity: severity,
+            Title: $"{wcf.OpeningChannels:N0} WCF channel(s) stuck Opening alongside timeout exceptions",
+            Evidence: $"{wcf.OpeningChannels:N0} WCF channel(s) are in the Opening state with " +
+                      $"{timeoutCount:N0} timeout/cancellation exception(s) on heap. " +
+                      "A channel normally spends milliseconds in Opening — a channel captured in " +
+                      "this state usually means Channel.Open()/OpenAsync() is blocked on a connect, " +
+                      "DNS, or handshake timeout.",
+            Recommendation: "Check the remote endpoint's availability and network path (firewall, DNS, " +
+                            "load balancer health). Confirm openTimeout is set appropriately for the " +
+                            "transport, and that Open()/OpenAsync() failures are observed and the channel " +
+                            "is Abort()ed rather than left half-open.",
+            Tags: ["infrastructure", "wcf", "channel", "timeout", "connection"],
+            MetricValue: wcf.OpeningChannels,
+            MetricUnit: "opening channels"));
+    }
+
     private static void DetectHttpClientAccumulation(
         List<InsightFinding> findings,
         HttpObjectDomainResult? http)
@@ -1569,17 +2069,278 @@ internal sealed class InsightEngine
         }
     }
 
+    /// <summary>
+    /// Cross-references the dominant thread-stack cluster with HangAnalyzer's blocked-thread
+    /// findings. When most of the dominant cluster's threads are independently reported as
+    /// waiting by HangAnalyzer, the two single-analyzer findings describe the same bottleneck —
+    /// this promotes that overlap into one elevated, correlated finding instead of leaving the
+    /// reader to notice the connection themselves. When ThreadAnalyzer's data is also available,
+    /// the overlapping threads' StackRootCount is folded in as a retention signal: a stuck thread
+    /// that also anchors GC roots means resolving the block may relieve retained memory too. When
+    /// LockGraphAnalyzer's data is also available and any overlapping thread is independently
+    /// flagged as a deadlock candidate (holding a lock while itself blocked), severity is escalated
+    /// to Critical and the held lock types are named — this is the strongest signal available
+    /// short of true circular-wait detection, since it ties stack shape + wait state + lock
+    /// ownership into one finding instead of three disconnected single-analyzer observations.
+    /// </summary>
+    private static void DetectClusterHangCorrelation(
+        List<InsightFinding> findings,
+        ThreadStackClusterDomainResult? clusters,
+        HangDomainResult? hang,
+        ThreadDomainResult? threads,
+        LockGraphDomainResult? lockGraph)
+    {
+        if (clusters is null || hang is null)
+            return;
+        if (clusters.TopClusters is not { Count: > 0 } topClusters)
+            return;
+        if (hang.TopWaitingThreads is not { Count: > 0 } waitingThreads)
+            return;
+
+        ThreadClusterSnapshot dominant = topClusters[0];
+        if (dominant.SampleOsThreadIds.Count == 0)
+            return;
+
+        var waitingOsThreadIds = new HashSet<uint>();
+        for (int i = 0; i < waitingThreads.Count; i++)
+            waitingOsThreadIds.Add(waitingThreads[i].OSThreadId);
+
+        int overlapCount = 0;
+        var overlappingOsThreadIds = new HashSet<uint>();
+        for (int i = 0; i < dominant.SampleOsThreadIds.Count; i++)
+        {
+            uint osThreadId = dominant.SampleOsThreadIds[i];
+            if (waitingOsThreadIds.Contains(osThreadId))
+            {
+                overlapCount++;
+                overlappingOsThreadIds.Add(osThreadId);
+            }
+        }
+
+        double overlapRatio = overlapCount / (double)dominant.SampleOsThreadIds.Count;
+        if (overlapRatio < ClusterHangOverlapWarningRatio)
+            return;
+
+        string? dominantWaitReason = null;
+        int dominantWaitReasonCount = 0;
+        var waitReasonCounts = new Dictionary<string, int>();
+        for (int i = 0; i < waitingThreads.Count; i++)
+        {
+            WaitingThreadSnapshot w = waitingThreads[i];
+
+            bool inCluster = false;
+            for (int j = 0; j < dominant.SampleOsThreadIds.Count; j++)
+            {
+                if (dominant.SampleOsThreadIds[j] == w.OSThreadId)
+                {
+                    inCluster = true;
+                    break;
+                }
+            }
+            if (!inCluster)
+                continue;
+
+            waitReasonCounts.TryGetValue(w.WaitReason, out int count);
+            count++;
+            waitReasonCounts[w.WaitReason] = count;
+            if (count > dominantWaitReasonCount)
+            {
+                dominantWaitReasonCount = count;
+                dominantWaitReason = w.WaitReason;
+            }
+        }
+
+        double dominantPercentOfAlive = clusters.AliveThreadCount > 0
+            ? dominant.Count * 100.0 / clusters.AliveThreadCount
+            : 0;
+
+        FindingSeverity sev = dominantPercentOfAlive >= 50
+            ? FindingSeverity.Critical
+            : FindingSeverity.Warning;
+
+        // If any overlapping thread is independently flagged by LockGraphAnalyzer as a deadlock
+        // candidate (holding a lock while itself blocked), that's structural evidence outweighing
+        // the raw percentage heuristic above — escalate regardless of dominantPercentOfAlive.
+        int overlappingDeadlockCandidateCount = 0;
+        var deadlockLockTypes = new List<string>();
+        if (lockGraph?.DeadlockCandidateDetails is { Count: > 0 } deadlockCandidates)
+        {
+            var seenLockTypes = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = 0; i < deadlockCandidates.Count; i++)
+            {
+                DeadlockCandidateSnapshot candidate = deadlockCandidates[i];
+                if (!overlappingOsThreadIds.Contains(candidate.OsThreadId))
+                    continue;
+
+                overlappingDeadlockCandidateCount++;
+                for (int j = 0; j < candidate.LockObjectTypes.Count; j++)
+                {
+                    if (seenLockTypes.Add(candidate.LockObjectTypes[j]))
+                        deadlockLockTypes.Add(candidate.LockObjectTypes[j]);
+                }
+            }
+        }
+        if (overlappingDeadlockCandidateCount > 0)
+            sev = FindingSeverity.Critical;
+
+        string reasonNote = dominantWaitReason is not null
+            ? $", predominantly waiting on {dominantWaitReason}"
+            : string.Empty;
+
+        var reasonRows = new List<IReadOnlyList<object?>>(waitReasonCounts.Count);
+        foreach (KeyValuePair<string, int> kv in waitReasonCounts)
+            reasonRows.Add(new object?[] { kv.Key, kv.Value });
+        reasonRows.Sort((a, b) => ((int)b[1]!).CompareTo((int)a[1]!));
+
+        var evidenceTable = new FindingEvidenceTable(
+            "Wait reasons among overlapping threads",
+            ["Wait Reason", "Thread Count"],
+            reasonRows);
+
+        string retentionNote = string.Empty;
+        if (threads is not null)
+        {
+            int retainedStackRoots = SumStackRootCounts(threads, overlappingOsThreadIds);
+            if (retainedStackRoots > 0)
+                retentionNote = $" These threads also anchor {retainedStackRoots:N0} GC root(s) via their stacks, so resolving the block may relieve retained memory too.";
+        }
+
+        string deadlockNote = string.Empty;
+        var tags = new List<string> { "thread-cluster", "hang", "blocking", "contention", "cross-analyzer" };
+        if (overlappingDeadlockCandidateCount > 0)
+        {
+            string lockTypeList = deadlockLockTypes.Count > 0 ? string.Join(", ", deadlockLockTypes) : "unresolved type(s)";
+            deadlockNote = $" {overlappingDeadlockCandidateCount} of these threads are additionally flagged by " +
+                           $"LockGraphAnalyzer as deadlock candidates, holding lock(s) on: {lockTypeList}.";
+            tags.Add("deadlock-candidate");
+        }
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Threads",
+            Severity: sev,
+            Title: "Dominant thread-stack cluster correlates with HangAnalyzer's blocked threads",
+            Evidence: $"{overlapCount} of {dominant.SampleOsThreadIds.Count} sampled threads in the dominant " +
+                      $"stack cluster ({dominant.Count:N0} threads, {dominantPercentOfAlive:F1}% of alive threads) " +
+                      $"are also reported as waiting by the Hang analyzer{reasonNote}. " +
+                      $"Cluster signature: {dominant.Signature}{retentionNote}{deadlockNote}",
+            Recommendation: overlappingDeadlockCandidateCount > 0
+                ? "Threads in this cluster are both blocked and independently confirmed to be holding contended " +
+                  "locks. Review lock acquisition order across these threads and use cycle-detection tooling " +
+                  "(e.g., !dlk in WinDbg) to confirm circular-wait before restarting the process."
+                : "A large group of threads sharing an identical stack and wait state strongly " +
+                  "suggests a single contended resource or blocking call. Inspect the cluster's " +
+                  "innermost frame together with the corresponding Hang analyzer wait details to " +
+                  "identify the shared bottleneck.",
+            Tags: tags,
+            MetricValue: overlapRatio,
+            MetricUnit: "ratio",
+            EvidenceTables: [evidenceTable]));
+    }
+
+    // Sums StackRootCount for the given OS thread IDs, deduplicated across ThreadAnalyzer's
+    // per-category snapshot lists — a thread can appear in both TopBlockedThreads and
+    // TopLockedThreads simultaneously (it can hold a lock while separately blocked waiting on
+    // something else), so a naive sum across lists would double-count its StackRootCount.
+    private static int SumStackRootCounts(ThreadDomainResult threads, HashSet<uint> osThreadIds)
+    {
+        if (osThreadIds.Count == 0)
+            return 0;
+
+        var stackRootsByOsThreadId = new Dictionary<uint, int>();
+        AddStackRootCounts(stackRootsByOsThreadId, threads.TopBlockedThreads);
+        AddStackRootCounts(stackRootsByOsThreadId, threads.TopLockedThreads);
+        AddStackRootCounts(stackRootsByOsThreadId, threads.OtherThreads);
+
+        int total = 0;
+        foreach (uint osThreadId in osThreadIds)
+        {
+            if (stackRootsByOsThreadId.TryGetValue(osThreadId, out int count))
+                total += count;
+        }
+        return total;
+    }
+
+    private static void AddStackRootCounts(Dictionary<uint, int> map, IReadOnlyList<ThreadStateSnapshot>? snapshots)
+    {
+        if (snapshots is null)
+            return;
+        for (int i = 0; i < snapshots.Count; i++)
+            map[snapshots[i].OSThreadId] = snapshots[i].StackRootCount;
+    }
+
+    /// <summary>
+    /// E-4 (docs/analysis/phase1/reference-chain-analyzer-audit.md): correlates
+    /// ReferenceChainAnalyzer's top-by-size type traces with DominatorAnalyzer's total heap size
+    /// to flag types whose representative sample dominates a disproportionate fraction of the
+    /// heap — closes the dotMemory "dominators" parity gap. Reuses <see cref="ReferenceTypeSampleSnapshot.RetainedBytes"/>
+    /// (already exact, dominator-tree-backed via E-2) rather than re-deriving retained size here.
+    /// </summary>
+    private static void DetectReferenceChainDominatorCorrelation(
+        List<InsightFinding> findings,
+        ReferenceChainDomainResult? referenceChain,
+        DominatorDomainResult? leak)
+    {
+        if (referenceChain is null || leak is null || leak.TotalHeapBytes == 0)
+            return;
+        if (referenceChain.TopTypeSampleTraces is not { Count: > 0 } traces)
+            return;
+
+        var offenders = new List<(string TypeName, ulong RetainedBytes, double Pct)>();
+        bool anyCritical = false;
+
+        for (int i = 0; i < traces.Count; i++)
+        {
+            ReferenceTypeSampleSnapshot trace = traces[i];
+            if (!trace.RetainedBytes.HasValue)
+                continue;
+
+            double pct = trace.RetainedBytes.Value * 100.0 / leak.TotalHeapBytes;
+            if (pct < ReferenceChainDominatorWarningPct)
+                continue;
+
+            offenders.Add((trace.TypeName, trace.RetainedBytes.Value, pct));
+            anyCritical |= pct >= ReferenceChainDominatorCriticalPct;
+        }
+
+        if (offenders.Count == 0)
+            return;
+
+        offenders.Sort(static (a, b) => b.Pct.CompareTo(a.Pct));
+
+        var rows = new List<IReadOnlyList<object?>>(offenders.Count);
+        for (int i = 0; i < offenders.Count; i++)
+            rows.Add(new object?[] { offenders[i].TypeName, FormatBytes(offenders[i].RetainedBytes), $"{offenders[i].Pct:F1}%" });
+
+        var evidenceTable = new FindingEvidenceTable(
+            "Types dominating a large heap fraction",
+            ["Type", "Retained Bytes", "% of Heap"],
+            rows);
+
+        (string TypeName, ulong RetainedBytes, double Pct) top = offenders[0];
+
+        findings.Add(new InsightFinding(
+            Analyzer: Source,
+            Category: "Memory",
+            Severity: anyCritical ? FindingSeverity.Critical : FindingSeverity.Warning,
+            Title: "Reference-chain type dominates a large heap fraction",
+            Evidence: $"{offenders.Count:N0} traced type(s) retain ≥ {ReferenceChainDominatorWarningPct:F0}% of the heap. " +
+                      $"Largest: {top.TypeName} retains {FormatBytes(top.RetainedBytes)} ({top.Pct:F1}% of {FormatBytes(leak.TotalHeapBytes)} total heap).",
+            Recommendation: "A single type's representative instance dominating this much of the heap indicates a small " +
+                            "number of objects (often a cache, collection, or singleton) are pinning a disproportionate " +
+                            "amount of memory. Inspect the reference-chain root path for these types to identify the owner.",
+            Tags: ["reference-chain", "dominator", "memory-leak", "cross-analyzer"],
+            MetricValue: top.Pct,
+            MetricUnit: "% of heap",
+            EvidenceTables: [evidenceTable]));
+    }
+
     // ── Utilities (last block) ────────────────────────────────────────────────
 
+    // Delegates to the shared post-run bus (AnalyzerRunResultsExtensions.GetResult<T>) so other
+    // post-hoc consumers (evidence building, leak ranking) can reuse the same typed lookup.
     private static T? FindResult<T>(IReadOnlyList<AnalyzerRunResult> runs) where T : AnalyzerDomainResult
-    {
-        for (int i = 0; i < runs.Count; i++)
-        {
-            if (runs[i].Result is T typed)
-                return typed;
-        }
-        return null;
-    }
+        => runs.GetResult<T>();
 
     private static string FormatBytes(ulong bytes)
     {

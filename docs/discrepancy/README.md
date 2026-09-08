@@ -1,0 +1,103 @@
+# Discrepancy Analysis — DumpDetective vs. Rohit_DumpDetective
+
+> Scope: a structural, evidence-based comparison of this codebase (`upgrade/clrmd-4` branch)
+> against a sibling implementation at `d:/POC/Rohit_DumpDetective` (same product name, independent
+> codebase, referred to below as "the other tool"). Written to identify concrete capability and
+> architecture gaps worth closing, not to declare a winner for its own sake.
+
+Every claim below is grounded in something read directly from one of the two repos on 2026-08-17 —
+primarily source code, verified two ways: direct `Read`/`Grep` on this repo, and `tokensave`'s code
+graph (pointed at `graph_root: d:/POC/Rohit_DumpDetective`, which has its own `.tokensave/` index)
+for the other repo, so its README's claims aren't taken at face value. Every class/command named in
+`capability-comparison.md` and `architecture-comparison.md` (`PluginLoader`, `RenderCommand`,
+`DiffCommand`, `ObjectInspectCommand`, `LoadCommand`, `CloseCommand`, `TraceAnalyzeCommand`,
+`HealthScorer`, `BfsIndexBuilder`, `ThresholdLoader`) was confirmed to exist as a real, non-trivial
+implementation via `tokensave_search` against that graph — not assumed from prose. This also caught
+one thing the other tool's own README doesn't mention: a `RootCauseTraceCommand`
+(`DumpDetective.Commands/Trace/RootCauseTraceCommand.cs`, implements both `ICommand` and
+`ITraceSubAnalyzer`) exists in their code but isn't in their documented command table — their docs
+undersell their own command surface by at least one command. Where a claim would require running a
+benchmark we don't yet have, it is marked **unverified — needs a same-dump run** rather than stated
+as fact. ClrMD version and AOT settings were confirmed directly against both repos' `.csproj` files
+(code, not docs) — see [architecture-comparison.md](architecture-comparison.md) §1–2.
+
+## Documents in this set
+
+| Doc | Covers |
+|---|---|
+| [capability-comparison.md](capability-comparison.md) | Command surface, analyzer/consumer coverage, output formats, caching UX, plugin system |
+| [architecture-comparison.md](architecture-comparison.md) | Index/cache strategy, ClrMD version, execution model, report model, AOT |
+| [performance-comparison.md](performance-comparison.md) | The other tool's published benchmarks, our current lack of equivalent numbers, and concrete hypotheses for the reported gap |
+| [analyzer-command-analysis-comparison.md](analyzer-command-analysis-comparison.md) | Per-analyzer deep dive: what each analyzer/command *computes*, algorithm vs. algorithm (corrected 33-analyzer/66-command counts, full mapping table, deep-dived pairs, follow-up worklist) |
+| [analyzer-command-report-comparison.md](analyzer-command-report-comparison.md) | Per-analyzer deep dive: how each analyzer/command *presents* its findings — architectural report-primitive gaps (structured `Explain`, inline chain rendering) that apply across all analyzers at once |
+| [cache-footprint-comparison.md](cache-footprint-comparison.md) | Exact, measured (not estimated) byte-level breakdown of why `cache.bin` (1.37 GB) is ~5x the other tool's `.ddcache` directory (271 MB) on the identical dump: no compression, a duplicated forward+reverse edge index at full address width, a full on-disk dominator tree |
+| [roadmap.md](roadmap.md) | Prioritized list of gaps worth closing, ordered by leverage |
+
+## Headline findings
+
+1. **Confirmed, not hypothesized: this tool's 33 analyzers run strictly sequentially; the other
+   tool runs its full command set 8-way parallel with LPT scheduling.** `AnalysisPipeline.RunAnalyzerBatchAsync`
+   is a plain `foreach`/`await` loop — `IAnalyzer.IsThreadSafe` exists on the interface but has zero
+   callers anywhere in the codebase (confirmed via a code-graph `uses`-edge query), meaning
+   `docs/architecture.md`'s claim that "analyzers may run in parallel when `IsThreadSafe` is opted
+   in" describes something that was never actually wired up. The other tool's
+   `AnalyzeReport.RenderEmbeddedReports` was read directly and confirmed to run a genuine
+   `Parallel.ForEach` (`MaxDegreeOfParallelism = 8`) with commands pre-sorted slowest-first, per an
+   explicit source comment naming the technique as LPT scheduling. This is likely the single
+   largest, cheapest-to-fix contributor to any full-report wall-clock gap, independent of dump size
+   or ClrMD version — see [performance-comparison.md](performance-comparison.md) § Hypothesis 0 and
+   [roadmap.md](roadmap.md) item 1.
+2. **The other tool covers two input types we don't touch at all: `.nettrace`/`.etl` trace
+   analysis and cross-source trace+dump correlation
+   (`ITraceDumpCorrelationRule`/`CorrelationEngine`, confirmed via the code graph).** Corrected count
+   (superseding the earlier "11 trace commands" estimate, which was README-sourced): listing
+   `Commands/Trace/` directly shows **27 real trace analyzer commands** (plus 3 support files —
+   `ITraceSubAnalyzer.cs`, `TraceEventTypesSection.cs`, `TraceOpener.cs`, not analyzers themselves).
+   This is not a "do it better" gap, it's a "doesn't exist here" gap — see
+   [capability-comparison.md](capability-comparison.md) and
+   [analyzer-command-analysis-comparison.md](analyzer-command-analysis-comparison.md) § Trace side.
+3. **The other tool ships a persistent, reusable on-disk cache (`load`/`close` commands, `.bfs.idx`
+   BFS index built via a confirmed 3-pass `BfsIndexBuilder`) that is *explicitly* opt-in and
+   measured at ~5x speedup across repeat runs.** We build a disk-backed index too (`cache.bin`), but
+   it isn't exposed as a first-class, user-controlled lifecycle the way `load`/`close` are — see
+   [architecture-comparison.md](architecture-comparison.md) § Cache lifecycle. On the same real dump
+   (14.62M objects), this tool's `cache.bin` measures 1.37 GB vs. the other tool's full `.ddcache`
+   directory at 271 MB — a ~5x gap fully traced to three confirmed, measured causes, not a cache-tier
+   mismatch: no compression anywhere in `cache.bin` (their `.bfs.idx`/`.idom.idx` measure 5.1x/12.8x
+   Brotli reduction on this same dump's data), a duplicated forward+reverse edge index at full 8-byte
+   address width (57% of the file) vs. their single forward CSR at 4-byte dense indices, and a full
+   on-disk dominator tree with explicit child lists (16% of the file) vs. their 2-column
+   `idom[]`/`retained[]` format — see
+   [cache-footprint-comparison.md](cache-footprint-comparison.md) for the complete section-by-section
+   measurement on both sides.
+4. **The other tool is pinned to ClrMD 3.1.512801; this branch is mid-upgrade to ClrMD 4.0.732401**
+   (branch name `upgrade/clrmd-4` literally documents this, confirmed directly from both `.csproj`
+   files). A ClrMD major-version regression is a live, testable hypothesis for the heap-walk phase
+   specifically — see [performance-comparison.md](performance-comparison.md) § Hypothesis 1.
+5. **We have no same-dump, same-hardware timing comparison yet.** The other tool's README
+   documents specific, reproducible numbers (25 GB / 86.5M-object dump, full breakdown by phase).
+   Until we run our own `analyze` against a similarly-sized dump — after fixing item 1 above, so the
+   number isn't dominated by a scheduling bug — "theirs is faster" stays directionally credible but
+   unquantified on our side.
+6. **Per-analyzer deep dive (new): analysis-side and report-side gaps don't always point the same
+   direction.** For the two pairs deep-dived so far (Dominator retained-size, Leak-Candidate
+   classification), this tool's *algorithm* is ahead in both cases (real Lengauer-Tarjan dominator
+   tree vs. their BFS approximation; an 8-class `LeakClass` taxonomy with per-class remediation
+   advice vs. their 5 hard-coded pattern checks) — but its *report presentation* is behind in both
+   cases, for one shared, architectural reason: their `IRenderSink.Explain(what, why, bullets,
+   action)` is a first-class, polymorphic-serializable primitive every one of their ~66 commands can
+   use, and their inline box-drawn root-chain rendering is used the same way; this repo's
+   `SectionBlock` model has no structured-narrative equivalent and its equivalent chain data
+   (`RootPathGroup`) is confined to one section builder, not reused by the two others that reference
+   it only by cross-pointer. See
+   [analyzer-command-analysis-comparison.md](analyzer-command-analysis-comparison.md) and
+   [analyzer-command-report-comparison.md](analyzer-command-report-comparison.md) for the full
+   mapping (33 analyzers vs. ~66 commands), the two deep-dived pairs, and a prioritized worklist for
+   the rest.
+7. **Where we're ahead:** analyzer breadth on a single heap pass for memory-dump-only analysis (31
+   analyzers spanning memory/GC/threads/async/infra-resource-leaks with a formal `Evidence`/
+   confidence model — see `docs/analysis/phase-0/phase0-deliverable-9-industry-benchmark.md` for the
+   pre-existing tool-vs-tool comparison this builds on), and a stricter architectural discipline
+   around bounded memory (hard 20-depth BFS cap confirmed in `BoundedGraphWalk` and covered by a
+   dedicated depth-clamp test, `ArrayPool`, no full graph materialization stated as an enforced rule,
+   not just an aspiration).

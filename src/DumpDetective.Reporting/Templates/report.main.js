@@ -2,32 +2,53 @@ import * as Dom from './report.dom.js';
 import * as R from './report.renderers.js';
 import * as UI from './report.ui.js';
 
+// The embedded payload script can carry data-encoding="gzip-base64" for large reports
+// (see docs/refactor/report-payload-size-reduction-design.md, F7). Plain "json" (or the
+// attribute being absent, for older reports) is returned as-is.
+async function decodePayloadText(el) {
+  const text = el.textContent;
+  if (!text || !text.trim()) return null;
+  const encoding = el.dataset ? el.dataset.encoding : null;
+  if (encoding !== 'gzip-base64') return text;
+  if (typeof DecompressionStream === 'undefined') {
+    throw new Error('This report\'s data is gzip-compressed and requires a browser with ' +
+      'DecompressionStream support (current Chrome, Edge, or Firefox) to open.');
+  }
+  const binary = atob(text.trim());
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const decompressed = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return await new Response(decompressed).text();
+}
+
 async function loadPayload() {
   try {
     const el = document.getElementById('report-json');
-    if (el && el.textContent && el.textContent.trim()) {
-      try {
-        const parsed = JSON.parse(el.textContent);
-        const doc = (parsed && parsed.report) ? parsed.report : parsed;
-        const perDumpDocs = (parsed && Array.isArray(parsed.perDumpDocs)) ? parsed.perDumpDocs : [];
-        if (doc && doc._external) {
-          const href = doc._external;
-          try {
-            const resp = await fetch(href);
-            if (resp.ok) {
-              const externalParsed = await resp.json();
-              const externalDoc = (externalParsed && externalParsed.report) ? externalParsed.report : externalParsed;
-              const externalPerDumpDocs = (externalParsed && Array.isArray(externalParsed.perDumpDocs))
-                ? externalParsed.perDumpDocs
-                : perDumpDocs;
-              return { doc: externalDoc, perDumpDocs: externalPerDumpDocs };
-            }
-          } catch (e) { /* ignore */ }
-        }
-        return { doc: doc, perDumpDocs: perDumpDocs };
-      } catch (e) { /* fall through */ }
+    const text = el ? await decodePayloadText(el) : null;
+    if (text && text.trim()) {
+      const parsed = JSON.parse(text);
+      window.__REPORT__ = parsed;
+      const doc = (parsed && parsed.report) ? parsed.report : parsed;
+      const perDumpDocs = (parsed && Array.isArray(parsed.perDumpDocs)) ? parsed.perDumpDocs : [];
+      if (doc && doc._external) {
+        const href = doc._external;
+        try {
+          const resp = await fetch(href);
+          if (resp.ok) {
+            const externalParsed = await resp.json();
+            const externalDoc = (externalParsed && externalParsed.report) ? externalParsed.report : externalParsed;
+            const externalPerDumpDocs = (externalParsed && Array.isArray(externalParsed.perDumpDocs))
+              ? externalParsed.perDumpDocs
+              : perDumpDocs;
+            return { doc: externalDoc, perDumpDocs: externalPerDumpDocs };
+          }
+        } catch (e) { /* ignore */ }
+      }
+      return { doc: doc, perDumpDocs: perDumpDocs };
     }
-  } catch (e) { }
+  } catch (e) {
+    if (!window.__REPORT__) throw e;
+  }
   const fallback = window.__REPORT__ || null;
   if (!fallback) return null;
   return {
@@ -50,6 +71,7 @@ async function bootstrap() {
   const payload = await loadPayload();
   if (!payload || !payload.doc) return;
   const doc = payload.doc;
+  R.setStringPool(doc.strings);
   if ((!doc.perDumpDocs || !doc.perDumpDocs.length) && Array.isArray(payload.perDumpDocs) && payload.perDumpDocs.length) {
     doc.perDumpDocs = payload.perDumpDocs;
   }
@@ -73,6 +95,7 @@ async function bootstrap() {
   const rightRail = document.getElementById('report-right-rail-content');
   const rightRailHost = document.getElementById('report-right-rail');
   if (rightRailHost) rightRailHost.hidden = true;
+  document.body.classList.remove('has-right-rail');
   const renderMode = String((doc && doc.renderMode) || '').toLowerCase();
   const reportContent = document.getElementById('report-content');
   const hasPreRenderedContent = renderMode === 'prerendered'
@@ -91,26 +114,27 @@ async function bootstrap() {
   }
 
   const executive = R.buildExecutiveSummary(doc);
-  if (executive) main.appendChild(executive);
+  if (executive) {
+    if (hasPreRenderedContent && reportContent) {
+      const preRenderedScorecard = reportContent.querySelector('#health-scorecard, .health-scorecard');
+      if (preRenderedScorecard && preRenderedScorecard.parentElement === reportContent) {
+        reportContent.insertBefore(executive, preRenderedScorecard.nextSibling);
+      } else {
+        reportContent.insertBefore(executive, reportContent.firstChild);
+      }
+    } else {
+      main.appendChild(executive);
+    }
+  }
 
   const actionQueue = R.buildActionQueuePanel(doc);
   if (actionQueue) {
-    if (isV2 && rightRail) {
-      rightRail.appendChild(actionQueue);
-      if (rightRailHost) rightRailHost.hidden = false;
-    } else {
-      main.appendChild(actionQueue);
-    }
+    main.appendChild(actionQueue);
   }
 
   const forensicsRail = R.buildForensicsRailPanel(doc);
   if (forensicsRail) {
-    if (isV2 && rightRail) {
-      rightRail.appendChild(forensicsRail);
-      if (rightRailHost) rightRailHost.hidden = false;
-    } else {
-      main.appendChild(forensicsRail);
-    }
+    main.appendChild(forensicsRail);
   }
 
   const globalSearch = R.buildGlobalSearchBar(doc);
@@ -199,4 +223,14 @@ async function bootstrap() {
   UI.setupInteractivity(doc, announce);
 }
 
-bootstrap().catch(err => console.error('Report bootstrap failed', err));
+bootstrap().catch(err => {
+  console.error('Report bootstrap failed', err);
+  const main = document.getElementById('main');
+  if (main) {
+    const banner = document.createElement('div');
+    banner.setAttribute('role', 'alert');
+    banner.style.cssText = 'margin:2rem;padding:1rem;border:1px solid #c00;background:#fee;color:#900;font:14px sans-serif;';
+    banner.textContent = 'Failed to load this report: ' + (err && err.message ? err.message : String(err));
+    main.prepend(banner);
+  }
+});

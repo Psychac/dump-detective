@@ -77,29 +77,20 @@ public sealed class StartupValidatorTests
             Diagnostics: new DiagnosticsOptions(),
             Report: new ReportOptions { Format = ReportFormat.Text },
             Crash: new CrashAnalysisOptions(),
-            AsyncTaskAnalysis: new AsyncTaskAnalysisOptions(),
             AsyncStateMachineAnalysis: new AsyncStateMachineAnalysisOptions(),
             ArrayAnalysis: new ArrayAnalysisOptions(),
             BoxingAnalysis: new BoxingAnalysisOptions(),
             Collection: new CollectionAnalysisOptions(),
             StringAnalysis: new StringAnalysisOptions(),
-            HeapTopology: new HeapTopologyAnalysisOptions(),
-            AppDomainAnalysis: new AppDomainAnalysisOptions(),
             AllocationPatternAnalysis: new AllocationPatternAnalysisOptions(),
             ThreadStackClusterAnalysis: new ThreadStackClusterAnalysisOptions(),
-            LockGraphAnalysis: new LockGraphAnalysisOptions(),
-            FinalizableObjectAnalysis: new FinalizableObjectAnalysisOptions(),
             GCGenerationAnalysis: new GCGenerationAnalysisOptions(),
-            GCRootAnalysis: new GCRootAnalysisOptions(),
-            LohFragmentationAnalysis: new LohFragmentationAnalysisOptions(),
             SegmentReservationAnalysis: new SegmentReservationAnalysisOptions(),
             ThreadAnalysis: new ThreadAnalysisOptions(),
             HangAnalysis: new HangAnalysisOptions(),
             JitAnalysis: new JitAnalysisOptions(),
             WeakReferenceAnalysis: new WeakReferenceAnalysisOptions(),
-            ObjectShapeAnalysis: new ObjectShapeAnalysisOptions(),
             ModuleAnalysis: new ModuleAnalysisOptions(),
-            DependentHandleAnalysis: new DependentHandleAnalysisOptions(),
             GCHandleAnalysis: new GCHandleAnalysisOptions(),
             StaticRootLeakAnalysis: new StaticRootLeakAnalysisOptions(),
             MemoryAnalysis: new MemoryAnalysisOptions(),
@@ -107,10 +98,9 @@ public sealed class StartupValidatorTests
             UsedConfigFile: false,
             IncludeAnalyzers: Array.Empty<string>(),
             ExcludeAnalyzers: Array.Empty<string>(),
-            DiagnosticMode: false,
-            IndexPrebuildMode: HeapIndexPrebuildMode.Auto);
+            DiagnosticMode: false
+    );
     }
-
     private static string CreateTempDirectory()
     {
         string tempDirectory = Path.Combine(Path.GetTempPath(), $"dumpdetective-validator-tests-{Guid.NewGuid():N}");

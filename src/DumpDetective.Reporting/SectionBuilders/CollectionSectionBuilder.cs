@@ -1,4 +1,4 @@
-using DumpDetective.Core.Models;
+﻿using DumpDetective.Core.Models;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
@@ -32,6 +32,8 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
             ["arraylists"] = new NumericMetricValue(d.ArrayLists, MetricUnit.Count),
             ["sortedlists"] = new NumericMetricValue(d.SortedLists, MetricUnit.Count),
             ["sortedsets"] = new NumericMetricValue(d.SortedSets, MetricUnit.Count),
+            ["immutable_arrays"] = new NumericMetricValue(d.ImmutableArrays, MetricUnit.Count),
+            ["immutable_array_builders"] = new NumericMetricValue(d.ImmutableArrayBuilders, MetricUnit.Count),
             ["wasteful_collections"] = new NumericMetricValue(d.WastefulCollectionCount, MetricUnit.Count),
             ["total_wasted_memory"] = new NumericMetricValue((double)d.TotalWastedMemory, MetricUnit.Bytes, FormatHelper.FormatBytes(d.TotalWastedMemory)),
         };
@@ -45,16 +47,70 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
             new([Cell("Stack<T>"),    Cell($"{d.Stacks:N0}",       d.Stacks)]),
             new([Cell("SortedList"),  Cell($"{d.SortedLists:N0}",  d.SortedLists)]),
             new([Cell("SortedSet"),   Cell($"{d.SortedSets:N0}",   d.SortedSets)]),
-            new([Cell("ArrayList"),   Cell($"{d.ArrayLists:N0}",   d.ArrayLists)])
+            new([Cell("ArrayList"),   Cell($"{d.ArrayLists:N0}",   d.ArrayLists)]),
+            new([Cell("ImmutableArray"),         Cell($"{d.ImmutableArrays:N0}",        d.ImmutableArrays)]),
+            new([Cell("ImmutableArray.Builder"), Cell($"{d.ImmutableArrayBuilders:N0}", d.ImmutableArrayBuilders)])
         };
         compactTables.Add(STCompact("Collection inventory", new[] { CH("Kind"), CH("Count","number") }, inventoryRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
         if (d.WasteCountsByKind is { Count: > 0 })
         {
-            var wasteKindRows = new List<TableRow>(d.WasteCountsByKind.Count);
-            foreach (var kvp in d.WasteCountsByKind)
-                wasteKindRows.Add(new TableRow([Cell(kvp.Key.ToString()), Cell($"{kvp.Value:N0}", kvp.Value)]));
-            compactTables.Add(STCompact("Wasteful collections by kind", new[] { CH("Kind"), CH("Wasteful Count","number") }, wasteKindRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            var wasteBytesByKind = d.WasteBytesByKind ?? new Dictionary<CollectionKind, ulong>();
+            var wasteKinds = new List<CollectionKind>(d.WasteCountsByKind.Keys);
+            wasteKinds.Sort((a, b) =>
+            {
+                wasteBytesByKind.TryGetValue(a, out ulong aBytes);
+                wasteBytesByKind.TryGetValue(b, out ulong bBytes);
+                int byBytes = bBytes.CompareTo(aBytes);
+                return byBytes != 0 ? byBytes : string.CompareOrdinal(a.ToString(), b.ToString());
+            });
+
+            var wasteKindRows = new List<TableRow>(wasteKinds.Count);
+            foreach (var kind in wasteKinds)
+            {
+                int count = d.WasteCountsByKind[kind];
+                wasteBytesByKind.TryGetValue(kind, out ulong bytes);
+                double shareOfTotal = d.TotalWastedMemory > 0 ? (double)bytes / d.TotalWastedMemory * 100.0 : 0.0;
+                wasteKindRows.Add(new TableRow([
+                    Cell(kind.ToString()),
+                    Cell($"{count:N0}", count),
+                    Cell(FormatHelper.FormatBytes(bytes), (long)Math.Min(bytes, (ulong)long.MaxValue)),
+                    Cell($"{shareOfTotal:F1}%", shareOfTotal)]));
+            }
+            compactTables.Add(STCompact("Wasteful collections by kind",
+                new[] { CH("Kind"), CH("Wasteful Count","number"), CH("Wasted","bytes"), CH("Share of Waste") },
+                wasteKindRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
+        if (d.WasteCountsByElementType is { Count: > 0 })
+        {
+            var wasteBytesByElementType = d.WasteBytesByElementType ?? new Dictionary<string, ulong>();
+            var elementTypes = new List<string>(d.WasteCountsByElementType.Keys);
+            elementTypes.Sort((a, b) =>
+            {
+                wasteBytesByElementType.TryGetValue(a, out ulong aBytes);
+                wasteBytesByElementType.TryGetValue(b, out ulong bBytes);
+                int byBytes = bBytes.CompareTo(aBytes);
+                return byBytes != 0 ? byBytes : string.CompareOrdinal(a, b);
+            });
+
+            int elementTypeLimit = Math.Min(elementTypes.Count, 15);
+            var elementTypeRows = new List<TableRow>(elementTypeLimit);
+            for (int i = 0; i < elementTypeLimit; i++)
+            {
+                string elementType = elementTypes[i];
+                int count = d.WasteCountsByElementType[elementType];
+                wasteBytesByElementType.TryGetValue(elementType, out ulong bytes);
+                double shareOfTotal = d.TotalWastedMemory > 0 ? (double)bytes / d.TotalWastedMemory * 100.0 : 0.0;
+                elementTypeRows.Add(new TableRow([
+                    Cell(FormatHelper.TruncateString(elementType, 60)),
+                    Cell($"{count:N0}", count),
+                    Cell(FormatHelper.FormatBytes(bytes), (long)Math.Min(bytes, (ulong)long.MaxValue)),
+                    Cell($"{shareOfTotal:F1}%", shareOfTotal)]));
+            }
+            compactTables.Add(STCompact("Wasted memory by element type",
+                new[] { CH("Element Type"), CH("Wasteful Count","number"), CH("Wasted","bytes"), CH("Share of Waste") },
+                elementTypeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         var topWasteful = d.TopWastefulCollections ?? [];
@@ -72,22 +128,45 @@ internal sealed class CollectionSectionBuilder : SectionBuilderBase, IAnalyzerSe
                     Cell($"{c.Capacity:N0}", c.Capacity),
                     Cell($"{c.FillRate:F1}%",   c.FillRate),
                     Cell(FormatHelper.FormatBytes(c.WastedMemory), (long)c.WastedMemory),
-                    Cell(c.Head.HasValue ? c.Head.Value.ToString("N0") : "—", c.Head.HasValue ? c.Head.Value : null),
-                    Cell(c.Tail.HasValue ? c.Tail.Value.ToString("N0") : "—", c.Tail.HasValue ? c.Tail.Value : null),
-                    Cell(c.LargestContiguousFreeSegmentBytes.HasValue ? FormatHelper.FormatBytes(c.LargestContiguousFreeSegmentBytes.Value) : "—", c.LargestContiguousFreeSegmentBytes.HasValue ? (long)Math.Min(c.LargestContiguousFreeSegmentBytes.Value, (ulong)long.MaxValue) : null),
-                    Cell(c.FreeSegmentCount.HasValue ? c.FreeSegmentCount.Value.ToString("N0") : "—", c.FreeSegmentCount.HasValue ? c.FreeSegmentCount.Value : null),
                     Cell(c.ElementType),
                     Cell(c.ElementSize > 0 ? FormatHelper.FormatBytes(c.ElementSize) : "—", c.ElementSize > 0 ? (long)Math.Min(c.ElementSize, (ulong)long.MaxValue) : null),
                     Cell(c.SizeEstimateConfidence),
                     Cell(c.DetectionMethod),
-                    Cell(c.RootDescription ?? "—")]));
+                    Cell(c.RootDescription ?? "—"),
+                    Cell(c.OwnerTypeHint ?? "—"),
+                    Cell(c.Recommendation)]));
             }
             compactTables.Add(STCompact("Wasteful collections",
-                new[] { CH("Type"), CH("Kind"), CH("Count","number"), CH("Capacity","number"), CH("Fill Rate"), CH("Wasted","bytes"), CH("Head","number"), CH("Tail","number"), CH("Largest Free Gap"), CH("Free Segments","number"), CH("Element Type"), CH("Element Size","bytes"), CH("Confidence"), CH("Method"), CH("Root") },
+                new[] { CH("Type"), CH("Kind"), CH("Count","number"), CH("Capacity","number"), CH("Fill Rate"), CH("Wasted","bytes"), CH("Element Type"), CH("Element Size","bytes"), CH("Confidence"), CH("Method"), CH("Root"), CH("Owner (hint)"), CH("Recommendation") },
                 wcRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             if (topWasteful.Count > limit)
             {
                 // note will be shown in narrative blocks
+            }
+
+            // Head/Tail/free-segment layout only means anything for Queue<T>'s circular buffer —
+            // every other kind always renders "—" in these columns, so they're broken out into
+            // their own sub-table instead of padding the shared table with dashes.
+            var queueRows = topWasteful.Where(c => c.Kind == CollectionKind.Queue).ToList();
+            if (queueRows.Count > 0)
+            {
+                int queueLimit = Math.Min(queueRows.Count, 15);
+                var qRows = new List<TableRow>(queueLimit);
+                for (int i = 0; i < queueLimit; i++)
+                {
+                    var c = queueRows[i];
+                    qRows.Add(new TableRow([
+                        Cell(FormatHelper.TruncateString(c.Type, 60)),
+                        Cell($"{c.Count:N0}", c.Count),
+                        Cell($"{c.Capacity:N0}", c.Capacity),
+                        Cell(c.Head.HasValue ? c.Head.Value.ToString("N0") : "—", c.Head.HasValue ? c.Head.Value : null),
+                        Cell(c.Tail.HasValue ? c.Tail.Value.ToString("N0") : "—", c.Tail.HasValue ? c.Tail.Value : null),
+                        Cell(c.LargestContiguousFreeSegmentBytes.HasValue ? FormatHelper.FormatBytes(c.LargestContiguousFreeSegmentBytes.Value) : "—", c.LargestContiguousFreeSegmentBytes.HasValue ? (long)Math.Min(c.LargestContiguousFreeSegmentBytes.Value, (ulong)long.MaxValue) : null),
+                        Cell(c.FreeSegmentCount.HasValue ? c.FreeSegmentCount.Value.ToString("N0") : "—", c.FreeSegmentCount.HasValue ? c.FreeSegmentCount.Value : null)]));
+                }
+                compactTables.Add(STCompact("Wasteful queues — buffer layout",
+                    new[] { CH("Type"), CH("Count","number"), CH("Capacity","number"), CH("Head","number"), CH("Tail","number"), CH("Largest Free Gap"), CH("Free Segments","number") },
+                    qRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
             }
         }
 

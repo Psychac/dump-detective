@@ -1,9 +1,10 @@
-using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Analysis.Cache;
+using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
-using DumpDetective.Analysis.Models;
-using DumpDetective.Analysis.Pipeline;
+
+using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Analysis.Analyzers;
 
@@ -11,8 +12,10 @@ namespace DumpDetective.Analysis.Analyzers;
 /// Classifies all managed heap segments (SOH, LOH, POH, Frozen) and produces a
 /// <see cref="HeapTopologyDomainResult"/> with per-kind size and object count totals.
 /// Operates directly on <see cref="ClrHeap.Segments"/>.
-/// Per-object counting is skipped for SOH by default (see <see cref="HeapTopologyAnalysisOptions.CountSohObjects"/>)
-/// since SOH dominates object count (87 M+ objects on large dumps) and is the main cost driver.
+/// SOH is never walked per-object (it dominates object count — 87 M+ objects on large dumps —
+/// and is the main cost driver); its exact object count is instead derived as
+/// <c>Phase1TotalObjectCount - LohCount - PohCount - FrozenCount</c>, free once Phase 1's
+/// already-exact total is available.
 /// </summary>
 public sealed class HeapTopologyAnalyzer : IAnalyzer
 {
@@ -22,44 +25,59 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
     public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var opts = context.AnalysisOptions.HeapTopology;
-        return ValueTask.FromResult(Analyze(context.Heap, context.Progress, opts.CountSohObjects).Stamp(this));
+        return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, cancellationToken).Stamp(this));
     }
 
-    private static AnalyzerDomainResult Analyze(ClrHeap heap, IProgress<AnalyzerProgressReport>? progress, bool countSoh)
+    private static AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
     {
-        // heap.Segments is backed by a fixed list in ClrMD — enumerate twice rather than ToList(),
-        // keeping one extra List<T> allocation off the heap for large dumps.
-        int totalSegments = 0;
-        foreach (ClrSegment _ in heap.Segments) totalSegments++;
+        // Shared with SegmentReservationAnalyzer — see docs/refactor/heap-segment-shared-pass-plan.md.
+        // Falls back to a local classification pass when the cache isn't the concrete
+        // HeapAnalysisCache (e.g. a bare IHeapAnalysisCache test double).
+        IReadOnlyList<SegmentSummary> summaries = cache is HeapAnalysisCache heapCacheForSummaries
+            ? heapCacheForSummaries.GetOrBuildSegmentSummaries(heap)
+            : SegmentSummaryCache.Build(heap);
+
+        int totalSegments = summaries.Count;
 
         progress?.Report(new(0, "classifying heap segments", $"0 / {totalSegments} segments"));
 
-        ulong sohBytes = 0, lohBytes = 0, pohBytes = 0, frozenBytes = 0;
-        ulong sohUsedBytes = 0, lohUsedBytes = 0, pohUsedBytes = 0, frozenUsedBytes = 0;
-        ulong sohReserved = 0, lohReserved = 0, pohReserved = 0, frozenReserved = 0;
-        int sohCount = 0, lohCount = 0, pohCount = 0, frozenCount = 0;
-        int sohObjects = 0, lohObjects = 0, pohObjects = 0, frozenObjects = 0;
+        ulong sohBytes = 0, lohBytes = 0, pohBytes = 0, frozenBytes = 0, unknownBytes = 0;
+        ulong sohUsedBytes = 0, lohUsedBytes = 0, pohUsedBytes = 0, frozenUsedBytes = 0, unknownUsedBytes = 0;
+        ulong sohReserved = 0, lohReserved = 0, pohReserved = 0, frozenReserved = 0, unknownReserved = 0;
+        ulong gen0Bytes = 0, gen1Bytes = 0, gen2Bytes = 0;
+        ulong sohFragmented = 0, lohFragmented = 0, pohFragmented = 0, frozenFragmented = 0, unknownFragmented = 0;
+        int sohCount = 0, lohCount = 0, pohCount = 0, frozenCount = 0, unknownCount = 0;
+        long sohObjects = 0, lohObjects = 0, pohObjects = 0, frozenObjects = 0, unknownObjects = 0;
         long totalObjectsScanned = 0;
         int segmentsProcessed = 0;
 
         var snapshots = new List<HeapSegmentSnapshot>(totalSegments);
         var bytesByLogicalHeap = new Dictionary<int, ulong>();
-        var objectsByLogicalHeap = new Dictionary<int, int>();
+        var objectsByLogicalHeap = new Dictionary<int, long>();
         var segmentCountByLogicalHeap = new Dictionary<int, int>();
         var pohTypes = new Dictionary<string, SegmentTypeAccumulator>(StringComparer.Ordinal);
         var frozenTypes = new Dictionary<string, SegmentTypeAccumulator>(StringComparer.Ordinal);
 
-        foreach (ClrSegment segment in heap.Segments)
+        for (int summaryIndex = 0; summaryIndex < summaries.Count; summaryIndex++)
         {
-            HeapSegmentKind kind = SegmentKindMapper.Map(segment);
-            ulong committed = GetCommittedBytes(segment);
-            ulong reserved = GetReservedBytes(segment);
+            SegmentSummary summary = summaries[summaryIndex];
+            ClrSegment segment = summary.Segment;
+            HeapSegmentKind kind = summary.Kind;
+            ulong committed = summary.CommittedBytes;
+            ulong reserved = summary.ReservedBytes;
             ulong used = 0;
             ulong start = segment.Start;
             ulong end = segment.End;
             ulong length = end > start ? end - start : 0;
-            int generation = segment.SubHeap?.Index ?? -1;
+            int logicalHeapIndex = summary.LogicalHeapIndex;
+
+            ulong segGen0Bytes = summary.Gen0Bytes, segGen1Bytes = summary.Gen1Bytes, segGen2Bytes = summary.Gen2Bytes;
+            if (kind == HeapSegmentKind.SmallObjectHeap)
+            {
+                gen0Bytes += segGen0Bytes;
+                gen1Bytes += segGen1Bytes;
+                gen2Bytes += segGen2Bytes;
+            }
 
             Dictionary<string, SegmentTypeAccumulator>? typeStats = kind switch
             {
@@ -68,30 +86,30 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
                 _ => null
             };
 
-            int objCount = CountObjects(segment, kind, countSoh, ref totalObjectsScanned, ref used, progress, typeStats);
-            if (generation >= 0)
+            long objCount = CountObjects(segment, kind, ref totalObjectsScanned, ref used, progress, typeStats, cancellationToken);
+            if (logicalHeapIndex >= 0)
             {
-                if (bytesByLogicalHeap.TryGetValue(generation, out ulong existingBytes))
-                    bytesByLogicalHeap[generation] = existingBytes + committed;
+                if (bytesByLogicalHeap.TryGetValue(logicalHeapIndex, out ulong existingBytes))
+                    bytesByLogicalHeap[logicalHeapIndex] = existingBytes + committed;
                 else
-                    bytesByLogicalHeap[generation] = committed;
+                    bytesByLogicalHeap[logicalHeapIndex] = committed;
 
-                if (segmentCountByLogicalHeap.TryGetValue(generation, out int existingSegments))
-                    segmentCountByLogicalHeap[generation] = existingSegments + 1;
+                if (segmentCountByLogicalHeap.TryGetValue(logicalHeapIndex, out int existingSegments))
+                    segmentCountByLogicalHeap[logicalHeapIndex] = existingSegments + 1;
                 else
-                    segmentCountByLogicalHeap[generation] = 1;
+                    segmentCountByLogicalHeap[logicalHeapIndex] = 1;
 
                 if (objCount < 0)
                 {
-                    objectsByLogicalHeap[generation] = -1;
+                    objectsByLogicalHeap[logicalHeapIndex] = -1;
                 }
-                else if (objectsByLogicalHeap.TryGetValue(generation, out int existingObjects) && existingObjects >= 0)
+                else if (objectsByLogicalHeap.TryGetValue(logicalHeapIndex, out long existingObjects) && existingObjects >= 0)
                 {
-                    objectsByLogicalHeap[generation] = existingObjects + objCount;
+                    objectsByLogicalHeap[logicalHeapIndex] = existingObjects + objCount;
                 }
-                else if (!objectsByLogicalHeap.ContainsKey(generation))
+                else if (!objectsByLogicalHeap.ContainsKey(logicalHeapIndex))
                 {
-                    objectsByLogicalHeap[generation] = objCount;
+                    objectsByLogicalHeap[logicalHeapIndex] = objCount;
                 }
             }
 
@@ -100,6 +118,8 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
                 ScannedCount: totalObjectsScanned,
                 Phase: "classifying heap segments",
                 Detail: $"{segmentsProcessed} / {totalSegments} segments, {totalObjectsScanned:N0} objects"));
+
+            ulong fragmented = committed > used ? committed - used : 0;
 
             snapshots.Add(new HeapSegmentSnapshot(
                 Address: segment.Address,
@@ -110,27 +130,38 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
                 UsedBytes: used,
                 ReservedBytes: reserved,
                 Kind: kind,
-                Generation: generation,
-                ObjectCount: objCount));
+                Generation: logicalHeapIndex,
+                ObjectCount: objCount,
+                Gen0Bytes: segGen0Bytes,
+                Gen1Bytes: segGen1Bytes,
+                Gen2Bytes: segGen2Bytes));
 
             switch (kind)
             {
                 case HeapSegmentKind.SmallObjectHeap:
                     sohUsedBytes += used;
+                    sohFragmented += fragmented;
                     break;
                 case HeapSegmentKind.LargeObjectHeap:
                     lohUsedBytes += used;
+                    lohFragmented += fragmented;
                     break;
                 case HeapSegmentKind.PinnedObjectHeap:
                     pohUsedBytes += used;
+                    pohFragmented += fragmented;
                     break;
                 case HeapSegmentKind.Frozen:
                     frozenUsedBytes += used;
+                    frozenFragmented += fragmented;
+                    break;
+                case HeapSegmentKind.Unknown:
+                    unknownUsedBytes += used;
+                    unknownFragmented += fragmented;
                     break;
             }
 
             // objCount == -1 is the sentinel for "SOH not counted" — do not add to totals.
-            int countedObj = objCount >= 0 ? objCount : 0;
+            long countedObj = objCount >= 0 ? objCount : 0;
             switch (kind)
             {
                 case HeapSegmentKind.SmallObjectHeap:
@@ -157,18 +188,44 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
                     frozenReserved += reserved;
                     frozenObjects += countedObj;
                     break;
+                case HeapSegmentKind.Unknown:
                 default:
-                    sohCount++;
-                    sohBytes += committed;
-                    sohReserved += reserved;
-                    if (objCount >= 0) sohObjects += countedObj; else sohObjects = -1;
+                    // Genuinely unrecognized segment kind (corrupted dump or a newer ClrMD enum
+                    // member SegmentKindMapper hasn't been updated for). Tracked separately rather
+                    // than silently folded into SOH, so a corrupted dump is visible in the report
+                    // instead of quietly skewing SOH totals.
+                    unknownCount++;
+                    unknownBytes += committed;
+                    unknownReserved += reserved;
+                    unknownObjects += countedObj;
                     break;
             }
         }
 
-        ulong totalCommitted = sohBytes + lohBytes + pohBytes + frozenBytes;
-        ulong totalUsed = sohUsedBytes + lohUsedBytes + pohUsedBytes + frozenUsedBytes;
-        ulong totalReserved = sohReserved + lohReserved + pohReserved + frozenReserved;
+        // SOH was never walked, so sohUsedBytes is still 0 and sohFragmented (accumulated as
+        // committed - 0 in the loop above) equals sohBytes — i.e. "100% fragmented", which is
+        // wrong. Reset it; it is only meaningful once derived below from Phase 1's exact totals.
+        sohFragmented = 0;
+
+        // Exact SOH object count and used bytes, free: Phase 1's already-exact heap-wide totals
+        // minus the already-cheap LOH/POH/Frozen/Unknown walks above — zero additional heap traversal.
+        if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? idx))
+        {
+            long derivedSohObjects = idx.ObjectCount - lohObjects - pohObjects - frozenObjects - unknownObjects;
+            sohObjects = Math.Max(derivedSohObjects, 0);
+
+            ulong totalIndexedBytes = 0;
+            foreach (TypeAggregateIndexEntry entry in idx.TypeAggregates.Values)
+                totalIndexedBytes += entry.TotalSize;
+
+            ulong nonSohUsedBytes = lohUsedBytes + pohUsedBytes + frozenUsedBytes + unknownUsedBytes;
+            sohUsedBytes = totalIndexedBytes > nonSohUsedBytes ? totalIndexedBytes - nonSohUsedBytes : 0;
+            sohFragmented = sohBytes > sohUsedBytes ? sohBytes - sohUsedBytes : 0;
+        }
+
+        ulong totalCommitted = sohBytes + lohBytes + pohBytes + frozenBytes + unknownBytes;
+        ulong totalUsed = sohUsedBytes + lohUsedBytes + pohUsedBytes + frozenUsedBytes + unknownUsedBytes;
+        ulong totalReserved = sohReserved + lohReserved + pohReserved + frozenReserved + unknownReserved;
         ulong reservationGap = totalReserved > totalCommitted ? totalReserved - totalCommitted : 0;
         double frozenPercent = totalCommitted == 0 ? 0.0 : frozenBytes * 100.0 / totalCommitted;
         double lohPercent = totalCommitted == 0 ? 0.0 : lohBytes * 100.0 / totalCommitted;
@@ -180,6 +237,7 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
                 new(HeapSegmentKind.LargeObjectHeap, lohCount, lohObjects, lohBytes, lohReserved),
                 new(HeapSegmentKind.PinnedObjectHeap, pohCount, pohObjects, pohBytes, pohReserved),
                 new(HeapSegmentKind.Frozen, frozenCount, frozenObjects, frozenBytes, frozenReserved),
+                new(HeapSegmentKind.Unknown, unknownCount, unknownObjects, unknownBytes, unknownReserved),
         };
 
         var logicalHeapSummaries = new List<PerLogicalHeapSummary>(bytesByLogicalHeap.Count);
@@ -187,7 +245,7 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
         {
             bytesByLogicalHeap.TryGetValue(heapIndex, out ulong heapBytes);
             segmentCountByLogicalHeap.TryGetValue(heapIndex, out int heapSegments);
-            objectsByLogicalHeap.TryGetValue(heapIndex, out int heapObjects);
+            objectsByLogicalHeap.TryGetValue(heapIndex, out long heapObjects);
             logicalHeapSummaries.Add(new PerLogicalHeapSummary(heapIndex, heapBytes, heapObjects, heapSegments));
         }
 
@@ -221,41 +279,40 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
             FrozenPercent: frozenPercent,
             LohPercent: lohPercent,
             PohPercent: pohPercent,
+            Gen0Bytes: gen0Bytes,
+            Gen1Bytes: gen1Bytes,
+            Gen2Bytes: gen2Bytes,
+            SohFragmentedBytes: sohFragmented,
+            LohFragmentedBytes: lohFragmented,
+            PohFragmentedBytes: pohFragmented,
+            FrozenFragmentedBytes: frozenFragmented,
+            IsServerGc: heap.IsServer,
+            LogicalHeapCount: heap.SubHeaps.Length,
             KindSummaries: kindSummaries,
             PerLogicalHeapSummaries: logicalHeapSummaries,
-                TopPohTypes: topPohTypes,
-                TopFrozenTypes: topFrozenTypes,
+            TopPohTypes: topPohTypes,
+            TopFrozenTypes: topFrozenTypes,
             TopSegmentsBySize: topBySize);
     }
 
     public void Dispose() { }
 
-    private static ulong GetCommittedBytes(ClrSegment segment)
-    {
-        MemoryRange mem = segment.CommittedMemory;
-        return mem.End >= mem.Start ? mem.End - mem.Start : 0;
-    }
-
-    private static ulong GetReservedBytes(ClrSegment segment)
-    {
-        MemoryRange mem = segment.ReservedMemory;
-        return mem.End >= mem.Start ? mem.End - mem.Start : 0;
-    }
-    private static int CountObjects(
+    private static long CountObjects(
         ClrSegment segment,
         HeapSegmentKind kind,
-        bool countSoh,
         ref long totalObjectsScanned,
         ref ulong usedBytes,
         IProgress<AnalyzerProgressReport>? progress,
-        Dictionary<string, SegmentTypeAccumulator>? typeStats = null)
+        Dictionary<string, SegmentTypeAccumulator>? typeStats = null,
+        CancellationToken cancellationToken = default)
     {
-        // SOH holds the vast majority of objects on large dumps.
-        // Skip enumeration unless explicitly requested to avoid O(87M) scans.
-        if (kind == HeapSegmentKind.SmallObjectHeap && !countSoh)
-            return -1; // sentinel: "not counted" — distinguished from a genuine zero in the report
+        // SOH holds the vast majority of objects on large dumps (O(87M) on large dumps) — never
+        // walked per-object here. Its exact total is derived arithmetically after the segment loop
+        // (see Analyze) from Phase 1's already-exact heap-wide object count.
+        if (kind == HeapSegmentKind.SmallObjectHeap)
+            return -1; // sentinel: "not walked here" — the caller overwrites the SOH total via arithmetic
 
-        int count = 0;
+        long count = 0;
         // Only flood-report progress for LOH/POH; SOH has too many segments to flood.
         bool reportInner = progress is not null
             && kind is HeapSegmentKind.LargeObjectHeap or HeapSegmentKind.PinnedObjectHeap;
@@ -273,12 +330,14 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
                     string typeName = obj.Type.Name ?? string.Empty;
                     if (!string.IsNullOrWhiteSpace(typeName))
                     {
-                        if (!typeStats.TryGetValue(typeName, out SegmentTypeAccumulator acc))
+                        if (!typeStats.TryGetValue(typeName, out SegmentTypeAccumulator? acc))
+                        {
                             acc = new SegmentTypeAccumulator();
+                            typeStats[typeName] = acc;
+                        }
 
                         acc.Count++;
                         acc.TotalBytes += obj.Size;
-                        typeStats[typeName] = acc;
                     }
                 }
             }
@@ -287,6 +346,7 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
 
             if (reportInner && (localScanned & (HeapTopologyAnalyzerOptions.ReportObjectScanInterval - 1)) == 0)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 totalObjectsScanned += localScanned;
                 localScanned = 0;
                 progress!.Report(new(
@@ -321,7 +381,7 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer
         return snapshots;
     }
 
-    private struct SegmentTypeAccumulator
+    private sealed class SegmentTypeAccumulator
     {
         public int Count { get; set; }
         public ulong TotalBytes { get; set; }

@@ -32,24 +32,30 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             ["blocked_threads"] = new NumericMetricValue(d.BlockedThreadCount, MetricUnit.Count),
             ["lock_holding_threads"] = new NumericMetricValue(d.LockHoldingThreadCount, MetricUnit.Count),
             ["threads_with_exceptions"] = new NumericMetricValue(d.ThreadsWithActiveExceptionsCount, MetricUnit.Count),
+            ["blocked_thread_ratio"] = new TextMetricValue($"{d.BlockedThreadRatio:P1}"),
+            ["threadpool_queue_depth"] = new NumericMetricValue(d.ThreadPoolQueueDepth, MetricUnit.Count),
+            ["threadpool_active_workers"] = new NumericMetricValue(d.ThreadPoolActiveWorkers, MetricUnit.Count),
+            ["threadpool_idle_workers"] = new NumericMetricValue(d.ThreadPoolIdleWorkers, MetricUnit.Count),
+            ["threadpool_min_workers"] = new NumericMetricValue(d.ThreadPoolMinWorkers, MetricUnit.Count),
+            ["threadpool_max_workers"] = new NumericMetricValue(d.ThreadPoolMaxWorkers, MetricUnit.Count),
             ["finalizer_blocked"] = new TextMetricValue(d.FinalizerThreadBlocked ? "Yes" : "No"),
             ["finalizer_lock_count"] = new NumericMetricValue(d.FinalizerLockCount, MetricUnit.Count),
             ["async_chain_threads"] = new NumericMetricValue(d.AsyncChainThreadCount, MetricUnit.Count),
             ["max_async_chain_depth"] = new NumericMetricValue(d.MaxAsyncChainDepth, MetricUnit.Count),
         };
+        if (d.StackMemorySummary is { } stackMemory)
+        {
+            keyMetrics["stack_memory_total"] = new NumericMetricValue(stackMemory.TotalBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(stackMemory.TotalBytes));
+            keyMetrics["stack_memory_mean"] = new NumericMetricValue(stackMemory.MeanBytes, MetricUnit.Bytes, FormatHelper.FormatBytes((ulong)stackMemory.MeanBytes));
+            keyMetrics["stack_memory_max"] = new NumericMetricValue(stackMemory.MaxBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(stackMemory.MaxBytes));
+            keyMetrics["stack_memory_p95"] = new NumericMetricValue(stackMemory.P95Bytes, MetricUnit.Bytes, FormatHelper.FormatBytes(stackMemory.P95Bytes));
+        }
         if (d.FinalizerManagedThreadId.HasValue)
         {
             keyMetrics["finalizer_thread_id"] = new NumericMetricValue(d.FinalizerManagedThreadId.Value, MetricUnit.Count);
             if (d.FinalizerOsThreadId.HasValue)
                 keyMetrics["finalizer_os_thread"] = new NumericMetricValue(d.FinalizerOsThreadId.Value, MetricUnit.Count);
         }
-        if (d.SamplingCapacity > 0 || d.SampledSnapshotCount > 0)
-        {
-            keyMetrics["sampled_snapshots"] = new NumericMetricValue(d.SampledSnapshotCount, MetricUnit.Count);
-            keyMetrics["sampling_capacity"] = new NumericMetricValue(d.SamplingCapacity, MetricUnit.Count);
-            keyMetrics["sampling_seed"] = new TextMetricValue($"0x{d.SamplingSeed:X8}");
-        }
-
         // Finalizer frames — emitted as a NamedStackTrace typed slot
         var finFrames = d.FinalizerFrames ?? [];
         var stackTraces = new List<NamedStackTrace>();
@@ -135,6 +141,14 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             compactTables.Add(STCompact("GC mode distribution", new[] { CH("GC Mode"), CH("Count","number") }, gcModeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
+        if (d.ExceptionTypeDistribution is { Count: > 0 })
+        {
+            var exTypeRows = new List<TableRow>(d.ExceptionTypeDistribution.Count);
+            foreach (var kvp in d.ExceptionTypeDistribution.OrderByDescending(kvp => kvp.Value))
+                exTypeRows.Add(new TableRow([Cell(kvp.Key), Cell($"{kvp.Value:N0}", kvp.Value)]));
+            compactTables.Add(STCompact("Exception type distribution", new[] { CH("Exception Type"), CH("Count","number") }, exTypeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
         if (d.ThreadsWithActiveExceptions is { Count: > 0 })
         {
             var exRows = new List<TableRow>(d.ThreadsWithActiveExceptions.Count);
@@ -160,52 +174,33 @@ internal sealed class ThreadSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             for (int i = 0; i < hotspots.Count; i++)
                 hsRows.Add(new TableRow([Cell(hotspots[i].Name), Cell($"{hotspots[i].Count:N0}", hotspots[i].Count)]));
             compactTables.Add(STCompact("Top frame hotspots", new[] { CH("Frame"), CH("Count","number") }, hsRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            blocks.Add(T("See the Thread Stack Signature Clustering section for full-stack grouping and dominant-cluster detail beyond these single-frame hotspot counts."));
         }
 
-        var sampled = d.SampledThreads ?? [];
-        if (sampled.Count > 0)
+        // Every alive thread not already covered by the locked/blocked/exception tables above —
+        // a deterministic complete list (§9.23), not a reservoir sample, so it's rendered as an
+        // ordinary paginated table rather than one stack-trace block per thread.
+        if (d.OtherThreads is { Count: > 0 })
         {
-            var lockedSet  = d.TopLockedThreads     ?? (IReadOnlyList<ThreadStateSnapshot>)[];
-            var blockedSet = d.TopBlockedThreads    ?? (IReadOnlyList<ThreadStateSnapshot>)[];
-            var exSet      = d.ThreadsWithActiveExceptions ?? (IReadOnlyList<ThreadExceptionSnapshot>)[];
-
-            for (int i = 0; i < sampled.Count; i++)
+            var otherRows = new List<TableRow>(d.OtherThreads.Count);
+            for (int i = 0; i < d.OtherThreads.Count; i++)
             {
-                var s = sampled[i];
-                bool isCaptured = false;
-                for (int j = 0; j < lockedSet.Count;  j++) if (lockedSet[j].ThreadId  == s.ThreadId && lockedSet[j].OSThreadId  == s.OSThreadId)  { isCaptured = true; break; }
-                for (int j = 0; j < blockedSet.Count; j++) if (blockedSet[j].ThreadId == s.ThreadId && blockedSet[j].OSThreadId == s.OSThreadId) { isCaptured = true; break; }
-                for (int j = 0; j < exSet.Count;      j++) if (exSet[j].ThreadId      == s.ThreadId && exSet[j].OSThreadId      == s.OSThreadId)      { isCaptured = true; break; }
-
-                string snapshotTag = isCaptured ? "Captured" : "Sampled";
-                string waitTag = !string.IsNullOrEmpty(s.WaitCategory) ? $" | {s.WaitCategory}" : string.Empty;
-                string lockTag = s.LockCount > 0 ? $" | {s.LockCount} lock{(s.LockCount == 1 ? "" : "s")}" : string.Empty;
-                string label = $"Thread {s.ThreadId} (OS {s.OSThreadId}) — {snapshotTag}{waitTag}{lockTag}";
-                string category = isCaptured ? "Captured" : "Sampled";
-
-                var meta = new System.Collections.Generic.Dictionary<string, string>
-                {
-                    ["State"]       = s.ThreadState,
-                    ["GC Mode"]     = s.GcMode,
-                    ["Lock Count"]  = s.LockCount.ToString("N0"),
-                    ["Stack Roots"] = s.StackRootCount.ToString("N0"),
-                };
-                if (s.StackSizeBytes > 0)
-                    meta["Stack Size"] = FormatBytes(s.StackSizeBytes);
-                if (!string.IsNullOrEmpty(s.WaitCategory))
-                    meta["Wait Category"] = s.WaitCategory!;
-                if (!string.IsNullOrEmpty(s.WaitReason))
-                    meta["Wait Reason"] = s.WaitReason!;
-
-                var frames = new List<StackFrameEntry>(s.TopFrames.Count);
-                for (int f = 0; f < s.TopFrames.Count; f++)
-                    frames.Add(new StackFrameEntry(f, s.TopFrames[f], IsFrameworkFrame(s.TopFrames[f])));
-
-                stackTraces.Add(new NamedStackTrace(label, category, meta, frames, false));
+                ThreadStateSnapshot s = d.OtherThreads[i];
+                otherRows.Add(new TableRow([
+                    Cell(s.ThreadId.ToString("N0"),   s.ThreadId),
+                    Cell(s.OSThreadId.ToString("N0"), s.OSThreadId),
+                    Cell(s.ThreadState),
+                    Cell(s.GcMode),
+                    Cell(s.StackRootCount.ToString("N0"), s.StackRootCount),
+                    Cell(s.StackSizeBytes > 0 ? FormatHelper.FormatBytes(s.StackSizeBytes) : "—"),
+                    Cell(s.TopFrames.Count > 0 ? s.TopFrames[0] : "—")]));
             }
+            compactTables.Add(STCompact("Other threads", new[] { CH("Thread ID","number"), CH("OS Thread","number"), CH("State"), CH("GC Mode"), CH("Stack Roots","number"), CH("Stack Size","bytes"), CH("Top Frame") }, otherRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
-        if (d.AppDomainDistribution is { Count: > 0 })
+        // A single AppDomain is the norm on .NET 5+ and conveys nothing — only show the
+        // table when there's more than one AppDomain to differentiate between.
+        if (d.AppDomainDistribution is { Count: > 1 })
         {
             var appRows = new List<TableRow>(d.AppDomainDistribution.Count);
             foreach (var kvp in d.AppDomainDistribution)

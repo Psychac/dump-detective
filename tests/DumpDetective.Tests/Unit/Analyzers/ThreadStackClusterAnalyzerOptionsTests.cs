@@ -1,27 +1,16 @@
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Models;
+using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Models;
 using FluentAssertions;
 using System.IO;
+using System.Linq;
 using Xunit;
 
 namespace DumpDetective.Tests.Unit.Analyzers;
 
 public sealed class ThreadStackClusterAnalyzerOptionsTests
 {
-    [Fact]
-    public void Preset_Fast_Sets_Coarse_Values()
-    {
-        var opts = ThreadStackClusterAnalysisOptions.Preset(AnalysisProfile.Fast);
-
-        opts.SamplingMode.Should().Be(SignatureSamplingMode.Coarse);
-        opts.MaxFramesPerSignature.Should().Be(4);
-        opts.MaxThreadIdsPerCluster.Should().Be(5);
-        opts.TopSignaturesToShow.Should().Be(3);
-        opts.TopClustersToShow.Should().Be(8);
-        opts.ProduceClusterExports.Should().BeFalse();
-    }
-
     [Fact]
     public void DomainResult_Can_Carry_Artifacts()
     {
@@ -46,5 +35,136 @@ public sealed class ThreadStackClusterAnalyzerOptionsTests
             result.Artifacts.Count.Should().Be(1);
             result.Artifacts[0].Analyzer.Should().Be("Test");
         }
+    }
+
+    [Fact]
+    public void DomainResult_Can_Carry_TopFrameHotspots()
+    {
+        var hotspots = new[]
+        {
+            new NameCountEntry("System.Threading.Monitor.Wait(object)", 42),
+            new NameCountEntry("MyApp.Worker.Run()", 7),
+        };
+        var result = new ThreadStackClusterDomainResult(2, 1, 0, 50.0, new[] { "sig" }, TopFrameHotspots: hotspots);
+
+        result.TopFrameHotspots.Should().NotBeNull();
+        result.TopFrameHotspots!.Should().HaveCount(2);
+        result.TopFrameHotspots![0].Name.Should().Be("System.Threading.Monitor.Wait(object)");
+        result.TopFrameHotspots![0].Count.Should().Be(42);
+    }
+
+    [Theory]
+    [InlineData("System.Threading.ThreadPoolWorkQueue.Dispatch()", "Threadpool-idle")]
+    [InlineData("System.Threading.PortableThreadPool+WorkerThread.WorkerThreadStart()", "Threadpool-idle")]
+    [InlineData("<No managed frames> (GC)", "GC")]
+    [InlineData("<No managed frames> (Finalizer)", "Finalizer")]
+    [InlineData("<No managed frames> (IOCP)", "IOCP-idle")]
+    [InlineData("<No managed frames> (Threadpool)", "Threadpool-idle")]
+    [InlineData("MyApp.Worker.Run() | System.Threading.Monitor.Wait(object)", null)]
+    [InlineData("<No managed frames>", null)]
+    public void ClassifyFrameworkPattern_Recognizes_Known_Signatures(string signature, string? expected)
+    {
+        ThreadStackClusterAnalyzer.ClassifyFrameworkPattern(signature).Should().Be(expected);
+    }
+
+    [Fact]
+    public void ThreadClusterSnapshot_Can_Carry_FrameworkPattern()
+    {
+        var snapshot = new ThreadClusterSnapshot(500, Array.Empty<uint>(), "<No managed frames> (GC)", FrameworkPattern: "GC");
+
+        snapshot.FrameworkPattern.Should().Be("GC");
+    }
+
+    private static ThreadStackClusterAnalyzer.StackCluster MakeCluster(string signature, int count)
+    {
+        var cluster = new ThreadStackClusterAnalyzer.StackCluster(signature) { Count = count };
+        return cluster;
+    }
+
+    [Fact]
+    public void BuildClusterTree_Empty_Input_Returns_Empty()
+    {
+        ThreadStackClusterAnalyzer.BuildClusterTree(Array.Empty<ThreadStackClusterAnalyzer.StackCluster>())
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public void BuildClusterTree_Merges_Clusters_Sharing_Innermost_Frame()
+    {
+        var clusters = new[]
+        {
+            MakeCluster("Wait() | Foo()", 5),
+            MakeCluster("Wait() | Bar()", 3),
+        };
+
+        var roots = ThreadStackClusterAnalyzer.BuildClusterTree(clusters);
+
+        roots.Should().HaveCount(1);
+        var wait = roots[0];
+        wait.FrameLabel.Should().Be("Wait()");
+        wait.Count.Should().Be(8);
+        wait.IsChain.Should().BeFalse();
+        wait.Children.Should().HaveCount(2);
+        wait.Children.Should().Contain(c => c.FrameLabel == "Foo()" && c.Count == 5);
+        wait.Children.Should().Contain(c => c.FrameLabel == "Bar()" && c.Count == 3);
+    }
+
+    [Fact]
+    public void BuildClusterTree_Collapses_Unbranched_Chain_Into_One_Node()
+    {
+        var clusters = new[] { MakeCluster("Wait() | Foo() | Bar() | Baz()", 10) };
+
+        var roots = ThreadStackClusterAnalyzer.BuildClusterTree(clusters);
+
+        roots.Should().HaveCount(1);
+        var node = roots[0];
+        node.FrameLabel.Should().Be("Wait() → Foo() → Bar() → Baz()");
+        node.Count.Should().Be(10);
+        node.IsChain.Should().BeTrue();
+        node.Children.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void BuildClusterTree_Caps_Children_Per_Node_And_Reports_Truncation()
+    {
+        var clusters = new List<ThreadStackClusterAnalyzer.StackCluster>();
+        for (int i = 0; i < 10; i++)
+            clusters.Add(MakeCluster($"Wait() | Child{i}()", 10 - i));
+
+        var roots = ThreadStackClusterAnalyzer.BuildClusterTree(clusters);
+
+        roots.Should().HaveCount(1);
+        var wait = roots[0];
+        wait.Children.Should().HaveCount(8);
+        wait.TruncatedChildCount.Should().Be(2);
+    }
+
+    // Regression: a deeply recursive, branchy call stack (e.g. stack-overflow-shaped dumps) used to
+    // produce one nested TreeNode per branch point with no depth bound, which could exceed
+    // System.Text.Json's MaxDepth during report serialization ("possible object cycle detected").
+    // A short-lived sibling branching off the shared spine at every frame defeats the
+    // unbranched-chain collapse (Children.Count == 2 at every spine node), so this exercises the
+    // depth cap rather than the node/child-count budgets covered above.
+    [Fact]
+    public void BuildClusterTree_DeepBranchingStack_CapsNestingDepthInsteadOfGrowingUnbounded()
+    {
+        const int frameCount = 100;
+        var clusters = new List<ThreadStackClusterAnalyzer.StackCluster>();
+        var spineFrames = new List<string>();
+        for (int i = 0; i < frameCount; i++)
+        {
+            spineFrames.Add($"Frame{i}");
+            var sideFrames = new List<string>(spineFrames) { $"Frame{i}Side" };
+            clusters.Add(MakeCluster(string.Join(" | ", sideFrames), 1));
+        }
+        clusters.Add(MakeCluster(string.Join(" | ", spineFrames), 1));
+
+        var roots = ThreadStackClusterAnalyzer.BuildClusterTree(clusters);
+
+        int MaxDepth(ThreadClusterTreeNode node) =>
+            node.Children.Count == 0 ? 1 : 1 + node.Children.Max(MaxDepth);
+
+        int observedDepth = roots.Max(MaxDepth);
+        observedDepth.Should().BeLessThan(frameCount, "the depth cap should trigger well before the full stack depth");
     }
 }

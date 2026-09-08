@@ -2,14 +2,17 @@ using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Utilities;
 
-namespace DumpDetective.Analysis.FindingGenerators;
+namespace DumpDetective.Reporting.FindingGenerators;
 
 internal sealed class AsyncStateMachineFindingGenerator : IFindingGenerator
 {
     private const int FireAndForgetThreshold = 100;
     private const int HighCountWarning = 1_000;
     private const int HighCountCritical = 10_000;
+    private const int MaxFireAndForgetFindings = 3;
+    private const int AsyncVoidCountThreshold = 10;
     private const ulong LargeCaptureWarning = 50_000_000UL;  // 50 MB
     private const ulong LargeCaptureCritical = 200_000_000UL;  // 200 MB
 
@@ -39,7 +42,7 @@ internal sealed class AsyncStateMachineFindingGenerator : IFindingGenerator
                 Severity: sev,
                 Title: $"High async state machine count: {r.TotalStateMachines:N0} suspended state machines",
                 Evidence: $"{r.TotalStateMachines:N0} async state machine objects found on heap " +
-                          $"consuming {FormatBytes(r.TotalStateMachineBytes)}. " +
+                          $"consuming {FormatHelper.FormatBytes(r.TotalStateMachineBytes)}. " +
                           $"Top method: {topType}.",
                 Recommendation: "Each suspended async method holds an allocation on the heap for the duration " +
                                 "of the await. A high count indicates many in-flight async operations. " +
@@ -50,18 +53,24 @@ internal sealed class AsyncStateMachineFindingGenerator : IFindingGenerator
         }
 
         // ── Fire-and-forget detection (same method suspended > threshold) ──────
+        int fireAndForgetCount = 0;
         foreach (SuspendedMethodEntry entry in r.SuspendedMethodMap)
         {
             if (entry.SuspendedCount >= FireAndForgetThreshold)
             {
+                // Escalate severity based on suspended count
+                FindingSeverity sev = entry.SuspendedCount >= HighCountCritical
+                    ? FindingSeverity.Critical
+                    : FindingSeverity.Warning;
+
                 findings.Add(new InsightFinding(
                     Analyzer: AnalyzerName,
                     Category: "Memory",
-                    Severity: FindingSeverity.Warning,
+                    Severity: sev,
                     Title: $"Potential fire-and-forget leak: '{entry.MethodName}' has {entry.SuspendedCount:N0} suspended instances",
                     Evidence: $"{entry.SuspendedCount:N0} suspended instances of async method '{entry.MethodName}' " +
                               $"declared on '{entry.DeclaringType}' found on heap " +
-                              $"(total {FormatBytes(entry.TotalBytes)}). " +
+                              $"(total {FormatHelper.FormatBytes(entry.TotalBytes)}). " +
                               $"A large count for a single method suggests callers are not awaiting completion.",
                     Recommendation: "Ensure all async methods are properly awaited. " +
                                     "Fire-and-forget patterns using Task.Run or async void are common sources of " +
@@ -69,8 +78,41 @@ internal sealed class AsyncStateMachineFindingGenerator : IFindingGenerator
                     Tags: ["async", "fire-and-forget", "leak", "state-machine"],
                     MetricValue: entry.SuspendedCount,
                     MetricUnit: "objects"));
-                break; // One finding for the worst offender is enough
+                
+                if (++fireAndForgetCount >= MaxFireAndForgetFindings)
+                    break;
             }
+        }
+
+        // ── Async void method detection ───────────────────────────────────────
+        var asyncVoidMethods = new List<(string Method, string Type, int Count)>();
+        foreach (StateMachineTypeProfile profile in r.TopStateMachineTypes)
+        {
+            if (profile.IsAsyncVoid && profile.Count >= AsyncVoidCountThreshold)
+                asyncVoidMethods.Add((profile.OriginatingMethod, profile.DeclaringType, profile.Count));
+        }
+
+        if (asyncVoidMethods.Count > 0)
+        {
+            asyncVoidMethods.Sort(static (a, b) => b.Count.CompareTo(a.Count));
+            string topAsyncVoid = asyncVoidMethods.Count > 0
+                ? $"{asyncVoidMethods[0].Method} (on {asyncVoidMethods[0].Type})"
+                : "N/A";
+
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Memory",
+                Severity: FindingSeverity.Warning,
+                Title: $"Async void method detected: {topAsyncVoid}",
+                Evidence: $"{asyncVoidMethods.Count} async void method(s) detected with state machines on heap. " +
+                          $"Top: {topAsyncVoid} with {asyncVoidMethods[0].Count} suspended instances.",
+                Recommendation: "Async void methods should be avoided except for event handlers. " +
+                                "They fire-and-forget by construction, make exception handling impossible, " +
+                                "and prevent callers from knowing when the operation completes. " +
+                                "Use async Task methods instead and await the result.",
+                Tags: ["async", "async-void", "memory", "antipattern"],
+                MetricValue: asyncVoidMethods.Count,
+                MetricUnit: "methods"));
         }
 
         // ── Large captured closures ────────────────────────────────────────────
@@ -85,15 +127,15 @@ internal sealed class AsyncStateMachineFindingGenerator : IFindingGenerator
                 : FindingSeverity.Warning;
 
             string topCapture = r.TopByCapturedSize.Count > 0
-                ? $"{r.TopByCapturedSize[0].TypeName} ({FormatBytes(r.TopByCapturedSize[0].TotalCapturedRefBytes)})"
+                ? $"{r.TopByCapturedSize[0].TypeName} ({FormatHelper.FormatBytes(r.TopByCapturedSize[0].TotalCapturedRefBytes)})"
                 : "N/A";
 
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
                 Category: "Memory",
                 Severity: sev,
-                Title: $"Async state machines capturing large closures: {FormatBytes(totalCaptured)} total",
-                Evidence: $"Top state machine instances retain an estimated {FormatBytes(totalCaptured)} " +
+                Title: $"Async state machines capturing large closures: {FormatHelper.FormatBytes(totalCaptured)} total",
+                Evidence: $"Top state machine instances retain an estimated {FormatHelper.FormatBytes(totalCaptured)} " +
                           $"via captured reference fields. " +
                           $"Largest: {topCapture}.",
                 Recommendation: "State machines capture all variables referenced across await boundaries. " +
@@ -107,11 +149,4 @@ internal sealed class AsyncStateMachineFindingGenerator : IFindingGenerator
         return findings;
     }
 
-    private static string FormatBytes(ulong bytes) => bytes switch
-    {
-        >= 1_073_741_824 => $"{bytes / 1_073_741_824.0:F1} GB",
-        >= 1_048_576 => $"{bytes / 1_048_576.0:F1} MB",
-        >= 1_024 => $"{bytes / 1_024.0:F1} KB",
-        _ => $"{bytes} B"
-    };
 }

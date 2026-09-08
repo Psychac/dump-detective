@@ -6,6 +6,8 @@ using DumpDetective.Reporting.Services;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Reporting.SectionBuilders;
 
+using System.Linq;
+
 using FluentAssertions;
 
 using Xunit;
@@ -19,7 +21,7 @@ public sealed class ReportingCompositionTests
     public void Serialize_ShouldMergeDuplicateFindings_AndPreserveEvidenceAndRemediation()
     {
         InsightFinding findingA = new(
-            Analyzer: "RetentionAnalyzer",
+            Analyzer: "DominatorAnalyzer",
             Category: "Leak",
             Severity: FindingSeverity.Warning,
             Title: "Duplicate strings detected",
@@ -29,7 +31,7 @@ public sealed class ReportingCompositionTests
             Fingerprint: "dup-key");
 
         InsightFinding findingB = new(
-            Analyzer: "RetentionAnalyzer",
+            Analyzer: "DominatorAnalyzer",
             Category: "Leak",
             Severity: FindingSeverity.Critical,
             Title: "Duplicate strings detected",
@@ -38,8 +40,8 @@ public sealed class ReportingCompositionTests
             Tags: ["memory", "string"],
             Fingerprint: "dup-key");
 
-        AnalyzerRunResult runA = CreateRun("RetentionAnalyzer", findingA);
-        AnalyzerRunResult runB = CreateRun("RetentionAnalyzer", findingB);
+        AnalyzerRunResult runA = CreateRun("DominatorAnalyzer", findingA);
+        AnalyzerRunResult runB = CreateRun("DominatorAnalyzer", findingB);
 
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/test.dmp",
@@ -51,14 +53,14 @@ public sealed class ReportingCompositionTests
         doc.ExecutiveSummary.Should().NotBeNull();
         // Critical/Warning/top-recommendation projection removed from ExecutiveSummaryRecord.
         // Verify findings were composed and remain available on the report document.
-        doc.Findings.Should().HaveCountGreaterOrEqualTo(1);
+        doc.Findings.Should().HaveCountGreaterThanOrEqualTo(1);
     }
 
     [Fact]
     public void Serialize_ShouldClusterNearDuplicateTopActions()
     {
         InsightFinding leakA = new(
-            Analyzer: "RetentionAnalyzer",
+            Analyzer: "DominatorAnalyzer",
             Category: "Leak",
             Severity: FindingSeverity.Critical,
             Title: "Event handler retention pressure",
@@ -68,7 +70,7 @@ public sealed class ReportingCompositionTests
             Fingerprint: "cluster-a");
 
         InsightFinding leakB = new(
-            Analyzer: "RetentionAnalyzer",
+            Analyzer: "DominatorAnalyzer",
             Category: "Leak",
             Severity: FindingSeverity.Warning,
             Title: "Event handler retention pressure",
@@ -90,8 +92,8 @@ public sealed class ReportingCompositionTests
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/cluster.dmp",
             runs: [
-                CreateRun("RetentionAnalyzer", leakA),
-                CreateRun("RetentionAnalyzer", leakB),
+                CreateRun("DominatorAnalyzer", leakA),
+                CreateRun("DominatorAnalyzer", leakB),
                 CreateRun("ThreadAnalyzer", threadFinding)
             ],
             elapsed: TimeSpan.FromSeconds(1),
@@ -150,11 +152,12 @@ public sealed class ReportingCompositionTests
             ]
         };
 
+        // HtmlReportRenderer relies on Domains (client-rendered), not the legacy
+        // Findings/AnalyzerSections fields, so it is excluded from this literal-content check.
         IReportFormatter[] formatters =
         [
             new TextCanonicalReportFormatter(),
-            new MarkdownCanonicalReportFormatter(),
-            new HtmlCanonicalReportFormatter()
+            new MarkdownCanonicalReportFormatter()
         ];
 
         foreach (IReportFormatter formatter in formatters)
@@ -187,42 +190,6 @@ public sealed class ReportingCompositionTests
             reportBuilders: []);
 
         doc.SchemaVersion.Should().Be("2.1");
-    }
-
-    [Fact]
-    public void HtmlFormatter_ShouldRenderDetailedAnalyzerSections_AsCollapsibleBlocks()
-    {
-        SingleDumpReportDocument doc = new()
-        {
-            DumpPath = "C:/dumps/detailed.dmp",
-            GeneratedAtUtc = DateTime.UtcNow,
-            ElapsedSeconds = 1,
-            AnalyzerSections =
-            [
-                new AnalyzerDetailSection("Memory Leak Analyzer", "Memory Leak Analyzer", 0,
-                [
-                    new MetricBlock("Top type",   "System.String"),
-                    new MetricBlock("Retained MB", "123")
-                ]),
-                new AnalyzerDetailSection("Thread Analyzer", "Thread Analyzer", 10,
-                [
-                    new MetricBlock("Blocked threads", "4"),
-                    new MetricBlock("Wait chains",     "2")
-                ])
-            ]
-        };
-
-        IReportFormatter formatter = new HtmlCanonicalReportFormatter();
-
-        string output = formatter.Render(doc);
-
-        output.Should().Contain("<details>");
-        output.Should().Contain(">Memory Leak Analyzer<");
-        output.Should().Contain(">Thread Analyzer<");
-        output.Should().Contain("<span class=\"detail-key\">Top type:</span>");
-        output.Should().Contain("<span class=\"detail-value wrap\">System.String</span>");
-        output.Should().Contain("<span class=\"detail-key\">Blocked threads:</span>");
-        output.Should().Contain("<span class=\"detail-value wrap\">4</span>");
     }
 
     [Fact]
@@ -314,6 +281,38 @@ public sealed class ReportingCompositionTests
     }
 
     [Fact]
+    public void CrossDomainInsightsSection_ShouldRenderEvidenceTable_WhenFindingCarriesOne()
+    {
+        FindingEvidenceTable evidenceTable = new(
+            "Per-module JIT stack heatmap (top active modules)",
+            ["Module", "Active JIT Frames", "Module Size", "Version Conflict"],
+            [["MyApp.Plugins.dll", 200, "4.8 MB", "Yes"]]);
+
+        InsightFinding insightFinding = new(
+            Analyzer: "InsightEngine",
+            Category: "Performance",
+            Severity: FindingSeverity.Info,
+            Title: "Module with heavy active JIT stack presence also flagged by module analysis",
+            Evidence: "Module 'MyApp.Plugins.dll' accounts for 200 active JIT stack frames.",
+            Recommendation: "Correlate module size/version-conflict status with the JIT stack heatmap.",
+            Tags: ["jit", "modules", "cross-analyzer"],
+            Fingerprint: "jit-module-hotspot",
+            EvidenceTables: [evidenceTable]);
+
+        AnalyzerResultSet resultSet = new([], additionalFindings: [insightFinding]);
+        InsightsSectionBuilder builder = new();
+
+        AnalyzerDetailSection section = builder.Build(resultSet);
+
+        section.CompactTables.Should().NotBeNull();
+        section.CompactTables!.Should().ContainSingle(t => t.Title.Contains(evidenceTable.Title));
+        CompactTable table = section.CompactTables!.Single(t => t.Title.Contains(evidenceTable.Title));
+        table.Headers.Select(h => h.Name).Should().BeEquivalentTo(evidenceTable.Headers);
+        table.Rows.Should().ContainSingle();
+        table.Rows[0].Values.Should().BeEquivalentTo(evidenceTable.Rows[0]);
+    }
+
+    [Fact]
     public void TypeSystemSection_ShouldRenderC1TypeTableMetadata()
     {
         MemoryDomainResult memory = new(
@@ -345,20 +344,27 @@ public sealed class ReportingCompositionTests
             Gen2Pct: 100,
             PerTypeGenerationProfiles:
             [
-                new TypeGenerationProfile("Demo.Type", 1, 2, 3, 0, 1024, false)
+                new TypeGenerationProfile("Demo.Type", 1, 2, 3, 0, 1024, IsFinalizable: false, Gen2Bytes: 0)
             ]);
 
         ObjectShapeAnalyzerDomainResult shape = new(
             TopReferenceHeavyTypes:
             [
-                new TypeShapeProfile("Demo.Type", 4, 2, 2, 0.50, 10, false, false, false, 1, 0, ObjectShapeCategory.Balanced)
+                new TypeShapeProfile("Demo.Type", 4, 2, 2, 0.50, 10, 1000, false, false, false, 1, 0, ObjectShapeCategory.Balanced)
             ],
             TopValueHeavyTypes:
             [
-                new TypeShapeProfile("Demo.Type", 4, 2, 2, 0.50, 10, false, false, false, 1, 0, ObjectShapeCategory.Balanced)
+                new TypeShapeProfile("Demo.Type", 4, 2, 2, 0.50, 10, 1000, false, false, false, 1, 0, ObjectShapeCategory.Balanced)
+            ],
+            TopBalancedTypes:
+            [
+                new TypeShapeProfile("Demo.Balanced", 4, 2, 2, 0.50, 500, 5000, false, false, false, 1, 0, ObjectShapeCategory.Balanced)
             ],
             TotalTypesAnalyzed: 1,
-            AvgRefFieldsPerType: 2);
+            AvgRefFieldsPerType: 2,
+            TotalGcScanWork: 20,
+            TopGen2RetainedTypes: [],
+            TotalGen2GcScanWork: 0);
 
         AnalyzerRunResult memoryRun = new(
             AnalyzerName: "MemoryAnalyzer",
@@ -467,7 +473,7 @@ public sealed class ReportingCompositionTests
     public void Serialize_ShouldExcludeInfoConfidenceAndDiagnostics_FromDomainInsights()
     {
         InsightFinding analyzerSignal = new(
-            Analyzer: "Retention Analysis",
+            Analyzer: "Dominator Analysis",
             Category: "Retention",
             Severity: FindingSeverity.Warning,
             Title: "Retention hotspot",
@@ -487,7 +493,7 @@ public sealed class ReportingCompositionTests
             Fingerprint: "conf-cap");
 
         InsightFinding diagnosticsInfo = new(
-            Analyzer: "Retention Analysis",
+            Analyzer: "Dominator Analysis",
             Category: "Diagnostics",
             Severity: FindingSeverity.Info,
             Title: "Reference tracking was capped",
@@ -496,9 +502,9 @@ public sealed class ReportingCompositionTests
             Tags: ["analysis-quality"],
             Fingerprint: "diag-cap");
 
-        AnalyzerRunResult run = CreateRun("RetentionAnalyzer", analyzerSignal);
+        AnalyzerRunResult run = CreateRun("DominatorAnalyzer", analyzerSignal);
         AnalyzerRunResult gcRun = CreateRun("GCRootAnalyzer", confidenceInfo);
-        AnalyzerRunResult diagRun = CreateRun("RetentionAnalyzer", diagnosticsInfo);
+        AnalyzerRunResult diagRun = CreateRun("DominatorAnalyzer", diagnosticsInfo);
 
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/info-filter.dmp",
@@ -506,7 +512,7 @@ public sealed class ReportingCompositionTests
             elapsed: TimeSpan.FromSeconds(1),
             analyzerBuilders:
             [
-                new StubAnalyzerSectionBuilder("RetentionAnalyzer", "Retention"),
+                new StubAnalyzerSectionBuilder("DominatorAnalyzer", "Retention"),
                 new StubAnalyzerSectionBuilder("GCRootAnalyzer", "GC Roots")
             ],
             reportBuilders: []);
@@ -527,7 +533,7 @@ public sealed class ReportingCompositionTests
     public void Serialize_ShouldEmitDeterministicTopActions_WithFactorBreakdown()
     {
         InsightFinding warningA = new(
-            Analyzer: "RetentionAnalyzer",
+            Analyzer: "DominatorAnalyzer",
             Category: "Leak",
             Severity: FindingSeverity.Warning,
             Title: "Retention risk alpha",
@@ -537,7 +543,7 @@ public sealed class ReportingCompositionTests
             Fingerprint: "same-priority-a");
 
         InsightFinding warningB = new(
-            Analyzer: "RetentionAnalyzer",
+            Analyzer: "DominatorAnalyzer",
             Category: "Leak",
             Severity: FindingSeverity.Warning,
             Title: "Retention risk beta",
@@ -546,8 +552,8 @@ public sealed class ReportingCompositionTests
             Tags: ["memory", "runtime"],
             Fingerprint: "same-priority-b");
 
-        AnalyzerRunResult runA = CreateRun("RetentionAnalyzer", warningA);
-        AnalyzerRunResult runB = CreateRun("RetentionAnalyzer", warningB);
+        AnalyzerRunResult runA = CreateRun("DominatorAnalyzer", warningA);
+        AnalyzerRunResult runB = CreateRun("DominatorAnalyzer", warningB);
 
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/top-actions.dmp",
@@ -579,7 +585,7 @@ public sealed class ReportingCompositionTests
     public void Serialize_ShouldEmitTopLevelScoringModelVersionMetadata()
     {
         InsightFinding warning = new(
-            Analyzer: "RetentionAnalyzer",
+            Analyzer: "DominatorAnalyzer",
             Category: "Leak",
             Severity: FindingSeverity.Warning,
             Title: "Retention risk",
@@ -590,7 +596,7 @@ public sealed class ReportingCompositionTests
 
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/score-meta.dmp",
-            runs: [CreateRun("RetentionAnalyzer", warning)],
+            runs: [CreateRun("DominatorAnalyzer", warning)],
             elapsed: TimeSpan.FromSeconds(1),
             analyzerBuilders: [],
             reportBuilders: []);
@@ -703,7 +709,7 @@ public sealed class ReportingCompositionTests
     public void Serialize_ShouldPropagateConfidenceCaveats_InTopActions()
     {
         InsightFinding warning = new(
-            Analyzer: "RetentionAnalyzer",
+            Analyzer: "DominatorAnalyzer",
             Category: "Leak",
             Severity: FindingSeverity.Warning,
             Title: "Heuristic retention signature",
@@ -716,7 +722,7 @@ public sealed class ReportingCompositionTests
 
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/warn-caveat.dmp",
-            runs: [CreateRun("RetentionAnalyzer", warning)],
+            runs: [CreateRun("DominatorAnalyzer", warning)],
             elapsed: TimeSpan.FromSeconds(1),
             analyzerBuilders: [],
             reportBuilders: []);

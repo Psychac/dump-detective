@@ -98,6 +98,14 @@ internal abstract record AnalysisReportDocument
     public ReportAppendix? Appendix { get; init; } = null;
     public ExecutiveSummaryRecord? ExecutiveSummary { get; init; }        // optional executive summary
 
+    /// <summary>
+    /// Cross-table string pool for compact-table cells (docs/refactor/report-payload-size-reduction-design.md,
+    /// F1). Populated only by the HTML renderer (<see cref="DumpDetective.Reporting.Formatters.ReportStringPool"/>); null for other
+    /// formats. A string-typed table cell is unambiguous on the wire: a JSON string is a literal value, a
+    /// JSON number is an index into this pool.
+    /// </summary>
+    public IReadOnlyList<string>? Strings { get; init; } = null;
+
     [JsonIgnore]
     public IReadOnlyList<FindingRecord> Findings { get; init; } = Array.Empty<FindingRecord>();
 

@@ -1,11 +1,10 @@
-﻿using Microsoft.Diagnostics.Runtime;
-using DumpDetective.Analysis.Cache;
+﻿using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Models;
-using DumpDetective.Core.Models;
-using DumpDetective.Core.Utilities;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
+
+using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -13,17 +12,15 @@ namespace DumpDetective.Analysis.Analyzers
     {
         public string Name => "GC Generation Analysis";
         public string Category => "GC";
+        public IReadOnlyCollection<string> Tags => new[] { "gc", "generations", "memory", "performance" };
+        public int Order => 10;
+        public bool IsThreadSafe => false;
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             GCGenerationAnalysisOptions options = context.AnalysisOptions.GCGenerationAnalysis;
             return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, context.Progress).Stamp(this));
-        }
-
-        public AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache)
-        {
-            return Analyze(heap, cache, new GCGenerationAnalysisOptions(), progress: null);
         }
 
         private static AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache, GCGenerationAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress)
@@ -52,9 +49,14 @@ namespace DumpDetective.Analysis.Analyzers
             ulong lohBytes = 0;
             long totalObjects = 0, lohObjects = 0;
             long gen0Objects = 0, gen1Objects = 0, gen2Objects = 0;
+            bool anyGen2Bytes = false;
 
-            var lohCandidates = new List<(ulong Mt, TypeAggregateIndexEntry Entry)>();
-            var genCandidates = new List<(ulong Mt, TypeAggregateIndexEntry Entry)>();
+            // genCandidates receives exactly one entry per aggregate (unconditional Add below), so
+            // its final size is known up front. lohCandidates is a filtered subset — aggregates.Count
+            // is a safe upper bound, cheaper than the List's default doubling growth for heaps with
+            // hundreds of thousands of distinct types.
+            var lohCandidates = new List<(ulong Mt, TypeAggregateIndexEntry Entry)>(aggregates.Count);
+            var genCandidates = new List<(ulong Mt, TypeAggregateIndexEntry Entry)>(aggregates.Count);
 
             foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in aggregates)
             {
@@ -66,6 +68,9 @@ namespace DumpDetective.Analysis.Analyzers
                 lohObjects += e.LohCount;
                 totalObjects += e.Count;
 
+                if (e.Gen2TotalSize > 0)
+                    anyGen2Bytes = true;
+
                 if (e.LohCount > 0)
                     lohCandidates.Add((kv.Key, e));
 
@@ -75,42 +80,59 @@ namespace DumpDetective.Analysis.Analyzers
             long nonLohTotal = totalObjects - lohObjects;
             long accountedGen = gen0Objects + gen1Objects + gen2Objects;
 
-            // Approximate gen bytes using average non-LOH size × per-MT gen count.
-            AnalyzerHelpers.ComputeApproxGenBytes(aggregates, out ulong gen0Bytes, out ulong gen1Bytes, out ulong gen2Bytes);
+            // Exact gen bytes from segment metadata.
+            AnalyzerHelpers.ComputeExactGenBytes(heap, out ulong gen0Bytes, out ulong gen1Bytes, out ulong gen2Bytes);
 
             ulong totalManagedBytes = gen0Bytes + gen1Bytes + gen2Bytes + lohBytes;
             double lohPct = totalManagedBytes == 0 ? 0.0 : lohBytes * 100.0 / totalManagedBytes;
+            double gen0Pct = totalObjects == 0 ? 0.0 : gen0Objects * 100.0 / totalObjects;
             double gen2Pct = totalObjects == 0 ? 0.0 : gen2Objects * 100.0 / totalObjects;
 
-            // Top LOH types — resolve names only for top N.
+            // Top LOH types, ranked by LOH size.
             lohCandidates.Sort(static (a, b) => b.Entry.LohSize.CompareTo(a.Entry.LohSize));
-            int lohTake = Math.Min(options.TopLohTypeLimit, lohCandidates.Count);
-            var topLohTypes = new List<TypeSnapshot>(lohTake);
-            for (int i = 0; i < lohTake; i++)
+            var topLohTypes = new List<TypeSnapshot>(lohCandidates.Count);
+            foreach ((ulong mt, TypeAggregateIndexEntry e) in lohCandidates)
             {
-                (ulong mt, TypeAggregateIndexEntry e) = lohCandidates[i];
                 string name = heap.GetTypeByMethodTable(mt)?.Name ?? $"MT:0x{mt:x}";
                 topLohTypes.Add(new TypeSnapshot(name, (int)Math.Min(int.MaxValue, e.LohCount), e.LohSize, e.LohSize));
             }
 
-            // Per-type generation profiles.
+            // Per-type generation profiles, ranked by exact Gen2 bytes so memory-heavy accumulators
+            // surface ahead of small high-count types. Heap indices written before Gen2TotalSize
+            // existed (schema v3 and older) carry zeros for every type, so fall back to instance
+            // count there rather than emitting an arbitrary order.
             List<TypeGenerationProfile> profiles = [];
+            long finalizableGen2Count = 0;
+            ulong finalizableGen2Bytes = 0;
             if (accountedGen > 0)
             {
-                genCandidates.Sort(static (a, b) => b.Entry.Count.CompareTo(a.Entry.Count));
-                int genTake = Math.Min(options.TopGenProfileLimit, genCandidates.Count);
-                profiles = new List<TypeGenerationProfile>(genTake);
-                for (int i = 0; i < genTake; i++)
+                if (anyGen2Bytes)
+                    genCandidates.Sort(static (a, b) => b.Entry.Gen2TotalSize.CompareTo(a.Entry.Gen2TotalSize));
+                else
+                    genCandidates.Sort(static (a, b) => b.Entry.Count.CompareTo(a.Entry.Count));
+
+                profiles = new List<TypeGenerationProfile>(genCandidates.Count);
+                foreach ((ulong mt, TypeAggregateIndexEntry e) in genCandidates)
                 {
-                    (ulong mt, TypeAggregateIndexEntry e) = genCandidates[i];
                     string name = heap.GetTypeByMethodTable(mt)?.Name ?? $"MT:0x{mt:x}";
+                    bool isFinalizable = (e.Flags & TypeAggregateFlags.IsFinalizableType) != 0;
                     profiles.Add(new TypeGenerationProfile(
                         name, e.Gen0Count, e.Gen1Count, e.Gen2Count,
                         (int)Math.Min(int.MaxValue, e.LohCount),
                         e.TotalSize,
-                        (e.Flags & TypeAggregateFlags.IsFinalizableType) != 0));
+                        e.Gen2TotalSize,
+                        isFinalizable));
+
+                    if (isFinalizable)
+                    {
+                        finalizableGen2Count += e.Gen2Count;
+                        finalizableGen2Bytes += e.Gen2TotalSize;
+                    }
                 }
             }
+
+            // POH detection for .NET 5+
+            AnalyzerHelpers.ComputePohMetrics(aggregates, out ulong pohBytes, out long pohObjects);
 
             return new GCGenerationDomainResult(
                 gen0Bytes,
@@ -124,8 +146,17 @@ namespace DumpDetective.Analysis.Analyzers
                 (int)Math.Min(int.MaxValue, totalObjects),
                 (int)Math.Min(int.MaxValue, lohObjects),
                 topLohTypes,
-                gen2Pct,
-                profiles);
+                PohBytes: pohBytes,
+                PohObjects: pohObjects,
+                Gen2Pct: gen2Pct,
+                PerTypeGenerationProfiles: profiles,
+                GenBytesAreApproximate: false,
+                FallbackMode: false,
+                LohThresholdPercent: options.LohThresholdPercent,
+                Gen0PressureThresholdPercent: options.Gen0PressureThresholdPercent,
+                PohThresholdPercent: options.PohThresholdPercent,
+                FinalizableGen2Count: finalizableGen2Count,
+                FinalizableGen2Bytes: finalizableGen2Bytes);
         }
 
         // ── Slow / fallback path (no heap index) ──────────────────────────────────
@@ -159,13 +190,9 @@ namespace DumpDetective.Analysis.Analyzers
             foreach (CachedTypeStatistics stat in typeStats.Values)
                 if (stat.LohCount > 0) lohList.Add(stat);
             lohList.Sort(static (a, b) => b.LohSize.CompareTo(a.LohSize));
-            int lohTake = Math.Min(options.TopLohTypeLimit, lohList.Count);
-            var topLohTypes = new List<TypeSnapshot>(lohTake);
-            for (int i = 0; i < lohTake; i++)
-            {
-                CachedTypeStatistics stat = lohList[i];
+            var topLohTypes = new List<TypeSnapshot>(lohList.Count);
+            foreach (CachedTypeStatistics stat in lohList)
                 topLohTypes.Add(new TypeSnapshot(stat.TypeName, stat.LohCount, stat.LohSize, stat.LohSize));
-            }
 
             return new GCGenerationDomainResult(
                 Gen0Bytes: 0, Gen0Objects: 0,
@@ -174,8 +201,15 @@ namespace DumpDetective.Analysis.Analyzers
                 lohBytes, lohPct,
                 totalObjects, lohObjects,
                 topLohTypes,
-                gen2Pct,
-                PerTypeGenerationProfiles: []);
+                PohBytes: 0,
+                PohObjects: 0,
+                Gen2Pct: gen2Pct,
+                PerTypeGenerationProfiles: [],
+                GenBytesAreApproximate: true,
+                FallbackMode: true,
+                LohThresholdPercent: options.LohThresholdPercent,
+                Gen0PressureThresholdPercent: options.Gen0PressureThresholdPercent,
+                PohThresholdPercent: options.PohThresholdPercent);
         }
 
         public void Dispose() { }

@@ -4,6 +4,25 @@
 import { el, sevCss } from './report.dom.js';
 import { slugifyAnchor } from './report.renderers.shared.js';
 import { ensureUniqueDomId } from './report.renderers.shared.js';
+import { buildTreeWidget } from './report.renderers.shared.js';
+import { resolveStr } from './report.renderers.shared.js';
+
+// Resolves pooled-string cells (see report.renderers.shared.js) back to their literal value.
+// Only non-numeric columns can contain pooled indices — the producer never pools a cell in a
+// number/bytes/formatted column, so leaving those untouched avoids misreading a legitimate
+// small numeric value as a pool index.
+function resolvePooledRow(values, headerMeta) {
+  let resolved = values;
+  for (let i = 0; i < values.length; i++) {
+    const meta = headerMeta[i];
+    const isNumericColumn = !!(meta && (meta.type === 'number' || meta.type === 'bytes' || meta.format));
+    if (!isNumericColumn && typeof values[i] === 'number') {
+      if (resolved === values) resolved = values.slice();
+      resolved[i] = resolveStr(values[i]);
+    }
+  }
+  return resolved;
+}
 
 function extractCellDisplay(cellData) {
   if (cellData && cellData.display != null) return String(cellData.display);
@@ -322,7 +341,10 @@ export function buildAnalyzerSection(section, i) {
   const sectionTables = Array.isArray(section.compactTables) ? section.compactTables.map(function (ct) {
     const headers = Array.isArray(ct.headers) ? ct.headers.map(function (h) { return (h && h.name) ? String(h.name) : String(h || ''); }) : [];
     const headerMeta = Array.isArray(ct.headers) ? ct.headers.map(function (h) { return ({ type: h && h.type ? String(h.type) : 'string', format: h && h.format ? String(h.format) : null, sortable: (h && (h.sortable === undefined)) ? true : Boolean(h && h.sortable) }); }) : [];
-    const rows = Array.isArray(ct.rows) ? ct.rows.map(function (r) { return Array.isArray(r.values) ? r.values : (Array.isArray(r) ? r : []); }) : [];
+    const rows = Array.isArray(ct.rows) ? ct.rows.map(function (r) {
+      const values = Array.isArray(r.values) ? r.values : (Array.isArray(r) ? r : []);
+      return resolvePooledRow(values, headerMeta);
+    }) : [];
     return { title: ct.title, headers: headers, headerMeta: headerMeta, rows: rows, rowLimit: ct.rowLimit };
   }) : [];
   if (sectionTables && sectionTables.length) {
@@ -353,13 +375,47 @@ export function buildAnalyzerSection(section, i) {
         count.textContent = rowCount + ' rows';
         tools.appendChild(count);
 
-        if (limit > 0 && rowCount > limit) {
-          const showAll = document.createElement('button');
-          showAll.type = 'button';
-          showAll.className = 'action-btn table-show-all-btn';
-          showAll.setAttribute('data-target-table', tableId);
-          showAll.textContent = 'Show all ' + rowCount + ' rows';
-          tools.appendChild(showAll);
+        const pageSizeOptions = [10, 20, 50, 100, 'all'];
+        if (rowCount > pageSizeOptions[0]) {
+          const pagination = el('div', 'table-pagination');
+          pagination.setAttribute('data-target-table', tableId);
+
+          const sizeLabel = document.createElement('label');
+          sizeLabel.className = 'table-pagination__size-label';
+          sizeLabel.textContent = 'Rows per page';
+          const sizeSelect = document.createElement('select');
+          sizeSelect.className = 'table-page-size-select';
+          sizeSelect.setAttribute('data-target-table', tableId);
+          sizeSelect.setAttribute('aria-label', 'Rows per page');
+          for (let oi = 0; oi < pageSizeOptions.length; oi++) {
+            const opt = document.createElement('option');
+            opt.value = String(pageSizeOptions[oi]);
+            opt.textContent = pageSizeOptions[oi] === 'all' ? 'All' : String(pageSizeOptions[oi]);
+            if (pageSizeOptions[oi] === limit) opt.selected = true;
+            sizeSelect.appendChild(opt);
+          }
+          sizeLabel.appendChild(sizeSelect);
+          pagination.appendChild(sizeLabel);
+
+          const prevBtn = document.createElement('button');
+          prevBtn.type = 'button';
+          prevBtn.className = 'action-btn table-page-prev-btn';
+          prevBtn.setAttribute('data-target-table', tableId);
+          prevBtn.textContent = 'Prev';
+          pagination.appendChild(prevBtn);
+
+          const pageIndicator = el('span', 'table-pagination__indicator');
+          pageIndicator.setAttribute('data-target-table-page', tableId);
+          pagination.appendChild(pageIndicator);
+
+          const nextBtn = document.createElement('button');
+          nextBtn.type = 'button';
+          nextBtn.className = 'action-btn table-page-next-btn';
+          nextBtn.setAttribute('data-target-table', tableId);
+          nextBtn.textContent = 'Next';
+          pagination.appendChild(nextBtn);
+
+          tools.appendChild(pagination);
 
           const printNote = el('div', 'table-print-note');
           printNote.textContent = 'Print/export summary: table body omitted. Showing summary only for ' + rowCount + ' rows.';
@@ -377,8 +433,8 @@ export function buildAnalyzerSection(section, i) {
         tableEl.id = tableId;
         tableEl.classList.add('detail-filterable-table');
         tableEl.dataset.responsiveStack = '1';
-        tableEl.dataset.limit = String(limit > 0 ? limit : 0);
-        tableEl.dataset.showAll = '0';
+        tableEl.dataset.pageSize = String(limit > 0 ? limit : 'all');
+        tableEl.dataset.page = '1';
         tableEl.dataset.hydrated = '0';
         tableEl.dataset.lazyHydrate = shouldLazyHydrate ? '1' : '0';
         const thead = document.createElement('thead');
@@ -772,6 +828,8 @@ export function buildAnalyzerSection(section, i) {
       if (group.hasDuplicateSubscriptions) addM('Dup Subscriptions', 'Yes — same subscriber registered multiple times');
       if (group.hasLifetimeMismatch) addM('Lifetime Mismatch', 'Yes — Gen2 publisher retaining Gen0/Gen1 subscribers');
       if (group.orphanedSubscriberInstances > 0) addM('Orphaned Instances', Number(group.orphanedSubscriberInstances).toLocaleString('en-US') + ' dead-subscriber pattern');
+      if (group.isTimerEvent) addM('Category', 'Timer — undisposed timers are a common source of process-lifetime leaks');
+      else if (group.isPropertyChangedEvent) addM('Category', 'INotifyPropertyChanged — the highest-frequency MVVM event');
       gBody.appendChild(metaGrid);
 
       const subTypes = Array.isArray(group.topSubscriberTypes) ? group.topSubscriberTypes : [];
@@ -826,7 +884,12 @@ export function buildAnalyzerSection(section, i) {
       if (inst.hasLifetimeMismatch) addM('Lifetime Mismatch', 'Yes — Gen2 publisher retaining Gen0/Gen1 subscribers');
       iBody.appendChild(metaGrid);
 
-      const subDetails = Array.isArray(inst.subscriberDetails) ? inst.subscriberDetails : [];
+      // Elements are either an inline subscriber-detail object or an int index into
+      // section.subscriberDetailPool (docs/refactor/report-payload-size-reduction-design.md, F4).
+      const subscriberDetailPool = Array.isArray(section.subscriberDetailPool) ? section.subscriberDetailPool : null;
+      const subDetails = (Array.isArray(inst.subscriberDetails) ? inst.subscriberDetails : []).map(function (d) {
+        return (typeof d === 'number' && subscriberDetailPool) ? (subscriberDetailPool[d] || d) : d;
+      });
       if (subDetails.length) {
         const sdLabel = el('div', 'event-leak-card__sub-label'); sdLabel.textContent = 'Subscriber Details:'; iBody.appendChild(sdLabel);
         const sdList = el('div', 'event-leak-card__sub-list');
@@ -836,7 +899,7 @@ export function buildAnalyzerSection(section, i) {
           const cnt = el('span', 'event-leak-card__sub-count'); cnt.textContent = Number(det.count || 0).toLocaleString('en-US');
           const typ = el('span', 'event-leak-card__sub-type'); typ.textContent = det.type || '';
           const mth = el('span', 'event-leak-card__sub-method'); mth.textContent = det.methodName ? ' → ' + det.methodName : '';
-          const sz  = el('span', 'event-leak-card__sub-size');  sz.textContent  = det.size > 0 ? ' ' + formatBytes(Number(det.size)) : '';
+          const sz  = el('span', 'event-leak-card__sub-size');  sz.textContent  = det.size > 0 ? ' ' + formatBytes(Number(det.size)) + (det.sizeIsExact ? ' (exact)' : ' (est.)') : '';
           row.appendChild(cnt); row.appendChild(typ); row.appendChild(mth); row.appendChild(sz);
           sdList.appendChild(row);
         }
@@ -866,6 +929,7 @@ export function buildAnalyzerSection(section, i) {
       scSum.appendChild(cntBadge);
       if (osIds) scSum.appendChild(osIds);
       if (cluster.truncated) { const tr = el('span', 'stack-cluster-card__truncated'); tr.textContent = ' (truncated)'; scSum.appendChild(tr); }
+      if (cluster.frameworkPattern) { const fp = el('span', 'stack-cluster-card__pattern'); fp.textContent = cluster.frameworkPattern; scSum.appendChild(fp); }
       scDetails.appendChild(scSum);
 
       const sig = el('div', 'stack-cluster-card__sig'); sig.textContent = cluster.signature || '';
@@ -873,6 +937,24 @@ export function buildAnalyzerSection(section, i) {
       scWrap.appendChild(scDetails);
     }
     content.appendChild(scWrap);
+  }
+
+  // ── TreeWidgets slot ──────────────────────────────────────────────────────
+  const treeWidgets = Array.isArray(section.treeWidgets) ? section.treeWidgets : [];
+  if (treeWidgets.length) {
+    const twWrap = el('div', 'typed-slot typed-slot--tree-widgets');
+    for (let twi = 0; twi < treeWidgets.length; twi++) {
+      const widget = treeWidgets[twi];
+      const twOuter = el('details', 'tree-widget-outer');
+      twOuter.setAttribute('data-collapsible', 'tree-widget');
+      const twSum = el('summary', 'tree-widget-outer__summary');
+      twSum.textContent = (widget.title || 'Tree') + (widget.anyTruncated ? '  ⚠ truncated' : '');
+      twOuter.appendChild(twSum);
+      const roots = Array.isArray(widget.roots) ? widget.roots : [];
+      twOuter.appendChild(buildTreeWidget(roots, { widgetClass: 'thread-cluster-tree' }));
+      twWrap.appendChild(twOuter);
+    }
+    content.appendChild(twWrap);
   }
 
   // ── Artifacts slot ────────────────────────────────────────────────────────

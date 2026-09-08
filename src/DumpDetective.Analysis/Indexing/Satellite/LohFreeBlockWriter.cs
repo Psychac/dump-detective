@@ -11,6 +11,9 @@ namespace DumpDetective.Analysis.Indexing.Satellite;
 /// <remarks>
 /// Record layout (24 bytes, little-endian):
 ///   SegmentAddress (8) | Offset (8) | Size (8)
+/// Offset is the free block's byte offset from SegmentAddress; consumers reconstruct the
+/// block's absolute address as SegmentAddress + Offset (e.g. to surface the largest free
+/// block's location for further WinDbg investigation).
 /// Consumers: LohFragmentationAnalyzer
 /// Typical size: &lt; 1 MB
 /// </remarks>
@@ -25,11 +28,9 @@ internal static class LohFreeBlockWriter
     // Their type name is "Free" with no namespace.
     private const string FreeTypeName = "Free";
 
-    public static long Write(string filePath, ClrHeap heap, CancellationToken cancellationToken)
+    public static long Write(Stream stream, ClrHeap heap, CancellationToken cancellationToken)
     {
-        using FileStream stream = new(filePath, FileMode.Create, FileAccess.Write,
-            FileShare.Read, bufferSize: 128 * 1024, FileOptions.SequentialScan);
-
+        long baseOffset = stream.Position;
         new IndexHeader(Magic, Version, recordCount: 0).WriteTo(stream);
 
         byte[] buf = ArrayPool<byte>.Shared.Rent(RecordSize * 1024);
@@ -85,7 +86,7 @@ internal static class LohFreeBlockWriter
         }
 
         stream.Flush();
-        IndexHeader.PatchRecordCount(stream, recordCount);
+        IndexHeader.PatchRecordCount(stream, recordCount, baseOffset);
         return recordCount;
     }
 
@@ -95,13 +96,11 @@ internal static class LohFreeBlockWriter
     /// Each candidate is <c>(SegmentStart, FreeObjectOffset, FreeObjectSize)</c>.
     /// </summary>
     public static long WriteFromCandidates(
-        string filePath,
+        Stream stream,
         IEnumerable<(ulong SegStart, ulong Offset, ulong Size)> candidates,
         CancellationToken cancellationToken)
     {
-        using FileStream stream = new(filePath, FileMode.Create, FileAccess.Write,
-            FileShare.Read, bufferSize: 128 * 1024, FileOptions.SequentialScan);
-
+        long baseOffset = stream.Position;
         new IndexHeader(Magic, Version, recordCount: 0).WriteTo(stream);
 
         byte[] buf = ArrayPool<byte>.Shared.Rent(RecordSize * 1024);
@@ -137,7 +136,7 @@ internal static class LohFreeBlockWriter
         }
 
         stream.Flush();
-        IndexHeader.PatchRecordCount(stream, recordCount);
+        IndexHeader.PatchRecordCount(stream, recordCount, baseOffset);
         return recordCount;
     }
 }

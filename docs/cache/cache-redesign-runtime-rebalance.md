@@ -1,0 +1,1060 @@
+# Cache Redesign — Runtime & Memory Rebalance
+
+The format redesign ([cache-format-clean-slate-redesign.md](cache-format-clean-slate-redesign.md),
+[cache-implementation-clean-slate-redesign.md](cache-implementation-clean-slate-redesign.md)) took
+`cache.bin` from 1,398.3 MiB to 342.50 MiB on the reference dump — 24.5% of where it started, with
+compression (v9) still unwritten. That result stands.
+
+What it did not do is cost the other two axes. Every number in
+[cache-redesign-measurements.md](cache-redesign-measurements.md) is a **byte count**. The single
+wall-clock figure in the whole series (§7: 51.7 s → 51.4 s) was measured for a different purpose —
+the per-open checksum memoisation — and was explicitly reported as inside run-to-run noise. Peak
+memory was never measured at all.
+
+So the redesign optimised one axis with instrumentation and moved the other two blind. This document
+covers (A) the measurement that closes that gap, and (B) the remediation plan the measurement gates.
+
+**Units:** MiB = 1024², matching the format docs. Elapsed times in seconds.
+
+---
+
+## 0. Environment of record
+
+Every number in this document is from one machine and one dump. Both matter, because the headroom
+argument below is a function of installed RAM.
+
+| | |
+|---|---|
+| Machine | Windows 11 Pro 26200, 8 logical cores, **15.7 GiB RAM** |
+| Volume | `D:` — 277 GB, 79 GB free. Dump, caches and scratch all colocated here |
+| Runtime | .NET SDK 10.0.400, Release configuration |
+| Reference dump | `D:\DUmps\Crash_IIS_BALTSTPRD\Date__03_23_2026__Time_06_21_21PM__Second_Chance_Exception_E0434352.dmp` |
+| Dump size | 3,350.3 MB (3.3 GB) |
+| Heap | 14,620,162 objects, 14,003 types |
+| Reachable graph | 6,686,490 nodes, 17,367,740 edges (recorded in the v8 commit) |
+| Current `cache.bin` | 342.5 MB on disk |
+
+15.7 GiB is the number that turns §B.1 and §B.4 below from an inefficiency into a problem. It is also
+why the 27.5 GB dump's projected figures are stated even though this measurement does not cover it —
+if the projections hold, that dump no longer fits.
+
+---
+
+## Part A — Measurement
+
+### A.1 Baseline commit: `d1dc4dcc`
+
+The redesign landed as a chain. Chronological order, oldest first:
+
+| Commit | What it changed | Bytes written? |
+|---|---|---|
+| `7ae6bf58` | §6.4 — per-open checksum memoisation | no (read path only) |
+| **`d1dc4dcc`** | **Traced the forward index; docs only** | **no — BASELINE** |
+| `ca938bf4` | Stop persisting the write-only forward-edge index | **yes** — first byte change |
+| `89e64b7c` | `MethodTable` dictionary encoding (v5) | yes |
+| `a4ad874d` | Report-nondeterminism doc | no |
+| `1c9d0b5c` | Narrowed `ObjectSizes` column (v6) | yes |
+| `ee022330` | Block-delta address columns + section manifest (v6) | yes |
+| `8138e1b0` | v6 address-column oracle test | no |
+| `ce080bcb` | `EnumerateRetainedSet` frequency measurement | no |
+| `966bdeab` | Derive dominator child list on demand (v7) | yes |
+| `916d3182` | True CSR reverse edge index (v8) | yes |
+| `68b413ad` | Doc trim | no |
+
+`d1dc4dcc` is the last commit before any change to what gets written. Picking it rather than
+something earlier is deliberate on two counts:
+
+- It **includes** `7ae6bf58`, so the checksum memoisation win is present in *both* arms and cancels
+  out. A baseline before it would credit the redesign with a read-path improvement it did not make.
+- It **excludes** `ca938bf4`, so the forward-index removal is charged to the redesign. That commit is
+  part of how the file got from 1,398.3 MiB to 342.50 MiB, so it belongs on the same ledger as the
+  1.3 GB → 400 MB result being explained.
+
+`cache.bin` at `d1dc4dcc` should measure ≈1,398.3 MiB. If it does not, the baseline is wrong and
+everything downstream is suspect — this is the protocol's first assertion, not an afterthought.
+
+### A.2 Arms
+
+Four cells, run strictly in this order, strictly one at a time:
+
+| # | Arm | Cache state | What it isolates |
+|---|---|---|---|
+| 1 | baseline `d1dc4dcc` | cold (dir deleted) | full index build — the write path |
+| 2 | baseline `d1dc4dcc` | warm (cell 1's cache) | analysis over the old format — the read path |
+| 3 | current `HEAD` | cold (dir deleted) | full index build — the write path |
+| 4 | current `HEAD` | warm (cell 3's cache) | analysis over v8 — the read path |
+
+Cold and warm are separated because the two suspected regressions live in different places. The
+reverse-index build (§B.1–B.3) is cold-path only and would be invisible in a warm run; the
+per-record decode overhead (§B.5) is warm-path and would be swamped by build time in a cold run.
+
+Baseline runs first in both pairs so that neither arm gets an advantage from a colder OS page cache.
+
+**Isolation.** Neither arm touches the dump's colocated `.dumpindex/`. Each gets its own directory
+via `--cache-dir`, both on `D:` so the two arms see identical storage characteristics:
+
+```
+D:\DUmps\_ddbench\baseline\<dump>.dumpindex\
+D:\DUmps\_ddbench\current\<dump>.dumpindex\
+```
+
+The existing 342.5 MB colocated cache is left untouched throughout, and `D:\DUmps\_ddbench` is
+deleted when the measurement is finished.
+
+**Build isolation.** The baseline is checked out as a `git worktree`, not a branch switch, so `HEAD`
+stays clean and both binaries exist simultaneously. Both built `-c Release`.
+
+### A.3 Metrics per cell
+
+| Metric | Source | Why |
+|---|---|---|
+| Wall clock | `Stopwatch` around the child process | the headline |
+| **Peak private bytes** | `Process.PeakPagedMemorySize64` | **the memory headline** — private commit, excludes the mmap'd dump |
+| Peak working set | `Process.PeakWorkingSet64` | reported for completeness; includes dump pages, so it is noisy |
+| `cache.bin` size | file length after the run | confirms which format each arm actually wrote |
+| Per-phase managed alloc | `DD_PERF_INDEX_MEMORY=1` on stderr | attributes a cold-run delta to a phase |
+| Section open/verify tally | `DD_PERF_CACHE_SESSION=1` on stderr | attributes a warm-run delta to a section |
+
+Peak private bytes is the metric that answers the question. `PeakWorkingSet64` on a run that
+memory-maps a 3.3 GB dump is dominated by file-backed pages the GC never touched, and moves with
+whatever else the OS is doing.
+
+### A.4 Confounds, stated rather than fought
+
+- **OS page cache.** The cold run pulls the dump into the standby list, so the warm run that follows
+  reads it back for free. Both arms follow the identical cold→warm sequence, so the *comparison*
+  holds even though neither warm number is a true cold-start figure. Not worth fighting with
+  `EmptyStandbyList` on a 15.7 GiB machine.
+- **n=1 on cold cells.** Cold rebuilds are minutes. The first pass is n=1 to establish magnitude. If
+  a delta lands within ~10% it gets repeated before anything is concluded from it — §7 of the
+  measurements doc is the precedent for not turning noise into a claim.
+- **Warm cells n=3.** They are ~51 s, so repetition is nearly free, and the warm-path deltas under
+  suspicion (§B.5) are small enough that n=1 could not resolve them.
+- **Different formats do different work.** The arms are not doing byte-identical work — that is the
+  point — but they must produce the *same analysis*. Report output is diffed between arms as a
+  correctness gate; a runtime win from accidentally skipping work is not a win.
+
+### A.5 Harness
+
+`scripts/bench-cache-rebalance.ps1` (scratch, not committed unless it proves reusable). Per cell:
+starts the CLI with `Start-Process -PassThru`, waits, then reads the peak counters off the retained
+process handle before releasing it — Windows keeps them valid after exit as long as the handle is
+open. Stdout/stderr tee to a per-cell log; the `[PERF]` lines are extracted afterwards.
+
+---
+
+## Part A-R — Results (measured 2026-09-06)
+
+### A-R.1 Headline
+
+**The runtime premise did not reproduce.** Cold rebuild got *faster*; warm analysis is unchanged.
+Peak memory did rise, but by ~200 MB, not the ~1 GB an early n=1 pair suggested.
+
+| Arm | `cache.bin` | n | Wall clock (median) | Peak private MB (median) |
+|---|---:|---:|---:|---:|
+| 1 · baseline cold `d1dc4dcc` | 1,398.3 MB | 6 | 105.5 s | 4,622.5 |
+| 5 · fwd-index removed cold `ca938bf4` | 935.9 MB | 2 | 100.0 s | 4,703.1 |
+| 3 · current cold `HEAD` | **342.5 MB** | 5 | **97.0 s** | **4,819.9** |
+| 2 · baseline warm | 1,398.3 MB | 3 | 54.3 s | 3,051.4 |
+| 4 · current warm | 342.5 MB | 3 | **53.0 s** | **3,039.1** |
+
+| Path | Δ time | Δ peak private |
+|---|---:|---:|
+| **Cold** | **−8.5 s (−8.1%)** | **+197.4 MB (+4.3%)** |
+| **Warm** | −1.3 s (−2.4%) — noise | −12.3 MB (−0.4%) — noise |
+
+`cache.bin` at `d1dc4dcc` measured 1,398.3 MB, matching the format doc's stated starting point
+exactly. The baseline is the right commit.
+
+### A-R.2 The cold-path speedup is the forward-index removal, not the encodings
+
+Arm 5 exists to split the two effects bundled into "current", and it splits them cleanly:
+
+| Step | Δ time | Δ peak private |
+|---|---:|---:|
+| `d1dc4dcc` → `ca938bf4` (stop persisting forward index) | −5.5 s | +80.6 MB |
+| `ca938bf4` → `HEAD` (v5–v8 encodings) | −3.0 s | +116.8 MB |
+
+The v5–v8 encoding work — dictionary encoding, narrowed sizes, block-delta addresses, derived
+dominator children, CSR reverse index — is **runtime-neutral to slightly positive** on the cold path
+and free on the warm path. It did not cost time anywhere that this measurement can see.
+
+### A-R.3 The memory delta is B.1, confirmed to within 5%
+
+Predicted from `ReverseEdgeCsrBuilder`'s allocation shape at this dump's E = 17,367,740 edges and
+R = 6,686,490 rows:
+
+| Live simultaneously | MB |
+|---|---:|
+| `resolvedBuckets` — 2 × `int[E]` | 132.5 |
+| `children` — `int[E]` | 66.3 |
+| `degree` + `offsets` + `cursor` — 3 × `int[R]` | 76.5 |
+| `sortedReachableAddresses` — `ulong[R]` | 51.0 |
+| **Total** | **326.3** |
+| Prior path (4 concurrent raw buckets) | ≈139 |
+| **Predicted delta** | **+187** |
+
+**Measured delta: +197.4 MB.** Prediction and measurement agree to 5%. B.1 is the mechanism; nothing
+else material is in play on this dump.
+
+### A-R.4 B.5 is dead — the streaming decode costs nothing measurable
+
+Warm path is −1.3 s and −12.3 MB, both inside noise across n=3. The v6 per-record block-delta add,
+size sentinel compare and `_typeDictionary` indirection do not show up. The read-traffic reduction
+(24 → 8 bytes/record) evidently pays for them. §B.5 is closed with no action.
+
+### A-R.5 Measurement quality — stated honestly
+
+- **Peak private bytes is noisy at this scale.** Baseline cold spanned 4,103–4,773 MB across 6 runs;
+  current spanned 4,662–5,147 across 5. The distributions overlap. The +197 MB median delta is real
+  — it is corroborated independently by A-R.3's arithmetic — but it is *not* cleanly separated by
+  the process-level metric alone. Peak committed heap depends on GC timing, which is nondeterministic.
+- **The first cold run of all is ~7% slower** (137.8 s on a genuinely cold OS page cache, then
+  111.0 s). All reported cells were run with the dump already resident. Both arms got identical
+  treatment.
+- **Ordering bias.** Arms were run in blocks, not interleaved. Current's cold times drift downward
+  within its block (98.5 → 94.7 s), so some of the −8.5 s may be system warmup rather than the build.
+  The direction of the runtime result is safe; the exact magnitude is not.
+- **n=2 on arm 5.** Enough to attribute a direction, not enough to defend the ±MB split in A-R.2 to
+  better than "roughly half each".
+- `DD_PERF_INDEX_MEMORY` totals were checked and are *lower* in current (9.34 vs 9.70 GB allocated;
+  reverse-index phase 3,084 vs 3,236 MB). Cumulative allocation is not residency — it moved the
+  opposite way from peak, which is exactly why peak private was the metric of record.
+
+### A-R.6 What this changes
+
+The premise this investigation started from — "runtime got slower and memory went higher" — is
+**half right, and the half that is right is smaller than it looked**. On the 3.3 GB reference dump:
+
+- Runtime: no regression. Cold is 8% faster.
+- Memory: +4.3% on cold, none on warm.
+
+That removes the urgency from C.2 *for this dump*. It does not remove the finding: B.1's arithmetic
+scales with E and R, and on the 27.5 GB dump those are ≈12.4× larger — ≈2.3 GB of extra residency on
+a machine with 15.7 GiB of RAM. The case for the remediation is now a **large-dump headroom** case,
+not a "we regressed the reference dump" case, and Part C is re-gated accordingly.
+
+---
+
+## Part B — What the code review already found
+
+Derived from reading the shipped v6/v7/v8 code plus the node/edge counts in the v8 commit message.
+**None of this is measured yet** — Part A exists to confirm or kill it. Ordered by expected size of
+the regression.
+
+Projections for the 27.5 GB dump scale by the ratio of raw reverse-edge bytes recorded in
+measurements §2 (3,064.2 MB / 245.9 MB ≈ 12.4×), giving ≈191M edges over ≈83M reachable nodes.
+
+### B.1 `ReverseEdgeCsrBuilder` holds every resolved bucket resident — cold path
+
+[`ReverseEdgeCsrBuilder.cs:56`](../../src/DumpDetective.Analysis/Indexing/ReverseIndex/ReverseEdgeCsrBuilder.cs#L56)
+allocates `ResolvedBucket[bucketCount]` and keeps all of it alive across the counting/filling
+barrier at [line 93](../../src/DumpDetective.Analysis/Indexing/ReverseIndex/ReverseEdgeCsrBuilder.cs#L93).
+The retired `ReverseEdgeSorter` loaded one bucket, sorted it, wrote it, and dropped it — bounded at 4
+concurrent buckets by design. The replacement is bounded at *all* buckets.
+
+| Component | Reference dump | 27.5 GB dump |
+|---|---:|---:|
+| `resolvedBuckets` (2 × `int[]`, 8 B/edge) | 139 MB | 1,532 MB |
+| `children` (4 B/edge) | 69 MB | 766 MB |
+| `degree` + `offsets` + `cursor` (12 B/row) | 80 MB | 996 MB |
+| `sortedReachableAddresses` (8 B/row) | 53 MB | 664 MB |
+| **Peak** | **≈341 MB** | **≈3.96 GB** |
+| Prior (4 concurrent raw buckets) | ≈139 MB | ≈215 MB |
+
+The type's own remarks name the choice — *"this array is kept resident across the barrier below
+rather than discarded per bucket"* — and defend it as "a size cap, not a memory-safety requirement,
+at the scale measured so far." The scale measured so far was zero.
+
+### B.2 Resolution is two random binary searches per edge — cold path
+
+[`ReverseEdgeCsrBuilder.cs:142-143`](../../src/DumpDetective.Analysis/Indexing/ReverseIndex/ReverseEdgeCsrBuilder.cs#L142-L143)
+calls `ResolveRow` twice per edge, each an `Array.BinarySearch` over the full sorted reachable array.
+
+| | Reference dump | 27.5 GB dump |
+|---|---:|---:|
+| Searches | 34.7M | 383M |
+| Probes each (log₂ R) | ~23 | ~27 |
+| Random reads | ~800M | **~10.3 billion** |
+| Over an array of | 53 MB | 664 MB |
+
+At `MaxDegreeOfParallelism = 4`. Nothing about this is cache-friendly: the buckets are hash-
+partitioned by child address, so each bucket's addresses are scattered uniformly across the whole
+reachable range.
+
+This project has already measured this exact pattern and rejected it.
+[`DiskBackedObjectIndexWriter.cs:1176`](../../src/DumpDetective.Analysis/Indexing/DiskBackedObjectIndexWriter.cs#L1176)
+carries a §10.8 note that Stage B replaced *"one random-access binary search per node"* with a sort +
+sequential merge for exactly this reason, implemented in `ScratchFileObjectMetadataLookup.ResolveBatch`.
+v8 reintroduced the abandoned pattern, per edge instead of per node, at roughly 5× the volume.
+
+### B.3 The reverse CSR is built twice — cold path
+
+This is the structural one, and it subsumes B.1 and B.2.
+
+[`ReachableGraphWalker.WalkWithCsr`](../../src/DumpDetective.Analysis/Traversal/Dominator/ReachableGraphWalker.cs#L298)
+already builds a complete reverse CSR — `revOffsets` / `revTargets`, exposed on
+`ReachableGraphWalkResult` — from the same edge set, keyed by walk node id. In the same loop, at
+[line 257](../../src/DumpDetective.Analysis/Traversal/Dominator/ReachableGraphWalker.cs#L257), it
+streams every one of those edges to `ReverseEdgeExtractor`, which writes them to disk scratch at 16
+B/edge so that Phase B can read them back, resolve them, and rebuild the identical structure keyed by
+row instead of node id. `DominatorRowMapping.Compute` already computes the nodeId↔row mapping.
+
+When Stage B runs — `buildCsr: buildStageB`, the normal path — the Phase A scratch write (278 MB on
+the reference dump, ~3 GB on the 27.5 GB dump), the Phase B re-read, all the binary searches in B.2
+and all the residency in B.1 are **redundant**. The persisted section can be produced by permuting
+the in-memory `revTargets` through the row mapping: O(N + E), sequential, no scratch, no search.
+
+`WalkWithoutCsr` has no in-memory CSR, so the existing path has to stay reachable for that case.
+
+### B.4 `_fanoutPerBucket` is dead weight v8 left behind — cold path
+
+[`ReverseEdgeExtractor.cs:30`](../../src/DumpDetective.Analysis/Indexing/ReverseIndex/ReverseEdgeExtractor.cs#L30)
+is a `Dictionary<ulong,int>` per bucket holding one entry per distinct child address, updated inside
+the bucket lock on **every** edge, and held for the entire heap walk.
+
+Its only consumer is `GetStatistics()`, which fed `ReverseIndexMetadata.TotalEdgesRecorded`. v8
+deleted that metadata section and stopped calling it. `GetStatistics()` now has **zero callers in
+src or tests** — verified, not assumed.
+
+At ~36 B per `Dictionary<ulong,int>` entry: ≈240 MB on the reference dump, ≈3 GB on the 27.5 GB dump,
+held concurrently with the walk's own (necessary) `idMap` of the same cardinality — plus a dictionary
+probe and insert per edge, inside a lock.
+
+Free to delete. No format change, no behaviour change.
+
+### B.5 Per-record decode on the streaming read path — warm path, unresolved
+
+v6 added, per object, in
+[`ObjectIndexReader.ZeroCopyColumnReader.FillBatch`](../../src/DumpDetective.Analysis/Indexing/ObjectIndexReader.cs#L191-L247):
+a block-base add and array index for the address, a sentinel compare for the size, and a
+`_typeDictionary[]` indirection for the MethodTable. Against that, it cut read traffic from 24 to 8
+bytes per record.
+
+Whether that is a net win depends on whether the loop is bandwidth-bound or CPU-bound, and the
+`_typeDictionary` indirection (112 KB, randomly accessed) is the part most likely to hurt. **No
+prediction offered** — cells 2 and 4 settle it. Listed here so it is not mistaken for an oversight.
+
+### B.6 Ruled out — v7
+
+`DominatorChildIndexReader`'s in-memory inversion is lazy, and measurements §15 found its only
+consumer, `StaticRootLeakDetector`, called zero times on every real dump tested. It allocates
+`int[R+1] + int[R] + int[R+1]` when it runs; it does not run. No action.
+
+---
+
+## Part C — Remediation, gated on Part A
+
+Ordered by ratio of expected recovery to risk. **Every item here gives back zero bytes** — the file
+stays at 342.50 MiB, and v9 compression remains available on top.
+
+Each item states the gate that must be satisfied for it to be worth doing. If the measurement
+contradicts the derivation, the item is dropped rather than argued.
+
+> **Re-gated after Part A-R.** Runtime needs no remedy — there is no runtime regression to fix. The
+> memory items stand, but their justification changed from "the reference dump regressed" to "the
+> 27.5 GB dump has no headroom on a 15.7 GiB machine". C.4 is dropped outright.
+
+### C.1 Delete `_fanoutPerBucket` and `GetStatistics` — ✅ SHIPPED
+
+**Gate:** none. `GetStatistics()` had no production callers; this was dead code regardless of what
+Part A showed.
+
+Removed the dictionary array, the per-edge probe/insert in `RecordEdge` and `RecordEdgesBatch`, and
+`ReverseEdgeExtractionStats` / `ReverseEdgeBucketStats` with it. The bucket lock stays — it still
+guards the `BinaryWriter`.
+
+`GetStatistics()` was not *entirely* dead: seven unit tests used it as their observation channel.
+Rather than delete the coverage, those assertions were re-expressed against the raw scratch bucket
+files via a new `ReverseEdgeBucketFileReader` helper. That is a strictly stronger test: the files are
+the extractor's only real output — Phase B reads nothing else — so a counter could have agreed with
+the assertions while the persisted bytes disagreed. Two assertions were added that the counter could
+not express at all: that every edge sharing a child lands in exactly one bucket (the invariant
+`ReverseEdgeCsrBuilder`'s lock-free passes depend on), and that concurrent writes never tear.
+`RecordEdgesBatch` also gained direct coverage, which it previously had none of.
+
+**Predicted −240 MB. Measured −688.3 MB (−14.3%).**
+
+| Cold, reference dump | n | Wall clock | Peak private | Peak spread |
+|---|---:|---:|---:|---:|
+| baseline `d1dc4dcc` | 6 | 105.5 s | 4,622.5 MB | 670 MB |
+| current `HEAD` | 5 | 97.0 s | 4,819.9 MB | 485 MB |
+| **`HEAD` + C.1** | 3 | **94.8 s** | **4,131.6 MB** | **12 MB** |
+
+The overshoot against prediction is real and has a plausible cause: the dictionary held ~240 MB of
+live data, but it is also a large, steadily-growing, GC-visible structure being written on every
+edge, so the committed heap had to carry it *plus* collection headroom. Removing it took out both.
+The collapse in run-to-run spread from 485 MB to **12 MB** is the corroborating evidence — that
+dictionary's collection timing was the dominant source of peak-memory variance in every earlier
+measurement on this page, which is also why Part A's cold cells needed 5–6 samples to read.
+
+Warm path unchanged, as expected for a build-path-only change: 53.2 s / 3,036.9 MB against `HEAD`'s
+53.0 s / 3,039.1 MB.
+
+**Net position against the pre-redesign baseline, after C.1:**
+
+| Axis | `d1dc4dcc` | `HEAD` + C.1 | Change |
+|---|---:|---:|---:|
+| `cache.bin` | 1,398.3 MB | 342.5 MB | **24.5% of original** |
+| Cold rebuild | 105.5 s | 94.8 s | **−10.1%** |
+| Cold peak private | 4,622.5 MB | 4,131.6 MB | **−10.6%** |
+| Warm analysis | 54.3 s | 53.2 s | −1.1 s (noise) |
+| Warm peak private | 3,051.4 MB | 3,036.9 MB | −14.5 MB (noise) |
+
+All three axes are now better than before the redesign. The +197 MB cold-memory regression Part A
+found is not merely repaid — peak is 491 MB *below* baseline. Full test suite green (1,161 passed,
+0 failed, 25 real-dump tests skipped by their env gate).
+
+### C.2 Feed the persisted CSR from the walk's in-memory reverse CSR
+
+**Gate:** ✅ met, but weaker than expected. Cold peak private is +197.4 MB, matching B.1's arithmetic
+to 5% (A-R.3). At 3.3 GB that is a 4.3% regression and not on its own worth a structural change; the
+justification is the 12.4× scaling to ≈2.3 GB on the 27.5 GB dump, which this measurement did not
+cover. **Decision needed before starting** — see "Open question" below.
+
+When `buildCsr` is true, skip Phase A's scratch write and Phase B entirely: permute
+`ReachableGraphWalkResult.RevOffsets` / `RevTargets` from node-id space into row space using the
+existing `DominatorRowMapping`, and hand the result to `ReverseEdgeContainerWriter` unchanged. Keep
+the extractor + `ReverseEdgeCsrBuilder` path alive for `WalkWithoutCsr`.
+
+This resolves B.1, B.2 and B.3 in one change, and removes 278 MB of scratch write + read-back on the
+reference dump.
+
+Correctness gate: the existing `ReverseEdgeCsrRealDumpTests` internal-consistency check
+(`EnumerateChildCounts`' own total against the TOC record count) plus the live-heap cross-check must
+both still pass, and the produced `ReverseEdgeOffsets`/`ReverseEdgeChildren` must be **byte-identical**
+to what the current path produces on the reference dump. That equality is checkable directly and is
+the acceptance criterion — not a sampled comparison.
+
+### C.3 Bound `ReverseEdgeCsrBuilder`'s residency — fallback only
+
+**Gate:** C.2 turns out to be impractical, *or* the `WalkWithoutCsr` path is shown to be exercised in
+production. (Current reading says it is not, on the Stage-B path.)
+
+Two passes over the scratch files instead of holding all resolved buckets: pass 1 resolves child rows
+only and accumulates `degree`; pass 2 re-reads and fills. Additionally, build `offsets` in place over
+`degree` and reuse it as the cursor, repairing the shift afterwards — that drops 8 B/row and 8 B/edge
+of residency. Resolution cost is unchanged, so this is strictly the memory half of the problem.
+
+Not worth doing if C.2 lands. Recorded so the option is not re-derived later.
+
+### C.4 ~~Warm-path decode~~ — DROPPED
+
+**Gate: not met.** A-R.4 measured the warm path at −1.3 s / −12.3 MB, both inside noise. There is
+nothing to fix. Closed.
+
+### C.5 Not in scope
+
+- **Giving back format bytes.** Nothing above trades disk size for speed. If Part A shows a
+  regression that *can only* be fixed by reverting an encoding, that is a separate decision with its
+  own evidence, brought back rather than taken unilaterally.
+- **v9 block compression.** Held last by prior decision (§7.1.1) and unaffected by any of this. It
+  should be re-costed on both axes when it happens, using the harness Part A builds — which is the
+  standing lesson from this whole exercise.
+
+---
+
+## Part D — The 27.5 GB dump, measured (2026-09-06)
+
+Run on `HEAD` + C.1, one cold rebuild, single process, nothing else running.
+`D:\DUmps\21-04\w3wp.exe_260421_175618.dmp`, 26,244 MB, 87,104,236 objects.
+
+### D.1 It fits — with thin margin and visible thrashing
+
+| | |
+|---|---:|
+| Wall clock | **1,310.5 s** (21.8 min) |
+| **Peak private** | **13,276.3 MB (12.97 GB)** |
+| Peak working set | 9,262.4 MB (9.05 GB) — capped by physical RAM |
+| `cache.bin` | **2,418.1 MB** |
+| Exit | clean, no OOM |
+
+The 3.9 GB gap between peak private and peak working set is pagefile. System available memory bottomed
+at **356 MB** during the reachability walk, and the walk's throughput visibly decayed while it was
+there. The run survived on a 35.1 GB commit limit, not on RAM.
+
+**Disk result confirmed at scale.** The produced `cache.bin` is 2,418.1 MB, byte-for-byte the same
+size as the pre-existing v8 cache alongside the dump, whose v4 predecessor is still there as
+`cache.bin.bak` at 9,423.7 MB. That is **9,423.7 → 2,418.1 MiB = 25.7%**, tracking the reference
+dump's 24.5% closely. The redesign's size result holds at 8× the dump size.
+
+### D.2 Part B's scale projection was 40% too high
+
+| | Part B projected | Measured |
+|---|---:|---:|
+| Edges (E) | ~191M | **137,033,360** |
+| Reachable rows (R) | ~83M | **58,339,936** |
+
+The projection scaled by raw reverse-edge bytes from measurements §2, which over-counted. Re-deriving
+B.1's residency at the real E and R:
+
+| Live simultaneously in `ReverseEdgeCsrBuilder` | Size | Under C.2 |
+|---|---:|---|
+| `resolvedBuckets` — 2 × `int[E]` | 1.02 GB | removed |
+| `children` — `int[E]` | 0.51 GB | kept — it is the output |
+| `degree` + `offsets` + `cursor` — 3 × `int[R]` | 0.65 GB | `offsets` kept, rest removed |
+| `sortedReachableAddresses` — `ulong[R]` | 0.43 GB | removed |
+| **Total** | **2.62 GB** | **≈1.89 GB removed** |
+
+So C.2 is worth ≈1.9 GB of a 12.97 GB peak (**−15%**), plus 2.04 GB of scratch write-and-read-back
+that disappears entirely. It would take peak to ≈11.1 GB — enough to stop the run relying on the
+pagefile, not enough to make it comfortable.
+
+### D.3 The walk, not the builder, is the dominant resident consumer
+
+Sampled mid-run, the process was already at **10.4 GB commit while still inside the reachability
+walk** — before `ReverseEdgeCsrBuilder` had started. The builder took it from there to 13.0 GB.
+
+That reorders the remaining work. `ReachableGraphWalker` holds, concurrently: a
+`Dictionary<ulong,int>` `idMap` at 58.3M entries (≈2.0 GB), `ChunkedBuffer` `edgeFrom`/`edgeTo`
+(≈1.1 GB), the `fwdTargets`/`revTargets`/`fwdOffsets`/`revOffsets` CSR arrays (≈1.6 GB), plus
+`addresses`/`outDegree`/`isRoot`. Roughly 6 GB of the 13 GB peak is the walk.
+
+Two consequences:
+
+- C.2 is now **doubly attractive**, because the walk's `revOffsets`/`revTargets` are already paid for.
+  Reusing them removes the builder's duplicate without adding anything — the memory is resident
+  either way.
+- The larger remaining lever is the walk itself, which is out of scope here and belongs in its own
+  investigation. Noted, not pursued. §7.3 item 2 of the dominator integration doc already records a
+  failed attempt (`DenseIdMap`, 2.6× slower with no peak win) — that history should be read first.
+
+### D.4 Verdict
+
+The current build fits the 27.5 GB dump on a 15.7 GiB machine. It does so by paging ~3.9 GB and
+driving available memory to 356 MB, which is a real degradation, not a clean pass. C.1 already
+removed ≈3 GB that a previously-successful build was carrying, so today's build has meaningfully more
+headroom than the one that produced the `cache.bin` sitting next to that dump.
+
+**C.2 is justified** — 1.9 GB off peak and 2.04 GB of scratch I/O gone, on a run demonstrably short
+of memory — but it is a margin improvement, not a rescue. It does not need to be done urgently, and
+it should not be sold as making large dumps comfortable. Only attacking the walk would do that.
+
+### D.5 Full instrumentation record
+
+Recorded here because the run's logs live in a session scratchpad that does not survive, and a
+27.5 GB cold rebuild is expensive enough that nobody should have to repeat it to recover these.
+
+**Scan shape** (`DD_PERF_INDEX_MEMORY=1`): 63 segments, DOP=8, 87,104,236 objects, per-worker
+columnar chunk buffers peaking at 100.0 MB concurrent (524,288 entries/column), zero leaked-live.
+For comparison the reference dump was 8 segments, DOP=4, 12.5 MB concurrent.
+
+**Cumulative allocation by phase** — total 116.16 GB, 1,431 B/object. Note this is bytes *allocated*,
+which the GC recycles continuously; it is not residency, and on this page it has repeatedly moved in
+the opposite direction from peak (see A-R.5):
+
+| Phase | Allocated | % |
+|---|---:|---:|
+| parallel heap scan (incl. edge extraction) | 51,227.9 MB | 43.1% |
+| satellite sections | 40,671.3 MB | 34.2% |
+| reverse index (CSR build + write) | 19,333.8 MB | 16.3% |
+| reachability walk | 5,468.8 MB | 4.6% |
+| forward index (sort + write) + TypeAggregates | 2,239.3 MB | 1.9% |
+| columnar scratch concatenation | 4.4 MB | 0.0% |
+
+**GC**: gen0 = 16,644, gen1 = 7,464, gen2 = 108. Managed heap at exit 12,153.5 MB.
+
+**Wall-clock breakdown** (total 1,310.5 s):
+
+| Phase | Time |
+|---|---:|
+| Load dump (DAC 448 ms) | 0.7 s |
+| **Scan + index heap** | **1,105.3 s** |
+| ↳ indexing heap | 335.5 s |
+| ↳ computing exact dominator tree (tracing heap graph) | 213.7 s |
+| ↳ shared heap index scan | 127.5 s |
+| ↳ computing exact dominator tree (resolving node metadata) | 46.7 s |
+| ↳ **building reverse-index CSR** | **39.6 s** |
+| ↳ flushing reverse-index edges | 2.2 s |
+| ↳ flushing forward-index edges | 1.0 s |
+| Run analyzers — of which `building publisher registry` (EventLeak) | 127.3 s |
+| Build report | 81.4 s |
+
+The reverse-index CSR phase is **39.6 s of 1,310.5 s — 3.0% of the run**, which is what caps C.2's
+runtime upside regardless of how much work it removes. Inside it: 32.6 s resolving 53 buckets at
+DOP 4 (per-bucket 1.8–5.8 s), 7.0 s prefix-sum + fill of 137,033,360 child entries, 8.5 s writing
+both sections into the container.
+
+**Checksum session** (`DD_PERF_CACHE_SESSION=1`): 11 container opens, 131 section opens, 24 verified
+/ 107 skipped by memoisation, 2,386.9 MiB hashed. `Roots`, `Handles` and `LargeObjects` are each
+still verified twice — the residual §6.1 gap, unchanged at this scale.
+
+### D.6 Five sections written and never read on this dump
+
+The same check that condemned the `ForwardEdge*` sections in measurements §9, re-run at 27.5 GB on a
+full default analyzer set. Sections the run **never touched**:
+
+| Never read | Note |
+|---|---|
+| `TypeAggregates` | read on the reference dump, not here |
+| `StringDedup`, `StringDedupMeta` | read on the reference dump, not here |
+| `ObjectAddressOverflow` | genuinely empty — no address delta escaped at 4 bytes |
+| `SectionManifest` | v6 rider; never read on either dump |
+| `ForwardEdgeBuckets/Directories/Metadata` | not written since `ca938bf4` |
+| `ReverseEdgeBuckets/Directories/Metadata` | not written since v8 |
+| `DominatorChildOffsets/ChildAddresses` | not written since v7 |
+| `Objects`, `EventCandidates` | never written |
+| `RootStackThreadAttribution` | known — §12.2's report wiring is deliberately deferred |
+
+`TypeAggregates`, `StringDedup` and `StringDedupMeta` being read on the 3.3 GB dump but not the
+27.5 GB one is the interesting part: it means the touch set is **analyzer-path dependent, not
+format dependent**, so "never read" from a single run is not sufficient grounds to stop writing a
+section. That is a correction to how measurements §9's method should be applied — §9 happened to be
+safe because the `ForwardEdge*` sections had no reader at all, which a source search confirmed
+independently of any run. `SectionManifest` is the one entry here that looks like a genuine §9-style
+candidate, and it is small enough not to matter.
+
+Not actioned. Recorded so the next person to run this check has a second data point rather than
+re-deriving one.
+
+### D.7 What was *not* measured
+
+Only the **after** arm (`HEAD` + C.1) was run on this dump. There is no baseline arm, so:
+
+| Axis | Before | After | Status |
+|---|---|---|---|
+| Disk index size | 9,423.7 MiB (`cache.bin.bak`, format v4) | 2,418.1 MiB | ✅ both measured |
+| Cold runtime | — | 1,310.5 s | ⚠ after only |
+| Peak memory | — | 13,276.3 MB | ⚠ after only |
+
+The disk comparison is real: `cache.bin.bak` is a format-v4 container sitting next to the dump, and
+the run reproduced the v8 size exactly. Runtime and peak memory have **no before figure on this
+dump** — that arm was deliberately skipped, since Part A had already settled "did we regress" on the
+reference dump and the 27.5 GB question was only "does the current build fit".
+
+Anyone wanting the full 3×2 grid needs one more cold rebuild at `d1dc4dcc`. Expect it to be slower
+(it persists the forward index) and to peak meaningfully higher (it carries the ~3 GB fanout
+dictionary C.1 removed, at this dump's 58.3M distinct children) — plausibly 16 GB+ against a 35.1 GB
+commit limit and 15.7 GiB of RAM. That is a real OOM risk on this machine, which is why it has not
+been run speculatively.
+
+---
+
+## Part E — Where the cold build's time actually goes, and what can be cut
+
+Single-pass review of the indexing/caching path against Part D's phase timings, on the explicit
+premise that **some accuracy or robustness tradeoff is acceptable**. Everything below is anchored to
+measured phase durations from the 27.5 GB run, not to reading the code alone.
+
+### E.0 Time budget, 27.5 GB cold build (1,310.5 s)
+
+| Phase | Time | % of run | In scope here |
+|---|---:|---:|---|
+| `indexing heap` — parallel scan + forward-edge extraction (DOP 8) | 335.5 s | 25.6% | yes |
+| `computing exact dominator tree (tracing heap graph)` — the walk | 213.7 s | 16.3% | yes |
+| `enumerating GC roots` — `Roots` section + field-name trailer | **200.3 s** | **15.3%** | yes |
+| `building publisher registry` — EventLeakAnalyzer | 127.3 s | 9.7% | no — analyzer |
+| Build report | 81.4 s | 6.2% | no |
+| `computing exact dominator tree (resolving node metadata)` | 46.7 s | 3.6% | yes |
+| `building reverse-index CSR` | 39.6 s | 3.0% | yes |
+| **Section checksum verification** (3 labelled sections only) | **35.9 s** | **2.7%** | yes |
+| `sorting forward-index buckets` | 28.6 s | 2.2% | yes |
+| `writing reverse-index CSR into cache.bin` | 8.5 s | 0.6% | yes |
+| Identified subtotal | ~1,117 s | ~85% | |
+
+Two items in that table were invisible before Part D and are the interesting ones: root enumeration
+at 15.3%, and checksum verification at 2.7% *from only three labelled sections* out of 24 verified.
+
+### E.1 ✅ SHIPPED — compute the dominator sections' checksums in flight
+
+**⚠ This section's original diagnosis was wrong and is corrected here.** It attributed the measured
+35.9 s to the *reader* re-hashing sections on open. It is not: the `verifying <X> section` progress
+label is emitted by **`CacheContainerWriter.ComputeChecksum`** — the *writer* re-reading each section
+it has just written in order to hash it. Reader-side verification turned out to be 0.5 s (§E.2).
+
+`CacheContainerWriter` has two ways to close a section. `EndSection(recordCount)` re-reads the
+section's bytes off the stream to hash them; `EndSection(recordCount, precomputedChecksum)` takes a
+hash the caller computed while writing and skips that pass entirely. The second exists precisely for
+"multi-GB on large dumps where a full re-read is real added wall-clock", and the object columns,
+forward-edge and reverse-edge sections all already use it.
+
+The three dominator sections did not:
+
+| Section | 27.5 GB size | Re-read measured |
+|---|---:|---:|
+| `DominatorReachableAddresses` | 233 MB | **28.2 s** |
+| `DominatorRetainedBytes` | 467 MB | 4.0 s |
+| `DominatorImmediateDominatorAddresses` | 233 MB | 3.7 s |
+| **Total** | | **35.9 s** |
+
+All three are single contiguous streaming passes with no patched-placeholder header, so they meet the
+precomputed overload's stated precondition. Fixed by hashing each chunk as it is written.
+
+Both writers also emitted the column one value at a time — `Stream.Write` plus (now)
+`XxHash32.Append` per row, 58.3M rows per column on the 27.5 GB dump. They now fill a 64 KB pooled
+buffer, matching what `BlockDeltaColumn.WriteBlockBases` and `ColumnOverflowTable.Write` already do.
+
+**Correctness.** A checksum that disagreed with the bytes would not throw — `CacheContainerReader`
+reports a mismatch as a *missing* section — so the failure mode is a silently empty dominator tree.
+New test `Write_ChecksumsComputedInFlight_SurviveVerificationAcrossBufferBoundaries` writes 40,000
+rows (crossing the 64 KB buffer several times and ending mid-buffer, since a single-flush payload
+cannot exercise the chunk accounting) and round-trips through the verifying reader. It was
+mutation-checked: perturbing the emitted checksum by 1 makes it fail. Full suite green, 1,162 passed.
+
+**⚠ Not confirmed end-to-end.** A same-session alternating A/B on the 3.3 GB dump found **no
+measurable difference**:
+
+| Arm | run 1 | run 2 | mean |
+|---|---:|---:|---:|
+| C.1 only | 87.3 s | 94.6 s | 90.9 s |
+| C.1 + E.1 | 90.0 s | 93.0 s | 91.5 s |
+
+That is the expected result, not a contradiction. On the 3.3 GB dump those sections are 26/26/53 MB,
+so the removed re-read is ~105 MB — invisible against this dump's ±7 s run-to-run spread. It is also
+why no `verifying <X> section` label appears on that dump in *either* arm: the writer only reports
+progress every 64 MB, which a 53 MB section never reaches. **This dump structurally cannot measure
+this change.** The 35.9 s figure it targets comes from the 27.5 GB run, and confirming the saving
+end-to-end needs a 27.5 GB re-run.
+
+**⚠ Methodology lesson, recorded because it nearly produced a false claim.** A first pass measured
+E.1 at 80.7 s against C.1's earlier 94.8 s and looked like a 14.9% win. It was entirely
+cross-session drift: allocation totals (8.74 GB) and GC counts (gen0 947 vs 943, gen2 11 vs 12) were
+identical between the two arms, and ambient free memory had moved from 7,243 MB to 5,794 MB between
+the two measurement sessions — which changes .NET's heap-growth behaviour and therefore peak private
+bytes. **Cold-run wall clock and peak private on this machine are only comparable within one
+alternating session.** A-R.5 flagged run-to-run spread; it understated that the drift is *between*
+sessions, not just within them. Every cross-session comparison earlier on this page should be read
+with that caveat, including C.1's headline −688 MB.
+
+### E.2 ❌ DROPPED — reader-side verification measured 0.5 s, and the mapping change is rejected prior art
+
+Both halves of this item fell over on inspection.
+
+**The cost is not there.** Instrumenting `VerifyOnce` with elapsed time (new to
+`DD_PERF_CACHE_SESSION=1`, since the existing counter reported bytes but not time) gives, on the
+3.3 GB dump: **320.9 MiB hashed in 0.5 s (683 MiB/s)** out of a ~91 s run. Extrapolating the 27.5 GB
+run's 2,386.9 MiB at that rate is ~3.5 s. Real but not worth a contract change, and nowhere near the
+35.9 s this item was written to explain — that was all writer-side (§E.1).
+
+**The mapping change was already tried and reverted.** `CacheContainerReader`'s own remarks record
+it: holding one `MemoryMappedFile` per session "locks `cache.bin` on Windows and breaks any caller
+that later deletes or replaces the index directory", and the saving is a `CreateFileMapping` syscall.
+Proposing it in the first draft of Part E was a failure to read the class doc before recommending a
+change to it.
+
+The elapsed-time instrumentation is kept — it is what settled this, and it closes the gap where the
+read side's share of verification cost was unmeasurable.
+
+### E.3 The 200.3 s root phase cannot be optimised until it is split — measure first
+
+15.3% of the run, and currently one opaque number covering two very different things:
+
+1. `heap.EnumerateRoots()` — ClrMD's conservative stack walk across every thread, plus handles.
+   Largely irreducible; it is DAC work.
+2. `WriteFieldNameTrailer` → `StaticFieldResolver.BuildMapByRootAddress`.
+
+The second is structurally suspicious. It walks **every typedef in every module in every appdomain**,
+and for each one calls `heap.GetTypeByMethodTable(mt)` and materialises `type.Name` — an expensive
+DAC call plus a string allocation — *before* filtering with `IsSystemType(type.Name)` /
+`IsCompilerGenerated`. The typedef universe is far larger than the 12,376 types with live instances
+on this dump, and the entire result is then discarded except for fields whose address happens to be
+in `staticRootAddresses`.
+
+If it dominates, the fixes are cheap and low-risk: reject framework modules by module name before
+touching their types, and put any predicate that does not need `type.Name` ahead of the one that
+does. If it does not dominate, the 200 s is DAC stack-walking and there is nothing here.
+
+**One stopwatch around the trailer call settles it.** Not guessing which, and not optimising on a
+guess — that is the mistake this whole document exists to correct. Note the trailer itself is *not*
+redundant work: `RootSetCache` reads the persisted trailer and only falls back to rebuilding the map
+if that read fails, so it is written once and read cheaply thereafter.
+
+### E.4 Batch the walk's reverse-edge writes — seconds, and it strengthens C.2
+
+`ReverseEdgeExtractor.RecordEdgesBatch` exists precisely because "at hundreds of millions of edges
+the fixed per-call cost of `lock` is the dominant overhead of `RecordEdge`" — and the forward path
+uses it (`DiskBackedObjectIndexWriter` lines 350, 446). The **reverse path does not**:
+`ReachableGraphWalker` calls `RecordEdge` once per edge, so the 27.5 GB walk takes **137,033,360
+individually-locked** acquire/write/release round trips plus 274M `BinaryWriter.Write(ulong)` calls,
+inside the 213.7 s walk.
+
+Order-of-magnitude only: ~137M uncontended lock pairs plus buffered writes is plausibly 10–20 s.
+Batching mirrors code that already exists for the sibling path, so it is low-risk.
+
+**But note what this implies for C.2.** The C.2-variant (§below) deletes this write path entirely,
+so it collects this saving *plus* the 39.6 s CSR build *plus* the 2.2 s flush — call it 50–60 s, ~4%
+of the run, on top of its 1.9 GB peak and 4.1 GB of scratch I/O. That is a materially better case
+than the 3.0% ceiling Part D quoted for C.2, which counted only the CSR phase.
+
+### E.5 Deliberately not recommended
+
+- **Dropping the forward-edge index to skip its 28.6 s sort + extraction share.** It exists solely to
+  feed the walk, and the loose-file walk is measured ~2× faster than live ClrMD. Removing it would
+  hand back well over 200 s to save ~30 s. Keep it.
+- **Compressing the base object columns** to cut I/O. Measurements §4 already ruled this out — it
+  costs the 10.49 GB/s streaming path a 22× zero-copy penalty.
+- **Reducing DOP.** The scan is already at DOP 8 on 8 cores.
+- **Deleting `RootStackThreadAttribution`** as a *speed* measure. It is written and never read on
+  either dump, so it should go on hygiene grounds (same class as C.1), but it measured **0.0 s** —
+  claiming it as a speedup would be false.
+
+### E.6 Ranked — revised after shipping E.1 and dropping E.2
+
+| # | Item | Saving | Status |
+|---|---|---:|---|
+| 1 | E.1 dominator checksums in flight | 35.9 s of writer re-read on 27.5 GB | ✅ shipped, **not confirmed end-to-end** |
+| 2 | C.2-variant (delete the extractor pipeline) | ≈50–60 s + 1.9 GB peak + 4.1 GB scratch | ⬜ open, best remaining item |
+| 3 | E.4 batch reverse-edge writes | ~10–20 s, estimated | ⬜ open, subsumed by #2 |
+| 4 | E.3 static-field-map filter order | unknown, up to 15.3% | ⬜ **instrument first** |
+| — | ~~E.2 reader-side verification~~ | measured 0.5 s | ❌ dropped |
+
+Revised expectation: the honest total for what is *shipped* is 35.9 s on the 27.5 GB dump and nothing
+measurable on the 3.3 GB dump. Part E's first draft claimed ~100–115 s (~8%) from items 1–4; that
+figure double-counted E.2's 36 s, which turned out to be E.1's, and E.2's real value is 0.5 s. The
+corrected ceiling for everything still open is ≈60–80 s plus whatever E.3 turns out to be.
+
+The two biggest phases — the 335.5 s parallel scan and the 213.7 s walk — remain ClrMD/DAC-bound and
+untouched by any of this. Part D.3's note stands: `DenseIdMap` was already tried on the walk and came
+back 2.6× slower with no peak-memory win.
+
+### E.7 Measurement protocol correction — mandatory for anything on this page
+
+The E.1 near-miss (§E.1's methodology note) established that **cold-run wall clock and peak private
+bytes on this machine are only comparable within a single alternating A/B session.** Ambient free
+memory moved 7,243 → 5,794 MB between two measurement sessions hours apart, which changes .NET's
+heap-growth behaviour and shifted peak private by ~500 MB and wall clock by ~14 s with *identical*
+allocation totals and GC counts.
+
+Any future item on this page must be measured by alternating the two arms inside one session
+(`A, B, A, B`), not by comparing against a figure recorded earlier. The harness supports this
+directly — build both binaries into separate worktrees and alternate `--cache-dir` targets.
+
+## Part F — C.2-variant explored (2026-09-06)
+
+Design exploration only; nothing implemented. Three questions had to be answered before the shape
+was decidable, and two of the answers changed it.
+
+### F.1 The transform is cheaper than expected — the mapping already exists
+
+`ReachableGraphWalker.WalkWithCsr` produces `revOffsets` (`int[N+1]`) and `revTargets` (`int[E]`) in
+**walk-id (discovery-order)** space. The persisted format is keyed by **row** — index into the sorted
+`DominatorReachableAddresses` column. The bridge between them, `oldId → row`, is
+`DominatorRowMapping.Compute`, which **the Stage B path already computes and pays for** (Part D's
+timeline: `row mapping` runs right after the walk).
+
+So the transform is:
+
+```
+newDegree[oldIdToRow[c]] = revOffsets[c+1] - revOffsets[c]     // one pass over N
+newOffsets                = prefix sum of newDegree             // one pass over N
+rowToOldId[oldIdToRow[c]] = c                                   // one pass over N (inverse perm)
+for row in 0..N-1:                                              // one pass over N + E
+    oldId = rowToOldId[row]
+    for k in revOffsets[oldId] .. revOffsets[oldId+1]:
+        emit oldIdToRow[revTargets[k]]
+```
+
+The emit loop walks rows in ascending order, which **is** the container's `ReverseEdgeChildren`
+layout — so it streams straight to the container stream, hashing as it goes via §E.1's
+just-established buffered pattern. **No `int[E]` is materialised at all.**
+
+Memory added: `newOffsets` + `rowToOldId`, 2 × `int[N]` ≈ **0.47 GB** at the 27.5 GB dump's
+N = 58,339,936.
+
+Memory removed (Part D.2's table): `resolvedBuckets` 1.02 GB + `children` 0.51 GB +
+`degree`/`cursor` 0.47 GB ≈ **2.00 GB**. Net **≈ −1.5 GB**, plus 2.19 GB of scratch written and read
+straight back.
+
+Time removed, measured: `building reverse-index CSR` 39.6 s + `flushing reverse-index edges` 2.2 s =
+**41.8 s**, plus the walk's 137,033,360 individually-locked `RecordEdge` calls (§E.4, estimated
+10–20 s, not measured). Time added: four sequential passes over N and one over E.
+
+### F.2 ⚠ The extractor cannot be deleted — `buildCsr: false` still needs the reverse index
+
+This was the open question and the answer is no, which kills the "one path replaces two" framing that
+made this variant attractive over C.2-as-scoped.
+
+`buildStageB` is `reverseEdgeExtractor != null && enableExactDominatorTree && <any
+IRequiresDominatorTreeIndex analyzer active>`. It is true by default, but false when
+`EnableExactDominatorTree` is set false or all five requirers (`DominatorAnalyzer`,
+`EventLeakAnalyzer`, `FinalizableObjectAnalyzer`, `GCRootAnalyzer`, `StaticRootLeakDetector`) are
+excluded. In that case the walk runs `WalkWithoutCsr`, which tracks a bare `HashSet<ulong> visited`
+and returns **empty** `revOffsets`/`revTargets` — no edge data whatsoever.
+
+And the reverse index is still needed there: `CollectionAnalyzer` and
+`IndexBackedBidirectionalSearch` (root-path/reference-chain search) consume it through
+`IBackwardReferenceProvider`, and neither is an `IRequiresDominatorTreeIndex`. So the section must
+still be produced on the no-Stage-B path.
+
+Making `WalkWithoutCsr` build a reverse CSR instead was costed and rejected: it needs
+`Dictionary<ulong,int>` in place of `HashSet<ulong>` (+≈0.5 GB), edge storage to counting-sort
+(`edgeTo` `int[E]` + `outDegree` `int[N]` ≈ 0.74 GB, exploiting the fact that BFS discovery makes
+`edgeFrom` non-decreasing), plus the CSR arrays (≈0.74 GB) — roughly **+2.0 GB on a path whose memory
+profile has never been measured**, to save the 2.62 GB the extractor costs there. Near break-even, on
+an unmeasured path, for no benefit to the default path. Not worth it.
+
+**So the shape is: bypass, not replacement.** When `buildStageB` is true, pass
+`reverseEdgeExtractor: null` into the walk and derive the section from `walkResult`; otherwise
+current behaviour, untouched. The extractor and `ReverseEdgeCsrBuilder` stay exactly as they are —
+this adds no duplicate logic, it adds a bypass around existing tested code, and `reverseEdgeExtractor`
+is already nullable and already conditionally passed. That is a materially smaller change than
+"delete the pipeline", and materially less attractive, because the maintenance win evaporates and
+only the perf win remains.
+
+### F.3 ⚠ "Byte-identical output" is the wrong acceptance criterion
+
+Part C.2 stated byte-identical `ReverseEdgeOffsets`/`ReverseEdgeChildren` as the gate. On inspection
+that is not guaranteed, and asserting it would be asserting something the current code does not
+promise either.
+
+What *is* guaranteed: the two sources see the **identical edge multiset**.
+`ReachableGraphWalker` line 257 calls `RecordEdge(address, childAddr)` and lines 259–261 append to
+`edgeFrom`/`edgeTo` — same iteration, no `continue` between them, no filtering difference.
+
+What is *not* guaranteed: parent ordering within one child's list. Today's order is each child's
+bucket-file order, which is the order `RecordEdge` was called for that child, i.e. walk-discovery
+order. The walk's `revTargets` counting-sort also fills in edge-append order. So the two orders are
+very likely the same — but that is a coincidence of two implementations, not a documented invariant,
+and `ReverseEdgeCsrBuilder`'s bucket-parallel fill makes it non-obvious.
+
+Revised criterion: **assert `Offsets` byte-identical and each row's parent list equal as a multiset**,
+then check byte-identity of `Children` empirically on the reference dump and, if it holds, record it
+as an observation rather than promoting it to a guarantee. No consumer depends on parent order —
+`TryGetParents` returns the slice and every caller treats it as a set.
+
+### F.4 Verdict
+
+| | |
+|---|---|
+| Time | **−41.8 s measured** (+10–20 s estimated from §E.4), of 1,310.5 s → **~3–5%** |
+| Peak memory | **≈ −1.5 GB** of 12.97 GB → **~12%** |
+| Scratch I/O | −2.19 GB written, −2.19 GB read back |
+| Code | a bypass around existing code, **not** a deletion (§F.2) |
+| Risk | medium — touches the walk↔index seam; correctness gate is §F.3, not byte-identity |
+
+Still the best remaining item on this page, and the memory number is the real prize on a dump that
+peaks at 12.97 GB against 15.7 GiB of RAM. But it is a bypass with a permanent second path, so it
+should be judged as a perf change on its own merits rather than as a simplification.
+
+Not started. §E.3 (the unmeasured 200.3 s root phase) remains the only candidate that could be
+larger, and it costs one stopwatch to size.
+
+---
+
+## Open question — ~~C.2, after C.1~~ RESOLVED by Part D
+
+C.1 removed the reference dump's entire case for C.2 — cold peak there is now 491 MB *below* the
+pre-redesign baseline. The scaling argument was then tested directly in Part D rather than left as
+arithmetic, which was the right call: the projection it rested on was 40% too high on both E and R.
+
+**Resolution: build C.2, but not urgently.** Part D measured the 27.5 GB dump at a 12.97 GB peak with
+available memory bottoming at 356 MB and 3.9 GB going to the pagefile. C.2 removes ≈1.9 GB of that
+plus 2.04 GB of scratch round-trip, and D.3 strengthens the case further — the walk already holds the
+`revOffsets`/`revTargets` C.2 would reuse, so the builder's copy is pure duplication of memory that is
+resident either way.
+
+It is a margin improvement, not a rescue. Roughly 6 GB of the 13 GB peak is the walk itself (D.3),
+which C.2 does not touch. Anyone reaching for "make large dumps comfortable" needs to look there
+instead, and should read §7.3 item 2 of the dominator integration doc first — a previous attempt
+(`DenseIdMap`) came back 2.6× slower with no peak-memory win.
+
+## Part G — The rebuilt pipeline, measured at 27.5 GB (2026-09-07)
+
+This doc's whole premise is that the format work optimised one axis blind. The rebuild described in
+[cache-ideal-design.md](cache-ideal-design.md) then optimised *this* doc's axes explicitly — and got
+one of them badly wrong. Recorded here because Part D is the baseline it has to be read against.
+
+One cold rebuild, `HEAD` at `71539a09`, private commit sampled once a second.
+
+| Axis | Part D baseline | Rebuilt | Δ |
+|---|---:|---:|---:|
+| Cold wall clock | 1,310.5 s | **1,349.4 s** | +38.9 s (+3.0%) |
+| **Peak private** | **12,976.3 MB** | **12,143 MB** | **−833 MB (−6.4%)** |
+| `cache.bin` | 2,418.1 MiB | **1,627.4 MiB** | −790.7 MiB (−32.7%) |
+
+### G.1 The peak is Lengauer–Tarjan, not the walk
+
+Part D.3 concluded "roughly 6 GB of the 13 GB peak is the walk" and that the walk was therefore the
+lever. The rebuild removed ~3.1 GB of the walk's structures — the `Dictionary<ulong,int>` (2,326 MB)
+and the `edgeFrom`/`edgeTo` `ChunkedBuffer`s (~1,096 MB) — and peak private fell 833 MB.
+
+Sampling private commit through the build says why:
+
+| Point in build | Peak private |
+|---|---:|
+| heap scan | ~3.8–5.0 GB |
+| reachability walk | ~5.4 GB |
+| **dominator stage (LeafFolder + LT), 58,339,932 nodes** | **~10.2 GB** |
+| Leak Candidate Analysis — an *analyzer*, after the build | ~7.8 GB |
+
+**The walk is not the peak and, on this evidence, never was.** D.3's 10.4 GB sample was taken "while
+still inside the reachability walk", which is true but does not make the walk its *cause* — the
+dominator stage that follows it reaches 10.2 GB with the walk's structures already freed.
+
+That is now the second time the walk has been assumed to be the memory problem. §7.3 item 2 of the
+dominator integration doc records the first (`DenseIdMap`, 2.6× slower, no peak win). **Anyone
+reaching for peak memory next should profile `LeafFolder` + `LengauerTarjan` and the analyzers, not
+the index pipeline.**
+
+### G.2 Runtime distribution, and what is missing from it
+
+⚠ **Partial.** The run log was deleted during cleanup before the full per-phase table was extracted.
+These six phases were captured; the remaining ~406 s is unattributed rather than zero.
+
+| Phase | Part D | Rebuilt | Δ |
+|---|---:|---:|---:|
+| `indexing heap` (parallel scan + edge extraction) | 335.5 s | 399.4 s | +63.9 s |
+| `enumerating GC roots` | 200.3 s | 207.2 s | +6.9 s |
+| reachability walk | 213.7 s | **190.1 s** | −23.6 s |
+| **reference-graph build** (new second phase) | — | **+113.5 s** | +113.5 s |
+| dominator metadata resolve | 46.7 s | 26.4 s | −20.3 s |
+| reverse-index CSR build + flush + write | 50.3 s | **6.9 s** | **−43.4 s** |
+| *captured subtotal* | *846.5 s* | *943.5 s* | *+97.0 s* |
+| **unattributed** (analyzers, report, dominator compute) | *464.0 s* | *405.9 s* | — |
+| **total** | **1,310.5 s** | **1,349.4 s** | **+38.9 s** |
+
+Two structural changes are visible directly and are the ones to trust:
+
+- **The reverse CSR build is gone** — 50.3 s of build/flush/write becomes a 6.9 s write, because the
+  walk emits the CSR itself instead of it being rebuilt from hash-partitioned scratch.
+- **The walk is now two phases** — 190.1 s of reachability plus 113.5 s of reference-graph
+  construction, against a single 213.7 s pass. That +90 s net is the price of not holding every edge
+  in memory while ids are assigned, and it is what the ~3.1 GB bought.
+
+**The +63.9 s on `indexing heap` should not be believed.** Nothing in the rebuild touches the
+parallel scan, and §E.7 is explicit that cold wall clock on this machine is comparable only within
+one alternating session. This was a single run against a figure from a different session and a
+different code state, so per-phase deltas of that size are within the drift §E.7 documents
+(ambient free memory moved ~1.4 GB between sessions and shifted wall clock ~14 s with *identical*
+allocation totals). The two structural items above are safe because they are presence/absence of a
+phase, not a small delta on a shared one.
+
+### G.3 What this doc's standing lesson becomes
+
+§16 of the measurements doc said "v9 must be costed on all three axes", after this doc found the
+format work had moved runtime and memory blind. The rebuild did cost all three axes up front — and
+still missed, because it costed the *structures* rather than the *peak*. The sharper form of the
+lesson:
+
+> Sizing a structure tells you what removing it frees. It does not tell you whether the run's peak
+> is anywhere near it. Those are separate measurements, and only the second one predicts the result.
+
+## Status
+
+| Step | State |
+|---|---|
+| **Part G — rebuilt pipeline measured at 27.5 GB** | ✅ disk −32.7%, runtime +3.0%, **peak private only −6.4%** |
+| **G.1 — peak is LT + analyzers, not the walk** | ⬜ **the open memory lever now; profile it before touching the index pipeline** |
+| A.1 baseline selected (`d1dc4dcc`) — verified at 1,398.3 MB | ✅ |
+| A.5 harness | ✅ |
+| Cell 1 — baseline cold ×6 | ✅ |
+| Cell 2 — baseline warm ×3 | ✅ |
+| Cell 3 — current cold ×5 | ✅ |
+| Cell 4 — current warm ×3 | ✅ |
+| Arm 5 — `ca938bf4` cold ×2 (attribution) | ✅ |
+| Results (Part A-R) | ✅ |
+| B.5 — closed, no regression found | ✅ |
+| **C.1 — delete dead `_fanoutPerBucket`** | ✅ **shipped, −688 MB cold peak** |
+| C.1 verification — cold ×3, warm ×3, full suite | ✅ |
+| 27.5 GB dump measurement (Part D) | ✅ fits at 12.97 GB peak, thrashes |
+| C.2 — CSR from the walk's in-memory reverse CSR | ⬜ explored in **Part F**; bypass not deletion |
+| C.3 — bound builder residency (fallback) | ⬜ only if C.2 is rejected |
+| C.4 — warm-path decode | ✅ dropped, gate not met |
+| Walk's own ≈6 GB residency (D.3) | ⬜ out of scope, own investigation |
+| **Part E — cold-build speedup review** | ✅ done, ranked in E.6 |
+| **E.1 dominator checksums in flight** | ✅ **shipped** — 35.9 s of writer re-read removed |
+| E.1 confirmation on the 27.5 GB dump | ❌ **not pursued** — 2×22 min to confirm sound arithmetic |
+| E.2 reader-side verification | ✅ dropped — measured 0.5 s |
+| E.4 batch reverse-edge writes (~10–20 s) | ⬜ open, subsumed by C.2-variant |
+| E.3 static-field-map filter order | ⬜ **instrument before touching** |
+| E.7 alternating-session A/B protocol | ✅ adopted after a near-miss |

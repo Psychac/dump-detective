@@ -1,14 +1,27 @@
+using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 
-namespace DumpDetective.Analysis.FindingGenerators;
+namespace DumpDetective.Reporting.FindingGenerators;
 
 internal sealed class StaticRootFindingGenerator : IFindingGenerator
 {
     public string AnalyzerName => "Static Root Leak Detection";
     public bool CanGenerate(AnalyzerDomainResult result) => result is StaticRootDomainResult;
+
+    private static FindingSeverity DetermineSeverity(StaticRootDomainResult result, ulong criticalByteThreshold)
+    {
+        if (result.RootCount >= 10)
+            return FindingSeverity.Critical;
+
+        var topRoots = result.TopRootsByRetainedBytes;
+        if (topRoots?.Count > 0 && topRoots[0].TotalMemoryImpact > criticalByteThreshold)
+            return FindingSeverity.Critical;
+
+        return FindingSeverity.Warning;
+    }
 
     public IReadOnlyList<InsightFinding> Generate(AnalyzerDomainResult result)
     {
@@ -31,7 +44,9 @@ internal sealed class StaticRootFindingGenerator : IFindingGenerator
             ];
         }
 
-        FindingSeverity severity = r.RootCount >= 10 ? FindingSeverity.Critical : FindingSeverity.Warning;
+        const ulong CriticalByteThreshold = 100 * 1_024 * 1_024;
+        FindingSeverity severity = DetermineSeverity(r, CriticalByteThreshold);
+        Evidence? topEvidence = r.TopRootsByRetainedBytes?.Count > 0 ? r.TopRootsByRetainedBytes[0].Evidence : null;
 
         return
         [
@@ -44,7 +59,8 @@ internal sealed class StaticRootFindingGenerator : IFindingGenerator
                 Recommendation: "Audit static ownership and clear or weaken references for expired object graphs.",
                 Tags: ["static-root", "retention", "memory-leak"],
                 MetricValue: r.TotalRetainedBytes,
-                MetricUnit: "retained-bytes")
+                MetricUnit: "retained-bytes",
+                ConfidenceScore: EvidenceConfidence.Compute(topEvidence))
         ];
     }
 }

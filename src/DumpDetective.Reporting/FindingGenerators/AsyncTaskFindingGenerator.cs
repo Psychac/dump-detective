@@ -3,7 +3,7 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 
-namespace DumpDetective.Analysis.FindingGenerators;
+namespace DumpDetective.Reporting.FindingGenerators;
 
 internal sealed class AsyncTaskFindingGenerator : IFindingGenerator
 {
@@ -25,7 +25,76 @@ internal sealed class AsyncTaskFindingGenerator : IFindingGenerator
     {
         if (result is not AsyncTaskDomainResult r) return [];
 
-        var signals = new List<AsyncSignal>(capacity: 4);
+        var signals = new List<AsyncSignal>(capacity: 8);
+
+        // Continuation chain cycles — hard deadlock
+        if (r.CycleDetected)
+        {
+            signals.Add(new AsyncSignal(
+                Key: "cycle",
+                Severity: FindingSeverity.Critical,
+                Priority: 1000,
+                Title: "Async deadlock detected (continuation chain cycle)",
+                Evidence: "A task's continuation chain cycles back to itself, indicating a hard deadlock where the task cannot complete.",
+                Recommendation: "Inspect the task's continuation chain for circular references or self-awaits. Review async method implementations for patterns that schedule continuations back onto themselves.",
+                Tags: ["async", "task", "deadlock", "cycle"],
+                MetricValue: 1.0,
+                MetricUnit: "cycle-detected"));
+        }
+
+        // Gen2/LOH pending tasks — strong leak signal
+        int pendingOldGen = r.PendingGen2 + r.PendingLOH;
+        if (pendingOldGen > 0 && r.PendingTasks > 0)
+        {
+            double oldGenPct = pendingOldGen * 100.0 / r.PendingTasks;
+            FindingSeverity severity = oldGenPct >= 50 ? FindingSeverity.Warning : FindingSeverity.Info;
+
+            signals.Add(new AsyncSignal(
+                Key: "pending-oldgen",
+                Severity: severity,
+                Priority: 500 + pendingOldGen,
+                Title: $"Pending tasks in Gen2/LOH ({pendingOldGen:N0}, {oldGenPct:F1}%)",
+                Evidence: $"{pendingOldGen:N0} of {r.PendingTasks:N0} pending tasks ({oldGenPct:F1}%) are in Gen2 (old generation) or LOH (large object heap). Gen2 residency is a strong indicator of long-lived memory retention and potential leaks.",
+                Recommendation: "Inspect Gen2/LOH pending tasks for root cause. Check if tasks are waiting on external events, resources, or deadlocks. Gen2 presence suggests these tasks have survived multiple GC cycles.",
+                Tags: ["async", "task", "pending", "generation", "gc", "retention"],
+                MetricValue: pendingOldGen,
+                MetricUnit: "pending-oldgen"));
+        }
+
+        // Unresolved TaskCompletionSource in Gen2/LOH — leaked promise signal. Gated on
+        // old-generation residency, not raw unresolved count: a fresh in-flight TCS and a
+        // genuinely stuck one look identical at the instant of the dump, but only a leaked one
+        // survives multiple GC cycles into Gen2/LOH.
+        if (r.UnresolvedTcsGen2Count > 0)
+        {
+            signals.Add(new AsyncSignal(
+                Key: "tcs-unresolved-oldgen",
+                Severity: r.UnresolvedTcsGen2Count >= 20 ? FindingSeverity.Warning : FindingSeverity.Info,
+                Priority: 450 + r.UnresolvedTcsGen2Count,
+                Title: $"Unresolved TaskCompletionSource instances in Gen2/LOH ({r.UnresolvedTcsGen2Count:N0})",
+                Evidence: $"{r.UnresolvedTcsGen2Count:N0} of {r.UnresolvedTaskCompletionSources:N0} unresolved TaskCompletionSource instances (out of {r.TotalTaskCompletionSources:N0} total) are in Gen2 (old generation) or LOH, meaning nobody has called SetResult/SetException/SetCanceled and the promise has survived multiple GC cycles — a leaked promise, not just an in-flight one.",
+                Recommendation: "Inspect the retention path for these TaskCompletionSource instances. Common causes: an event handler expected to call Set* was unsubscribed before firing, an external callback never invoked, or a timeout/cancellation path that doesn't resolve the TCS.",
+                Tags: ["async", "task", "tcs", "leak", "generation", "gc"],
+                MetricValue: r.UnresolvedTcsGen2Count,
+                MetricUnit: "unresolved-tcs-oldgen"));
+        }
+
+        // Pending IValueTaskSource in Gen2/LOH — same leak-strength rationale as the TCS signal
+        // above: a fresh in-flight ValueTask source and a genuinely stuck one look identical at
+        // dump time, but only a stuck one survives multiple GC cycles into Gen2/LOH.
+        if (r.PendingVtsGen2Count > 0)
+        {
+            signals.Add(new AsyncSignal(
+                Key: "vts-pending-oldgen",
+                Severity: r.PendingVtsGen2Count >= 20 ? FindingSeverity.Warning : FindingSeverity.Info,
+                Priority: 440 + r.PendingVtsGen2Count,
+                Title: $"Pending IValueTaskSource instances in Gen2/LOH ({r.PendingVtsGen2Count:N0})",
+                Evidence: $"{r.PendingVtsGen2Count:N0} of {r.PendingValueTaskSources:N0} pending IValueTaskSource instances (out of {r.TotalValueTaskSources:N0} total) are in Gen2 (old generation) or LOH, meaning the underlying operation has not signaled completion and has survived multiple GC cycles — a stuck source, not just an in-flight one.",
+                Recommendation: "Inspect the retention path for these ValueTaskSource-backed objects (common in Socket, System.IO.Pipelines, and pooled ASP.NET Core primitives). Check for a completion callback that never fires or a pooled instance that was never returned/reset.",
+                Tags: ["async", "valuetask", "vts", "leak", "generation", "gc"],
+                MetricValue: r.PendingVtsGen2Count,
+                MetricUnit: "pending-vts-oldgen"));
+        }
 
         // Orphaned tasks — fire-and-forget anti-pattern or unobserved faults
         if (r.OrphanedTasks > 0)
@@ -82,12 +151,22 @@ internal sealed class AsyncTaskFindingGenerator : IFindingGenerator
         // High pending task count — possible starvation
         if (r.PendingTasks > 500)
         {
+            // Escalate severity if pending tasks represent a high fraction of the total
+            double pendingRate = r.TotalTasks > 0 ? r.PendingTasks * 100.0 / r.TotalTasks : 0;
+            FindingSeverity pendingSeverity = r.PendingTasks > 5000 || pendingRate > 70
+                ? FindingSeverity.Critical
+                : pendingRate > 50
+                    ? FindingSeverity.Warning
+                    : r.PendingTasks > 2000
+                        ? FindingSeverity.Warning
+                        : FindingSeverity.Info;
+
             signals.Add(new AsyncSignal(
                 Key: "pending",
-                Severity: r.PendingTasks > 5000 ? FindingSeverity.Critical : FindingSeverity.Warning,
+                Severity: pendingSeverity,
                 Priority: 300 + (r.PendingTasks / 10),
                 Title: "High number of pending tasks",
-                Evidence: $"{r.PendingTasks:N0} tasks are pending ({r.TotalTasks:N0} total). A large pending queue may indicate thread-pool starvation or awaiting blocked continuations.",
+                Evidence: $"{r.PendingTasks:N0} tasks are pending ({pendingRate:F1}% of {r.TotalTasks:N0} total). A large pending queue may indicate thread-pool starvation or awaiting blocked continuations.",
                 Recommendation: "Check for synchronous blocking inside async methods (.Result / .Wait). Use ValueTask where tasks complete synchronously. Verify thread-pool sizing.",
                 Tags: ["async", "task", "pending", "starvation"],
                 MetricValue: r.PendingTasks,

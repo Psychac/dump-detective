@@ -13,16 +13,24 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
     public string DisplayTitle => "Lock Graph & Deadlocks";
     public int SortOrder => 300;
 
+    // A lock re-entered this many times by its holder while other threads wait on it
+    // is a re-entrancy signal worth calling out separately from ordinary contention.
+    private const int HighRecursionThreshold = 3;
+
     public bool CanHandle(AnalyzerDomainResult result) => result is LockGraphDomainResult;
 
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (LockGraphDomainResult)result;
         var compactTables = new List<CompactTable>();
+        double confidenceScore = d.CalculateOwnerResolutionConfidence();
         var blocks = new List<SectionBlock>
         {
-            BuildConfidenceBand(0.85, ["Derived from recorded wait chains and lock ownership."]),
+            BuildConfidenceBand(confidenceScore, ["Derived from recorded wait chains and lock ownership."]),
         };
+
+        var contestedDetails = d.ContestedLockDetails ?? [];
+        int highRecursionLockCount = contestedDetails.Count(cl => cl.RecursionCount >= HighRecursionThreshold);
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
@@ -30,21 +38,27 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
             ["contested_locks"] = new NumericMetricValue(d.ContestedLockCount, MetricUnit.Count),
             ["max_waiters_on_single_lock"] = new NumericMetricValue(d.MaxWaitersOnSingleLock, MetricUnit.Count),
             ["deadlock_candidates"] = new NumericMetricValue(d.DeadlockCandidateCount, MetricUnit.Count),
+            ["unresolved_owners"] = new NumericMetricValue(d.UnresolvedOwnerCount, MetricUnit.Count),
+            ["high_recursion_locks"] = new NumericMetricValue(highRecursionLockCount, MetricUnit.Count),
         };
+
+        if (d.UnresolvedOwnerCount > 0)
+            blocks.Add(T($"⚠ {d.UnresolvedOwnerCount} lock(s) held by threads that are no longer in the runtime (possible thread crash/termination)."));
+
+        if (highRecursionLockCount > 0)
+            blocks.Add(T($"⚠ {highRecursionLockCount} contested lock(s) show a recursion count ≥ {HighRecursionThreshold} — the holder is re-entering the lock repeatedly while other threads wait, a potential re-entrancy issue."));
 
         var topTypes = d.TopContestedLockTypes ?? [];
         if (topTypes.Count > 0)
         {
-            int limit = Math.Min(topTypes.Count, 8);
-            var ctRows = new List<TableRow>(limit);
-            for (int i = 0; i < limit; i++)
+            var ctRows = new List<TableRow>(topTypes.Count);
+            foreach (var entry in topTypes)
                 ctRows.Add(new TableRow([
-                    Cell(FormatHelper.TruncateString(topTypes[i].Name, 70)),
-                    Cell($"{topTypes[i].Count:N0} cumulative waiter(s)", topTypes[i].Count)]));
+                    Cell(FormatHelper.TruncateString(entry.Name, 70)),
+                    Cell($"{entry.Count:N0} cumulative waiter(s)", entry.Count)]));
             compactTables.Add(STCompact("Top contested lock types", new[] { CH("Type"), CH("Waiters") }, ctRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
-        var contestedDetails = d.ContestedLockDetails ?? [];
         if (contestedDetails.Count > 0)
         {
             var clRows = new List<TableRow>(contestedDetails.Count);
@@ -66,9 +80,9 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
         }
 
         if (d.DeadlockCandidateCount >= 2)
-            blocks.Add(T("Probable deadlock pattern detected."));
+            blocks.Add(T("Potential deadlock pattern detected (candidates identified; cycle confirmation required)."));
         else if (d.ContestedLockCount > 0)
-            blocks.Add(T("Lock contention present; monitor lock acquisition order."));
+            blocks.Add(T("Lock contention present; monitor lock acquisition order matters."));
         else
             blocks.Add(T("No lock contention/deadlock candidates detected."));
 
@@ -88,15 +102,19 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
                 string lockAddresses = dc.LockObjectAddresses.Count > 0
                     ? string.Join(", ", dc.LockObjectAddresses.Select(address => $"0x{address:x}"))
                     : "(none)";
+                string ownerFrames = dc.OwnerThreadFrames.Count > 0
+                    ? FormatHelper.TruncateString(string.Join(" ← ", dc.OwnerThreadFrames), 100)
+                    : "(no frames)";
                 dcRows.Add(new TableRow([
                     Cell($"{dc.ManagedThreadId}"),
                     Cell($"{dc.OsThreadId}"),
                     Cell(FormatHelper.TruncateString(lockTypes, 60)),
                     Cell(FormatHelper.TruncateString(lockAddresses, 70)),
-                    Cell(FormatHelper.TruncateString(dc.CycleSummary, 80))]));
+                    Cell(FormatHelper.TruncateString(dc.BlockedAtFrame, 80)),
+                    Cell(ownerFrames)]));
             }
             compactTables.Add(STCompact("Deadlock candidate threads",
-                new[] { CH("Managed ID","number"), CH("OS Thread ID","number"), CH("Held Lock Types"), CH("Held Lock Addresses"), CH("Summary") },
+                new[] { CH("Managed ID","number"), CH("OS Thread ID","number"), CH("Held Lock Types"), CH("Held Lock Addresses"), CH("Blocked At Frame"), CH("Stack Trace") },
                 dcRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -127,14 +145,25 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
 
         SectionLeadFinding? leadFinding = null;
         if (d.DeadlockCandidateCount > 0)
+        {
+            string confidenceSymbol = confidenceScore >= 0.75 ? "\u25cf\u25cf\u25cf\u25cf"
+                : confidenceScore >= 0.65 ? "\u25cf\u25cf\u25cf\u25cb"
+                : confidenceScore >= 0.50 ? "\u25cf\u25cf\u25cb\u25cb"
+                : "\u25cf\u25cb\u25cb\u25cb";
+
             leadFinding = new SectionLeadFinding(
-                Severity: "Critical",
-                Title: $"Deadlock detected \u2014 {d.DeadlockCandidateCount} cycle(s) identified",
+                Severity: "Warning",
+                Title: $"Potential deadlock pattern \u2014 {d.DeadlockCandidateCount} candidate(s) identified",
                 Summary: $"{d.DeadlockCandidateCount} deadlock candidate(s) with {d.TotalHeldLocks:N0} held lock(s) and {d.ContestedLockCount:N0} contested lock object(s).",
-                Recommendation: "Enforce a consistent lock acquisition order across all threads. Use lock timeouts or restructure code to eliminate nested locking.",
-                ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
-                ConfidenceScore: 0.85,
-                Caveats: ["Detection is based on recorded BlockingObjects; cooperative waits (e.g. SemaphoreSlim) may not appear."]);
+                Recommendation: "Review lock acquisition order and use cycle detection tools (e.g., !dlk in WinDbg SOS) to confirm a circular-wait cycle exists before assuming deadlock.",
+                ConfidenceSymbol: confidenceSymbol,
+                ConfidenceScore: confidenceScore,
+                Caveats: [
+                    "Deadlock candidates are based on top-frame heuristics (Monitor.Wait/Enter) and do not confirm an actual cycle.",
+                    "Two independently blocked threads (unrelated locks) may both appear as candidates.",
+                    "Detection does not cover non-monitor primitives (ReaderWriterLockSlim, SemaphoreSlim, etc.)."
+                ]);
+        }
 
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,

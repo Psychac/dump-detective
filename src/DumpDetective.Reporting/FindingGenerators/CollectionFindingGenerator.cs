@@ -1,9 +1,9 @@
-using DumpDetective.Core.Abstractions;
+﻿using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 
-namespace DumpDetective.Analysis.FindingGenerators;
+namespace DumpDetective.Reporting.FindingGenerators;
 
 internal sealed class CollectionFindingGenerator : IFindingGenerator
 {
@@ -19,21 +19,49 @@ internal sealed class CollectionFindingGenerator : IFindingGenerator
         FindingSeverity severity = r.TotalWastedMemory >= summaryWarnBytes
             ? FindingSeverity.Warning : FindingSeverity.Info;
 
-        // Build a simple per-kind breakdown string if the analyzer provided kind counts.
+        // Per-kind breakdown, ordered by wasted bytes so the dominant kind reads first.
         string perKindBreakdown = string.Empty;
+        CollectionKind? dominantWasteKind = null;
         if (r.WasteCountsByKind is { Count: > 0 })
         {
-            perKindBreakdown = " (" + string.Join(", ", r.WasteCountsByKind.Select(kv => $"{kv.Key}:{kv.Value:N0}")) + ")";
+            var wasteBytesByKind = r.WasteBytesByKind ?? new Dictionary<CollectionKind, ulong>();
+            var kindsByWaste = r.WasteCountsByKind.Keys
+                .OrderByDescending(k => wasteBytesByKind.TryGetValue(k, out ulong bytes) ? bytes : 0UL)
+                .ThenBy(k => k.ToString(), StringComparer.Ordinal)
+                .ToList();
+
+            perKindBreakdown = " (" + string.Join(", ", kindsByWaste.Select(k =>
+            {
+                wasteBytesByKind.TryGetValue(k, out ulong bytes);
+                return $"{k}: {r.WasteCountsByKind[k]:N0} / {FormatHelper.FormatBytes(bytes)}";
+            })) + ")";
+
+            if (wasteBytesByKind.Count > 0)
+                dominantWasteKind = kindsByWaste[0];
         }
 
-        string evidence = $"{r.TotalCollections:N0} collections scanned; estimated unused capacity {FormatHelper.FormatBytes(r.TotalWastedMemory)} across {r.WastefulCollectionCount:N0} wasteful collections{perKindBreakdown}.";
+        // Dominant element type, ordered by wasted bytes — a narrower, often more actionable
+        // signal than kind alone (e.g. "List<byte[]>" vs. "List<CacheEntry>" both show as List).
+        string dominantElementTypeNote = string.Empty;
+        if (r.WasteCountsByElementType is { Count: > 0 })
+        {
+            var wasteBytesByElementType = r.WasteBytesByElementType ?? new Dictionary<string, ulong>();
+            string topElementType = r.WasteCountsByElementType.Keys
+                .OrderByDescending(t => wasteBytesByElementType.TryGetValue(t, out ulong bytes) ? bytes : 0UL)
+                .ThenBy(t => t, StringComparer.Ordinal)
+                .First();
+            wasteBytesByElementType.TryGetValue(topElementType, out ulong topElementBytes);
+            dominantElementTypeNote = $" Dominant wasted element type: {topElementType} ({FormatHelper.FormatBytes(topElementBytes)}).";
+        }
+
+        string evidence = $"{r.TotalCollections:N0} collections scanned; estimated unused capacity {FormatHelper.FormatBytes(r.TotalWastedMemory)} across {r.WastefulCollectionCount:N0} wasteful collections{perKindBreakdown}.{dominantElementTypeNote}";
 
         string recommendation = severity == FindingSeverity.Warning
             ? "Trim long-lived collections and initialize with realistic capacities."
             : "Collection sizing appears acceptable in this snapshot.";
 
         // If a particular kind dominates wasted bytes we can add a focused recommendation.
-        var topKind = r.TopWastefulCollections?.FirstOrDefault()?.Kind;
+        var topKind = dominantWasteKind ?? r.TopWastefulCollections?.FirstOrDefault()?.Kind;
         if (topKind.HasValue && topKind.Value != CollectionKind.List)
         {
             recommendation += $" Consider addressing {topKind.Value} instances specifically (e.g., TrimExcess / Resize / Use alternative collection) if they are long-lived.";

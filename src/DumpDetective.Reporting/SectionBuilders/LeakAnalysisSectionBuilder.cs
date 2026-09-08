@@ -3,6 +3,7 @@ using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using DumpDetective.Reporting.Services;
 using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
@@ -13,7 +14,11 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
     public string DisplayTitle => "Leak Candidates";
     public int SortOrder => 100;
 
-    private const int TopCandidateCount = 30;
+    // LeakCandidateCards render as rich narrative cards (score, explanation, GC/LOH impact notes),
+    // not table rows — unlike STCompact, the client has no card-pagination affordance, so this
+    // bounds report verbosity the same way an inline-prose truncation would (§11.2 D5's carve-out).
+    // The STCompact table below carries the complete ranked population instead.
+    private const int MaxLeakCandidateCards = 30;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is LeakCandidateDomainResult;
 
@@ -21,11 +26,15 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
     {
         var leak = (LeakCandidateDomainResult)result;
 
+        var (confidenceScore, leakCaveats) = ConfidenceScoring.Compute(0.75,
+            ConfidenceScoring.F(leak.HeuristicOnly, 0.15, "Heuristic-only leak analysis; no full retention scan."));
+        string confidenceSymbol = confidenceScore >= 0.85 ? "●●●●" : confidenceScore >= 0.65 ? "●●●○" : confidenceScore >= 0.45 ? "●●○○" : "●○○○";
+
         var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>
         {
-            BuildConfidenceBand(leak.HeuristicOnly ? 0.55 : 0.70, leak.HeuristicOnly
-                ? new[] { "Heuristic-only leak analysis; no full retention scan." }
+            BuildConfidenceBand(confidenceScore, leakCaveats.Count > 0
+                ? leakCaveats
                 : new[] { "Leak analysis is heuristic-guided; confirm with root-path review." }),
         };
 
@@ -40,9 +49,9 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
                     Title: $"Memory leak candidate: {top.TypeName} ({top.Classification})",
                     Summary: $"Score: {top.SuspicionScore:N0}, {top.InstanceCount:N0} instances, {FormatBytes(top.TotalSize)} total. Gen2: {top.Gen2Pct:F1}%.",
                     Recommendation: "Investigate root paths in §A5 (GC Root Intelligence) to confirm retention.",
-                    ConfidenceSymbol: leak.HeuristicOnly ? "●●○○" : "●●●○",
-                    ConfidenceScore: leak.HeuristicOnly ? 0.55 : 0.70,
-                    Caveats: leak.HeuristicOnly ? new[] { "Heuristic-only analysis; confirm with root-path review." } : Array.Empty<string>());
+                    ConfidenceSymbol: confidenceSymbol,
+                    ConfidenceScore: confidenceScore,
+                    Caveats: leakCaveats);
             }
         }
 
@@ -91,8 +100,8 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
             blocks.Add(T("Top candidates are ranked by suspicion score; the report highlights likely leak patterns first and then expands the highest-signal rows below."));
                 compactTables.Add(STCompact(
                 "Top leak candidates by suspicion score",
-                    new[] { CH("Type"), CH("Score","number"), CH("Severity"), CH("Class"), CH("Total Size","bytes"), CH("Instances","number"), CH("Gen2%", "number", "percent"), CH("Root Kind"), CH("Finalizable"), CH("Container"), CH("Ref Ratio", "number", "ratio") },
-                leak.TopCandidates.Take(TopCandidateCount).Select(candidate => R(new object?[] {
+                    new[] { CH("Type"), CH("Score","number"), CH("Severity"), CH("Class"), CH("Total Size","bytes"), CH("Instances","number"), CH("Gen2%", "number", "percent"), CH("Root Kind"), CH("Finalizable"), CH("Container"), CH("Ref Ratio", "number", "ratio"), CH("Root Chain") },
+                leak.TopCandidates.Select(candidate => R(new object?[] {
                     candidate.TypeName,
                     candidate.SuspicionScore,
                     candidate.Severity.ToString(),
@@ -103,7 +112,8 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
                     candidate.RootKind ?? "—",
                     candidate.IsFinalizable ? "Yes" : "No",
                     candidate.IsContainer ? "Yes" : "No",
-                        candidate.ReferenceFieldRatio
+                        candidate.ReferenceFieldRatio,
+                    candidate.RootChain ?? "—"
                 })).ToArray()));
 
             blocks.Add(T("Score factors: +30 for Gen2-heavy (>80%), +20 for >100 MB shallow size, +15 for finalizable types with >1,000 Gen2 objects, +10 each for static-rooted, pinned, and dependent-handle candidates, +5 for container-like types, +5 for reference-heavy shapes, and +5 for delegate/event-style types."));
@@ -111,8 +121,9 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
 
         var leakCandidateCards = new List<LeakCandidateCard>();
 
-        // Merge explanation + impact into typed cards for all high-signal candidates
-        for (int i = 0; i < leak.TopCandidates.Count; i++)
+        // Merge explanation + impact into typed cards for the highest-signal candidates
+        int cardCount = Math.Min(leak.TopCandidates.Count, MaxLeakCandidateCards);
+        for (int i = 0; i < cardCount; i++)
         {
             LeakCandidateRecord candidate = leak.TopCandidates[i];
             string impactBand = GetImpactBand(candidate.TotalSize);
@@ -198,6 +209,10 @@ internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzer
             LeakClass.DependentHandleLeak =>
                 $"{candidate.TypeName} is kept alive as the value in a ConditionalWeakTable where the key is still reachable. " +
                 "Review the table's owner lifetime and consider explicit cleanup.",
+
+            LeakClass.TimerLeak =>
+                $"{candidate.TypeName} instances ({candidate.InstanceCount:N0}, {FormatBytes(candidate.TotalSize)}) correlate with an elevated logical timer " +
+                "count reported by Timer Leak Analysis. Dispose timers explicitly when no longer needed; avoid per-request or per-entity timers.",
 
             LeakClass.Unknown =>
                 $"{candidate.TypeName} is reachable from a GC root but the retention pattern was not recognised. " +

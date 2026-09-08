@@ -4,7 +4,7 @@ using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 
-namespace DumpDetective.Analysis.FindingGenerators;
+namespace DumpDetective.Reporting.FindingGenerators;
 
 internal sealed class StringFindingGenerator : IFindingGenerator
 {
@@ -58,6 +58,24 @@ internal sealed class StringFindingGenerator : IFindingGenerator
                 MetricUnit: "bytes"));
         }
 
+        if (r.VeryLongStrings?.Count > 0)
+        {
+            ulong veryLongTotalSize = 0;
+            foreach (var entry in r.VeryLongStrings)
+                veryLongTotalSize += entry.SizeBytes;
+
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Memory",
+                Severity: FindingSeverity.Info,
+                Title: "Very long strings detected",
+                Evidence: $"{r.VeryLongStrings.Count:N0} very long string(s) totaling {FormatHelper.FormatBytes(veryLongTotalSize)} (individual threshold > 85 KB). These block GC compaction and fragment the Large Object Heap.",
+                Recommendation: "Refactor to avoid allocating extremely long strings; use ReadOnlySpan<char>, StringBuilder with limited buffering, or streaming APIs.",
+                Tags: ["string", "loh", "fragmentation", "memory"],
+                MetricValue: veryLongTotalSize,
+                MetricUnit: "bytes"));
+        }
+
         if (r.PctOfManagedHeap > 20.0)
         {
             findings.Add(new InsightFinding(
@@ -70,6 +88,20 @@ internal sealed class StringFindingGenerator : IFindingGenerator
                 Tags: ["string", "memory"],
                 MetricValue: r.TotalStringMemoryBytes,
                 MetricUnit: "bytes"));
+        }
+
+        if (r.SamplingCoverage < 0.05 && r.SamplingCoverage > 0)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Analysis",
+                Severity: FindingSeverity.Info,
+                Title: "Low sampling coverage on deduplication analysis",
+                Evidence: $"String deduplication was performed on a sample covering only {r.SamplingCoverage * 100.0:F1}% of all strings ({r.StringsSampled:N0} sampled out of ~{(int)(r.StringsSampled / Math.Max(r.SamplingCoverage, 0.01)):N0} total). Results may not be representative of heap-wide patterns.",
+                Recommendation: "Low coverage here reflects how many strings fell within MaxDuplicateStringLength, not a configurable sampling limit. Current results should be treated as indicative, not definitive.",
+                Tags: ["sampling", "coverage", "deduplication"],
+                MetricValue: r.SamplingCoverage * 100.0,
+                MetricUnit: "percent"));
         }
 
         return findings;

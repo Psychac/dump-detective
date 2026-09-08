@@ -51,7 +51,7 @@ public sealed class FitnessEnforcementTests
             Path.Combine(repoRoot, "tests", "DumpDetective.Tests", "Integration", "ProgramEntryPointTests.cs"),
             Path.Combine(repoRoot, "tests", "DumpDetective.Tests", "Integration", "HtmlRendererCssTests.cs"),
             Path.Combine(repoRoot, "tests", "DumpDetective.Tests", "ReportingVisualsTests.cs"),
-            Path.Combine(repoRoot, "tests", "DumpDetective.Tests", "Unit", "Architecture", "AnalyzerFeatureModuleSpikeTests.cs"),
+            Path.Combine(repoRoot, "tests", "DumpDetective.Tests", "Unit", "Hosting", "ServiceRegistrationTests.cs"),
             Path.Combine(repoRoot, "tests", "DumpDetective.Tests", "Unit", "Architecture", "DependencyDirectionTests.cs"),
         ];
 

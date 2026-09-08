@@ -26,21 +26,32 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
             ["total_segments"] = new NumericMetricValue(d.TotalSegments, MetricUnit.Count),
+            ["gc_mode"] = new TextMetricValue(d.IsServerGc ? "Server" : "Workstation"),
+            ["logical_heap_count"] = new NumericMetricValue(d.LogicalHeapCount, MetricUnit.Count),
             ["committed_bytes"] = new NumericMetricValue((double)d.TotalCommittedBytes, MetricUnit.Bytes, FormatBytes(d.TotalCommittedBytes)),
             ["used_bytes"] = new NumericMetricValue((double)d.TotalUsedBytes, MetricUnit.Bytes, FormatBytes(d.TotalUsedBytes)),
             ["reserved_bytes"] = new NumericMetricValue((double)d.TotalReservedBytes, MetricUnit.Bytes, FormatBytes(d.TotalReservedBytes)),
             ["reservation_gap"] = new NumericMetricValue((double)d.ReservationGapBytes, MetricUnit.Bytes, FormatBytes(d.ReservationGapBytes)),
+            ["gen0_bytes"] = new NumericMetricValue((double)d.Gen0Bytes, MetricUnit.Bytes, FormatBytes(d.Gen0Bytes)),
+            ["gen1_bytes"] = new NumericMetricValue((double)d.Gen1Bytes, MetricUnit.Bytes, FormatBytes(d.Gen1Bytes)),
+            ["gen2_bytes"] = new NumericMetricValue((double)d.Gen2Bytes, MetricUnit.Bytes, FormatBytes(d.Gen2Bytes)),
             ["soh_bytes"] = new NumericMetricValue((double)d.SohBytes, MetricUnit.Bytes, FormatBytes(d.SohBytes)),
+            ["soh_fragmented"] = new NumericMetricValue((double)d.SohFragmentedBytes, MetricUnit.Bytes, FormatBytes(d.SohFragmentedBytes)),
             ["loh_bytes"] = new NumericMetricValue((double)d.LohBytes, MetricUnit.Bytes, FormatBytes(d.LohBytes)),
+            ["loh_fragmented"] = new NumericMetricValue((double)d.LohFragmentedBytes, MetricUnit.Bytes, FormatBytes(d.LohFragmentedBytes)),
             ["loh_pct"] = new NumericMetricValue(d.LohPercent, MetricUnit.Percent, $"{d.LohPercent:F1}%"),
             ["poh_bytes"] = new NumericMetricValue((double)d.PohBytes, MetricUnit.Bytes, FormatBytes(d.PohBytes)),
+            ["poh_fragmented"] = new NumericMetricValue((double)d.PohFragmentedBytes, MetricUnit.Bytes, FormatBytes(d.PohFragmentedBytes)),
             ["poh_pct"] = new NumericMetricValue(d.PohPercent, MetricUnit.Percent, $"{d.PohPercent:F1}%"),
             ["foh_bytes"] = new NumericMetricValue((double)d.FrozenBytes, MetricUnit.Bytes, FormatBytes(d.FrozenBytes)),
+            ["foh_fragmented"] = new NumericMetricValue((double)d.FrozenFragmentedBytes, MetricUnit.Bytes, FormatBytes(d.FrozenFragmentedBytes)),
             ["foh_pct"] = new NumericMetricValue(d.FrozenPercent, MetricUnit.Percent, $"{d.FrozenPercent:F1}%"),
         };
 
         if (d.FrozenBytes > 100UL * 1024 * 1024)
             blocks.Add(T("Frozen object heap usage is above 100 MB; this often points to heavy immutable or interned data retention."));
+
+        blocks.Add(T("Note: SOH is never walked per-object; SOH object count and used/fragmented bytes are derived exactly from Phase 1's heap-wide totals instead. When Phase 1's index is unavailable, SOH object count shows N/A and SOH fragmentation is reported as 0 rather than a misleading estimate."));
 
         // Kind summary
         if (d.KindSummaries is { Count: > 0 })
@@ -65,13 +76,10 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
         if (d.PerLogicalHeapSummaries.Count > 0)
         {
             var rows = new List<TableRow>(d.PerLogicalHeapSummaries.Count);
-            ulong maxBytes = 0, minBytes = ulong.MaxValue;
             for (int i = 0; i < d.PerLogicalHeapSummaries.Count; i++)
             {
                 PerLogicalHeapSummary heap = d.PerLogicalHeapSummaries[i];
                 double share = d.TotalCommittedBytes == 0 ? 0.0 : heap.Bytes * 100.0 / d.TotalCommittedBytes;
-                if (heap.Bytes > maxBytes) maxBytes = heap.Bytes;
-                if (heap.Bytes < minBytes) minBytes = heap.Bytes;
                 rows.Add(Row(
                     Cell(heap.LogicalHeapIndex.ToString("N0"), heap.LogicalHeapIndex),
                     Cell(FormatBytes(heap.Bytes), (long)Math.Min(heap.Bytes, long.MaxValue)),
@@ -80,8 +88,8 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
                     Cell(heap.SegmentCount.ToString("N0"), heap.SegmentCount)));
             }
             compactTables.Add(STCompact("Per logical heap", new[] { CH("Heap"), CH("Committed Bytes","bytes"), CH("% of Total", "number", "percent"), CH("Objects","number"), CH("Segments","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
-            if (d.PerLogicalHeapSummaries.Count > 1 && minBytes > 0 && maxBytes > minBytes * 2)
-                blocks.Add(T("Warning: Logical heaps are skewed: largest heap is more than 2x the smallest."));
+            // Skew is reported as a proper InsightFinding by HeapTopologyFindingGenerator (severity,
+            // tags, MetricValue, trend-tracked) instead of an inline text block here.
         }
 
         // Top segments by size
@@ -91,6 +99,9 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
             for (int i = 0; i < d.TopSegmentsBySize.Count; i++)
             {
                 HeapSegmentSnapshot seg = d.TopSegmentsBySize[i];
+                double objectDensity = seg.CommittedBytes > 0 && seg.ObjectCount > 0
+                    ? (seg.ObjectCount * 1024.0 * 1024.0) / seg.CommittedBytes
+                    : 0.0;
                 rows.Add(Row(
                     Cell($"0x{seg.Address:X}"),
                     Cell(seg.Kind.ToString()),
@@ -99,10 +110,11 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
                     Cell(FormatBytes(seg.UsedBytes), (long)Math.Min(seg.UsedBytes, long.MaxValue)),
                     Cell(FormatBytes(seg.ReservedBytes), (long)Math.Min(seg.ReservedBytes, long.MaxValue)),
                     Cell(seg.Generation.ToString("N0"), seg.Generation),
-                    Cell(seg.ObjectCount.ToString("N0"), seg.ObjectCount)));
+                    Cell(seg.ObjectCount.ToString("N0"), seg.ObjectCount),
+                    Cell(objectDensity > 0 ? $"{objectDensity:F1}" : "—", objectDensity > 0 ? objectDensity : null)));
             }
             compactTables.Add(STCompact("Top segments by size",
-                new[] { CH("Address"), CH("Kind"), CH("Length","bytes"), CH("Committed","bytes"), CH("Used","bytes"), CH("Reserved","bytes"), CH("Gen","number"), CH("Objects","number") },
+                new[] { CH("Address"), CH("Kind"), CH("Length","bytes"), CH("Committed","bytes"), CH("Used","bytes"), CH("Reserved","bytes"), CH("Gen","number"), CH("Objects","number"), CH("Density","objects/MB") },
                 rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 

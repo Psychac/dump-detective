@@ -1,8 +1,6 @@
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Cli.Models;
-using DumpDetective.Cli.Services.Capabilities;
 using DumpDetective.Core.Models;
-using DumpDetective.Reporting.Capabilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Services;
 
@@ -12,32 +10,6 @@ namespace DumpDetective.Cli.Services;
 
 internal sealed class StartupValidator
 {
-    public void ValidateFeatureModuleCoverage(AnalyzerFeatureModuleCoverage coverage, bool requireFullCoverage, string label)
-    {
-        var errors = new List<string>();
-
-        if (coverage.InvalidShapeModules.Count > 0)
-            errors.Add($"Invalid module shape in {label}: {string.Join(", ", coverage.InvalidShapeModules)}");
-
-        if (coverage.ExtraAnalyzerTypes.Count > 0)
-            errors.Add($"Module entries in {label} do not map to active analyzers: {string.Join(", ", coverage.ExtraAnalyzerTypes)}");
-
-        if (coverage.MissingFindingGenerators.Count > 0)
-            errors.Add($"Module entries in {label} missing registered finding generators: {string.Join(", ", coverage.MissingFindingGenerators)}");
-
-        if (coverage.MissingTrendComparers.Count > 0)
-            errors.Add($"Module entries in {label} missing registered trend comparers: {string.Join(", ", coverage.MissingTrendComparers)}");
-
-        if (coverage.MissingAnalyzerSectionBuilders.Count > 0)
-            errors.Add($"Module entries in {label} missing analyzer section builders: {string.Join(", ", coverage.MissingAnalyzerSectionBuilders)}");
-
-        if (requireFullCoverage && coverage.MissingAnalyzerModules.Count > 0)
-            errors.Add($"{label} does not cover all active analyzers: {string.Join(", ", coverage.MissingAnalyzerModules)}");
-
-        if (errors.Count > 0)
-            throw new ArgumentException(string.Join(Environment.NewLine, errors));
-    }
-
     public void ValidateRegistrations(
         IReadOnlyList<IAnalyzer> analyzers,
         IEnumerable<IFindingGenerator> findingGenerators,
@@ -119,7 +91,6 @@ internal sealed class StartupValidator
         ValidateRetentionOptions(options.MemoryLeak, errors);
         ValidateStringAnalysisOptions(options.StringAnalysis, errors);
         ValidateReferenceChainOptions(options.ReferenceChain, errors);
-        ValidateEventLeakOptions(options.EventLeak, errors);
 
         var overlap = options.IncludeAnalyzers.Intersect(options.ExcludeAnalyzers, StringComparer.OrdinalIgnoreCase);
         if (overlap.Any())
@@ -184,18 +155,6 @@ internal sealed class StartupValidator
         {
             errors.Add("ReferenceChain.TopCount must be greater than zero.");
         }
-
-        if (options.MaxPathSearchObjects <= 0)
-        {
-            errors.Add("ReferenceChain.MaxPathSearchObjects must be greater than zero.");
-        }
     }
 
-    private static void ValidateEventLeakOptions(EventLeakOptions options, List<string> errors)
-    {
-        if (options.MinSubscribers < 0)
-        {
-            errors.Add("EventLeak.MinSubscribers must be zero or greater.");
-        }
-    }
 }

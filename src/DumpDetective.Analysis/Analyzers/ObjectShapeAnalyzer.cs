@@ -1,10 +1,10 @@
-using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
-using DumpDetective.Core.Options;
+
+using Microsoft.Diagnostics.Runtime;
+using Microsoft.Extensions.Logging;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -14,21 +14,29 @@ namespace DumpDetective.Analysis.Analyzers
     /// and joins with <see cref="HeapIndexBuildResult.TypeAggregates"/> for instance counts.
     /// Classifies types as ReferenceHeavy / ValueHeavy / Balanced / Scalar and ranks
     /// by (referenceFieldRatio × instanceCount) to surface GC-scan-cost hotspots.
-    /// Capped at top 200 types by instance count to bound ClrType metadata lookups.
     /// </summary>
     public sealed class ObjectShapeAnalyzer : IAnalyzer
     {
         public string Name => "Object Shape Analysis";
         public string Category => "Memory";
+        public IReadOnlyCollection<string> Tags => ["gc", "object-shape", "memory", "gc-scan"];
+
+        private readonly ILogger<ObjectShapeAnalyzer>? _logger;
+
+        public ObjectShapeAnalyzer() { }
+
+        public ObjectShapeAnalyzer(ILogger<ObjectShapeAnalyzer>? logger)
+        {
+            _logger = logger;
+        }
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            ObjectShapeAnalysisOptions options = context.AnalysisOptions.ObjectShapeAnalysis;
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache).Stamp(this));
         }
 
-        private static AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache, ObjectShapeAnalysisOptions options)
+        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache)
         {
             if (cache is not HeapAnalysisCache heapCache
                 || !heapCache.TryGetHeapIndex(out HeapIndexBuildResult? idx)
@@ -37,15 +45,18 @@ namespace DumpDetective.Analysis.Analyzers
                 return new ObjectShapeAnalyzerDomainResult(
                     TopReferenceHeavyTypes: [],
                     TopValueHeavyTypes: [],
+                    TopBalancedTypes: [],
                     TotalTypesAnalyzed: 0,
-                    AvgRefFieldsPerType: 0);
+                    AvgRefFieldsPerType: 0,
+                    TotalGcScanWork: 0,
+                    TopGen2RetainedTypes: [],
+                    TotalGen2GcScanWork: 0);
             }
 
             IReadOnlyDictionary<ulong, TypeShapeEntry> shapes = idx.TypeShapeCache;
             IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates = idx.TypeAggregates;
 
-            // Collect MTs present in both shape cache and aggregates, sorted by descending
-            // instance count — cap by options to bound ClrType metadata access.
+            // Collect MTs present in both shape cache and aggregates.
             var candidates = new List<(ulong Mt, TypeShapeEntry Shape, long Count)>(shapes.Count);
             foreach (KeyValuePair<ulong, TypeShapeEntry> kv in shapes)
             {
@@ -53,26 +64,30 @@ namespace DumpDetective.Analysis.Analyzers
                     candidates.Add((kv.Key, kv.Value, agg.Count));
             }
 
-            candidates.Sort(static (a, b) => b.Count.CompareTo(a.Count));
-
-            int cap = Math.Min(candidates.Count, options.InstanceCountCap);
-
-            var refHeavy = new List<TypeShapeProfile>(options.TopListLimit);
-            var valHeavy = new List<TypeShapeProfile>(options.TopListLimit);
+            var refHeavyCandidates = new List<TypeShapeProfile>();
+            var valHeavyCandidates = new List<TypeShapeProfile>();
+            var balancedCandidates = new List<TypeShapeProfile>();
 
             long totalRefFields = 0;
+            long totalGcScanWork = 0;
+            long totalGen2GcScanWork = 0;
             int typesAnalyzed = 0;
 
-            for (int i = 0; i < cap; i++)
+            foreach ((ulong mt, TypeShapeEntry shape, long count) in candidates)
             {
-                (ulong mt, TypeShapeEntry shape, long count) = candidates[i];
-
                 ClrType? type = heap.GetTypeByMethodTable(mt);
                 if (type is null)
                     continue;
 
+                if (!aggregates.TryGetValue(mt, out TypeAggregateIndexEntry agg))
+                    continue;
+
                 typesAnalyzed++;
                 totalRefFields += shape.RefFields;
+                totalGcScanWork += (long)(shape.RefFields * (double)Math.Max(0, count));
+
+                ulong gen2InstanceCount = (ulong)Math.Max(0, agg.Gen2Count);
+                totalGen2GcScanWork += (long)(shape.RefFields * (double)gen2InstanceCount);
 
                 double refRatio = shape.TotalFields > 0
                     ? shape.RefFields * 1.0 / shape.TotalFields
@@ -88,8 +103,15 @@ namespace DumpDetective.Analysis.Analyzers
 
                 int baseDepth = ComputeBaseTypeDepth(type);
                 int ifaceCount;
-                try { ifaceCount = type.EnumerateInterfaces().Count(); }
-                catch { ifaceCount = 0; }
+                try
+                {
+                    ifaceCount = type.EnumerateInterfaces().Count();
+                }
+                catch (Exception ex)
+                {
+                    ifaceCount = 0;
+                    _logger?.LogDebug(ex, "Error enumerating interfaces for type {TypeName} (MT=0x{MethodTable:x})", type.Name, mt);
+                }
 
                 var profile = new TypeShapeProfile(
                     TypeName: type.Name ?? $"MT:0x{mt:x}",
@@ -98,28 +120,59 @@ namespace DumpDetective.Analysis.Analyzers
                     ValueFields: shape.ValFields,
                     ReferenceFieldRatio: refRatio,
                     InstanceCount: (ulong)Math.Max(0, count),
+                    TotalSize: agg.TotalSize,
                     IsFinalizable: type.IsFinalizable,
                     IsValueType: type.IsValueType,
                     IsArray: type.IsArray,
                     BaseTypeChainDepth: baseDepth,
                     InterfaceCount: ifaceCount,
-                    Category: category);
+                    Category: category,
+                    Gen2InstanceCount: gen2InstanceCount);
 
-                // Rank by (refRatio × instanceCount) — types with many instances and
-                // many ref fields impose the highest GC scan cost.
-                if (category == ObjectShapeCategory.ReferenceHeavy && refHeavy.Count < options.TopListLimit)
-                    refHeavy.Add(profile);
-                else if (category == ObjectShapeCategory.ValueHeavy && valHeavy.Count < options.TopListLimit)
-                    valHeavy.Add(profile);
+                if (category == ObjectShapeCategory.ReferenceHeavy)
+                    refHeavyCandidates.Add(profile);
+                else if (category == ObjectShapeCategory.ValueHeavy)
+                    valHeavyCandidates.Add(profile);
+                else if (category == ObjectShapeCategory.Balanced)
+                    balancedCandidates.Add(profile);
             }
+
+            // Sort by GC scan cost score (refRatio × instanceCount) in descending order
+            refHeavyCandidates.Sort(static (a, b) =>
+                (b.ReferenceFieldRatio * (double)b.InstanceCount)
+                    .CompareTo(a.ReferenceFieldRatio * (double)a.InstanceCount));
+
+            // Sort value-heavy types by total heap size (more impactful types first)
+            valHeavyCandidates.Sort(static (a, b) =>
+                b.TotalSize.CompareTo(a.TotalSize));
+
+            // Sort balanced types by instance count (most populous first)
+            balancedCandidates.Sort(static (a, b) =>
+                b.InstanceCount.CompareTo(a.InstanceCount));
+
+            // Retention-adjusted ranking: RefFields × Gen2InstanceCount rather than total
+            // InstanceCount, since Gen2 objects are rescanned on every full GC while Gen0/Gen1
+            // objects are collected (and thus scanned) far more cheaply.
+            var gen2RetainedCandidates = new List<TypeShapeProfile>(
+                refHeavyCandidates.Count + valHeavyCandidates.Count + balancedCandidates.Count);
+            gen2RetainedCandidates.AddRange(refHeavyCandidates);
+            gen2RetainedCandidates.AddRange(valHeavyCandidates);
+            gen2RetainedCandidates.AddRange(balancedCandidates);
+            gen2RetainedCandidates.Sort(static (a, b) =>
+                (b.ReferenceFields * (double)b.Gen2InstanceCount)
+                    .CompareTo(a.ReferenceFields * (double)a.Gen2InstanceCount));
 
             double avgRefFields = typesAnalyzed > 0 ? totalRefFields * 1.0 / typesAnalyzed : 0.0;
 
             return new ObjectShapeAnalyzerDomainResult(
-                TopReferenceHeavyTypes: refHeavy,
-                TopValueHeavyTypes: valHeavy,
+                TopReferenceHeavyTypes: refHeavyCandidates,
+                TopValueHeavyTypes: valHeavyCandidates,
+                TopBalancedTypes: balancedCandidates,
                 TotalTypesAnalyzed: typesAnalyzed,
-                AvgRefFieldsPerType: avgRefFields);
+                AvgRefFieldsPerType: avgRefFields,
+                TotalGcScanWork: totalGcScanWork,
+                TopGen2RetainedTypes: gen2RetainedCandidates,
+                TotalGen2GcScanWork: totalGen2GcScanWork);
         }
 
         private static int ComputeBaseTypeDepth(ClrType type)

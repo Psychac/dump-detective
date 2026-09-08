@@ -21,7 +21,15 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 new("alloc.loh.size.pct",           null, r.LohSizePct,            "%",     MetricTrendDirection.HigherIsWorse),
                 new("alloc.gc.pressure",            null, (double)r.GCPressure,    "level", MetricTrendDirection.HigherIsWorse),
                 new("alloc.promotion.pressure",     null, r.PromotionPressureScore,"score", MetricTrendDirection.HigherIsWorse),
+                new("alloc.finalizable.type.count", null, r.FinalizableTypeCount,  "types", MetricTrendDirection.HigherIsWorse),
+                new("alloc.finalizable.bytes",      null, r.FinalizableBytes,      "bytes", MetricTrendDirection.HigherIsWorse),
             };
+
+            if (r.LohSizeBands is not null)
+            {
+                foreach (var band in r.LohSizeBands)
+                    metrics.Add(new("alloc.loh.band.bytes", band.RangeLabel, band.TotalBytes, "bytes", MetricTrendDirection.HigherIsWorse));
+            }
 
             foreach (TypeAllocationProfile p in r.TopTransientTypes)
                 metrics.Add(new("alloc.transient.type.gen0.count", p.TypeName, p.Gen0Count, "objects", MetricTrendDirection.Neutral));
@@ -51,6 +59,8 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 MetricDeltaHelper.Compute("alloc.loh.size.pct",       null, b.LohSizePct,            c.LohSizePct,            "%",     MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("alloc.gc.pressure",        null, (double)b.GCPressure,    (double)c.GCPressure,    "level", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("alloc.promotion.pressure", null, b.PromotionPressureScore,c.PromotionPressureScore,"score", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("alloc.finalizable.type.count", null, b.FinalizableTypeCount, c.FinalizableTypeCount, "types", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("alloc.finalizable.bytes",      null, b.FinalizableBytes,     c.FinalizableBytes,     "bytes", MetricTrendDirection.HigherIsWorse),
             ];
         }
     }

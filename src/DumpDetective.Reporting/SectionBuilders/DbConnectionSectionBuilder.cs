@@ -26,8 +26,12 @@ internal sealed class DbConnectionSectionBuilder : SectionBuilderBase, IAnalyzer
         {
             ["total_connections"] = new NumericMetricValue(d.TotalConnections, MetricUnit.Count),
             ["open_connections"] = new NumericMetricValue(d.OpenConnections, MetricUnit.Count),
+            ["gen2_open_connections"] = new NumericMetricValue(d.Gen2OpenConnections, MetricUnit.Count),
+            ["gen0_open_connections"] = new NumericMetricValue(d.Gen0OpenConnections, MetricUnit.Count),
             ["closed_connections"] = new NumericMetricValue(d.ClosedConnections, MetricUnit.Count),
+            ["broken_connections"] = new NumericMetricValue(d.BrokenConnections, MetricUnit.Count),
             ["other_connections"] = new NumericMetricValue(d.OtherConnections, MetricUnit.Count),
+            ["unknown_state_connections"] = new NumericMetricValue(d.UnknownStateConnections, MetricUnit.Count),
         };
 
         if (!d.ConnectionsFound)
@@ -49,12 +53,14 @@ internal sealed class DbConnectionSectionBuilder : SectionBuilderBase, IAnalyzer
                     Cell($"{t.TotalCount:N0}", t.TotalCount),
                     Cell($"{t.OpenCount:N0}",   t.OpenCount),
                     Cell($"{t.ClosedCount:N0}", t.ClosedCount),
+                    Cell($"{t.BrokenCount:N0}", t.BrokenCount),
                     Cell($"{t.OtherCount:N0}",  t.OtherCount),
+                    Cell($"{t.UnknownStateCount:N0}", t.UnknownStateCount),
                     Cell(FormatBytes(t.TotalBytes)),
                 ]));
             }
             compactTables.Add(STCompact("Connection objects by type",
-                new[] { CH("Type"), CH("Total","number"), CH("Open","number"), CH("Closed","number"), CH("Other","number"), CH("Heap Size","bytes") },
+                new[] { CH("Type"), CH("Total","number"), CH("Open","number"), CH("Closed","number"), CH("Broken","number"), CH("Other","number"), CH("Unknown","number"), CH("Heap Size","bytes") },
                 typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -77,8 +83,57 @@ internal sealed class DbConnectionSectionBuilder : SectionBuilderBase, IAnalyzer
                 openRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
-        if (d.StateScanCapped)
-            blocks.Add(new TextBlock("Note: state sampling was capped. Counts above may be lower than actual totals."));
+        // R12: retention paths for the Gen2 open connections DbConnectionAnalyzer ran root-path
+        // search against (bounded subset, not all open connections — see MaxRootPathEnrichment).
+        var rootPathRows = new List<TableRow>();
+        for (int i = 0; i < d.TopOpenConnections.Count; i++)
+        {
+            DbConnectionSnapshot s = d.TopOpenConnections[i];
+            if (s.RootPath is null) continue;
+
+            string shortType = s.TypeName.Contains('.') ? s.TypeName.Split('.')[^1] : s.TypeName;
+            rootPathRows.Add(new TableRow([
+                Cell(shortType),
+                Cell($"0x{s.Address:X}"),
+                Cell(s.RetainedBytes is ulong bytes ? FormatBytes(bytes) : "(unknown)"),
+                Cell(s.RootPath),
+            ]));
+        }
+        if (rootPathRows.Count > 0)
+        {
+            compactTables.Add(STCompact("Retention paths (Gen2 open connections)",
+                new[] { CH("Type"), CH("Address"), CH("Retained"), CH("GC Root Path") },
+                rootPathRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
+        // Top exhausted pools by connection string
+        if (d.TopPools.Count > 0)
+        {
+            var poolRows = new List<TableRow>(d.TopPools.Count);
+            for (int i = 0; i < d.TopPools.Count; i++)
+            {
+                PoolSummary p = d.TopPools[i];
+                int totalInPool = p.TotalConnections;
+                int openInPool = p.OpenConnections;
+                double utilisation = totalInPool > 0 ? (100.0 * openInPool / totalInPool) : 0;
+                poolRows.Add(new TableRow([
+                    Cell(p.PoolIdentifier),
+                    Cell($"{openInPool:N0}", openInPool),
+                    Cell($"{totalInPool:N0}", totalInPool),
+                    Cell($"{utilisation:F1}%"),
+                ]));
+            }
+            compactTables.Add(STCompact("Top exhausted connection pools",
+                new[] { CH("Pool (Server/Database)"), CH("Open","number"), CH("Sampled Total","number"), CH("Utilisation %","percent") },
+                poolRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
+        // Add generation breakdown note
+        if (d.OpenConnections > 0)
+        {
+            string genNote = $"Open connections breakdown by GC generation: Gen2 (long-lived, {d.Gen2OpenConnections:N0}) likely indicates leaks; Gen0 ({d.Gen0OpenConnections:N0}) likely in-flight transactions.";
+            blocks.Add(new TextBlock(genNote));
+        }
 
         return new AnalyzerDetailSection(AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,

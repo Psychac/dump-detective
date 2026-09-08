@@ -1,0 +1,16 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "Set-Content": true,
+        "dotnet build": true,
+        "Resolve-Path": true,
+        "ForEach-Object": true,
+        "dotnet-script": true,
+        "Add-Type": true,
+        "New-Item": true,
+        "Out-Null": true,
+        "dotnet run": true,
+        "dotnet script": true,
+        "dotnet test": true,
+        "pushd": true
+    }
+}

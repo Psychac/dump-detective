@@ -1,10 +1,10 @@
-using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
+
+using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -18,8 +18,6 @@ namespace DumpDetective.Analysis.Analyzers
     ///
     /// Struct padding: for each value type with a populated <see cref="TypeShapeCache"/> entry,
     /// computes <c>StaticSize – sum(field.Size)</c> to surface padding waste.
-    ///
-    /// Capped at <see cref="TypeScanCap"/> MT lookups to bound metadata overhead.
     /// </summary>
     public sealed class BoxingAnalyzer : IAnalyzer
     {
@@ -32,12 +30,13 @@ namespace DumpDetective.Analysis.Analyzers
         {
             cancellationToken.ThrowIfCancellationRequested();
             BoxingAnalysisOptions options = context.AnalysisOptions.BoxingAnalysis;
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, cancellationToken).Stamp(this));
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, options, cancellationToken).Stamp(this));
         }
 
         private static AnalyzerDomainResult Analyze(
             ClrHeap heap,
             IHeapAnalysisCache cache,
+            IProgress<AnalyzerProgressReport>? progress,
             BoxingAnalysisOptions options,
             CancellationToken cancellationToken)
         {
@@ -52,28 +51,43 @@ namespace DumpDetective.Analysis.Analyzers
 
             if (typeAggregates is null)
             {
-                return new BoxingDomainResult(0, 0, [], 0, 0, 0, [], false);
+                return new BoxingDomainResult(0, 0, [], 0, 0, 0, 0, 0, [], [], 0, 0.0);
             }
 
             // ── Boxing inventory ──────────────────────────────────────────────
-            var boxedByTypeName = new Dictionary<string, (int Count, ulong Bytes, bool IsEnum)>(
+            var boxedByTypeName = new Dictionary<string, (int Count, ulong Bytes, bool IsEnum, bool HasRefFields, long Gen0Count, long Gen2Count, bool HasIEquatable)>(
                 StringComparer.Ordinal);
 
-            int totalBoxedObjects = 0;
+            long totalBoxedObjects = 0;
             ulong totalBoxedBytes = 0;
-            int boxedEnumCount = 0;
+            long boxedEnumCount = 0;
             ulong boxedEnumBytes = 0;
-            int oversizedCount = 0;
-            bool scanCapped = false;
+            long nullableCount = 0;
+            ulong nullableBytes = 0;
+            long oversizedCount = 0;
+            long totalGen2BoxedCount = 0;
 
             // Struct padding candidates: collect during the same pass
-            var paddingCandidates = new List<(string TypeName, int StructSize, int FieldBytes)>(64);
+            var paddingCandidates = new List<(string TypeName, int StructSize, int FieldBytes, int Count, int WastedBytes)>(64);
 
-            int scanned = 0;
+            // Oversized value type candidates: aggregated by type name during the same pass
+            var oversizedByTypeName = new Dictionary<string, (int StaticSize, int Count)>(StringComparer.Ordinal);
+
+            int typesScanned = 0;
+            int totalTypes = typeAggregates.Count;
+            const int ProgressReportInterval = 128;
+
             foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in typeAggregates)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (++scanned > options.TypeScanCap) { scanCapped = true; break; }
+                // Mid-loop cancellation check and progress reporting (every 128 types) — each
+                // iteration does a ClrMD metadata lookup (GetTypeByMethodTable), so this loop's
+                // cost scales with distinct type count rather than object count.
+                if ((typesScanned % ProgressReportInterval) == 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    progress?.Report(new(typesScanned, "scanning boxed type metadata", $"{typesScanned}/{totalTypes} types"));
+                }
+                typesScanned++;
 
                 TypeAggregateIndexEntry entry = kv.Value;
 
@@ -92,9 +106,10 @@ namespace DumpDetective.Analysis.Analyzers
                 if (!isBoxed) continue;
 
                 string typeName = clrType.Name ?? $"MT:0x{kv.Key:x}";
-                int count = (int)Math.Min(entry.Count, int.MaxValue);
+                int count = SafeInstanceCount(entry.Count);
                 ulong bytes = entry.TotalSize;
                 bool isEnum = clrType.IsEnum;
+                bool isNullable = IsNullableTypeName(typeName);
 
                 totalBoxedObjects += count;
                 totalBoxedBytes += bytes;
@@ -105,14 +120,37 @@ namespace DumpDetective.Analysis.Analyzers
                     boxedEnumBytes += bytes;
                 }
 
+                if (isNullable)
+                {
+                    nullableCount += count;
+                    nullableBytes += bytes;
+                }
+
                 // Oversized value types — StaticSize reflects the value layout size
                 if (clrType.StaticSize > options.OversizedThresholdBytes)
+                {
                     oversizedCount += count;
+                    if (oversizedByTypeName.TryGetValue(typeName, out var existingOversized))
+                        oversizedByTypeName[typeName] = (existingOversized.StaticSize, existingOversized.Count + count);
+                    else
+                        oversizedByTypeName[typeName] = (clrType.StaticSize, count);
+                }
+
+                // Check if type has reference fields using typeShapeCache
+                bool hasRefFields = typeShapeCache?.TryGetValue(kv.Key, out var shapeEntry) == true && shapeEntry.RefFields > 0;
+
+                // Per-MT GC generation distribution (already captured by the Phase 1 index) —
+                // distinguishes transient (Gen0, likely short-lived boxing churn) from retained
+                // (Gen2, survived collections — the boxing that actually matters for a leak/GC-pressure diagnosis).
+                totalGen2BoxedCount += entry.Gen2Count;
+
+                bool hasIEquatable = HasIEquatableInterface(EnumerateInterfacesSafe(clrType));
 
                 if (boxedByTypeName.TryGetValue(typeName, out var existing))
-                    boxedByTypeName[typeName] = (existing.Count + count, existing.Bytes + bytes, isEnum);
+                    boxedByTypeName[typeName] = (existing.Count + count, existing.Bytes + bytes, isEnum, existing.HasRefFields || hasRefFields,
+                        existing.Gen0Count + entry.Gen0Count, existing.Gen2Count + entry.Gen2Count, existing.HasIEquatable || hasIEquatable);
                 else
-                    boxedByTypeName[typeName] = (count, bytes, isEnum);
+                    boxedByTypeName[typeName] = (count, bytes, isEnum, hasRefFields, entry.Gen0Count, entry.Gen2Count, hasIEquatable);
 
                 // ── Struct padding ────────────────────────────────────────────
                 // Compute per-type only (not per-instance). Skip enums and very small structs.
@@ -120,58 +158,70 @@ namespace DumpDetective.Analysis.Analyzers
                 {
                     int fieldBytes = ComputeTotalFieldBytes(clrType);
                     int structSize = clrType.StaticSize;
-                    if (fieldBytes > 0 && structSize > fieldBytes)
-                        paddingCandidates.Add((typeName, structSize, fieldBytes));
+                    int wasted = ComputePaddingWaste(structSize, fieldBytes);
+                    if (wasted > 0)
+                        paddingCandidates.Add((typeName, structSize, fieldBytes, count, wasted));
                 }
             }
 
             // ── Build top boxed types ─────────────────────────────────────────
-            var typeList = new List<(string Name, int Count, ulong Bytes, bool IsEnum)>(boxedByTypeName.Count);
-            foreach (KeyValuePair<string, (int Count, ulong Bytes, bool IsEnum)> kv in boxedByTypeName)
-                typeList.Add((kv.Key, kv.Value.Count, kv.Value.Bytes, kv.Value.IsEnum));
+            var typeList = new List<(string Name, int Count, ulong Bytes, bool IsEnum, bool HasRefFields, long Gen0Count, long Gen2Count, bool HasIEquatable)>(boxedByTypeName.Count);
+            foreach (KeyValuePair<string, (int Count, ulong Bytes, bool IsEnum, bool HasRefFields, long Gen0Count, long Gen2Count, bool HasIEquatable)> kv in boxedByTypeName)
+                typeList.Add((kv.Key, kv.Value.Count, kv.Value.Bytes, kv.Value.IsEnum, kv.Value.HasRefFields, kv.Value.Gen0Count, kv.Value.Gen2Count, kv.Value.HasIEquatable));
 
             typeList.Sort(static (a, b) => b.Bytes.CompareTo(a.Bytes));
 
-            int topLimit = Math.Min(typeList.Count, options.TopBoxedTypeLimit);
-            var topBoxedTypes = new List<BoxedTypeEntry>(topLimit);
-            for (int i = 0; i < topLimit; i++)
+            var boxedTypes = new List<BoxedTypeEntry>(typeList.Count);
+            foreach (var t in typeList)
             {
-                var t = typeList[i];
-                topBoxedTypes.Add(new BoxedTypeEntry(t.Name, t.Count, t.Bytes, t.IsEnum));
+                double gen2Fraction = t.Count > 0 ? (double)t.Gen2Count / t.Count : 0.0;
+                boxedTypes.Add(new BoxedTypeEntry(t.Name, t.Count, t.Bytes, t.IsEnum, t.HasRefFields, t.Gen0Count, t.Gen2Count, gen2Fraction, t.HasIEquatable));
             }
 
-            // ── Build top padding waste types ─────────────────────────────────
-            paddingCandidates.Sort(static (a, b) =>
-            {
-                int wastedA = a.StructSize - a.FieldBytes;
-                int wastedB = b.StructSize - b.FieldBytes;
-                return wastedB.CompareTo(wastedA);
-            });
+            // ── Build padding waste types, ranked by waste ──────────────────────
+            paddingCandidates.Sort(static (a, b) => b.WastedBytes.CompareTo(a.WastedBytes));
 
-            int padLimit = Math.Min(paddingCandidates.Count, options.TopPaddingLimit);
-            var topPaddingWaste = new List<StructPaddingEntry>(padLimit);
-            for (int i = 0; i < padLimit; i++)
+            var paddingWaste = new List<StructPaddingEntry>(paddingCandidates.Count);
+            foreach (var c in paddingCandidates)
             {
-                var c = paddingCandidates[i];
-                int wasted = c.StructSize - c.FieldBytes;
-                double ratio = c.StructSize > 0 ? (double)wasted / c.StructSize : 0.0;
-                topPaddingWaste.Add(new StructPaddingEntry(
+                double ratio = c.StructSize > 0 ? (double)c.WastedBytes / c.StructSize : 0.0;
+                paddingWaste.Add(new StructPaddingEntry(
                     TypeName: c.TypeName,
                     TotalFieldBytes: c.FieldBytes,
                     StructSize: c.StructSize,
-                    WastedPaddingBytes: wasted,
+                    WastedPaddingBytes: c.WastedBytes,
                     WasteRatio: ratio));
             }
+
+            ulong aggregatePaddingWaste = 0;
+            foreach (var c in paddingCandidates)
+            {
+                aggregatePaddingWaste += (ulong)(c.WastedBytes * c.Count);
+            }
+
+            // ── Build oversized types, ranked by instance count ─────────────────
+            var oversizedList = new List<OversizedTypeEntry>(oversizedByTypeName.Count);
+            foreach (KeyValuePair<string, (int StaticSize, int Count)> kv2 in oversizedByTypeName)
+                oversizedList.Add(new OversizedTypeEntry(kv2.Key, kv2.Value.StaticSize, kv2.Value.Count));
+
+            oversizedList.Sort(static (a, b) => b.Count.CompareTo(a.Count));
+
+            double avgBoxedInstanceBytes = totalBoxedObjects > 0 ? (double)totalBoxedBytes / totalBoxedObjects : 0.0;
 
             return new BoxingDomainResult(
                 TotalBoxedObjects: totalBoxedObjects,
                 TotalBoxedBytes: totalBoxedBytes,
-                TopBoxedTypes: topBoxedTypes,
+                TopBoxedTypes: boxedTypes,
                 BoxedEnumCount: boxedEnumCount,
                 BoxedEnumBytes: boxedEnumBytes,
-                OversizedValueTypeCount: oversizedCount,
-                TopPaddingWasteTypes: topPaddingWaste,
-                TypeScanCapped: scanCapped);
+                NullableBoxedCount: nullableCount,
+                NullableBoxedBytes: nullableBytes,
+                OversizedValueTypeInstanceCount: oversizedCount,
+                TopOversizedTypes: oversizedList,
+                TopPaddingWasteTypes: paddingWaste,
+                AggregatePaddingWasteBytes: aggregatePaddingWaste,
+                AvgBoxedInstanceBytes: avgBoxedInstanceBytes,
+                TotalGen2BoxedCount: totalGen2BoxedCount);
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────
@@ -197,6 +247,57 @@ namespace DumpDetective.Analysis.Analyzers
                 return 0;
             }
         }
+
+        /// <summary>
+        /// Calls <c>clrType.EnumerateInterfaces()</c> defensively, returning an empty sequence on
+        /// any exception (ClrMD interface enumeration can fail on corrupt dumps or partially-loaded
+        /// metadata). Kept separate from <see cref="HasIEquatableInterface"/> so that interface-set
+        /// logic is unit-testable without a live <see cref="ClrType"/>.
+        /// </summary>
+        private static IEnumerable<ClrInterface> EnumerateInterfacesSafe(ClrType clrType)
+        {
+            try
+            {
+                return clrType.EnumerateInterfaces();
+            }
+            catch
+            {
+                return [];
+            }
+        }
+
+        /// <summary>
+        /// Returns true if <paramref name="interfaces"/> includes <c>IEquatable&lt;T&gt;</c>.
+        /// Types without it fall back to <c>object.Equals</c> for equality comparisons
+        /// (Dictionary/HashSet keys, <c>List.Contains</c>), which boxes the value on every call.
+        /// </summary>
+        internal static bool HasIEquatableInterface(IEnumerable<ClrInterface> interfaces)
+        {
+            foreach (ClrInterface iface in interfaces)
+            {
+                if (iface.Name is not null && iface.Name.StartsWith("IEquatable", StringComparison.Ordinal))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Clamps a <c>long</c> instance count to <c>int.MaxValue</c> for display/table purposes
+        /// without overflowing (heap type aggregates use <c>long</c> counters for very large heaps).
+        /// </summary>
+        internal static int SafeInstanceCount(long count) => (int)Math.Min(count, int.MaxValue);
+
+        /// <summary>Returns true if <paramref name="typeName"/> is a boxed <c>System.Nullable&lt;T&gt;</c>.</summary>
+        internal static bool IsNullableTypeName(string typeName) =>
+            typeName.StartsWith("System.Nullable<", StringComparison.Ordinal);
+
+        /// <summary>
+        /// Computes struct padding waste (in bytes) given the struct's declared size and the sum of
+        /// its field sizes. Returns 0 when there is no measurable waste (e.g. fields unavailable).
+        /// </summary>
+        internal static int ComputePaddingWaste(int structSize, int fieldBytes) =>
+            fieldBytes > 0 && structSize > fieldBytes ? structSize - fieldBytes : 0;
+
         public void Dispose() { }
     }
 }

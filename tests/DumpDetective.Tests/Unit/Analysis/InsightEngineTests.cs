@@ -3,6 +3,8 @@ using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 
+using System.Linq;
+
 using FluentAssertions;
 
 using Xunit;
@@ -84,6 +86,1183 @@ public sealed class InsightEngineTests
             f.Severity == FindingSeverity.Critical
             && f.Title.Contains("LOH", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void Analyze_ShouldEmitCorrelation_WhenDominantClusterOverlapsHangWaitingThreads()
+    {
+        InsightEngine engine = new();
+
+        ThreadStackClusterDomainResult clusters = new(
+            AliveThreadCount: 10,
+            UniqueClusters: 2,
+            SingletonSignatures: 0,
+            DiversityPercent: 20.0,
+            TopClusterSignatures: ["sig-a"],
+            TopClusters:
+            [
+                new ThreadClusterSnapshot(
+                    Count: 8,
+                    SampleOsThreadIds: [1, 2, 3, 4, 5],
+                    Signature: "sig-a")
+            ]);
+
+        HangDomainResult hang = new(
+            TotalAliveThreads: 10,
+            WaitingThreadCount: 5,
+            ThreadsHoldingLocks: 0,
+            WaitingPercent: 50.0,
+            WaitCategoryBreakdown: new Dictionary<string, int>(StringComparer.Ordinal),
+            TotalTaskContinuations: 0,
+            QueuedWorkItems: 0,
+            TotalTasks: 0,
+            PendingTasks: 0,
+            FaultedTasks: 0,
+            CanceledTasks: 0,
+            RuntimeThreadPoolDataAvailable: false,
+            RuntimeMinThreads: 0,
+            RuntimeMaxThreads: 0,
+            RuntimeActiveWorkerThreads: 0,
+            RuntimeIdleWorkerThreads: 0,
+            RuntimeRetiredWorkerThreads: 0,
+            RuntimeQueueLength: null,
+            RuntimeCpuUtilization: 0,
+            IsStarved: false,
+            HealthScore: 50,
+            TopWaitingThreads:
+            [
+                new WaitingThreadSnapshot(1, 1, "WaitForSingleObject", "Monitor.Wait", 0, "frame1"),
+                new WaitingThreadSnapshot(2, 2, "WaitForSingleObject", "Monitor.Wait", 0, "frame1"),
+                new WaitingThreadSnapshot(3, 3, "WaitForSingleObject", "Monitor.Wait", 0, "frame1"),
+                new WaitingThreadSnapshot(4, 4, "WaitForSingleObject", "Monitor.Wait", 0, "frame1"),
+            ]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Thread Stack Signature Clustering", AnalyzerExecutionStatus.Success, clusters),
+            BuildRun("Hang Analyzer", AnalyzerExecutionStatus.Success, hang),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("HangAnalyzer", StringComparison.OrdinalIgnoreCase)
+            && f.Title.Contains("cluster", StringComparison.OrdinalIgnoreCase)
+            && f.Evidence.Contains("Monitor.Wait", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Analyze_ShouldNotEmitCorrelation_WhenClusterAndHangThreadsDoNotOverlap()
+    {
+        InsightEngine engine = new();
+
+        ThreadStackClusterDomainResult clusters = new(
+            AliveThreadCount: 10,
+            UniqueClusters: 2,
+            SingletonSignatures: 0,
+            DiversityPercent: 20.0,
+            TopClusterSignatures: ["sig-a"],
+            TopClusters:
+            [
+                new ThreadClusterSnapshot(
+                    Count: 8,
+                    SampleOsThreadIds: [101, 102, 103, 104, 105],
+                    Signature: "sig-a")
+            ]);
+
+        HangDomainResult hang = new(
+            TotalAliveThreads: 10,
+            WaitingThreadCount: 5,
+            ThreadsHoldingLocks: 0,
+            WaitingPercent: 50.0,
+            WaitCategoryBreakdown: new Dictionary<string, int>(StringComparer.Ordinal),
+            TotalTaskContinuations: 0,
+            QueuedWorkItems: 0,
+            TotalTasks: 0,
+            PendingTasks: 0,
+            FaultedTasks: 0,
+            CanceledTasks: 0,
+            RuntimeThreadPoolDataAvailable: false,
+            RuntimeMinThreads: 0,
+            RuntimeMaxThreads: 0,
+            RuntimeActiveWorkerThreads: 0,
+            RuntimeIdleWorkerThreads: 0,
+            RuntimeRetiredWorkerThreads: 0,
+            RuntimeQueueLength: null,
+            RuntimeCpuUtilization: 0,
+            IsStarved: false,
+            HealthScore: 50,
+            TopWaitingThreads:
+            [
+                new WaitingThreadSnapshot(1, 1, "WaitForSingleObject", "Monitor.Wait", 0, "frame1"),
+                new WaitingThreadSnapshot(2, 2, "WaitForSingleObject", "Monitor.Wait", 0, "frame1"),
+            ]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Thread Stack Signature Clustering", AnalyzerExecutionStatus.Success, clusters),
+            BuildRun("Hang Analyzer", AnalyzerExecutionStatus.Success, hang),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().NotContain(f =>
+            f.Title.Contains("HangAnalyzer", StringComparison.OrdinalIgnoreCase)
+            && f.Title.Contains("cluster", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Analyze_ShouldEmitCrossAnalyzerFinding_WithEvidenceTable_WhenJitHotspotModuleIsConflicted()
+    {
+        InsightEngine engine = new();
+
+        JitDomainResult jit = new(
+            TotalJitHeapBytes: 1_000_000,
+            JitManagerCount: 1,
+            ActiveMethodsOnStacks: 500,
+            DistinctMethodsOnStacks: 20,
+            TopLargestMethods: [],
+            TopActiveFrameTypes: [],
+            TopActiveModulesByFrameHits: [new NameCountEntry("MyApp.Plugins.dll", 200)],
+            UnmanagedFrameCount: 0,
+            ManagedFrameCount: 500,
+            ReadyToRunFrameCount: 0,
+            DynamicMethodFrameCount: 0,
+            TieredMethodCount: 0,
+            MaxThreadFrameDepth: 0,
+            MaxThreadFrameDepthOSThreadId: 0,
+            LargeMethodThresholdBytes: 64 * 1024);
+
+        ModuleDomainResult modules = new(
+            TotalModules: 10,
+            DynamicModules: 0,
+            UniqueModuleNames: 10,
+            VersionConflictGroups: 1,
+            ConflictingAssemblyNames: ["MyApp.Plugins.dll"],
+            TopModulesBySize: [new LoadedModuleSnapshot("MyApp.Plugins.dll", "MyApp.Plugins", "C:\\app\\MyApp.Plugins.dll", 0x1000, 5_000_000, false, true)],
+            ConflictDetails: [],
+            HeavyModuleWarningThresholdBytes: 1_000_000,
+            UnknownIdentityDuplicateModules: new HashSet<string>());
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("JIT Analysis", AnalyzerExecutionStatus.Success, jit),
+            BuildRun("Module Analysis", AnalyzerExecutionStatus.Success, modules),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("heavy active JIT stack presence", StringComparison.OrdinalIgnoreCase)
+            && f.Tags.Contains("cross-analyzer")
+            && f.EffectiveEvidenceTables.Count == 1
+            && f.EffectiveEvidenceTables[0].Rows.Count == 1);
+    }
+
+    [Fact]
+    public void Analyze_ShouldEmitWarning_WhenActiveExceptionsConcentratedInConflictedModule()
+    {
+        InsightEngine engine = new();
+
+        CrashDomainResult crash = new(
+            TotalExceptions: 10,
+            ActiveExceptions: 8,
+            ExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal) { ["FooException"] = 10 },
+            ActiveExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal) { ["FooException"] = 8 },
+            TopCrashThreadCandidates:
+            [
+                CrashCandidate(1, activeCount: 6, topUserFrameModule: "MyApp.Plugins.dll"),
+                CrashCandidate(2, activeCount: 2, topUserFrameModule: "MyApp.Core.dll"),
+            ]);
+
+        ModuleDomainResult modules = new(
+            TotalModules: 10,
+            DynamicModules: 0,
+            UniqueModuleNames: 10,
+            VersionConflictGroups: 1,
+            ConflictingAssemblyNames: ["MyApp.Plugins.dll"],
+            TopModulesBySize: [new LoadedModuleSnapshot("MyApp.Plugins.dll", "MyApp.Plugins", "C:\\app\\MyApp.Plugins.dll", 0x1000, 5_000_000, false, true)],
+            ConflictDetails: [],
+            HeavyModuleWarningThresholdBytes: 1_000_000,
+            UnknownIdentityDuplicateModules: new HashSet<string>());
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Crash Analysis", AnalyzerExecutionStatus.Success, crash),
+            BuildRun("Module Analysis", AnalyzerExecutionStatus.Success, modules),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Severity == FindingSeverity.Warning
+            && f.Title.Contains("concentrated", StringComparison.OrdinalIgnoreCase)
+            && f.Tags.Contains("cross-analyzer")
+            && f.EffectiveEvidenceTables.Count == 1
+            && f.EffectiveEvidenceTables[0].Rows.Count == 2);
+    }
+
+    [Fact]
+    public void Analyze_ShouldNotEmitCrashModuleFinding_WhenActiveExceptionsBelowThreshold()
+    {
+        InsightEngine engine = new();
+
+        CrashDomainResult crash = new(
+            TotalExceptions: 2,
+            ActiveExceptions: 2,
+            ExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal) { ["FooException"] = 2 },
+            ActiveExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal) { ["FooException"] = 2 },
+            TopCrashThreadCandidates: [CrashCandidate(1, activeCount: 2, topUserFrameModule: "MyApp.Plugins.dll")]);
+
+        ModuleDomainResult modules = new(
+            TotalModules: 10,
+            DynamicModules: 0,
+            UniqueModuleNames: 10,
+            VersionConflictGroups: 1,
+            ConflictingAssemblyNames: ["MyApp.Plugins.dll"],
+            TopModulesBySize: [new LoadedModuleSnapshot("MyApp.Plugins.dll", "MyApp.Plugins", "C:\\app\\MyApp.Plugins.dll", 0x1000, 5_000_000, false, true)],
+            ConflictDetails: [],
+            HeavyModuleWarningThresholdBytes: 1_000_000,
+            UnknownIdentityDuplicateModules: new HashSet<string>());
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Crash Analysis", AnalyzerExecutionStatus.Success, crash),
+            BuildRun("Module Analysis", AnalyzerExecutionStatus.Success, modules),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().NotContain(f => f.Title.Contains("concentrated", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static CrashThreadCandidateSnapshot CrashCandidate(uint threadId, int activeCount, string? topUserFrameModule) => new(
+        ThreadId: threadId,
+        OSThreadId: threadId,
+        ActiveExceptionCount: activeCount,
+        PrimaryExceptionType: "FooException",
+        TopFrames: [],
+        OriginalStackTrace: null,
+        OriginalStackTraceInferred: false,
+        OriginalStackTraceInferredFrom: null,
+        TopUserFrameModule: topUserFrameModule);
+
+    [Fact]
+    public void Analyze_ShouldEmitEvidenceTable_WhenClusterOverlapsWithHangWaitReasons()
+    {
+        InsightEngine engine = new();
+
+        ThreadStackClusterDomainResult clusters = new(
+            AliveThreadCount: 10,
+            UniqueClusters: 1,
+            SingletonSignatures: 0,
+            DiversityPercent: 10.0,
+            TopClusterSignatures: ["Frame.A -> Frame.B"],
+            TopClusters: [new ThreadClusterSnapshot(
+                Count: 8,
+                SampleOsThreadIds: [1, 2, 3, 4],
+                Signature: "Frame.A -> Frame.B")]);
+
+        HangDomainResult hang = new(
+            TotalAliveThreads: 10,
+            WaitingThreadCount: 4,
+            ThreadsHoldingLocks: 0,
+            WaitingPercent: 40.0,
+            WaitCategoryBreakdown: new Dictionary<string, int>(),
+            TotalTaskContinuations: 0,
+            QueuedWorkItems: 0,
+            TotalTasks: 0,
+            PendingTasks: 0,
+            FaultedTasks: 0,
+            CanceledTasks: 0,
+            RuntimeThreadPoolDataAvailable: false,
+            RuntimeMinThreads: 0,
+            RuntimeMaxThreads: 0,
+            RuntimeActiveWorkerThreads: 0,
+            RuntimeIdleWorkerThreads: 0,
+            RuntimeRetiredWorkerThreads: 0,
+            RuntimeQueueLength: null,
+            RuntimeCpuUtilization: 0,
+            IsStarved: false,
+            HealthScore: 50,
+            TopWaitingThreads:
+            [
+                new WaitingThreadSnapshot(1, 1, "Monitor", "MonitorWait", 0, "Frame.A"),
+                new WaitingThreadSnapshot(2, 2, "Monitor", "MonitorWait", 0, "Frame.A"),
+                new WaitingThreadSnapshot(3, 3, "Monitor", "MonitorWait", 0, "Frame.A"),
+                new WaitingThreadSnapshot(4, 4, "SqlWait", "UserRequestWait", 0, "Frame.A"),
+            ]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Thread Stack Signature Clustering", AnalyzerExecutionStatus.Success, clusters),
+            BuildRun("Hang Analyzer", AnalyzerExecutionStatus.Success, hang),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("Dominant thread-stack cluster correlates", StringComparison.OrdinalIgnoreCase)
+            && f.EffectiveEvidenceTables.Count == 1
+            && f.EffectiveEvidenceTables[0].Rows.Count == 2
+            && f.EffectiveEvidenceTables[0].Rows[0].SequenceEqual(new object?[] { "MonitorWait", 3 }));
+    }
+
+    [Fact]
+    public void Analyze_ShouldEnrichClusterHangCorrelation_WithStackRootCounts_WhenThreadDataAvailable()
+    {
+        InsightEngine engine = new();
+
+        ThreadStackClusterDomainResult clusters = new(
+            AliveThreadCount: 10,
+            UniqueClusters: 1,
+            SingletonSignatures: 0,
+            DiversityPercent: 10.0,
+            TopClusterSignatures: ["Frame.A -> Frame.B"],
+            TopClusters: [new ThreadClusterSnapshot(
+                Count: 8,
+                SampleOsThreadIds: [1, 2, 3],
+                Signature: "Frame.A -> Frame.B")]);
+
+        HangDomainResult hang = new(
+            TotalAliveThreads: 10,
+            WaitingThreadCount: 3,
+            ThreadsHoldingLocks: 0,
+            WaitingPercent: 30.0,
+            WaitCategoryBreakdown: new Dictionary<string, int>(),
+            TotalTaskContinuations: 0,
+            QueuedWorkItems: 0,
+            TotalTasks: 0,
+            PendingTasks: 0,
+            FaultedTasks: 0,
+            CanceledTasks: 0,
+            RuntimeThreadPoolDataAvailable: false,
+            RuntimeMinThreads: 0,
+            RuntimeMaxThreads: 0,
+            RuntimeActiveWorkerThreads: 0,
+            RuntimeIdleWorkerThreads: 0,
+            RuntimeRetiredWorkerThreads: 0,
+            RuntimeQueueLength: null,
+            RuntimeCpuUtilization: 0,
+            IsStarved: false,
+            HealthScore: 50,
+            TopWaitingThreads:
+            [
+                new WaitingThreadSnapshot(1, 1, "Monitor", "MonitorWait", 0, "Frame.A"),
+                new WaitingThreadSnapshot(2, 2, "Monitor", "MonitorWait", 0, "Frame.A"),
+                new WaitingThreadSnapshot(3, 3, "Monitor", "MonitorWait", 0, "Frame.A"),
+            ]);
+
+        ThreadDomainResult threads = new(
+            TotalThreadCount: 10,
+            AliveThreadCount: 10,
+            InactiveThreadCount: 0,
+            GcThreadCount: 0,
+            BlockedThreadCount: 3,
+            LockHoldingThreadCount: 0,
+            ThreadsWithActiveExceptionsCount: 0,
+            BackgroundThreadCount: 0,
+            WaitPatternBreakdown: new Dictionary<string, int>(),
+            TopBlockedThreads:
+            [
+                new ThreadStateSnapshot(1, 1, 0, "Wait", "Preemptive", "MonitorWait", "MonitorWait", [], StackRootCount: 10, StackSizeBytes: 0),
+                new ThreadStateSnapshot(2, 2, 0, "Wait", "Preemptive", "MonitorWait", "MonitorWait", [], StackRootCount: 20, StackSizeBytes: 0),
+                new ThreadStateSnapshot(3, 3, 0, "Wait", "Preemptive", "MonitorWait", "MonitorWait", [], StackRootCount: 5, StackSizeBytes: 0),
+            ]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Thread Stack Signature Clustering", AnalyzerExecutionStatus.Success, clusters),
+            BuildRun("Hang Analyzer", AnalyzerExecutionStatus.Success, hang),
+            BuildRun("Thread Analysis", AnalyzerExecutionStatus.Success, threads),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("Dominant thread-stack cluster correlates", StringComparison.OrdinalIgnoreCase)
+            && f.Evidence.Contains("35", StringComparison.Ordinal)
+            && f.Evidence.Contains("anchor", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static (ThreadStackClusterDomainResult Clusters, HangDomainResult Hang) BuildLowSeverityClusterHangOverlap() => (
+        new ThreadStackClusterDomainResult(
+            AliveThreadCount: 10,
+            UniqueClusters: 1,
+            SingletonSignatures: 0,
+            DiversityPercent: 10.0,
+            TopClusterSignatures: ["Frame.A -> Frame.B"],
+            TopClusters: [new ThreadClusterSnapshot(
+                Count: 3,
+                SampleOsThreadIds: [1, 2, 3],
+                Signature: "Frame.A -> Frame.B")]),
+        new HangDomainResult(
+            TotalAliveThreads: 10,
+            WaitingThreadCount: 3,
+            ThreadsHoldingLocks: 0,
+            WaitingPercent: 30.0,
+            WaitCategoryBreakdown: new Dictionary<string, int>(),
+            TotalTaskContinuations: 0,
+            QueuedWorkItems: 0,
+            TotalTasks: 0,
+            PendingTasks: 0,
+            FaultedTasks: 0,
+            CanceledTasks: 0,
+            RuntimeThreadPoolDataAvailable: false,
+            RuntimeMinThreads: 0,
+            RuntimeMaxThreads: 0,
+            RuntimeActiveWorkerThreads: 0,
+            RuntimeIdleWorkerThreads: 0,
+            RuntimeRetiredWorkerThreads: 0,
+            RuntimeQueueLength: null,
+            RuntimeCpuUtilization: 0,
+            IsStarved: false,
+            HealthScore: 50,
+            TopWaitingThreads:
+            [
+                new WaitingThreadSnapshot(1, 1, "Monitor", "MonitorWait", 1, "Frame.A"),
+                new WaitingThreadSnapshot(2, 2, "Monitor", "MonitorWait", 0, "Frame.A"),
+                new WaitingThreadSnapshot(3, 3, "Monitor", "MonitorWait", 0, "Frame.A"),
+            ]));
+
+    [Fact]
+    public void Analyze_ShouldEscalateClusterHangCorrelation_WhenOverlapIncludesDeadlockCandidate()
+    {
+        InsightEngine engine = new();
+        (ThreadStackClusterDomainResult clusters, HangDomainResult hang) = BuildLowSeverityClusterHangOverlap();
+
+        LockGraphDomainResult lockGraph = new(
+            TotalHeldLocks: 1,
+            ContestedLockCount: 1,
+            MaxWaitersOnSingleLock: 1,
+            DeadlockCandidateCount: 1,
+            DeadlockCandidateDetails:
+            [
+                new DeadlockCandidateSnapshot(1, 1, ["MyApp.OrderLock"], [0x1000], "Frame.A", [])
+            ]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Thread Stack Signature Clustering", AnalyzerExecutionStatus.Success, clusters),
+            BuildRun("Hang Analyzer", AnalyzerExecutionStatus.Success, hang),
+            BuildRun("Lock Graph Analysis", AnalyzerExecutionStatus.Success, lockGraph),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("Dominant thread-stack cluster correlates", StringComparison.OrdinalIgnoreCase)
+            && f.Severity == FindingSeverity.Critical
+            && f.Tags.Contains("deadlock-candidate")
+            && f.Evidence.Contains("MyApp.OrderLock", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Analyze_ShouldNotEscalateClusterHangCorrelation_WhenDeadlockCandidateDoesNotOverlap()
+    {
+        InsightEngine engine = new();
+        (ThreadStackClusterDomainResult clusters, HangDomainResult hang) = BuildLowSeverityClusterHangOverlap();
+
+        LockGraphDomainResult lockGraph = new(
+            TotalHeldLocks: 1,
+            ContestedLockCount: 1,
+            MaxWaitersOnSingleLock: 1,
+            DeadlockCandidateCount: 1,
+            DeadlockCandidateDetails:
+            [
+                new DeadlockCandidateSnapshot(99, 99, ["MyApp.OrderLock"], [0x1000], "Frame.Z", [])
+            ]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Thread Stack Signature Clustering", AnalyzerExecutionStatus.Success, clusters),
+            BuildRun("Hang Analyzer", AnalyzerExecutionStatus.Success, hang),
+            BuildRun("Lock Graph Analysis", AnalyzerExecutionStatus.Success, lockGraph),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("Dominant thread-stack cluster correlates", StringComparison.OrdinalIgnoreCase)
+            && f.Severity == FindingSeverity.Warning
+            && !f.Tags.Contains("deadlock-candidate")
+            && !f.Evidence.Contains("MyApp.OrderLock", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Analyze_ShouldEmitEvidenceTable_WhenTopMemoryTypeIsAlmostEntirelyGen2()
+    {
+        InsightEngine engine = new();
+
+        MemoryDomainResult memory = new(
+            TotalBytes: 200_000_000,
+            LohBytes: 0,
+            LohPercent: 0,
+            TotalObjects: 1_000,
+            LohObjects: 0,
+            LohThresholdBytes: 85_000,
+            UniqueTypes: 1,
+            TopTypes: [new TypeSnapshot("MyApp.Cache.Entry", 1_000, 150_000_000, 0)]);
+
+        GCGenerationDomainResult gcGen = new(
+            Gen0Bytes: 0, Gen0Objects: 0,
+            Gen1Bytes: 0, Gen1Objects: 0,
+            Gen2Bytes: 150_000_000, Gen2Objects: 950,
+            LohBytes: 0, LohPercent: 0,
+            TotalObjects: 1_000, LohObjects: 0,
+            TopLohTypes: [],
+            PerTypeGenerationProfiles: [new TypeGenerationProfile("MyApp.Cache.Entry", 10, 40, 950, 0, 150_000_000)]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Memory Analysis", AnalyzerExecutionStatus.Success, memory),
+            BuildRun("GC Generation Analysis", AnalyzerExecutionStatus.Success, gcGen),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("long-lived", StringComparison.OrdinalIgnoreCase)
+            && f.Tags.Contains("gc-generation")
+            && f.EffectiveEvidenceTables.Count == 1
+            && f.EffectiveEvidenceTables[0].Rows.Count == 1
+            && f.EffectiveEvidenceTables[0].Rows[0][0]!.Equals("MyApp.Cache.Entry"));
+    }
+
+    [Fact]
+    public void Analyze_ShouldNotEmitMemoryGenerationCorrelation_WhenTypeIsMostlyGen0()
+    {
+        InsightEngine engine = new();
+
+        MemoryDomainResult memory = new(
+            TotalBytes: 200_000_000,
+            LohBytes: 0,
+            LohPercent: 0,
+            TotalObjects: 1_000,
+            LohObjects: 0,
+            LohThresholdBytes: 85_000,
+            UniqueTypes: 1,
+            TopTypes: [new TypeSnapshot("MyApp.Transient.Buffer", 1_000, 150_000_000, 0)]);
+
+        GCGenerationDomainResult gcGen = new(
+            Gen0Bytes: 150_000_000, Gen0Objects: 950,
+            Gen1Bytes: 0, Gen1Objects: 0,
+            Gen2Bytes: 0, Gen2Objects: 10,
+            LohBytes: 0, LohPercent: 0,
+            TotalObjects: 1_000, LohObjects: 0,
+            TopLohTypes: [],
+            PerTypeGenerationProfiles: [new TypeGenerationProfile("MyApp.Transient.Buffer", 950, 40, 10, 0, 150_000_000)]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Memory Analysis", AnalyzerExecutionStatus.Success, memory),
+            BuildRun("GC Generation Analysis", AnalyzerExecutionStatus.Success, gcGen),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().NotContain(f => f.Title.Contains("long-lived", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Analyze_ShouldUseByteBasedGen2Fraction_WhenGen2BytesAvailable()
+    {
+        // Instance count alone puts Gen2 residency at 60% (600 of 1,000 instances) — below the
+        // 85% correlation threshold. But those 600 Gen2 instances are much larger on average
+        // (140,000,000 of 150,000,000 total bytes = 93.3%), so the byte-based fraction (P2-4)
+        // should surface the finding even though the count-based fraction would not.
+        InsightEngine engine = new();
+
+        MemoryDomainResult memory = new(
+            TotalBytes: 200_000_000,
+            LohBytes: 0,
+            LohPercent: 0,
+            TotalObjects: 1_000,
+            LohObjects: 0,
+            LohThresholdBytes: 85_000,
+            UniqueTypes: 1,
+            TopTypes: [new TypeSnapshot("MyApp.Cache.GrowingBuffer", 1_000, 150_000_000, 0)]);
+
+        GCGenerationDomainResult gcGen = new(
+            Gen0Bytes: 10_000_000, Gen0Objects: 400,
+            Gen1Bytes: 0, Gen1Objects: 0,
+            Gen2Bytes: 140_000_000, Gen2Objects: 600,
+            LohBytes: 0, LohPercent: 0,
+            TotalObjects: 1_000, LohObjects: 0,
+            TopLohTypes: [],
+            PerTypeGenerationProfiles:
+            [
+                new TypeGenerationProfile(
+                    "MyApp.Cache.GrowingBuffer",
+                    Gen0Count: 400, Gen1Count: 0, Gen2Count: 600, LohCount: 0,
+                    TotalBytes: 150_000_000, Gen2Bytes: 140_000_000)
+            ]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Memory Analysis", AnalyzerExecutionStatus.Success, memory),
+            BuildRun("GC Generation Analysis", AnalyzerExecutionStatus.Success, gcGen),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("long-lived", StringComparison.OrdinalIgnoreCase)
+            && f.Tags.Contains("gc-generation")
+            && f.EffectiveEvidenceTables.Count == 1
+            && f.EffectiveEvidenceTables[0].Rows[0][0]!.Equals("MyApp.Cache.GrowingBuffer")
+            && f.EffectiveEvidenceTables[0].Rows[0][7]!.Equals("93.3%"));
+    }
+
+    [Fact]
+    public void Analyze_ShouldEmitEvidenceTable_WhenSystemStringIsTopMemoryTypeWithDuplication()
+    {
+        InsightEngine engine = new();
+
+        MemoryDomainResult memory = new(
+            TotalBytes: 200_000_000,
+            LohBytes: 0,
+            LohPercent: 0,
+            TotalObjects: 10_000,
+            LohObjects: 0,
+            LohThresholdBytes: 85_000,
+            UniqueTypes: 2,
+            TopTypes:
+            [
+                new TypeSnapshot("MyApp.Cache.Entry", 1_000, 150_000_000, 0),
+                new TypeSnapshot("System.String", 8_000, 40_000_000, 0),
+            ]);
+
+        StringDomainResult strings = new(
+            TotalStrings: 8_000,
+            TotalStringMemoryBytes: 40_000_000,
+            SampledUniquePatterns: 1_000,
+            DuplicatePatternCount: 500,
+            DuplicateWastedBytes: 8_000_000,
+            DuplicationRatio: 0.88,
+            PctOfManagedHeap: 20.0,
+            TopDuplicates: [new DuplicateStringSnapshot("connection-string-template", 3_000, 6_000_000)],
+            VeryLongStrings: [],
+            LohStringBytes: 0,
+            InternedStringCount: 0,
+            InternedStringBytes: 0,
+            Gen0StringCount: 0,
+            Gen1StringCount: 0,
+            Gen2StringCount: 0,
+            Gen2StringBytes: 0,
+            StringsSampled: 8_000);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Memory Analysis", AnalyzerExecutionStatus.Success, memory),
+            BuildRun("String Analysis", AnalyzerExecutionStatus.Success, strings),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("String data is a top heap consumer", StringComparison.OrdinalIgnoreCase)
+            && f.Tags.Contains("strings")
+            && f.EffectiveEvidenceTables.Count == 1
+            && f.EffectiveEvidenceTables[0].Rows.Count == 1
+            && f.EffectiveEvidenceTables[0].Rows[0][0]!.Equals("connection-string-template"));
+    }
+
+    [Fact]
+    public void Analyze_ShouldNotEmitStringMemoryConcentration_WhenStringIsNotAmongTopMemoryTypes()
+    {
+        InsightEngine engine = new();
+
+        var topTypes = new List<TypeSnapshot>();
+        for (int i = 0; i < 15; i++)
+            topTypes.Add(new TypeSnapshot($"MyApp.Type{i}", 100, 1_000_000, 0));
+
+        MemoryDomainResult memory = new(
+            TotalBytes: 200_000_000,
+            LohBytes: 0,
+            LohPercent: 0,
+            TotalObjects: 10_000,
+            LohObjects: 0,
+            LohThresholdBytes: 85_000,
+            UniqueTypes: topTypes.Count,
+            TopTypes: topTypes);
+
+        StringDomainResult strings = new(
+            TotalStrings: 8_000,
+            TotalStringMemoryBytes: 40_000_000,
+            SampledUniquePatterns: 1_000,
+            DuplicatePatternCount: 500,
+            DuplicateWastedBytes: 8_000_000,
+            DuplicationRatio: 0.88,
+            PctOfManagedHeap: 20.0,
+            TopDuplicates: [new DuplicateStringSnapshot("connection-string-template", 3_000, 6_000_000)],
+            VeryLongStrings: [],
+            LohStringBytes: 0,
+            InternedStringCount: 0,
+            InternedStringBytes: 0,
+            Gen0StringCount: 0,
+            Gen1StringCount: 0,
+            Gen2StringCount: 0,
+            Gen2StringBytes: 0,
+            StringsSampled: 8_000);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Memory Analysis", AnalyzerExecutionStatus.Success, memory),
+            BuildRun("String Analysis", AnalyzerExecutionStatus.Success, strings),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().NotContain(f => f.Title.Contains("String data is a top heap consumer", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Analyze_ShouldEmitPinnedStringLeak_WhenPinnedStringBytesExceedThreshold()
+    {
+        InsightEngine engine = new();
+
+        GCHandleDomainResult handles = new(
+            TotalHandles: 10_000,
+            StrongLikeHandles: 9_000,
+            WeakLikeHandles: 900,
+            PinnedHandleTargets: 100,
+            TopPinnedTargetTypes: [new NameCountEntry("System.String", 50)],
+            TopPinnedObjectsBySize: [new NameBytesEntry("System.String", 5_000_000)]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("GC Handle Analysis", AnalyzerExecutionStatus.Success, handles),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("Pinned strings detected", StringComparison.OrdinalIgnoreCase)
+            && f.Tags.Contains("strings")
+            && f.Tags.Contains("pinning"));
+    }
+
+    [Fact]
+    public void Analyze_ShouldNotEmitPinnedStringLeak_WhenPinnedStringBytesBelowThreshold()
+    {
+        InsightEngine engine = new();
+
+        GCHandleDomainResult handles = new(
+            TotalHandles: 10_000,
+            StrongLikeHandles: 9_000,
+            WeakLikeHandles: 900,
+            PinnedHandleTargets: 5,
+            TopPinnedTargetTypes: [new NameCountEntry("System.String", 2)],
+            TopPinnedObjectsBySize: [new NameBytesEntry("System.String", 100)]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("GC Handle Analysis", AnalyzerExecutionStatus.Success, handles),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().NotContain(f => f.Title.Contains("Pinned strings detected", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Analyze_ShouldNotEmitPinnedStringLeak_WhenNoStringsArePinned()
+    {
+        InsightEngine engine = new();
+
+        GCHandleDomainResult handles = new(
+            TotalHandles: 10_000,
+            StrongLikeHandles: 9_000,
+            WeakLikeHandles: 900,
+            PinnedHandleTargets: 200,
+            TopPinnedTargetTypes: [new NameCountEntry("MyApp.Buffer", 200)],
+            TopPinnedObjectsBySize: [new NameBytesEntry("MyApp.Buffer", 50_000_000)]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("GC Handle Analysis", AnalyzerExecutionStatus.Success, handles),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().NotContain(f => f.Title.Contains("Pinned strings detected", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Analyze_ShouldEmitCorrelation_WhenStaticRootRetainsTypeQueuedForFinalization()
+    {
+        InsightEngine engine = new();
+
+        StaticRootDomainResult staticRoot = new(
+            RootCount: 1,
+            TotalRetainedBytes: 10_000,
+            TopRootsByRetainedBytes:
+            [
+                new StaticRootSnapshot(
+                    RootDescription: "MyApp.Cache._entries",
+                    TotalMemoryImpact: 10_000,
+                    ObjectsKeptAlive: 50,
+                    TopRetainedTypes: [new RetainedTypeInfo { TypeName = "MyApp.Resource", Count = 50, TotalSize = 10_000 }])
+            ]);
+
+        FinalizableObjectDomainResult finalizable = new(
+            TotalFinalizableObjects: 100,
+            TotalFinalizableBytes: 10_000,
+            Gen0Count: 0,
+            Gen1Count: 0,
+            Gen2Count: 100,
+            LohCount: 0,
+            FinalizerQueueCount: 30,
+            FinalizerQueueRetainedBytes: 0,
+            IsRetainedEstimatePartial: false,
+            HasUndisposedDisposableInQueue: false,
+            CriticalFinalizerQueueCount: 0,
+            CriticalFinalizerQueueBytes: 0,
+            TopFinalizableTypesByGen2Count: [],
+            TopQueueTypesByCount: [new QueueTypeStatistic("MyApp.Resource", 30)],
+            TopCriticalFinalizerTypesByCount: [],
+            TopQueueEntriesByRetainedSize: []);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Static Root Leak Detection", AnalyzerExecutionStatus.Success, staticRoot),
+            BuildRun("Finalizable Object Analysis", AnalyzerExecutionStatus.Success, finalizable),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("queued for finalization", StringComparison.OrdinalIgnoreCase)
+            && f.Evidence.Contains("MyApp.Cache._entries", StringComparison.Ordinal)
+            && f.Evidence.Contains("MyApp.Resource", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Analyze_ShouldNotEmitCorrelation_WhenNoRetainedTypeMatchesQueuedType()
+    {
+        InsightEngine engine = new();
+
+        StaticRootDomainResult staticRoot = new(
+            RootCount: 1,
+            TotalRetainedBytes: 10_000,
+            TopRootsByRetainedBytes:
+            [
+                new StaticRootSnapshot(
+                    RootDescription: "MyApp.Cache._entries",
+                    TotalMemoryImpact: 10_000,
+                    ObjectsKeptAlive: 50,
+                    TopRetainedTypes: [new RetainedTypeInfo { TypeName = "MyApp.Unrelated", Count = 50, TotalSize = 10_000 }])
+            ]);
+
+        FinalizableObjectDomainResult finalizable = new(
+            TotalFinalizableObjects: 100,
+            TotalFinalizableBytes: 10_000,
+            Gen0Count: 0,
+            Gen1Count: 0,
+            Gen2Count: 100,
+            LohCount: 0,
+            FinalizerQueueCount: 30,
+            FinalizerQueueRetainedBytes: 0,
+            IsRetainedEstimatePartial: false,
+            HasUndisposedDisposableInQueue: false,
+            CriticalFinalizerQueueCount: 0,
+            CriticalFinalizerQueueBytes: 0,
+            TopFinalizableTypesByGen2Count: [],
+            TopQueueTypesByCount: [new QueueTypeStatistic("MyApp.Resource", 30)],
+            TopCriticalFinalizerTypesByCount: [],
+            TopQueueEntriesByRetainedSize: []);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Static Root Leak Detection", AnalyzerExecutionStatus.Success, staticRoot),
+            BuildRun("Finalizable Object Analysis", AnalyzerExecutionStatus.Success, finalizable),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().NotContain(f => f.Title.Contains("queued for finalization", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Analyze_ShouldEmitFinding_WhenActiveTransactionsHoldOpenConnections()
+    {
+        InsightEngine engine = new();
+
+        var openConnections = new List<DbConnectionSnapshot>();
+        var activeTransactions = new List<SqlTransactionSnapshot>();
+        for (int i = 0; i < 5; i++)
+        {
+            ulong connAddress = 0x1000UL + (ulong)(i * 0x100);
+            openConnections.Add(new DbConnectionSnapshot("Microsoft.Data.SqlClient.SqlConnection", connAddress, "Open", 1));
+            activeTransactions.Add(new SqlTransactionSnapshot("Microsoft.Data.SqlClient.SqlTransaction", 0x2000UL + (ulong)(i * 0x100), "Active", 1, connAddress));
+        }
+
+        DbConnectionDomainResult dbConn = new(
+            ConnectionsFound: true, TotalConnections: 5, OpenConnections: 5, ClosedConnections: 0,
+            BrokenConnections: 0, OtherConnections: 0, UnknownStateConnections: 0,
+            Gen2OpenConnections: 0, Gen0OpenConnections: 0, ByType: [], TopOpenConnections: openConnections, TopPools: []);
+
+        SqlTransactionDomainResult sqlTxn = new(
+            TransactionsFound: true, TotalTransactions: 5, DisposedCount: 0, ActiveCount: 5,
+            OtherCount: 0, ByType: [], TopActiveTransactions: activeTransactions);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("DB Connection Analysis", AnalyzerExecutionStatus.Success, dbConn),
+            BuildRun("SQL Transaction Analysis", AnalyzerExecutionStatus.Success, sqlTxn),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Title.Contains("held by a live transaction", StringComparison.OrdinalIgnoreCase)
+            && f.MetricValue == 5);
+    }
+
+    [Fact]
+    public void Analyze_ShouldNotEmitFinding_WhenTransactionConnectionsDoNotMatchOpenConnections()
+    {
+        InsightEngine engine = new();
+
+        DbConnectionDomainResult dbConn = new(
+            ConnectionsFound: true, TotalConnections: 5, OpenConnections: 5, ClosedConnections: 0,
+            BrokenConnections: 0, OtherConnections: 0, UnknownStateConnections: 0,
+            Gen2OpenConnections: 0, Gen0OpenConnections: 0, ByType: [],
+            TopOpenConnections: [new DbConnectionSnapshot("SqlConnection", 0xAAAA, "Open", 1)], TopPools: []);
+
+        SqlTransactionDomainResult sqlTxn = new(
+            TransactionsFound: true, TotalTransactions: 5, DisposedCount: 0, ActiveCount: 5, OtherCount: 0,
+            ByType: [],
+            TopActiveTransactions: [new SqlTransactionSnapshot("SqlTransaction", 0xBBBB, "Active", 1, 0xCCCC)]);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("DB Connection Analysis", AnalyzerExecutionStatus.Success, dbConn),
+            BuildRun("SQL Transaction Analysis", AnalyzerExecutionStatus.Success, sqlTxn),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().NotContain(f => f.Title.Contains("held by a live transaction", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Analyze_ShouldEmitFinding_WhenOpeningChannelsCoincideWithTimeoutExceptions()
+    {
+        InsightEngine engine = new();
+
+        WcfChannelDomainResult wcf = BuildWcfResult(opening: 1);
+
+        CrashDomainResult crash = new(
+            TotalExceptions: 1,
+            ActiveExceptions: 0,
+            ExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal)
+            {
+                ["System.TimeoutException"] = 1,
+            },
+            ActiveExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal));
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("WCF Channel Analysis", AnalyzerExecutionStatus.Success, wcf),
+            BuildRun("Crash Analyzer", AnalyzerExecutionStatus.Success, crash),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Severity == FindingSeverity.Info
+            && f.Title.Contains("stuck Opening", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Analyze_ShouldEscalateToWarning_WhenOpeningChannelCountIsHigh()
+    {
+        InsightEngine engine = new();
+
+        WcfChannelDomainResult wcf = BuildWcfResult(opening: 5);
+
+        CrashDomainResult crash = new(
+            TotalExceptions: 1,
+            ActiveExceptions: 0,
+            ExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal)
+            {
+                ["System.TimeoutException"] = 1,
+            },
+            ActiveExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal));
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("WCF Channel Analysis", AnalyzerExecutionStatus.Success, wcf),
+            BuildRun("Crash Analyzer", AnalyzerExecutionStatus.Success, crash),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().Contain(f =>
+            f.Severity == FindingSeverity.Warning
+            && f.Title.Contains("stuck Opening", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Analyze_ShouldNotEmitOpeningTimeoutFinding_WhenNoTimeoutExceptionsPresent()
+    {
+        InsightEngine engine = new();
+
+        WcfChannelDomainResult wcf = BuildWcfResult(opening: 3);
+
+        CrashDomainResult crash = new(
+            TotalExceptions: 1,
+            ActiveExceptions: 0,
+            ExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal)
+            {
+                ["System.InvalidOperationException"] = 1,
+            },
+            ActiveExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal));
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("WCF Channel Analysis", AnalyzerExecutionStatus.Success, wcf),
+            BuildRun("Crash Analyzer", AnalyzerExecutionStatus.Success, crash),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().NotContain(f => f.Title.Contains("stuck Opening", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Analyze_ShouldNotEmitOpeningTimeoutFinding_WhenNoChannelsAreOpening()
+    {
+        InsightEngine engine = new();
+
+        WcfChannelDomainResult wcf = BuildWcfResult(opening: 0);
+
+        CrashDomainResult crash = new(
+            TotalExceptions: 1,
+            ActiveExceptions: 0,
+            ExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal)
+            {
+                ["System.TimeoutException"] = 1,
+            },
+            ActiveExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal));
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("WCF Channel Analysis", AnalyzerExecutionStatus.Success, wcf),
+            BuildRun("Crash Analyzer", AnalyzerExecutionStatus.Success, crash),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().NotContain(f => f.Title.Contains("stuck Opening", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Analyze_ReferenceChainTypeBelowHeapFractionThreshold_EmitsNoDominatorCorrelationFinding()
+    {
+        InsightEngine engine = new();
+
+        ReferenceChainDomainResult referenceChain = BuildReferenceChainResult(("App.SmallCache", 5_000UL));
+        DominatorDomainResult leak = BuildDominatorResultWithTotalHeap(1_000_000UL);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Reference Chain Analysis", AnalyzerExecutionStatus.Success, referenceChain),
+            BuildRun("Dominator Analysis", AnalyzerExecutionStatus.Success, leak),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().NotContain(f => f.Title == "Reference-chain type dominates a large heap fraction");
+    }
+
+    [Fact]
+    public void Analyze_ReferenceChainTypeAboveWarningThreshold_EmitsWarningDominatorCorrelation()
+    {
+        InsightEngine engine = new();
+
+        ReferenceChainDomainResult referenceChain = BuildReferenceChainResult(("App.BigCache", 150_000UL));
+        DominatorDomainResult leak = BuildDominatorResultWithTotalHeap(1_000_000UL);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Reference Chain Analysis", AnalyzerExecutionStatus.Success, referenceChain),
+            BuildRun("Dominator Analysis", AnalyzerExecutionStatus.Success, leak),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        InsightFinding finding = findings.Should().ContainSingle(f => f.Title == "Reference-chain type dominates a large heap fraction").Subject;
+        finding.Severity.Should().Be(FindingSeverity.Warning);
+        finding.Evidence.Should().Contain("App.BigCache");
+    }
+
+    [Fact]
+    public void Analyze_ReferenceChainTypeAboveCriticalThreshold_EmitsCriticalDominatorCorrelation()
+    {
+        InsightEngine engine = new();
+
+        ReferenceChainDomainResult referenceChain = BuildReferenceChainResult(("App.HugeCache", 300_000UL));
+        DominatorDomainResult leak = BuildDominatorResultWithTotalHeap(1_000_000UL);
+
+        AnalyzerRunResult[] runs =
+        [
+            BuildRun("Reference Chain Analysis", AnalyzerExecutionStatus.Success, referenceChain),
+            BuildRun("Dominator Analysis", AnalyzerExecutionStatus.Success, leak),
+        ];
+
+        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
+
+        findings.Should().ContainSingle(f => f.Title == "Reference-chain type dominates a large heap fraction")
+            .Which.Severity.Should().Be(FindingSeverity.Critical);
+    }
+
+    private static ReferenceChainDomainResult BuildReferenceChainResult(params (string TypeName, ulong RetainedBytes)[] types)
+    {
+        var traces = new List<ReferenceTypeSampleSnapshot>(types.Length);
+        for (int i = 0; i < types.Length; i++)
+        {
+            traces.Add(new ReferenceTypeSampleSnapshot(
+                TypeName: types[i].TypeName,
+                Count: 10,
+                TotalSizeBytes: types[i].RetainedBytes,
+                SampleAddress: 0x1000,
+                SampleObjectType: types[i].TypeName,
+                SampleObjectSize: 32,
+                HasGcRoot: true,
+                RootKind: "StaticVar",
+                RootPath: null,
+                PathHops: null,
+                TraversalLimited: false,
+                RetainedBytes: types[i].RetainedBytes));
+        }
+
+        return new ReferenceChainDomainResult(
+            AnalyzedSamples: types.Length,
+            RetainedSamples: types.Length,
+            RetainedPercent: 100.0,
+            TopTypeSampleTraces: traces);
+    }
+
+    private static DominatorDomainResult BuildDominatorResultWithTotalHeap(ulong totalHeapBytes) => new(
+        CandidateCount: 0,
+        AnalyzedCount: 0,
+        TotalEstimatedRetainedBytes: 0,
+        TopDominatorTypes: [],
+        TotalHeapBytes: totalHeapBytes);
+
+    private static WcfChannelDomainResult BuildWcfResult(int opening) => new(
+        WcfPresent: true,
+        TotalChannels: opening + 1,
+        OpeningChannels: opening,
+        OpenedChannels: 1,
+        FaultedChannels: 0,
+        ClosingChannels: 0,
+        ClosedChannels: 0,
+        OtherChannels: 0,
+        ByType: [],
+        TopFaultedChannels: []);
 
     private static AnalyzerRunResult BuildRun(string analyzerName, AnalyzerExecutionStatus status, AnalyzerDomainResult? result = null)
         => new(

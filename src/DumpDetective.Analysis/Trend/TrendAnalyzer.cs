@@ -5,7 +5,7 @@ namespace DumpDetective.Analysis.Trend
 {
     internal sealed class TrendAnalyzer(IEnumerable<IAnalyzerTrendComparer> comparers)
     {
-        private const string RetentionAnalyzerName = "Retention Analysis";
+        private const string RetentionAnalyzerName = "Dominator Analysis";
         private const string LegacyLeakAnalyzerName = "Memory Leak Analysis";
         private const string LeakCandidateAnalyzerName = "Leak Candidate Analysis";
 
@@ -55,9 +55,9 @@ namespace DumpDetective.Analysis.Trend
         {
             var result = new Dictionary<string, IReadOnlyList<NewLeakSignal>>(StringComparer.Ordinal);
 
-            // Retention Analysis (legacy alias: Memory Leak Analysis) — compare TopHighlyReferencedObjects by type.
-            if (TryGetRetentionResult(baseline, out RetentionDomainResult bLeak) &&
-                TryGetRetentionResult(current, out RetentionDomainResult cLeak))
+            // Dominator Analysis (legacy alias: Memory Leak Analysis) — compare TopHighlyReferencedObjects by type.
+            if (TryGetRetentionResult(baseline, out DominatorDomainResult bLeak) &&
+                TryGetRetentionResult(current, out DominatorDomainResult cLeak))
             {
                 var baselineByType = new Dictionary<string, double>(StringComparer.Ordinal);
                 foreach (HighlyReferencedObjectSnapshot obj in bLeak.TopHighlyReferencedObjects ?? Array.Empty<HighlyReferencedObjectSnapshot>())
@@ -91,16 +91,16 @@ namespace DumpDetective.Analysis.Trend
                 bStaticRaw is StaticRootDomainResult bStatic && cStaticRaw is StaticRootDomainResult cStatic)
             {
                 var baselineByName = new Dictionary<string, double>(StringComparer.Ordinal);
-                foreach (NameBytesEntry entry in bStatic.TopRootsByRetainedBytes ?? Array.Empty<NameBytesEntry>())
-                    baselineByName[entry.Name] = entry.Bytes;
+                foreach (StaticRootSnapshot entry in bStatic.TopRootsByRetainedBytes ?? Array.Empty<StaticRootSnapshot>())
+                    baselineByName[entry.RootDescription] = entry.TotalMemoryImpact;
 
                 var signals = new List<NewLeakSignal>();
-                foreach (NameBytesEntry entry in cStatic.TopRootsByRetainedBytes ?? Array.Empty<NameBytesEntry>())
+                foreach (StaticRootSnapshot entry in cStatic.TopRootsByRetainedBytes ?? Array.Empty<StaticRootSnapshot>())
                 {
-                    double currentBytes = entry.Bytes;
-                    baselineByName.TryGetValue(entry.Name, out double baseBytes);
+                    double currentBytes = entry.TotalMemoryImpact;
+                    baselineByName.TryGetValue(entry.RootDescription, out double baseBytes);
                     if (currentBytes > baseBytes * 1.5 + 1024)
-                        signals.Add(new NewLeakSignal(entry.Name, baseBytes, currentBytes, "StaticRootLeakDetector"));
+                        signals.Add(new NewLeakSignal(entry.RootDescription, baseBytes, currentBytes, "StaticRootLeakDetector"));
                 }
 
                 if (signals.Count > 0)
@@ -133,17 +133,17 @@ namespace DumpDetective.Analysis.Trend
             return result;
         }
 
-        private static bool TryGetRetentionResult(AnalysisSnapshot snapshot, out RetentionDomainResult result)
+        private static bool TryGetRetentionResult(AnalysisSnapshot snapshot, out DominatorDomainResult result)
         {
             if (snapshot.DomainResults.TryGetValue(RetentionAnalyzerName, out AnalyzerDomainResult? retentionRaw) &&
-                retentionRaw is RetentionDomainResult retention)
+                retentionRaw is DominatorDomainResult retention)
             {
                 result = retention;
                 return true;
             }
 
             if (snapshot.DomainResults.TryGetValue(LegacyLeakAnalyzerName, out AnalyzerDomainResult? leakRaw) &&
-                leakRaw is RetentionDomainResult leak)
+                leakRaw is DominatorDomainResult leak)
             {
                 result = leak;
                 return true;

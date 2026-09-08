@@ -13,7 +13,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
             {
                 new("gcroot.total.roots",           null, r.TotalRoots,                     "roots",  MetricTrendDirection.Neutral),
                 new("gcroot.top.severity.score",    null, r.TopRootsBySeverity.Count > 0 ? r.TopRootsBySeverity[0].SeverityScore : 0, "score", MetricTrendDirection.HigherIsWorse),
-                new("gcroot.path.capped.count",     null, r.PathSearchCappedCount,           "paths",  MetricTrendDirection.Neutral),
+                new("gcroot.path.capped.count",     null, r.SubgraphWalkCappedCount,           "paths",  MetricTrendDirection.Neutral),
                 new("gcroot.strong.handle.count",   null, GetKindCount(r, "StrongHandle"),   "roots",  MetricTrendDirection.HigherIsWorse),
                 new("gcroot.finalizer.count",       null, GetKindCount(r, "FinalizerQueue"), "roots",  MetricTrendDirection.HigherIsWorse),
             };
@@ -37,7 +37,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 MetricDeltaHelper.Compute("gcroot.total.roots",         null, b.TotalRoots,                                                                   c.TotalRoots,                                                                   "roots",  MetricTrendDirection.Neutral),
                 MetricDeltaHelper.Compute("gcroot.strong.handle.count", null, (double)GetKindCount(b, "StrongHandle"),   (double)GetKindCount(c, "StrongHandle"),   "roots",  MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("gcroot.finalizer.count",     null, (double)GetKindCount(b, "FinalizerQueue"), (double)GetKindCount(c, "FinalizerQueue"), "roots",  MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("gcroot.path.capped.count",   null, (double)b.PathSearchCappedCount,           (double)c.PathSearchCappedCount,           "paths",  MetricTrendDirection.Neutral),
+                MetricDeltaHelper.Compute("gcroot.path.capped.count",   null, (double)b.SubgraphWalkCappedCount,         (double)c.SubgraphWalkCappedCount,           "paths",  MetricTrendDirection.Neutral),
             ];
         }
 

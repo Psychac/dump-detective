@@ -14,18 +14,20 @@ internal sealed class StringDedupEntry
     // Dominant MethodTable observed for this content (approximate)
     public ulong DominantMethodTable;
 
-    public StringDedupEntry(string preview, ulong size, ulong sampleAddress = 0, ulong dominantMt = 0)
+    // weight compensates for uniform-stride sampling (e.g. memory-mode's adaptive string
+    // dedup sampling): a sampled instance represents `weight` real instances.
+    public StringDedupEntry(string preview, ulong size, ulong sampleAddress = 0, ulong dominantMt = 0, int weight = 1)
     {
         Preview = preview;
-        Count = 1;
-        TotalSize = size;
+        Count = weight;
+        TotalSize = size * (ulong)weight;
         DominantMethodTable = dominantMt;
         SampleAddresses = sampleAddress != 0 ? new ulong[] { sampleAddress } : null;
     }
-    public void AddInstance(ulong size, ulong sampleAddress = 0, ulong mt = 0)
+    public void AddInstance(ulong size, ulong sampleAddress = 0, ulong mt = 0, int weight = 1)
     {
-        Count++;
-        TotalSize += size;
+        Count += weight;
+        TotalSize += size * (ulong)weight;
         if (sampleAddress != 0)
         {
             if (SampleAddresses is null) SampleAddresses = new ulong[] { sampleAddress };
@@ -49,9 +51,9 @@ internal sealed record HeapIndexBuildResult(
     HeapEntry[]? InMemoryEntries = null,
     IReadOnlyList<ModuleInfo>? Modules = null,
     /// <summary>
-    /// 8-element heap-wide object-size histogram built during Phase 1.
+    /// 9-element heap-wide object-size histogram built during Phase 1.
     /// Bucket boundaries are defined in <see cref="SizeBucketHelper.BucketLabels"/>.
-    /// Always 64 bytes — never null after a successful build.
+    /// Always 72 bytes — never null after a successful build.
     /// </summary>
     long[]? GlobalSizeBuckets = null,
     /// <summary>
@@ -85,10 +87,11 @@ internal sealed record HeapIndexBuildResult(
     /// <summary>
     /// Pre-enumerated GC handle snapshot collected during Phase 1 when memory-backed
     /// indexing is used. Mirrors the content of <c>HandleSnapshot.bin</c> in disk-backed
-    /// mode: one record per handle (Addr, MethodTable, Kind).
+    /// mode: one record per handle (Addr, MethodTable, Kind, DependentTarget). DependentTarget
+    /// (P3-3) is the secondary target address for Dependent-kind handles, 0 otherwise.
     /// Consumers: <c>WeakReferenceAnalyzer</c>, <c>GCHandleAnalyzer</c>.
     /// </summary>
-    (ulong Addr, ulong Mt, byte Kind)[]? InMemoryHandleSnapshot = null,
+    (ulong Addr, ulong Mt, byte Kind, ulong DependentTarget)[]? InMemoryHandleSnapshot = null,
     /// <summary>
     /// Non-fatal warnings emitted during satellite index file writes (disk-backed mode only).
     /// Null when all satellite files were written successfully or in memory-backed mode.
@@ -101,4 +104,13 @@ internal sealed record HeapIndexBuildResult(
     /// Null when string hashing was disabled or not yet implemented for the storage kind.
     /// </summary>
     IReadOnlyDictionary<ulong, StringDedupEntry>? StringDedupIndex = null,
-    DistributionSummary? StringDedupDistribution = null);
+    DistributionSummary? StringDedupDistribution = null,
+    /// <summary>
+    /// Per-MethodTable indices of instance fields whose type is <c>System.String</c>, built once
+    /// during Phase 1 alongside <see cref="TypeShapeCache"/>. Sparse — only present for types that
+    /// have at least one string field. Lets <c>StringAnalyzer</c>'s ownership sampling skip the
+    /// per-type <c>ClrType.Fields</c> walk it would otherwise repeat on first encounter of each MT.
+    /// Null on the cache-hit fast path (no full scan ran); consumers must fall back to a lazy
+    /// per-type computation in that case.
+    /// </summary>
+    IReadOnlyDictionary<ulong, int[]>? StringFieldIndicesByMethodTable = null);

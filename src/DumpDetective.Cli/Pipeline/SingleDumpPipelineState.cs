@@ -30,6 +30,13 @@ internal sealed class SingleDumpPipelineState : IDisposable
     /// <summary>Read-only cache interface — used by <see cref="Stages.RunAnalyzersPipelineStage"/> as the analyzer <c>Cache</c> contract.</summary>
     public IHeapAnalysisCache? HeapCache { get; set; }
     public HeapIndexBuildResult? HeapIndex { get; set; }
+    /// <summary>
+    /// Analysis context and pipeline built by <see cref="Stages.BuildHeapIndexStage"/> so the
+    /// shared heap-index/thread-stack scan passes run under that stage's header/timer instead of
+    /// under "Run analyzers"; reused as-is by <see cref="Stages.RunAnalyzersPipelineStage"/>.
+    /// </summary>
+    public Analysis.Pipeline.RuntimeAnalysisContext? Context { get; set; }
+    public Analysis.Pipeline.AnalysisPipeline? Pipeline { get; set; }
 
     // ── Stage 3: RunAnalyzersPipelineStage ──────────────────────────────────
     public IReadOnlyList<AnalyzerRunResult> Runs { get; set; } = [];
@@ -63,5 +70,12 @@ internal sealed class SingleDumpPipelineState : IDisposable
     /// </summary>
     public bool HasDetailedStageMemoryStats { get; set; }
 
-    public void Dispose() => LoadContext?.Dispose();
+    public void Dispose()
+    {
+        // HeapCache isn't IDisposable on its interface (most cache implementations don't need it);
+        // duck-type so the disk-backed reverse-index reader's memory-mapped views still get
+        // released promptly instead of waiting on finalization.
+        (HeapCache as IDisposable)?.Dispose();
+        LoadContext?.Dispose();
+    }
 }

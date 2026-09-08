@@ -7,7 +7,6 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class FindingNarrativeSectionBuilder : SectionBuilderBase, IReportSectionBuilder
 {
-    public IReadOnlyList<string> SourceAnalyzers => [];
 
     public string SectionId => "prof.finding-narratives";
     public string DisplayTitle => "Critical Finding Narratives";

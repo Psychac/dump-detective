@@ -1,4 +1,8 @@
+using System.Diagnostics;
+
 using Microsoft.Diagnostics.Runtime;
+
+using DumpDetective.Core.Abstractions;
 
 namespace DumpDetective.Analysis.Dump;
 
@@ -8,15 +12,22 @@ namespace DumpDetective.Analysis.Dump;
 /// </summary>
 internal sealed class DumpLoader : IDumpLoader
 {
-    public Task<DumpLoadContext> LoadAsync(string dumpPath, CancellationToken cancellationToken)
+    public Task<DumpLoadContext> LoadAsync(string dumpPath, CancellationToken cancellationToken, IProgress<AnalyzerProgressReport>? progress = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var stopwatch = Stopwatch.StartNew();
 
         try
         {
             if (!File.Exists(dumpPath))
                 throw new DumpLoadException($"Dump file not found: {dumpPath}");
 
+            // Sub-steps reported individually — on large dumps, ClrMD's CreateRuntime() (which
+            // locates and loads the matching DAC, then walks the module/AppDomain list to
+            // initialize it) is typically the one that dominates this stage's wall-clock, not the
+            // initial LoadDump memory-map. Without this, the whole stage looks like a single blank
+            // freeze with no indication of which part is actually slow.
+            progress?.Report(new(0, "opening dump file", Detail: Path.GetFileName(dumpPath), Elapsed: stopwatch.Elapsed));
             DataTarget dataTarget = DataTarget.LoadDump(dumpPath);
             if (dataTarget.ClrVersions.Length == 0)
             {
@@ -24,10 +35,12 @@ internal sealed class DumpLoader : IDumpLoader
                 throw new DumpLoadException($"No CLR versions found in dump: {dumpPath}");
             }
 
+            progress?.Report(new(0, "loading CLR runtime (DAC)", Detail: null, Elapsed: stopwatch.Elapsed));
             ClrInfo clr = dataTarget.ClrVersions[0];
             ClrRuntime runtime = clr.CreateRuntime();
             ClrHeap heap = runtime.Heap;
 
+            progress?.Report(new(0, "validating heap", Detail: null, Elapsed: stopwatch.Elapsed));
             if (!heap.CanWalkHeap)
             {
                 runtime.Dispose();

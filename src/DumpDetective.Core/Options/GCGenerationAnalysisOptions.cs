@@ -2,16 +2,21 @@ namespace DumpDetective.Core.Options;
 
 public sealed class GCGenerationAnalysisOptions
 {
-    public ulong LohThresholdBytes { get; init; } = 85_000;
-    public int TopLohTypeLimit { get; init; } = 15;
-    public int TopGenProfileLimit { get; init; } = 20;
+    /// <summary>
+    /// LOH memory share threshold (%). Only emit LOH Info finding when LOH share exceeds this percentage.
+    /// Suppresses noise for healthy dumps where LOH is within expected range. Default 20%.
+    /// </summary>
+    public double LohThresholdPercent { get; init; } = 20.0;
 
-    public static GCGenerationAnalysisOptions Preset(AnalysisProfile profile) => profile switch
-    {
-        AnalysisProfile.Fast => new GCGenerationAnalysisOptions { TopLohTypeLimit = 8, TopGenProfileLimit = 10 },
-        AnalysisProfile.Full => new GCGenerationAnalysisOptions { TopLohTypeLimit = 30, TopGenProfileLimit = 40 },
-        _ => new GCGenerationAnalysisOptions(),
-    };
+    /// <summary>
+    /// Gen0 allocation pressure threshold (%). Emit Warning when Gen0 objects exceed this % of total objects.
+    /// Signals high allocation rate that may degrade GC throughput. Default 40%.
+    /// </summary>
+    public double Gen0PressureThresholdPercent { get; init; } = 40.0;
 
-    public static GCGenerationAnalysisOptions Default { get; } = Preset(AnalysisProfile.Balanced);
+    /// <summary>
+    /// POH (Pinned Object Heap) memory share threshold (%). Only emit POH Info finding when POH share
+    /// exceeds this percentage. POH is a separate heap for pinned objects (.NET 5+). Default 5%.
+    /// </summary>
+    public double PohThresholdPercent { get; init; } = 5.0;
 }

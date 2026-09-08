@@ -24,9 +24,17 @@ internal sealed class WcfChannelSectionBuilder : SectionBuilderBase, IAnalyzerSe
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
             ["total_channels"] = new NumericMetricValue(d.TotalChannels, MetricUnit.Count),
+            ["opening"] = new NumericMetricValue(d.OpeningChannels, MetricUnit.Count),
             ["opened"] = new NumericMetricValue(d.OpenedChannels, MetricUnit.Count),
             ["faulted"] = new NumericMetricValue(d.FaultedChannels, MetricUnit.Count),
+            ["closing"] = new NumericMetricValue(d.ClosingChannels, MetricUnit.Count),
             ["closed"] = new NumericMetricValue(d.ClosedChannels, MetricUnit.Count),
+            ["other"] = new NumericMetricValue(d.OtherChannels, MetricUnit.Count),
+            ["invalid_state"] = new NumericMetricValue(d.InvalidStateCount, MetricUnit.Count),
+            ["duplex_channels"] = new NumericMetricValue(d.DuplexChannelCount, MetricUnit.Count),
+            ["session_channels"] = new NumericMetricValue(d.SessionChannelCount, MetricUnit.Count),
+            ["factories"] = new NumericMetricValue(d.FactoryCount, MetricUnit.Count),
+            ["total_bytes"] = new NumericMetricValue(d.TotalBytes, MetricUnit.Bytes),
         };
 
         if (!d.WcfPresent)
@@ -46,14 +54,18 @@ internal sealed class WcfChannelSectionBuilder : SectionBuilderBase, IAnalyzerSe
                 typeRows.Add(new TableRow([
                     Cell(t.TypeName),
                     Cell($"{t.TotalCount:N0}",   t.TotalCount),
+                    Cell($"{t.OpeningCount:N0}", t.OpeningCount),
                     Cell($"{t.OpenedCount:N0}",  t.OpenedCount),
                     Cell($"{t.FaultedCount:N0}", t.FaultedCount),
+                    Cell($"{t.ClosingCount:N0}", t.ClosingCount),
                     Cell($"{t.ClosedCount:N0}",  t.ClosedCount),
                     Cell($"{t.OtherCount:N0}",   t.OtherCount),
                     Cell(FormatBytes(t.TotalBytes)),
+                    Cell(t.BindingHint.ToString()),
+                    Cell($"{t.InvalidStateCount:N0}", t.InvalidStateCount),
                 ]));
             }
-            compactTables.Add(STCompact("Channel objects by type", new[] { CH("Type"), CH("Total","number"), CH("Opened","number"), CH("Faulted","number"), CH("Closed","number"), CH("Other","number"), CH("Heap Size","bytes") }, typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Channel objects by type", new[] { CH("Type"), CH("Total","number"), CH("Opening","number"), CH("Opened","number"), CH("Faulted","number"), CH("Closing","number"), CH("Closed","number"), CH("Other","number"), CH("Heap Size","bytes"), CH("Binding"), CH("Invalid State","number") }, typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         // Top faulted channels
@@ -64,17 +76,16 @@ internal sealed class WcfChannelSectionBuilder : SectionBuilderBase, IAnalyzerSe
             {
                 WcfChannelSnapshot s = d.TopFaultedChannels[i];
                 string shortType = s.TypeName.Contains('.') ? s.TypeName.Split('.')[^1] : s.TypeName;
+                string remoteAddr = s.RemoteAddress ?? "(unknown)";
                 faultRows.Add(new TableRow([
                     Cell(shortType),
                     Cell($"0x{s.Address:X}"),
                     Cell(s.StateLabel),
+                    Cell(remoteAddr),
                 ]));
             }
-            compactTables.Add(STCompact("Faulted channel instances", new[] { CH("Type"), CH("Address"), CH("State") }, faultRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Faulted channel instances", new[] { CH("Type"), CH("Address"), CH("State"), CH("Remote Endpoint") }, faultRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
-
-        if (d.StateScanCapped)
-            blocks.Add(new TextBlock("Note: state sampling was capped. State-based counts may be lower than actual totals."));
 
         return new AnalyzerDetailSection(AnalyzerName, DisplayTitle, SortOrder, blocks,
             KeyMetrics: keyMetrics,

@@ -33,7 +33,7 @@ public class TrendVelocityTests
         memoryEntry.VelocityScore.Should().HaveValue();
         memoryEntry.VelocityScore!.Value.Should().BeGreaterThan(0);
         memoryEntry.VolatilityScore.Should().HaveValue();
-        memoryEntry.VolatilityScore!.Value.Should().BeGreaterOrEqualTo(0);
+        memoryEntry.VolatilityScore!.Value.Should().BeGreaterThanOrEqualTo(0);
         memoryEntry.ConfidenceTrend.Should().NotBeNull();
     }
 

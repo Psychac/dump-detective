@@ -17,8 +17,6 @@ internal static class SectionIdDomainMap
         ["Memory Analysis"]            = ("Memory",     "A2"),
         ["DominatorAnalyzer"]          = ("Memory",     "A3"),
         ["Dominator Analysis"]         = ("Memory",     "A3"),
-        ["MemoryLeakAnalyzer"]         = ("Memory",     "A4"),   // RetentionAnalyzer in the plan; actual class is MemoryLeakAnalyzer
-        ["Retention Analysis"]         = ("Memory",     "A4"),
         ["GCRootAnalyzer"]             = ("Memory",     "A5"),
         ["GC Root Analysis"]           = ("Memory",     "A5"),
         ["StaticRootLeakDetector"]     = ("Memory",     "A6"),
@@ -35,6 +33,7 @@ internal static class SectionIdDomainMap
         ["Heap Topology"]              = ("GC",         "B3"),
         ["LohFragmentationAnalyzer"]   = ("GC",         "B4"),
         ["LOH Fragmentation Analysis"]  = ("GC",         "B4"),
+        ["LOH & POH Fragmentation Analysis"]  = ("GC",   "B4"),
         ["SegmentReservationAnalyzer"] = ("GC",         "B5"),
         ["Segment Reservation Analysis"] = ("GC",       "B5"),
         ["FinalizableObjectAnalyzer"]  = ("GC",         "B6"),
@@ -43,8 +42,6 @@ internal static class SectionIdDomainMap
         ["GC Handle Analysis"]         = ("GC",         "B7"),
         ["WeakReferenceAnalyzer"]      = ("GC",         "B7"),
         ["Weak Reference Analysis"]    = ("GC",         "B7"),
-        ["DependentHandleAnalyzer"]    = ("GC",         "B7"),
-        ["Dependent Handle Analysis"]  = ("GC",         "B7"),
 
         // Domain C — Type System
         ["ObjectShapeAnalyzer"]        = ("TypeSystem", "C2"),
@@ -83,9 +80,6 @@ internal static class SectionIdDomainMap
         ["ModuleAnalyzer"]             = ("Runtime",    "G1"),
         ["Module Analysis"]            = ("Runtime",    "G1"),
         ["Modules & Assemblies"]       = ("Runtime",    "G1"),   // ModuleSectionBuilder display title
-        ["AppDomainAnalyzer"]          = ("Runtime",    "G2"),
-        ["AppDomain Analysis"]         = ("Runtime",    "G2"),
-        ["AppDomains"]                 = ("Runtime",    "G2"),   // AppDomainSectionBuilder display title
         ["JitAnalyzer"]                = ("Runtime",    "G3"),
         ["JIT Analysis"]               = ("Runtime",    "G3"),
 
@@ -96,20 +90,18 @@ internal static class SectionIdDomainMap
         ["Heap Topology"]              = ("GC",         "B3"),   // HeapTopologySectionBuilder display title
         ["Task Overview"]              = ("Async",      "E1"),   // AsyncAnalysisSectionBuilder display title
 
-        // B7 combined section — AnalyzerName used by GCHandlesCombinedSectionBuilder
-        ["GC Handles, Weak References & Dependent Handles"] = ("GC", "B7"),
-
-        // Individual B7/B8/B9 — split builders
+        // Individual B7/B8 — split builders
         ["GCHandleAnalyzer"]            = ("GC",      "B7"),
         ["GC Handle Analysis"]          = ("GC",      "B7"),
         ["GC Handles"]                  = ("GC",      "B7"),
         ["WeakReferenceAnalyzer"]       = ("GC",      "B8"),
         ["Weak Reference Analysis"]     = ("GC",      "B8"),
-        ["DependentHandleAnalyzer"]     = ("GC",      "B9"),
-        ["Dependent Handle Analysis"]   = ("GC",      "B9"),
 
-        // Supplementary section — ReferenceChainSectionBuilder (supporting analyzer, no fixed spec section)
-        ["Reference Chain Analysis"]   = ("Memory",     ""),
+        // Supplementary section — ReferenceChainSectionBuilder (supporting analyzer, no fixed spec
+        // section slot originally, but needs a real anchor to be a cross-section link target —
+        // see docs/analysis/phase1/dominator-analyzer-audit.md's "Shared Next steps" P3 item).
+        ["ReferenceChainAnalyzer"]     = ("Memory",     "A4"),
+        ["Reference Chain Analysis"]   = ("Memory",     "A4"),
 
         // Domain H — Infrastructure / Network
         ["DbConnectionAnalyzer"]       = ("Infrastructure", "H1"),
@@ -120,6 +112,12 @@ internal static class SectionIdDomainMap
         ["HTTP Object Analysis"]       = ("Infrastructure", "H3"),
         ["TimerLeakAnalyzer"]         = ("Infrastructure", "H4"),
         ["Timer Leak Analysis"]       = ("Infrastructure", "H4"),
+        ["SqlTransactionAnalyzer"]    = ("Infrastructure", "H5"),
+        ["SQL Transaction Analysis"]  = ("Infrastructure", "H5"),
+        ["SqlCommandAnalyzer"]        = ("Infrastructure", "H6"),
+        ["SQL Command Analysis"]      = ("Infrastructure", "H6"),
+        ["SqlConnectionPoolAnalyzer"] = ("Infrastructure", "H7"),
+        ["SQL Connection Pool Analysis"] = ("Infrastructure", "H7"),
 
         // C1 (TypeTable) is built by TypeSystemSectionBuilder as an IReportSectionBuilder — no analyzerName entry needed.
     };

@@ -3,7 +3,7 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 
-namespace DumpDetective.Analysis.FindingGenerators;
+namespace DumpDetective.Reporting.FindingGenerators;
 
 internal sealed class GCRootFindingGenerator : IFindingGenerator
 {
@@ -14,7 +14,7 @@ internal sealed class GCRootFindingGenerator : IFindingGenerator
     {
         if (result is not GCRootDomainResult r) return [];
 
-        var findings = new List<InsightFinding>(2);
+        var findings = new List<InsightFinding>(4);
 
         // ── Large static/strong root retention ─────────────────────────────
         ulong staticBytes = 0;
@@ -71,20 +71,49 @@ internal sealed class GCRootFindingGenerator : IFindingGenerator
                 MetricUnit: "objects"));
         }
 
-        // ── Root path cap signal ──────────────────────────────────────────
-        if (r.PathSearchCapped && r.PathSearchCappedCount > 0)
+        // ── Pinned handle accumulation & LOH fragmentation risk ────────────
+        int pinnedCount = 0;
+        int asyncPinnedCount = 0;
+        foreach (RootKindSummary ks in r.ByKind)
+        {
+            if (ks.Kind is "PinnedHandle")
+                pinnedCount = ks.Count;
+            else if (ks.Kind is "AsyncPinnedHandle")
+                asyncPinnedCount = ks.Count;
+        }
+
+        int totalPinned = pinnedCount + asyncPinnedCount;
+        if (totalPinned >= 100)
+        {
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Memory",
+                Severity: totalPinned >= 500 ? FindingSeverity.Warning : FindingSeverity.Info,
+                Title: $"Pinned handle accumulation: {totalPinned:N0} pinned objects",
+                Evidence: $"{pinnedCount:N0} pinned handles + {asyncPinnedCount:N0} async pinned handles = {totalPinned:N0} total. " +
+                          "Pinned objects prevent heap compaction and fragment both SOH (Small Object Heap) and LOH (Large Object Heap).",
+                Recommendation: "Review pinned handle sources and consider: (1) Unpin objects after marshaling completes, " +
+                                "(2) Use GCHandle.Alloc(obj, GCHandleType.Weak) for weak references instead of pinning, " +
+                                "(3) Consolidate pinned allocations to reduce fragmentation, (4) Monitor pinned handle growth across dumps.",
+                Tags: ["gc", "roots", "pinned", "fragmentation", "loh"],
+                MetricValue: totalPinned,
+                MetricUnit: "handles"));
+        }
+
+        // ── Root-owned subgraph walk cap signal ─────────────────────────────
+        if (r.SubgraphWalkCapped && r.SubgraphWalkCappedCount > 0)
         {
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
                 Category: "Confidence",
                 Severity: FindingSeverity.Info,
-                Title: $"Root path search capped ({r.PathSearchCappedCount} paths truncated)",
-                Evidence: $"BFS traversal hit the {r.PathSearchCappedCount} node/depth budget for some root paths. " +
-                          "Root path type chains may be incomplete for deeply nested object graphs.",
-                Recommendation: "Results are indicative — large object graphs may have deeper retention chains not shown.",
+                Title: $"Root-owned subgraph walk capped ({r.SubgraphWalkCappedCount} subgraphs truncated)",
+                Evidence: $"BFS traversal hit the {r.SubgraphWalkCappedCount} node/depth budget for some root-owned subgraphs. " +
+                          "The reported subgraph shape may be incomplete for deeply nested object graphs.",
+                Recommendation: "Results are indicative — large object graphs may retain more than shown.",
                 Tags: ["gc", "roots", "confidence", "cap"],
-                MetricValue: r.PathSearchCappedCount,
-                MetricUnit: "paths"));
+                MetricValue: r.SubgraphWalkCappedCount,
+                MetricUnit: "subgraphs"));
         }
 
         return findings;

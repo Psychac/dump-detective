@@ -5,15 +5,12 @@ using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
 using System.Linq;
+using System.Numerics;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    private const int TopTypeRows = 20;
-    private const int TopLargeRows = 20;
-    private const int TopSparseRows = 10;
-
     public string AnalyzerName => "Array Analysis";
     public string DisplayTitle => "Arrays";
     public int SortOrder => 400; // §22 arrays (before §23 async state machines)
@@ -33,46 +30,55 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
             ["loh_arrays"] = new NumericMetricValue(d.LohArrayCount, MetricUnit.Count),
             ["loh_array_bytes"] = new NumericMetricValue((double)d.LohArrayBytes, MetricUnit.Bytes),
             ["multi_dimensional_arrays"] = new NumericMetricValue(d.MultiDimArrayCount, MetricUnit.Count),
+            ["multi_dimensional_array_bytes"] = new NumericMetricValue((double)d.MultiDimArrayBytes, MetricUnit.Bytes),
         };
-        if (d.ScanLimited)
-            keyMetrics["scan_limit_reached"] = new TextMetricValue("Yes — sparse sampling cap hit; results may be partial");
-
         if (d.TopArrayTypesBySize.Count > 0)
         {
-            int limit = Math.Min(d.TopArrayTypesBySize.Count, TopTypeRows);
             compactTables.Add(STCompact(
                 "Top array types by total bytes",
-                new[] { CH("Element Type"), CH("Rank","number"), CH("Count","number"), CH("Total Size","bytes"), CH("Multi-Dim") },
-                BuildTypeRows(d.TopArrayTypesBySize, limit).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
-            if (d.TopArrayTypesBySize.Count > limit)
-                blocks.Add(T($"Showing top {limit} array types by memory. {d.TopArrayTypesBySize.Count - limit} additional type(s) omitted."));
+                new[] { CH("Element Type"), CH("Module"), CH("Rank","number"), CH("Count","number"), CH("Total Size","bytes"), CH("Multi-Dim"), CH("Avg Instance Size","bytes"), CH("% Heap","number","percent"), CH("% Gen2+LOH","number","percent") },
+                BuildTypeRows(d.TopArrayTypesBySize).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopLargeArrays.Count > 0)
         {
             blocks.Add(T("Individual array instances on the Large Object Heap (≥85 KB). " +
                           "LOH allocations are never compacted and contribute to heap fragmentation."));
-            int limit = Math.Min(d.TopLargeArrays.Count, TopLargeRows);
             compactTables.Add(STCompact(
                 "Largest individual array instances",
                 new[] { CH("Address"), CH("Element Type"), CH("Length","number"), CH("Rank","number"), CH("Size","bytes"), CH("Label") },
-                BuildLargeRows(d.TopLargeArrays, limit).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
-            if (d.TopLargeArrays.Count > limit)
-                blocks.Add(T($"Showing top {limit} large arrays. {d.TopLargeArrays.Count - limit} additional array(s) omitted."));
+                BuildLargeRows(d.TopLargeArrays).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         if (d.TopSparseArrays.Count > 0)
         {
             blocks.Add(T("Arrays where the majority of elements are null or default. " +
                           "These waste heap memory and could be replaced with sparse data structures such as Dictionary<int, T>."));
-            int limit = Math.Min(d.TopSparseArrays.Count, TopSparseRows);
             compactTables.Add(STCompact(
                 "Sparse arrays by estimated wasted bytes",
                 new[] { CH("Address"), CH("Element Type"), CH("Length","number"), CH("Null/Default %", "number", "percent"), CH("Wasted Bytes","bytes") },
-                BuildSparseRows(d.TopSparseArrays, limit).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
-            if (d.TopSparseArrays.Count > limit)
-                blocks.Add(T($"Showing top {limit} sparse arrays. {d.TopSparseArrays.Count - limit} additional array(s) omitted."));
+                BuildSparseRows(d.TopSparseArrays).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
+
+        var topPinnedArrays = d.TopPinnedArrays ?? [];
+        if (topPinnedArrays.Count > 0)
+        {
+            blocks.Add(T("Arrays targeted by a pinned or async-pinned GC handle. The GC cannot move these " +
+                          "objects, which blocks compaction and fragments the surrounding heap segment."));
+            compactTables.Add(STCompact(
+                "Pinned array instances",
+                new[] { CH("Address"), CH("Element Type"), CH("Length","number"), CH("Rank","number"), CH("Size","bytes"), CH("Label") },
+                BuildLargeRows(topPinnedArrays).Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
+        keyMetrics["pinned_array_count"] = new NumericMetricValue(d.PinnedArrayCount, MetricUnit.Count);
+        keyMetrics["pinned_array_bytes"] = new NumericMetricValue((double)d.PinnedArrayBytes, MetricUnit.Bytes);
+
+        ulong totalWastedBytes = 0;
+        foreach (SparseArrayEntry sparse in d.TopSparseArrays)
+            totalWastedBytes += sparse.WastedBytes;
+
+        keyMetrics["sparse_wasted_bytes"] = new NumericMetricValue((double)totalWastedBytes, MetricUnit.Bytes);
 
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,
@@ -80,29 +86,31 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
             CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
-    private static List<TableRow> BuildTypeRows(IReadOnlyList<ArrayTypeProfile> types, int limit)
+    private static List<TableRow> BuildTypeRows(IReadOnlyList<ArrayTypeProfile> types)
     {
-        var rows = new List<TableRow>(limit);
-        for (int i = 0; i < limit; i++)
+        var rows = new List<TableRow>(types.Count);
+        foreach (ArrayTypeProfile t in types)
         {
-            ArrayTypeProfile t = types[i];
             rows.Add(new TableRow([
                 Cell(FormatHelper.TruncateString(t.ElementTypeName, 70)),
+                Cell(FormatHelper.TruncateString(t.ModuleName, 50)),
                 Cell($"{t.Rank:N0}",                        t.Rank),
                 Cell($"{t.Count:N0}",                       t.Count),
                 Cell(FormatHelper.FormatBytes(t.TotalBytes)),
                 Cell(t.IsMultiDimensional ? "Yes" : "No"),
+                Cell(FormatHelper.FormatBytes((ulong)t.AverageInstanceSize), t.AverageInstanceSize),
+                Cell($"{t.PercentOfTotalHeapBytes:F1}%",    t.PercentOfTotalHeapBytes),
+                Cell($"{t.Gen2PlusLohPercent:F1}%",         t.Gen2PlusLohPercent),
             ]));
         }
         return rows;
     }
 
-    private static List<TableRow> BuildLargeRows(IReadOnlyList<LargeArrayEntry> entries, int limit)
+    private static List<TableRow> BuildLargeRows(IReadOnlyList<LargeArrayEntry> entries)
     {
-        var rows = new List<TableRow>(limit);
-        for (int i = 0; i < limit; i++)
+        var rows = new List<TableRow>(entries.Count);
+        foreach (LargeArrayEntry e in entries)
         {
-            LargeArrayEntry e = entries[i];
             rows.Add(new TableRow([
                 Cell($"0x{e.Address:X}"),
                 Cell(FormatHelper.TruncateString(e.ElementTypeName, 70)),
@@ -115,10 +123,21 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
         return rows;
     }
 
+    // ArrayPool<T> buckets are powers of two starting at 16 bytes; a byte[] whose length is
+    // itself a power of two at or above 128 KB is very likely an unreturned pool rental rather
+    // than an application-sized allocation (which would rarely land exactly on a bucket boundary).
+    private const int ArrayPoolMinLength = 131_072; // 128 KB
+
     private static string GetAntiPatternLabel(string elementTypeName, int length, ulong size)
     {
-        if (elementTypeName.Contains("Byte", StringComparison.OrdinalIgnoreCase) && size > 1_000_000)
-            return "byte[] > 1 MB";
+        if (elementTypeName.Contains("Byte", StringComparison.OrdinalIgnoreCase))
+        {
+            if (length >= ArrayPoolMinLength && BitOperations.IsPow2(length))
+                return "possible unreturned ArrayPool<byte> rental";
+
+            if (size > 1_000_000)
+                return "byte[] > 1 MB";
+        }
 
         if ((elementTypeName.Contains("String", StringComparison.OrdinalIgnoreCase) || elementTypeName.Contains("Object", StringComparison.OrdinalIgnoreCase))
             && length > 10_000)
@@ -127,12 +146,11 @@ internal sealed class ArraySectionBuilder : SectionBuilderBase, IAnalyzerSection
         return "—";
     }
 
-    private static List<TableRow> BuildSparseRows(IReadOnlyList<SparseArrayEntry> entries, int limit)
+    private static List<TableRow> BuildSparseRows(IReadOnlyList<SparseArrayEntry> entries)
     {
-        var rows = new List<TableRow>(limit);
-        for (int i = 0; i < limit; i++)
+        var rows = new List<TableRow>(entries.Count);
+        foreach (SparseArrayEntry e in entries)
         {
-            SparseArrayEntry e = entries[i];
             rows.Add(new TableRow([
                 Cell($"0x{e.Address:X}"),
                 Cell(FormatHelper.TruncateString(e.ElementTypeName, 70)),

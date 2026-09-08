@@ -28,13 +28,23 @@ internal sealed class MemoryHandleSnapshotReader : IHandleSnapshotReader
             var kind = (byte)h.HandleKind;
             ulong addr = h.Object.Address;
             ulong mt = 0UL;
+            bool isAlive = false;
             if (addr != 0)
             {
                 var obj = _heap.GetObject(addr);
-                if (obj.IsValid) mt = obj.Type?.MethodTable ?? 0UL;
+                if (obj.IsValid)
+                {
+                    mt = obj.Type?.MethodTable ?? 0UL;
+                    isAlive = true;
+                }
             }
 
-            yield return new HandleRecord(addr, mt, kind);
+            // P3-3: resolve the dependent target inline — same live ClrHandle already in hand.
+            ulong dependentTarget = 0;
+            if (h.HandleKind == ClrHandleKind.Dependent)
+                DependentHandleTargetResolver.TryGetDependentTargetAddress(h, out dependentTarget);
+
+            yield return new HandleRecord(addr, mt, kind, isAlive, dependentTarget);
             _count++;
             if (_count > _cap) yield break;
         }

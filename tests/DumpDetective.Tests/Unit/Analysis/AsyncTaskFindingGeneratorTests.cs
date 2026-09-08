@@ -1,4 +1,4 @@
-using DumpDetective.Analysis.FindingGenerators;
+using DumpDetective.Reporting.FindingGenerators;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Enums;
 
@@ -58,6 +58,45 @@ public sealed class AsyncTaskFindingGeneratorTests
         findings.Should().HaveCount(2);
     }
 
+    [Fact]
+    public void Generate_PendingVtsGen2BelowInfoThreshold_ReturnsInfoSeverity()
+    {
+        var gen = new AsyncTaskFindingGenerator();
+        var result = BuildResult(total: 100, pending: 0, faulted: 0, orphaned: 0, maxDepth: 0, avgDepth: 0)
+            with { TotalValueTaskSources = 50, PendingValueTaskSources = 10, PendingVtsGen2Count = 5 };
+
+        var findings = gen.Generate(result);
+
+        findings.Should().ContainSingle();
+        findings[0].Title.Should().Contain("Pending IValueTaskSource instances in Gen2/LOH");
+        findings[0].Severity.Should().Be(FindingSeverity.Info);
+    }
+
+    [Fact]
+    public void Generate_PendingVtsGen2AtOrAboveWarningThreshold_ReturnsWarningSeverity()
+    {
+        var gen = new AsyncTaskFindingGenerator();
+        var result = BuildResult(total: 100, pending: 0, faulted: 0, orphaned: 0, maxDepth: 0, avgDepth: 0)
+            with { TotalValueTaskSources = 100, PendingValueTaskSources = 40, PendingVtsGen2Count = 20 };
+
+        var findings = gen.Generate(result);
+
+        findings.Should().ContainSingle();
+        findings[0].Severity.Should().Be(FindingSeverity.Warning);
+    }
+
+    [Fact]
+    public void Generate_NoPendingVtsGen2_NoVtsSignal()
+    {
+        var gen = new AsyncTaskFindingGenerator();
+        var result = BuildResult(total: 100, pending: 0, faulted: 0, orphaned: 0, maxDepth: 0, avgDepth: 0)
+            with { TotalValueTaskSources = 50, PendingValueTaskSources = 50, PendingVtsGen2Count = 0 };
+
+        var findings = gen.Generate(result);
+
+        findings.Should().BeEmpty();
+    }
+
     private static AsyncTaskDomainResult BuildResult(
         int total,
         int pending,
@@ -80,7 +119,6 @@ public sealed class AsyncTaskFindingGeneratorTests
             TotalTaskContinuations: total * 2,
             MaxContinuationDepth: maxDepth,
             AvgContinuationDepth: avgDepth,
-            TaskScanLimited: false,
             TopPendingTaskTypes: [],
             TopFaultedTaskTypes: [],
             TopContinuationTypes: [],

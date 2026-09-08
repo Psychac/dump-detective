@@ -51,7 +51,6 @@ namespace DumpDetective.Reporting.Serialization;
 [JsonSerializable(typeof(CompactTable))]
 [JsonSerializable(typeof(List<CompactRow>))]
 [JsonSerializable(typeof(List<CompactHeader>))]
-[JsonSerializable(typeof(SectionProvenance))]
 [JsonSerializable(typeof(System.Collections.Generic.Dictionary<string, MetricValue>))]
 [JsonSerializable(typeof(List<CompactTable>))]
 [JsonSerializable(typeof(SparklineBlock))]
@@ -60,5 +59,6 @@ namespace DumpDetective.Reporting.Serialization;
     WriteIndented = false,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     UseStringEnumConverter = true,
-    NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals)]
+    NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
+    MaxDepth = 256)]
 internal sealed partial class ReportJsonContext : JsonSerializerContext { }

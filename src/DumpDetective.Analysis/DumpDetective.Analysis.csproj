@@ -5,6 +5,7 @@
     <LangVersion>14.0</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>DumpDetective.Analysis</RootNamespace>
   </PropertyGroup>
 
@@ -14,8 +15,7 @@
     <None Remove="Configuration\**" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.Diagnostics.Runtime" Version="3.1.512801" />
-    <PackageReference Include="System.IO.Hashing" Version="10.0.7" />
+    <PackageReference Include="System.IO.Hashing" Version="10.0.9" />
     <ProjectReference Include="..\DumpDetective.Core\DumpDetective.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
@@ -23,5 +23,8 @@
     <InternalsVisibleTo Include="DumpDetective.Reporting" />
     <InternalsVisibleTo Include="DumpDetective.Tests" />
     <InternalsVisibleTo Include="BenchmarkSuite1" />
+    <InternalsVisibleTo Include="ProfileRootEnumeration" />
+    <InternalsVisibleTo Include="ProfileRootPhase" />
+    <InternalsVisibleTo Include="ProbeCacheReaders" />
   </ItemGroup>
 </Project>

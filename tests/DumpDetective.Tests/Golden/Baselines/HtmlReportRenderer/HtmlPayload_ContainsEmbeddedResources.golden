@@ -1,0 +1,30 @@
+{
+  "htmlStructure": {
+    "hasDoctype": true,
+    "hasMetaTags": true,
+    "hasEmbeddedCSS": true,
+    "hasEmbeddedJS": true,
+    "externalResources": 0,
+    "requiredModules": [
+      "report.css",
+      "report.js",
+      "report.dom.js",
+      "report.renderers.js",
+      "report.renderers.shared.js",
+      "report.renderers.blocks.js",
+      "report.renderers.charts.js",
+      "report.renderers.header.js",
+      "report.renderers.nav.js",
+      "report.renderers.panels.js",
+      "report.renderers.findings.js",
+      "report.renderers.sections.js",
+      "report.ui.js",
+      "report.ui.toc.js",
+      "report.ui.integrity.js",
+      "report.main.js"
+    ]
+  },
+  "offlineCapable": true,
+  "fallbackRenderable": true,
+  "estimatedPayloadSizeKB": 0
+}

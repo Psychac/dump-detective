@@ -130,7 +130,7 @@ internal static class AnalyzerFilterService
             or nameof(Analysis.Analyzers.AsyncTaskAnalyzer)
                 => 1,
 
-            nameof(Analysis.Analyzers.RetentionAnalyzer)
+            nameof(Analysis.Analyzers.DominatorAnalyzer)
             or nameof(Analysis.Analyzers.LeakCandidateAnalyzer)
             or nameof(Analysis.Analyzers.CollectionAnalyzer)
             or nameof(Analysis.Analyzers.StringAnalyzer)
@@ -141,7 +141,6 @@ internal static class AnalyzerFilterService
                 => 3,
 
             nameof(Analysis.Analyzers.GCHandleAnalyzer)
-            or nameof(Analysis.Analyzers.DependentHandleAnalyzer)
             or nameof(Analysis.Analyzers.LohFragmentationAnalyzer)
             or nameof(Analysis.Analyzers.ThreadStackClusterAnalyzer)
                 => 4,
@@ -154,7 +153,6 @@ internal static class AnalyzerFilterService
             nameof(Analysis.Analyzers.FinalizableObjectAnalyzer)
             or nameof(Analysis.Analyzers.AsyncStateMachineAnalyzer)
             or nameof(Analysis.Analyzers.ArrayAnalyzer)
-            or nameof(Analysis.Analyzers.AppDomainAnalyzer)
             or nameof(Analysis.Analyzers.SegmentReservationAnalyzer)
             or nameof(Analysis.Analyzers.WeakReferenceAnalyzer)
             or nameof(Analysis.Analyzers.BoxingAnalyzer)

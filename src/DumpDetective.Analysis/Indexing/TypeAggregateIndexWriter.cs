@@ -13,30 +13,34 @@ namespace DumpDetective.Analysis.Indexing;
 /// <remarks>
 /// File layout (little-endian throughout, offsets shown assuming BucketCount=8):
 /// <code>
-///   [  0 –  23]  IndexHeader (24 B)  Magic=0x47415954, Version=2, RecordCount=numTypes
+///   [  0 –  23]  IndexHeader (24 B)  Magic=0x47415954, Version=4, RecordCount=numTypes
 ///   [ 24 –  31]  ObjectCount (8 B)   total objects from the scan
 ///   [ 32 –  63]  ExtraHeader (32 B)  BucketCount(4)+ModuleCount(4)+ShapeCount(4)+Pad(4)+
-///                                   DumpFileLength(8)+DumpLastWriteUtcTicks(8)
+///                                   Reserved(8)+Reserved(8)
 ///   [ 64 – 127]  SizeBuckets (64 B)  BucketCount × 8-byte signed counters
-///   [128 –   …]  TypeEntry records   numTypes × 68 B each (see TypeAggregateIndexEntry doc)
+///   [128 –   …]  TypeEntry records   numTypes × 88 B each (see TypeAggregateIndexEntry doc)
 ///   [  … –   …]  ShapeEntry records  ShapeCount × 16 B each (MT(8)+Ref(2)+Val(2)+Pad(4))
 ///   [  … –  ∞]  Module records      variable: Id(4)+NameLen(2)+AsmLen(2)+Name(N)+Asm(M)
 /// </code>
 /// The file is written last in Phase 1 (after all satellite files). Its presence is
 /// therefore a reliable indicator that the full initial build completed successfully.
-/// The <c>DumpFileLength</c> and <c>DumpLastWriteUtcTicks</c> stamp is validated on
-/// every cache hit so a replaced dump of the same filename is always detected.
+/// Dump identity is validated once at the container level (see
+/// <c>DumpContentHasher</c>/<c>CacheContainerReader.MatchesDumpContent</c>) before this
+/// section is ever opened, so the two reserved fields above are no longer a stamp.
 /// </remarks>
 internal static class TypeAggregateIndexWriter
 {
     // File magic: "TYAG" = Type Aggregate Index
     internal const int Magic = 0x47415954;
-    internal const int Version = 2;
+    // Bumped 3 -> 4 when Gen2TotalSize was added to TypeEntry (P2-3). Older TypeAggregateIndex.bin
+    // files fail the header-version check in TypeAggregateIndexReader and are rebuilt via a full
+    // heap rescan — the same policy used for every prior bump of this format.
+    internal const int Version = 4;
 
     // TypeAggregateIndexEntry binary record — must match the layout in the doc comment of
     // TypeAggregateIndexEntry.cs: MT(8)+ModuleId(4)+Count(8)+TotalSize(8)+LohCount(8)+
-    // LohSize(8)+SampleAddress(8)+Gen0Count(4)+Gen1Count(4)+Gen2Count(4)+Flags(1)+Pad(3)
-    internal const int TypeEntrySize = 68;
+    // LohSize(8)+SampleAddress(8)+Gen0Count(8)+Gen1Count(8)+Gen2Count(8)+Gen2TotalSize(8)+Flags(1)+Pad(3)
+    internal const int TypeEntrySize = 88;
 
     // TypeShapeEntry binary record: MT(8)+RefFields(2)+ValFields(2)+Pad(4)
     internal const int ShapeEntrySize = 16;
@@ -44,8 +48,7 @@ internal static class TypeAggregateIndexWriter
     // ── Public write entry point ───────────────────────────────────────────────
 
     public static void Write(
-        string filePath,
-        string dumpPath,
+        Stream stream,
         IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> typeAggregates,
         IReadOnlyList<ModuleInfo>? modules,
         long[]? sizeBuckets,
@@ -57,9 +60,6 @@ internal static class TypeAggregateIndexWriter
         int moduleCount = modules?.Count ?? 0;
         int shapeCount = shapeCache?.Count ?? 0;
 
-        using var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write,
-            FileShare.Read, bufferSize: 256 * 1024, FileOptions.SequentialScan);
-
         // ── IndexHeader ──────────────────────────────────────────────────────
         new IndexHeader(Magic, Version, recordCount: typeCount).WriteTo(stream);
 
@@ -68,24 +68,17 @@ internal static class TypeAggregateIndexWriter
         BinaryPrimitives.WriteInt64LittleEndian(buf8, objectCount);
         stream.Write(buf8);
 
-        // ── ExtraHeader: BucketCount(4)+ModuleCount(4)+ShapeCount(4)+Pad(4)+DumpLength(8)+DumpTimeTicks(8) ─
-        long dumpFileLength = 0;
-        long dumpLastWriteTicks = 0;
-        try
-        {
-            var fi = new FileInfo(dumpPath);
-            dumpFileLength = fi.Length;
-            dumpLastWriteTicks = fi.LastWriteTimeUtc.Ticks;
-        }
-        catch { /* stamp stays 0,0 — reader accepts 0,0 as "unknown" */ }
-
+        // ── ExtraHeader: BucketCount(4)+ModuleCount(4)+ShapeCount(4)+Pad(4)+Reserved(8)+Reserved(8) ─
+        // The last two 8-byte fields used to carry a dump length/mtime stamp; that check is now
+        // done once at the container level (see DumpContentHasher) before this section is ever
+        // parsed, so they're left zero-filled here for layout compatibility.
         Span<byte> extra = stackalloc byte[32];
         BinaryPrimitives.WriteInt32LittleEndian(extra, bucketCount);
         BinaryPrimitives.WriteInt32LittleEndian(extra[4..], moduleCount);
         BinaryPrimitives.WriteInt32LittleEndian(extra[8..], shapeCount);
         BinaryPrimitives.WriteInt32LittleEndian(extra[12..], 0); // pad
-        BinaryPrimitives.WriteInt64LittleEndian(extra[16..], dumpFileLength);
-        BinaryPrimitives.WriteInt64LittleEndian(extra[24..], dumpLastWriteTicks);
+        BinaryPrimitives.WriteInt64LittleEndian(extra[16..], 0);
+        BinaryPrimitives.WriteInt64LittleEndian(extra[24..], 0);
         stream.Write(extra);
 
         // ── SizeBuckets ──────────────────────────────────────────────────────
@@ -208,11 +201,12 @@ internal static class TypeAggregateIndexWriter
         BinaryPrimitives.WriteInt64LittleEndian(span[28..], e.LohCount);     //  8 → total 36
         BinaryPrimitives.WriteUInt64LittleEndian(span[36..], e.LohSize);      //  8 → total 44
         BinaryPrimitives.WriteUInt64LittleEndian(span[44..], e.SampleAddress);//  8 → total 52
-        BinaryPrimitives.WriteInt32LittleEndian(span[52..], e.Gen0Count);    //  4 → total 56
-        BinaryPrimitives.WriteInt32LittleEndian(span[56..], e.Gen1Count);    //  4 → total 60
-        BinaryPrimitives.WriteInt32LittleEndian(span[60..], e.Gen2Count);    //  4 → total 64
-        span[64] = (byte)e.Flags;                                              //  1 → total 65
-        span[65] = span[66] = span[67] = 0;                                    //  3 → total 68
+        BinaryPrimitives.WriteInt64LittleEndian(span[52..], e.Gen0Count);    //  8 → total 60
+        BinaryPrimitives.WriteInt64LittleEndian(span[60..], e.Gen1Count);    //  8 → total 68
+        BinaryPrimitives.WriteInt64LittleEndian(span[68..], e.Gen2Count);    //  8 → total 76
+        BinaryPrimitives.WriteUInt64LittleEndian(span[76..], e.Gen2TotalSize); //  8 → total 84
+        span[84] = (byte)e.Flags;                                              //  1 → total 85
+        span[85] = span[86] = span[87] = 0;                                    //  3 → total 88
     }
 
     private static void WriteShapeEntry(Span<byte> span, ulong mt, TypeShapeEntry s)

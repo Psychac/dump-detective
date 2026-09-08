@@ -60,8 +60,7 @@ public class FullPipelineBenchmark
             _heap,
             _dumpPath,
             cancellationToken: default,
-            progress: null,
-            mode: HeapIndexPrebuildMode.Auto);
+            progress: null);
 
         // Stage 3: wire up context — identical to RunAnalyzersPipelineStage.BuildContext
         var diagnostics = new DiagnosticsOptions { ContinueOnAnalyzerFailure = true };
@@ -71,7 +70,7 @@ public class FullPipelineBenchmark
             ReferenceChain = new ReferenceChainOptions(),
             EventLeak = new EventLeakOptions(),
             Diagnostics = diagnostics,
-            Collection = CollectionAnalysisOptions.Default,
+            Collection = new CollectionAnalysisOptions(),
         };
 
         _context = new RuntimeAnalysisContext
@@ -92,13 +91,12 @@ public class FullPipelineBenchmark
             new ModuleAnalyzer(),
             new CrashAnalyzer(),
             new HangAnalyzer(),
-            new RetentionAnalyzer(),
+            new DominatorAnalyzer(),
             new StringAnalyzer(),
             new CollectionAnalyzer(),
             new StaticRootLeakDetector(),
             new ReferenceChainAnalyzer(),
             new GCHandleAnalyzer(),
-            new DependentHandleAnalyzer(),
             new LohFragmentationAnalyzer(),
             new ThreadStackClusterAnalyzer(),
             new ThreadAnalyzer(),

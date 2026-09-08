@@ -17,13 +17,21 @@ internal sealed record ThreadDomainResult(
     IReadOnlyDictionary<string, int>? ThreadStateDistribution = null,
     IReadOnlyDictionary<string, int>? AppDomainDistribution = null,
     IReadOnlyDictionary<string, int>? GcModeDistribution = null,
+    IReadOnlyDictionary<string, int>? ExceptionTypeDistribution = null,
     IReadOnlyList<ThreadStateSnapshot>? TopLockedThreads = null,
     IReadOnlyList<ThreadStateSnapshot>? TopBlockedThreads = null,
     IReadOnlyList<ThreadExceptionSnapshot>? ThreadsWithActiveExceptions = null,
     IReadOnlyList<NameCountEntry>? TopStackHotspots = null,
     IReadOnlyList<NameCountEntry>? TopActiveThreadHotspots = null,
-    IReadOnlyList<ThreadStateSnapshot>? SampledThreads = null,
+    // Every alive thread not already captured above (no lock, no wait/block classification, no
+    // active exception) — a deterministic complete list, not a random reservoir sample.
+    IReadOnlyList<ThreadStateSnapshot>? OtherThreads = null,
     int ThreadPoolWorkerCount = 0,
+    int ThreadPoolQueueDepth = 0,
+    int ThreadPoolActiveWorkers = 0,
+    int ThreadPoolIdleWorkers = 0,
+    int ThreadPoolMinWorkers = 0,
+    int ThreadPoolMaxWorkers = 0,
     int FinalizerThreadCount = 0,
     bool FinalizerThreadBlocked = false,
     uint? FinalizerManagedThreadId = null,
@@ -32,10 +40,17 @@ internal sealed record ThreadDomainResult(
     IReadOnlyList<string>? FinalizerFrames = null,
     int AsyncChainThreadCount = 0,
     int MaxAsyncChainDepth = 0,
-    int SampledSnapshotCount = 0,
-    int CapturedSnapshotCount = 0,
-    int SamplingCapacity = 0,
-    int SamplingSeed = 0) : AnalyzerDomainResult;
+    double BlockedThreadRatio = 0.0,
+    ThreadStackMemorySummary? StackMemorySummary = null) : AnalyzerDomainResult;
+
+// Aggregate stack-size footprint across all alive threads with a resolvable stack range
+// (StackBase > StackLimit). Null when no thread yielded a positive stack size.
+internal sealed record ThreadStackMemorySummary(
+    ulong TotalBytes,
+    double MeanBytes,
+    ulong MaxBytes,
+    ulong P95Bytes,
+    int SampleCount);
 
 internal sealed record ThreadStateSnapshot(
     uint ThreadId,

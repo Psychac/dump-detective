@@ -1,0 +1,38 @@
+{
+  "documentType": "TrendReportDocument",
+  "metadata": {
+    "trendName": "trend-baseline",
+    "dumpCount": 0,
+    "timeSpan": "0.00:00:00",
+    "analysisTimestamp": "2000-01-01T00:00:00Z"
+  },
+  "trendSections": [
+    {
+      "name": "Health Scorecard",
+      "category": "Trend",
+      "metrics": []
+    },
+    {
+      "name": "Snapshot Strip",
+      "category": "Trend",
+      "lifecycleEvents": []
+    },
+    {
+      "name": "Metric Timeline",
+      "category": "Trend",
+      "timeline": []
+    },
+    {
+      "name": "Regression Dashboard",
+      "category": "Trend",
+      "regressions": []
+    },
+    {
+      "name": "Appendix",
+      "category": "Trend",
+      "metadata": []
+    }
+  ],
+  "perDumpDocuments": [],
+  "aggregateFindings": []
+}

@@ -9,13 +9,22 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not BoxingDomainResult r) return [];
+            // TotalGen2BoxedCount is summed over the same population as TotalBoxedObjects
+            // (every boxed instance in the type aggregate index), so the fraction below is exact.
+            double gen2Fraction = r.TotalBoxedObjects == 0 ? 0.0 : r.TotalGen2BoxedCount * 100.0 / r.TotalBoxedObjects;
             var metrics = new List<AnalyzerMetric>
             {
                 new("boxing.total.objects",     null, r.TotalBoxedObjects,       "objects", MetricTrendDirection.HigherIsWorse),
                 new("boxing.total.bytes",       null, r.TotalBoxedBytes,         "bytes",   MetricTrendDirection.HigherIsWorse),
+                new("boxing.avg.instance.bytes", null, r.AvgBoxedInstanceBytes,  "bytes",   MetricTrendDirection.HigherIsWorse),
                 new("boxing.enum.count",        null, r.BoxedEnumCount,          "objects", MetricTrendDirection.HigherIsWorse),
                 new("boxing.enum.bytes",        null, r.BoxedEnumBytes,          "bytes",   MetricTrendDirection.HigherIsWorse),
-                new("boxing.oversized.count",   null, r.OversizedValueTypeCount, "objects", MetricTrendDirection.HigherIsWorse),
+                new("boxing.nullable.count",    null, r.NullableBoxedCount,      "objects", MetricTrendDirection.HigherIsWorse),
+                new("boxing.nullable.bytes",    null, r.NullableBoxedBytes,      "bytes",   MetricTrendDirection.HigherIsWorse),
+                new("boxing.oversized.count",   null, r.OversizedValueTypeInstanceCount, "objects", MetricTrendDirection.HigherIsWorse),
+                new("boxing.padding.aggregate", null, r.AggregatePaddingWasteBytes, "bytes", MetricTrendDirection.HigherIsWorse),
+                new("boxing.gen2.count",        null, r.TotalGen2BoxedCount,     "objects", MetricTrendDirection.HigherIsWorse),
+                new("boxing.gen2.fraction",     null, gen2Fraction,              "%",       MetricTrendDirection.HigherIsWorse),
             };
 
             foreach (BoxedTypeEntry entry in r.TopBoxedTypes)
@@ -30,13 +39,23 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
         {
             if (baseline is not BoxingDomainResult b || current is not BoxingDomainResult c) return [];
+
+            double bGen2Fraction = b.TotalBoxedObjects == 0 ? 0.0 : b.TotalGen2BoxedCount * 100.0 / b.TotalBoxedObjects;
+            double cGen2Fraction = c.TotalBoxedObjects == 0 ? 0.0 : c.TotalGen2BoxedCount * 100.0 / c.TotalBoxedObjects;
+
             return
             [
                 MetricDeltaHelper.Compute("boxing.total.objects",   null, b.TotalBoxedObjects,       c.TotalBoxedObjects,       "objects", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("boxing.total.bytes",     null, b.TotalBoxedBytes,         c.TotalBoxedBytes,         "bytes",   MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("boxing.avg.instance.bytes", null, b.AvgBoxedInstanceBytes, c.AvgBoxedInstanceBytes, "bytes", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("boxing.enum.count",      null, b.BoxedEnumCount,          c.BoxedEnumCount,          "objects", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("boxing.enum.bytes",      null, b.BoxedEnumBytes,          c.BoxedEnumBytes,          "bytes",   MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("boxing.oversized.count", null, b.OversizedValueTypeCount, c.OversizedValueTypeCount, "objects", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("boxing.nullable.count",  null, b.NullableBoxedCount,     c.NullableBoxedCount,      "objects", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("boxing.nullable.bytes",  null, b.NullableBoxedBytes,     c.NullableBoxedBytes,      "bytes",   MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("boxing.oversized.count", null, b.OversizedValueTypeInstanceCount, c.OversizedValueTypeInstanceCount, "objects", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("boxing.padding.aggregate", null, b.AggregatePaddingWasteBytes, c.AggregatePaddingWasteBytes, "bytes", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("boxing.gen2.count",      null, b.TotalGen2BoxedCount,     c.TotalGen2BoxedCount,     "objects", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("boxing.gen2.fraction",   null, bGen2Fraction,             cGen2Fraction,            "%",       MetricTrendDirection.HigherIsWorse),
             ];
         }
     }

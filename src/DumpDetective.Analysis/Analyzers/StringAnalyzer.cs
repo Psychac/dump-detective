@@ -1,14 +1,15 @@
-using System.IO.Hashing;
-using System.Runtime.InteropServices;
-using System.Diagnostics;
-using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Traversal;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
-using DumpDetective.Core.Utilities;
+
+using Microsoft.Diagnostics.Runtime;
+
+using System.Diagnostics;
+using System.IO.Hashing;
+using System.Runtime.InteropServices;
 
 namespace DumpDetective.Analysis.Analyzers;
 
@@ -16,7 +17,7 @@ namespace DumpDetective.Analysis.Analyzers;
 /// Analyze managed string usage: counts, sizes, LOH/FOH stats and duplicate patterns.
 /// Prefers pre-built string dedup index when available to avoid random dump I/O.
 /// </summary>
-internal sealed class StringAnalyzer : IAnalyzer
+internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticipant
 {
     // File-level constants removed. Use StringAnalysisOptions for configurable thresholds.
     /// <inheritdoc/>
@@ -24,6 +25,443 @@ internal sealed class StringAnalyzer : IAnalyzer
 
     /// <inheritdoc/>
     public string Category => "Memory";
+
+    // Field layout cache per MethodTable to avoid re-enumerating ClrType.Fields
+    private sealed class FieldLayoutCache
+    {
+        private readonly Dictionary<ulong, ClrInstanceField[]> _cache = new();
+
+        public ClrInstanceField[] GetFields(ClrType? type)
+        {
+            if (type == null) return [];
+
+            var mt = type.MethodTable;
+            if (!_cache.TryGetValue(mt, out var fields))
+            {
+                fields = type.Fields.ToArray();
+                _cache[mt] = fields;
+            }
+            return fields;
+        }
+    }
+
+    // Instance accumulator state for the index-scan dedup branch of the
+    // IHeapIndexScanParticipant path. Populated by BeforeHeapIndexScan (called by the
+    // pipeline dispatcher) and mutated per-entry by OnHeapEntry; consumed by AnalyzeAsync
+    // once the shared index scan has completed. Every other branch of Analyze (prebuilt
+    // dedup, FOH interned scan, no-index fallbacks) is untouched by this state.
+    private ClrHeap? _heap;
+    private StringAnalysisOptions? _indexScanStringOptions;
+    private HashSet<ulong>? _indexScanStringMts;
+    private bool _indexScanDedupActive;
+    private int _indexScanMaxUnique;
+    private Dictionary<StringFingerprint, StringLeakInfo>? _indexScanStringStats;
+    private Dictionary<ulong, int>? _indexScanMethodTableDupCounts;
+    private List<int>? _indexScanLengthSamples;
+    private Dictionary<string, int>? _indexScanLengthBuckets;
+    private List<LongStringEntry>? _indexScanVeryLongStrings;
+    private int _indexScanStringsRead;
+
+    // P1-3 accumulator state: string-field-ownership tracking. Independent of
+    // _indexScanDedupActive (runs even when dedup itself is skipped) — piggybacks on the
+    // same shared disk-index pass rather than doing its own heap.EnumerateObjects() walk.
+    private const int MaxStringOwnerTypesToTrack = 100;
+    // Per-type reservoir size: bounds total ClrMD-touching calls to roughly
+    // MaxStringOwnerTypesToTrack * MaxSamplesPerOwnerType regardless of heap size (a hot type
+    // beyond this many instances is subsampled via reservoir sampling — see AccumulateStringOwnerType).
+    // Totals are extrapolated from the sample average against the type's real count.
+    private const int MaxSamplesPerOwnerType = 2000;
+    // Per-worker cap for length-percentile sampling (see FingerprintAddress); MergePartial
+    // downsamples back to this bound after concatenating worker results, since plain
+    // concatenation across N parallel workers would otherwise grow unbounded with worker count.
+    private const int MaxLengthSamples = 100_000;
+    private bool _indexScanOwnerTypesActive;
+    private FieldLayoutCache? _indexScanFieldCache;
+    private Dictionary<ulong, int[]>? _indexScanStringOwnerFieldIndices; // owner MT -> string field indices
+    private HashSet<ulong>? _indexScanTypesWithoutStringFields; // negative cache
+    private Dictionary<ulong, ulong>? _indexScanStringOwnerTypeBytes; // owner MT -> sum of reservoir sample bytes
+    private Dictionary<ulong, int>? _indexScanStringOwnerSampleCounts; // owner MT -> samples held (<= MaxSamplesPerOwnerType)
+    // owner MT -> total instances of that type seen by this worker so far (uncapped) — drives
+    // Algorithm-R reservoir replacement so late-encountered instances aren't systematically
+    // excluded in favor of whichever were scanned first (address/allocation-order bias).
+    private Dictionary<ulong, int>? _indexScanStringOwnerSeenCounts;
+    // owner MT -> reservoir of individual sample byte values, sized MaxSamplesPerOwnerType.
+    // Needed (rather than just a running sum) so a replaced sample's old contribution can be
+    // subtracted when Algorithm-R swaps it out.
+    private Dictionary<ulong, ulong[]>? _indexScanStringOwnerReservoir;
+    private Random? _indexScanReservoirRng;
+    // Phase 1-built field-index map (HeapIndexBuildResult.StringFieldIndicesByMethodTable). When
+    // present, AccumulateStringOwnerType skips its own GetTypeByMethodTable + ClrType.Fields walk
+    // entirely — a dictionary miss here is a definitive "no string fields" answer, not just "not
+    // yet computed". Null on the cache-hit fast path (no full Phase 1 scan ran), in which case
+    // the lazy per-type computation below is the only option.
+    private IReadOnlyDictionary<ulong, int[]>? _indexScanPrecomputedStringFieldIndices;
+
+    /// <summary>
+    /// Resolves whether the index-scan dedup branch will run this pass (mirroring the
+    /// same prebuilt-availability decision made inline in <see cref="Analyze"/>) and, if so,
+    /// seeds the accumulator fields consumed by <see cref="OnHeapEntry"/> and read back in
+    /// <see cref="Analyze"/>.
+    /// </summary>
+    public void BeforeHeapIndexScan(AnalysisContext context)
+    {
+        ClrHeap heap = context.Heap;
+        _heap = heap;
+        StringAnalysisOptions stringOptions = context.AnalysisOptions.StringAnalysis;
+        _indexScanStringOptions = stringOptions;
+
+        IReadOnlyDictionary<ulong, TypeAggregateIndexEntry>? typeAggregates = null;
+        HeapIndexBuildResult? heapIndex = null;
+        var stringMts = new HashSet<ulong>(capacity: 4);
+        int totalStrings = 0;
+
+        if (context.Cache is HeapAnalysisCache concreteCache && concreteCache.TryGetHeapIndex(out heapIndex))
+        {
+            typeAggregates = heapIndex.TypeAggregates;
+            foreach (var kvp in heapIndex.TypeAggregates)
+            {
+                if ((kvp.Value.Flags & TypeAggregateFlags.IsStringType) == 0) continue;
+                stringMts.Add(kvp.Key);
+                totalStrings += (int)Math.Min(kvp.Value.Count, int.MaxValue);
+            }
+        }
+
+        _indexScanStringMts = stringMts;
+
+        // P1-3: seed owner-type tracking whenever there are string types to look for, independent
+        // of whether dedup itself runs — this reuses the same shared disk-index pass.
+        _indexScanOwnerTypesActive = stringMts.Count > 0;
+        if (_indexScanOwnerTypesActive)
+        {
+            _indexScanFieldCache = new FieldLayoutCache();
+            _indexScanStringOwnerFieldIndices = new Dictionary<ulong, int[]>(capacity: 1000);
+            _indexScanTypesWithoutStringFields = new HashSet<ulong>(capacity: 1000);
+            _indexScanStringOwnerTypeBytes = new Dictionary<ulong, ulong>(capacity: MaxStringOwnerTypesToTrack);
+            _indexScanStringOwnerSampleCounts = new Dictionary<ulong, int>(capacity: MaxStringOwnerTypesToTrack);
+            _indexScanStringOwnerSeenCounts = new Dictionary<ulong, int>(capacity: MaxStringOwnerTypesToTrack);
+            _indexScanStringOwnerReservoir = new Dictionary<ulong, ulong[]>(capacity: MaxStringOwnerTypesToTrack);
+            _indexScanReservoirRng = new Random();
+            _indexScanPrecomputedStringFieldIndices = heapIndex?.StringFieldIndicesByMethodTable;
+        }
+        else
+        {
+            _indexScanFieldCache = null;
+            _indexScanStringOwnerFieldIndices = null;
+            _indexScanTypesWithoutStringFields = null;
+            _indexScanStringOwnerTypeBytes = null;
+            _indexScanStringOwnerSampleCounts = null;
+            _indexScanStringOwnerSeenCounts = null;
+            _indexScanStringOwnerReservoir = null;
+            _indexScanReservoirRng = null;
+            _indexScanPrecomputedStringFieldIndices = null;
+        }
+
+        var prebuilt = heapIndex?.StringDedupIndex;
+        bool active = (prebuilt is null || prebuilt.Count == 0)
+            && typeAggregates is not null;
+
+        _indexScanDedupActive = active;
+        if (!active)
+        {
+            _indexScanStringStats = null;
+            _indexScanMethodTableDupCounts = null;
+            _indexScanLengthSamples = null;
+            _indexScanLengthBuckets = null;
+            _indexScanVeryLongStrings = null;
+            _indexScanStringsRead = 0;
+            return;
+        }
+
+        _indexScanMaxUnique = stringOptions.MaxUniqueStringTracking;
+        _indexScanStringStats = new Dictionary<StringFingerprint, StringLeakInfo>(capacity: 1024);
+        _indexScanMethodTableDupCounts = new Dictionary<ulong, int>(capacity: 64);
+        _indexScanLengthSamples = new List<int>(capacity: MaxLengthSamples);
+        _indexScanLengthBuckets = new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            ["0-15"] = 0,
+            ["16-31"] = 0,
+            ["32-63"] = 0,
+            ["64-127"] = 0,
+            ["128-255"] = 0,
+            ["256-511"] = 0,
+            ["512-1023"] = 0,
+            ["1024-4095"] = 0,
+            ["4096-16383"] = 0,
+            ["16384-65535"] = 0,
+            ["65536+"] = 0
+        };
+        _indexScanVeryLongStrings = new List<LongStringEntry>(capacity: 16);
+        _indexScanStringsRead = 0;
+    }
+
+    /// <summary>
+    /// Called once per disk-backed index entry, in address order, during the shared
+    /// heap-index scan pass. Mirrors the historical index-scan dedup loop body, operating
+    /// on instance fields. No explicit-interface forwarder needed: both this class and
+    /// <see cref="HeapEntry"/> are internal.
+    /// </summary>
+    public void OnHeapEntry(in HeapEntry entry)
+    {
+        if (_indexScanOwnerTypesActive)
+            AccumulateStringOwnerType(in entry);
+
+        if (!_indexScanDedupActive) return;
+
+        StringAnalysisOptions stringOptions = _indexScanStringOptions!;
+        if (!IsStringMt(_heap!, entry.MethodTable, _indexScanStringMts!)) return;
+
+        if (entry.Size >= (ulong)stringOptions.VeryLongStringThresholdBytes)
+        {
+            int ecl = (int)Math.Min((entry.Size - 26) / 2, int.MaxValue);
+            _indexScanVeryLongStrings!.Add(new LongStringEntry(entry.Address, ecl, entry.Size, Preview: null, TypeName: null));
+        }
+
+        if (!IsStringSizeInBounds(entry.Size, stringOptions)) return;
+        _indexScanStringsRead++;
+        FingerprintAddress(_heap!, entry.Address, entry.Size, stringOptions, _indexScanStringStats!, _indexScanMaxUnique, _indexScanMethodTableDupCounts!, _indexScanLengthSamples!, _indexScanLengthBuckets!, samplingSource: "IndexScan");
+    }
+
+    /// <summary>
+    /// P1-3: accumulate string-field bytes owned by <paramref name="entry"/>'s type, using
+    /// the entry's MethodTable (already known from the disk index — no memory read required)
+    /// to look up cached string-field indices before ever touching the object itself. Objects
+    /// of types with no string fields (the overwhelming majority) cost one HashSet lookup and
+    /// nothing else — <c>heap.GetObject</c> is only called once we know the type is relevant.
+    /// </summary>
+    /// <remarks>
+    /// Field-type checks below use <see cref="ClrInstanceField.ElementType"/>, never
+    /// <c>ClrInstanceField.Type</c> — see the PERF remarks on
+    /// <c>DiskBackedObjectIndexWriter.ComputeTypeShapeAndStringFields</c> for why (full <see cref="ClrType"/>
+    /// resolution under a concurrent/parallel caller turned a ~20s scan into 5+ minutes).
+    /// <para>
+    /// Sampling uses Algorithm-R reservoir sampling (bounded to
+    /// <see cref="MaxSamplesPerOwnerType"/> instances per type) rather than taking the first N
+    /// instances encountered. Address/allocation-scan order otherwise biases the sample toward
+    /// older instances, which can systematically underestimate types that grow over time — exactly
+    /// the leak-detection pattern this table exists to surface.
+    /// </para>
+    /// </remarks>
+    private void AccumulateStringOwnerType(in HeapEntry entry)
+    {
+        ulong mt = entry.MethodTable;
+        int[]? stringFieldIndices;
+
+        if (_indexScanPrecomputedStringFieldIndices is not null)
+        {
+            // Phase 1 already determined, for every unique MT, whether it owns string fields —
+            // a dictionary miss here is definitive: no negative cache or ClrType.Fields walk needed.
+            if (!_indexScanPrecomputedStringFieldIndices.TryGetValue(mt, out stringFieldIndices))
+                return;
+        }
+        else
+        {
+            // Cache-hit fast path (no Phase 1 scan ran this pipeline run) — fall back to computing
+            // field indices lazily, same as before Phase 1 carried this metadata.
+            if (_indexScanTypesWithoutStringFields!.Contains(mt))
+                return;
+
+            if (!_indexScanStringOwnerFieldIndices!.TryGetValue(mt, out stringFieldIndices))
+            {
+                ClrType? type = _heap!.GetTypeByMethodTable(mt);
+                if (type is null)
+                {
+                    _indexScanTypesWithoutStringFields.Add(mt);
+                    return;
+                }
+
+                var fields = _indexScanFieldCache!.GetFields(type);
+                var indices = new List<int>(capacity: 4);
+                for (int i = 0; i < fields.Length; i++)
+                {
+                    // ElementType is a tag read off the field's metadata signature — cheap.
+                    // fields[i].Type would force full ClrType resolution per field; under
+                    // concurrent parallel-pass workers that serializes on ClrMD's internal
+                    // metadata-resolution locking (measured: turned a ~20s scan into 5+ minutes).
+                    if (fields[i].ElementType == ClrElementType.String)
+                        indices.Add(i);
+                }
+
+                if (indices.Count == 0)
+                {
+                    _indexScanTypesWithoutStringFields.Add(mt);
+                    return;
+                }
+
+                stringFieldIndices = indices.ToArray();
+                _indexScanStringOwnerFieldIndices[mt] = stringFieldIndices;
+            }
+        }
+
+        var ownerBytes = _indexScanStringOwnerTypeBytes!;
+        var sampleCounts = _indexScanStringOwnerSampleCounts!;
+        bool alreadyTracked = ownerBytes.ContainsKey(mt);
+        if (!alreadyTracked && ownerBytes.Count >= MaxStringOwnerTypesToTrack)
+            return; // cap reached — only keep accumulating types already being tracked
+
+        // Algorithm-R reservoir sampling: decide whether this instance (the n-th of this type
+        // seen by this worker) gets sampled, rather than always taking the first
+        // MaxSamplesPerOwnerType encountered. Address/allocation order otherwise biases the
+        // sample toward older instances, which can systematically underestimate types that grow
+        // over time (the exact leak-detection pattern this analyzer exists to catch).
+        var seenCounts = _indexScanStringOwnerSeenCounts!;
+        seenCounts.TryGetValue(mt, out int n);
+        n++;
+        seenCounts[mt] = n;
+
+        int slot;
+        if (n <= MaxSamplesPerOwnerType)
+        {
+            slot = n - 1; // still filling the reservoir — always accept
+        }
+        else
+        {
+            int j = _indexScanReservoirRng!.Next(n); // uniform in [0, n)
+            if (j >= MaxSamplesPerOwnerType)
+                return; // not selected — skip the expensive per-object read entirely
+            slot = j;
+        }
+
+        // Only past this point do we touch ClrMD's per-object machinery (GetObject/ReadObject),
+        // which is the expensive part — bounded above to MaxSamplesPerOwnerType reads per type.
+        ClrObject obj = _heap!.GetObject(entry.Address);
+        if (!obj.IsValid) return;
+
+        var objFields = _indexScanFieldCache!.GetFields(obj.Type);
+        ulong addBytes = 0;
+        foreach (int fieldIndex in stringFieldIndices)
+        {
+            try
+            {
+                if (fieldIndex >= objFields.Length) continue;
+                ClrObject stringRef = objFields[fieldIndex].ReadObject(obj, interior: false);
+                if (!stringRef.IsValid) continue;
+                addBytes += stringRef.Size;
+            }
+            catch
+            {
+                // Skip malformed field reads
+            }
+        }
+
+        var reservoirs = _indexScanStringOwnerReservoir!;
+        if (!reservoirs.TryGetValue(mt, out ulong[]? reservoir))
+        {
+            reservoir = new ulong[MaxSamplesPerOwnerType];
+            reservoirs[mt] = reservoir;
+        }
+
+        ownerBytes.TryGetValue(mt, out ulong existing);
+        ownerBytes[mt] = existing - reservoir[slot] + addBytes; // subtract replaced sample, if any (0 while filling)
+        reservoir[slot] = addBytes;
+        sampleCounts[mt] = Math.Min(n, MaxSamplesPerOwnerType);
+    }
+
+    IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() =>
+        new StringAnalyzer();
+
+    // Workers covered disjoint address ranges; merge their dedup state into this instance.
+    // If _indexScanDedupActive is false (dedup was skipped on this context), there's nothing
+    // to merge — workers whose dedup was also inactive contribute nothing.
+    void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
+    {
+        // P1-3 owner-type bytes: independent of dedup active state, merged separately.
+        if (_indexScanOwnerTypesActive)
+        {
+            var ownerBytes = _indexScanStringOwnerTypeBytes!;
+            var sampleCounts = _indexScanStringOwnerSampleCounts!;
+            foreach (IHeapIndexScanParticipant p in partials)
+            {
+                var other = (StringAnalyzer)p;
+                if (!other._indexScanOwnerTypesActive) continue;
+
+                foreach (var kvp in other._indexScanStringOwnerTypeBytes!)
+                {
+                    if (!ownerBytes.ContainsKey(kvp.Key) && ownerBytes.Count >= MaxStringOwnerTypesToTrack)
+                        continue;
+                    ownerBytes.TryGetValue(kvp.Key, out ulong existing);
+                    ownerBytes[kvp.Key] = existing + kvp.Value;
+
+                    sampleCounts.TryGetValue(kvp.Key, out int existingSamples);
+                    other._indexScanStringOwnerSampleCounts!.TryGetValue(kvp.Key, out int otherSamples);
+                    sampleCounts[kvp.Key] = existingSamples + otherSamples;
+                }
+            }
+        }
+
+        if (!_indexScanDedupActive) return;
+
+        var stringStats = _indexScanStringStats!;
+        var mtDups = _indexScanMethodTableDupCounts!;
+        var lengthSamples = _indexScanLengthSamples!;
+        var buckets = _indexScanLengthBuckets!;
+        var longStrings = _indexScanVeryLongStrings!;
+
+        foreach (IHeapIndexScanParticipant p in partials)
+        {
+            var other = (StringAnalyzer)p;
+            if (!other._indexScanDedupActive) continue;
+
+            _indexScanStringsRead += other._indexScanStringsRead;
+
+            // Fingerprint map: sum Count and TotalSize per fingerprint, respect _indexScanMaxUnique.
+            foreach (var kvp in other._indexScanStringStats!)
+            {
+                ref StringLeakInfo self = ref CollectionsMarshal.GetValueRefOrAddDefault(
+                    stringStats, kvp.Key, out bool existed);
+                if (!existed)
+                {
+                    if (stringStats.Count > _indexScanMaxUnique)
+                    {
+                        stringStats.Remove(kvp.Key);
+                        continue;
+                    }
+                    self = kvp.Value;
+                }
+                else
+                {
+                    self.Count += kvp.Value.Count;
+                    self.TotalSize += kvp.Value.TotalSize;
+                    if (self.SampleAddresses is null)
+                        self.SampleAddresses = kvp.Value.SampleAddresses;
+                }
+            }
+
+            // Method-table dup counts: sum per key.
+            foreach (var kvp in other._indexScanMethodTableDupCounts!)
+            {
+                mtDups.TryGetValue(kvp.Key, out int existing);
+                mtDups[kvp.Key] = existing + kvp.Value;
+            }
+
+            // Length samples: just concat (used for statistical percentile computation).
+            lengthSamples.AddRange(other._indexScanLengthSamples!);
+
+            // Bucket counts: sum per bucket label.
+            foreach (var kvp in other._indexScanLengthBuckets!)
+            {
+                buckets.TryGetValue(kvp.Key, out int existing);
+                buckets[kvp.Key] = existing + kvp.Value;
+            }
+
+            // Very-long-string list: concat (no ordering required).
+            longStrings.AddRange(other._indexScanVeryLongStrings!);
+        }
+
+        // Each worker already caps its own samples at MaxLengthSamples (see FingerprintAddress),
+        // but plain concatenation across N workers still grows unbounded with worker count. Downsample
+        // back to the cap via uniform random selection — lengthSamples only feeds percentile estimates,
+        // so an unbiased random subset preserves the same statistical validity as the per-worker cap.
+        if (lengthSamples.Count > MaxLengthSamples)
+        {
+            var rng = new Random();
+            for (int i = 0; i < MaxLengthSamples; i++)
+            {
+                int j = i + rng.Next(lengthSamples.Count - i);
+                (lengthSamples[i], lengthSamples[j]) = (lengthSamples[j], lengthSamples[i]);
+            }
+            lengthSamples.RemoveRange(MaxLengthSamples, lengthSamples.Count - MaxLengthSamples);
+        }
+    }
 
     /// <summary>
     /// Analyze the provided <see cref="AnalysisContext"/> and return a <see cref="AnalyzerDomainResult"/>.
@@ -37,20 +475,21 @@ internal sealed class StringAnalyzer : IAnalyzer
         ulong totalManagedBytes = GetTotalManagedBytes(context);
         List<(ulong Start, ulong End)> fohSegments = BuildFohSegments(context.Heap);
 
-        return ValueTask.FromResult(Analyze(context.Heap, context.Cache, stringOptions, totalManagedBytes, fohSegments, context.Progress).Stamp(this));
+        return ValueTask.FromResult(Analyze(context.Heap, context.Cache, stringOptions, totalManagedBytes, fohSegments, context.Progress, cancellationToken).Stamp(this));
     }
 
     /// <summary>
     /// Core analysis implementation. Separated for easier unit testing and to keep
     /// the public entry point small.
     /// </summary>
-    private static AnalyzerDomainResult Analyze(
+    private AnalyzerDomainResult Analyze(
         ClrHeap heap,
         IHeapAnalysisCache? cache,
         StringAnalysisOptions stringOptions,
         ulong totalManagedBytes,
         List<(ulong Start, ulong End)> fohSegments,
-        IProgress<AnalyzerProgressReport>? progress)
+        IProgress<AnalyzerProgressReport>? progress,
+        CancellationToken cancellationToken = default)
     {
         var totalStopwatch = Stopwatch.StartNew();
 
@@ -71,29 +510,23 @@ internal sealed class StringAnalyzer : IAnalyzer
         int totalStrings = 0;
         ulong totalStringMemory = 0;
         ulong lohStringBytes = 0;
-        int gen2StringCount = 0;
+        long gen0StringCount = 0;
+        long gen1StringCount = 0;
+        long gen2StringCount = 0;
         ulong gen2StringBytes = 0;
         var veryLongStrings = new List<LongStringEntry>(capacity: 16);
 
         if (typeAggregates is not null && stringMts.Count > 0)
         {
-            foreach (ulong mt in stringMts)
-            {
-                if (!typeAggregates.TryGetValue(mt, out TypeAggregateIndexEntry entry)) continue;
-                totalStrings += (int)Math.Min(entry.Count, int.MaxValue);
-                totalStringMemory += entry.TotalSize;
-                lohStringBytes += entry.LohSize;
-                gen2StringCount += entry.Gen2Count;
-                if (entry.Count > 0)
-                    gen2StringBytes += (ulong)entry.Gen2Count * (entry.TotalSize / (ulong)entry.Count);
-            }
+            (totalStrings, totalStringMemory, lohStringBytes, gen0StringCount, gen1StringCount, gen2StringCount, gen2StringBytes) =
+                AggregateStringTypeStats(typeAggregates, stringMts);
             progress?.Report(new(totalStrings, "string stats from index", $"{totalStrings:N0} strings, {FormatBytes(totalStringMemory)} total"));
         }
 
         // ── Interned strings: scan only FOH segments (tiny — typically 1–2 segments)
         int internedStringCount = 0;
         ulong internedStringBytes = 0;
-        if (stringOptions.DetectInterning && fohSegments.Count > 0)
+        if (fohSegments.Count > 0)
         {
             foreach (ClrSegment segment in heap.Segments)
             {
@@ -108,26 +541,14 @@ internal sealed class StringAnalyzer : IAnalyzer
             }
         }
 
-        // ── Deduplication: pre-built-index or bounded content scan — only when enabled and within threshold ─
+        // ── Deduplication: pre-built index, or shared index-scan results, or full heap scan ─
         var stringStats = new Dictionary<StringFingerprint, StringLeakInfo>(capacity: 1024);
         var methodTableDupCounts = new Dictionary<ulong, int>(capacity: 64);
-        bool dedupSkipped = false;
-
-        bool runDedup = stringOptions.EnableDeduplication
-            && stringOptions.DeduplicationMode != DeduplicationMode.Disabled
-            && totalStrings <= stringOptions.DeduplicationStringCountThreshold;
-
-        if (!runDedup && totalStrings > 0)
-        {
-            dedupSkipped = true;
-            progress?.Report(new(totalStrings, "string dedup skipped",
-                $"{totalStrings:N0} strings exceed threshold ({stringOptions.DeduplicationStringCountThreshold:N0}) or dedup disabled. Set EnableDeduplication=true and appropriate DeduplicationMode to enable."));
-        }
 
         int stringsSampled = 0;
         string? dedupSource = null;
         // length sampling structures
-        var lengthSamples = new List<int>(capacity: 100_000);
+        var lengthSamples = new List<int>(capacity: MaxLengthSamples);
         var lengthBuckets = new Dictionary<string, int>(StringComparer.Ordinal)
         {
             ["0-15"] = 0,
@@ -142,214 +563,123 @@ internal sealed class StringAnalyzer : IAnalyzer
             ["16384-65535"] = 0,
             ["65536+"] = 0
         };
-        if (runDedup)
+
+        int maxUnique = stringOptions.MaxUniqueStringTracking;
+        var prebuilt = heapIndex?.StringDedupIndex;
+
+        // ── Fast path: use pre-built dedup index from heap scan (zero dump I/O) ──────
+        if (prebuilt is not null && prebuilt.Count > 0)
         {
-            // Compute effective numeric caps based on sampling mode and configured values.
-            (int maxToDedup, int maxUnique) = ComputeEffectiveCaps(stringOptions, stringOptions.MaxStringsToDedup, stringOptions.MaxUniqueStringTracking);
-
-            var prebuilt = heapIndex?.StringDedupIndex;
-
-            // Dedup path selection based on DeduplicationMode
-            // ── PreferPrebuiltOnly: only use prebuilt index if present, otherwise skip
-            // ── FallbackToHeapScan: prefer prebuilt, else index-backed scan, else full heap scan
-            // ── Disabled handled above via runDedup flag
-
-            if (stringOptions.DeduplicationMode == DeduplicationMode.PreferPrebuiltOnly)
+            // Use the prebuilt string dedup index produced at index-build time.
+            // The index key is a 64-bit content hash computed while object pages
+            // were hot; length/char samples are not available here. We therefore
+            // synthesize a `StringFingerprint` that preserves the 64-bit hash
+            // while leaving length/char sentinels unset. The prebuilt index
+            // already groups identical content via the hash, so this is a
+            // fast, zero-I/O way to aggregate duplicate counts and sizes.
+            foreach (var kvp in prebuilt)
             {
-                if (prebuilt is not null && prebuilt.Count > 0)
+                if (kvp.Value.Count <= 1) continue; // singletons aren't duplicates
+                var fp = new StringFingerprint(kvp.Key, 0, '\0', '\0');
+                if (!stringStats.ContainsKey(fp) && stringStats.Count >= maxUnique) continue;
+                ref StringLeakInfo entry = ref CollectionsMarshal.GetValueRefOrAddDefault(stringStats, fp, out bool existed);
+                if (!existed)
                 {
-                    foreach (var kvp in prebuilt)
-                    {
-                        if (kvp.Value.Count <= 1) continue; // singletons aren't duplicates
-                        var fp = new StringFingerprint(kvp.Key, 0, '\0', '\0');
-                        if (!stringStats.ContainsKey(fp) && stringStats.Count >= maxUnique) continue;
-                        ref StringLeakInfo entry = ref CollectionsMarshal.GetValueRefOrAddDefault(stringStats, fp, out bool existed);
-                        if (!existed)
-                        {
-                            entry.Preview = kvp.Value.Preview;
-                            entry.SampleAddresses = kvp.Value.SampleAddresses;
-                            entry.DominantMethodTable = kvp.Value.DominantMethodTable;
-                            entry.FingerprintHash = kvp.Key;
-                            entry.SamplingSource = "Prebuilt";
-                        }
-                        entry.Count += kvp.Value.Count;
-                        entry.TotalSize += kvp.Value.TotalSize;
-                        if (entry.DominantMethodTable != 0)
-                        {
-                            methodTableDupCounts.TryGetValue(entry.DominantMethodTable, out int c);
-                            methodTableDupCounts[entry.DominantMethodTable] = c + kvp.Value.Count;
-                        }
-                    }
-                    progress?.Report(new(totalStrings, "string dedup complete",
-                        $"{stringStats.Count:N0} duplicate patterns from pre-built index ({prebuilt.Count:N0} unique strings scanned during index build)"));
-                    stringsSampled = prebuilt.Count;
+                    entry.Preview = kvp.Value.Preview;
+                    entry.SampleAddresses = kvp.Value.SampleAddresses;
+                    entry.DominantMethodTable = kvp.Value.DominantMethodTable;
+                    entry.FingerprintHash = kvp.Key;
+                    entry.SamplingSource = "Prebuilt";
                 }
                 else
                 {
-                    // Prebuilt required but missing.
-                    dedupSkipped = true;
-                    progress?.Report(new(totalStrings, "string dedup skipped",
-                        "Deduplication mode set to PreferPrebuiltOnly but no prebuilt index was found; skipping dedup."));
-                    stringsSampled = 0;
+                    if (entry.FingerprintHash == 0)
+                        entry.FingerprintHash = kvp.Key;
+                    if (string.IsNullOrEmpty(entry.SamplingSource))
+                        entry.SamplingSource = "Prebuilt";
+                }
+                entry.Count += kvp.Value.Count;
+                entry.TotalSize += kvp.Value.TotalSize;
+                if (entry.DominantMethodTable != 0)
+                {
+                    methodTableDupCounts.TryGetValue(entry.DominantMethodTable, out int c);
+                    methodTableDupCounts[entry.DominantMethodTable] = c + kvp.Value.Count;
                 }
             }
-            else
-            {
-                // FallbackToHeapScan behaviour (existing): prefer prebuilt, else index scan, else full heap scan
-                // ── Fast path: use pre-built dedup index from heap scan (zero dump I/O) ──────
-                if (prebuilt is not null && prebuilt.Count > 0)
-                {
-                    // Use the prebuilt string dedup index produced at index-build time.
-                    // The index key is a 64-bit content hash computed while object pages
-                    // were hot; length/char samples are not available here. We therefore
-                    // synthesize a `StringFingerprint` that preserves the 64-bit hash
-                    // while leaving length/char sentinels unset. The prebuilt index
-                    // already groups identical content via the hash, so this is a
-                    // fast, zero-I/O way to aggregate duplicate counts and sizes.
-                    foreach (var kvp in prebuilt)
-                    {
-                        if (kvp.Value.Count <= 1) continue; // singletons aren't duplicates
-                        var fp = new StringFingerprint(kvp.Key, 0, '\0', '\0');
-                        if (!stringStats.ContainsKey(fp) && stringStats.Count >= maxUnique) continue;
-                        ref StringLeakInfo entry = ref CollectionsMarshal.GetValueRefOrAddDefault(stringStats, fp, out bool existed);
-                        if (!existed)
-                        {
-                            entry.Preview = kvp.Value.Preview;
-                            entry.SampleAddresses = kvp.Value.SampleAddresses;
-                            entry.DominantMethodTable = kvp.Value.DominantMethodTable;
-                            entry.FingerprintHash = kvp.Key;
-                            entry.SamplingSource = "Prebuilt";
-                        }
-                        else
-                        {
-                            if (entry.FingerprintHash == 0)
-                                entry.FingerprintHash = kvp.Key;
-                            if (string.IsNullOrEmpty(entry.SamplingSource))
-                                entry.SamplingSource = "Prebuilt";
-                        }
-                        entry.Count += kvp.Value.Count;
-                        entry.TotalSize += kvp.Value.TotalSize;
-                        if (entry.DominantMethodTable != 0)
-                        {
-                            methodTableDupCounts.TryGetValue(entry.DominantMethodTable, out int c);
-                            methodTableDupCounts[entry.DominantMethodTable] = c + kvp.Value.Count;
-                        }
-                    }
-                    progress?.Report(new(totalStrings, "string dedup complete",
-                        $"{stringStats.Count:N0} duplicate patterns from pre-built index ({prebuilt.Count:N0} unique strings scanned during index build)"));
-                    stringsSampled = prebuilt.Count;
-                }
-                else if (typeAggregates is not null)
-                {
-                    // Index available but no pre-built dedup (e.g. disk-backed with cached index).
-                    // Fall back to capped AsString() scan.
-                    int stringsRead = 0;
-                    var sc = new ObjectScanCounter("string dedup (index scan)", progress);
-                    foreach (var (address, mt, size) in cache!.EnumerateIndexedEntriesAsTuples())
-                    {
-                        sc.Tick();
-                        if (!IsStringMt(heap, mt, stringMts)) continue;
-                        if (size >= (ulong)stringOptions.VeryLongStringThresholdBytes)
-                        {
-                            int ecl = (int)Math.Min((size - 26) / 2, int.MaxValue);
-                            veryLongStrings.Add(new LongStringEntry(address, ecl, size));
-                        }
-                        if (stringsRead >= maxToDedup) continue;
-                        if (!IsStringSizeInBounds(size, stringOptions)) continue;
-                        stringsRead++;
-                        FingerprintAddress(heap, address, size, stringOptions, stringStats, maxUnique, methodTableDupCounts, lengthSamples, lengthBuckets, samplingSource: "IndexScan");
-                    }
-                    sc.Complete();
-                    progress?.Report(new(totalStrings, "string dedup complete",
-                        $"{stringsRead:N0} strings sampled from {totalStrings:N0} total"));
-                    stringsSampled = stringsRead;
-                }
-                else
-                {
-                    // No-index fallback: single pass collecting stats + bounded dedup.
-                    int stringsRead = 0;
-                    var sc = new ObjectScanCounter("scanning string objects", progress);
-                    foreach (ClrObject obj in heap.EnumerateObjects())
-                    {
-                        sc.Tick();
-                        if (!obj.IsValid || obj.Type is null) continue;
-                        if (!string.Equals(obj.Type.Name, "System.String", StringComparison.Ordinal)) continue;
-                        stringMts.Add(obj.Type.MethodTable);
-
-                        totalStrings++;
-                        totalStringMemory += obj.Size;
-                        if (obj.Size >= (ulong)stringOptions.LohThresholdBytes) lohStringBytes += obj.Size;
-                        if (obj.Size >= (ulong)stringOptions.VeryLongStringThresholdBytes)
-                        {
-                            int ecl = obj.Size > 26 ? (int)Math.Min((obj.Size - 26) / 2, int.MaxValue) : 0;
-                            veryLongStrings.Add(new LongStringEntry(obj.Address, ecl, obj.Size));
-                        }
-                        if (stringOptions.DetectInterning && fohSegments.Count > 0 && IsInFoh(obj.Address, fohSegments))
-                        { internedStringCount++; internedStringBytes += obj.Size; continue; }
-
-                        if (stringsRead < maxToDedup && IsStringSizeInBounds(obj.Size, stringOptions))
-                        {
-                            stringsRead++;
-                            FingerprintAddress(heap, obj.Address, obj.Size, stringOptions, stringStats, maxUnique, methodTableDupCounts, lengthSamples, lengthBuckets, samplingSource: "HeapScan");
-                        }
-                    }
-                    sc.Complete();
-                    stringsSampled = stringsRead;
-                }
-            }
-            // (Dedup handled above in DeduplicationMode-aware branches)
+            progress?.Report(new(totalStrings, "string dedup complete",
+                $"{stringStats.Count:N0} duplicate patterns from pre-built index ({prebuilt.Count:N0} unique strings scanned during index build)"));
+            stringsSampled = prebuilt.Count;
         }
-        else if (typeAggregates is null)
+        else if (typeAggregates is not null)
         {
-            // No index, no dedup: full heap scan for scalar stats only.
-            var sc = new ObjectScanCounter("scanning string objects (stats only)", progress);
+            // Index available but no pre-built dedup (e.g. disk-backed with cached
+            // index). The dedup scan itself already happened as this analyzer's
+            // IHeapIndexScanParticipant.OnHeapEntry during the shared dispatcher
+            // pass (see AnalysisPipeline.ExecuteAsync) — just read the results back.
+            if (_indexScanDedupActive)
+            {
+                veryLongStrings = _indexScanVeryLongStrings!;
+                stringStats = _indexScanStringStats!;
+                methodTableDupCounts = _indexScanMethodTableDupCounts!;
+                lengthSamples = _indexScanLengthSamples!;
+                lengthBuckets = _indexScanLengthBuckets!;
+                stringsSampled = _indexScanStringsRead;
+                progress?.Report(new(totalStrings, "string dedup complete",
+                    $"{_indexScanStringsRead:N0} strings sampled from {totalStrings:N0} total"));
+            }
+        }
+        else
+        {
+            // No-index fallback: single pass collecting stats + dedup together.
+            int stringsRead = 0;
+            var sc = new ObjectScanCounter("scanning string objects", progress);
             foreach (ClrObject obj in heap.EnumerateObjects())
             {
                 sc.Tick();
                 if (!obj.IsValid || obj.Type is null) continue;
                 if (!string.Equals(obj.Type.Name, "System.String", StringComparison.Ordinal)) continue;
+                stringMts.Add(obj.Type.MethodTable);
+
                 totalStrings++;
                 totalStringMemory += obj.Size;
                 if (obj.Size >= (ulong)stringOptions.LohThresholdBytes) lohStringBytes += obj.Size;
-                int ecl = obj.Size > 26 ? (int)Math.Min((obj.Size - 26) / 2, int.MaxValue) : 0;
                 if (obj.Size >= (ulong)stringOptions.VeryLongStringThresholdBytes)
-                    veryLongStrings.Add(new LongStringEntry(obj.Address, ecl, obj.Size));
+                {
+                    int ecl = obj.Size > 26 ? (int)Math.Min((obj.Size - 26) / 2, int.MaxValue) : 0;
+                    string? preview = obj.AsString(maxLength: 100);
+                    string? typeName = obj.Type?.Name;
+                    veryLongStrings.Add(new LongStringEntry(obj.Address, ecl, obj.Size, Preview: preview, TypeName: typeName));
+                }
                 if (fohSegments.Count > 0 && IsInFoh(obj.Address, fohSegments))
-                { internedStringCount++; internedStringBytes += obj.Size; }
-                stringMts.Add(obj.Type.MethodTable);
+                { internedStringCount++; internedStringBytes += obj.Size; continue; }
+
+                if (IsStringSizeInBounds(obj.Size, stringOptions))
+                {
+                    stringsRead++;
+                    FingerprintAddress(heap, obj.Address, obj.Size, stringOptions, stringStats, maxUnique, methodTableDupCounts, lengthSamples, lengthBuckets, samplingSource: "HeapScan");
+                }
             }
             sc.Complete();
+            stringsSampled = stringsRead;
         }
 
         // ── Aggregate dedup results ──────────────────────────────────────────────────────
-        int uniqueStrings = dedupSkipped ? 0 : ComputeUniqueCount(stringStats);
+        int sampledUniquePatterns = ComputeUniqueCount(stringStats);
         int duplicatePatternCount = 0;
         ulong duplicateWastedBytes = 0;
 
-        var byWasteHeap = new PriorityQueue<StringLeakInfo, ulong>(stringOptions.TopDuplicatesToShow + 1);
-        var byCountHeap = new PriorityQueue<StringLeakInfo, int>(stringOptions.TopDuplicatesToShow + 1);
-
-        int minCount = stringOptions.MinDuplicateStringCount;
-        foreach (StringLeakInfo info in stringStats.Values)
-        {
-            if (info.Count <= minCount) continue;
-            duplicatePatternCount++;
-            ulong wasted = info.TotalSize - (info.TotalSize / (ulong)info.Count);
-            duplicateWastedBytes += wasted;
-            byWasteHeap.Enqueue(info, info.TotalSize);
-            if (byWasteHeap.Count > stringOptions.TopDuplicatesToShow) byWasteHeap.Dequeue();
-            byCountHeap.Enqueue(info, info.Count);
-            if (byCountHeap.Count > stringOptions.TopDuplicatesToShow) byCountHeap.Dequeue();
-        }
+        List<StringLeakInfo> duplicates = SelectDuplicates(
+            stringStats.Values, stringOptions.MinDuplicateStringCount, out duplicatePatternCount, out duplicateWastedBytes);
 
         // Prepare a map from dominant method-table -> type name for snapshots
         var mtToName = new Dictionary<ulong, string?>(methodTableDupCounts.Count);
         foreach (var mt in methodTableDupCounts.Keys)
             mtToName[mt] = heap.GetTypeByMethodTable(mt)?.Name;
 
-        IReadOnlyList<DuplicateStringSnapshot> topByWaste = DrainToDescendingWaste(byWasteHeap, mtToName);
-        IReadOnlyList<DuplicateStringSnapshot> topByCount = DrainToDescendingCount(byCountHeap, mtToName);
-        IReadOnlyList<DuplicateStringSnapshot> topDuplicates = MergeTopDuplicates(topByWaste, topByCount);
+        IReadOnlyList<DuplicateStringSnapshot> topDuplicates = BuildDuplicateSnapshots(duplicates, mtToName);
+
+        IReadOnlyList<DuplicateStringRetentionPath>? retentionPaths = BuildRetentionPaths(
+            heap, cache, topDuplicates, stringOptions.RetentionPathSampleCount, cancellationToken);
 
         // Build frequency buckets from stringStats
         var freqBuckets = new Dictionary<string, int>(StringComparer.Ordinal)
@@ -489,16 +819,14 @@ internal sealed class StringAnalyzer : IAnalyzer
             }
         }
 
-        double duplicationRatio = (!dedupSkipped && totalStrings > 0)
-            ? (totalStrings - uniqueStrings) / (double)totalStrings
+        double duplicationRatio = totalStrings > 0
+            ? (totalStrings - sampledUniquePatterns) / (double)totalStrings
             : 0.0;
         double pctOfManagedHeap = totalManagedBytes > 0
             ? totalStringMemory * 100.0 / totalManagedBytes
             : 0.0;
 
-        double samplingCoverage = 0.0;
-        if (totalStrings > 0)
-            samplingCoverage = runDedup ? (stringsSampled / (double)totalStrings) : 0.0;
+        double samplingCoverage = totalStrings > 0 ? stringsSampled / (double)totalStrings : 0.0;
 
         // Map dominant method-tables to type names for reporting (top 10)
         IReadOnlyList<NameCountEntry>? topDuplicateTypes = null;
@@ -518,23 +846,22 @@ internal sealed class StringAnalyzer : IAnalyzer
         {
             try
             {
-                // JSON export: top duplicates by waste
+                // JSON export: all duplicate patterns, ranked by wasted bytes descending
                 var exportObj = new
                 {
                     TotalStrings = totalStrings,
                     TotalStringMemoryBytes = totalStringMemory,
-                    UniqueStrings = uniqueStrings,
+                    SampledUniquePatterns = sampledUniquePatterns,
                     DuplicatePatternCount = duplicatePatternCount,
                     DuplicateWastedBytes = duplicateWastedBytes,
-                    TopByWaste = topByWaste.Select(d => new { d.Preview, d.Count, d.WastedBytes, SampleAddresses = d.SampleAddresses, d.DominantMethodTable }),
-                    TopByCount = topByCount.Select(d => new { d.Preview, d.Count, d.WastedBytes, SampleAddresses = d.SampleAddresses, d.DominantMethodTable })
+                    Duplicates = topDuplicates.Select(d => new { d.Preview, d.Count, d.WastedBytes, SampleAddresses = d.SampleAddresses, d.DominantMethodTable })
                 };
                 string json = System.Text.Json.JsonSerializer.Serialize(exportObj, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
 
-                // CSV export: simple rows for topByWaste
+                // CSV export: all duplicate patterns
                 var sw = new System.Text.StringBuilder();
                 sw.AppendLine("Preview,Count,WastedBytes,SampleAddresses,DominantMethodTable");
-                foreach (var d in topByWaste)
+                foreach (var d in topDuplicates)
                 {
                     string samples = d.SampleAddresses is null ? "" : string.Join('|', d.SampleAddresses);
                     sw.Append('"').Append(d.Preview.Replace("\"", "\"\"")).Append('"').Append(',')
@@ -597,13 +924,10 @@ internal sealed class StringAnalyzer : IAnalyzer
 
         totalStopwatch.Stop();
 
-        // choose dedup source label when dedup was run
-        if (runDedup)
-        {
-            if (heapIndex?.StringDedupIndex is not null && heapIndex.StringDedupIndex.Count > 0) dedupSource = "Prebuilt";
-            else if (typeAggregates is not null) dedupSource = "IndexScan";
-            else dedupSource = "HeapScan";
-        }
+        // choose dedup source label
+        if (heapIndex?.StringDedupIndex is not null && heapIndex.StringDedupIndex.Count > 0) dedupSource = "Prebuilt";
+        else if (typeAggregates is not null) dedupSource = "IndexScan";
+        else dedupSource = "HeapScan";
 
         var distribution = new DistributionSummary(
             Percentiles: percentiles,
@@ -611,10 +935,72 @@ internal sealed class StringAnalyzer : IAnalyzer
             FrequencyBuckets: freqBuckets,
             SampleCount: sampleCount);
 
+        // Cap VeryLongStrings to top 1000 by size to prevent unbounded growth
+        const int maxVeryLongStringsToKeep = 1000;
+        if (veryLongStrings.Count > maxVeryLongStringsToKeep)
+        {
+            veryLongStrings.Sort((a, b) => b.SizeBytes.CompareTo(a.SizeBytes));
+            veryLongStrings.RemoveRange(maxVeryLongStringsToKeep, veryLongStrings.Count - maxVeryLongStringsToKeep);
+        }
+
+        // P1-3: top object types owning string fields.
+        IReadOnlyList<(string TypeName, ulong TotalBytes)>? topStringOwnerTypes = null;
+        if (stringMts.Count > 0)
+        {
+            try
+            {
+                Dictionary<ulong, ulong>? stringOwnerTypeBytes;
+
+                if (typeAggregates is not null && _indexScanOwnerTypesActive)
+                {
+                    // Index available: the scan already happened as this analyzer's
+                    // IHeapIndexScanParticipant.OnHeapEntry during the shared dispatcher pass
+                    // (disk-backed, no live heap walk) — bytes were sampled up to
+                    // MaxSamplesPerOwnerType instances per type, so extrapolate against the
+                    // type's real instance count from the pre-built index.
+                    stringOwnerTypeBytes = new Dictionary<ulong, ulong>(capacity: MaxStringOwnerTypesToTrack);
+                    foreach (var kv in _indexScanStringOwnerTypeBytes!)
+                    {
+                        _indexScanStringOwnerSampleCounts!.TryGetValue(kv.Key, out int samples);
+                        if (samples <= 0) continue;
+
+                        ulong realCount = typeAggregates.TryGetValue(kv.Key, out var agg) ? (ulong)Math.Max(agg.Count, 0) : (ulong)samples;
+                        double avgBytesPerInstance = (double)kv.Value / samples;
+                        stringOwnerTypeBytes[kv.Key] = (ulong)(avgBytesPerInstance * realCount);
+                    }
+                }
+                else
+                {
+                    // No-index fallback: single live heap pass (rare path — small dumps / no cache).
+                    stringOwnerTypeBytes = new Dictionary<ulong, ulong>(capacity: MaxStringOwnerTypesToTrack);
+                    var fieldCache = new FieldLayoutCache();
+                    ScanForStringOwnerTypesFallback(heap, stringMts, stringOwnerTypeBytes, fieldCache, progress, MaxStringOwnerTypesToTrack);
+                }
+
+                if (stringOwnerTypeBytes is not null && stringOwnerTypeBytes.Count > 0)
+                {
+                    // Report all tracked owner types (bounded above by MaxStringOwnerTypesToTrack) —
+                    // the report UI paginates/filters compact tables client-side, so there's no need
+                    // to pre-truncate here.
+                    var topOwners = new List<(string, ulong)>(capacity: stringOwnerTypeBytes.Count);
+                    foreach (var kv in stringOwnerTypeBytes.OrderByDescending(kv => kv.Value))
+                    {
+                        string typeName = heap.GetTypeByMethodTable(kv.Key)?.Name ?? $"0x{kv.Key:X}";
+                        topOwners.Add((typeName, kv.Value));
+                    }
+                    topStringOwnerTypes = topOwners;
+                }
+            }
+            catch
+            {
+                topStringOwnerTypes = null; // swallow errors gracefully
+            }
+        }
+
         return new StringDomainResult(
             TotalStrings: totalStrings,
             TotalStringMemoryBytes: totalStringMemory,
-            UniqueStrings: uniqueStrings,
+            SampledUniquePatterns: sampledUniquePatterns,
             DuplicatePatternCount: duplicatePatternCount,
             DuplicateWastedBytes: duplicateWastedBytes,
             DuplicationRatio: duplicationRatio,
@@ -624,52 +1010,94 @@ internal sealed class StringAnalyzer : IAnalyzer
             LohStringBytes: lohStringBytes,
             InternedStringCount: internedStringCount,
             InternedStringBytes: internedStringBytes,
+            Gen0StringCount: gen0StringCount,
+            Gen1StringCount: gen1StringCount,
             Gen2StringCount: gen2StringCount,
             Gen2StringBytes: gen2StringBytes,
-            DeduplicationSkipped: dedupSkipped,
-            StringsSampled: runDedup ? stringsSampled : 0,
+            StringsSampled: stringsSampled,
             SamplingCoverage: samplingCoverage,
-            // new metadata
-            SamplingMode: stringOptions.SamplingMode.ToString(),
-            DeduplicationMode: stringOptions.DeduplicationMode.ToString(),
-            DeduplicationThreshold: stringOptions.DeduplicationStringCountThreshold,
-            MaxStringsToDedup: ComputeEffectiveCaps(stringOptions, stringOptions.MaxStringsToDedup, stringOptions.MaxUniqueStringTracking).MaxStringsToDedup,
             DedupSource: dedupSource,
             AnalysisDurationMs: totalStopwatch.ElapsedMilliseconds,
-            DedupSkipReason: dedupSkipped ? $"Dedup skipped: threshold={stringOptions.DeduplicationStringCountThreshold}" : null,
             TopDuplicateTypes: topDuplicateTypes,
-                Distribution: distribution,
-                PreviewMaxLength: stringOptions.PreviewMaxLength,
-                Artifacts: rawExports);
+            TopStringOwnerTypes: topStringOwnerTypes,
+            Distribution: distribution,
+            Artifacts: rawExports,
+            TopDuplicateRetentionPaths: retentionPaths);
     }
 
-    // Internal helper used by the analyzer and unit tests to compute effective numeric caps
-    // from the semantic `StringSamplingMode` hint and configured base caps.
-    internal static (int MaxStringsToDedup, int MaxUniqueStringTracking) ComputeEffectiveCaps(
-        DumpDetective.Core.Options.StringAnalysisOptions options,
-        int baseMaxToDedup,
-        int baseMaxUnique)
+    /// <summary>
+    /// P3-2 (string-analyzer-audit.md): runs a bounded GC root-path search (via the shared
+    /// <see cref="RootPathFinder"/>/<see cref="RootPathSearchSupport"/> infrastructure other
+    /// leak-focused analyzers already use) for one sample instance of each of the top
+    /// <paramref name="sampleCount"/> duplicate patterns by wasted bytes — answers "why is this
+    /// duplicated value still alive" without walking the whole heap for every pattern.
+    /// </summary>
+    private static IReadOnlyList<DuplicateStringRetentionPath>? BuildRetentionPaths(
+        ClrHeap heap,
+        IHeapAnalysisCache? cache,
+        IReadOnlyList<DuplicateStringSnapshot> topDuplicates,
+        int sampleCount,
+        CancellationToken cancellationToken)
     {
-        int maxToDedup = baseMaxToDedup;
-        int maxUnique = baseMaxUnique;
+        if (cache is null || topDuplicates.Count == 0 || sampleCount <= 0) return null;
 
-        switch (options.SamplingMode)
+        IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
+
+        var provider = new ReferenceGraph(heap);
+
+        // Same bounded budget TimerLeakAnalyzer/StaticRootLeakDetector use for their evidence
+        // root-path searches — see PopulateEvidence in TimerLeakAnalyzer.cs for the reasoning
+        // (real limits, not a legacy-only fallback, even with the reverse index available).
+        var limits = new RootPathSearchLimits
         {
-            case DumpDetective.Core.Options.StringSamplingMode.Aggressive:
-                maxToDedup = Math.Max(1_000, (int)(maxToDedup * 0.25));
-                maxUnique = Math.Max(10_000, (int)(maxUnique * 0.25));
-                break;
-            case DumpDetective.Core.Options.StringSamplingMode.Full:
-                maxToDedup = Math.Min(int.MaxValue / 2, (int)(maxToDedup * 2));
-                maxUnique = Math.Min(int.MaxValue / 2, (int)(maxUnique * 2));
-                break;
-            case DumpDetective.Core.Options.StringSamplingMode.Moderate:
-            default:
-                break;
+            MaxCandidateNodes = 5_000,
+            MaxCandidateDepth = 8,
+            MaxRootExpansionDepth = 12,
+            LargeFanoutThreshold = 100,
+        };
+        var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry,
+            RootPathSearchSupport.IsNoisyType, static _ => false, cache.TryGetReverseIndexProvider(), cache);
+
+        IReadOnlyList<(DuplicateStringSnapshot Duplicate, ulong Address)> candidates =
+            SelectRetentionPathCandidates(topDuplicates, sampleCount);
+
+        var results = new List<DuplicateStringRetentionPath>(candidates.Count);
+        foreach ((DuplicateStringSnapshot dup, ulong address) in candidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            bool found = finder.TryFindAnyRootPath(address, roots, out string? rootKind, out List<ulong>? addresses, out bool searchTruncated, out _, out _, cancellationToken);
+            string? rootPath = found ? RootPathSearchSupport.FormatPath(heap, rootKind!, addresses, cache) : null;
+
+            results.Add(new DuplicateStringRetentionPath(dup.Preview, address, found, rootPath, searchTruncated));
         }
 
-        return (maxToDedup, maxUnique);
+        return results.Count > 0 ? results : null;
     }
+
+    /// <summary>
+    /// Picks up to <paramref name="sampleCount"/> duplicate patterns (in the order supplied —
+    /// callers pass a wasted-bytes-descending list) that have a resolvable sample address,
+    /// pairing each with the address a root-path search should target. Pure selection logic,
+    /// split out from <see cref="BuildRetentionPaths"/> so it's testable without a live
+    /// <see cref="ClrHeap"/>/<see cref="IHeapAnalysisCache"/>.
+    /// </summary>
+    private static IReadOnlyList<(DuplicateStringSnapshot Duplicate, ulong Address)> SelectRetentionPathCandidates(
+        IReadOnlyList<DuplicateStringSnapshot> topDuplicates, int sampleCount)
+    {
+        var candidates = new List<(DuplicateStringSnapshot, ulong)>(Math.Min(sampleCount, topDuplicates.Count));
+        for (int i = 0; i < topDuplicates.Count && candidates.Count < sampleCount; i++)
+        {
+            DuplicateStringSnapshot dup = topDuplicates[i];
+            if (dup.SampleAddresses is null || dup.SampleAddresses.Count == 0) continue;
+            candidates.Add((dup, dup.SampleAddresses[0]));
+        }
+        return candidates;
+    }
+
+    // Display preview length — a render concern, not a memory or exactness cap. The value
+    // is already bounded by MaxDuplicateStringLength before this point.
+    private const int PreviewLength = 80;
 
     /// <summary>
     /// Read a string at <paramref name="address"/>, create a fingerprint and
@@ -705,7 +1133,7 @@ internal sealed class StringAnalyzer : IAnalyzer
 
         if (!existed)
         {
-            info.Preview = CreatePreview(value, stringOptions.PreviewMaxLength);
+            info.Preview = CreatePreview(value, PreviewLength);
             info.SampleAddresses = new ulong[] { address };
             info.DominantMethodTable = obj.Type?.MethodTable ?? 0;
             info.FingerprintHash = fingerprint.Hash;
@@ -723,7 +1151,7 @@ internal sealed class StringAnalyzer : IAnalyzer
 
         // record length samples and buckets (bounded)
         int charLen = value.Length;
-        if (lengthSamples is not null && lengthSamples.Count < 100_000) lengthSamples.Add(charLen);
+        if (lengthSamples is not null && lengthSamples.Count < MaxLengthSamples) lengthSamples.Add(charLen);
         if (lengthBuckets is not null)
         {
             string key = charLen switch
@@ -778,15 +1206,8 @@ internal sealed class StringAnalyzer : IAnalyzer
     {
         if (stringOptions.MaxDuplicateStringLength <= 0) return true;
         if (size <= 26) return true; // empty/very small strings
-        try
-        {
-            ulong estChars = (size - 26) / 2;
-            return estChars <= (ulong)stringOptions.MaxDuplicateStringLength;
-        }
-        catch
-        {
-            return false;
-        }
+        ulong estChars = (size - 26) / 2;
+        return estChars <= (ulong)stringOptions.MaxDuplicateStringLength;
     }
 
     /// <summary>
@@ -807,6 +1228,64 @@ internal sealed class StringAnalyzer : IAnalyzer
     private static int ComputeUniqueCount(Dictionary<StringFingerprint, StringLeakInfo> stringStats)
     {
         return stringStats.Count;
+    }
+
+    /// <summary>
+    /// Aggregate string-type totals (count, bytes, LOH, and per-generation counts) from
+    /// Phase 1's <see cref="TypeAggregateIndexEntry"/> index — zero heap I/O.
+    /// </summary>
+    private static (int TotalStrings, ulong TotalStringMemory, ulong LohStringBytes,
+        long Gen0StringCount, long Gen1StringCount, long Gen2StringCount, ulong Gen2StringBytes)
+        AggregateStringTypeStats(
+            IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> typeAggregates,
+            IReadOnlySet<ulong> stringMts)
+    {
+        int totalStrings = 0;
+        ulong totalStringMemory = 0;
+        ulong lohStringBytes = 0;
+        long gen0StringCount = 0;
+        long gen1StringCount = 0;
+        long gen2StringCount = 0;
+        ulong gen2StringBytes = 0;
+
+        foreach (ulong mt in stringMts)
+        {
+            if (!typeAggregates.TryGetValue(mt, out TypeAggregateIndexEntry entry)) continue;
+            totalStrings += (int)Math.Min(entry.Count, int.MaxValue);
+            totalStringMemory += entry.TotalSize;
+            lohStringBytes += entry.LohSize;
+            gen0StringCount += entry.Gen0Count;
+            gen1StringCount += entry.Gen1Count;
+            gen2StringCount += entry.Gen2Count;
+            gen2StringBytes += entry.Gen2TotalSize;
+        }
+
+        return (totalStrings, totalStringMemory, lohStringBytes, gen0StringCount, gen1StringCount, gen2StringCount, gen2StringBytes);
+    }
+
+    /// <summary>
+    /// Select string patterns whose occurrence count meets <paramref name="minCount"/> and
+    /// compute their total wasted bytes (bytes beyond the first occurrence of each pattern).
+    /// </summary>
+    private static List<StringLeakInfo> SelectDuplicates(
+        Dictionary<StringFingerprint, StringLeakInfo>.ValueCollection stats,
+        int minCount,
+        out int duplicatePatternCount,
+        out ulong duplicateWastedBytes)
+    {
+        var duplicates = new List<StringLeakInfo>();
+        duplicatePatternCount = 0;
+        duplicateWastedBytes = 0;
+
+        foreach (StringLeakInfo info in stats)
+        {
+            if (info.Count < minCount) continue;
+            duplicatePatternCount++;
+            duplicateWastedBytes += info.TotalSize * (ulong)(info.Count - 1) / (ulong)info.Count;
+            duplicates.Add(info);
+        }
+
+        return duplicates;
     }
 
     /// <summary>Format a byte count as a human-readable string.</summary>
@@ -862,23 +1341,30 @@ internal sealed class StringAnalyzer : IAnalyzer
         // Fallback: sum segment committed memory.
         ulong totalBytes = 0;
         foreach (ClrSegment segment in context.Heap.Segments)
-            totalBytes += (ulong)(segment.End - segment.Start);
+            totalBytes += SegmentKindMapper.GetCommittedBytes(segment);
         return totalBytes;
     }
 
-    /// <summary>Drain a priority queue into descending wasted bytes snapshots.</summary>
-    private static IReadOnlyList<DuplicateStringSnapshot> DrainToDescendingWaste(
-        PriorityQueue<StringLeakInfo, ulong> pq,
+    /// <summary>
+    /// Convert every duplicate pattern into a snapshot, ranked by wasted bytes descending
+    /// (count and total size as tiebreaks). Unlike the old two-heap top-K selection, nothing
+    /// is dropped here — the full set of patterns meeting <see cref="StringAnalysisOptions.MinDuplicateStringCount"/>
+    /// is returned; how many rows to show is a render-layer concern.
+    /// </summary>
+    private static IReadOnlyList<DuplicateStringSnapshot> BuildDuplicateSnapshots(
+        List<StringLeakInfo> duplicates,
         IReadOnlyDictionary<ulong, string?> mtToName)
     {
-        var list = new List<DuplicateStringSnapshot>(pq.Count);
-        while (pq.Count > 0)
+        if (duplicates.Count == 0)
+            return [];
+
+        var list = new List<DuplicateStringSnapshot>(duplicates.Count);
+        foreach (StringLeakInfo info in duplicates)
         {
-            StringLeakInfo info = pq.Dequeue();
-            ulong wasted = info.TotalSize - (info.TotalSize / (ulong)info.Count);
+            ulong wasted = info.TotalSize * (ulong)(info.Count - 1) / (ulong)info.Count;
             int avg = info.Count > 0 ? (int)Math.Min(info.TotalSize / (ulong)info.Count, int.MaxValue) : 0;
             string? dominantType = null;
-            if (info.DominantMethodTable != 0 && mtToName is not null && mtToName.TryGetValue(info.DominantMethodTable, out var n))
+            if (info.DominantMethodTable != 0 && mtToName.TryGetValue(info.DominantMethodTable, out var n))
                 dominantType = n;
             list.Add(new DuplicateStringSnapshot(
                 info.Preview ?? string.Empty,
@@ -892,81 +1378,15 @@ internal sealed class StringAnalyzer : IAnalyzer
                 AvgSize: avg,
                 SamplingSource: info.SamplingSource));
         }
-        list.Reverse();
-        return list;
-    }
 
-    /// <summary>Drain a priority queue into descending count snapshots.</summary>
-    private static IReadOnlyList<DuplicateStringSnapshot> DrainToDescendingCount(
-        PriorityQueue<StringLeakInfo, int> pq,
-        IReadOnlyDictionary<ulong, string?> mtToName)
-    {
-        var list = new List<DuplicateStringSnapshot>(pq.Count);
-        while (pq.Count > 0)
+        list.Sort(static (a, b) =>
         {
-            StringLeakInfo info = pq.Dequeue();
-            ulong wasted = info.TotalSize - (info.TotalSize / (ulong)info.Count);
-            int avg = info.Count > 0 ? (int)Math.Min(info.TotalSize / (ulong)info.Count, int.MaxValue) : 0;
-            string? dominantType = null;
-            if (info.DominantMethodTable != 0 && mtToName is not null && mtToName.TryGetValue(info.DominantMethodTable, out var n))
-                dominantType = n;
-            list.Add(new DuplicateStringSnapshot(
-                info.Preview ?? string.Empty,
-                info.Count,
-                wasted,
-                info.SampleAddresses,
-                info.DominantMethodTable,
-                DominantType: dominantType,
-                FingerprintHash: info.FingerprintHash == 0 ? null : info.FingerprintHash,
-                TotalSize: info.TotalSize,
-                AvgSize: avg,
-                SamplingSource: info.SamplingSource));
-        }
-        list.Reverse();
+            int cmp = b.WastedBytes.CompareTo(a.WastedBytes);
+            if (cmp != 0) return cmp;
+            cmp = b.Count.CompareTo(a.Count);
+            return cmp != 0 ? cmp : b.TotalSize.CompareTo(a.TotalSize);
+        });
         return list;
-    }
-
-    private static IReadOnlyList<DuplicateStringSnapshot> MergeTopDuplicates(
-        IReadOnlyList<DuplicateStringSnapshot> byWaste,
-        IReadOnlyList<DuplicateStringSnapshot> byCount)
-    {
-        if (byWaste.Count == 0 && byCount.Count == 0)
-            return Array.Empty<DuplicateStringSnapshot>();
-
-        var merged = new Dictionary<string, DuplicateStringSnapshot>(StringComparer.Ordinal);
-
-        static string KeyFor(DuplicateStringSnapshot s)
-            => s.FingerprintHash is ulong h ? $"h:{h:X16}" : $"p:{s.Preview}";
-
-        void MergeIn(IReadOnlyList<DuplicateStringSnapshot> source)
-        {
-            for (int i = 0; i < source.Count; i++)
-            {
-                DuplicateStringSnapshot current = source[i];
-                string key = KeyFor(current);
-                if (!merged.TryGetValue(key, out DuplicateStringSnapshot? existing) || existing is null)
-                {
-                    merged[key] = current;
-                    continue;
-                }
-
-                // Prefer the richer/bigger snapshot when the same duplicate appears in both rankings.
-                if (current.WastedBytes > existing.WastedBytes ||
-                    (current.WastedBytes == existing.WastedBytes && current.Count > existing.Count))
-                {
-                    merged[key] = current;
-                }
-            }
-        }
-
-        MergeIn(byWaste);
-        MergeIn(byCount);
-
-        return merged.Values
-            .OrderByDescending(static d => d.WastedBytes)
-            .ThenByDescending(static d => d.Count)
-            .ThenByDescending(static d => d.TotalSize)
-            .ToArray();
     }
 
     /// <summary>Create a compact fingerprint for a string value.</summary>
@@ -986,6 +1406,101 @@ internal sealed class StringAnalyzer : IAnalyzer
     }
 
     private readonly record struct StringFingerprint(ulong Hash, int Length, char FirstChar, char LastChar);
+
+    /// <summary>
+    /// No-index fallback: live heap.EnumerateObjects() walk for string-field ownership.
+    /// Only used when no disk-backed heap index is available (small dumps / uncached runs) —
+    /// the normal path piggybacks on the shared <see cref="IHeapIndexScanParticipant"/> pass
+    /// via <see cref="AccumulateStringOwnerType"/> instead.
+    /// </summary>
+    /// <remarks>
+    /// PERF: string-field detection uses <see cref="ClrInstanceField.ElementType"/>, not
+    /// <c>ClrInstanceField.Type</c> — see the PERF remarks on
+    /// <c>DiskBackedObjectIndexWriter.ComputeTypeShapeAndStringFields</c>.
+    /// </remarks>
+    private static void ScanForStringOwnerTypesFallback(
+        ClrHeap heap,
+        HashSet<ulong> stringMts,
+        Dictionary<ulong, ulong> stringOwnerTypeBytes,
+        FieldLayoutCache fieldCache,
+        IProgress<AnalyzerProgressReport>? progress,
+        int maxTypesToTrack)
+    {
+        // Cache: MethodTable -> string field indices (built on-demand per type)
+        var stringFieldsByType = new Dictionary<ulong, int[]>(capacity: 1000);
+        var typesWithoutStringFields = new HashSet<ulong>(capacity: 1000); // Negative cache
+
+        int typesTracked = 0;
+        var sc = new ObjectScanCounter("scanning for string-owning types", progress);
+
+        foreach (var obj in heap.EnumerateObjects())
+        {
+            sc.Tick();
+            if (!obj.IsValid || obj.Type == null) continue;
+
+            var mt = obj.Type.MethodTable;
+
+            // Check negative cache first (common case: type has no string fields)
+            if (typesWithoutStringFields.Contains(mt))
+                continue;
+
+            // Check positive cache
+            if (!stringFieldsByType.TryGetValue(mt, out var stringFieldIndices))
+            {
+                // Build cache entry for this type (first time we see it)
+                var fields = fieldCache.GetFields(obj.Type);
+                var stringIndices = new List<int>(capacity: 4);
+
+                for (int i = 0; i < fields.Length; i++)
+                {
+                    // ElementType is a signature tag — cheap, no full ClrType resolution needed.
+                    if (fields[i].ElementType == ClrElementType.String)
+                        stringIndices.Add(i);
+                }
+
+                if (stringIndices.Count > 0)
+                {
+                    stringFieldIndices = stringIndices.ToArray();
+                    stringFieldsByType[mt] = stringFieldIndices;
+                }
+                else
+                {
+                    // Negative cache: this type has no string fields
+                    typesWithoutStringFields.Add(mt);
+                    continue;
+                }
+            }
+
+            // Process string fields for this object
+            var objFields = fieldCache.GetFields(obj.Type);
+            foreach (int fieldIndex in stringFieldIndices)
+            {
+                try
+                {
+                    if (fieldIndex >= objFields.Length) continue;
+                    var field = objFields[fieldIndex];
+
+                    var stringRef = field.ReadObject(obj, interior: false);
+                    if (!stringRef.IsValid) continue;
+
+                    var ownerMt = obj.Type.MethodTable;
+                    if (!stringOwnerTypeBytes.TryGetValue(ownerMt, out ulong existing))
+                    {
+                        if (stringOwnerTypeBytes.Count >= maxTypesToTrack) continue;
+                        typesTracked++;
+                    }
+                    stringOwnerTypeBytes[ownerMt] = existing + stringRef.Size;
+                }
+                catch
+                {
+                    // Safely skip malformed fields
+                    continue;
+                }
+            }
+        }
+
+        sc.Complete();
+    }
 
     public void Dispose() { }
 }

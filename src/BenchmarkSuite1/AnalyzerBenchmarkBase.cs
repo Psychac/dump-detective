@@ -78,8 +78,7 @@ namespace BenchmarkSuite1
                     Heap,
                     dumpPath,
                     cancellationToken: default,
-                    progress: null,
-                    mode: HeapIndexPrebuildMode.Auto);
+                    progress: null);
             }
 
             var diagnosticsOptions = new DiagnosticsOptions { ContinueOnAnalyzerFailure = true };

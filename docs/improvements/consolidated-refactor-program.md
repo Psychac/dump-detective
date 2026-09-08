@@ -8,6 +8,9 @@ Implementation verification update (2026-05-30):
 - Enforcement gates are in place (`.github/workflows/phase8-fitness.yml`) and validated locally.
 - Post-program follow-on cleanup items remain (documented in project critical reviews) but are no longer phase blockers.
 
+Implementation verification correction (2026-07-17):
+- Direct re-inspection of `DumpDetective.Core.csproj` found that Phase 7's `InternalsVisibleTo` reduction deliverable was never actually implemented, despite being marked "Complete." All other phases (0-6, 8) were re-validated and hold. See the 2026-07-17 re-validation notes and corrected Phase 7 status below.
+
 Execution status update (2026-05-30):
 - Phase 0: Complete (baseline script, snapshots, and smoke/guardrail tests green)
 - Phase 1: Complete (legacy top-level project removed, active layout clarified)
@@ -16,7 +19,7 @@ Execution status update (2026-05-30):
 - Phase 4: Complete (CLI composition ownership reduced; factories/facade/capability catalog now Reporting-owned)
 - Phase 5: Complete (serializer/trend decomposition delivered, renderer policy explicit, UI modules split with targeted coverage)
 - Phase 6: Complete (pipeline collaborators extracted, insight rules grouped, shared traversal adopted in analyzer path)
-- Phase 7: Complete (Core boundary tightened: legacy option bag removed, policy inference moved to Analysis, context surface narrowed)
+- Phase 7: Partially complete (legacy option bag removed, policy inference moved to Analysis, context surface narrowed; `InternalsVisibleTo` audit/reduction not done — corrected 2026-07-17, see re-validation notes)
 - Phase 8: Complete (fitness enforcement wired into CI with architecture/no-source-link/hotspot/perf guardrails)
 
 Re-validation notes (2026-05-30):
@@ -29,6 +32,12 @@ Re-validation notes (2026-05-30):
 - Phase 7 milestone: Core contracts slimmed; runtime-aware boundary decision documented; focused tests and baseline harness revalidated
 - Phase 8 milestone: CI fitness gates added for architecture direction, no-source-link boundaries, hotspot guardrail coverage, benchmark compile, and baseline harness
 
+Re-validation notes (2026-07-17):
+- Direct source re-check of the four per-project critical reviews found the phase-level rollup above still holds for Phases 0-6 and 8, with one correction to a Phase 7 deliverable and one clarification to a Phase 4 deliverable.
+- **Phase 7 correction:** the claim "audited `InternalsVisibleTo`: retained single Analysis-to-tests entry only (no Core internals exposure)" does not match current source. `src/DumpDetective.Core/DumpDetective.Core.csproj` still declares five `InternalsVisibleTo` entries (`BenchmarkSuite1`, `DumpDetective.Analysis`, `DumpDetective.Reporting`, `DumpDetective.Cli`, `DumpDetective.Tests`) — unchanged from the pre-refactor breadth. This item should be treated as not started, not complete; see the corrected Phase 7 status below and `core-project-critical-review.md`.
+- **Phase 4 clarification:** the capability/module registration and CLI-thinning deliverables are confirmed real (Reporting's `DefaultAnalyzerFeatureModuleCatalog` drives `ServiceRegistration.cs` directly), but `DumpAnalysisService`, `SingleDumpOrchestrationService`, and `TrendOrchestrationService` still live in `Cli/Services/`, not a dedicated `Execution/` folder as some follow-on notes implied. This does not affect the Phase 4 exit criteria (ownership moved out of CLI), only internal CLI folder layout; see `cli-project-critical-review.md`.
+- New minor items surfaced during re-validation (tracked as post-program cleanup, not phase blockers): a duplicate `AnalysisSummaryFormatter` forwarding shim in `Cli/Services/` alongside the real one in `Cli/Output/`; orphaned phase-2-era spike code in `Cli/Services/Capabilities/` (`AnalyzerFeatureModuleAdapter`, `AnalyzerFeatureModuleSpikeCatalog`) not wired into production registration; and Reporting-owned `FindingGenerators/*.cs` files still declaring the stale `namespace DumpDetective.Analysis.FindingGenerators`. Full detail in the respective per-project critical reviews.
+
 Validated against:
 - `architecture-refactor-roadmap.md`
 - `cli-project-critical-review.md`
@@ -36,7 +45,7 @@ Validated against:
 - `analysis-project-critical-review.md`
 - `core-project-critical-review.md`
 
-Prepared on 2026-05-30.
+Prepared on 2026-05-30. Re-validated on 2026-07-17.
 
 ## Purpose
 This document consolidates the architectural roadmap and the four project-specific critical reviews into one program-level refactor plan.
@@ -555,14 +564,14 @@ Low to Medium
 - Core remains small and no longer looks like a stealth policy layer
 
 Current status:
-- Complete
+- Partially complete (corrected 2026-07-17: the `InternalsVisibleTo` deliverable was not actually done; see below)
 - Completed in this iteration:
   - runtime-boundary decision documented: Core is intentionally dump-runtime-aware at `AnalysisContext`
   - removed legacy `AnalysisContext.Options` type-keyed map in favor of typed `AnalysisOptions`
   - removed policy inference helpers from `DiagnosticsOptions` and moved evaluation to Analysis (`AnalyzerCollectionPolicyEvaluator`)
   - narrowed ambient runtime context by removing duplicate `RuntimeAnalysisContext.ExecutionPolicy`
-  - audited `InternalsVisibleTo`: retained single Analysis-to-tests entry only (no Core internals exposure)
   - updated affected benchmarks/tests to typed options path and validated behavior
+- Not done (found 2026-07-17): `InternalsVisibleTo` audit/reduction. `DumpDetective.Core.csproj` still lists five friend assemblies (`BenchmarkSuite1`, `DumpDetective.Analysis`, `DumpDetective.Reporting`, `DumpDetective.Cli`, `DumpDetective.Tests`), the same breadth as before the program. The earlier "Complete" status and the "retained single Analysis-to-tests entry only" note were inaccurate and are corrected here.
 
 ## Phase 8: Hardening and Fitness Enforcement
 

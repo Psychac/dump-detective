@@ -1,12 +1,12 @@
 using DumpDetective.Cli.Commands;
-using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Options;
 using DumpDetective.Cli.Configuration;
+using DumpDetective.Cli.Console;
 using DumpDetective.Cli.Services;
 using DumpDetective.Cli.Models;
-using DumpDetective.Cli.Services.Configuration;
-using static DumpDetective.Cli.Services.Configuration.ConfigurationParseHelpers;
+
+using static DumpDetective.Cli.Configuration.ConfigurationParseHelpers;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -32,40 +32,30 @@ internal sealed class ConfigurationResolver
 
         bool usedConfigFile = fileModel is not null;
 
-        RetentionOptions memoryLeak = Resolve(usedConfigFile, BuildMemoryLeakFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, RetentionOptions.Preset), fileModel, request);
-        ReferenceChainOptions refChain = Resolve(usedConfigFile, BuildReferenceChainFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, ReferenceChainOptions.Preset), fileModel, request);
-        EventLeakOptions eventLeak = Resolve(usedConfigFile, BuildEventLeakFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, EventLeakOptions.Preset), fileModel, request);
+        RetentionOptions memoryLeak = Resolve(usedConfigFile, BuildMemoryLeakFromConfig, _ => new RetentionOptions(), fileModel, request);
+        ReferenceChainOptions refChain = Resolve(usedConfigFile, BuildReferenceChainFromConfig, _ => new ReferenceChainOptions(), fileModel, request);
+        EventLeakOptions eventLeak = Resolve(usedConfigFile, BuildEventLeakFromConfig, _ => new EventLeakOptions(), fileModel, request);
         DiagnosticsOptions diagnostics = Resolve(usedConfigFile, BuildDiagnosticsFromConfig, AnalyzerOptionsBuilder.BuildDiagnosticsFromCli, fileModel, request);
         ReportOptions report = Resolve(usedConfigFile, BuildReportFromConfig, AnalyzerOptionsBuilder.BuildReportFromCli, fileModel, request);
-        HeapIndexPrebuildMode indexMode = Resolve(usedConfigFile, BuildIndexPrebuildModeFromConfig, AnalyzerOptionsBuilder.BuildIndexPrebuildModeFromCli, fileModel, request);
-        ExecutionPolicy executionPolicy = BuildExecutionPolicy(fileModel, memoryLeak, refChain, indexMode);
-        CrashAnalysisOptions crash = Resolve(usedConfigFile, BuildCrashFromConfig, req => AnalyzerOptionsBuilder.BuildValidatedBalancedPresetFromCli(req, CrashAnalysisOptions.Preset, CrashAnalysisOptions.Validate), fileModel, request);
-        AsyncTaskAnalysisOptions asyncTaskAnalysis = Resolve(usedConfigFile, BuildAsyncTaskAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, AsyncTaskAnalysisOptions.Preset), fileModel, request);
-        AsyncStateMachineAnalysisOptions asyncStateMachineAnalysis = Resolve(usedConfigFile, BuildAsyncStateMachineAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, AsyncStateMachineAnalysisOptions.Preset), fileModel, request);
-        ArrayAnalysisOptions arrayAnalysis = Resolve(usedConfigFile, BuildArrayAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, ArrayAnalysisOptions.Preset), fileModel, request);
-        BoxingAnalysisOptions boxingAnalysis = Resolve(usedConfigFile, BuildBoxingAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, BoxingAnalysisOptions.Preset), fileModel, request);
-        CollectionAnalysisOptions collection = Resolve(usedConfigFile, BuildCollectionFromConfig, req => AnalyzerOptionsBuilder.BuildValidatedBalancedPresetFromCli(req, CollectionAnalysisOptions.Preset, CollectionAnalysisOptions.Validate), fileModel, request);
-        StringAnalysisOptions stringAnalysis = Resolve(usedConfigFile, BuildStringAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, StringAnalysisOptions.Preset), fileModel, request);
-        HeapTopologyAnalysisOptions heapTopology = Resolve(usedConfigFile, BuildHeapTopologyAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, HeapTopologyAnalysisOptions.Preset), fileModel, request);
-        AppDomainAnalysisOptions appDomainAnalysis = Resolve(usedConfigFile, BuildAppDomainAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, AppDomainAnalysisOptions.Preset), fileModel, request);
-        AllocationPatternAnalysisOptions allocationPatternAnalysis = Resolve(usedConfigFile, BuildAllocationPatternAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, AllocationPatternAnalysisOptions.Preset), fileModel, request);
-        ThreadStackClusterAnalysisOptions threadStackClusterAnalysis = Resolve(usedConfigFile, BuildThreadStackClusterAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, ThreadStackClusterAnalysisOptions.Preset), fileModel, request);
-        LockGraphAnalysisOptions lockGraphAnalysis = Resolve(usedConfigFile, BuildLockGraphAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, LockGraphAnalysisOptions.Preset), fileModel, request);
-        FinalizableObjectAnalysisOptions finalizableObjectAnalysis = Resolve(usedConfigFile, BuildFinalizableObjectAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, FinalizableObjectAnalysisOptions.Preset), fileModel, request);
-        GCGenerationAnalysisOptions gcGenerationAnalysis = Resolve(usedConfigFile, BuildGCGenerationAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, GCGenerationAnalysisOptions.Preset), fileModel, request);
-        GCRootAnalysisOptions gcRootAnalysis = Resolve(usedConfigFile, BuildGCRootAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, GCRootAnalysisOptions.Preset), fileModel, request);
-        LohFragmentationAnalysisOptions lohFragmentationAnalysis = Resolve(usedConfigFile, BuildLohFragmentationAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, LohFragmentationAnalysisOptions.Preset), fileModel, request);
-        SegmentReservationAnalysisOptions segmentReservationAnalysis = Resolve(usedConfigFile, BuildSegmentReservationAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, SegmentReservationAnalysisOptions.Preset), fileModel, request);
-        ThreadAnalysisOptions threadAnalysis = Resolve(usedConfigFile, BuildThreadAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, ThreadAnalysisOptions.Preset), fileModel, request);
-        HangAnalysisOptions hangAnalysis = Resolve(usedConfigFile, BuildHangAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, HangAnalysisOptions.Preset), fileModel, request);
-        JitAnalysisOptions jitAnalysis = Resolve(usedConfigFile, BuildJitAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, JitAnalysisOptions.Preset), fileModel, request);
-        WeakReferenceAnalysisOptions weakReferenceAnalysis = Resolve(usedConfigFile, BuildWeakReferenceAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, WeakReferenceAnalysisOptions.Preset), fileModel, request);
-        ObjectShapeAnalysisOptions objectShapeAnalysis = Resolve(usedConfigFile, BuildObjectShapeAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, ObjectShapeAnalysisOptions.Preset), fileModel, request);
-        ModuleAnalysisOptions moduleAnalysis = Resolve(usedConfigFile, BuildModuleAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, ModuleAnalysisOptions.Preset), fileModel, request);
-        DependentHandleAnalysisOptions dependentHandleAnalysis = Resolve(usedConfigFile, BuildDependentHandleAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, DependentHandleAnalysisOptions.Preset), fileModel, request);
-        GCHandleAnalysisOptions gcHandleAnalysis = Resolve(usedConfigFile, BuildGCHandleAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, GCHandleAnalysisOptions.Preset), fileModel, request);
-        StaticRootLeakAnalysisOptions staticRootLeakAnalysis = Resolve(usedConfigFile, BuildStaticRootLeakAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, StaticRootLeakAnalysisOptions.Preset), fileModel, request);
-        MemoryAnalysisOptions memoryAnalysis = Resolve(usedConfigFile, BuildMemoryAnalysisFromConfig, req => AnalyzerOptionsBuilder.BuildBalancedPresetFromCli(req, MemoryAnalysisOptions.Preset), fileModel, request);
+        ExecutionPolicy executionPolicy = BuildExecutionPolicy(fileModel, memoryLeak);
+        CrashAnalysisOptions crash = Resolve(usedConfigFile, BuildCrashFromConfig, _ => new CrashAnalysisOptions(), fileModel, request);
+        AsyncStateMachineAnalysisOptions asyncStateMachineAnalysis = Resolve(usedConfigFile, BuildAsyncStateMachineAnalysisFromConfig, _ => new AsyncStateMachineAnalysisOptions(), fileModel, request);
+        ArrayAnalysisOptions arrayAnalysis = Resolve(usedConfigFile, BuildArrayAnalysisFromConfig, _ => new ArrayAnalysisOptions(), fileModel, request);
+        BoxingAnalysisOptions boxingAnalysis = Resolve(usedConfigFile, BuildBoxingAnalysisFromConfig, _ => new BoxingAnalysisOptions(), fileModel, request);
+        CollectionAnalysisOptions collection = Resolve(usedConfigFile, BuildCollectionFromConfig, _ => CollectionAnalysisOptions.Validate(new CollectionAnalysisOptions()), fileModel, request);
+        StringAnalysisOptions stringAnalysis = Resolve(usedConfigFile, BuildStringAnalysisFromConfig, AnalyzerOptionsBuilder.BuildStringAnalysisFromCli, fileModel, request);
+        AllocationPatternAnalysisOptions allocationPatternAnalysis = Resolve(usedConfigFile, BuildAllocationPatternAnalysisFromConfig, _ => new AllocationPatternAnalysisOptions(), fileModel, request);
+        ThreadStackClusterAnalysisOptions threadStackClusterAnalysis = Resolve(usedConfigFile, BuildThreadStackClusterAnalysisFromConfig, _ => new ThreadStackClusterAnalysisOptions(), fileModel, request);
+        GCGenerationAnalysisOptions gcGenerationAnalysis = Resolve(usedConfigFile, BuildGCGenerationAnalysisFromConfig, _ => new GCGenerationAnalysisOptions(), fileModel, request);
+        SegmentReservationAnalysisOptions segmentReservationAnalysis = Resolve(usedConfigFile, BuildSegmentReservationAnalysisFromConfig, _ => new SegmentReservationAnalysisOptions(), fileModel, request);
+        ThreadAnalysisOptions threadAnalysis = Resolve(usedConfigFile, BuildThreadAnalysisFromConfig, _ => new ThreadAnalysisOptions(), fileModel, request);
+        HangAnalysisOptions hangAnalysis = Resolve(usedConfigFile, BuildHangAnalysisFromConfig, _ => new HangAnalysisOptions(), fileModel, request);
+        JitAnalysisOptions jitAnalysis = Resolve(usedConfigFile, BuildJitAnalysisFromConfig, _ => new JitAnalysisOptions(), fileModel, request);
+        WeakReferenceAnalysisOptions weakReferenceAnalysis = Resolve(usedConfigFile, BuildWeakReferenceAnalysisFromConfig, _ => new WeakReferenceAnalysisOptions(), fileModel, request);
+        ModuleAnalysisOptions moduleAnalysis = Resolve(usedConfigFile, BuildModuleAnalysisFromConfig, _ => new ModuleAnalysisOptions(), fileModel, request);
+        GCHandleAnalysisOptions gcHandleAnalysis = Resolve(usedConfigFile, BuildGCHandleAnalysisFromConfig, _ => new GCHandleAnalysisOptions(), fileModel, request);
+        StaticRootLeakAnalysisOptions staticRootLeakAnalysis = Resolve(usedConfigFile, BuildStaticRootLeakAnalysisFromConfig, _ => new StaticRootLeakAnalysisOptions(), fileModel, request);
+        MemoryAnalysisOptions memoryAnalysis = Resolve(usedConfigFile, BuildMemoryAnalysisFromConfig, _ => new MemoryAnalysisOptions(), fileModel, request);
 
         string? configuredDumpPath = fileModel?.DumpPath;
         string? configuredBaseline = fileModel?.BaselineDumpPath;
@@ -112,29 +102,20 @@ internal sealed class ConfigurationResolver
             diagnostics,
             report,
             crash,
-            asyncTaskAnalysis,
             asyncStateMachineAnalysis,
             arrayAnalysis,
             boxingAnalysis,
             collection,
             stringAnalysis,
-            heapTopology,
-            appDomainAnalysis,
             allocationPatternAnalysis,
             threadStackClusterAnalysis,
-            lockGraphAnalysis,
-            finalizableObjectAnalysis,
             gcGenerationAnalysis,
-            gcRootAnalysis,
-            lohFragmentationAnalysis,
             segmentReservationAnalysis,
             threadAnalysis,
             hangAnalysis,
             jitAnalysis,
             weakReferenceAnalysis,
-            objectShapeAnalysis,
             moduleAnalysis,
-            dependentHandleAnalysis,
             gcHandleAnalysis,
             staticRootLeakAnalysis,
             memoryAnalysis,
@@ -142,10 +123,10 @@ internal sealed class ConfigurationResolver
             usedConfigFile,
                 effectiveInclude,
                 effectiveExclude,
-            request.DiagnosticMode,
-            indexMode)
+            request.DiagnosticMode)
         {
-            ExecutionPolicy = executionPolicy
+            ExecutionPolicy = executionPolicy,
+            CacheDirectory = fileModel?.CacheDirectory ?? request.CacheDirectory
         };
         }
         catch (Exception ex) when (ex is ArgumentException or FileNotFoundException)
@@ -196,6 +177,8 @@ internal sealed class ConfigurationResolver
         serializerOptions.Converters.Add(new JsonStringEnumConverter());
 
         string json = File.ReadAllText(configPath);
+        WarnIfLegacyProfileKeyPresent(json);
+
         CliConfigurationFileModel? model = JsonSerializer.Deserialize<CliConfigurationFileModel>(json, serializerOptions);
         if (model is null)
         {
@@ -205,30 +188,71 @@ internal sealed class ConfigurationResolver
         return model;
     }
 
+    // The AnalysisProfile tier system (Fast/Balanced/Full) was removed — every analyzer now runs
+    // exact, uncapped analysis unconditionally, so CliConfigurationFileModel no longer has a
+    // Profile property at all. A legacy top-level "Profile" key would otherwise be silently
+    // dropped by the deserializer with no signal to the user that it stopped doing anything —
+    // warn instead.
+    private static void WarnIfLegacyProfileKeyPresent(string json)
+    {
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(json, new JsonDocumentOptions
+            {
+                CommentHandling = JsonCommentHandling.Skip,
+                AllowTrailingCommas = true
+            });
+
+            foreach (JsonProperty prop in doc.RootElement.EnumerateObject())
+            {
+                if (string.Equals(prop.Name, "Profile", StringComparison.OrdinalIgnoreCase))
+                {
+                    ConsoleUx.Warning("Config key 'Profile' is deprecated and no longer has any effect — every " +
+                        "analyzer now runs exact, uncapped analysis by default. Remove it, or override specific " +
+                        "analyzer settings under the 'Analyzers' section instead.");
+                    return;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // Malformed JSON is reported by the real Deserialize call below with a clearer error.
+        }
+    }
+
     private static RetentionOptions BuildMemoryLeakFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "MemoryLeak",
-            config.MemoryLeak,
-            RetentionOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "MemoryLeak", out JsonElement section))
+            return ApplySectionOverrides(new RetentionOptions(), section);
+
+        return config.MemoryLeak is null
+            ? new RetentionOptions()
+            : ApplyOptionsOverrides(new RetentionOptions(), config.MemoryLeak);
+    }
 
 
 
     private static ReferenceChainOptions BuildReferenceChainFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "ReferenceChain",
-            config.ReferenceChain,
-            ReferenceChainOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "ReferenceChain", out JsonElement section))
+            return ApplySectionOverrides(new ReferenceChainOptions(), section);
+
+        return config.ReferenceChain is null
+            ? new ReferenceChainOptions()
+            : ApplyOptionsOverrides(new ReferenceChainOptions(), config.ReferenceChain);
+    }
 
 
 
     private static EventLeakOptions BuildEventLeakFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "EventLeak",
-            config.EventLeak,
-            EventLeakOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "EventLeak", out JsonElement section))
+            return ApplySectionOverrides(new EventLeakOptions(), section);
+
+        return config.EventLeak is null
+            ? new EventLeakOptions()
+            : ApplyOptionsOverrides(new EventLeakOptions(), config.EventLeak);
+    }
 
 
 
@@ -273,20 +297,9 @@ internal sealed class ConfigurationResolver
 
 
 
-    private static HeapIndexPrebuildMode BuildIndexPrebuildModeFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-    {
-        return config.ExecutionPolicy?.IndexPrebuildMode
-            ?? ParseHeapIndexMode(config.Indexing?.Mode)
-            ?? ParseHeapIndexMode(config.IndexMode)
-            ?? request.IndexPrebuildMode
-            ?? HeapIndexPrebuildMode.Auto;
-    }
-
     private static ExecutionPolicy BuildExecutionPolicy(
         CliConfigurationFileModel? config,
-        RetentionOptions memoryLeak,
-        ReferenceChainOptions referenceChain,
-        HeapIndexPrebuildMode indexMode)
+        RetentionOptions memoryLeak)
     {
         ExecutionPolicyModel? policy = config?.ExecutionPolicy;
 
@@ -294,9 +307,6 @@ internal sealed class ConfigurationResolver
         {
             MaxLeakScanObjects = PositiveOrNull(policy?.MaxLeakScanObjects) ?? memoryLeak.MaxLeakScanObjects,
             MaxReferenceAddresses = PositiveOrNull(policy?.MaxReferenceAddresses) ?? memoryLeak.MaxReferenceAddresses,
-            ReferenceChainMaxPathDepth = PositiveOrNull(policy?.ReferenceChainMaxPathDepth) ?? referenceChain.MaxPathDepth,
-            ReferenceChainFastModeMaxDepth = PositiveOrNull(policy?.ReferenceChainFastModeMaxDepth) ?? referenceChain.FastModeMaxDepth,
-            ReferenceChainMaxPathSearchObjects = PositiveOrNull(policy?.ReferenceChainMaxPathSearchObjects) ?? referenceChain.MaxPathSearchObjects
         };
     }
 
@@ -310,9 +320,7 @@ internal sealed class ConfigurationResolver
             modern = modernSection.Deserialize<CollectionAnalysisOptionsModel>();
         CollectionAnalysisOptionsModel? model = MergeCollectionModel(primary: modern, fallback: legacy);
 
-        AnalysisProfile profile = ResolveAnalyzerProfile(model?.Profile, config.Profile);
-        CollectionAnalysisOptions preset = CollectionAnalysisOptions.Preset(profile);
-        CollectionAnalysisOptions effective = CollectionAnalysisOptions.ApplyOverrides(preset, model);
+        CollectionAnalysisOptions effective = CollectionAnalysisOptions.ApplyOverrides(new CollectionAnalysisOptions(), model);
         effective = CollectionAnalysisOptions.Validate(effective);
 
         return effective;
@@ -320,194 +328,173 @@ internal sealed class ConfigurationResolver
 
     private static CrashAnalysisOptions BuildCrashFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
     {
-        CrashAnalysisOptionsModel? legacy = config.Crash;
-        CrashAnalysisOptionsModel? modern = null;
-        if (TryGetAnalyzerSection(config, "Crash", out JsonElement modernSection))
-            modern = modernSection.Deserialize<CrashAnalysisOptionsModel>();
-        CrashAnalysisOptionsModel? model = MergeCrashModel(primary: modern, fallback: legacy);
+        if (TryGetAnalyzerSection(config, "Crash", out JsonElement section))
+            return ApplySectionOverrides(new CrashAnalysisOptions(), section);
 
-        AnalysisProfile profile = ResolveAnalyzerProfile(model?.Profile, config.Profile);
-        CrashAnalysisOptions preset = CrashAnalysisOptions.Preset(profile);
-        CrashAnalysisOptions effective = CrashAnalysisOptions.ApplyOverrides(preset, model);
-        effective = CrashAnalysisOptions.Validate(effective);
-
-        return effective;
+        return config.Crash is null
+            ? new CrashAnalysisOptions()
+            : ApplyOptionsOverrides(new CrashAnalysisOptions(), config.Crash);
     }
 
-    private static AsyncTaskAnalysisOptions BuildAsyncTaskAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "AsyncTask",
-            config.AsyncTaskAnalysis,
-            AsyncTaskAnalysisOptions.Preset);
-
     private static AsyncStateMachineAnalysisOptions BuildAsyncStateMachineAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "AsyncStateMachine",
-            config.AsyncStateMachineAnalysis,
-            AsyncStateMachineAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "AsyncStateMachine", out JsonElement section))
+            return ApplySectionOverrides(new AsyncStateMachineAnalysisOptions(), section);
+
+        return config.AsyncStateMachineAnalysis is null
+            ? new AsyncStateMachineAnalysisOptions()
+            : ApplyOptionsOverrides(new AsyncStateMachineAnalysisOptions(), config.AsyncStateMachineAnalysis);
+    }
 
     private static ArrayAnalysisOptions BuildArrayAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "Array",
-            config.ArrayAnalysis,
-            ArrayAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "Array", out JsonElement section))
+            return ApplySectionOverrides(new ArrayAnalysisOptions(), section);
+
+        return config.ArrayAnalysis is null
+            ? new ArrayAnalysisOptions()
+            : ApplyOptionsOverrides(new ArrayAnalysisOptions(), config.ArrayAnalysis);
+    }
 
     private static BoxingAnalysisOptions BuildBoxingAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "Boxing",
-            config.BoxingAnalysis,
-            BoxingAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "Boxing", out JsonElement section))
+            return ApplySectionOverrides(new BoxingAnalysisOptions(), section);
+
+        return config.BoxingAnalysis is null
+            ? new BoxingAnalysisOptions()
+            : ApplyOptionsOverrides(new BoxingAnalysisOptions(), config.BoxingAnalysis);
+    }
 
     private static StringAnalysisOptions BuildStringAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "String",
-            config.StringAnalysis,
-            StringAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "String", out JsonElement section))
+            return ApplySectionOverrides(new StringAnalysisOptions(), section);
 
-    private static HeapTopologyAnalysisOptions BuildHeapTopologyAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "HeapTopology",
-            config.HeapTopology,
-            HeapTopologyAnalysisOptions.Preset);
-
-    private static AppDomainAnalysisOptions BuildAppDomainAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "AppDomain",
-            config.AppDomainAnalysis,
-            AppDomainAnalysisOptions.Preset);
+        return config.StringAnalysis is null
+            ? new StringAnalysisOptions()
+            : ApplyOptionsOverrides(new StringAnalysisOptions(), config.StringAnalysis);
+    }
 
     private static AllocationPatternAnalysisOptions BuildAllocationPatternAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "AllocationPattern",
-            config.AllocationPatternAnalysis,
-            AllocationPatternAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "AllocationPattern", out JsonElement section))
+            return ApplySectionOverrides(new AllocationPatternAnalysisOptions(), section);
+
+        return config.AllocationPatternAnalysis is null
+            ? new AllocationPatternAnalysisOptions()
+            : ApplyOptionsOverrides(new AllocationPatternAnalysisOptions(), config.AllocationPatternAnalysis);
+    }
 
     private static ThreadStackClusterAnalysisOptions BuildThreadStackClusterAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "ThreadStackCluster",
-            config.ThreadStackClusterAnalysis,
-            ThreadStackClusterAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "ThreadStackCluster", out JsonElement section))
+            return ApplySectionOverrides(new ThreadStackClusterAnalysisOptions(), section);
 
-    private static LockGraphAnalysisOptions BuildLockGraphAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "LockGraph",
-            config.LockGraphAnalysis,
-            LockGraphAnalysisOptions.Preset);
-
-    private static FinalizableObjectAnalysisOptions BuildFinalizableObjectAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "FinalizableObject",
-            config.FinalizableObjectAnalysis,
-            FinalizableObjectAnalysisOptions.Preset);
+        return config.ThreadStackClusterAnalysis is null
+            ? new ThreadStackClusterAnalysisOptions()
+            : ApplyOptionsOverrides(new ThreadStackClusterAnalysisOptions(), config.ThreadStackClusterAnalysis);
+    }
 
     private static GCGenerationAnalysisOptions BuildGCGenerationAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "GCGeneration",
-            config.GCGenerationAnalysis,
-            GCGenerationAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "GCGeneration", out JsonElement section))
+            return ApplySectionOverrides(new GCGenerationAnalysisOptions(), section);
 
-    private static GCRootAnalysisOptions BuildGCRootAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "GCRoot",
-            config.GCRootAnalysis,
-            GCRootAnalysisOptions.Preset);
-
-    private static LohFragmentationAnalysisOptions BuildLohFragmentationAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "LohFragmentation",
-            config.LohFragmentationAnalysis,
-            LohFragmentationAnalysisOptions.Preset);
+        return config.GCGenerationAnalysis is null
+            ? new GCGenerationAnalysisOptions()
+            : ApplyOptionsOverrides(new GCGenerationAnalysisOptions(), config.GCGenerationAnalysis);
+    }
 
     private static SegmentReservationAnalysisOptions BuildSegmentReservationAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "SegmentReservation",
-            config.SegmentReservationAnalysis,
-            SegmentReservationAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "SegmentReservation", out JsonElement section))
+            return ApplySectionOverrides(new SegmentReservationAnalysisOptions(), section);
+
+        return config.SegmentReservationAnalysis is null
+            ? new SegmentReservationAnalysisOptions()
+            : ApplyOptionsOverrides(new SegmentReservationAnalysisOptions(), config.SegmentReservationAnalysis);
+    }
 
     private static ThreadAnalysisOptions BuildThreadAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "Thread",
-            config.ThreadAnalysis,
-            ThreadAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "Thread", out JsonElement section))
+            return ApplySectionOverrides(new ThreadAnalysisOptions(), section);
+
+        return config.ThreadAnalysis is null
+            ? new ThreadAnalysisOptions()
+            : ApplyOptionsOverrides(new ThreadAnalysisOptions(), config.ThreadAnalysis);
+    }
 
     private static HangAnalysisOptions BuildHangAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "Hang",
-            config.HangAnalysis,
-            HangAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "Hang", out JsonElement section))
+            return ApplySectionOverrides(new HangAnalysisOptions(), section);
+
+        return config.HangAnalysis is null
+            ? new HangAnalysisOptions()
+            : ApplyOptionsOverrides(new HangAnalysisOptions(), config.HangAnalysis);
+    }
 
     private static JitAnalysisOptions BuildJitAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "Jit",
-            config.JitAnalysis,
-            JitAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "Jit", out JsonElement section))
+            return ApplySectionOverrides(new JitAnalysisOptions(), section);
+
+        return config.JitAnalysis is null
+            ? new JitAnalysisOptions()
+            : ApplyOptionsOverrides(new JitAnalysisOptions(), config.JitAnalysis);
+    }
 
     private static WeakReferenceAnalysisOptions BuildWeakReferenceAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "WeakReference",
-            config.WeakReferenceAnalysis,
-            WeakReferenceAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "WeakReference", out JsonElement section))
+            return ApplySectionOverrides(new WeakReferenceAnalysisOptions(), section);
 
-    private static ObjectShapeAnalysisOptions BuildObjectShapeAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "ObjectShape",
-            config.ObjectShapeAnalysis,
-            ObjectShapeAnalysisOptions.Preset);
+        return config.WeakReferenceAnalysis is null
+            ? new WeakReferenceAnalysisOptions()
+            : ApplyOptionsOverrides(new WeakReferenceAnalysisOptions(), config.WeakReferenceAnalysis);
+    }
 
     private static ModuleAnalysisOptions BuildModuleAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "Module",
-            config.ModuleAnalysis,
-            ModuleAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "Module", out JsonElement section))
+            return ApplySectionOverrides(new ModuleAnalysisOptions(), section);
 
-    private static DependentHandleAnalysisOptions BuildDependentHandleAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "DependentHandle",
-            config.DependentHandleAnalysis,
-            DependentHandleAnalysisOptions.Preset);
+        return config.ModuleAnalysis is null
+            ? new ModuleAnalysisOptions()
+            : ApplyOptionsOverrides(new ModuleAnalysisOptions(), config.ModuleAnalysis);
+    }
 
     private static GCHandleAnalysisOptions BuildGCHandleAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "GCHandle",
-            config.GCHandleAnalysis,
-            GCHandleAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "GCHandle", out JsonElement section))
+            return ApplySectionOverrides(new GCHandleAnalysisOptions(), section);
+
+        return config.GCHandleAnalysis is null
+            ? new GCHandleAnalysisOptions()
+            : ApplyOptionsOverrides(new GCHandleAnalysisOptions(), config.GCHandleAnalysis);
+    }
 
     private static StaticRootLeakAnalysisOptions BuildStaticRootLeakAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "StaticRootLeak",
-            config.StaticRootLeakAnalysis,
-            StaticRootLeakAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "StaticRootLeak", out JsonElement section))
+            return ApplySectionOverrides(new StaticRootLeakAnalysisOptions(), section);
+
+        return config.StaticRootLeakAnalysis is null
+            ? new StaticRootLeakAnalysisOptions()
+            : ApplyOptionsOverrides(new StaticRootLeakAnalysisOptions(), config.StaticRootLeakAnalysis);
+    }
 
     private static MemoryAnalysisOptions BuildMemoryAnalysisFromConfig(CliConfigurationFileModel config, AnalysisCommandRequest request)
-        => BuildAnalyzerOptionsFromConfig(
-            config,
-            "Memory",
-            config.MemoryAnalysis,
-            MemoryAnalysisOptions.Preset);
+    {
+        if (TryGetAnalyzerSection(config, "Memory", out JsonElement section))
+            return ApplySectionOverrides(new MemoryAnalysisOptions(), section);
+
+        return config.MemoryAnalysis is null
+            ? new MemoryAnalysisOptions()
+            : ApplyOptionsOverrides(new MemoryAnalysisOptions(), config.MemoryAnalysis);
+    }
 
     private static T Resolve<T>(
         bool fromFile,
@@ -529,11 +516,6 @@ internal sealed class ConfigurationResolver
         return Path.ChangeExtension(dumpPath, extension);
     }
 
-    private static AnalysisProfile ResolveAnalyzerProfile(string? analyzerProfile, string? globalProfile)
-        => ConfigurationParseHelpers.ParseAnalysisProfile(analyzerProfile)
-           ?? ConfigurationParseHelpers.ParseAnalysisProfile(globalProfile)
-           ?? AnalysisProfile.Balanced;
-
     private static bool TryGetAnalyzerSection(CliConfigurationFileModel config, string analyzerName, out JsonElement section)
     {
         section = default;
@@ -550,20 +532,6 @@ internal sealed class ConfigurationResolver
         }
 
         return false;
-    }
-
-    private static string? GetAnalyzerProfile(JsonElement section)
-    {
-        if (section.ValueKind != JsonValueKind.Object)
-            return null;
-
-        foreach (JsonProperty prop in section.EnumerateObject())
-        {
-            if (string.Equals(prop.Name, "Profile", StringComparison.OrdinalIgnoreCase) && prop.Value.ValueKind == JsonValueKind.String)
-                return prop.Value.GetString();
-        }
-
-        return null;
     }
 
     private static T ApplySectionOverrides<T>(T baseOptions, JsonElement section) where T : class
@@ -608,62 +576,6 @@ internal sealed class ConfigurationResolver
         return merged ?? baseOptions;
     }
 
-    private static T BuildAnalyzerOptionsFromConfig<T>(
-        CliConfigurationFileModel config,
-        string analyzerName,
-        T? legacyOptions,
-        Func<AnalysisProfile, T> createPreset) where T : class, new()
-    {
-        if (TryGetAnalyzerSection(config, analyzerName, out JsonElement section))
-        {
-            AnalysisProfile profile = ResolveAnalyzerProfile(GetAnalyzerProfile(section), config.Profile);
-            T preset = createPreset(profile);
-            return ApplySectionOverrides(preset, section);
-        }
-
-        AnalysisProfile globalProfile = ResolveAnalyzerProfile(analyzerProfile: null, config.Profile);
-        T fallbackPreset = createPreset(globalProfile);
-        return legacyOptions is null
-            ? fallbackPreset
-            : ApplyOptionsOverrides(fallbackPreset, legacyOptions);
-    }
-
-    private static AnalysisProfile? ParseAnalysisProfile(string? raw)
-    {
-        if (string.IsNullOrWhiteSpace(raw))
-            return null;
-
-        return raw.Trim().ToLowerInvariant() switch
-        {
-            "fast" => AnalysisProfile.Fast,
-            "balanced" => AnalysisProfile.Balanced,
-            "full" => AnalysisProfile.Full,
-            "deep" => AnalysisProfile.Full,
-            _ => throw new ArgumentException($"Invalid Analysis Profile value '{raw}' in config.")
-        };
-    }
-
-    private static CrashAnalysisOptionsModel? MergeCrashModel(CrashAnalysisOptionsModel? primary, CrashAnalysisOptionsModel? fallback)
-    {
-        if (primary is null)
-            return fallback;
-        if (fallback is null)
-            return primary;
-
-        return new CrashAnalysisOptionsModel
-        {
-            Profile = primary.Profile ?? fallback.Profile,
-            MaxExceptionsPerType = primary.MaxExceptionsPerType ?? fallback.MaxExceptionsPerType,
-            TopExceptionTypesToInclude = primary.TopExceptionTypesToInclude ?? fallback.TopExceptionTypesToInclude,
-            MaxDetailedExceptionsPerType = primary.MaxDetailedExceptionsPerType ?? fallback.MaxDetailedExceptionsPerType,
-            MaxOriginalStackFramesToPrint = primary.MaxOriginalStackFramesToPrint ?? fallback.MaxOriginalStackFramesToPrint,
-            MaxCurrentThreadFramesToPrint = primary.MaxCurrentThreadFramesToPrint ?? fallback.MaxCurrentThreadFramesToPrint,
-            TopCrashThreadCandidates = primary.TopCrashThreadCandidates ?? fallback.TopCrashThreadCandidates,
-            TopDetailedExceptionInstances = primary.TopDetailedExceptionInstances ?? fallback.TopDetailedExceptionInstances,
-            IncludeAllTypesInPayload = primary.IncludeAllTypesInPayload ?? fallback.IncludeAllTypesInPayload,
-        };
-    }
-
     private static CollectionAnalysisOptionsModel? MergeCollectionModel(CollectionAnalysisOptionsModel? primary, CollectionAnalysisOptionsModel? fallback)
     {
         if (primary is null)
@@ -673,14 +585,11 @@ internal sealed class ConfigurationResolver
 
         return new CollectionAnalysisOptionsModel
         {
-            Profile = primary.Profile ?? fallback.Profile,
             WasteThresholdBytes = primary.WasteThresholdBytes ?? fallback.WasteThresholdBytes,
             TopWastefulCollectionsToShow = primary.TopWastefulCollectionsToShow ?? fallback.TopWastefulCollectionsToShow,
             MaxDegreeOfParallelism = primary.MaxDegreeOfParallelism ?? fallback.MaxDegreeOfParallelism,
-            IncludeQueueAnalysis = primary.IncludeQueueAnalysis ?? fallback.IncludeQueueAnalysis,
             SurfaceProbingExceptions = primary.SurfaceProbingExceptions ?? fallback.SurfaceProbingExceptions,
             PathAnalysisTopN = primary.PathAnalysisTopN ?? fallback.PathAnalysisTopN,
-            ReferenceChainOptions = primary.ReferenceChainOptions ?? fallback.ReferenceChainOptions,
             SerializeHeapAccess = primary.SerializeHeapAccess ?? fallback.SerializeHeapAccess,
         };
     }

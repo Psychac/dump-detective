@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text;
@@ -24,6 +25,11 @@ internal sealed record HtmlRenderSettings(
 /// </summary>
 internal sealed class HtmlReportRenderer : IReportFormatter
 {
+    // Below this size the embedded payload stays plain JSON so small reports remain
+    // human-diffable/greppable straight out of the HTML file. See
+    // docs/refactor/report-payload-size-reduction-design.md (F7).
+    private const int CompressionThresholdBytes = 200_000;
+
     private static readonly string _template = EmbeddedResourceLoader.LoadText("report.html");
     private static readonly string _css = BuildInlinedCss();
     private static readonly string _js = BuildInlinedBundle();
@@ -54,6 +60,37 @@ internal sealed class HtmlReportRenderer : IReportFormatter
             RenderMode = shouldPreRender ? "prerendered" : "client",
             ReportStyleVersion = settings.StyleVersion == ReportStyleVersion.V2 ? "v2" : "v1"
         };
+
+        // Skip string pooling for pre-rendered reports: their table markup is already baked
+        // into preAnalyzers as static HTML (ReportHtmlShared.RenderAnalyzerSections, above,
+        // using the original unpooled `doc`), so client-side interactivity that re-reads the
+        // embedded payload directly would need its own pool-resolution path we don't build here.
+        if (!shouldPreRender)
+        {
+            (IReadOnlyList<ReportDomainSection>? pooledDomains,
+                IReadOnlyList<AnalyzerDetailSection>? pooledTrendSections,
+                IReadOnlyList<string>? stringPool) = ReportStringPool.Apply(
+                    docForClient.Domains,
+                    (docForClient as TrendReportDocument)?.TrendAnalyzerSections);
+
+            if (stringPool != null)
+            {
+                docForClient = docForClient with { Domains = pooledDomains, Strings = stringPool };
+                if (docForClient is TrendReportDocument pooledTrendDoc && pooledTrendSections != null)
+                    docForClient = pooledTrendDoc with { TrendAnalyzerSections = pooledTrendSections };
+            }
+
+            docForClient = docForClient with { Domains = EventLeakSubscriberPool.Apply(docForClient.Domains) };
+            if (docForClient is TrendReportDocument trendForSubscriberPool)
+            {
+                docForClient = trendForSubscriberPool with
+                {
+                    TrendAnalyzerSections = EventLeakSubscriberPool.Apply(trendForSubscriberPool.TrendAnalyzerSections)
+                        ?? trendForSubscriberPool.TrendAnalyzerSections
+                };
+            }
+        }
+
         reportJson = JsonSerializer.Serialize(docForClient, ReportJsonContext.Default.AnalysisReportDocument);
         reportJson = CompactReportJson(docForClient, reportJson);
 
@@ -80,13 +117,31 @@ internal sealed class HtmlReportRenderer : IReportFormatter
         // }
         string payloadJson = "{\"report\":" + reportJson + ",\"perDumpDocs\":" + perDumpJson + "}";
 
+        // Pre-rendered reports already duplicate their content directly into the HTML body,
+        // so keep their embedded payload plain rather than adding a decompression dependency
+        // to a path that doesn't need the byte savings as much.
+        bool compressPayload = !shouldPreRender
+            && Encoding.UTF8.GetByteCount(payloadJson) > CompressionThresholdBytes;
+        string reportJsonEncoding = compressPayload ? "gzip-base64" : "json";
+        string reportJsonBody = compressPayload ? GzipCompressToBase64(payloadJson) : payloadJson;
+
         return _template
             .Replace("{{CSS}}", _css)
-            .Replace("{{REPORT_JSON}}", payloadJson)
+            .Replace("{{REPORT_JSON_ENCODING}}", reportJsonEncoding)
+            .Replace("{{REPORT_JSON}}", reportJsonBody)
             .Replace("{{JS}}", _js)
             .Replace("{{PRE_RENDERED_HEALTH_SCORECARD}}", preHealthScorecard)
             .Replace("{{PRE_RENDERED_FINDINGS}}", preFindings)
             .Replace("{{PRE_RENDERED_ANALYZER_SECTIONS}}", preAnalyzers);
+    }
+
+    private static string GzipCompressToBase64(string text)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(text);
+        using var output = new MemoryStream();
+        using (var gzip = new GZipStream(output, CompressionLevel.SmallestSize, leaveOpen: true))
+            gzip.Write(raw, 0, raw.Length);
+        return Convert.ToBase64String(output.ToArray());
     }
 
     private static string CompactReportJson(AnalysisReportDocument doc, string reportJson)
@@ -184,6 +239,12 @@ internal sealed class HtmlReportRenderer : IReportFormatter
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.renderers.sections.js")));
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.toc.js")));
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.integrity.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.motion.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.filters.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.search.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.keyboard.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.actions.js")));
+            sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.tables.js")));
             sb.AppendLine(StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.ui.js")));
 
             string main = StripModuleKeywords(EmbeddedResourceLoader.LoadText("report.main.js"));

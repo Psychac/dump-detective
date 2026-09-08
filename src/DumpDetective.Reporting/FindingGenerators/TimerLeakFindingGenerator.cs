@@ -3,7 +3,7 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 
-namespace DumpDetective.Analysis.FindingGenerators;
+namespace DumpDetective.Reporting.FindingGenerators;
 
 internal sealed class TimerLeakFindingGenerator : IFindingGenerator
 {
@@ -17,22 +17,35 @@ internal sealed class TimerLeakFindingGenerator : IFindingGenerator
 
         var findings = new List<InsightFinding>(2);
 
-        if (r.TotalTimers >= 100)
+        if (r.LogicalTimerCount >= 100)
         {
-            FindingSeverity severity = r.TotalTimers >= 250 ? FindingSeverity.Critical : FindingSeverity.Warning;
+            FindingSeverity severity = r.LogicalTimerCount >= 250 ? FindingSeverity.Critical : FindingSeverity.Warning;
+
+            Evidence? topEvidence = null;
+            int topCount = -1;
+            for (int i = 0; i < r.ByType.Count; i++)
+            {
+                TimerObjectTypeSummary type = r.ByType[i];
+                if (type.Count > topCount)
+                {
+                    topCount = type.Count;
+                    topEvidence = type.Evidence;
+                }
+            }
 
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
                 Category: "Infrastructure",
                 Severity: severity,
-                Title: $"{r.TotalTimers:N0} timer-related objects on managed heap",
-                Evidence: $"Threading.Timer={r.ThreadingTimerCount:N0}, Timers.Timer={r.TimersTimerCount:N0}, " +
-                          $"TimerQueueTimer={r.TimerQueueTimerCount:N0}, TimerHolder={r.TimerHolderCount:N0}, Other={r.OtherTimerCount:N0}.",
+                Title: $"{r.LogicalTimerCount:N0} logical timers (undisposed) on managed heap",
+                Evidence: $"Raw object count: {r.TotalTimers:N0} (Threading.Timer={r.ThreadingTimerCount:N0}, Timers.Timer={r.TimersTimerCount:N0}, " +
+                          $"TimerQueueTimer={r.TimerQueueTimerCount:N0}, TimerHolder={r.TimerHolderCount:N0}, PeriodicTimer={r.PeriodicTimerCount:N0}, Other={r.OtherTimerCount:N0}).",
                 Recommendation: "Dispose timers explicitly when they are no longer needed. " +
                                 "Avoid creating per-request or per-entity timers; use shared scheduling services where possible.",
                 Tags: ["infrastructure", "timer", "leak", "dispose"],
-                MetricValue: r.TotalTimers,
-                MetricUnit: "timers"));
+                MetricValue: r.LogicalTimerCount,
+                MetricUnit: "timers",
+                ConfidenceScore: EvidenceConfidence.Compute(topEvidence)));
         }
 
         int queuePressure = r.TimerHolderCount + r.TimerQueueTimerCount;

@@ -9,7 +9,11 @@ internal sealed record ArrayTypeProfile(
     int Rank,
     int Count,
     ulong TotalBytes,
-    bool IsMultiDimensional);
+    bool IsMultiDimensional,
+    double PercentOfTotalHeapBytes = 0,
+    double Gen2PlusLohPercent = 0,
+    double AverageInstanceSize = 0,
+    string ModuleName = "Unknown");
 
 internal sealed record LargeArrayEntry(
     ulong Address,
@@ -30,9 +34,12 @@ internal sealed record ArrayDomainResult(
     int TotalArrayObjects,
     ulong TotalArrayBytes,
     int MultiDimArrayCount,
+    ulong MultiDimArrayBytes,
     int LohArrayCount,
     ulong LohArrayBytes,
     IReadOnlyList<ArrayTypeProfile> TopArrayTypesBySize,
     IReadOnlyList<LargeArrayEntry> TopLargeArrays,
     IReadOnlyList<SparseArrayEntry> TopSparseArrays,
-    bool ScanLimited) : AnalyzerDomainResult;
+    int PinnedArrayCount = 0,
+    ulong PinnedArrayBytes = 0,
+    IReadOnlyList<LargeArrayEntry>? TopPinnedArrays = null) : AnalyzerDomainResult;

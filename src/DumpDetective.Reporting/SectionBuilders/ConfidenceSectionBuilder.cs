@@ -4,14 +4,13 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using DumpDetective.Reporting.Services;
 using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSectionBuilder
 {
-    public IReadOnlyList<string> SourceAnalyzers => [];
-
     public string SectionId => "Z3";
     public string DisplayTitle => "Known Limitations";
     public int SortOrder => 1750;
@@ -78,37 +77,38 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
                 continue;
 
             AnalyzerMemoryStats stats = run.MemoryStats;
+            // "Allocated" leads and the old "MH Delta" column is gone: a managed-heap delta is a net
+            // heap-SIZE change, so an allocation-heavy analyzer whose work triggers a gen2 collection
+            // reports a negative number while costing gigabytes. Allocated bytes is monotonic and
+            // attributes correctly. See docs/analysis/phase1-redesigns/dominator-tree-memory-profile.md § 1.
             memoryRows.Add(Row(
                 Cell(run.AnalyzerName),
+                Cell(FormatHelper.FormatBytes((ulong)Math.Max(0, stats.AllocatedDelta)), stats.AllocatedDelta),
                 Cell(FormatHelper.FormatBytes((ulong)Math.Max(0, stats.WorkingSetBefore)), stats.WorkingSetBefore),
                 Cell(FormatHelper.FormatBytes((ulong)Math.Max(0, stats.WorkingSetAfter)), stats.WorkingSetAfter),
                 Cell(FormatHelper.FormatBytes((ulong)Math.Max(0, stats.WorkingSetDelta)), stats.WorkingSetDelta),
                 Cell(FormatHelper.FormatBytes((ulong)Math.Max(0, stats.ManagedHeapBefore)), stats.ManagedHeapBefore),
-                Cell(FormatHelper.FormatBytes((ulong)Math.Max(0, stats.ManagedHeapAfter)), stats.ManagedHeapAfter),
-                Cell(FormatHelper.FormatBytes((ulong)Math.Max(0, stats.ManagedHeapDelta)), stats.ManagedHeapDelta)));
+                Cell(FormatHelper.FormatBytes((ulong)Math.Max(0, stats.ManagedHeapAfter)), stats.ManagedHeapAfter)));
         }
 
         if (memoryRows.Count > 0)
         {
             compactTables.Add(STCompact("Analyzer memory impact",
-                new[] { CH("Analyzer"), CH("WS Before","bytes"), CH("WS After","bytes"), CH("WS Delta","bytes"), CH("MH Before","bytes"), CH("MH After","bytes"), CH("MH Delta","bytes") },
+                new[] { CH("Analyzer"), CH("Allocated","bytes"), CH("WS Before","bytes"), CH("WS After","bytes"), CH("WS Delta","bytes"), CH("MH Before","bytes"), CH("MH After","bytes") },
                 memoryRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         blocks.Add(T("Measured = 1.0, High-confidence heuristic = 0.8, Partial/bounded = 0.5, Speculative < 0.5."));
 
         var limitationRows = new List<TableRow>();
-        AddLimitation(limitationRows, "Retention", results.Get<RetentionDomainResult>() is RetentionDomainResult retention && (retention.SkippedReferenceAddresses > 0 || retention.ObjectScanCapped || retention.ReferenceCountingSkipped), BuildRetentionText(results.Get<RetentionDomainResult>()));
-        AddLimitation(limitationRows, "GC roots", results.Get<GCRootDomainResult>() is GCRootDomainResult gcRoot && (gcRoot.PathSearchCapped || gcRoot.PathSearchCappedCount > 0), BuildRootText(results.Get<GCRootDomainResult>()));
-        AddLimitation(limitationRows, "Hang / task scan", results.Get<HangDomainResult>() is HangDomainResult hang && (!hang.RuntimeThreadPoolDataAvailable || hang.TaskScanLimited), BuildHangText(results.Get<HangDomainResult>()));
-        AddLimitation(limitationRows, "Async tasks", results.Get<AsyncTaskDomainResult>() is AsyncTaskDomainResult asyncTasks && asyncTasks.TaskScanLimited, BuildAsyncTaskText(results.Get<AsyncTaskDomainResult>()));
-        AddLimitation(limitationRows, "Async state machines", results.Get<AsyncStateMachineDomainResult>() is AsyncStateMachineDomainResult asyncState && asyncState.ScanLimited, BuildAsyncStateText(results.Get<AsyncStateMachineDomainResult>()));
-        AddLimitation(limitationRows, "Arrays", results.Get<ArrayDomainResult>() is ArrayDomainResult array && array.ScanLimited, BuildArrayText(results.Get<ArrayDomainResult>()));
+        AddLimitation(limitationRows, "Retention", results.Get<DominatorDomainResult>() is DominatorDomainResult retention && (retention.ApproximatedReferenceAddresses > 0 || retention.ObjectScanCapped || retention.ReferenceCountingSkipped), BuildRetentionText(results.Get<DominatorDomainResult>()));
+        AddLimitation(limitationRows, "GC roots", results.Get<GCRootDomainResult>() is GCRootDomainResult gcRoot && (gcRoot.SubgraphWalkCapped || gcRoot.SubgraphWalkCappedCount > 0), BuildRootText(results.Get<GCRootDomainResult>()));
+        AddLimitation(limitationRows, "Hang / task scan", results.Get<HangDomainResult>() is HangDomainResult hang && !hang.RuntimeThreadPoolDataAvailable, BuildHangText(results.Get<HangDomainResult>()));
 
         if (limitationRows.Count > 0)
         {
             compactTables.Add(STCompact("Current bounded-scan signals",
-                new[] { CH("Area"), CH("Flagged"), CH("What it means") },
+                new[] { CH("Area"), CH("Flagged"), CH("Confidence", "number"), CH("What it means") },
                 limitationRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -130,13 +130,16 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
         if (!flagged)
             return;
 
+        (double score, _) = ConfidenceScoring.Compute(0.8, ConfidenceScoring.F(flagged, 0.3, text));
+
         rows.Add(Row(
             Cell(area),
             Cell("Yes"),
+            Cell(score.ToString("F2"), score),
             Cell(text)));
     }
 
-    private static string BuildRetentionText(RetentionDomainResult? retention)
+    private static string BuildRetentionText(DominatorDomainResult? retention)
     {
         if (retention is null)
             return "No retention analyzer result available.";
@@ -145,10 +148,10 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
             return "Incoming-reference counting was skipped because the disk-backed index would make full reverse counting too expensive.";
 
         if (retention.ObjectScanCapped)
-            return $"Incoming-reference counting hit the scan cap after {retention.SkippedReferenceAddresses:N0} skipped addresses; highly-referenced-object counts may be partial.";
+            return "Incoming-reference counting hit the object-scan cap (MaxLeakScanObjects); highly-referenced-object counts may be partial.";
 
-        if (retention.SkippedReferenceAddresses > 0)
-            return $"Reference counting skipped {retention.SkippedReferenceAddresses:N0} addresses; retention counts may be partial.";
+        if (retention.ApproximatedReferenceAddresses > 0)
+            return $"Reference counting approximated {retention.ApproximatedReferenceAddresses:N0} addresses' counts (bounded-error, not dropped) after the tracking-table capacity was reached.";
 
         return "Retention metrics are bounded but available.";
     }
@@ -158,8 +161,8 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
         if (gcRoot is null)
             return "No GC root result available.";
 
-        if (gcRoot.PathSearchCapped)
-            return $"GC root path search was capped after {gcRoot.PathSearchCappedCount:N0} targets; deeper paths may be missing.";
+        if (gcRoot.SubgraphWalkCapped)
+            return $"GC root path search was capped after {gcRoot.SubgraphWalkCappedCount:N0} targets; deeper paths may be missing.";
 
         return "GC root paths are bounded and selective.";
     }
@@ -172,39 +175,7 @@ internal sealed class ConfidenceSectionBuilder : SectionBuilderBase, IReportSect
         if (!hang.RuntimeThreadPoolDataAvailable)
             return "Runtime thread-pool data was not available; thread-pool health may be approximate.";
 
-        if (hang.TaskScanLimited)
-            return "Task scanning was limited; queued work items and continuation totals may be partial.";
-
         return "Thread-pool and task metrics are bounded.";
     }
 
-    private static string BuildAsyncTaskText(AsyncTaskDomainResult? asyncTasks)
-    {
-        if (asyncTasks is null)
-            return "No async task result available.";
-
-        return asyncTasks.TaskScanLimited
-            ? "Async task scanning hit its cap; orphan and continuation totals may be partial."
-            : "Async task scan completed within the configured cap.";
-    }
-
-    private static string BuildAsyncStateText(AsyncStateMachineDomainResult? asyncState)
-    {
-        if (asyncState is null)
-            return "No async state-machine result available.";
-
-        return asyncState.ScanLimited
-            ? "Async state-machine type scan was capped; top-type and capture summaries may be partial."
-            : "Async state-machine scan completed within the configured cap.";
-    }
-
-    private static string BuildArrayText(ArrayDomainResult? array)
-    {
-        if (array is null)
-            return "No array result available.";
-
-        return array.ScanLimited
-            ? "Array scanning was capped; sparse-array and large-array lists may be partial."
-            : "Array scan completed within the configured cap.";
-    }
 }

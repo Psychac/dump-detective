@@ -1,4 +1,4 @@
-using DumpDetective.Analysis.FindingGenerators;
+using DumpDetective.Reporting.FindingGenerators;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Enums;
 
@@ -22,17 +22,19 @@ public sealed class WeakReferenceFindingGeneratorTests
     }
 
     [Fact]
-    public void Generate_WithSignals_ReturnsOverviewAndTopDetail()
+    public void Generate_WithMultipleSignals_ReturnsAllSorted()
     {
         var gen = new WeakReferenceFindingGenerator();
-        var result = BuildResult(total: 5000, alive: 300, dead: 4700, ratio: 0.94, stale: 900, dependentDeadKeys: 25);
+        // Use 50k dead handles to trigger both ratio and absolute count thresholds
+        var result = BuildResult(total: 55000, alive: 5000, dead: 50000, ratio: 0.91, stale: 900, dependentDeadKeys: 25);
 
         var findings = gen.Generate(result);
 
-        findings.Should().HaveCount(2);
+        findings.Should().HaveCount(4);
         findings[0].Title.Should().Contain("overview");
-        findings[1].Title.Should().Contain("dead weak handle targets");
-        findings[0].Severity.Should().Be(FindingSeverity.Critical);
+        findings[1].Severity.Should().Be(FindingSeverity.Critical); // High proportion (ratio >= 0.8)
+        findings[2].Severity.Should().Be(FindingSeverity.Warning);  // High absolute count (50k, < 100k threshold)
+        findings[3].Severity.Should().Be(FindingSeverity.Info);     // Dependent handles
     }
 
     private static WeakReferenceDomainResult BuildResult(
@@ -55,6 +57,7 @@ public sealed class WeakReferenceFindingGeneratorTests
             TopWeakTargetTypes: [],
             TopStaleWrapperHolderTypes: [],
             DependentHandleDeadKeyCount: dependentDeadKeys,
-            ScanCapped: false);
+            PhaseBFallbackUsed: false,
+            PhaseBSkipped: false);
     }
 }

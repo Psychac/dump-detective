@@ -27,22 +27,26 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
         };
 
         SectionLeadFinding? leadFinding = null;
-        if (asyncTasks.MaxContinuationDepth > 50)
+        if (asyncTasks.MaxContinuationDepth >= 15)
         {
             leadFinding = new SectionLeadFinding(
                 Severity: "Warning",
                 Title: $"Deep continuation chain detected (depth {asyncTasks.MaxContinuationDepth:N0})",
-                Summary: $"Max continuation chain depth is {asyncTasks.MaxContinuationDepth:N0}, exceeding the 50-hop warning threshold.",
+                Summary: $"Max continuation chain depth is {asyncTasks.MaxContinuationDepth:N0}, exceeding the 15-hop warning threshold.",
                 Recommendation: "Inspect the deepest chain table below. Deep chains can indicate async deadlocks or unbounded recursive continuations.",
                 ConfidenceSymbol: "●●●●",
                 ConfidenceScore: 0.85,
-                Caveats: asyncTasks.TaskScanLimited ? ["Task scan was limited; chain depth may be underestimated."] : []);
+                Caveats: []);
         }
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
             ["total_tasks"] = new NumericMetricValue(asyncTasks.TotalTasks, MetricUnit.Count),
             ["pending_tasks"] = new NumericMetricValue(asyncTasks.PendingTasks, MetricUnit.Count),
+            ["pending_gen0"] = new NumericMetricValue(asyncTasks.PendingGen0, MetricUnit.Count),
+            ["pending_gen1"] = new NumericMetricValue(asyncTasks.PendingGen1, MetricUnit.Count),
+            ["pending_gen2"] = new NumericMetricValue(asyncTasks.PendingGen2, MetricUnit.Count),
+            ["pending_loh"] = new NumericMetricValue(asyncTasks.PendingLOH, MetricUnit.Count),
             ["running_tasks"] = new NumericMetricValue(asyncTasks.RunningTasks, MetricUnit.Count),
             ["faulted_tasks"] = new NumericMetricValue(asyncTasks.FaultedTasks, MetricUnit.Count),
             ["canceled_tasks"] = new NumericMetricValue(asyncTasks.CanceledTasks, MetricUnit.Count),
@@ -51,6 +55,13 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
             ["total_task_continuations"] = new NumericMetricValue(asyncTasks.TotalTaskContinuations, MetricUnit.Count),
             ["max_continuation_depth"] = new NumericMetricValue(asyncTasks.MaxContinuationDepth, MetricUnit.Count),
             ["avg_continuation_depth"] = new NumericMetricValue(asyncTasks.AvgContinuationDepth, MetricUnit.Custom, asyncTasks.AvgContinuationDepth.ToString("F1")),
+            ["depth_sample_count"] = new NumericMetricValue(asyncTasks.DepthSampleCount, MetricUnit.Count),
+            ["total_tcs"] = new NumericMetricValue(asyncTasks.TotalTaskCompletionSources, MetricUnit.Count),
+            ["unresolved_tcs"] = new NumericMetricValue(asyncTasks.UnresolvedTaskCompletionSources, MetricUnit.Count),
+            ["unresolved_tcs_gen2"] = new NumericMetricValue(asyncTasks.UnresolvedTcsGen2Count, MetricUnit.Count),
+            ["total_vts"] = new NumericMetricValue(asyncTasks.TotalValueTaskSources, MetricUnit.Count),
+            ["pending_vts"] = new NumericMetricValue(asyncTasks.PendingValueTaskSources, MetricUnit.Count),
+            ["pending_vts_gen2"] = new NumericMetricValue(asyncTasks.PendingVtsGen2Count, MetricUnit.Count),
         };
 
         compactTables.Add(STCompact(
@@ -64,6 +75,20 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
                 R("RanToCompletion", asyncTasks.CompletedTasks),
                 R("Orphaned", asyncTasks.OrphanedTasks),
             }));
+
+        // Pending task generation distribution
+        if (asyncTasks.PendingTasks > 0)
+        {
+            compactTables.Add(STCompact(
+                "Pending task GC generation distribution",
+                new[] { CH("Generation"), CH("Count","number"), CH("Percentage") },
+                new[] {
+                    R("Gen0 (young)", asyncTasks.PendingGen0, $"{(asyncTasks.PendingGen0 * 100.0 / asyncTasks.PendingTasks):F1}%"),
+                    R("Gen1", asyncTasks.PendingGen1, $"{(asyncTasks.PendingGen1 * 100.0 / asyncTasks.PendingTasks):F1}%"),
+                    R("Gen2 (old)", asyncTasks.PendingGen2, $"{(asyncTasks.PendingGen2 * 100.0 / asyncTasks.PendingTasks):F1}%"),
+                    R("LOH (large)", asyncTasks.PendingLOH, $"{(asyncTasks.PendingLOH * 100.0 / asyncTasks.PendingTasks):F1}%"),
+                }));
+        }
 
         if (asyncTasks.TopContinuationTypes.Count > 0)
         {
@@ -97,6 +122,19 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
             compactTables.Add(STCompact("Pending task types", new[] { CH("Type"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
+        if (asyncTasks.TopPendingTaskTypesByBytes is { Count: > 0 } byBytes)
+        {
+            var rows = new List<TableRow>(byBytes.Count);
+            for (int i = 0; i < byBytes.Count; i++)
+            {
+                rows.Add(Row(
+                    Cell(byBytes[i].Name),
+                    Cell(FormatBytes((ulong)byBytes[i].TotalBytes), byBytes[i].TotalBytes),
+                    Cell(byBytes[i].Count.ToString("N0"), byBytes[i].Count)));
+            }
+            compactTables.Add(STCompact("Pending task types by retained bytes", new[] { CH("Type"), CH("Total Size","bytes"), CH("Count","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
         if (asyncTasks.TopFaultedTaskTypes.Count > 0)
         {
             var rows = new List<TableRow>(asyncTasks.TopFaultedTaskTypes.Count);
@@ -119,13 +157,47 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
                     Cell(snapshot.ExceptionType ?? "—"),
                     Cell(snapshot.ExceptionMessage is null ? "—" : FormatHelper.TruncateString(snapshot.ExceptionMessage, 80))));
             }
+
             compactTables.Add(STCompact("Orphaned tasks",
                 new[] { CH("Address"), CH("Task Type"), CH("Result Type"), CH("Size","bytes"), CH("Exception Type"), CH("Exception Message") },
                 rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
-        if (asyncTasks.TaskScanLimited)
-            blocks.Add(T("Task scanning was limited; orphan and continuation totals may be partial."));
+        if (asyncTasks.TopUnresolvedTaskCompletionSources is { Count: > 0 } unresolvedTcs)
+        {
+            var rows = new List<TableRow>(unresolvedTcs.Count);
+            for (int i = 0; i < unresolvedTcs.Count; i++)
+            {
+                UnresolvedTcsSnapshot snapshot = unresolvedTcs[i];
+                rows.Add(Row(
+                    Cell($"0x{snapshot.Address:X}"),
+                    Cell(snapshot.TypeName),
+                    Cell(FormatBytes(snapshot.Size), (long)Math.Min(snapshot.Size, long.MaxValue)),
+                    Cell(snapshot.Generation == 3 ? "LOH" : $"Gen{snapshot.Generation}", snapshot.Generation)));
+            }
+
+            compactTables.Add(STCompact("Unresolved TaskCompletionSource instances",
+                new[] { CH("Address"), CH("Type"), CH("Size","bytes"), CH("Generation") },
+                rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
+        if (asyncTasks.TopPendingValueTaskSources is { Count: > 0 } pendingVts)
+        {
+            var rows = new List<TableRow>(pendingVts.Count);
+            for (int i = 0; i < pendingVts.Count; i++)
+            {
+                PendingValueTaskSourceSnapshot snapshot = pendingVts[i];
+                rows.Add(Row(
+                    Cell($"0x{snapshot.Address:X}"),
+                    Cell(snapshot.TypeName),
+                    Cell(FormatBytes(snapshot.Size), (long)Math.Min(snapshot.Size, long.MaxValue)),
+                    Cell(snapshot.Generation == 3 ? "LOH" : $"Gen{snapshot.Generation}", snapshot.Generation)));
+            }
+
+            compactTables.Add(STCompact("Pending IValueTaskSource instances",
+                new[] { CH("Address"), CH("Type"), CH("Size","bytes"), CH("Generation") },
+                rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
 
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,

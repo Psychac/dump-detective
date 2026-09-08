@@ -10,9 +10,13 @@ namespace DumpDetective.Reporting.SectionBuilders;
 
 internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
-    public string AnalyzerName => "LOH Fragmentation Analysis";
-    public string DisplayTitle => "LOH Fragmentation";
+    public string AnalyzerName => "LOH & POH Fragmentation Analysis";
+    public string DisplayTitle => "LOH & POH Fragmentation";
     public int SortOrder => 400;
+
+    // Above this share of free gaps under 1 KB, the free space is effectively unusable for any
+    // real LOH/POH allocation regardless of overall fragmentation % — worth a dedicated note.
+    private const double SmallGapDominanceThresholdPercent = 80;
 
     public bool CanHandle(AnalyzerDomainResult result) => result is LohFragmentationDomainResult;
 
@@ -43,11 +47,13 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
                 var s = segments[i];
                 segRows.Add(new TableRow([
                     Cell($"0x{s.Address:x16}"),
-                    Cell(FormatHelper.FormatBytes(d.TotalBytes / (ulong)Math.Max(1, d.SegmentCount))),
+                    Cell(KindLabel(s.Kind)),
+                    Cell(FormatHelper.FormatBytes(s.TotalBytes), (long)s.TotalBytes),
                     Cell($"{s.FragmentationPercent:F1}%", s.FragmentationPercent),
-                    Cell(FormatHelper.FormatBytes(s.LargestFreeBlock), (long)s.LargestFreeBlock)]));
+                    Cell(FormatHelper.FormatBytes(s.LargestFreeBlock), (long)s.LargestFreeBlock),
+                    Cell(s.LargestFreeBlockAddress == 0 ? "-" : $"0x{s.LargestFreeBlockAddress:x16}")]));
             }
-            compactTables.Add(STCompact("Top fragmented segments", new[] { CH("Address"), CH("Size","bytes"), CH("Frag %", "number", "percent"), CH("Largest Free Block","bytes") }, segRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+            compactTables.Add(STCompact("Top fragmented segments", new[] { CH("Address"), CH("Kind"), CH("Size","bytes"), CH("Frag %", "number", "percent"), CH("Largest Free Block","bytes"), CH("Largest Free Block Address") }, segRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
 
             var heatmapItems = new List<object>(segments.Count);
             for (int i = 0; i < segments.Count; i++)
@@ -66,12 +72,30 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
                 })));
         }
 
-        if (d.FragmentationPercent >= 40)
-            blocks.Add(T("LOH fragmentation is critically high — compaction or large-object pooling recommended."));
-        else if (d.FragmentationPercent >= 20)
-            blocks.Add(T("LOH fragmentation is elevated — monitor allocation patterns."));
+        var kindBreakdown = d.KindBreakdown ?? [];
+        if (kindBreakdown.Count > 0)
+        {
+            var kindRows = new List<TableRow>(kindBreakdown.Count);
+            for (int i = 0; i < kindBreakdown.Count; i++)
+            {
+                var k = kindBreakdown[i];
+                kindRows.Add(new TableRow([
+                    Cell(KindLabel(k.Kind)),
+                    Cell($"{k.SegmentCount:N0}", k.SegmentCount),
+                    Cell(FormatHelper.FormatBytes(k.TotalBytes), (long)k.TotalBytes),
+                    Cell(FormatHelper.FormatBytes(k.FreeBytes), (long)k.FreeBytes),
+                    Cell($"{k.FragmentationPercent:F1}%", k.FragmentationPercent),
+                    Cell(FormatHelper.FormatBytes(k.LargestFreeBlock), (long)k.LargestFreeBlock)]));
+            }
+            compactTables.Add(STCompact("LOH vs. POH breakdown", new[] { CH("Kind"), CH("Segments","number"), CH("Total Bytes","bytes"), CH("Free Bytes","bytes"), CH("Frag %", "number", "percent"), CH("Largest Free Block","bytes") }, kindRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+        }
+
+        if (d.FragmentationPercent >= 30)
+            blocks.Add(T("LOH/POH fragmentation is critically high — compaction or large-object pooling recommended."));
+        else if (d.FragmentationPercent >= 15)
+            blocks.Add(T("LOH/POH fragmentation is elevated — monitor allocation patterns."));
         else
-            blocks.Add(T("LOH fragmentation is within normal range."));
+            blocks.Add(T("LOH/POH fragmentation is within normal range."));
 
         var histogram = d.FreeGapHistogram ?? [];
         if (histogram.Count > 0)
@@ -89,6 +113,31 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
                     Cell($"{pct:F1}%")]));
             }
             compactTables.Add(STCompact("Free-gap size distribution", new[] { CH("Gap Size Range"), CH("Count","number"), CH("% of Gaps", "number", "percent") }, hRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+
+            int subKbGaps = 0;
+            for (int i = 0; i < histogram.Count; i++)
+                if (histogram[i].GapSizeRange == "< 1 KB")
+                    subKbGaps = histogram[i].GapCount;
+            double subKbPct = totalGaps == 0 ? 0 : subKbGaps * 100.0 / totalGaps;
+            if (subKbPct > SmallGapDominanceThresholdPercent)
+                blocks.Add(T($"{subKbPct:F0}% of free gaps are under 1 KB — the free space is fragmented into slivers too small to satisfy any meaningful LOH/POH allocation without compaction."));
+        }
+
+        var largeObjectTypes = d.TopLargeObjectTypes ?? [];
+        if (largeObjectTypes.Count > 0)
+        {
+            var typeRows = new List<TableRow>(largeObjectTypes.Count);
+            for (int i = 0; i < largeObjectTypes.Count; i++)
+            {
+                var type = largeObjectTypes[i];
+                double pctOfLoh = d.TotalBytes == 0 ? 0 : type.TotalBytes * 100.0 / d.TotalBytes;
+                typeRows.Add(new TableRow([
+                    Cell(type.TypeName),
+                    Cell($"{type.ObjectCount:N0}", type.ObjectCount),
+                    Cell(FormatHelper.FormatBytes(type.TotalBytes), (long)type.TotalBytes),
+                    Cell($"{pctOfLoh:F1}%", pctOfLoh)]));
+            }
+            compactTables.Add(STCompact("LOH consumption by type", new[] { CH("Type"), CH("Count","number"), CH("Total Bytes","bytes"), CH("% of LOH", "number", "percent") }, typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
         var largeObjects = d.TopLargeObjects ?? [];
@@ -107,20 +156,20 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
         }
 
         SectionLeadFinding? leadFinding = null;
-        if (d.FragmentationPercent > 60)
+        if (d.FragmentationPercent >= 30)
             leadFinding = new SectionLeadFinding(
                 Severity: "Critical",
-                Title: $"Severe LOH fragmentation — {d.FragmentationPercent:F1}% of LOH is free space",
-                    Summary: $"Total LOH: {FormatHelper.FormatBytes(d.TotalBytes)}, free: {FormatHelper.FormatBytes(d.FreeBytes)} ({d.FreeBlockCount:N0} free blocks). Largest free block: {FormatHelper.FormatBytes(d.LargestFreeBlock)}.",
+                Title: $"Critical LOH/POH fragmentation — {d.FragmentationPercent:F1}% of LOH/POH is free space",
+                    Summary: $"Total LOH/POH: {FormatHelper.FormatBytes(d.TotalBytes)}, free: {FormatHelper.FormatBytes(d.FreeBytes)} ({d.FreeBlockCount:N0} free blocks). Largest free block: {FormatHelper.FormatBytes(d.LargestFreeBlock)}.",
                 Recommendation: "Compact the LOH via GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true), or pool large objects (ArrayPool<T>/MemoryPool<T>) to reduce allocation churn.",
                 ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
                 ConfidenceScore: 0.9,
                 Caveats: []);
-        else if (d.FragmentationPercent > 30)
+        else if (d.FragmentationPercent >= 15)
             leadFinding = new SectionLeadFinding(
                 Severity: "Warning",
-                Title: $"Elevated LOH fragmentation — {d.FragmentationPercent:F1}% free-space fragmentation",
-                    Summary: $"Total LOH: {FormatHelper.FormatBytes(d.TotalBytes)}, free: {FormatHelper.FormatBytes(d.FreeBytes)} ({d.FreeBlockCount:N0} free blocks). Largest free block: {FormatHelper.FormatBytes(d.LargestFreeBlock)}.",
+                Title: $"Elevated LOH/POH fragmentation — {d.FragmentationPercent:F1}% free-space fragmentation",
+                    Summary: $"Total LOH/POH: {FormatHelper.FormatBytes(d.TotalBytes)}, free: {FormatHelper.FormatBytes(d.FreeBytes)} ({d.FreeBlockCount:N0} free blocks). Largest free block: {FormatHelper.FormatBytes(d.LargestFreeBlock)}.",
                 Recommendation: "Monitor LOH allocation patterns. Consider using ArrayPool<T> or MemoryPool<T> for large buffers to reduce fragmentation over time.",
                 ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
                 ConfidenceScore: 0.9,
@@ -133,14 +182,21 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
             CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
+    private static string KindLabel(HeapSegmentKind kind) => kind switch
+    {
+        HeapSegmentKind.LargeObjectHeap => "LOH",
+        HeapSegmentKind.PinnedObjectHeap => "POH",
+        _ => kind.ToString(),
+    };
+
     private static string GetSeverityBand(double fragmentationPercent)
     {
-        if (fragmentationPercent > 60)
-            return "Critical (> 60%)";
+        if (fragmentationPercent >= 30)
+            return "Critical (\u2265 30%)";
 
-        if (fragmentationPercent > 30)
-            return "Warning (30%\u201360%)";
+        if (fragmentationPercent >= 15)
+            return "Warning (15%\u201330%)";
 
-        return "OK (\u2264 30%)";
+        return "OK (< 15%)";
     }
 }

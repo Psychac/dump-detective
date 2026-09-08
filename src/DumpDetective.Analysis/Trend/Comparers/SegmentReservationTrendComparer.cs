@@ -17,6 +17,8 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 new("segment.reserved.ratio",        null, r.ReservedToCommittedRatio, "ratio",    MetricTrendDirection.HigherIsWorse),
                 new("segment.ephemeral.fill.pct",    null, r.AvgEphemeralFillPct,      "%",        MetricTrendDirection.HigherIsWorse),
                 new("segment.noephemeral.soh.count", null, r.NonEphemeralSohSegmentCount, "segments", MetricTrendDirection.HigherIsWorse),
+                new("segment.regions.nearempty.count", null, r.NearEmptyRegionCount, "regions", MetricTrendDirection.HigherIsWorse),
+                new("segment.regions.nearempty.committed.bytes", null, r.NearEmptyRegionCommittedBytes, "bytes", MetricTrendDirection.HigherIsWorse),
             ];
         }
 
@@ -30,6 +32,8 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 MetricDeltaHelper.Compute("segment.reservation.gap",    null, b.ReservationGapBytes,       c.ReservationGapBytes,       "bytes",    MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("segment.reserved.ratio",     null, b.ReservedToCommittedRatio,  c.ReservedToCommittedRatio,  "ratio",    MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("segment.ephemeral.fill.pct", null, b.AvgEphemeralFillPct,       c.AvgEphemeralFillPct,       "%",        MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("segment.regions.nearempty.count", null, b.NearEmptyRegionCount, c.NearEmptyRegionCount, "regions", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("segment.regions.nearempty.committed.bytes", null, b.NearEmptyRegionCommittedBytes, c.NearEmptyRegionCommittedBytes, "bytes", MetricTrendDirection.HigherIsWorse),
             ];
         }
     }

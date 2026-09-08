@@ -4,12 +4,13 @@ using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 
-namespace DumpDetective.Analysis.FindingGenerators;
+namespace DumpDetective.Reporting.FindingGenerators;
 
 internal sealed class JitFindingGenerator : IFindingGenerator
 {
     private const ulong JitHeapBloatThreshold = 500 * 1024 * 1024; // 500 MB
     private const double HighUnmanagedFrameRatio = 0.30;            // 30 %
+    private const int DeepStackFrameThreshold = 500;                // frames
     private readonly record struct JitSignal(
         FindingSeverity Severity,
         int Priority,
@@ -76,9 +77,9 @@ internal sealed class JitFindingGenerator : IFindingGenerator
                 Severity: FindingSeverity.Info,
                 Priority: 80,
                 Title: "Tiered compilation activity detected",
-                Evidence: $"{r.TieredMethodCount:N0} method(s) observed with multiple native code " +
-                          $"addresses for the same metadata token, indicating tiered recompilation " +
-                          $"(Tier0 → Tier1). This is expected behaviour.",
+                Evidence: $"~{r.TieredMethodCount:N0} method(s) (estimate, stack-visible methods only) " +
+                          $"observed with multiple native code addresses for the same method, " +
+                          $"indicating tiered recompilation (Tier0 → Tier1). This is expected behaviour.",
                 Recommendation: "If startup-time JIT overhead is a concern, " +
                                 "consider ReadyToRun images (dotnet publish -r ... --self-contained).",
                 Tags: ["jit", "tiered-compilation"],
@@ -91,18 +92,52 @@ internal sealed class JitFindingGenerator : IFindingGenerator
         {
             var top = r.TopLargestMethods[0];
             ulong topSize = (ulong)top.HotSize + top.ColdSize;
+            string thresholdDisplay = FormatHelper.FormatBytes(r.LargeMethodThresholdBytes);
             signals.Add(new JitSignal(
                 Severity: FindingSeverity.Info,
                 Priority: 140,
                 Title: "Large JIT-compiled methods detected on thread stacks",
                 Evidence: $"Largest method on stacks: '{top.Signature}' " +
                           $"({FormatHelper.FormatBytes(topSize)} native code). " +
-                          $"{r.TopLargestMethods.Count} method(s) exceed the 64 KB threshold.",
-                Recommendation: "Refactor methods over 64 KB native code — they prevent " +
+                          $"{r.TopLargestMethods.Count} method(s) exceed the {thresholdDisplay} threshold.",
+                Recommendation: $"Refactor methods over {thresholdDisplay} native code — they prevent " +
                                 "inlining and stress the JIT register allocator.",
                 Tags: ["jit", "code-size", "performance"],
                 MetricValue: (double)topSize,
                 MetricUnit: "bytes"));
+        }
+
+        // Dynamic codegen detected on stacks — DynamicMethod/Reflection.Emit/expression trees.
+        if (r.DynamicMethodFrameCount > 0)
+        {
+            signals.Add(new JitSignal(
+                Severity: FindingSeverity.Info,
+                Priority: 100,
+                Title: "Dynamic codegen frames detected on thread stacks",
+                Evidence: $"{r.DynamicMethodFrameCount:N0} active frame(s) resolve to a dynamic module " +
+                          $"(DynamicMethod, AssemblyBuilder-emitted types, or compiled LINQ expression trees).",
+                Recommendation: "If the same dynamic method/expression is being generated and compiled " +
+                                "repeatedly rather than cached, this is a common source of unbounded JIT " +
+                                "code-heap growth.",
+                Tags: ["jit", "dynamic-codegen", "reflection-emit"],
+                MetricValue: r.DynamicMethodFrameCount,
+                MetricUnit: "frames"));
+        }
+
+        // Unusually deep thread stack — recursion or re-entrant call-chain signal.
+        if (r.MaxThreadFrameDepth > DeepStackFrameThreshold)
+        {
+            signals.Add(new JitSignal(
+                Severity: FindingSeverity.Warning,
+                Priority: 160,
+                Title: "Unusually deep thread stack detected",
+                Evidence: $"OS thread {r.MaxThreadFrameDepthOSThreadId} has {r.MaxThreadFrameDepth:N0} frames " +
+                          $"on its stack, exceeding the {DeepStackFrameThreshold:N0}-frame informational threshold.",
+                Recommendation: "Inspect this thread's stack for unbounded recursion or a re-entrant call chain " +
+                                 "(e.g. recursive event handlers, self-referencing visitor patterns).",
+                Tags: ["jit", "stack-depth", "recursion"],
+                MetricValue: r.MaxThreadFrameDepth,
+                MetricUnit: "frames"));
         }
 
         FindingSeverity summarySeverity = FindingSeverity.Info;
@@ -112,7 +147,7 @@ internal sealed class JitFindingGenerator : IFindingGenerator
                 summarySeverity = signals[i].Severity;
         }
 
-        var findings = new List<InsightFinding>(2)
+        var findings = new List<InsightFinding>(1 + signals.Count)
         {
             // Summary finding (always emitted).
             new InsightFinding(
@@ -124,37 +159,29 @@ internal sealed class JitFindingGenerator : IFindingGenerator
                       $"{r.JitManagerCount} JIT manager(s). " +
                       $"Active method frames on stacks: {r.ActiveMethodsOnStacks:N0} managed, " +
                       $"{r.UnmanagedFrameCount:N0} runtime/internal. " +
-                      $"Tiered recompilations observed: {r.TieredMethodCount:N0}.",
+                      $"Tiered recompilations observed (estimate): {r.TieredMethodCount:N0}.",
             Recommendation: signals.Count > 0
-                ? "Review the top JIT signal below and validate codegen/interop hotspots."
+                ? "Review the detailed JIT signals below and validate codegen/interop hotspots."
                 : "JIT footprint is within expected range.",
             Tags: ["jit", "overview"],
             MetricValue: (double)r.TotalJitHeapBytes,
             MetricUnit: "bytes")
         };
 
-        if (signals.Count > 0)
+        // Emit all detected signals (sorted by severity descending, then priority descending)
+        for (int i = 0; i < signals.Count; i++)
         {
-            JitSignal top = signals[0];
-            for (int i = 1; i < signals.Count; i++)
-            {
-                JitSignal s = signals[i];
-                bool betterSeverity = SeverityRank(s.Severity) > SeverityRank(top.Severity);
-                bool sameSeverityHigherPriority = SeverityRank(s.Severity) == SeverityRank(top.Severity) && s.Priority > top.Priority;
-                if (betterSeverity || sameSeverityHigherPriority)
-                    top = s;
-            }
-
+            JitSignal sig = signals[i];
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
                 Category: "Performance",
-                Severity: top.Severity,
-                Title: top.Title,
-                Evidence: top.Evidence,
-                Recommendation: top.Recommendation,
-                Tags: top.Tags,
-                MetricValue: top.MetricValue,
-                MetricUnit: top.MetricUnit));
+                Severity: sig.Severity,
+                Title: sig.Title,
+                Evidence: sig.Evidence,
+                Recommendation: sig.Recommendation,
+                Tags: sig.Tags,
+                MetricValue: sig.MetricValue,
+                MetricUnit: sig.MetricUnit));
         }
 
         return findings;

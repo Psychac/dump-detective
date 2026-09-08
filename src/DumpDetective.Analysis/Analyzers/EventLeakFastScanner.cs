@@ -1,8 +1,8 @@
 using System;
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Threading;
 using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Analysis.Analyzers.EventLeak;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Utilities;
@@ -19,68 +19,26 @@ namespace DumpDetective.Analysis.Analyzers;
 using GroupKey = (string PublisherType, string EventFieldName, bool IsStatic);
 
 /// <summary>
-/// High-performance two-phase event-leak scanner.
+/// High-performance heap-scan driver for event-leak detection.
 ///
-/// Phase A — type index:
-///   For each unique MethodTable seen in the heap index, resolve the ClrType exactly once
-///   (metadata only, no dump reads) and record the byte offset of every delegate-typed
-///   instance field that looks like an event backing field.
-///
-/// Phase B — heap scan:
-///   For each heap entry whose MT is in the index, use <see cref="IMemoryReader.ReadPointer"/>
-///   at the pre-computed field offset.  This is a single 8-byte read at a known address —
-///   no <c>ClrObject</c> construction, no MethodTable re-read, no ClrMD overhead.
-///   • If the pointer is zero the event has no subscribers → 1 read, skip.
-///   • If non-zero, follow the <c>MulticastDelegate._invocationList</c> / <c>._target</c>
-///     chain using further direct reads (2–5 reads for a typical leaking event).
-///   Subscriber type names are resolved lazily after the scan from a small MT→Name table.
-///
-/// Parallelism:
-///   When <see cref="IDataReader.IsThreadSafe"/> is true and a memory-backed heap index
-///   is available, Phase B is partitioned into <c>Environment.ProcessorCount × 4</c>
-///   chunks processed in parallel on the thread-pool.  Each chunk owns a private
-///   accumulator dictionary; results are merged under a lock at the end.
+/// Per-object hot path:
+///   For each heap entry, look up its MethodTable in the pre-built <see cref="PublisherRegistry"/>
+///   (design §3 — the registry's single eager module walk replaced this class's former lazy
+///   per-unique-MT metadata walk). If descriptors are found, read each instance delegate field via
+///   <see cref="IMemoryReader.ReadPointer"/> at its pre-computed offset — no <c>ClrObject</c>
+///   construction, no MethodTable re-read, no ClrMD overhead.
+///   • A null pointer means no subscribers → 1 read, skip.
+///   • If non-zero, follow the <c>MulticastDelegate._invocationList</c> / <c>._target</c> chain
+///     using direct reads (2–5 reads for a typical leaking event).
+///   Subscriber type names are resolved lazily from a small MT→Name table.
 /// </summary>
 internal sealed class EventLeakFastScanner
 {
     // ──────────────────────────────────────────────────────────────────────────────
-    // Field layout — stored per-publisher MethodTable
-    // ──────────────────────────────────────────────────────────────────────────────
-
-    /// <summary>Represents a single delegate-typed instance field of a publisher type.</summary>
-    internal readonly struct DelegateFieldLayout
-    {
-        /// <summary>Byte offset from the start of the object (same frame as <c>ClrInstanceField.Offset</c>).</summary>
-        public readonly int Offset;
-        public readonly string FieldName;
-        public readonly string PublisherTypeName;
-
-        public DelegateFieldLayout(int offset, string fieldName, string publisherTypeName)
-        {
-            Offset = offset;
-            FieldName = fieldName;
-            PublisherTypeName = publisherTypeName;
-        }
-    }
-
-    // ──────────────────────────────────────────────────────────────────────────────
-    // MulticastDelegate internal layout — discovered once from the first delegate type found.
-    // All MulticastDelegate subclasses share identical offsets for _target / _invocationList.
-    // ──────────────────────────────────────────────────────────────────────────────
-    private int _delegateTargetOffset;
-    private int _delegateInvListOffset;
-    /// <summary>
-    /// Absolute offset of <c>_invocationCount</c> (nint, immediately follows _invocationList).
-    /// When <c>_invocationList</c> is an <c>object[]</c>, this is the number of VALID entries
-    /// (the array may be over-allocated via doubling; entries beyond this index are null).
-    /// </summary>
-    private int _delegateInvCountOffset;
-    private bool _delegateLayoutDiscovered;
-
-    // ──────────────────────────────────────────────────────────────────────────────
     // Core state
     // ──────────────────────────────────────────────────────────────────────────────
     private readonly ClrHeap _heap;
+    private readonly PublisherRegistry _registry;
     private readonly IMemoryReader _reader;
     private readonly bool _readerIsThreadSafe;
     private readonly int _ptrSize;
@@ -96,23 +54,32 @@ internal sealed class EventLeakFastScanner
     /// </summary>
     private readonly int _arrayDataOffset;
 
-    /// <summary>MT → delegate field layouts; absent key = not yet evaluated; null value = no delegate fields.</summary>
-    private readonly Dictionary<ulong, DelegateFieldLayout[]?> _mtIndex = new(capacity: 8192);
-
     /// <summary>Subscriber MT → resolved type name (deferred to keep the hot scan free of ClrMD calls).</summary>
     private readonly Dictionary<ulong, string> _subscriberTypeNames = new(capacity: 512);
 
-    /// <summary>Shared event-name cache injected from the owner <see cref="EventLeakAnalyzer"/>.</summary>
-    private readonly Func<ClrType, HashSet<string>> _getEventNames;
+    /// <summary>
+    /// Instruction pointer → resolved method name. Leaked events typically have the same handler
+    /// method subscribed many times over (one handler, many publisher instances), so without this
+    /// cache <see cref="ResolveSubscriberTypes"/> repeats the same expensive
+    /// <see cref="ClrRuntime.GetMethodByInstructionPointer"/> DAC symbol lookup for the same IP.
+    /// </summary>
+    private readonly Dictionary<ulong, string?> _methodNameByInstructionPointer = new(capacity: 512);
+
+    // PERF INVESTIGATION (temporary): accumulated ticks for the per-object hot path. The
+    // once-per-unique-MT metadata walk now happens eagerly in PublisherRegistry.Build, before
+    // this scanner runs at all — see EventLeakAnalyzer's own timing around that call.
+    private long _processPublisherEntryTicks;
+
+    internal double GetScanTimings() => _processPublisherEntryTicks * 1000.0 / Stopwatch.Frequency;
 
     // ──────────────────────────────────────────────────────────────────────────────
     // Construction
     // ──────────────────────────────────────────────────────────────────────────────
 
-    public EventLeakFastScanner(ClrHeap heap, Func<ClrType, HashSet<string>> getEventNames, IProgress<AnalyzerProgressReport>? progress = null)
+    public EventLeakFastScanner(ClrHeap heap, PublisherRegistry registry, IProgress<AnalyzerProgressReport>? progress = null)
     {
         _heap = heap;
-        _getEventNames = getEventNames;
+        _registry = registry;
 
         IDataReader dr = heap.Runtime.DataTarget.DataReader;
         // IDataReader : IMemoryReader in ClrMD 3.x — direct cast is safe.
@@ -125,11 +92,6 @@ internal sealed class EventLeakFastScanner
         _reporterStopwatch = Stopwatch.StartNew();
         _scannedObjects = 0;
         _lastReportMs = 0;
-
-        // Proactively discover MulticastDelegate field layout before any scan starts.
-        // Searching known System.* type names via modules is more reliable than waiting
-        // to stumble across a delegate field whose Type might be null in some dumps.
-        DiscoverDelegateLayoutFromModules();
     }
 
     // ──────────────────────────────────────────────────────────────────────────────
@@ -137,487 +99,73 @@ internal sealed class EventLeakFastScanner
     // ──────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Runs the fast two-phase scan.
-    /// <para>
-    /// When <paramref name="inMemoryArray"/> is non-null (memory-backed heap index) the scan
-    /// runs in two phases: Phase A pre-builds the MT→offsets index from the array, then
-    /// Phase B partitions the same array across all CPU cores for parallel processing.
-    /// </para>
-    /// <para>
-    /// When only a streaming <paramref name="entries"/> source is available (disk-backed
-    /// index or plain <c>heap.EnumerateObjects()</c>) the scan runs in a single pass that
-    /// builds the MT index lazily on first encounter and processes each entry immediately.
-    /// </para>
+    /// Runs the fast single-pass scan over a streaming entry source (disk-backed index or
+    /// plain <c>heap.EnumerateObjects()</c>).
     /// </summary>
     /// <returns>
     ///   <c>true</c> always (the scan may have found 0 leaks — that is not a failure).
     /// </returns>
     public bool Scan(
-        IEnumerable<HeapEntry>? streamingEntries,
-        HeapEntry[]? inMemoryArray,
-        int objectCount,
+        IEnumerable<HeapEntry> streamingEntries,
         Dictionary<GroupKey, EventLeakAnalyzer.GroupAccumulator> groupAcc,
         Dictionary<ulong, string> rootHints,
-        IReadOnlyList<ClrAppDomain> appDomains,
-        HashSet<ulong> processedStaticMTs,
-        HashSet<ulong> processedStaticDelegates,
         EventLeakOptions options,
+        HashSet<ulong> leakingMTs,
         ref int eventsScanned,
         ref int publisherInstances)
     {
-        if (inMemoryArray != null && objectCount > 0)
-        {
-            // ── Two-phase (memory-backed index) ──────────────────────────────────
-            // Phase A: one sequential pass to populate _mtIndex from type metadata.
-            BuildMtIndexFromArray(inMemoryArray, objectCount);
-
-            // Phase B: always sequential.
-            //
-            // Why not parallel?  For large cold dumps (> RAM) the in-memory HeapEntry[]
-            // is in sequential heap-address order.  Parallel chunks scatter reads across
-            // the full 25GB address space, converting sequential SSD reads (500 MB/s)
-            // into random ones (~100 µs/op) and thrashing the OS page cache.
-            // Sequential access lets the hardware prefetcher and OS read-ahead work;
-            // actual field reads land on pages that were just warmed by the prior entry.
-            // Even on a 32-core machine the I/O bottleneck dominates CPU, so parallel
-            // adds lock-contention overhead without proportional speedup.
-            ScanSequentialArray(inMemoryArray, objectCount, groupAcc, rootHints, appDomains,
-                processedStaticMTs, processedStaticDelegates, options,
-                ref eventsScanned, ref publisherInstances);
-        }
-        else if (streamingEntries != null)
-        {
-            // ── Single-pass (disk-backed index or heap.EnumerateObjects) ─────────
-            // MT index is built lazily inside the loop.
-            SinglePassScan(streamingEntries, groupAcc, rootHints, appDomains,
-                processedStaticMTs, processedStaticDelegates, options,
-                ref eventsScanned, ref publisherInstances);
-        }
+        SinglePassScan(streamingEntries, groupAcc, rootHints, options, leakingMTs,
+            ref eventsScanned, ref publisherInstances);
 
         return true;
     }
 
-    // ──────────────────────────────────────────────────────────────────────────────
-    // Phase A – type index (memory-backed path)
-    // ──────────────────────────────────────────────────────────────────────────────
-
     /// <summary>
-    /// Iterates the in-memory heap-index array once to collect all unique MethodTables,
-    /// then resolves each to a <see cref="ClrType"/> and builds the delegate-field offset table.
-    /// One <c>GetTypeByMethodTable</c> call per unique MT (metadata-only, no dump reads).
+    /// Processes a single heap entry using descriptors pre-resolved by
+    /// <see cref="PublisherRegistry"/>. Used both by <see cref="Scan"/>'s single-pass loop and
+    /// directly by <see cref="EventLeakAnalyzer.OnHeapEntry"/> when driven by the shared
+    /// <see cref="Pipeline.IHeapIndexScanParticipant"/> dispatcher pass.
     /// </summary>
-    private void BuildMtIndexFromArray(HeapEntry[] arr, int count)
-    {
-        var uniqueMts = new HashSet<ulong>(capacity: 8192);
-        for (int i = 0; i < count; i++)
-        {
-            ulong mt = arr[i].MethodTable;
-            if (mt != 0) uniqueMts.Add(mt);
-        }
-
-        int resolved = 0;
-        int total = uniqueMts.Count;
-        _progress?.Report(new AnalyzerProgressReport(0, "building event type index",
-            $"0 / {total:N0} types", _reporterStopwatch.Elapsed));
-
-        foreach (ulong mt in uniqueMts)
-        {
-            _mtIndex.TryAdd(mt, BuildFieldLayouts(mt));
-            resolved++;
-            // Report every 100 types to keep call overhead low; ThrottledProgress upstream gates the rate.
-            if (resolved % 100 == 0)
-                _progress?.Report(new AnalyzerProgressReport(resolved, "building event type index",
-                    $"{resolved:N0} / {total:N0} types", _reporterStopwatch.Elapsed));
-        }
-
-        _progress?.Report(new AnalyzerProgressReport(resolved, "building event type index",
-            $"{resolved:N0} / {total:N0} types", _reporterStopwatch.Elapsed));
-    }
-
-    private DelegateFieldLayout[]? BuildFieldLayouts(ulong mt)
-    {
-        ClrType? type = _heap.GetTypeByMethodTable(mt);
-        if (type is null
-            || TypeFilterHelper.IsSystemType(type.Name)
-            || TypeFilterHelper.IsCompilerGenerated(type.Name))
-        {
-            return null;
-        }
-
-        // PERF: Do NOT call _getEventNames(type) here.
-        // _getEventNames iterates type.Methods to find add_/remove_ pairs — O(methods).
-        // With 50k+ unique MTs in a large dump, calling it unconditionally burns
-        // 30–80 seconds for the ~98% of types that have no delegate fields at all.
-        // Instead: defer the call until we confirm the type has at least one delegate field.
-        HashSet<string>? eventNames = null;   // null = not yet resolved
-        List<DelegateFieldLayout>? layouts = null;
-
-        foreach (ClrInstanceField field in type.Fields)
-        {
-            // PERF: IsObjectReference is a flag read — no metadata I/O.
-            // Skipping value-type fields here avoids calling field.Type (which may need
-            // metadata resolution) for the ~70–80% of fields that can never be delegates.
-            if (!field.IsObjectReference)
-                continue;
-            if (!TypeFilterHelper.IsDelegateType(field.Type))
-                continue;
-            if (TypeFilterHelper.IsCompilerGenerated(field.Name))
-                continue;
-            if (string.IsNullOrEmpty(field.Name))
-                continue;
-
-            // First delegate field found — now worth fetching the event-name set (cached).
-            eventNames ??= _getEventNames(type);
-
-            // Accuracy: when the type declares explicit events (add_/remove_ pairs),
-            // only accept fields whose name is in the event set.
-            // When no events are declared, apply a name-pattern filter instead of all-pass:
-            // accepting ALL delegate fields from types with no events produces huge false-positive
-            // counts from callback/handler fields that are not leaked events.
-            if (eventNames.Count > 0)
-            {
-                // Exact match OR looks like an explicit backing field (e.g. _myEvent for event MyEvent).
-                // IsDelegateType is already confirmed above, so name heuristic is safe here.
-                if (!eventNames.Contains(field.Name) && !EventLeakAnalyzer.LooksLikeEventFieldName(field.Name))
-                    continue;
-            }
-            else
-            {
-                // No declared events — only accept fields whose name looks like a C# event backing field.
-                if (!EventLeakAnalyzer.LooksLikeEventFieldName(field.Name))
-                    continue;
-            }
-
-            // Discover MulticastDelegate internal layout from the first delegate field type.
-            if (!_delegateLayoutDiscovered)
-                TryDiscoverDelegateLayout(field.Type);
-
-            layouts ??= new List<DelegateFieldLayout>(capacity: 4);
-            // FIX: ClrInstanceField.Offset is the INTERIOR offset (relative to the start of
-            // object instance data, i.e. AFTER the MT pointer). ClrMD's own GetAddress() does:
-            //   address = objRef + Offset + PointerSize   (for interior=false)
-            // We must store the ABSOLUTE offset (including the MT header) so that
-            //   ReadPointer(entry.Address + layout.Offset)
-            // lands on the actual field value, not on the MT pointer or adjacent data.
-            layouts.Add(new DelegateFieldLayout(
-                offset: field.Offset + _ptrSize,
-                fieldName: field.Name,
-                publisherTypeName: type.Name ?? StringConstants.UnknownType));
-        }
-
-        if (layouts is not null)
-            return [.. layouts];
-
-        // No instance delegate fields found.
-        // Still check if the type has static delegate fields that look like events.
-        // If so, return an EMPTY (non-null) array so that ProcessPublisherEntry is
-        // invoked for instances of this type and its static field block fires.
-        HashSet<string> staticEventNames = _getEventNames(type);
-        foreach (ClrStaticField sf in type.StaticFields)
-        {
-            if (!TypeFilterHelper.IsDelegateType(sf.Type)
-                || TypeFilterHelper.IsCompilerGenerated(sf.Name)
-                || string.IsNullOrEmpty(sf.Name))
-                continue;
-
-            if (staticEventNames.Count > 0
-                && !staticEventNames.Contains(sf.Name!)
-                && !EventLeakAnalyzer.LooksLikeEventFieldName(sf.Name))
-                continue;
-
-            if (staticEventNames.Count == 0 && !EventLeakAnalyzer.LooksLikeEventFieldName(sf.Name))
-                continue;
-
-            // Found a qualifying static delegate field — return empty (not null) array.
-            return [];
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Eagerly resolves the <c>System.Delegate</c> and <c>System.MulticastDelegate</c>
-    /// types from loaded modules and discovers their field offsets.
-    /// This is more reliable than waiting for a delegate field to appear during the scan,
-    /// because <c>ClrInstanceField.Type</c> can be null for unresolved fields in some dumps.
-    /// </summary>
-    private void DiscoverDelegateLayoutFromModules()
-    {
-        if (_delegateLayoutDiscovered) return;
-
-        foreach (ClrAppDomain domain in _heap.Runtime.AppDomains)
-        {
-            foreach (ClrModule module in domain.Modules)
-            {
-                if (_delegateLayoutDiscovered) return;
-
-                ClrType? delegateBase = module.GetTypeByName("System.Delegate");
-                ClrType? multicastDelegate = module.GetTypeByName("System.MulticastDelegate");
-
-                if (delegateBase != null || multicastDelegate != null)
-                {
-                    TryDiscoverDelegateLayout(multicastDelegate ?? delegateBase);
-                    if (_delegateLayoutDiscovered) return;
-                }
-            }
-        }
-
-        // If module walk didn't work, apply the known-good fallback inside TryDiscoverDelegateLayout.
-        if (!_delegateLayoutDiscovered)
-            TryDiscoverDelegateLayout(null);  // triggers hardcoded fallback
-    }
-
-    /// <summary>
-    /// Walks up the delegate type's base-type chain to discover the
-    /// <c>_target</c> and <c>_invocationList</c> field offsets.
-    /// <para>
-    /// <b>Key distinction</b>: <c>_target</c> is declared on <c>System.Delegate</c>,
-    /// while <c>_invocationList</c> is declared on <c>System.MulticastDelegate</c> —
-    /// they live on *different* types in the hierarchy.  Both must be found for a
-    /// complete layout; only searching <c>System.MulticastDelegate</c> for <c>_target</c>
-    /// returns null and leaves offsets zeroed.
-    /// </para>
-    /// </summary>
-    private void TryDiscoverDelegateLayout(ClrType? delegateType)
-    {
-        bool targetFound = false;
-        bool invListFound = false;
-
-        ClrType? cur = delegateType;
-        while (cur != null && !(targetFound && invListFound))
-        {
-            if (!targetFound && cur.Name == "System.Delegate")
-            {
-                ClrInstanceField? tf = cur.GetFieldByName("_target");
-                if (tf != null)
-                {
-                    // +_ptrSize: same interior-offset correction as BuildFieldLayouts.
-                    _delegateTargetOffset = tf.Offset + _ptrSize;
-                    targetFound = true;
-                }
-            }
-
-            if (!invListFound && cur.Name == "System.MulticastDelegate")
-            {
-                ClrInstanceField? ilf = cur.GetFieldByName("_invocationList");
-                if (ilf != null)
-                {
-                    _delegateInvListOffset = ilf.Offset + _ptrSize;
-                    // _invocationCount is the nint field immediately after _invocationList
-                    // (both pointer-sized; they are always declared consecutively in the CLR source).
-                    _delegateInvCountOffset = _delegateInvListOffset + _ptrSize;
-                    invListFound = true;
-                }
-            }
-
-            cur = cur.BaseType;
-        }
-
-        if (targetFound && invListFound)
-        {
-            _delegateLayoutDiscovered = true;
-            return;
-        }
-
-        // Fallback: use known .NET 6+ 64/32-bit layout if ClrMD type inspection failed
-        // (e.g. incomplete symbols).  Offsets verified against coreclr source:
-        //   System.Delegate:          _target(0) _methodBase(1) _methodPtr(2) _methodPtrAux(3)
-        //   System.MulticastDelegate: _invocationList(4) _invocationCount(5)
-        //   Absolute = interior + ptrSize, so multiply field-index by ptrSize.
-        if (!_delegateLayoutDiscovered)
-        {
-            _delegateTargetOffset = _ptrSize;           // field 0 → absolute 8 (64-bit)
-            _delegateInvListOffset = _ptrSize * 5;       // field 4 → absolute 40
-            _delegateInvCountOffset = _ptrSize * 6;       // field 5 → absolute 48
-            _delegateLayoutDiscovered = true;
-        }
-    }
-
-    // ──────────────────────────────────────────────────────────────────────────────
-    // Phase B – sequential scan (memory-backed array, reader not thread-safe)
-    // ──────────────────────────────────────────────────────────────────────────────
-
-    private void ScanSequentialArray(
-        HeapEntry[] arr,
-        int count,
+    public void ScanEntry(
+        in HeapEntry entry,
+        List<(ulong addr, ulong mt, ulong delegateAddr)> buf,
         Dictionary<GroupKey, EventLeakAnalyzer.GroupAccumulator> groupAcc,
         Dictionary<ulong, string> rootHints,
-        IReadOnlyList<ClrAppDomain> appDomains,
-        HashSet<ulong> processedStaticMTs,
-        HashSet<ulong> processedStaticDelegates,
         EventLeakOptions options,
+        HashSet<ulong> leakingMTs,
         ref int eventsScanned,
         ref int publisherInstances)
     {
-        var buf = new List<(ulong addr, ulong mt, ulong delegateAddr)>(capacity: 64);
-        for (int i = 0; i < count; i++)
-        {
-            HeapEntry entry = arr[i];
-            ReportProgressInterlocked();
-            if (!_mtIndex.TryGetValue(entry.MethodTable, out DelegateFieldLayout[]? layouts) || layouts is null)
-                continue;
-            ProcessPublisherEntry(entry, layouts, buf, groupAcc, rootHints, appDomains,
-                processedStaticMTs, processedStaticDelegates, options,
-                ref eventsScanned, ref publisherInstances);
-        }
+        ReportProgressInterlocked();
+        if (entry.MethodTable == 0) return;
+
+        if (!_registry.TryGetDescriptors(entry.MethodTable, out EventFieldDescriptor[]? descriptors) || descriptors is null)
+            return;
+
+        long p0 = Stopwatch.GetTimestamp();
+        ProcessPublisherEntry(entry, descriptors, buf, groupAcc, rootHints, options, leakingMTs,
+            ref eventsScanned, ref publisherInstances);
+        _processPublisherEntryTicks += Stopwatch.GetTimestamp() - p0;
     }
 
     // ──────────────────────────────────────────────────────────────────────────────
     // Single-pass scan (disk-backed index or heap.EnumerateObjects)
-    // Builds MT index lazily on first encounter; no second pass needed.
     // ──────────────────────────────────────────────────────────────────────────────
 
     private void SinglePassScan(
         IEnumerable<HeapEntry> entries,
         Dictionary<GroupKey, EventLeakAnalyzer.GroupAccumulator> groupAcc,
         Dictionary<ulong, string> rootHints,
-        IReadOnlyList<ClrAppDomain> appDomains,
-        HashSet<ulong> processedStaticMTs,
-        HashSet<ulong> processedStaticDelegates,
         EventLeakOptions options,
+        HashSet<ulong> leakingMTs,
         ref int eventsScanned,
         ref int publisherInstances)
     {
         var buf = new List<(ulong addr, ulong mt, ulong delegateAddr)>(capacity: 64);
         foreach (HeapEntry entry in entries)
         {
-            ReportProgressInterlocked();
-            if (entry.MethodTable == 0) continue;
-
-            // Lazily build field layouts on first encounter of this MT.
-            if (!_mtIndex.TryGetValue(entry.MethodTable, out DelegateFieldLayout[]? layouts))
-            {
-                layouts = BuildFieldLayouts(entry.MethodTable);
-                _mtIndex[entry.MethodTable] = layouts;
-            }
-            if (layouts is null) continue;
-
-            ProcessPublisherEntry(entry, layouts, buf, groupAcc, rootHints, appDomains,
-                processedStaticMTs, processedStaticDelegates, options,
+            ScanEntry(in entry, buf, groupAcc, rootHints, options, leakingMTs,
                 ref eventsScanned, ref publisherInstances);
-        }
-    }
-
-    // ──────────────────────────────────────────────────────────────────────────────
-    // Phase B – parallel scan (memory-backed index, thread-safe reader)
-    // Static fields are processed sequentially after the parallel phase to avoid
-    // shared-state contention on processedStaticMTs / processedStaticDelegates.
-    // ──────────────────────────────────────────────────────────────────────────────
-
-    private void ScanParallel(
-        HeapEntry[] arr,
-        int objectCount,
-        Dictionary<GroupKey, EventLeakAnalyzer.GroupAccumulator> groupAcc,
-        Dictionary<ulong, string> rootHints,
-        IReadOnlyList<ClrAppDomain> appDomains,
-        HashSet<ulong> processedStaticMTs,
-        HashSet<ulong> processedStaticDelegates,
-        EventLeakOptions options,
-        ref int eventsScanned,
-        ref int publisherInstances)
-    {
-        int degree = Math.Max(1, Environment.ProcessorCount);
-        int chunkSize = Math.Max(4096, (objectCount + degree - 1) / degree);
-        int numChunks = (objectCount + chunkSize - 1) / chunkSize;
-
-        var partialAccs = new ConcurrentBag<Dictionary<GroupKey, EventLeakAnalyzer.GroupAccumulator>>();
-        var seenMtsDuringPar = new ConcurrentBag<HashSet<ulong>>();
-        long totalEvents = 0;
-        long totalPublishers = 0;
-
-        Parallel.For(0, numChunks, chunkIdx =>
-        {
-            int start = chunkIdx * chunkSize;
-            int end = Math.Min(start + chunkSize, objectCount);
-
-            var localAcc = new Dictionary<GroupKey, EventLeakAnalyzer.GroupAccumulator>();
-            var localSeenMTs = new HashSet<ulong>();
-            var localBuf = new List<(ulong addr, ulong mt, ulong delegateAddr)>(capacity: 64);
-            int localEvents = 0;
-            int localPublishers = 0;
-
-            for (int i = start; i < end; i++)
-            {
-                HeapEntry entry = arr[i];
-                ReportProgressInterlocked();
-                if (!_mtIndex.TryGetValue(entry.MethodTable, out DelegateFieldLayout[]? layouts)
-                    || layouts is null) continue;
-
-                // Instance fields only in the parallel phase.
-                bool hadField = ProcessInstanceFields(entry, layouts, localBuf, localAcc, rootHints, options,
-                    ref localEvents);
-                if (hadField) localPublishers++;
-
-                // Track which MTs had delegate layouts (for static field post-pass).
-                localSeenMTs.Add(entry.MethodTable);
-            }
-
-            // publisherInstances from ProcessInstanceFields is already counted
-            // in localPublishers via the ref param — no extra increment needed.
-            partialAccs.Add(localAcc);
-            seenMtsDuringPar.Add(localSeenMTs);
-            Interlocked.Add(ref totalEvents, localEvents);
-            Interlocked.Add(ref totalPublishers, localPublishers);
-        });
-
-        eventsScanned += (int)totalEvents;
-        publisherInstances += (int)totalPublishers;
-
-        // Merge partial accumulators.
-        foreach (var partial in partialAccs)
-            foreach (var kvp in partial)
-                EventLeakAnalyzer.MergeAccumulatorEntry(
-                    groupAcc, kvp.Key, kvp.Value, options.TopDetailedInstancesPerGroup);
-
-        // Sequential post-pass: process static fields for every unique MT seen.
-        var buf = new List<(ulong addr, ulong mt, ulong delegateAddr)>(capacity: 64);
-        foreach (HashSet<ulong> mtSet in seenMtsDuringPar)
-        {
-            foreach (ulong mt in mtSet)
-            {
-                if (!processedStaticMTs.Add(mt)) continue;
-
-                ClrType? type = _heap.GetTypeByMethodTable(mt);
-                if (type is null) continue;
-
-                HashSet<string> eventNames = _getEventNames(type);
-                int minSubs = options.MinSubscribers;
-                bool includeNonLeaking = options.IncludeNonLeakingEvents;
-
-                foreach (ClrStaticField sField in type.StaticFields)
-                {
-                    if (!TypeFilterHelper.IsDelegateType(sField.Type)
-                        || TypeFilterHelper.IsCompilerGenerated(sField.Name)
-                        || string.IsNullOrEmpty(sField.Name)) continue;
-
-                    // Exact match OR looks like an explicit backing field (e.g. _myEvent for event MyEvent).
-                    if (eventNames.Count > 0
-                        && !eventNames.Contains(sField.Name!)
-                        && !EventLeakAnalyzer.LooksLikeEventFieldName(sField.Name)) continue;
-
-                    eventsScanned++;
-
-                    List<SubscriberInfo> subs = EventLeakAnalyzer.GetStaticEventSubscribers(
-                        _heap, sField, appDomains, processedStaticDelegates);
-
-                    if (subs.Count == 0) continue;
-                    if (!includeNonLeaking && subs.Count < minSubs) continue;
-
-                    bool mismatch = CheckLifetimeMismatchDirect(subs, options);
-                    EventLeakInfo leak = EventLeakAnalyzer.CreateLeakInfo(
-                        publisherAddress: 0,
-                        publisherType: type.Name ?? StringConstants.UnknownType,
-                        eventFieldName: sField.Name!,
-                        isStatic: true,
-                        subs, rootHints, options, heap: _heap,
-                        publisherGeneration: 2,
-                        hasLifetimeMismatch: mismatch);
-
-                    if (EventLeakAnalyzer.IsLikelyPublisher(leak, options))
-                        EventLeakAnalyzer.AddToAccumulator(
-                            groupAcc, leak, options.TopDetailedInstancesPerGroup);
-                }
-            }
         }
     }
 
@@ -627,70 +175,25 @@ internal sealed class EventLeakFastScanner
 
     /// <summary>
     /// Processes one publisher object entry: instance delegate fields + static fields.
-    /// Used by the single-pass and sequential-array paths.
+    /// Called from <see cref="ScanEntry"/> for every entry with resolved descriptors.
     /// </summary>
     private void ProcessPublisherEntry(
         HeapEntry entry,
-        DelegateFieldLayout[] layouts,
+        EventFieldDescriptor[] descriptors,
         List<(ulong addr, ulong mt, ulong delegateAddr)> buf,
         Dictionary<GroupKey, EventLeakAnalyzer.GroupAccumulator> groupAcc,
         Dictionary<ulong, string> rootHints,
-        IReadOnlyList<ClrAppDomain> appDomains,
-        HashSet<ulong> processedStaticMTs,
-        HashSet<ulong> processedStaticDelegates,
         EventLeakOptions options,
+        HashSet<ulong> leakingMTs,
         ref int eventsScanned,
         ref int publisherInstances)
     {
+        // Statics no longer run on the hot path (design §6) — EventLeakAnalyzer.SweepRegistryStatics
+        // is now the single place static delegate fields are read, once per MT in
+        // PublisherRegistry.StaticPublisherMTs, after the scan completes.
         bool hadField = ProcessInstanceFields(
-            entry, layouts, buf, groupAcc, rootHints, options,
+            entry, descriptors, buf, groupAcc, rootHints, options, leakingMTs,
             ref eventsScanned);
-
-        // ── Static fields (once per unique MethodTable) ──────────────────────────
-        if (processedStaticMTs.Add(entry.MethodTable))
-        {
-            ClrType? type = _heap.GetTypeByMethodTable(entry.MethodTable);
-            if (type != null)
-            {
-                HashSet<string> eventNames = _getEventNames(type);
-                int minSubs = options.MinSubscribers;
-                bool includeNonLeaking = options.IncludeNonLeakingEvents;
-
-                foreach (ClrStaticField sField in type.StaticFields)
-                {
-                    if (!TypeFilterHelper.IsDelegateType(sField.Type)
-                        || TypeFilterHelper.IsCompilerGenerated(sField.Name)
-                        || string.IsNullOrEmpty(sField.Name)) continue;
-
-                    if (eventNames.Count > 0
-                        && !eventNames.Contains(sField.Name!)
-                        && !EventLeakAnalyzer.LooksLikeEventFieldName(sField.Name)) continue;
-
-                    eventsScanned++;
-                    hadField = true;
-
-                    List<SubscriberInfo> subs = EventLeakAnalyzer.GetStaticEventSubscribers(
-                        _heap, sField, appDomains, processedStaticDelegates);
-
-                    if (subs.Count == 0) continue;
-                    if (!includeNonLeaking && subs.Count < minSubs) continue;
-
-                    bool mismatch = CheckLifetimeMismatchDirect(subs, options);
-                    EventLeakInfo leak = EventLeakAnalyzer.CreateLeakInfo(
-                        publisherAddress: 0,
-                        publisherType: type.Name ?? StringConstants.UnknownType,
-                        eventFieldName: sField.Name!,
-                        isStatic: true,
-                            subs, rootHints, options, heap: _heap,
-                        publisherGeneration: 2,
-                        hasLifetimeMismatch: mismatch);
-
-                    if (EventLeakAnalyzer.IsLikelyPublisher(leak, options))
-                        EventLeakAnalyzer.AddToAccumulator(
-                            groupAcc, leak, options.TopDetailedInstancesPerGroup);
-                }
-            }
-        }
 
         if (hadField) publisherInstances++;
     }
@@ -701,22 +204,23 @@ internal sealed class EventLeakFastScanner
     /// </summary>
     private bool ProcessInstanceFields(
         HeapEntry entry,
-        DelegateFieldLayout[] layouts,
+        EventFieldDescriptor[] descriptors,
         List<(ulong addr, ulong mt, ulong delegateAddr)> buf,
         Dictionary<GroupKey, EventLeakAnalyzer.GroupAccumulator> groupAcc,
         Dictionary<ulong, string> rootHints,
         EventLeakOptions options,
+        HashSet<ulong> leakingMTs,
         ref int eventsScanned)
     {
         bool hadField = false;
-        int minSubs = options.MinSubscribers;
-        bool includeNonLeaking = options.IncludeNonLeakingEvents;
-        // PERF: publisherGen computed lazily — most publisher objects have all-null events.
-        // GetSegmentByAddress is cheap (binary search) but not free; skip it when not needed.
-        int publisherGen = -2;  // -2 = not yet computed; -1 = computed but unknown
+        // entry is the publisher itself, so its generation is already known from the
+        // Phase 1 disk-backed index — no segment lookup needed here at all.
+        int publisherGen = entry.Generation;
 
-        foreach (ref readonly DelegateFieldLayout layout in layouts.AsSpan())
+        foreach (ref readonly EventFieldDescriptor descriptor in descriptors.AsSpan())
         {
+            if (descriptor.IsStatic) continue;
+
             eventsScanned++;
             ReportProgressInterlocked();
             hadField = true;
@@ -724,24 +228,25 @@ internal sealed class EventLeakFastScanner
             // One ReadPointer: reveals both null-ness and delegate address.
             // Null events skip with a single 8-byte read — no GetObject, no segment lookup.
             ulong delegateAddr;
-            if (!_reader.ReadPointer(entry.Address + (ulong)layout.Offset, out delegateAddr)
+            if (!_reader.ReadPointer(entry.Address + (ulong)descriptor.Offset, out delegateAddr)
                 || delegateAddr == 0)
                 continue;
 
             buf.Clear();
-            ExtractSubscribersDirect(delegateAddr, buf);
+            // P1-3 (docs/analysis/phase1/eventleak-analyzer-audit.md): call the shared
+            // DelegateChainWalker directly instead of maintaining a second, hand-copied
+            // implementation of the same pointer chase — DelegateChainWalker.ExtractSubscribers
+            // is a plain static method, not a virtual IPublisherShape.Extract call, so nothing
+            // about the hot-path/virtual-dispatch rationale in DelegateChainWalker's own doc
+            // comment applied to keeping a duplicate here.
+            DelegateChainWalker.ExtractSubscribers(_heap, _reader, delegateAddr, _registry.DelegateTargetOffset, _registry.DelegateInvocationListOffset, buf);
             if (buf.Count == 0) continue;
-            if (!includeNonLeaking && buf.Count < minSubs) continue;
-
-            // Lazy: only pay for segment lookup when we actually have non-null subscribers.
-            if (publisherGen == -2)
-                publisherGen = GetObjectGenerationDirect(entry.Address);
 
             // Filter noise/compiler-generated publisher types but do NOT require Gen2.
             // Gen2 is a useful severity signal but excluding Gen0/Gen1 publishers removes a
             // large fraction of real subscriber counts from the total.
-            if (TypeFilterHelper.IsCompilerGenerated(layout.PublisherTypeName)
-                || EventLeakAnalyzer.IsNoiseTypeName(layout.PublisherTypeName))
+            if (TypeFilterHelper.IsCompilerGenerated(descriptor.PublisherTypeName)
+                || EventLeakAnalyzer.IsNoiseTypeName(descriptor.PublisherTypeName))
                 continue;
             if (buf.Count < options.PublisherSubscriberThreshold) continue;
 
@@ -749,103 +254,31 @@ internal sealed class EventLeakFastScanner
 
             bool mismatch = CheckLifetimeMismatchDirect(subscribers, options);
 
-            // Compute generation lazily (only when we have qualifying subscribers).
-            if (publisherGen == -2)
-                publisherGen = GetObjectGenerationDirect(entry.Address);
-
             EventLeakInfo leak = EventLeakAnalyzer.CreateLeakInfo(
                 publisherAddress: entry.Address,
-                publisherType: layout.PublisherTypeName,
-                eventFieldName: layout.FieldName,
+                publisherType: descriptor.PublisherTypeName,
+                eventFieldName: descriptor.FieldName,
                 isStatic: false,
                     subscribers,
                     rootHints,
-                    options, heap: null,   // skip low-incoming-refs heap scan on hot path
+                    // heap is passed so IsDisposedButSubscribed can resolve via the MT-cached
+                    // interface check; the (per-object, unbounded) low-incoming-refs heap scan
+                    // stays opt-in only and is skipped here regardless (EnableLowIncomingRefsCheck).
+                    options, heap: _heap,
                     publisherGeneration: publisherGen,
-                    hasLifetimeMismatch: mismatch);
+                    hasLifetimeMismatch: mismatch,
+                    disposableTypeCache: _registry.DisposableTypeCache,
+                    publisherMethodTable: entry.MethodTable);
 
             // IsLikelyPublisher: subscriber count and gen already validated above.
             // Still call to honour any future threshold changes.
-            EventLeakAnalyzer.AddToAccumulator(groupAcc, leak, options.TopDetailedInstancesPerGroup);
+            EventLeakAnalyzer.AddToAccumulator(groupAcc, leak, options.TopDetailedInstancesPerGroup, leakingMTs);
         }
 
         // NOTE: publisherInstances is intentionally NOT incremented here.
         // ProcessPublisherEntry (the caller on sequential paths) owns the increment
         // to avoid double-counting.
         return hadField;
-    }
-
-    // ──────────────────────────────────────────────────────────────────────────────
-    // Direct subscriber extraction (no ClrObject, no heap.GetObject)
-    // ──────────────────────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Extracts subscriber (address, methodTable) pairs from a delegate object
-    /// entirely via <see cref="IMemoryReader.ReadPointer"/> calls.
-    /// Uses pre-discovered <c>_target</c> / <c>_invocationList</c> offsets —
-    /// no ClrType lookups, no <c>ClrObject</c> allocations.
-    /// </summary>
-    private void ExtractSubscribersDirect(ulong delegateAddr, List<(ulong addr, ulong mt, ulong delegateAddr)> results)
-    {
-        // Read _invocationList to distinguish single vs multicast delegate.
-        ulong invListAddr;
-        if (!_reader.ReadPointer(delegateAddr + (ulong)_delegateInvListOffset, out invListAddr))
-            return;
-
-        if (invListAddr == 0)
-        {
-            // Single subscriber: read _target.
-            ExtractSingleTargetDirect(delegateAddr, results);
-            return;
-        }
-
-        // Multicast: invListAddr points to a Delegate[] array containing per-subscriber delegates.
-        // Use ClrMD's GetObject to validate the array and get its authoritative Length.
-        // Raw MT-lookup via GetTypeByMethodTable is unreliable here — the type may not yet be
-        // in ClrMD's cache, causing IsArray to return false and silently collapsing every
-        // multicast event to a single-target read (1 subscriber per publisher instead of N).
-        ClrObject invListObj = _heap.GetObject(invListAddr);
-        if (!invListObj.IsValid || !invListObj.IsArray)
-        {
-            // Not an array — fall back to single-target (covers chained-delegate edge cases).
-            ExtractSingleTargetDirect(delegateAddr, results);
-            return;
-        }
-
-        ClrArray arr = invListObj.AsArray();
-        int invCount = arr.Length;
-        if (invCount == 0 || invCount > 1_000_000) // sanity cap
-            return;
-
-        // Iterate the Delegate[] using ClrMD's array accessors — same approach as the
-        // ClrMD path in GetDelegateTargets, so behaviour is identical for both paths.
-        for (int i = 0; i < invCount; i++)
-        {
-            ClrObject elem = arr.GetObjectValue(i);
-            if (elem.IsValid && elem.Address != 0)
-                ExtractSingleTargetDirect(elem.Address, results);
-        }
-    }
-
-    private void ExtractSingleTargetDirect(ulong delegateAddr, List<(ulong addr, ulong mt, ulong delegateAddr)> results)
-    {
-        ulong targetAddr;
-        if (_reader.ReadPointer(delegateAddr + (ulong)_delegateTargetOffset, out targetAddr)
-            && targetAddr != 0)
-        {
-            // Instance method handler: _target is the subscriber object.
-            ulong targetMt;
-            if (_reader.ReadPointer(targetAddr, out targetMt) && targetMt != 0)
-                results.Add((targetAddr, targetMt, delegateAddr));
-        }
-        else
-        {
-            // Static method handler: use the delegate object itself as the token
-            // (matches existing behaviour in ExtractSingleSubscriber).
-            ulong delegateMt;
-            if (_reader.ReadPointer(delegateAddr, out delegateMt) && delegateMt != 0)
-                results.Add((delegateAddr, delegateMt, delegateAddr));
-        }
     }
 
     // ──────────────────────────────────────────────────────────────────────────────
@@ -889,8 +322,12 @@ internal sealed class EventLeakFastScanner
                                 ulong ptr = (ulong)f.Read<IntPtr>(delObj, interior: false);
                                 if (ptr != 0)
                                 {
-                                    var m = runtime.GetMethodByInstructionPointer(ptr);
-                                    if (m != null) methodName = m.Signature ?? m.Name;
+                                    if (!_methodNameByInstructionPointer.TryGetValue(ptr, out methodName))
+                                    {
+                                        var m = runtime.GetMethodByInstructionPointer(ptr);
+                                        methodName = m != null ? (m.Signature ?? m.Name) : null;
+                                        _methodNameByInstructionPointer[ptr] = methodName;
+                                    }
                                 }
                             }
                             catch { }
@@ -913,8 +350,12 @@ internal sealed class EventLeakFastScanner
                                     ulong aux = (ulong)faux.Read<IntPtr>(delObj, interior: false);
                                     if (aux != 0)
                                     {
-                                        var m2 = runtime.GetMethodByInstructionPointer(aux);
-                                        if (m2 != null) methodName = m2.Signature ?? m2.Name;
+                                        if (!_methodNameByInstructionPointer.TryGetValue(aux, out methodName))
+                                        {
+                                            var m2 = runtime.GetMethodByInstructionPointer(aux);
+                                            methodName = m2 != null ? (m2.Signature ?? m2.Name) : null;
+                                            _methodNameByInstructionPointer[aux] = methodName;
+                                        }
                                     }
                                 }
                                 catch { }
@@ -948,10 +389,15 @@ internal sealed class EventLeakFastScanner
                                                     try { val = (ulong)field.Read<IntPtr>(mb, interior: false); }
                                                     catch { continue; }
                                                     if (val == 0) continue;
-                                                    var m3 = runtime.GetMethodByInstructionPointer(val);
-                                                    if (m3 != null)
+                                                    if (!_methodNameByInstructionPointer.TryGetValue(val, out string? m3Name))
                                                     {
-                                                        methodName = m3.Signature ?? m3.Name;
+                                                        var m3 = runtime.GetMethodByInstructionPointer(val);
+                                                        m3Name = m3 != null ? (m3.Signature ?? m3.Name) : null;
+                                                        _methodNameByInstructionPointer[val] = m3Name;
+                                                    }
+                                                    if (m3Name != null)
+                                                    {
+                                                        methodName = m3Name;
                                                         break;
                                                     }
                                                 }
@@ -968,7 +414,7 @@ internal sealed class EventLeakFastScanner
             }
             catch { /* swallow */ }
 
-            result.Add(new SubscriberInfo { Address = addr, Type = name, MethodName = methodName });
+            result.Add(new SubscriberInfo { Address = addr, MethodTable = mt, Type = name, MethodName = methodName });
         }
         return result;
     }
@@ -1006,13 +452,14 @@ internal sealed class EventLeakFastScanner
         }
     }
 
+    // §9.19 (docs/refactor/analysis-profile-removal-plan.md): probes every subscriber, not a
+    // capped sample — each generation lookup is an O(1) segment lookup, cheap regardless of scale.
     private bool CheckLifetimeMismatchDirect(List<SubscriberInfo> subscribers, EventLeakOptions options)
     {
         if (subscribers.Count == 0) return false;
-        int probeLimit = Math.Min(subscribers.Count, options.LifetimeMismatchProbeLimit);
         int gen01Count = 0;
         int probed = 0;
-        for (int i = 0; i < subscribers.Count && probed < probeLimit; i++)
+        for (int i = 0; i < subscribers.Count; i++)
         {
             ulong addr = subscribers[i].Address;
             if (addr == 0 || subscribers[i].Type == StringConstants.StaticMethodSubscriber) continue;

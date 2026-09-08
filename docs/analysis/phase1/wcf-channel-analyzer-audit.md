@@ -1,0 +1,667 @@
+# WcfChannelAnalyzer — Phase 1 Audit
+
+**Reviewed:** 2026-08-03  
+**Protocol:** [phase1-analyzer-architecture-review.md](phase1-analyzer-architecture-review.md)
+
+**Components reviewed:**
+- `WcfChannelAnalyzer.cs`
+- `InfrastructureDomainModels.cs` (WCF section)
+- `WcfChannelSectionBuilder.cs`
+- `WcfChannelFindingGenerator.cs`
+- `WcfChannelTrendComparer.cs`
+- `InsightEngine.cs` (`DetectWcfChannelFault`)
+- `WcfChannelAnalyzerHeapIndexScanTests.cs`
+- `WcfChannelAnalyzerDiscrepancyTests.cs`
+- `TypedResourceScanDriver.cs`, `TypedResourceSampler.cs`, `TypedResourceCandidateScanner.cs`
+- `TypeNamePatternMatcher.cs`
+
+---
+
+## Audit Area 1 — Role & Opportunity Assessment
+
+### Current Role
+
+The analyzer detects `System.ServiceModel.*` channel and proxy objects on the managed heap,
+classifies each instance's `CommunicationState`, and surfaces faulted or accumulated channels.
+It occupies an important gap: WCF channel lifecycle is invisible to generic heap analyzers.
+
+The role is internally cohesive. All logic flows through the typed-resource quartet
+(`ITypedResourceCandidateSource` / `ITypedResourceInstanceSampler`) and the parallel heap scan
+infrastructure, consistent with `DbConnectionAnalyzer`.
+
+### Coverage Gaps
+
+**Intermediate states silent.** `Opening` (1) and `Closing` (3) are both folded into `OtherChannels`.
+`Opening` channels that never complete represent DNS/TCP connection failures — a high-value signal
+that is silently discarded. An engineer cannot distinguish "50 channels in misc state" from
+"50 channels stuck connecting."
+
+**ChannelFactory<T> detection absent.** The finding generator itself warns engineers to
+*cache ChannelFactory<T>* rather than channels, but never detects whether the application
+is creating ChannelFactory<T> per-call — one of the most expensive WCF anti-patterns
+(DNS resolution + certificate negotiation per factory). High counts would be a P0 finding.
+
+**Endpoint address not extracted.** WCF channels hold their remote endpoint (`_remoteAddress`,
+`_via`, or `Via` property backed fields). Knowing *which service* is faulted is the first
+question an engineer asks; the analyzer requires a manual `!do <addr>` to answer it.
+
+**Duplex and session channels not differentiated.** `IDuplexChannel`-backed objects have
+bidirectional resource profiles; session channels (`ISessionChannel<T>`) hold per-session
+state. Both are currently absorbed into the generic channel pool with no distinction.
+
+**No binding-type inference.** Type names partially encode binding type
+(e.g., `BasicHttpChannel`, `NetTcpChannel`). Binding type correlates directly with failure
+mode and remediation advice. It is accessible without extra ClrMD calls.
+
+### Expansion Opportunities
+
+- Explicit `OpeningChannels` and `ClosingChannels` counters derived from current `OtherChannels`
+- ChannelFactory type detection (same pattern matching approach, different type tokens)
+- Remote endpoint extraction from known field names
+- Binding-type classification from type name suffix
+
+### Architectural Observations
+
+`WcfChannelAnalyzer` is the only `IParallelHeapIndexScanParticipant` in the infrastructure
+analyzer family. Its sibling `DbConnectionAnalyzer` implements only `IHeapIndexScanParticipant`
+(sequential). The parallel implementation here is strictly superior for large heaps; there is
+no technical reason `DbConnectionAnalyzer` does not share it.
+
+---
+
+## Audit Area 2 — Diagnostic & Report Quality
+
+### Strengths
+
+- Per-type table with Total / Opened / Faulted / Closed / Other / Heap Size is comprehensive
+  and directly actionable.
+- Faulted channel address list gives engineers a starting point for `!do <addr>` in WinDbg.
+- Finding generator recommendations are technically precise (`Abort()` vs `Close()`, cache
+  ChannelFactory not channel, Close() on a faulted channel throws).
+- `InsightEngine.DetectWcfChannelFault` correctly cross-correlates with
+  `System.ServiceModel.*` and `ObjectDisposedException` on the heap.
+- Trend comparer covers `wcf.total`, `wcf.opened`, `wcf.faulted` — useful for dump diffing.
+
+### Weaknesses
+
+**`OtherChannels` is opaque.**  
+`Opening`, `Closing`, and `Created` all produce `OtherChannels`. The report table shows a
+number with no guidance on what it means. An engineer cannot distinguish stuck-opening
+channels from channels that were never started.
+
+**Missing `Opening`/`Closing` state breakdown in model.**  
+`WcfChannelDomainResult` has no `OpeningChannels` or `ClosingChannels` fields. These states
+are diagnostically significant and should have first-class representation.
+
+**Key metrics exclude total bytes.**  
+`TotalBytes` is present per type in `WcfChannelTypeSummary` but is not aggregated in
+`WcfChannelDomainResult` and not surfaced in `AnalyzerDetailSection.KeyMetrics`. An engineer
+cannot see the overall memory footprint of WCF objects at a glance.
+
+**Section builder key metrics are inconsistent.**  
+`KeyMetrics` includes `total_channels`, `opened`, `faulted`, and `closed` but omits `other`.
+This makes the metrics non-additive (total ≠ opened + faulted + closed).
+
+**State-scan-cap notice lacks specificity.**  
+The report note says "state sampling was capped" but does not say which type(s) were capped
+or how many instances were sampled. An engineer cannot assess how much state information is
+missing.
+
+**No summary of faulted channel heap cost.**  
+Faulted channels hold live network sockets. The report shows addresses but no per-address
+size or estimated total retained bytes. This information is available via `entry.Size`.
+
+**Finding threshold lacks evidence basis.**  
+100 channels → Warning, 500 → Critical. These are hard-coded constants with no explanation.
+Different applications have legitimately different channel pool sizes.
+
+**`TopFaultedChannels` shows no endpoint address.**  
+Every faulted sample has a type name and address but no indication of which remote service
+it was connected to. This is the single most useful piece of diagnostic evidence and requires
+a `!do` to retrieve manually.
+
+---
+
+## Audit Area 3 — ClrMD & Platform Utilization
+
+### ClrMD Usage Assessment
+
+**TypeAggregates — correct.**  
+Candidate discovery goes through `TypedResourceCandidateScanner`, which reads pre-built
+`TypeAggregates` from the Phase-1 index when available, falling back to heap enumeration.
+This is optimal: zero extra heap passes for candidate discovery.
+
+**Parallel scan — correct.**  
+`IParallelHeapIndexScanParticipant` is implemented and the merge logic is correct.
+`Total` and `Bytes` are not summed across workers (pre-seeded from TypeAggregates);
+only the state-change counters are merged. This is the right semantics.
+
+**State field reading — partially correct.**  
+`StateElementTypes` includes `ClrElementType.Object` to handle older .NET Framework WCF where
+the `CommunicationState` enum may be boxed. Field name list `["_state", "state",
+"communicationState"]` covers known implementations.
+
+However, `TryReadIntField` probes all field names independently without consulting the
+inheritance chain via `ClrType.BaseType`. If `System.ServiceModel.Channels.CommunicationObject`
+defines `_state` but a deep derived type does not, the lookup relies on ClrMD's field
+enumeration including inherited fields — which ClrMD 3.x does include in `ClrType.Fields`
+for instance fields. This works but is implicit rather than explicit. No correctness risk,
+but worth noting.
+
+**No endpoint address extraction.**  
+WCF channels store their remote address in fields such as `_remoteAddress` (type
+`System.ServiceModel.EndpointAddress`). Extracting the `Uri` or `Identity` string from that
+object would be straightforward with `ClrObject.ReadObjectField` / `ClrType.GetFieldByName`,
+but is not attempted.
+
+**No type hierarchy traversal for interface membership.**  
+The analyzer does not verify that matched types implement `IChannel`. This is a minor
+concern given that the namespace prefix `System.ServiceModel.` is tightly constrained, but
+interface verification would eliminate false positives from any hypothetical non-channel
+types in that namespace.
+
+### Infrastructure Utilization
+
+**`TypedResourceScanDriver` — fully utilized.**  
+All three entry points (`DiscoverCandidates`, `CreateSampler`, `TryGetSample`) are used in
+canonical order.
+
+**`InstanceStateSampler<T>` — fully utilized.**  
+`TryReserveSample` gate, `MergeFrom` for parallel workers, `AddTopSample` for top-N list —
+all correct.
+
+**`TypeNamePatternMatcher.HasPrefixAndSuffixOrContains` — correct usage.**  
+Prefix `System.ServiceModel.`, suffix `.ServiceChannel`, contains-tokens
+`["Channel", "ClientBase", "CommunicationObject"]`. The broad contains-token "Channel" is
+constrained by the required prefix, eliminating false positives from
+`System.Threading.Channels` or SignalR channel types.
+
+---
+
+## Audit Area 4 — Diagnostic Opportunity Analysis
+
+### High-Value Missing Diagnostics (priority-ranked)
+
+**1. Opening and Closing state breakdown (P0)**  
+`Opening` (1) channels are actively trying to connect. High counts mean the application is
+hammering a service that is down or unreachable — a production emergency. `Closing` (3)
+channels are draining; high counts indicate slow or stuck graceful shutdown. Both should be
+first-class counters in the domain model and the report.  
+*Implementation:* Add `OpeningChannels` and `ClosingChannels` to `WcfChannelDomainResult`
+and accumulate them with dedicated state comparisons in `OnHeapEntry`.
+
+**2. Endpoint address extraction for faulted channels (P0)**  
+The `_remoteAddress` field on a WCF channel is an `EndpointAddress` whose `Uri` property
+contains the service URL. For each faulted channel sample, reading this string would allow
+the finding to report "Channel to https://payments.internal/v2/svc is faulted" instead of
+"System.ServiceModel.Channels.ServiceChannel at 0x00012345 is Faulted." This is the
+information engineers need first.  
+*Implementation:* In `TrySample`, attempt to read `_remoteAddress` → `_uri` or `Uri` field;
+store the resulting string in `WcfChannelSnapshot`.
+
+**3. ChannelFactory<T> accumulation (P1)**  
+`ChannelFactory<T>` is expensive to create. Applications that construct one per call instead
+of caching it will show high `ChannelFactory`-derived type counts on the heap. This is a
+well-known WCF performance anti-pattern that causes latency spikes and DNS thrashing.  
+*Implementation:* Extend type matching to recognize `System.ServiceModel.ChannelFactory`
+types; add a separate `FactoryCount` to the result and a dedicated finding.
+
+**4. Binding type classification (P1)**  
+Type names partially encode binding:
+- `System.ServiceModel.Channels.ServiceChannel` (internal implementation)
+- `BasicHttpChannel`, `NetTcpChannel`, `WSHttpChannel`, `NetNamedPipeChannel`
+Known type name tokens can infer binding. `NetTcp` channels hold OS TCP connections;
+`BasicHttp` channels hold HTTP connections. Failure modes differ.  
+*Implementation:* Short suffix classification in `IsCandidateType`, stored in a `BindingHint`
+field on `WcfChannelTypeSummary`.
+
+**5. Session channel detection (P2)**  
+`ISessionChannel<T>` implementations carry per-session state. A large count of session
+channels indicates that the application is not properly closing sessions, which prevents
+server-side session state from being released.
+
+**6. Duplex channel and callback contract detection (P2)**  
+`IDuplexChannel` implementations hold a callback sink. Each unclosed duplex channel pins a
+callback dispatcher on both client and server.
+
+**7. `Opening` state correlation with timeout exceptions (P2)**  
+High `OpeningChannels` combined with timeout exceptions in `CrashDomainResult` is a
+near-certain indicator of connection-level failure (DNS, TCP refusal, TLS negotiation).
+`InsightEngine` can add this cross-correlation once the state is first-class.
+
+### Missing Statistics
+
+- Total aggregate heap bytes for all WCF channel objects (sum of `TotalBytes` from `ByType`)
+- Faulted channel percentage of total (`FaultedChannels / TotalChannels`)
+- Minimum / maximum / average channel count by state per type
+
+---
+
+## Audit Area 5 — Performance, Memory & Scalability
+
+### Current Performance Characteristics
+
+**Candidate discovery — O(T) where T = unique MethodTables.**  
+`TypedResourceCandidateScanner` reads TypeAggregates in one pass. Zero heap traversal for
+candidate discovery. Correct and efficient.
+
+**Parallel heap scan — scales linearly with CPU count.**  
+`IParallelHeapIndexScanParticipant` distributes the object index range across workers.
+Each worker maintains its own `_typeStats` and `_sampler`. Merge is O(W × T) where W =
+worker count, T = candidate type count. Both are small in practice.
+
+**State field read cap — 500 per type.**  
+At 500 samples per MethodTable, the field read budget is bounded. For WCF service-heavy
+apps with millions of channels of a single type, this means state counts for Opened/Faulted
+etc. can be materially below the true values. The `StateScanCapped` flag exists but is
+report-level only; no per-type cap information is available.
+
+### Allocation Concerns
+
+**Value tuple mutation pattern.**  
+`_typeStats` stores `(string Name, int Total, int Opened, int Faulted, int Closed, int Other,
+ulong Bytes)` tuples as dictionary values. Every `OnHeapEntry` call that updates state counts
+writes a new tuple. In .NET, value tuples in Dictionary values require a dictionary entry
+update (no in-place mutation). At high channel counts this creates no extra heap allocations
+(ValueTuple is a struct and is stored inline), but it does require a dictionary write per
+entry. This is acceptable; a dedicated `ChannelTypeCounts` mutable struct would be cleaner
+but is not a performance regression.
+
+**`_candidateMts` ContainsKey + TryGetValue double-lookup.**  
+`OnHeapEntry` calls both `candidateMts.ContainsKey(entry.MethodTable)` and then
+`typeStats.TryGetValue(entry.MethodTable, ...)`. Both dictionaries have the same keys after
+`BeforeHeapIndexScan`. Eliminating the `ContainsKey` check and relying on `TryGetValue`
+alone would remove a redundant hash computation per heap entry.
+
+### Scalability Assessment
+
+For 10–100 GB dumps the analyzer is safe. The TypeAggregates path eliminates a heap pass;
+the parallel scan handles millions of objects without per-object allocation. The 500-sample
+cap per type contains ClrMD field read cost.
+
+The `IParallelHeapIndexScanParticipant` advantage over sibling analyzers is significant.
+A 64-core host processes WCF channels 64× faster than the sequential `DbConnectionAnalyzer`
+would on the same machine.
+
+---
+
+## Audit Area 6 — Correctness & Confidence
+
+### Confidence Assessment: **High** for core counting; **Medium** for state attribution
+
+**Total channel count — High confidence.**  
+Sourced from `TypeAggregates.Count` per MethodTable. This is the same count the Phase-1
+index uses for all heap-level statistics. It is correct.
+
+**State-attributed counts — Medium confidence.**  
+Opened + Faulted + Closed + Other are accumulated only for objects where a state sample slot
+was reserved (up to 500 per type). If capped, these counts are understated relative to
+`Total`. The `StateScanCapped` flag surfaces this, but the discrepancy size is unknown.
+
+**State value range — Low risk, minor correctness gap.**  
+`stateVal` is passed directly to the `opened/faulted/closed/other` comparisons without
+validating that it is in [0..5]. Values outside the enum range go to `other`. The
+`MapCommunicationState` switch returns "Unknown" for them. This does not cause incorrect
+findings but silently absorbs corrupt heap objects into the `OtherChannels` bucket.
+
+### Risks and Edge Cases
+
+**Risk: `Opening` channels misclassified as Other.**  
+`Opening` = 1 is neither 2 (Opened), 4 (Closed), nor 5 (Faulted), so it falls to `other`.
+If the dump was taken during a mass connection attempt (e.g., service restart), hundreds or
+thousands of Opening channels would inflate `OtherChannels` with no actionable signal.
+
+**Risk: WcfContainsTokens broad matching.**  
+`"Channel"` as a contains-token, constrained to `System.ServiceModel.*`, is tight enough.
+However, `System.ServiceModel.Channels` namespace contains many non-channel types
+(e.g., `MessageHeader`, `BodyWriter`, `Message`) that do *not* contain "Channel" in their
+name — so these will not be false positives. The concern is the opposite: a type like
+`System.ServiceModel.Channels.ChannelPool` (if it exists) would be included.
+
+**Risk: Parallel merge defensive branch never exercised in tests.**  
+`MergePartial` handles the case where a worker has a MethodTable key absent from the primary.
+Given that `BeforeHeapIndexScan` pre-seeds identical candidate sets on every worker from the
+same TypeAggregates, this branch cannot be triggered in normal execution. It is dead code in
+practice, but correct if it were ever reached. No test covers it.
+
+**Risk: State field `ClrElementType.Object` path correctness.**  
+When the state field is typed as `object` (boxed enum in old .NET Framework WCF), ClrMD
+would return the boxed object address. `TryReadIntField` handles this path — the
+implementation needs to unbox correctly. This is implemented in `InstanceStateSampler`
+shared infrastructure. Not re-verified here but trusted as tested by `InstanceStateSamplerTests`.
+
+### False Positives
+
+Low risk. The namespace prefix `System.ServiceModel.` and the contains / suffix checks
+together produce a tightly scoped candidate set with no known false-positive types in
+standard .NET distributions.
+
+### False Negatives
+
+**Possible for third-party WCF-compatible stacks.**  
+CoreWCF (community WCF port), custom WCF transports, or gRPC/ServiceModel hybrid types
+that do not reside in `System.ServiceModel.*` will not be detected. This is a deliberate
+scope decision rather than a defect, but worth documenting.
+
+---
+
+## Audit Area 7 — Industry Benchmark
+
+### WinDbg + SOS
+
+| Capability | WinDbg + SOS | DumpDetective |
+|---|---|---|
+| Find all WCF channel types | `!dumpheap -type ServiceModel` (manual) | Automated, indexed |
+| Get channel state | `!do <addr>` for each object | Automated, sampled |
+| Faulted channel count | Manual counting | Automatic with threshold finding |
+| Remote endpoint address | `!do <addr>` → `_remoteAddress` | **Not extracted** |
+| Aggregate by type | Manual | Automatic |
+| Binding type | Inferred from type name manually | **Not classified** |
+| ChannelFactory presence | Manual | **Not detected** |
+| Cross-correlation with exceptions | Manual | Automatic (`InsightEngine`) |
+
+DumpDetective automates the tedious aspects of WCF diagnosis and adds cross-correlation
+that WinDbg lacks. The gap is endpoint address extraction, which is the first question
+engineers type into WinDbg when they find a faulted channel.
+
+### PerfView
+
+No WCF channel analysis. PerfView is allocation-trace oriented; it has no static heap
+state analysis capability equivalent to what DumpDetective provides.
+
+### Visual Studio Memory Usage
+
+No WCF protocol awareness. Generic type grouping could surface high channel counts but
+provides no state classification or actionability.
+
+### JetBrains dotMemory
+
+No WCF protocol awareness. Retention analysis could indirectly reveal faulted channel
+accumulation through object graph traversal, but there is no automated WCF triage.
+
+### Competitive Conclusion
+
+DumpDetective is ahead of every commercial tool in automated WCF channel state triage from
+a dump. The one gap where WinDbg has a clear advantage is endpoint address — engineers
+using WinDbg can read `_remoteAddress` with a single `!do` command. Closing that gap would
+make DumpDetective's WCF analysis definitively superior to any available tool.
+
+---
+
+## Final Executive Summary
+
+### Overall Assessment
+
+**Score: 74 / 100**  
+**Production readiness: Yes, with known limitations**
+
+**Major strengths:**
+- Correct TypeAggregates-backed candidate discovery — zero extra heap passes
+- Parallel scan implementation (unique among infrastructure analyzers)
+- Accurate faulted channel detection with sound `Abort()` vs `Close()` guidance
+- Cross-correlation with communication exceptions in `InsightEngine`
+- Clean architecture via typed-resource quartet interfaces
+
+**Major weaknesses:**
+- `Opening` and `Closing` states collapsed into opaque `OtherChannels` bucket
+- No endpoint address in faulted channel samples — first question any SRE asks
+- Total heap bytes not surfaced in key metrics
+- ChannelFactory anti-pattern not detected
+
+---
+
+### Priority Roadmap
+
+#### P0 — Critical
+
+| # | Recommendation | Impact | Difficulty | Confidence | Classification |
+|---|---|---|---|---|---|
+| P0-1 | **Add `OpeningChannels` and `ClosingChannels` to domain model and report.** Opening = stuck connecting; Closing = stuck draining. Both are actionable and currently invisible. | High | Low | High | ✅ Complete (commit 40da729) |
+| P0-2 | **Extract remote endpoint address into `WcfChannelSnapshot`.** Read `_remoteAddress` → `Uri` string in `TrySample`. Report in faulted-channel table and finding evidence. | Critical | Medium | High | ✅ Complete (commit 5e94be5) |
+
+#### P1 — High
+
+| # | Recommendation | Impact | Difficulty | Confidence | Classification |
+|---|---|---|---|---|---|
+| P1-1 | **Add `ChannelFactory<T>` detection.** Detect `System.ServiceModel.ChannelFactory`-derived types; emit a Warning finding when high counts are present. Per-call ChannelFactory creation is a well-known expensive anti-pattern. | High | Low | High | ✅ Complete (commit 59bbb2f) |
+| P1-2 | **Add aggregate `TotalBytes` to `WcfChannelDomainResult` and to key metrics.** Sum `TotalBytes` across `ByType` in `BuildResult`. Surface in `AnalyzerDetailSection.KeyMetrics`. | Medium | Low | High | ✅ Complete (commit 8fd8f7b) |
+| P1-3 | **Fix key metrics to include `OtherChannels`** so metrics sum to `TotalChannels`. | Low | Trivial | High | ✅ Complete (commit ca22ead) |
+| P1-4 | **Promote `DbConnectionAnalyzer` to `IParallelHeapIndexScanParticipant`.** The pattern is proven here; `DbConnectionAnalyzer` uses identical infrastructure but is single-threaded. | Medium | Medium | High | ✅ Pre-existing (DbConnectionAnalyzer commit 6fa8b5f) |
+
+#### P2 — Medium
+
+| # | Recommendation | Impact | Difficulty | Confidence | Classification |
+|---|---|---|---|---|---|
+| P2-1 | **Classify binding type from type name suffix.** Append `BindingHint` (Basic, NetTcp, WsHttp, NamedPipe, Unknown) to `WcfChannelTypeSummary`. Differentiate finding recommendations by binding type. | Medium | Low | Medium | ✅ Complete (2026-08-31) |
+| P2-2 | **Add `Opening` + `Closing` cross-correlation in `InsightEngine`.** When `OpeningChannels > 0` and timeout exceptions are present, emit a cross-cutting finding for connection-level failures. | Medium | Low | High | ✅ Complete (2026-08-31) |
+| P2-3 | **Add per-type cap indicator to `StateScanCapped`.** Change from `bool` to `IReadOnlyList<string>` of capped type names, or add a `CappedTypeCount` integer, so report consumers know the scope. | Low | Low | High | ⏭️ Superseded (2026-08-31) |
+| P2-4 | **Eliminate `ContainsKey` + `TryGetValue` double lookup in `OnHeapEntry`.** Single `TryGetValue` suffices. | Low | Trivial | High | ✅ Complete (2026-08-31) |
+
+#### P3 — Low
+
+| # | Recommendation | Impact | Difficulty | Confidence | Classification |
+|---|---|---|---|---|---|
+| P3-1 | **Add `stateVal` range validation.** Guard `stateVal < 0 || stateVal > 5` and increment a separate `InvalidStateCount` rather than silently absorbing into `OtherChannels`. | Low | Trivial | Medium | ✅ Complete (2026-08-31) |
+| P3-2 | **Detect duplex and session channels separately.** Add `ISessionChannel` and `IDuplexChannel` type tokens; add `SessionChannelCount` and `DuplexChannelCount` to domain model. | Medium | Medium | Medium | ✅ Complete (2026-08-31) |
+| P3-3 | **Add a test that exercises the `MergePartial` new-key-from-worker path under realistic pre-seeding.** Currently the branch is logically unreachable in production. | Low | Low | High | ✅ Complete (2026-08-31) |
+
+---
+
+### Final Verdict
+
+1. **Is the analyzer production-ready?**  
+   Yes. Core channel detection, parallel scan, and faulted-channel triage are correct and
+   scale to large dumps. The `Opening`/`Closing` gap and the missing endpoint address reduce
+   diagnostic completeness but do not cause incorrect conclusions.
+
+2. **Highest-impact improvements?**  
+   P0-2 (endpoint address extraction) is the single highest-return change — it eliminates
+   the manual `!do` step that every engineer performs when investigating a WCF fault.
+   P0-1 (Opening/Closing breakdown) converts a silent blind spot into an actionable finding
+   for connection-failure scenarios.
+
+3. **Platform evolution opportunities?**  
+   P1-4 (parallel `DbConnectionAnalyzer`) is a low-risk, high-value platform improvement.
+   The parallel scan pattern is proven here; applying it to the DB analyzer requires only an
+   interface change and the same merge implementation pattern.
+
+4. **Highest engineering return?**  
+   P0-2 → P0-1 → P1-1 in that order. These three changes, totalling approximately one day
+   of implementation work, would make DumpDetective's WCF analysis definitively superior to
+   any available tool including manual WinDbg + SOS workflows.
+
+---
+
+## Implementation Status
+
+### ✅ P0-1 Complete (2026-08-04)
+
+**Commit:** `40da729`  
+**Status:** Opening and Closing states now first-class in domain model
+
+**What was done:**
+- Added `OpeningChannels` and `ClosingChannels` to `WcfChannelDomainResult` and `WcfChannelTypeSummary`
+- Analyzer now tracks state transitions: Opening (1), Closing (3) counted separately from Other
+- Section builder displays Opening/Closing in key metrics and per-type table columns
+- Finding generator includes state breakdown in evidence: "Opening: N, Opened: N, Faulted: N, Closing: N, Closed: N, Other: N"
+- Trend comparer added `wcf.opening` and `wcf.closing` metrics marked as HigherIsWorse
+
+**Impact:**
+- Connection-level failures (high Opening count) now visible in reports
+- Graceful shutdown bottlenecks (high Closing count) now visible in reports
+- Trend analysis can now track Opening/Closing growth across dumps
+- Ready for P2-2: cross-correlation with timeout exceptions for automated diagnosis
+
+### ✅ P0-2 Complete (2026-08-10)
+
+**Commit:** `5e94be5`  
+**Status:** Remote endpoint addresses now extracted and displayed
+
+**What was done:**
+- Added `RemoteAddress` field (nullable string) to `WcfChannelSnapshot` record
+- Implemented three-level extraction chain in WcfChannelAnalyzer:
+  1. `TryExtractRemoteAddress()`: probe `_remoteAddress` or `_via` field on channel object
+  2. `TryExtractUriFromEndpointAddress()`: read `_uri` or `Uri` field from `System.ServiceModel.EndpointAddress`
+  3. `TryExtractStringFromUri()`: convert Uri to string via AsString() or ToString()
+- All field name probes are defensive (multiple variants, null checks, try/catch)
+- Updated `WcfChannelSectionBuilder` to display "Remote Endpoint" column in faulted channels table
+- Updated `WcfChannelFindingGenerator.BuildEndpointSummary()` to group unique endpoints (cap 3) in Finding evidence
+
+**Impact:**
+- Engineers investigating faulted channels no longer need manual `!do <addr>` inspection
+- Remote service URL now surfaces directly in report table and highlighted in Critical finding
+- Closes the final major diagnostic gap vs. manual WinDbg workflows
+- DumpDetective's WCF analysis now definitively superior to any available tool
+
+### ✅ P1-1 Complete (2026-08-10)
+
+**Commit:** `59bbb2f`  
+**Status:** ChannelFactory<T> detection now emits Warning findings
+
+**What was done:**
+- Added `IsFactoryType()` method to detect `System.ServiceModel.ChannelFactory` types
+- Added `FactoryCount` field to `WcfChannelDomainResult` (default 0, opt-in)
+- Updated analyzer to count factory instances separately during heap scan
+- Factory counting works in parallel (`MergePartial` aggregates across workers)
+- Added Warning finding when factories are detected (well-known performance anti-pattern)
+- Updated section builder to display factory count in key metrics
+
+**Impact:**
+- Per-call ChannelFactory creation (expensive anti-pattern) now automatically surfaced
+- Finding includes technical remediation: "Create single static ChannelFactory<T> per endpoint and reuse it"
+- Closes performance diagnostic gap where DNS/certificate negotiation overhead went undiagnosed
+
+### ✅ P1-2 Complete (2026-08-10)
+
+**Commit:** `8fd8f7b`  
+**Status:** Aggregate TotalBytes now surfaced in key metrics
+
+**What was done:**
+- Added `TotalBytes` field to `WcfChannelDomainResult` (nullable with default 0)
+- Updated `BuildResult()` to sum bytes across all channel types
+- Added "total_bytes" metric to section builder key metrics
+
+**Impact:**
+- Operators can now see overall WCF object heap memory footprint at a glance
+- No manual calculation required for pool sizing decisions
+- Completes aggregate metrics for channel pool diagnostics
+
+### ✅ P1-3 Complete (2026-08-10)
+
+**Commit:** `ca22ead`  
+**Status:** Metrics are now additive and consistent
+
+**What was done:**
+- Added "other" metric to key metrics dictionary in section builder
+- Now: Opening + Opened + Faulted + Closing + Closed + Other = Total
+
+**Impact:**
+- Metrics sum correctly to total channel count
+- Operators can verify channel state accounting at a glance
+- Trivial fix, high consistency gain
+
+### ✅ P1-4 Pre-existing (DbConnectionAnalyzer parallel implementation)
+
+**Note:** During WcfChannelAnalyzer audit, P1-4 recommended promoting DbConnectionAnalyzer to parallel scanning. Investigation reveals **this was already completed** in commit `6fa8b5f`.
+
+**Current State:**
+- DbConnectionAnalyzer implements `IParallelHeapIndexScanParticipant`
+- Has `CreateWorkerInstance()` and `MergePartial()` methods
+- Uses identical typed-resource infrastructure as WcfChannelAnalyzer
+
+**Status:** Platform-level improvement already in place. No action needed.
+
+### ✅ P2-1 Complete (2026-08-31)
+
+**Status:** Binding type now classified from channel type name and surfaced in reports
+
+**What was done:**
+- Added `WcfBindingHint` enum (`Unknown`, `Basic`, `NetTcp`, `WsHttp`, `NamedPipe`) to `DumpDetective.Core.Enums`
+- Added `BindingHint` field to `WcfChannelTypeSummary`, populated per-type in `WcfChannelAnalyzer.BuildResult()` via new `ClassifyBindingHint(string typeName)`
+- Classification is a type-name-token heuristic (NamedPipe → NamedPipe, Tcp → NetTcp, Security → WsHttp, Http → Basic, else Unknown); documented limitation: net.tcp and net.pipe both use `FramingDuplexSessionChannel` under the hood, so a bare channel type with no enclosing-factory-name prefix correctly classifies as `Unknown` rather than guessing
+- `WcfChannelSectionBuilder` now shows a "Binding" column in the per-type table
+- `WcfChannelFindingGenerator`'s faulted-channels finding now appends binding-specific remediation guidance (timeout/quota for net.tcp, pipe-server lifetime for net.pipe, security-token lifetime/clock-skew for WS-*, HTTP timeout/5xx for basicHttp) based on the dominant binding among faulted types
+
+**Impact:**
+- Reports now differentiate remediation guidance by binding instead of one generic recommendation for all faulted channels
+- Heuristic is intentionally conservative (Unknown when ambiguous) rather than mis-attributing a binding
+
+### ✅ P2-4 Complete (2026-08-31)
+
+**Status:** Double dictionary lookup removed from `OnHeapEntry`'s hot path
+
+**What was done:**
+- Removed the `_candidateMts.ContainsKey(entry.MethodTable)` check that preceded `_typeStats.TryGetValue(...)` — `_typeStats` is seeded 1:1 from the candidate-MethodTable map in `BeforeHeapIndexScan`, so `TryGetValue` against `_typeStats` alone already serves as the candidate-type check
+- Removed the now-write-only `_candidateMts` field; `BeforeHeapIndexScan` uses a local variable instead
+
+**Impact:**
+- One dictionary probe removed per heap object that reaches this point in `OnHeapEntry` (still gated behind the cheap `_factoryMts` MethodTable-set check first)
+- No behavior change; covered by existing `WcfChannelAnalyzerHeapIndexScanTests`
+
+### ✅ P2-2 Complete (2026-08-31)
+
+**Status:** New `DetectWcfOpeningTimeoutCorrelation` cross-cutting rule added to `InsightEngine`
+
+**What was done:**
+- Added `DetectWcfOpeningTimeoutCorrelation(findings, wcf, crash)` to `InsightEngine`'s `CorrelationRuleGroup`, alongside the existing `DetectWcfChannelFault` (which correlates *Faulted* channels with WCF/`ObjectDisposedException`) — this rule instead targets channels stuck in the *Opening* state, a distinct connect-time symptom that previously had no dedicated finding at all
+- Fires when `OpeningChannels > 0` **and** at least one timeout-family exception (`TimeoutException`, `OperationCanceledException`, `WebException`, or any `*TimeoutException`) is present on the heap — no minimum count floor, since the co-occurrence itself is the signal
+- Severity is `Info` by default, escalating to `Warning` once `OpeningChannels >= 5` or the timeout count `>= 10` (suggesting an ongoing outage rather than one-off flakiness)
+- Extracted the timeout-exception-type classification (previously inlined in `DetectRecurringTimeoutPattern`) into a shared `IsTimeoutExceptionType(string)` helper so the two rules can't drift out of sync on what counts as a "timeout" exception
+- Added 4 new tests in `InsightEngineTests.cs` covering: fires on co-occurrence, escalates to Warning at the high-count threshold, does not fire without a timeout exception, does not fire without any Opening channels
+
+**Impact:**
+- Connection-level failures (channels stuck trying to `Open()`/`OpenAsync()`) are now surfaced as their own actionable finding instead of being buried as a raw count inside the generic channel-count finding's evidence text
+- Closes the last item from the original P0-1 write-up, which flagged this correlation as the natural next step after making Opening/Closing first-class in the domain model
+
+### ⏭️ P2-3 Superseded (2026-08-31)
+
+**Status:** Not applicable — `StateScanCapped` no longer exists
+
+**Why:** The project moved to exact/full-data heap scanning across all analyzers and dropped
+top-K/capped-sample patterns outright rather than making caps more transparent. `WcfChannelDomainResult`
+and `WcfChannelTypeSummary` have no capping field of any kind today — the WCF heap scan is exhaustive,
+so there is no "scope of the cap" left to report. P2-3's premise (make an existing cap's scope visible)
+no longer applies; the underlying cap it targeted was removed rather than improved.
+
+### ✅ P3-1 Complete (2026-08-31)
+
+**Status:** Out-of-range channel state values are now counted separately from `OtherChannels`
+
+**What was done:**
+- Added `int InvalidState` to the analyzer's internal per-type tuple, threaded through `BeforeHeapIndexScan` seeding, `OnHeapEntry` classification, and `MergePartial` summation
+- Added `internal static bool IsValidCommunicationState(int stateVal) => stateVal is >= 0 and <= StateFaulted` — CommunicationState only defines 0 (Created) through 5 (Faulted); `OnHeapEntry` now checks this before falling back to the `Other` bucket, so a state value outside that range (a field-probe mismatch on a lookalike type, or memory corruption) increments a new `InvalidState` counter instead
+- Added `InvalidStateCount` to `WcfChannelTypeSummary` (per-type) and `WcfChannelDomainResult` (aggregate), both optional with a `0` default so every existing positional call site kept compiling unchanged
+- `WcfChannelSectionBuilder` shows an "Invalid State" column per-type and an `invalid_state` key metric
+- `WcfChannelFindingGenerator`'s channel-count finding evidence now appends `, Invalid: N` when `InvalidStateCount > 0`
+- Added `IsValidCommunicationState` boundary tests and an `InvalidState` merge test in `WcfChannelAnalyzerHeapIndexScanTests`, plus evidence-text tests in `InfrastructureFindingGeneratorTests`
+
+**Impact:**
+- A field-probe mismatch or heap corruption affecting the state read is now visible as its own signal instead of being indistinguishable from legitimate (if uncommon) Created-state channels
+- No behavior change to existing Opening/Opened/Faulted/Closing/Closed/Other classification — `InvalidState` only catches values that previously fell into the catch-all `else` branch
+
+### ✅ P3-2 Complete (2026-08-31)
+
+**Status:** Duplex and session channels now classified and counted separately
+
+**What was done:**
+- Added `internal static bool IsDuplexChannelType(string)` / `IsSessionChannelType(string)` to `WcfChannelAnalyzer` — type-name token matching (`"Duplex"` / `"Session"`) rather than `ClrType.EnumerateInterfaces()` per candidate, consistent with the existing zero-ClrType-introspection cost of `ClassifyBindingHint`. A channel's runtime type is a concrete class, not the `ISessionChannel`/`IDuplexChannel` interfaces the audit named, but WCF's channel class names consistently encode both shape tokens (e.g. `ClientFramingDuplexSessionChannel` is both), so this is a like-for-like continuation of the existing classification approach rather than a literal interface check
+- Added `DuplexChannelCount` and `SessionChannelCount` to `WcfChannelDomainResult` (both optional, default 0) — aggregated in `BuildResult()` from per-type `Total` counts; these are independent, overlapping classifications of `TotalChannels`, not a partition (a channel can be both duplex and session-based, or neither)
+- `WcfChannelSectionBuilder` exposes `duplex_channels` / `session_channels` key metrics
+- `WcfChannelFindingGenerator`'s channel-count finding evidence now always states `Duplex-capable: N, Session-based: N.`
+- Added `IsDuplexChannelType`/`IsSessionChannelType` theory tests and a finding-evidence test
+
+**Impact:**
+- Reports can now distinguish connection-oriented/stateful channel usage (net.tcp, net.pipe, WS-Session) from stateless request-reply channels (basicHttp) without a manual `!do` walk per channel type
+- No new `WcfChannelTypeSummary` columns added — kept the already-11-column per-type table from growing further; the two counts are aggregate-only, matching how `FactoryCount` is already surfaced
+
+### ✅ P3-3 Complete (2026-08-31)
+
+**Status:** New live-heap test proves `MergePartial`'s new-key-from-worker branch is unreachable in production, using a real `ClrHeap` instead of reflection-seeded state
+
+**What was done:**
+- Added `WcfChannelAnalyzerLiveHeapTests.cs`, following the project's existing `<Analyzer>LiveHeapTests` convention (`DbConnectionAnalyzerLiveHeapTests`, `SqlCommandAnalyzerLiveHeapTests`): attaches a real `ClrRuntime`/`ClrHeap` snapshot of the test process itself via `DataTarget.CreateSnapshotAndAttach`, with a test-only `System.ServiceModel.FakeChannel` fixture type (no dependency on the real System.ServiceModel package) that satisfies `WcfChannelAnalyzer.IsCandidateType`
+- The test calls the real `BeforeHeapIndexScan` (not reflection-injected `_typeStats`) on both a primary and a `CreateWorkerInstance()` worker against the *same* heap/cache, asserts their pre-seeded `_typeStats` key sets are identical before any entry is scanned, then runs `MergePartial` and asserts no new key appeared — directly demonstrating, against real ClrMD data, why the new-key-from-worker branch never fires in production (all workers discover the same candidate set from the same heap)
+- The pre-existing `MergePartial_AddsNewKeyFromWorker_WhenNotPresentInPrimary` test (reflection-seeded, artificially disjoint keys) is retained as-is — it still validates the defensive branch's own correctness as a safety net, it just isn't the "realistic pre-seeding" case P3-3 asked for
+
+**Impact:**
+- Closes the audit's full P0–P3 roadmap for `WcfChannelAnalyzer` — every recommendation is now either ✅ Complete or ⏭️ Superseded

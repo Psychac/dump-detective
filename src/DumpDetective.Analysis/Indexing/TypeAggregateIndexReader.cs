@@ -1,33 +1,34 @@
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Text;
+using DumpDetective.Analysis.Indexing.Container;
 
 namespace DumpDetective.Analysis.Indexing;
 
 /// <summary>
-/// Reads <c>TypeAggregateIndex.bin</c> to reconstruct a <see cref="HeapIndexBuildResult"/>
-/// without re-scanning the heap. Called by the fast-path check in
-/// <see cref="DiskBackedObjectIndexWriter.Build"/> when both index files are present.
+/// Reads the <c>TypeAggregates</c> (plus <c>StringDedup</c>/<c>StringDedupMeta</c>) sections of
+/// <c>cache.bin</c> to reconstruct a <see cref="HeapIndexBuildResult"/> without re-scanning the
+/// heap. Called by the fast-path check in <see cref="DiskBackedObjectIndexWriter.Build"/> when the
+/// container's <c>TypeAggregates</c> section is present.
 /// </summary>
 internal static class TypeAggregateIndexReader
 {
     /// <summary>
-    /// Attempts to load a cached <see cref="HeapIndexBuildResult"/> from
-    /// <paramref name="typeAggPath"/> and <paramref name="objectIndexPath"/>.
-    /// Returns <c>false</c> if either file is missing, corrupt, or has an
-    /// incompatible version — callers must fall back to a full heap scan.
+    /// Attempts to load a cached <see cref="HeapIndexBuildResult"/> from the container's
+    /// <c>TypeAggregates</c> section (plus the optional <c>StringDedup</c>/<c>StringDedupMeta</c>
+    /// sections). Returns <c>false</c> if the section is missing, corrupt, or has an incompatible
+    /// version — callers must fall back to a full heap scan.
     /// </summary>
     public static bool TryLoad(
-        string typeAggPath,
-        string objectIndexPath,
-        string dumpPath,
+        CacheContainerReader reader,
+        string containerPath,
         long objectCount,
         out HeapIndexBuildResult? result)
     {
         result = null;
         try
         {
-            return TryLoadCore(typeAggPath, objectIndexPath, dumpPath, objectCount, out result);
+            return TryLoadCore(reader, containerPath, objectCount, out result);
         }
         catch
         {
@@ -39,15 +40,15 @@ internal static class TypeAggregateIndexReader
     // ── Core load logic ────────────────────────────────────────────────────────
 
     private static bool TryLoadCore(
-        string typeAggPath,
-        string objectIndexPath,
-        string dumpPath,
+        CacheContainerReader reader,
+        string containerPath,
         long objectCount,
         out HeapIndexBuildResult? result)
     {
         result = null;
-        using var stream = new FileStream(typeAggPath, FileMode.Open, FileAccess.Read,
-            FileShare.Read, bufferSize: 256 * 1024, FileOptions.SequentialScan);
+        if (!reader.TryOpenSection(CacheSectionId.TypeAggregates, out Stream? sectionStream) || sectionStream is null)
+            return false;
+        using var stream = sectionStream;
 
         // ── IndexHeader ──────────────────────────────────────────────────────
         if (!IndexHeader.TryRead(stream, out var header)) return false;
@@ -61,35 +62,19 @@ internal static class TypeAggregateIndexReader
         Span<byte> buf8 = stackalloc byte[8];
         if (stream.ReadAtLeast(buf8, 8, throwOnEndOfStream: false) < 8) return false;
 
-        // ── ExtraHeader: BucketCount(4)+ModuleCount(4)+ShapeCount(4)+Pad(4)+DumpLength(8)+DumpTimeTicks(8) ─
+        // ── ExtraHeader: BucketCount(4)+ModuleCount(4)+ShapeCount(4)+Pad(4)+Reserved(8)+Reserved(8) ─
+        // Trailing 16 bytes used to be a dump length/mtime stamp; that check now happens once at
+        // the container level (see DumpContentHasher/CacheContainerReader.MatchesDumpContent)
+        // before this section is ever opened, so they're read past but otherwise unused.
         Span<byte> extra = stackalloc byte[32];
         if (stream.ReadAtLeast(extra, 32, throwOnEndOfStream: false) < 32) return false;
         int bucketCount = BinaryPrimitives.ReadInt32LittleEndian(extra);
         int moduleCount = BinaryPrimitives.ReadInt32LittleEndian(extra[4..]);
         int shapeCount = BinaryPrimitives.ReadInt32LittleEndian(extra[8..]);
-        long storedLength = BinaryPrimitives.ReadInt64LittleEndian(extra[16..]);
-        long storedTimeTicks = BinaryPrimitives.ReadInt64LittleEndian(extra[24..]);
 
         if (bucketCount is < 0 or > 64) return false;
         if (moduleCount is < 0 or > 65536) return false;
         if (shapeCount < 0) return false;
-
-        // Validate dump identity stamp. If both stored values are 0 the stamp was not
-        // available when the index was written (e.g. a permission error) — accept it.
-        // Otherwise the dump's current size and mtime must match exactly.
-        if (storedLength != 0 || storedTimeTicks != 0)
-        {
-            try
-            {
-                var fi = new FileInfo(dumpPath);
-                if (fi.Length != storedLength || fi.LastWriteTimeUtc.Ticks != storedTimeTicks)
-                    return false; // dump replaced — rebuild required
-            }
-            catch
-            {
-                return false; // cannot stat the dump — treat as mismatch
-            }
-        }
 
         // ── SizeBuckets ──────────────────────────────────────────────────────
         long[]? sizeBuckets = null;
@@ -208,17 +193,16 @@ internal static class TypeAggregateIndexReader
             }
         }
 
-        // Attempt to load optional StringDedupIndex satellite file and metadata sidecar
+        // Attempt to load optional StringDedup/StringDedupMeta sections
         IReadOnlyDictionary<ulong, StringDedupEntry>? stringDedup = null;
         DistributionSummary? stringDedupDistribution = null;
         try
         {
-            string dedupPath = DumpIndexPaths.StringDedupIndex(dumpPath);
-            if (File.Exists(dedupPath))
+            if (reader.TryOpenSection(CacheSectionId.StringDedup, out Stream? dedupStream) && dedupStream is not null)
             {
-                using var ds = new FileStream(dedupPath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 64 * 1024, FileOptions.SequentialScan);
+                using var ds = dedupStream;
                 Span<byte> hdr = stackalloc byte[12];
-                if (ds.Read(hdr) != 12) throw new InvalidDataException("short header");
+                if (ds.ReadAtLeast(hdr, 12, throwOnEndOfStream: false) != 12) throw new InvalidDataException("short header");
                 int magic = BinaryPrimitives.ReadInt32LittleEndian(hdr);
                 int version = BinaryPrimitives.ReadInt32LittleEndian(hdr[4..]);
                 int entries = BinaryPrimitives.ReadInt32LittleEndian(hdr[8..]);
@@ -229,7 +213,7 @@ internal static class TypeAggregateIndexReader
                     Span<byte> addrBuf = stackalloc byte[8];
                     for (int i = 0; i < entries; i++)
                     {
-                        if (ds.Read(rec) != rec.Length) throw new InvalidDataException("short record");
+                        if (ds.ReadAtLeast(rec, rec.Length, throwOnEndOfStream: false) != rec.Length) throw new InvalidDataException("short record");
                         ulong hash = BinaryPrimitives.ReadUInt64LittleEndian(rec);
                         int cnt = BinaryPrimitives.ReadInt32LittleEndian(rec[8..]);
                         ulong totalSize = BinaryPrimitives.ReadUInt64LittleEndian(rec[12..]);
@@ -243,7 +227,7 @@ internal static class TypeAggregateIndexReader
                             samples = new ulong[Math.Min(2, sampleCount)];
                             for (int s = 0; s < Math.Min(2, sampleCount); s++)
                             {
-                                if (ds.Read(addrBuf) != 8) throw new InvalidDataException("short addr");
+                                if (ds.ReadAtLeast(addrBuf, 8, throwOnEndOfStream: false) != 8) throw new InvalidDataException("short addr");
                                 samples[s] = BinaryPrimitives.ReadUInt64LittleEndian(addrBuf);
                             }
                         }
@@ -252,7 +236,7 @@ internal static class TypeAggregateIndexReader
                         if (previewLen > 0)
                         {
                             byte[] pbuf = new byte[previewLen];
-                            if (ds.Read(pbuf, 0, previewLen) != previewLen) throw new InvalidDataException("short preview");
+                            if (ds.ReadAtLeast(pbuf, previewLen, throwOnEndOfStream: false) != previewLen) throw new InvalidDataException("short preview");
                             preview = System.Text.Encoding.UTF8.GetString(pbuf);
                         }
 
@@ -265,13 +249,14 @@ internal static class TypeAggregateIndexReader
                 }
             }
 
-            // Attempt to load optional metadata sidecar
+            // Attempt to load optional StringDedupMeta section (opaque UTF-8 JSON bytes)
             try
             {
-                string metaPath = DumpIndexPaths.StringDedupIndexMetadata(dumpPath);
-                if (File.Exists(metaPath))
+                if (reader.TryOpenSection(CacheSectionId.StringDedupMeta, out Stream? metaStream) && metaStream is not null)
                 {
-                    string txt = File.ReadAllText(metaPath);
+                    using var ms = metaStream;
+                    using var textReader = new StreamReader(ms, Encoding.UTF8);
+                    string txt = textReader.ReadToEnd();
                     var opts = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
                     stringDedupDistribution = System.Text.Json.JsonSerializer.Deserialize<DistributionSummary>(txt, opts);
                 }
@@ -282,7 +267,7 @@ internal static class TypeAggregateIndexReader
 
         result = new HeapIndexBuildResult(
             HeapIndexStorageKind.Disk,
-            objectIndexPath,
+            containerPath,
             objectCount,
             Elapsed: TimeSpan.Zero,   // elapsed not meaningful for a cache hit
             TypeAggregates: typeAggregates,
@@ -308,11 +293,12 @@ internal static class TypeAggregateIndexReader
         long lohCnt = BinaryPrimitives.ReadInt64LittleEndian(span[28..]);
         ulong lohSz = BinaryPrimitives.ReadUInt64LittleEndian(span[36..]);
         ulong sAddr = BinaryPrimitives.ReadUInt64LittleEndian(span[44..]);
-        int g0 = BinaryPrimitives.ReadInt32LittleEndian(span[52..]);
-        int g1 = BinaryPrimitives.ReadInt32LittleEndian(span[56..]);
-        int g2 = BinaryPrimitives.ReadInt32LittleEndian(span[60..]);
-        var flags = (TypeAggregateFlags)span[64];
+        long g0 = BinaryPrimitives.ReadInt64LittleEndian(span[52..]);
+        long g1 = BinaryPrimitives.ReadInt64LittleEndian(span[60..]);
+        long g2 = BinaryPrimitives.ReadInt64LittleEndian(span[68..]);
+        ulong g2TotalSize = BinaryPrimitives.ReadUInt64LittleEndian(span[76..]);
+        var flags = (TypeAggregateFlags)span[84];
 
-        return new TypeAggregateIndexEntry(mt, modId, count, tSize, lohCnt, lohSz, sAddr, g0, g1, g2, flags);
+        return new TypeAggregateIndexEntry(mt, modId, count, tSize, lohCnt, lohSz, sAddr, g0, g1, g2, flags, g2TotalSize);
     }
 }

@@ -12,7 +12,6 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
     private const int TopMemoryItems = 5;
     private const int TopRecommendationItems = 3;
 
-    public IReadOnlyList<string> SourceAnalyzers => ["MemoryAnalyzer", "GCGenerationAnalyzer", "AllocationPatternAnalyzer", "LeakCandidateAnalyzer", "HangAnalyzer", "ThreadAnalyzer", "LockGraphAnalyzer", "CrashAnalyzer", "FinalizableObjectAnalyzer"];
 
     public string SectionId => "prof.executive-summary";
     public string DisplayTitle => "Executive Summary";

@@ -30,9 +30,9 @@ public sealed class AnalysisDiagnosticsTests
         run.FindingCount.Should().Be(0); // Pipeline sets 0; FindingGenerationPipeline enriches this in real runs
         // Diagnostics counters may be unpopulated in lightweight unit contexts; accept zero values.
         run.WarningCount.Should().Be(1);
-        run.ObjectScanCount.Should().BeGreaterOrEqualTo(0);
-        run.CacheHits.Should().BeGreaterOrEqualTo(0);
-        run.CacheMisses.Should().BeGreaterOrEqualTo(0);
+        run.ObjectScanCount.Should().BeGreaterThanOrEqualTo(0);
+        run.CacheHits.Should().BeGreaterThanOrEqualTo(0);
+        run.CacheMisses.Should().BeGreaterThanOrEqualTo(0);
 
         sink.Events.Should().NotBeEmpty();
         sink.Events.Should().Contain(e => e.EventType == AnalysisDiagnosticsEventType.RunStarted);
@@ -42,9 +42,9 @@ public sealed class AnalysisDiagnosticsTests
 
         AnalysisDiagnosticsEvent completed = sink.Events.Single(e => e.EventType == AnalysisDiagnosticsEventType.AnalyzerCompleted);
         completed.DurationMs.Should().BeGreaterThan(0);
-        completed.ObjectScanCount.Should().BeGreaterOrEqualTo(0);
-        completed.CacheHits.Should().BeGreaterOrEqualTo(0);
-        completed.CacheMisses.Should().BeGreaterOrEqualTo(0);
+        completed.ObjectScanCount.Should().BeGreaterThanOrEqualTo(0);
+        completed.CacheHits.Should().BeGreaterThanOrEqualTo(0);
+        completed.CacheMisses.Should().BeGreaterThanOrEqualTo(0);
         completed.TimestampUtc.Kind.Should().Be(DateTimeKind.Utc);
     }
 

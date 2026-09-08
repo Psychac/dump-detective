@@ -51,7 +51,11 @@ internal sealed record CompactHeader(
     bool Sortable = true);
 
 /// <summary>Compact row as a dense array of primitive values (strings, numbers, nulls).
-/// Numeric columns should be emitted as raw numbers; formatting belongs in the client layer.</summary>
+/// Numeric columns should be emitted as raw numbers; formatting belongs in the client layer.
+/// Serializes as a bare JSON array (see <see cref="DumpDetective.Reporting.Serialization.CompactRowJsonConverter"/>) —
+/// the client already accepts this shape (report.renderers.sections.js), and it saves the
+/// {"values":[...]} wrapper across every row (docs/refactor/report-payload-size-reduction-design.md, F2).</summary>
+[JsonConverter(typeof(DumpDetective.Reporting.Serialization.CompactRowJsonConverter))]
 internal sealed record CompactRow(object?[] Values);
 
 /// <summary>Compact table: headers carry typing/formatting metadata and rows are arrays-of-values.
@@ -66,16 +70,6 @@ internal static class CompactTableExtensions
 {
     // Legacy translators removed; producers now emit CompactTable directly.
 }
-
-/// <summary>Run provenance — duration, scan count, cache stats — shown collapsed at the bottom of the section.</summary>
-internal sealed record SectionProvenance(
-    string Analyzer,
-    string Status,
-    double DurationMs,
-    long ObjectScanCount,
-    long CacheHits,
-    long CacheMisses,
-    IReadOnlyList<string>? CappingNotes = null);
 
 // ── Typed structured-data slots ───────────────────────────────────────────────
 
@@ -93,21 +87,24 @@ internal sealed record NamedStackTrace(
     IReadOnlyList<StackFrameEntry> Frames,
     bool Truncated);
 
-/// <summary>A single GC root path from root through intermediate types to a target object.</summary>
-internal sealed record RootPath(
+/// <summary>Objects reachable from a GC root's target (owned subgraph). Forward BFS from target outward, not a root-to-target retention chain.</summary>
+internal sealed record RootOwnedSubgraph(
     string RootKind,
     string TargetAddress,   // hex string e.g. "0x1A2B3C"
-    int PathLength,
+    int SubgraphNodeCount,
     bool WasCapped,
-    IReadOnlyList<string> Hops);  // type names, root-first; final entry is target type
+    IReadOnlyList<string> Hops,   // type names in BFS order from target; shows graph shape owned by root
+    ulong EstimatedRetainedBytes = 0,
+    bool RetainedSizeWasWalked = false,  // true => a capped BFS walk computed EstimatedRetainedBytes, not the target's shallow size
+    bool RetainedSizeIsExact = false);   // true => the dominator tree resolved EstimatedRetainedBytes exactly (§12.1); takes precedence over RetainedSizeWasWalked
 
-/// <summary>All root paths reaching a particular target type, grouped for display.</summary>
-internal sealed record RootPathGroup(
+/// <summary>Object subgraphs reachable from roots of a particular target type, grouped for display.</summary>
+internal sealed record RootOwnedSubgraphGroup(
     string TargetType,         // fully qualified
     string TargetTypeShort,    // simple (last segment) name
-    int TotalPathCount,        // total paths in group before any take() limit
+    int TotalSubgraphCount,    // total subgraphs in group before any take() limit
     bool AnyCapped,
-    IReadOnlyList<RootPath> Paths);  // top paths (limited to 3)
+    IReadOnlyList<RootOwnedSubgraph> Subgraphs);  // top subgraphs (limited to 3)
 
 /// <summary>A single scored leak candidate with pre-computed explanation and impact text.</summary>
 internal sealed record LeakCandidateCard(
@@ -132,7 +129,10 @@ internal sealed record SubscriberDetailEntry(
     string Type,
     string? MethodName,
     int Count,
-    ulong Size);
+    ulong Size,
+    /// <summary>True when <see cref="Size"/> is the dominator tree's exact retained bytes for this
+    /// subscriber rather than the per-type shallow-size average (mirrors <see cref="RootOwnedSubgraph.RetainedSizeIsExact"/>).</summary>
+    bool SizeIsExact = false);
 
 /// <summary>Per-publisher event group summary with embedded subscriber type breakdown.</summary>
 internal sealed record EventLeakGroupCard(
@@ -149,8 +149,10 @@ internal sealed record EventLeakGroupCard(
     ulong EstimatedRetainedBytes,
     bool HasDuplicateSubscriptions,
     bool HasLifetimeMismatch,
-    int OrphanedSubscriberInstances,
-    IReadOnlyList<SubscriberDetailEntry> TopSubscriberTypes);
+    int DisposedButSubscribedInstances,
+    IReadOnlyList<SubscriberDetailEntry> TopSubscriberTypes,
+    bool IsTimerEvent = false,
+    bool IsPropertyChangedEvent = false);
 
 /// <summary>Per-publisher instance drill-down with optional per-subscriber details.</summary>
 internal sealed record EventLeakInstanceCard(
@@ -163,21 +165,46 @@ internal sealed record EventLeakInstanceCard(
     string? RootHint,
     int PublisherGeneration,
     int DuplicateSubscriptionCount,
-    int OrphanedSubscriberCount,
+    bool IsDisposedButSubscribed,
     bool HasLifetimeMismatch,
-    IReadOnlyList<SubscriberDetailEntry>? SubscriberDetails);
+    // Elements are either a SubscriberDetailEntry (inline) or an int index into the containing
+    // section's SubscriberDetailPool — see DumpDetective.Reporting.Formatters.EventLeakSubscriberPool
+    // (docs/refactor/report-payload-size-reduction-design.md, F4). Constructors can keep passing
+    // an IReadOnlyList<SubscriberDetailEntry> here unchanged; covariance handles the assignment.
+    [property: JsonConverter(typeof(DumpDetective.Reporting.Serialization.SubscriberDetailListJsonConverter))]
+    IReadOnlyList<object>? SubscriberDetails);
 
 /// <summary>A cluster of threads sharing the same stack signature.</summary>
 internal sealed record StackCluster(
     int ThreadCount,
     IReadOnlyList<string> OsThreadIds,
     string Signature,
-    bool Truncated);
+    bool Truncated,
+    string? FrameworkPattern = null);
 
 /// <summary>An on-disk artifact produced by an analyzer for offline inspection.</summary>
 internal sealed record AnalyzerArtifact(
     string FileName,
     string Instructions);
+
+/// <summary>
+/// Generic node for the shared collapsible tree widget (see
+/// docs/refactor/collapsible-tree-widget-design.md). Producers own graph algorithms — chain
+/// collapsing, breadth capping — before mapping into this shape; the widget only renders it.
+/// </summary>
+internal sealed record TreeNode(
+    string Label,
+    int? Count = null,
+    string? CountUnit = null,
+    IReadOnlyList<TreeNode>? Children = null,
+    int TruncatedChildCount = 0,
+    bool IsChain = false);
+
+/// <summary>A titled group of tree roots rendered by the shared collapsible tree widget.</summary>
+internal sealed record TreeWidget(
+    string Title,
+    IReadOnlyList<TreeNode> Roots,
+    bool AnyTruncated = false);
 
 /// <summary>A per-type sample trace entry with optional parsed GC root hop chain.</summary>
 internal sealed record TypeSampleTrace(
@@ -189,7 +216,23 @@ internal sealed record TypeSampleTrace(
     bool HasGcRoot,
     IReadOnlyList<string>? RootHops,  // parsed hop list root-first; null when no root found
     bool TraversalLimited,
-    string StatusLabel);  // "GC root found" | "No root (search limit)" | "No root" | "Sample unavailable"
+    string StatusLabel,  // "GC root found" | "No root (search limit)" | "No root" | "Sample unavailable"
+    // E-1 (docs/analysis/phase1/reference-chain-analyzer-audit.md) root-consistency scoring across
+    // multiple probed instances of the type. 0/0 when only the single representative sample above
+    // was analyzed (SampleCount <= 1) — the multi-sample columns add nothing in that case.
+    int SampleCount = 0,
+    int RetainedSampleCount = 0,
+    // E-2 (docs/analysis/phase1/reference-chain-analyzer-audit.md): exact retained-subgraph bytes
+    // for the representative sample, from the dominator tree. Null when unavailable — SampleObjectSize
+    // above remains the shallow-size fallback in that case.
+    ulong? RetainedBytes = null,
+    // E-3 (same doc): field names closing the WinDbg/SOS parity gap. RootFieldName is the static
+    // field/stack frame owner holding the root reference (first hop); LastHopFieldName is the field
+    // on the second-to-last path object holding the reference to the sample (last hop). Either can
+    // be null independently — a GC-handle root has no field name, an array-sourced last hop has no
+    // field name, and a one-hop path (root points directly at the sample) has no last hop at all.
+    string? RootFieldName = null,
+    string? LastHopFieldName = null);
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -204,16 +247,17 @@ internal sealed record AnalyzerDetailSection(
     SectionLeadFinding? LeadFinding = null,  // Always-visible top finding — null when section has no findings
     IReadOnlyDictionary<string, MetricValue>? KeyMetrics = null, // Always-visible metric strip (map: snake_case -> value)
     // Legacy typed tables removed: producers should populate `CompactTables` only.
-    SectionProvenance? Provenance = null,    // Run provenance — collapsed footer
     IReadOnlyList<CompactTable>? CompactTables = null,           // Compact table representation (preferred)
     IReadOnlyList<NamedStackTrace>? StackTraces = null,          // Named thread/stack traces (replaces H+SF[] blocks)
-    IReadOnlyList<RootPathGroup>? RootPathGroups = null,         // GC root paths grouped by target type (replaces nested collapses)
+    IReadOnlyList<RootOwnedSubgraphGroup>? RootOwnedSubgraphGroups = null, // Root-owned subgraphs grouped by target type (replaces nested collapses)
     IReadOnlyList<TypeSampleTrace>? TypeTraces = null,           // Per-type sample traces with root chains (replaces collapse+M[] blocks)
     IReadOnlyList<LeakCandidateCard>? LeakCandidateCards = null, // Scored leak candidates with explanation+impact text
     IReadOnlyList<EventLeakGroupCard>? EventLeakGroupCards = null,       // Event leak per-group drill-down
     IReadOnlyList<EventLeakInstanceCard>? EventLeakInstanceCards = null, // Event leak per-instance drill-down
+    IReadOnlyList<SubscriberDetailEntry>? SubscriberDetailPool = null,  // Pool referenced by EventLeakInstanceCards[].subscriberDetails indices (F4)
     IReadOnlyList<StackCluster>? StackClusters = null,           // Thread stack signature clusters
-    IReadOnlyList<AnalyzerArtifact>? Artifacts = null);          // On-disk artifacts produced by the analyzer
+    IReadOnlyList<AnalyzerArtifact>? Artifacts = null,           // On-disk artifacts produced by the analyzer
+    IReadOnlyList<TreeWidget>? TreeWidgets = null);               // Shared collapsible tree widget data (e.g. cluster shared-prefix tree)
 
 // Discriminated union root — each subtype carries only what it needs
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
@@ -231,6 +275,8 @@ internal sealed record AnalyzerDetailSection(
 [JsonDerivedType(typeof(CollapsibleSectionBeginBlock), "collapsibleBegin")]
 [JsonDerivedType(typeof(CollapsibleSectionEndBlock), "collapsibleEnd")]
 [JsonDerivedType(typeof(SparklineBlock), "sparkline")]
+[JsonDerivedType(typeof(InterpretationBlock), "interpretation")]
+[JsonDerivedType(typeof(NextStepsBlock), "nextSteps")]
 internal abstract record SectionBlock;
 
 internal sealed record HeadingBlock(string Text, int IndentLevel = 0) : SectionBlock;
@@ -258,6 +304,28 @@ internal sealed record ConfidenceBandBlock(
     double Score,
     string Symbol,
     string[] Caveats) : SectionBlock;
+
+/// <summary>
+/// Narrative reading of a ratio/percent metric (docs/refactor/narrative-interpretation-text-design.md)
+/// — e.g. "retained ≫ shallow → holds a large external graph." Distinct from <see cref="TextBlock"/>
+/// so renderers can style it as a muted "aside" instead of blending into ordinary narrative prose.
+/// Produced by <c>SectionBuilderBase.Interpret</c>, never constructed directly by a section builder.
+/// </summary>
+internal sealed record InterpretationBlock(string Text, int IndentLevel = 0) : SectionBlock;
+
+/// <summary>
+/// Cross-section "investigate next" pointers (docs/analysis/phase1/dominator-analyzer-audit.md's
+/// "Shared Next steps" P3 item) — e.g. Dominator pointing an engineer at GC Root Analysis or
+/// Reference Chain Analysis for root-cause follow-up, matching comparable tools' step-numbered
+/// investigation flow. <see cref="NextStepLink.SectionId"/> is the stable, analyzer-name-keyed ID
+/// from <c>SectionIdDomainMap</c> (e.g. <c>"A5"</c>), resolved at build time by
+/// <c>SectionBuilderBase.NextSteps</c> — never a raw analyzer name, so every formatter can turn it
+/// into a real anchor link without its own lookup. A link to a target that didn't run this session
+/// (filtered out, not just skipped) degrades to an unresolved in-page anchor rather than an error.
+/// </summary>
+internal sealed record NextStepsBlock(IReadOnlyList<NextStepLink> Links) : SectionBlock;
+
+internal sealed record NextStepLink(string Label, string SectionId);
 
 internal sealed record TableRow(IReadOnlyList<TableCell> Cells);
 internal sealed record TableCell(string Display, double? RawValue = null, string? LinkTarget = null);   // RawValue for client-side sort; LinkTarget for anchored links

@@ -4,7 +4,7 @@ using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 
-namespace DumpDetective.Analysis.FindingGenerators;
+namespace DumpDetective.Reporting.FindingGenerators;
 
 internal sealed class SegmentReservationFindingGenerator : IFindingGenerator
 {
@@ -20,7 +20,7 @@ internal sealed class SegmentReservationFindingGenerator : IFindingGenerator
         // Address space pressure.
         if (r.AddressSpacePressureRisk)
         {
-            bool is32Bit = IntPtr.Size == 4;
+            bool is32Bit = r.DumpPointerSize == 4;
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
                 Category: "Memory",
@@ -29,7 +29,7 @@ internal sealed class SegmentReservationFindingGenerator : IFindingGenerator
                 Evidence: r.PressureRiskReason,
                 Recommendation: is32Bit
                     ? "Migrate to a 64-bit process to avoid virtual address exhaustion."
-                    : "Investigate GC segment reservation policy; consider COMPLUS_GCSegmentSize tuning.",
+                    : "Investigate GC segment reservation policy; consider tuning System.GC.HeapHardLimit in runtimeconfig.json.",
                 Tags: ["segments", "virtual-memory", "address-space"],
                 MetricValue: r.ReservedToCommittedRatio,
                 MetricUnit: "ratio"));
@@ -49,6 +49,25 @@ internal sealed class SegmentReservationFindingGenerator : IFindingGenerator
                 Tags: ["segments", "ephemeral", "gen0", "gc"],
                 MetricValue: r.AvgEphemeralFillPct,
                 MetricUnit: "%"));
+        }
+
+        // Near-empty GC regions (.NET 8+ regions-based GC) — decommit candidates.
+        if (r.IsRegionsBased && r.NearEmptyRegionCount > 0)
+        {
+            // 50 MB — below this the near-empty committed total isn't worth flagging above Info;
+            // no external standard behind this number, picked as a "worth a human looking at it" line.
+            const ulong WarningReclaimableBytesThreshold = 50 * 1024 * 1024UL;
+            bool warning = r.NearEmptyRegionCommittedBytes > WarningReclaimableBytesThreshold;
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Memory",
+                Severity: warning ? FindingSeverity.Warning : FindingSeverity.Info,
+                Title: "Near-empty GC regions detected",
+                Evidence: $"{r.NearEmptyRegionCount} region(s) below {r.NearEmptyRegionFillPctThreshold:F0}% fill, holding {FormatHelper.FormatBytes(r.NearEmptyRegionCommittedBytes)} of committed memory.",
+                Recommendation: "Regions-based GC (DATAS) can decommit near-empty regions over time; if this persists across snapshots, investigate pinned or long-lived objects preventing region evacuation.",
+                Tags: ["segments", "regions", "gc-regions", "decommit"],
+                MetricValue: (double)r.NearEmptyRegionCommittedBytes,
+                MetricUnit: "bytes"));
         }
 
         // Summary finding (always).

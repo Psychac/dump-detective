@@ -78,6 +78,45 @@ public sealed class ConfigurationResolverTests
     }
 
     [Fact]
+    public void Resolve_ShouldNotLetPartialReportObjectShadowTopLevelReportStyle()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string configPath = Path.Combine(tempDirectory, "config.json");
+            File.WriteAllText(configPath, """
+            {
+              "DumpPath": "C:/dumps/from-config.dmp",
+              "ReportStyleVersion": "v2",
+              "Report": {
+                "Format": "Html"
+              }
+            }
+            """);
+
+            AnalysisCommandRequest request = CreateRequest(configPath: configPath) with
+            {
+                DumpPath = null,
+                OutputFormat = ReportFormat.Html,
+                ReportStyleVersion = ReportStyleVersion.V1,
+                PreRender = true,
+                SeparateJson = true
+            };
+            ConfigurationResolver resolver = new();
+
+            ResolvedExecutionOptions resolved = resolver.Resolve(request);
+
+            resolved.Report.StyleVersion.Should().Be(ReportStyleVersion.V2);
+            resolved.Report.PreRender.Should().BeTrue();
+            resolved.Report.SeparateJson.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Resolve_ShouldUseCliReportStyle_WhenConfigMissingStyle()
     {
         string tempDirectory = CreateTempDirectory();
@@ -126,12 +165,12 @@ public sealed class ConfigurationResolverTests
 
             AnalysisCommandRequest request = CreateRequest(configPath: configPath) with { DumpPath = null, OutputFormat = ReportFormat.Html };
             ConfigurationResolver resolver = new();
-            RetentionOptions balancedMemoryLeak = RetentionOptions.Preset(AnalysisProfile.Balanced);
-            ReferenceChainOptions balancedReferenceChain = ReferenceChainOptions.Preset(AnalysisProfile.Balanced);
+            RetentionOptions balancedMemoryLeak = new RetentionOptions();
+            ReferenceChainOptions balancedReferenceChain = new ReferenceChainOptions();
 
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
-            var balancedString = StringAnalysisOptions.Preset(AnalysisProfile.Balanced);
+            var balancedString = new StringAnalysisOptions();
             resolved.StringAnalysis.MaxDuplicateStringLength.Should().Be(balancedString.MaxDuplicateStringLength);
             resolved.ReferenceChain.TopCount.Should().Be(balancedReferenceChain.TopCount);
             resolved.Report.Format.Should().Be(ReportFormat.Html);
@@ -154,9 +193,9 @@ public sealed class ConfigurationResolverTests
 
             AnalysisCommandRequest request = CreateRequest(configPath: configPath) with { OutputFormat = ReportFormat.Html };
             ConfigurationResolver resolver = new();
-            RetentionOptions balancedMemoryLeak = RetentionOptions.Preset(AnalysisProfile.Balanced);
-            ReferenceChainOptions balancedReferenceChain = ReferenceChainOptions.Preset(AnalysisProfile.Balanced);
-            EventLeakOptions balancedEventLeak = EventLeakOptions.Preset(AnalysisProfile.Balanced);
+            RetentionOptions balancedMemoryLeak = new RetentionOptions();
+            ReferenceChainOptions balancedReferenceChain = new ReferenceChainOptions();
+            EventLeakOptions balancedEventLeak = new EventLeakOptions();
 
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
@@ -164,7 +203,7 @@ public sealed class ConfigurationResolverTests
             resolved.DumpPath.Should().Be("C:/dumps/from-config.dmp");
             resolved.MemoryLeak.HighReferenceThreshold.Should().Be(balancedMemoryLeak.HighReferenceThreshold);
             resolved.ReferenceChain.TopCount.Should().Be(balancedReferenceChain.TopCount);
-            resolved.EventLeak.MinSubscribers.Should().Be(balancedEventLeak.MinSubscribers);
+            resolved.EventLeak.TopDetailedInstancesPerGroup.Should().Be(balancedEventLeak.TopDetailedInstancesPerGroup);
             resolved.Report.Format.Should().Be(ReportFormat.Html);
         }
         finally
@@ -203,100 +242,14 @@ public sealed class ConfigurationResolverTests
         resolved.TrendDumpPaths.Should().Equal("C:/dumps/t1.dmp", "C:/dumps/t2.dmp", "C:/dumps/t3.dmp");
     }
 
-    [Fact]
-    public void Resolve_ShouldApplyAnalyzerProfileThenFieldOverrides_ForCrash()
-    {
-        string tempDirectory = CreateTempDirectory();
-        try
-        {
-            string configPath = Path.Combine(tempDirectory, "config.json");
-            File.WriteAllText(configPath, """
-            {
-              "DumpPath": "C:/dumps/from-config.dmp",
-              "Profile": "Fast",
-              "Analyzers": {
-                "Crash": {
-                  "Profile": "Full",
-                  "TopDetailedExceptionInstances": 7
-                }
-              }
-            }
-            """);
-
-            AnalysisCommandRequest request = CreateRequest(configPath: configPath);
-            ConfigurationResolver resolver = new();
-
-            ResolvedExecutionOptions resolved = resolver.Resolve(request);
-
-            resolved.Crash.TopDetailedExceptionInstances.Should().Be(7);
-            resolved.Crash.MaxDetailedExceptionsPerType.Should().Be(10);
-            resolved.Crash.MaxOriginalStackFramesToPrint.Should().Be(40);
-        }
-        finally
-        {
-            Directory.Delete(tempDirectory, recursive: true);
-        }
-    }
+    // The AnalysisProfile tier system (Fast/Balanced/Full/Deep) was removed — every analyzer now
+    // runs exact, uncapped analysis unconditionally, regardless of any "Profile" key a config file
+    // still carries. These tests replace the old tier-selection assertions (§8 item 8,
+    // docs/refactor/analysis-profile-removal-plan.md): "these test a relationship between tiers;
+    // with no tiers there is nothing to preserve."
 
     [Fact]
-    public void Resolve_ShouldMapDeepToFull_ForGlobalProfile()
-    {
-        string tempDirectory = CreateTempDirectory();
-        try
-        {
-            string configPath = Path.Combine(tempDirectory, "config.json");
-            File.WriteAllText(configPath, """
-            {
-              "DumpPath": "C:/dumps/from-config.dmp",
-              "Profile": "Deep"
-            }
-            """);
-
-            AnalysisCommandRequest request = CreateRequest(configPath: configPath);
-            ConfigurationResolver resolver = new();
-
-            ResolvedExecutionOptions resolved = resolver.Resolve(request);
-
-            resolved.Crash.MaxOriginalStackFramesToPrint.Should().Be(40);
-            resolved.Collection.Profile.Should().Be(DumpDetective.Core.Options.AnalysisProfile.Full);
-            resolved.Collection.PathAnalysisTopN.Should().Be(15);
-        }
-        finally
-        {
-            Directory.Delete(tempDirectory, recursive: true);
-        }
-    }
-
-    [Fact]
-    public void Resolve_ShouldFallbackToBalancedProfile_WhenNoProfileProvided()
-    {
-        string tempDirectory = CreateTempDirectory();
-        try
-        {
-            string configPath = Path.Combine(tempDirectory, "config.json");
-            File.WriteAllText(configPath, """
-            {
-              "DumpPath": "C:/dumps/from-config.dmp"
-            }
-            """);
-
-            AnalysisCommandRequest request = CreateRequest(configPath: configPath);
-            ConfigurationResolver resolver = new();
-
-            ResolvedExecutionOptions resolved = resolver.Resolve(request);
-
-            resolved.Crash.TopDetailedExceptionInstances.Should().Be(25);
-            resolved.Collection.Profile.Should().Be(DumpDetective.Core.Options.AnalysisProfile.Balanced);
-            resolved.Collection.PathAnalysisTopN.Should().Be(5);
-        }
-        finally
-        {
-            Directory.Delete(tempDirectory, recursive: true);
-        }
-    }
-
-    [Fact]
-    public void Resolve_ShouldApplyGlobalProfileBaseline_WhenAnalyzerSectionsMissing()
+    public void Resolve_ShouldIgnoreLegacyGlobalProfileKey_AndUseDefaults()
     {
         string tempDirectory = CreateTempDirectory();
         try
@@ -314,14 +267,45 @@ public sealed class ConfigurationResolverTests
 
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
-            resolved.MemoryLeak.TopHighlyReferencedObjectsToShow.Should().Be(40);
-            resolved.MemoryLeak.MaxLeakScanObjects.Should().Be(5_000_000);
+            var defaultMemoryLeak = new RetentionOptions();
+            var defaultReferenceChain = new ReferenceChainOptions();
+            var defaultEventLeak = new EventLeakOptions();
+            var defaultCollection = new CollectionAnalysisOptions();
 
-            resolved.ReferenceChain.SearchMode.Should().Be(ReferenceChainSearchMode.Deep);
-            resolved.ReferenceChain.MaxRootExpansionDepth.Should().Be(25);
+            resolved.MemoryLeak.TopHighlyReferencedObjectsToShow.Should().Be(defaultMemoryLeak.TopHighlyReferencedObjectsToShow);
+            resolved.MemoryLeak.MaxLeakScanObjects.Should().Be(defaultMemoryLeak.MaxLeakScanObjects);
+            resolved.ReferenceChain.MaxRootExpansionDepth.Should().Be(defaultReferenceChain.MaxRootExpansionDepth);
+            resolved.EventLeak.TopDetailedInstancesPerGroup.Should().Be(defaultEventLeak.TopDetailedInstancesPerGroup);
+            resolved.Collection.PathAnalysisTopN.Should().Be(defaultCollection.PathAnalysisTopN);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
 
-            resolved.EventLeak.IncludeNonLeakingEvents.Should().BeTrue();
-            resolved.EventLeak.TopDetailedInstancesPerGroup.Should().Be(20);
+    [Fact]
+    public void Resolve_ShouldNotThrow_WhenLegacyProfileKeyIsAnInvalidValue()
+    {
+        // Previously "Profile": "not-a-real-tier" threw ArgumentException during resolution.
+        // The key is now inert — resolution must succeed regardless of its value.
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string configPath = Path.Combine(tempDirectory, "config.json");
+            File.WriteAllText(configPath, """
+            {
+              "DumpPath": "C:/dumps/from-config.dmp",
+              "Profile": "not-a-real-tier"
+            }
+            """);
+
+            AnalysisCommandRequest request = CreateRequest(configPath: configPath);
+            ConfigurationResolver resolver = new();
+
+            Action act = () => resolver.Resolve(request);
+
+            act.Should().NotThrow();
         }
         finally
         {
@@ -351,14 +335,12 @@ public sealed class ConfigurationResolverTests
 
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
-            resolved.MemoryLeak.HighReferenceThreshold.Should().Be(30);
-            resolved.MemoryLeak.TopHighlyReferencedObjectsToShow.Should().Be(40);
+            resolved.MemoryLeak.HighReferenceThreshold.Should().Be(50);
+            resolved.MemoryLeak.TopHighlyReferencedObjectsToShow.Should().Be(15);
 
-            resolved.ReferenceChain.TopCount.Should().Be(20);
-            resolved.ReferenceChain.SearchMode.Should().Be(ReferenceChainSearchMode.Deep);
+            resolved.ReferenceChain.TopCount.Should().Be(10);
 
-            resolved.EventLeak.MinSubscribers.Should().Be(0);
-            resolved.EventLeak.IncludeNonLeakingEvents.Should().BeTrue();
+            resolved.EventLeak.TopDetailedInstancesPerGroup.Should().Be(5);
         }
         finally
         {
@@ -367,8 +349,10 @@ public sealed class ConfigurationResolverTests
     }
 
     [Fact]
-    public void Resolve_ShouldApplyAnalyzerProfileThenFieldOverrides_ForMemoryLeak()
+    public void Resolve_ShouldApplyFieldOverrides_RegardlessOfLegacyProfileKeys()
     {
+        // A legacy "Profile" key both globally and embedded in an analyzer section must not
+        // interfere with real field overrides in that same section.
         string tempDirectory = CreateTempDirectory();
         try
         {
@@ -381,37 +365,7 @@ public sealed class ConfigurationResolverTests
                                 "String": {
                                     "Profile": "Full",
                                     "MinDuplicateStringCount": 11
-                                }
-                            }
-                        }
-                        """);
-
-            AnalysisCommandRequest request = CreateRequest(configPath: configPath);
-            ConfigurationResolver resolver = new();
-
-            ResolvedExecutionOptions resolved = resolver.Resolve(request);
-
-            resolved.MemoryLeak.TopHighlyReferencedObjectsToShow.Should().Be(8);
-            resolved.StringAnalysis.MinDuplicateStringCount.Should().Be(11);
-        }
-        finally
-        {
-            Directory.Delete(tempDirectory, recursive: true);
-        }
-    }
-
-    [Fact]
-    public void Resolve_ShouldUseGlobalProfile_WhenAnalyzerProfileMissing_ForReferenceChain()
-    {
-        string tempDirectory = CreateTempDirectory();
-        try
-        {
-            string configPath = Path.Combine(tempDirectory, "config.json");
-            File.WriteAllText(configPath, """
-                        {
-                            "DumpPath": "C:/dumps/from-config.dmp",
-                            "Profile": "Fast",
-                            "Analyzers": {
+                                },
                                 "ReferenceChain": {
                                     "TopCount": 9
                                 }
@@ -424,41 +378,9 @@ public sealed class ConfigurationResolverTests
 
             ResolvedExecutionOptions resolved = resolver.Resolve(request);
 
-            resolved.ReferenceChain.SearchMode.Should().Be(DumpDetective.Core.Options.ReferenceChainSearchMode.Fast);
+            resolved.StringAnalysis.MinDuplicateStringCount.Should().Be(11);
             resolved.ReferenceChain.TopCount.Should().Be(9);
-        }
-        finally
-        {
-            Directory.Delete(tempDirectory, recursive: true);
-        }
-    }
-
-    [Fact]
-    public void Resolve_ShouldApplyAnalyzerProfile_ForEventLeak()
-    {
-        string tempDirectory = CreateTempDirectory();
-        try
-        {
-            string configPath = Path.Combine(tempDirectory, "config.json");
-            File.WriteAllText(configPath, """
-                        {
-                            "DumpPath": "C:/dumps/from-config.dmp",
-                            "Profile": "Fast",
-                            "Analyzers": {
-                                "EventLeak": {
-                                    "Profile": "Full"
-                                }
-                            }
-                        }
-                        """);
-
-            AnalysisCommandRequest request = CreateRequest(configPath: configPath);
-            ConfigurationResolver resolver = new();
-
-            ResolvedExecutionOptions resolved = resolver.Resolve(request);
-
-            resolved.EventLeak.IncludeNonLeakingEvents.Should().BeTrue();
-            resolved.EventLeak.TopDetailedInstancesPerGroup.Should().Be(20);
+            resolved.MemoryLeak.TopHighlyReferencedObjectsToShow.Should().Be(new RetentionOptions().TopHighlyReferencedObjectsToShow);
         }
         finally
         {
@@ -489,9 +411,6 @@ public sealed class ConfigurationResolverTests
             MaxDuplicateStringLength: 222,
             MinDuplicateStringCount: 9,
             MaxReferenceAddresses: 333,
-            ReferenceChainTopCount: 6,
-            ReferenceChainMaxPathSearchObjects: 444,
-            EventLeakMinSubscribers: 3,
             EnableMemoryDiagnostics: false,
             EnablePerformanceDiagnostics: true);
     }

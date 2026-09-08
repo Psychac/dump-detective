@@ -18,16 +18,15 @@ internal sealed class RunAnalyzersPipelineStage(DumpDetective.Cli.Execution.Anal
 
     public async Task ExecuteAsync(SingleDumpPipelineState state, CancellationToken cancellationToken)
     {
-        RuntimeAnalysisContext context = _analyzerExecutionService.BuildContext(
-            state.Resolved,
-            state.LoadContext!,
-            state.HeapCache!,
-            state.ActiveAnalyzers);
+        // Context and pipeline are built by BuildHeapIndexStage, which also runs the shared
+        // heap-index/thread-stack scan passes under its own header/timer before this stage starts.
+        RuntimeAnalysisContext context = state.Context!;
+        AnalysisPipeline pipeline = state.Pipeline!;
 
         IReadOnlyList<AnalyzerRunResult> runs;
         try
         {
-            runs = await _analyzerExecutionService.ExecuteAsync(context, state.ActiveAnalyzers, cancellationToken);
+            runs = await _analyzerExecutionService.ExecuteAsync(pipeline, context, cancellationToken);
         }
         catch (OperationCanceledException)
         {

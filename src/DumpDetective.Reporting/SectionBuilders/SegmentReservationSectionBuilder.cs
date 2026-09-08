@@ -24,9 +24,9 @@ internal sealed class SegmentReservationSectionBuilder : SectionBuilderBase, IAn
         var blocks = new List<SectionBlock>();
 
         SectionLeadFinding? leadFinding = null;
-        if (d.ReservedToCommittedRatio > 10.0 || (d.AddressSpacePressureRisk && d.ReservedToCommittedRatio > 4.0))
+        if (d.ReservedToCommittedRatio > d.RatioHighPressureThreshold || (d.AddressSpacePressureRisk && d.ReservedToCommittedRatio > d.RatioMediumPressureThreshold))
         {
-            bool critical = d.ReservedToCommittedRatio > 10.0;
+            bool critical = d.ReservedToCommittedRatio > d.RatioHighPressureThreshold;
             string reason = d.AddressSpacePressureRisk && !string.IsNullOrWhiteSpace(d.PressureRiskReason)
                 ? d.PressureRiskReason
                 : $"Reserved/committed ratio is {d.ReservedToCommittedRatio:F1}\u00d7.";
@@ -39,11 +39,11 @@ internal sealed class SegmentReservationSectionBuilder : SectionBuilderBase, IAn
                 ConfidenceScore: 0.85,
                 Caveats: []);
         }
-        else if (d.ReservedToCommittedRatio > 4.0)
+        else if (d.ReservedToCommittedRatio > d.RatioMediumPressureThreshold)
         {
             string reason = d.AddressSpacePressureRisk && !string.IsNullOrWhiteSpace(d.PressureRiskReason)
                 ? d.PressureRiskReason
-                : $"Reserved/committed ratio is {d.ReservedToCommittedRatio:F1}\u00d7 (threshold: 4\u00d7).";
+                : $"Reserved/committed ratio is {d.ReservedToCommittedRatio:F1}\u00d7 (threshold: {d.RatioMediumPressureThreshold:F0}\u00d7).";
             leadFinding = new SectionLeadFinding(
                 Severity: "Warning",
                 Title: $"Elevated segment reservation \u2014 ratio {d.ReservedToCommittedRatio:F1}\u00d7",
@@ -64,7 +64,16 @@ internal sealed class SegmentReservationSectionBuilder : SectionBuilderBase, IAn
             ["avg_ephemeral_fill_pct"] = new NumericMetricValue(d.AvgEphemeralFillPct, MetricUnit.Percent),
             ["non_ephemeral_soh_segs"] = new NumericMetricValue(d.NonEphemeralSohSegmentCount, MetricUnit.Count),
             ["address_space_pressure"] = new TextMetricValue(d.AddressSpacePressureRisk ? "Yes" : "No"),
+            ["gc_mode"] = new TextMetricValue(d.IsServerGc ? "Server" : "Workstation"),
+            ["logical_heap_count"] = new NumericMetricValue(d.LogicalHeapCount, MetricUnit.Count),
+            ["regions_based_gc"] = new TextMetricValue(d.IsRegionsBased ? "Yes" : "No"),
         };
+
+        if (d.IsRegionsBased)
+        {
+            keyMetrics["near_empty_region_count"] = new NumericMetricValue(d.NearEmptyRegionCount, MetricUnit.Count);
+            keyMetrics["near_empty_region_committed_bytes"] = new NumericMetricValue((double)d.NearEmptyRegionCommittedBytes, MetricUnit.Bytes);
+        }
 
         if (d.AddressSpacePressureRisk && !string.IsNullOrWhiteSpace(d.PressureRiskReason))
             blocks.Add(T($"Pressure reason: {d.PressureRiskReason}"));
@@ -76,17 +85,19 @@ internal sealed class SegmentReservationSectionBuilder : SectionBuilderBase, IAn
             for (int i = 0; i < limit; i++)
             {
                 SegmentReservationEntry seg = d.SegmentTable[i];
+                string fillPctDisplay = (seg.IsEphemeral || d.IsRegionsBased) ? $"{seg.FillPct:F1}%" : "—";
                 rows.Add(Row(
                     Cell($"0x{seg.Address:X}"),
+                    Cell($"0x{seg.EndAddress:X}"),
                     Cell(seg.Kind.ToString()),
                     Cell(FormatBytes(seg.CommittedBytes), (long)Math.Min(seg.CommittedBytes, long.MaxValue)),
                     Cell(FormatBytes(seg.ReservedBytes),  (long)Math.Min(seg.ReservedBytes,  long.MaxValue)),
                     Cell(seg.IsEphemeral ? "Yes" : "No"),
                     Cell(seg.LogicalHeap.ToString("N0"), seg.LogicalHeap),
-                    Cell($"{seg.FillPct:F1}%")));
+                    Cell(fillPctDisplay)));
             }
             compactTables.Add(STCompact("Segment table",
-                new[] { CH("Address"), CH("Kind"), CH("Committed","bytes"), CH("Reserved","bytes"), CH("Ephemeral"), CH("Logical Heap","number"), CH("Fill %", "number", "percent") },
+                new[] { CH("Address"), CH("End Address"), CH("Kind"), CH("Committed","bytes"), CH("Reserved","bytes"), CH("Ephemeral"), CH("Logical Heap","number"), CH("Fill %", "number", "percent") },
                 rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
@@ -99,6 +110,32 @@ internal sealed class SegmentReservationSectionBuilder : SectionBuilderBase, IAn
                     Cell(FormatBytes(kvp.Value), (long)Math.Min(kvp.Value, long.MaxValue))));
             compactTables.Add(STCompact("Reserved by logical heap", new[] { CH("Logical Heap","number"), CH("Reserved Bytes","bytes") }, heapRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
+
+        if (d.IsRegionsBased && d.RegionStats.Count > 0)
+        {
+            var regionRows = new List<TableRow>(d.RegionStats.Count);
+            foreach (RegionGenerationStats rs in d.RegionStats)
+            {
+                ulong avgReservedBytes = rs.Count > 0 ? rs.TotalReservedBytes / (ulong)rs.Count : 0;
+                regionRows.Add(Row(
+                    Cell(rs.Kind.ToString()),
+                    Cell(rs.Count.ToString("N0"), rs.Count),
+                    Cell(FormatBytes(rs.TotalReservedBytes), (long)Math.Min(rs.TotalReservedBytes, long.MaxValue)),
+                    Cell(FormatBytes(rs.TotalCommittedBytes), (long)Math.Min(rs.TotalCommittedBytes, long.MaxValue)),
+                    Cell(FormatBytes(rs.MinReservedBytes), (long)Math.Min(rs.MinReservedBytes, long.MaxValue)),
+                    Cell(FormatBytes(rs.MaxReservedBytes), (long)Math.Min(rs.MaxReservedBytes, long.MaxValue)),
+                    Cell(FormatBytes(avgReservedBytes), (long)Math.Min(avgReservedBytes, long.MaxValue)),
+                    Cell(rs.NearEmptyCount.ToString("N0"), rs.NearEmptyCount),
+                    Cell(FormatBytes(rs.NearEmptyCommittedBytes), (long)Math.Min(rs.NearEmptyCommittedBytes, long.MaxValue))));
+            }
+            compactTables.Add(STCompact("Regions by generation",
+                new[] { CH("Generation"), CH("Count","number"), CH("Total Reserved","bytes"), CH("Total Committed","bytes"), CH("Min Region","bytes"), CH("Max Region","bytes"), CH("Avg Region","bytes"), CH("Near-Empty Count","number"), CH("Near-Empty Committed","bytes") },
+                regionRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
+
+            if (d.NearEmptyRegionCount > 0)
+                blocks.Add(T($"{d.NearEmptyRegionCount} region(s) are below {d.NearEmptyRegionFillPctThreshold:F0}% fill, holding {FormatBytes(d.NearEmptyRegionCommittedBytes)} of committed memory that is a candidate for GC decommit."));
+        }
+
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,
             LeadFinding: leadFinding,

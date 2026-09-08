@@ -1,5 +1,4 @@
 using DumpDetective.Core.Configuration;
-using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Enums;
 
 namespace DumpDetective.Cli.Commands;
@@ -18,12 +17,9 @@ internal sealed record AnalysisCommandRequest(
     int? MaxDuplicateStringLength,
     int? MinDuplicateStringCount,
     int? MaxReferenceAddresses,
-    int? ReferenceChainTopCount,
-    int? ReferenceChainMaxPathSearchObjects,
-    int? EventLeakMinSubscribers,
     bool EnableMemoryDiagnostics,
     bool EnablePerformanceDiagnostics,
     ReportStyleVersion? ReportStyleVersion = null,
-    HeapIndexPrebuildMode? IndexPrebuildMode = null,
     bool PreRender = false,
-    bool SeparateJson = false);
+    bool SeparateJson = false,
+    string? CacheDirectory = null);

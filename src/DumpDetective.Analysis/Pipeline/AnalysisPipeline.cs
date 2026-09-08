@@ -13,19 +13,53 @@ internal sealed class AnalysisPipeline(
     AnalysisDiagnosticsPublisher? diagnosticsPublisher = null,
     AnalyzerResultPostProcessor? resultPostProcessor = null)
 {
-    private readonly IReadOnlyList<IAnalyzer> _analyzers = analyzers.ToArray();
+    private readonly IReadOnlyList<IAnalyzer> _analyzers = analyzers.Where(a => a is not IDeferredAnalyzer).ToArray();
+    // Analyzers that must observe the full completed run list (post-hoc, order-agnostic
+    // inter-analyzer result bus) run here, after every mid-loop analyzer has finished.
+    private readonly IReadOnlyList<IAnalyzer> _deferredAnalyzers = analyzers.OfType<IDeferredAnalyzer>().ToArray();
     private readonly AnalyzerResultPostProcessor _resultPostProcessor = resultPostProcessor ?? new AnalyzerResultPostProcessor(findingGenerationPipeline);
     private readonly AnalyzerCleanupPolicy _cleanupPolicy = cleanupPolicy ?? new AnalyzerCleanupPolicy();
     private readonly AnalysisDiagnosticsPublisher _diagnosticsPublisher = diagnosticsPublisher ?? new AnalysisDiagnosticsPublisher();
     private readonly AnalyzerExecutionRunner _executionRunner = executionRunner ?? new AnalyzerExecutionRunner(diagnosticsPublisher ?? new AnalysisDiagnosticsPublisher());
     // Cached once per pipeline instance to avoid repeated OS round-trips per analyzer.
     private static readonly Process _currentProcess = Process.GetCurrentProcess();
+    private bool _sharedScansRun;
+
+    /// <summary>
+    /// Runs the shared heap-index/thread-stack scan passes (design: single pass fanned out to
+    /// every <see cref="IHeapIndexScanParticipant"/>/<see cref="IThreadStackScanParticipant"/>).
+    /// Exposed so callers that want this attributed to the indexing phase (not "running
+    /// analyzers") can call it before that phase transition; idempotent — <see cref="ExecuteAsync"/>
+    /// skips it if already run.
+    /// </summary>
+    public void RunSharedScans(RuntimeAnalysisContext context, CancellationToken cancellationToken)
+    {
+        if (_sharedScansRun)
+            return;
+        _sharedScansRun = true;
+
+        IReadOnlyList<IHeapIndexScanParticipant> heapIndexScanParticipants = _analyzers.OfType<IHeapIndexScanParticipant>().ToArray();
+        if (heapIndexScanParticipants.Count > 0 && context.Cache is HeapAnalysisCache heapIndexCache)
+        {
+            new HeapIndexScanDispatcher().Run(heapIndexCache, context, heapIndexScanParticipants, cancellationToken);
+        }
+
+        IReadOnlyList<IThreadStackScanParticipant> threadStackScanParticipants = _analyzers.OfType<IThreadStackScanParticipant>().ToArray();
+        if (threadStackScanParticipants.Count > 0)
+        {
+            int maxFramesPerThread = 1;
+            foreach (IThreadStackScanParticipant participant in threadStackScanParticipants)
+                maxFramesPerThread = Math.Max(maxFramesPerThread, participant.GetRequiredFrameCount(context));
+
+            new ThreadStackScanDispatcher().Run(context.Runtime, context, threadStackScanParticipants, maxFramesPerThread, cancellationToken);
+        }
+    }
 
     public async Task<IReadOnlyList<AnalyzerRunResult>> ExecuteAsync(RuntimeAnalysisContext context, CancellationToken cancellationToken)
     {
         Guid runId = Guid.NewGuid();
         Stopwatch runStopwatch = Stopwatch.StartNew();
-        List<AnalyzerRunResult> runResults = new(_analyzers.Count);
+        List<AnalyzerRunResult> runResults = new(_analyzers.Count + _deferredAnalyzers.Count);
 
         _diagnosticsPublisher.Publish(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
             RunId: runId,
@@ -41,7 +75,42 @@ internal sealed class AnalysisPipeline(
             ExceptionType: null,
             ExceptionMessage: null));
 
-        foreach (IAnalyzer analyzer in _analyzers)
+        RunSharedScans(context, cancellationToken);
+
+        await RunAnalyzerBatchAsync(_analyzers, context, runId, runResults, cancellationToken);
+
+        context.CompletedRunResults = runResults.ToArray();
+        await RunAnalyzerBatchAsync(_deferredAnalyzers, context, runId, runResults, cancellationToken);
+
+        runStopwatch.Stop();
+
+        var finalResults = _resultPostProcessor.Enrich(runResults, cancellationToken).ToArray();
+
+        _diagnosticsPublisher.Publish(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
+            RunId: runId,
+            EventType: AnalysisDiagnosticsEventType.RunCompleted,
+            TimestampUtc: DateTime.UtcNow,
+            AnalyzerName: null,
+            Category: "Run",
+            DurationMs: runStopwatch.Elapsed.TotalMilliseconds,
+            ObjectScanCount: finalResults.Sum(r => r.ObjectScanCount),
+            CacheHits: finalResults.Sum(r => r.CacheHits),
+            CacheMisses: finalResults.Sum(r => r.CacheMisses),
+            Message: $"Run completed. Success={finalResults.Count(r => r.Status == AnalyzerExecutionStatus.Success)}, Failed={finalResults.Count(r => r.Status == AnalyzerExecutionStatus.Failed)}, SkippedByFilter={finalResults.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByFilter)}, SkippedByCancellation={finalResults.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByCancellation)}",
+            ExceptionType: null,
+            ExceptionMessage: null));
+
+        return finalResults;
+    }
+
+    private async Task RunAnalyzerBatchAsync(
+        IReadOnlyList<IAnalyzer> analyzersToRun,
+        RuntimeAnalysisContext context,
+        Guid runId,
+        List<AnalyzerRunResult> runResults,
+        CancellationToken cancellationToken)
+    {
+        foreach (IAnalyzer analyzer in analyzersToRun)
         {
             if (cancellationToken.IsCancellationRequested)
             {
@@ -91,14 +160,20 @@ internal sealed class AnalysisPipeline(
                 cacheWithProgress.SetProgress(context.Progress);
 
             AnalyzerMemoryStats? memoryStats = null;
-            long wsBefore = 0, managedBefore = 0;
+            long wsBefore = 0, managedBefore = 0, allocatedBefore = 0;
             bool trackWorkingSet = context.Diagnostics.EnableMemoryDiagnostics || AnalyzerCollectionPolicyEvaluator.HasCollectionPolicy(context.Diagnostics);
             if (trackWorkingSet)
             {
                 _currentProcess.Refresh();
                 wsBefore = _currentProcess.WorkingSet64;
                 if (context.Diagnostics.EnableMemoryDiagnostics)
+                {
                     managedBefore = GC.GetTotalMemory(false);
+                    // Process-wide, not GetAllocatedBytesForCurrentThread: an analyzer may fan out to
+                    // pool threads (see IAnalyzer.IsThreadSafe), and per-thread counters would miss
+                    // everything those threads allocate. Reads a counter, so it's effectively free.
+                    allocatedBefore = GC.GetTotalAllocatedBytes(precise: false);
+                }
             }
 
             try
@@ -130,7 +205,9 @@ internal sealed class AnalysisPipeline(
                         WorkingSetBefore: wsBefore,
                         WorkingSetAfter: wsAfter,
                         ManagedHeapBefore: managedBefore,
-                        ManagedHeapAfter: GC.GetTotalMemory(false));
+                        ManagedHeapAfter: GC.GetTotalMemory(false),
+                        AllocatedBefore: allocatedBefore,
+                        AllocatedAfter: GC.GetTotalAllocatedBytes(precise: false));
                 }
 
                 AnalyzerRunResult success = new(
@@ -251,26 +328,6 @@ internal sealed class AnalysisPipeline(
 
             _cleanupPolicy.CleanupAfterAnalyzer(context, analyzer, runResults.Count, wsBefore, trackWorkingSet);
         }
-
-        runStopwatch.Stop();
-
-        var finalResults = _resultPostProcessor.Enrich(runResults, cancellationToken).ToArray();
-
-        _diagnosticsPublisher.Publish(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
-            RunId: runId,
-            EventType: AnalysisDiagnosticsEventType.RunCompleted,
-            TimestampUtc: DateTime.UtcNow,
-            AnalyzerName: null,
-            Category: "Run",
-            DurationMs: runStopwatch.Elapsed.TotalMilliseconds,
-            ObjectScanCount: finalResults.Sum(r => r.ObjectScanCount),
-            CacheHits: finalResults.Sum(r => r.CacheHits),
-            CacheMisses: finalResults.Sum(r => r.CacheMisses),
-            Message: $"Run completed. Success={finalResults.Count(r => r.Status == AnalyzerExecutionStatus.Success)}, Failed={finalResults.Count(r => r.Status == AnalyzerExecutionStatus.Failed)}, SkippedByFilter={finalResults.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByFilter)}, SkippedByCancellation={finalResults.Count(r => r.Status == AnalyzerExecutionStatus.SkippedByCancellation)}",
-            ExceptionType: null,
-            ExceptionMessage: null));
-
-        return finalResults;
     }
 }
 

@@ -3,15 +3,20 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 
-namespace DumpDetective.Analysis.FindingGenerators;
+namespace DumpDetective.Reporting.FindingGenerators;
 
 internal sealed class ArrayFindingGenerator : IFindingGenerator
 {
     private const ulong LohWarningBytes = 500_000_000UL; // 500 MB
     private const ulong LohCriticalBytes = 2_000_000_000UL; // 2 GB
     private const int MultiDimWarningCount = 1_000;
+    private const ulong MultiDimWarningBytes = 100_000_000UL; // 100 MB
     private const double SparseRatioThreshold = 0.70;
     private const ulong SparseWastedWarningBytes = 10_000_000UL; // 10 MB
+    private const int MaxSparseFindings = 3;
+    private const int PinnedArrayWarningCount = 100;
+    private const ulong PinnedArrayWarningBytes = 50_000_000UL; // 50 MB
+    private const ulong PinnedArrayCriticalBytes = 200_000_000UL; // 200 MB
 
     public string AnalyzerName => "Array Analysis";
     public bool CanGenerate(AnalyzerDomainResult result) => result is ArrayDomainResult;
@@ -50,29 +55,32 @@ internal sealed class ArrayFindingGenerator : IFindingGenerator
         }
 
         // ── Multi-dimensional array anti-pattern ──────────────────────────────
-        if (r.MultiDimArrayCount >= MultiDimWarningCount)
+        if (r.MultiDimArrayCount >= MultiDimWarningCount || r.MultiDimArrayBytes >= MultiDimWarningBytes)
         {
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
                 Category: "Memory",
                 Severity: FindingSeverity.Warning,
-                Title: $"High multi-dimensional array count: {r.MultiDimArrayCount:N0}",
-                Evidence: $"{r.MultiDimArrayCount:N0} multi-dimensional (rank ≥ 2) arrays found. " +
+                Title: $"Multi-dimensional arrays: {r.MultiDimArrayCount:N0} arrays ({FormatBytes(r.MultiDimArrayBytes)})",
+                Evidence: $"{r.MultiDimArrayCount:N0} multi-dimensional (rank ≥ 2) arrays found, " +
+                          $"consuming {FormatBytes(r.MultiDimArrayBytes)} of heap memory. " +
                           "Multi-dimensional arrays are significantly slower to access than jagged arrays " +
                           "due to bounds-checking overhead on every access.",
                 Recommendation: "Replace multi-dimensional arrays (T[,]) with jagged arrays (T[][]) where " +
                                 "performance is critical. Jagged arrays have better cache locality and avoid " +
                                 "the CLR's multi-dimensional index calculation overhead.",
                 Tags: ["array", "multidim", "performance"],
-                MetricValue: r.MultiDimArrayCount,
-                MetricUnit: "arrays"));
+                MetricValue: r.MultiDimArrayBytes,
+                MetricUnit: "bytes"));
         }
 
         // ── Sparse / wasteful arrays ──────────────────────────────────────────
+        int sparseFindingCount = 0;
         foreach (SparseArrayEntry sparse in r.TopSparseArrays)
         {
             if (sparse.SparseRatio < SparseRatioThreshold) continue;
             if (sparse.WastedBytes < SparseWastedWarningBytes) continue;
+            if (sparseFindingCount >= MaxSparseFindings) break;
 
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
@@ -88,7 +96,35 @@ internal sealed class ArrayFindingGenerator : IFindingGenerator
                 MetricValue: sparse.WastedBytes,
                 MetricUnit: "bytes"));
 
-            break; // report at most one sparse finding per run to avoid noise
+            sparseFindingCount++;
+        }
+
+        // ── Pinned array accumulation ──────────────────────────────────────────
+        if (r.PinnedArrayCount >= PinnedArrayWarningCount || r.PinnedArrayBytes >= PinnedArrayWarningBytes)
+        {
+            FindingSeverity sev = r.PinnedArrayBytes >= PinnedArrayCriticalBytes
+                ? FindingSeverity.Critical
+                : FindingSeverity.Warning;
+
+            string topType = r.TopPinnedArrays is { Count: > 0 } pinned
+                ? pinned[0].ElementTypeName
+                : "N/A";
+
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Memory",
+                Severity: sev,
+                Title: $"Pinned array accumulation: {r.PinnedArrayCount:N0} arrays ({FormatBytes(r.PinnedArrayBytes)})",
+                Evidence: $"{r.PinnedArrayCount:N0} arrays are targeted by a pinned or async-pinned GC handle, " +
+                          $"consuming {FormatBytes(r.PinnedArrayBytes)}. Pinned objects cannot be moved by the GC, " +
+                          $"preventing compaction and fragmenting the surrounding heap segment. " +
+                          $"Largest pinned array element type: {topType}.",
+                Recommendation: "Pinned arrays are typically interop/native I/O buffers (P/Invoke, sockets, " +
+                                "overlapped I/O). Minimize pin duration, reuse buffers instead of pinning new " +
+                                "arrays repeatedly, and prefer GCHandleType.Pinned only when unavoidable.",
+                Tags: ["array", "pinned", "fragmentation", "memory"],
+                MetricValue: r.PinnedArrayBytes,
+                MetricUnit: "bytes"));
         }
 
         return findings;

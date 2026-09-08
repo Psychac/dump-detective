@@ -1,4 +1,4 @@
-using DumpDetective.Analysis.FindingGenerators;
+using DumpDetective.Reporting.FindingGenerators;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
 using FluentAssertions;
@@ -21,20 +21,24 @@ public sealed class JitFindingGeneratorTests
     }
 
     [Fact]
-    public void Generate_WithSignals_ReturnsOverviewAndTopDetail()
+    public void Generate_WithSignals_ReturnsOverviewAndAllSignals()
     {
         var gen = new JitFindingGenerator();
         var topMethods = new List<JitMethodSnapshot>
         {
-            new("Foo.Bar()", "Foo", 0x1000, 70_000, 10_000, false)
+            new("Foo.Bar()", "Foo", 0x1000, 70_000, 10_000, false, false)
         };
         var result = BuildResult(totalJitHeapBytes: 800 * 1024 * 1024, unmanagedFrames: 400, managedFrames: 200, tieredMethods: 250, topMethods: topMethods);
 
         var findings = gen.Generate(result);
 
-        findings.Should().HaveCount(2);
+        // Should emit overview + 4 concurrent signals (heap bloat, unmanaged ratio, tiered, large methods)
+        findings.Should().HaveCount(5);
         findings[0].Title.Should().Contain("overview");
-        findings[1].Title.Should().Contain("unusually large");
+        findings.Should().ContainSingle(f => f.Title.Contains("unusually large"));
+        findings.Should().ContainSingle(f => f.Title.Contains("High unmanaged"));
+        findings.Should().ContainSingle(f => f.Title.Contains("Tiered compilation"));
+        findings.Should().ContainSingle(f => f.Title.Contains("Large JIT-compiled"));
     }
 
     private static JitDomainResult BuildResult(
@@ -47,12 +51,18 @@ public sealed class JitFindingGeneratorTests
         return new JitDomainResult(
             TotalJitHeapBytes: totalJitHeapBytes,
             JitManagerCount: 3,
-            JitHeapPctOfTotalProcess: 12.5,
             ActiveMethodsOnStacks: managedFrames,
+            DistinctMethodsOnStacks: managedFrames,
             TopLargestMethods: topMethods,
             TopActiveFrameTypes: [],
+            TopActiveModulesByFrameHits: [],
             UnmanagedFrameCount: unmanagedFrames,
             ManagedFrameCount: managedFrames,
-            TieredMethodCount: tieredMethods);
+            ReadyToRunFrameCount: 0,
+            DynamicMethodFrameCount: 0,
+            TieredMethodCount: tieredMethods,
+            MaxThreadFrameDepth: 0,
+            MaxThreadFrameDepthOSThreadId: 0,
+            LargeMethodThresholdBytes: 64 * 1024);
     }
 }

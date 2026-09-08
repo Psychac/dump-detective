@@ -14,7 +14,8 @@ string? Fingerprint = null,
 double? MetricValue = null,
 string? MetricUnit = null,
 double? ConfidenceScore = null,
-IReadOnlyList<string>? Caveats = null)
+IReadOnlyList<string>? Caveats = null,
+IReadOnlyList<FindingEvidenceTable>? EvidenceTables = null)
 {
     public double? ConfidenceScore { get; init; } = ConfidenceScore ?? Severity switch
     {
@@ -24,6 +25,8 @@ IReadOnlyList<string>? Caveats = null)
     };
 
     public IReadOnlyList<string> EffectiveCaveats { get; init; } = Caveats ?? Array.Empty<string>();
+
+    public IReadOnlyList<FindingEvidenceTable> EffectiveEvidenceTables { get; init; } = EvidenceTables ?? Array.Empty<FindingEvidenceTable>();
 
     public double EffectiveConfidenceScore => ConfidenceScore ?? Severity switch
     {

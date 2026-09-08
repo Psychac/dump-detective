@@ -26,18 +26,14 @@ internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyze
             T("Task counts, orphaned tasks, and continuation pressure are summarized here."),
         };
 
+        // LeadFinding is derived from AsyncTaskFindingGenerator's InsightFinding by
+        // ReportSectionAssembler.NormalizeSectionContractSlots — see
+        // docs/refactor/analyzer-pipeline-stages-and-leadfinding-dedup.md P1 fix plan. The
+        // generator already aggregates 7 other signals (cycle detected, orphaned/faulted/pending
+        // tasks, Gen2/LOH TCS/VTS leaks) and picks the true highest-severity one, several of which
+        // reach Critical — this local block only ever surfaced a Warning-capped continuation-depth
+        // check, silently hiding a Critical cycle-detected finding when both applied.
         SectionLeadFinding? leadFinding = null;
-        if (asyncTasks.MaxContinuationDepth >= 15)
-        {
-            leadFinding = new SectionLeadFinding(
-                Severity: "Warning",
-                Title: $"Deep continuation chain detected (depth {asyncTasks.MaxContinuationDepth:N0})",
-                Summary: $"Max continuation chain depth is {asyncTasks.MaxContinuationDepth:N0}, exceeding the 15-hop warning threshold.",
-                Recommendation: "Inspect the deepest chain table below. Deep chains can indicate async deadlocks or unbounded recursive continuations.",
-                ConfidenceSymbol: "●●●●",
-                ConfidenceScore: 0.85,
-                Caveats: []);
-        }
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {

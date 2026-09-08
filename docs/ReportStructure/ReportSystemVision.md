@@ -1619,16 +1619,15 @@ metadata.
 
 **Open questions:**
 
-1. **Should the report lead the platform refactor, or follow it?**
-   [modularity-plan](../refactor/modularity-plan.md) puts sinks and UI at Phase 8, after
-   observations at Phase 5. My position: the report should lead, because the observation model's
-   value is invisible until something consumes it, and M1–M3 can be built over today's domain
-   results with an adapter. The risk of leading is building an adapter that outlives its welcome.
-   [modularity-plan.md § 4b](../refactor/modularity-plan.md#4b-relationship-to-the-report-vision-doc)
-   takes the position that this is narrower than a resequencing question: M1, M2 and M4 already
-   depend on nothing per § 19's own table, so they aren't blocked on this plan at all; only full
-   observation lineage is. The "adapter that outlives its welcome" risk is no longer just named —
-   [§19](#19-minimum-viable-path) now states the specific bound the M1 adapter must stay inside.
+1. ~~**Should the report lead the platform refactor, or follow it?**~~ **Resolved 2026-09-08:** lead,
+   for M1/M2/M4 specifically — not a resequencing of the whole plan. Per § 19's own table these three
+   depend on nothing, so [modularity-plan.md § 4b](../refactor/modularity-plan.md#4b-relationship-to-the-report-vision-doc)'s
+   narrower framing wins: only claims requiring full observation lineage (cross-analyzer synthesis,
+   measurement-vs-inference confidence split) wait on Phase 5. The "adapter that outlives its
+   welcome" risk is bounded by the rule [§19](#19-minimum-viable-path) states — no new judgment
+   invented inside the adapter — and [modularity-plan.md § 10 point 2](../refactor/modularity-plan.md#10-external-review-2026-09-08--where-this-can-be-questioned)
+   records the decision to start M1/M2/M4 now rather than continue carrying this as a live,
+   disagreeing reference across three docs.
 2. ~~**Does the query language earn its complexity?**~~ **Resolved:** no, not for v1. The full
    grammar in [§12.1](#121-the-query-algebra) is the defensible smaller version's growth target,
    not its starting point — v1 ships structured filter chips plus `dd.query()` over a plain
@@ -1816,3 +1815,41 @@ four surfaces, the query algebra, the wire format, every gate.
 
 The value of doing Parts II–III first is exactly this table: if the report were built trace-aware
 from scratch later, it would be a second renderer and a fourth mode.
+
+---
+
+## Appendix E — cross-checked against a sibling implementation
+
+A second, independently-built tool in this project's lineage (`d:\POC\Rohit_DumpDetective`) already
+ships a multi-format report pipeline (`IRenderSink` → Console/Html/Markdown/Text/Json/Bin/Capture
+sinks, plus `render` and `diff` commands) in production. Two things from its code are directly
+relevant here.
+
+**It independently hit, and documented, the exact problem this doc's widget vocabulary
+([§10](#10-evidence-shapes-and-the-widget-vocabulary)) exists to kill.** Its
+`Docs/IRenderSink-Extension-Guide.md` is an 11-step, 10-file checklist required to add *one* new
+visual element type: `ReportDoc.cs` (model + `[JsonDerivedType]`) → `CoreJsonContext.cs`
+(AOT JSON registration) → `IRenderSink.cs` (interface + text fallback) → `HtmlSink.cs`/`.css` (real
+render) → `CaptureSink.cs` (capture for replay) → `BinSink.cs`/`JsonSink.cs` (forwarding) →
+`MarkdownSink.cs`/`TextSink.cs` (text renders) → `ReportDocReplay.cs` (replay case) — with an
+explicit warning that skipping any step "will silently break" a format. This is [§10.1](#101-the-shape-taxonomy)'s
+"12 typed slots + 18-case `SectionBlock` union plus their bespoke JS renderers plus the second
+server-side renderer" problem, independently confirmed as something a sibling team actually built,
+hit, and had to write a process document to survive — not a hypothetical this spec invented to
+justify a redesign. It's concrete evidence the ten-shape, one-renderer design in §10 is worth its
+cost.
+
+**It also proves a much cheaper thing is possible, and worth weighing as an interim step.** Its
+`ReportDoc`/`ReportDocReplay`/`ReportDiffer` deliver working report replay and diff (the `render` and
+`diff` commands — converting a saved report to a different format, or comparing two saved reports)
+entirely by walking a polymorphic `ReportChapter → ReportSection → ReportElement` tree and matching
+chapters/sections/rows by name or key column. No observation model, no entity join, no typed measure
+semantics, no confidence. This is more fragile than [§5](#5-the-observation-store)–[§6](#6-the-claim-graph)'s
+design — string-keyed matching instead of `EntityRef`/`Measure.semantics`, no distinction between "a
+row disappeared" and "a row was never comparable" — but it ships real trend/diff value at a fraction
+of the cost. If [§21](#21-risks-assumptions-and-open-questions)'s minimum-viable path (M1–M4) needs
+to move even faster than a thin adapter over `AnalyzerDomainResult`/`InsightFinding`, an
+element-tree diff in this shape is a legitimate, cheaper fallback for the diff/trend slice
+specifically — not a replacement for the claim graph, but a way to de-risk shipping *something*
+comparable while [modularity-plan.md Phase 5](../refactor/modularity/phase-5-observations-synthesis.md)
+is still in flight.

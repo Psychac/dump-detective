@@ -294,6 +294,11 @@ beyond the confidence caps above:
   detail sections should eventually be built from observations too (making domain results
   redundant) is unresolved — it would be more uniform but could lose domain-specific richness
   that's genuinely valuable in the detail sections.
-- **Observation type vocabulary governance.** `ObservationType` strings are a shared namespace
+- ~~**Observation type vocabulary governance.** `ObservationType` strings are a shared namespace
   across all plugins. Uncoordinated, they'll fragment (`gc.pressure` vs `gc-pressure` vs
-  `gcPressure`). Needs a registry with the same versioning discipline as capabilities.
+  `gcPressure`). Needs a registry with the same versioning discipline as capabilities.~~
+  **Resolved** — see [phase-1-contracts-sdk.md](phase-1-contracts-sdk.md): checked-in, versioned
+  `capability-registry.json`/`observation-type-registry.json`, validated at build time via a
+  registry-conformance architecture test. Also cross-referenced from
+  [modularity-plan.md § 9](../modularity-plan.md#9-open-questions) and
+  [§ 10 point 4](../modularity-plan.md#10-external-review-2026-09-08--where-this-can-be-questioned).

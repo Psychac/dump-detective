@@ -12,6 +12,8 @@ internal sealed class FinalizableObjectFindingGenerator : IFindingGenerator
 {
     private const int Gen2WarningThreshold = 1_000;
     private const int Gen2CriticalThreshold = 10_000;
+    private const int QueueCountWarningThreshold = 1_000;
+    private const int QueueCountCriticalThreshold = 10_000;
     private const ulong QueueRetainedWarningBytes = 10_000_000UL;  // 10 MB
     private const ulong QueueRetainedCriticalBytes = 100_000_000UL;  // 100 MB
     private const int CriticalFinalizerWarningThreshold = 100;
@@ -57,6 +59,32 @@ internal sealed class FinalizableObjectFindingGenerator : IFindingGenerator
                                 "in the Dispose method to prevent unnecessary finalization.",
                 Tags: ["finalizer", "gen2", "gc", "dispose"],
                 MetricValue: r.Gen2Count,
+                MetricUnit: "objects"));
+        }
+
+        // ── Finalizer queue size backlog ────────────────────────────────────────
+        if (r.FinalizerQueueCount > QueueCountWarningThreshold)
+        {
+            FindingSeverity sev = r.FinalizerQueueCount > QueueCountCriticalThreshold
+                ? FindingSeverity.Critical
+                : FindingSeverity.Warning;
+
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Memory",
+                Severity: sev,
+                Title: sev == FindingSeverity.Critical
+                    ? $"Critical finalizer queue backlog — {r.FinalizerQueueCount:N0} objects queued"
+                    : $"Elevated finalizer queue — {r.FinalizerQueueCount:N0} objects pending finalization",
+                Evidence: $"Finalizer queue holds {r.FinalizerQueueCount:N0} objects retaining ~{FormatBytes(r.FinalizerQueueRetainedBytes)}." +
+                          (sev == FindingSeverity.Critical
+                              ? " The finalizer thread may be blocked or unable to drain the queue."
+                              : string.Empty),
+                Recommendation: sev == FindingSeverity.Critical
+                    ? "Implement IDisposable + GC.SuppressFinalize in Dispose() to prevent queuing. Check whether the finalizer thread is blocked (see §D1 Thread Overview)."
+                    : "Review finalizable types for IDisposable compliance and call GC.SuppressFinalize after Dispose().",
+                Tags: ["finalizer", "queue", "backlog", "dispose"],
+                MetricValue: r.FinalizerQueueCount,
                 MetricUnit: "objects"));
         }
 

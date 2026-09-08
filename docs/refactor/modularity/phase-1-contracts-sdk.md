@@ -140,6 +140,53 @@ columnar/intern primitives need, streamed straight to disk exactly as the heap s
 **Decision: go**, with that correction folded into [phase-6-trace-source.md](phase-6-trace-source.md)'s
 ingest design.
 
+### Cross-checked against a sibling implementation (`Rohit_DumpDetective`) — and against our own data
+
+A second, independently-built tool in the same lineage (`d:\POC\Rohit_DumpDetective`) already ships
+trace ingest and dump+trace correlation in production. Its `TraceOpener` does the opposite of what
+this spike recommended: every trace opens via `TraceLog.OpenOrConvert` /
+`TraceLog.CreateFromEventPipeDataFile` / `TraceLog.CreateFromEventTraceLogFile` — the exact
+non-streaming, full-index-materializing API this document told Phase 6 not to build bulk ingest on.
+Its `TraceOpener.cs` contains a hardcoded parser for `TraceLog`'s own conversion log referencing a
+conversion example of a 27,687 MB ETL producing a 13,966 MB `.etlx` (~0.5×, i.e. *shrinking*) — the
+opposite direction from this spike's 2.73×/4.2× (54.9 MB sample). An earlier version of this section
+treated that number as scale-correcting evidence against this project's own spike. **That was wrong,
+and a real measurement from this project's own data corrects it:**
+
+`D:\Dumps\08-05\etls\HighCPU_11.etl` (912.1 MB, a real PerfView capture from 2026-05-08) has a
+`HighCPU_11.etlx` sitting next to it on disk (2,191,615,082 bytes = 2090.1 MB, converted 2026-09-08,
+the same day as this investigation) — **2.29× growth**, at near-GB scale, on real first-party data.
+That's the same direction and the same rough magnitude as this spike's 54.9 MB sample (2.73×/4.2×),
+not the sibling's 0.5×. Two real, same-direction measurements from this project's own data now exist
+at two different scales; the sibling's single number, embedded in a log-format-parsing code comment
+with no attached measurement methodology, cannot outweigh that — it may not even be a real captured
+conversion (it could be an illustrative value written while implementing the regex, or a
+differently-shaped workload where kernel-stack density or symbol resolution behaves very
+differently). **Conclusion reverts to the original: `TraceLog.OpenOrConvert`'s non-streaming,
+size-proportional growth is real and holds at the scales measured so far — do not build
+`IArtifactSource.IndexAsync`'s bulk ingest on it.**
+
+What still stands from reading the sibling's code, independent of the reverted numeric claim above:
+
+1. **`TraceLog` gives working stack/symbol/method-name resolution for free.** The raw
+   event-callback path this document recommends (`EventPipeEventSource`/`ETWTraceEventSource`) does
+   not — building that resolution ourselves is real, previously-uncosted engineering work that
+   Phase 6 must budget for explicitly, not assume away.
+2. The sibling's single-pass fan-out dispatcher (`TraceEventDispatcher.Dispatch`: one iteration over
+   `trace.Events`, N `ITraceEventConsumer`s, a `WantsEvent(meta)` filter evaluated once per unique
+   event name so uninterested consumers pay nothing) is a good pattern to copy into Phase 6's ingest
+   design regardless of which underlying API is chosen — it happens to run on top of `TraceLog` in
+   their code, but the "one pass, many consumers, filter before you pay" shape is API-independent.
+3. Their conversion is disk-cached per trace file (`.ddcache/<stem>/<stem>.etlx`, staleness-checked
+   by timestamp) and reused across runs, which is the right mitigation *if* a non-streaming approach
+   is ever used for anything — but it doesn't change the per-conversion cost, only how often it's
+   paid, and this project already has two real measurements saying that cost is a multi-× blowup,
+   not a reduction.
+
+**Still worth doing before Phase 6 commits:** measure a real `.nettrace` (EventPipe), not just `.etl`
+(ETW) — every measurement so far, on both sides, has been ETW. Folded into
+[phase-6-trace-source.md § Ingest](phase-6-trace-source.md#ingest).
+
 ## Exit criteria
 
 - `DumpDetective.Sdk` builds standalone, zero project references.
@@ -147,7 +194,12 @@ ingest design.
   come in Phase 5).
 - **Entity-join spike has produced a measured join rate per entity kind**, and that measurement —
   not an assumption — informs the canonicalizer's fidelity ratings. A poor result here is a
-  legitimate trigger to stop and reconsider Phases 6–7 before investing in them.
+  legitimate trigger to stop and reconsider Phases 6–7 before investing in them. Caveat accepted as
+  residual risk 2026-09-08 (see
+  [modularity-plan.md § 10 point 3](../modularity-plan.md#10-external-review-2026-09-08--where-this-can-be-questioned)):
+  both measured pairs are the same WCF/EF-on-`w3wp.exe` app family; no non-WCF/EF sample was
+  obtainable to widen the corpus, so the fidelity ratings this spike informs are validated for that
+  shape only, not generalized.
 - ~~TraceEvent dependency spike has confirmed streaming behavior and license compatibility, or has
   surfaced a blocker early enough to change the Phase 6 plan while that's still cheap.~~ **Done** —
   see the measured results above. Licensing clear, raw streaming API confirmed bounded-memory;

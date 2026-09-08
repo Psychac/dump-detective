@@ -1,13 +1,19 @@
 # Modular Multi-Source Diagnostics Platform — Architecture & Migration Plan
 
-Status: draft; entity-join spike resolved 2026-09-08 (go, § 8 step 4). Phase 1 not yet started.
+Status: draft; entity-join spike resolved 2026-09-08 (go, § 8 step 4). **§ 8's minimum-viable path
+adopted as the chosen plan, 2026-09-08** (see [§ 10 point 7](#10-external-review-2026-09-08--where-this-can-be-questioned)):
+build the new trace/correlation capability first, refactor the existing dump pipeline (Phases 3–5,
+9) later. Phase 1 not yet started.
 Supersedes the dump-only modularity draft and reworks
 [../improvements/unified-dump-trace-architecture.md](../improvements/unified-dump-trace-architecture.md)
 into the modularity plan rather than treating them as separate efforts.
 
 **Scope warning up front.** This describes a platform, not a refactor. Executed fully it is a
-multi-quarter program. § 8 gives a much smaller path to the same user-visible outcome; read it
-before committing to anything here.
+multi-quarter program. **§ 8 is the chosen path, not just a fallback** — it gives a much smaller
+route to the same user-visible outcome without first re-platforming the ~30 analyzers and
+orchestration that already ship and work today. Read § 8 first; the full program below it is the
+long-term direction Phases 3–5/9 pay off into once the new capability has proven itself, not the
+immediate plan.
 
 ---
 
@@ -104,7 +110,8 @@ boundary that only exists for organizational tidiness isn't on this diagram.
 | [3 — Capability-driven plugins](modularity/phase-3-plugin-packaging.md) | Domain packages, attribute discovery, capability declarations; kill the hardcoded catalog | 2 |
 | [4 — Session orchestration DAG](modularity/phase-4-session-orchestration.md) | One capability-driven orchestrator; **modes never get built** | 3 |
 | [5 — Observations & synthesis](modularity/phase-5-observations-synthesis.md) | Analyzers emit observations; synthesis rules replace finding generators; trend comparers collapse | 4 |
-| [6 — Trace source](modularity/phase-6-trace-source.md) | `.nettrace` streaming ingest, trace index, first trace analyzers | 2, 5 |
+| [6a — Trace ingest](modularity/phase-6-trace-source.md#phase-6a--trace-ingest) | `.nettrace` streaming ingest, trace index, entity-resolution corpus | 2 |
+| [6b — Trace-fed analyzers](modularity/phase-6-trace-source.md#phase-6b--trace-fed-analyzers) | First trace analyzers (needs 6a, 1); optional-capability wiring on existing dump analyzers (needs 6a, 5 — deferred under § 8) | 6a, 1 (+5 for the deferred sub-item) |
 | [7 — Cross-source correlation](modularity/phase-7-cross-source-correlation.md) | Entity+time joined observations, correlation rules, capped confidence | 6 |
 | [8 — Sinks & unified UI](modularity/phase-8-sinks-and-ui.md) | `IReportSink`, unconditional `report.json`, timeline/entity-pivot UI | 1 (parts land early) |
 | [9 — Isolation & distribution](modularity/phase-9-isolation-distribution.md) | Out-of-process plugins, distributed storage — **speculative** | 2, 3 |
@@ -170,8 +177,16 @@ sessions where the expected output is *exactly known* (every finding today must 
 unchanged) — so when correlation later misbehaves, it's attributable to correlation rather than to
 an unproven substrate underneath it.
 
-The cost of that ordering is real: no trace value ships until quite late. § 8 is the answer if
-that's unacceptable.
+The cost of that ordering is real for *analyzer* value — no trace-fed finding ships until quite
+late. ~~§ 8 is the answer if that's unacceptable.~~ **Partially mitigated 2026-09-08:**
+[phase-6-trace-source.md](modularity/phase-6-trace-source.md) is now split into 6a (ingest +
+entity-resolution corpus, needs only Phase 1/2) and 6b (analyzer wiring, still gated on Phase 5) —
+see [§ 10 point 5](#10-external-review-2026-09-08--where-this-can-be-questioned). That lets the
+highest-risk unknown in the whole trace effort (do dump and trace entity refs actually join?) get
+validated in parallel with Phase 5 instead of after it, which is the earliest this plan can produce
+a real go/no-go signal on the multi-source thesis. It does not remove the ordering cost for
+*findings* — 6b, and therefore any trace-fed finding, still waits on Phase 5. § 8 remains the answer
+if even that residual cost is unacceptable.
 
 ---
 
@@ -327,7 +342,18 @@ can be larger than a dump):
 
 ---
 
-## 8. If the full program is too much — the minimum viable unified path
+## 8. The minimum viable unified path — ADOPTED as the chosen plan, 2026-09-08
+
+**Decision** (see [§ 10 point 7](#10-external-review-2026-09-08--where-this-can-be-questioned)):
+build new — the identity/capability/observation contracts, trace ingest, trace analyzers,
+correlation — right from the start, but don't refactor what already ships and works
+(Phases 3–5, 9) until the new capability has proven itself. The reasoning: Phases 3–5 aren't
+greenfield code, they're a re-platform of the ~30 analyzers and orchestration already in
+production use (Phase 5 gates itself on byte-identical golden-file equality against every existing
+finding precisely because it's touching live behavior, not building new). "Do it right from the
+start" is a much easier bar for code that doesn't exist yet than for a refactor of code real output
+already depends on — and for effectively solo-maintained work, front-loading that refactor ahead of
+any validated new value is the riskier bet, not the safer one.
 
 The fastest route to "dumps + traces + combined reports" while keeping the architecture honest,
 skipping the parts that are refactor rather than capability:
@@ -340,7 +366,10 @@ skipping the parts that are refactor rather than capability:
 2. **Phase 2, storage extraction only.** Pull out the columnar/intern/container primitives so trace
    ingest can reuse them. Skip the `Sources.ClrDump` reorganization; leave dump code where it is
    behind a thin `IArtifactSource` adapter.
-3. **Phase 6 trace ingest + 2–3 analyzers** (CPU hotspot, contention). Real new value.
+3. **Phase 6a (trace ingest) + Phase 6b's new-analyzer track — 2–3 analyzers** (CPU hotspot,
+   contention). Real new value. Excludes 6b's other sub-item (optional-capability wiring on
+   *existing* dump analyzers) — that genuinely needs those analyzers migrated to observations, i.e.
+   real Phase 5 work, so it's deferred along with Phase 5 itself, not part of this path.
 4. ~~**Cross-source join measurement.** Before building more: measure entity join rates on a real
    dump+trace pair. Go/no-go.~~ **Resolved 2026-09-08 — go.** See below.
 5. **Phase 7, two correlation recipes** (leak-with-allocation-site, contention-with-duration) —
@@ -355,7 +384,7 @@ investments.
 The tradeoff is honest: skipping Phases 3–5 means the mode-explosion problem comes back, since
 without the session DAG something still has to route dump vs. trace vs. combined. Accept an interim
 router, with the explicit understanding it's technical debt the deferred phases are meant to pay
-off — not a permanent design.
+off — not a permanent design. This is the debt the decision above knowingly takes on.
 
 ### Entity-join spike — measured, 2026-09-08
 
@@ -416,6 +445,21 @@ precision/recall measurement (see
 not read this section as a guarantee that correlation recipes will fire reliably — only that the
 identity layer they depend on is worth building.
 
+**Corpus diversity — accepted as a residual, documented risk, 2026-09-08.** Both pairs are the same
+app family and the same host shape (`w3wp.exe`/`BALLOADTESTEXAPIS`, WCF/EF-heavy). [§10 point
+3](#10-external-review-2026-09-08--where-this-can-be-questioned) recommended widening the corpus
+with a non-WCF/EF shape (ASP.NET Core self-hosted, a plain console host) before committing to
+Phases 6–7. That corpus isn't obtainable — no such sample is available to capture from. Considered
+and rejected: authoring a synthetic self-hosted app to manufacture the missing shape; not pursued
+today, so this remains unvalidated rather than closed. Decision: proceed on the existing two-sample
+evidence anyway, since it's still real production data showing the join mechanism has substance,
+and explicitly carry the gap forward rather than treat it as resolved. **Concretely, this means the
+"go" above is scoped to WCF/EF-on-w3wp.exe; whether canonicalization holds up on a different host
+shape (Kestrel self-hosted, a plain console host, minimal-API style code without WCF/EF's
+distinctive type-naming patterns) is unknown**, and Phase 6/7 work should watch for this the first
+time a non-WCF/EF customer dump becomes available, rather than assuming the aggregate rates above
+generalize.
+
 ---
 
 ## 9. Open questions
@@ -430,8 +474,192 @@ identity layer they depend on is worth building.
   wrong output. Domain results survive only as a transitional presentation payload during Phase 5,
   carrying no judgment fields.
 - **Declarative vs. code synthesis rules** — leaning hybrid (code rules, declarative matching).
-- **Capability & observation-type vocabulary governance** — shared namespaces across plugins;
-  needs registries with versioning discipline or they fragment.
+- ~~**Capability & observation-type vocabulary governance** — shared namespaces across plugins;
+  needs registries with versioning discipline or they fragment.~~ **Resolved** (see
+  [§10 point 4](#10-external-review-2026-09-08--where-this-can-be-questioned)):
+  [phase-1-contracts-sdk.md](modularity/phase-1-contracts-sdk.md) already specifies checked-in,
+  versioned `capability-registry.json`/`observation-type-registry.json` plus a CI-enforced
+  registry-conformance architecture test, landing in Phase 1.
 - **Static report UI vs. live query UI** — the former is a Phase 8 deliverable; the latter needs a
   long-running host exposing capability query surfaces, which Phase 4 makes possible but does not
   scope.
+
+---
+
+## 10. External review (2026-09-08) — where this can be questioned
+
+An independent architect's plan for "modularize + improve reporting + dumps/traces/combined,"
+worked out before reading this document, converged with it point for point (session model,
+capability declarations, observation substrate, entity identity with fidelity caps, judgment moved
+to synthesis, capability-resolved DAG, domain-not-source packaging). That convergence is a
+reasonable signal the shape is right. The pushback below is what's left after agreeing with the
+shape.
+
+1. **Execution is falling behind planning — RESOLVED 2026-09-08.** All six audited `LeadFinding`
+   builders (P0: Hang, Lock Graph, Finalizable Object, Segment Reservation; P1: Crash/Exception,
+   Async Task) no longer construct `SectionLeadFinding` inline; each now derives it solely from its
+   `IFindingGenerator` via `ReportSectionAssembler.NormalizeSectionContractSlots`, per the
+   [P0](analyzer-pipeline-stages-and-leadfinding-dedup.md#p0-fix-plan--hang-lock-graph-finalizable-object-segment-reservation)/[P1](analyzer-pipeline-stages-and-leadfinding-dedup.md#p1-fix-plan--crashexception-async-task)
+   fix plans. Three of the six (Finalizable Object, Segment Reservation, Crash/Exception) needed a
+   generator-side port first so no builder-only signal or judgment was silently dropped; the other
+   three were pure deletions. The confidence-band consolidation this document's own audit flagged as
+   safe to do now is also done: `SectionBuilderBase.SymbolForScore` is `internal` and shared by
+   `ReportSectionAssembler` and `LeakAnalysisSectionBuilder`, which no longer carry their own copy
+   of the ladder. Build clean, 303 tests pass. This item is closed — nothing left in it that's safe
+   to do ahead of the Phase 5 migration.
+2. **Report-vision sequencing — RESOLVED 2026-09-08.** ~~Still framed as an open disagreement when
+   it's mostly decided.~~ [§4b](#4b-relationship-to-the-report-vision-doc) and `ReportSystemVision.md`
+   § 21 (now updated to match) both conclude M1 (claims)/M2 (entities)/M4 (payload) can be built now
+   as thin adapters over today's `AnalyzerDomainResult`/`InsightFinding`, not gated on Phase 5.
+   Decision: start with M1 (claims) first, since M2/M4 are pure-data/rendering moves with no
+   adapter-drift risk, while M1 is the one §19 places an explicit bound on ("no new judgment
+   invented inside the adapter") — worth proving out on the smallest slice before M2/M4 follow. M1
+   scoping/kickoff is the next concrete action, not a backlog item competing with further design
+   work.
+3. **The entity-join "go" decision rests on a thin corpus for the size of the bet — ACCEPTED AS
+   RESIDUAL RISK 2026-09-08, not resolved.** Two samples, same app family, same host
+   (`w3wp.exe`/`BALLOADTESTEXAPIS`, WCF/EF-heavy) — good evidence canonicalization has real
+   substance (as § 8 already states precisely), but Phases 6–7 are the largest-effort phases in the
+   plan. Recommended widening the corpus (a non-WCF/EF shape — ASP.NET Core self-hosted, a plain
+   console host) before committing engineering months to trace ingest, not after. No such sample is
+   obtainable; a synthetic stand-in was considered and not pursued. Decision: proceed on the
+   existing corpus, with the gap explicitly carried forward rather than closed — see § 8's
+   entity-join spike write-up, now updated with this caveat, for where it's tracked.
+4. **Capability/observation-type vocabulary governance — RESOLVED 2026-09-08, already better than
+   recommended.** ~~Is an open question but is the same failure mode this plan exists to kill, one
+   layer up~~ — ~30 independently-drifted trend comparers and 6 divergent `SectionLeadFinding`
+   builders (fixed in [§10 point 1](#10-external-review-2026-09-08--where-this-can-be-questioned))
+   are exactly "uncoordinated parallel judgment," and an ungoverned `ObservationType` string
+   namespace across plugins is structurally the same risk. On checking, this document's own
+   [§ 9](#9-open-questions) and [observation-and-correlation-model.md § 7](modularity/observation-and-correlation-model.md#7-open-questions)
+   still phrased it as an unresolved open question, but [phase-1-contracts-sdk.md](modularity/phase-1-contracts-sdk.md)
+   already specifies the concrete answer: checked-in, versioned `capability-registry.json` /
+   `observation-type-registry.json`, validated at build time via an "SDK-boundary and
+   registry-conformance" architecture test (migration step 7, exit criterion). That's both pieces of
+   the recommendation — a real registry *and* a CI-enforced conformance check — landing in Phase 1,
+   earlier than the "by Phase 3" ask. The only gap was documentation drift: §9 and the correlation
+   model's §7 hadn't been updated to point at Phase 1's answer. Both now marked resolved with a
+   cross-reference; no design or code change was needed here, since the plan already had this right.
+5. **Phase 6's dependency on all of Phase 5 is broader than the ingest half needs — RESOLVED
+   2026-09-08.** ~~Streaming `.nettrace` ingest into columnar sections only needs the Phase 1/2
+   substrate (`Observation`, `IObservationSink`, columnar storage) — not the full 30-analyzer
+   migration. Only the optional-capability wiring on *existing* dump analyzers needs Phase 5 done.
+   Recommend splitting Phase 6 into 6a (ingest, parallelizable with Phase 5) and 6b (analyzer
+   wiring, gated on Phase 5) to shorten the "no trace value ships until quite late" critical path
+   § 4's own cost accounting names.~~ [phase-6-trace-source.md](modularity/phase-6-trace-source.md)
+   is now split exactly this way: **6a** (ingest, index sections, and the cross-source
+   entity-resolution corpus — depends only on Phase 2) and **6b** (trace-fed analyzers plus
+   optional-capability wiring on existing dump analyzers — depends on 6a and Phase 5). Moving entity
+   resolution into 6a is a further improvement beyond the original recommendation: it's the
+   highest-risk unverified assumption in the whole trace effort (do dump/trace entity refs actually
+   join?), and 6a now produces that go/no-go signal in parallel with Phase 5 rather than after it.
+   [§ 4](#4-phases) updated to reflect the reduced (but not eliminated — 6b findings still wait on
+   Phase 5) critical-path cost.
+6. **Phase 0's test-coverage exit criterion — RESOLVED 2026-09-08.** ~~Bounds by domain count, not
+   scenario diversity, and it is the sole safety net for the two highest-behavioral-risk phases (4
+   and 5). Given this codebase's own history of a regex-drift regression slipping past existing
+   tests in the same session it was introduced, recommend tightening the criterion to cover each
+   analyzer's distinct branches/severity tiers, not one snapshot per domain.~~
+   [phase-0-foundation.md](modularity/phase-0-foundation.md) item 5 and its exit criterion are now
+   tightened exactly this way: each analyzer domain's distinct severity tiers and decision branches
+   must each have a covering characterization test, not just ≥ 1 snapshot per domain, with the
+   `AsyncStateMachineAnalyzer` regex-drift regression cited as precedent for why domain-count alone
+   isn't a sufficient bar. Risk/effort section updated to flag this as real per-analyzer analysis
+   work, not a mechanical snapshot-and-move, since it's the only safety net Phases 4–5 have.
+7. **§ 8's minimum-viable path is honest that it re-accepts an interim router as deliberate
+   debt — DECIDED 2026-09-08.** ~~Worth an explicit business decision (full program vs. minimum
+   viable) before more design time goes into either path; not something architecture alone should
+   decide.~~ **Decision: minimum-viable path (§ 8), adopted.** Build the new trace/correlation
+   capability first; refactor the existing dump pipeline (Phases 3–5, 9) later, once the new
+   capability has proven itself. Reasoning: Phases 3–5 re-platform ~30 analyzers and orchestration
+   already shipping and working today, not greenfield code — Phase 5 gates itself on byte-identical
+   golden-file equality against every existing finding precisely because it's touching live
+   behavior. For effectively solo-maintained work, front-loading that refactor ahead of any
+   validated new value is the riskier bet. The interim-router debt is knowingly accepted, not
+   ignored — see § 8's updated framing and
+   [phase-6-trace-source.md](modularity/phase-6-trace-source.md)'s note (in the 6a/6b split at the
+   top of that doc) on the related risk of building trace analyzers on an observation model Phase 5
+   hasn't yet validated. Status line and § 8 heading updated to reflect this is now the chosen plan,
+   not a fallback.
+
+---
+
+## 11. Lessons from a sibling implementation (`d:\POC\Rohit_DumpDetective`)
+
+A second, independently-built tool in this project's lineage already ships trace ingest, dump+trace
+correlation, a plugin system, and a multi-format report pipeline in production. It is real ground
+truth, not another plan document, and reading its code (not just its docs) changed two load-bearing
+judgment calls in this plan and validated several others. Full detail is folded into the relevant
+phase docs; this section is the index.
+
+**Checked, and one initially-drafted "change" was reverted after checking our own data:**
+
+- **The trace-ingest API choice was briefly reopened, then confirmed as originally decided.** [Phase
+  1's TraceEvent
+  spike](modularity/phase-1-contracts-sdk.md#cross-checked-against-a-sibling-implementation-rohit_dumpdetective--and-against-our-own-data)
+  measured a 2.73× disk / 4.2× working-set cost for `TraceLog.OpenOrConvert` on a 54.9 MB sample. The
+  sibling ships `TraceLog.OpenOrConvert` as its only ingest path and a code comment there cites a
+  27,687 MB → 13,966 MB (~0.5×, shrinking) conversion, which an earlier pass through this plan
+  treated as reason to reopen the "never `TraceLog`" decision. That was a mistake, caught by spot-checking
+  this project's own data rather than trusting a number in someone else's comment: a real 912.1 MB
+  capture already on disk (`D:\Dumps\08-05\etls\HighCPU_11.etl`) converts to a 2090.1 MB `.etlx` —
+  **2.29× growth**, the same direction as the original 54.9 MB sample, not the sibling's number.
+  Two real, same-direction measurements from this project's own data at two different scales beat
+  one unverified figure from a log-parsing code comment. **[Phase
+  6](modularity/phase-6-trace-source.md#ingest)'s original decision stands**: build `IndexAsync` on
+  the raw event-callback reader, not `TraceLog`. What the sibling's code still legitimately adds:
+  `TraceLog` resolves stacks/symbols/method-names for free during conversion, and the raw-callback
+  path must now explicitly budget for that resolution as real engineering work, which this plan
+  previously assumed away. Still open: every measurement on both sides so far is `.etl` (ETW); a
+  real `.nettrace` (EventPipe) sample hasn't been measured.
+- **Phase 7 should ship a cheap, ad hoc correlation milestone before the full entity-join
+  machinery, not after.** The sibling's 26 correlation rules are hand-written per-rule threshold
+  comparisons with no entity-join machinery at all — and only 1 of its 16 cross-source rules does
+  anything resembling an entity join (a plain string-set match). [Phase
+  7](modularity/phase-7-cross-source-correlation.md#cross-checked-against-a-sibling-implementation--a-cheaper-path-ships-real-value-first)
+  now proposes **Phase 7a**: ship signal-level correlation rules as soon as Phase 6's trace analyzers
+  exist, in parallel with (not gated behind) the full `EntityRef`/`ConfidenceBreakdown` work, which
+  then needs to land only for the minority of recipes that actually require an entity join. This is
+  a concrete shape for this plan's own [§ 8](#8-if-the-full-program-is-too-much--the-minimum-viable-unified-path)
+  minimum-viable-path argument.
+
+**Confirmed (no change, but worth citing as evidence):**
+
+- Its 26 rules being hand-tuned, independently-drifting `score += 15` arithmetic is a second,
+  independent occurrence of the exact failure mode this plan's Phase 5 and the analyzer-pipeline
+  audit exist to kill (see [§ 10 point 4](#10-external-review-2026-09-08--where-this-can-be-questioned)) — good
+  evidence `ConfidenceBreakdown`'s named, versioned scoring is worth building, not over-engineering.
+- Its `FrameInterner` (stack-frame string interning, `Dictionary<string,string>`, truncate-then-intern
+  for long compiler-generated names) is close to identical to this plan's own stack-interning design
+  in [phase-6-trace-source.md § Index sections](modularity/phase-6-trace-source.md#index-sections) —
+  direct validation, no change needed.
+- Its `TraceEventDispatcher` (one pass over `trace.Events`, N `ITraceEventConsumer`s, a `WantsEvent`
+  filter evaluated once per unique event name so uninterested consumers pay nothing per occurrence)
+  is the same "one pass, many consumers" discipline this project already applies to heap scanning —
+  worth copying into Phase 6's ingest design explicitly, now added there.
+- Its plugin system needs **four separate participation interfaces**
+  (`ICommand`, `ITracePlugin`, `ITraceSubAnalyzer`, `ITraceDumpCorrelationRule`) because plugin
+  discovery is per-orchestrator rather than capability-declared — a real instance of the interface
+  proliferation this plan's capability-attribute model ([source-model.md §
+  3](modularity/source-model.md)) is designed to prevent. Supports keeping that design over a
+  simpler interface-per-mode approach, even though the simpler approach is what shipped first there.
+- Its report pipeline requires an 11-step, 10-file checklist to add one new visual element type
+  (`ReportDoc.cs` → `CoreJsonContext.cs` → `IRenderSink.cs` → `HtmlSink.cs`/`.css` → `CaptureSink.cs`
+  → `BinSink.cs` → `JsonSink.cs` → `MarkdownSink.cs` → `TextSink.cs` → `ReportDocReplay.cs`, with an
+  explicit warning that skipping any step "silently" breaks a format) — concrete, previously-abstract
+  validation that `ReportSystemVision.md`'s closed, shape-based widget vocabulary is solving a real,
+  already-occurred pain point, not a hypothetical one. Noted in
+  [ReportSystemVision.md](../ReportStructure/ReportSystemVision.md#appendix-e--cross-checked-against-a-sibling-implementation).
+- Its `dd-thresholds.json` externalizes ~19 named scoring thresholds into a config file the scoring
+  engine reads (`ThresholdConfig` → `ScoringThresholds`/`TrendThresholds`), falling back silently to
+  compiled defaults when absent — a cheap pattern worth adopting *now*, independent of the Phase 5
+  migration, as a small step toward removing the hand-picked constants [§ 10 point
+  1](#10-external-review-2026-09-08--where-this-can-be-questioned) originally flagged in
+  `HangSectionBuilder` and its siblings — the P0 fix moved those constants into the
+  `IFindingGenerator`s rather than removing them, so this externalization opportunity still stands.
+- Its `ReportDoc`/`ReportDocReplay`/`ReportDiffer` achieve report replay and diff (`render`, `diff`
+  commands) entirely by walking a polymorphic report-element tree and matching chapters/sections/rows
+  by name or key column — no observation model, no entity join, no typed measure semantics. It is
+  more fragile than this plan's Phase 5 design (string-keyed matching, no confidence, no measure-type
+  awareness) but delivers real trend/diff value far more cheaply. Worth weighing as a cheaper interim
+  step if Phase 5's full migration timeline becomes a concern — not a replacement for it.

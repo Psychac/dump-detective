@@ -1,6 +1,8 @@
 # Analyzer pipeline: stage model and LeadFinding duplication
 
-Status: proposal / discussion, not yet executed.
+Status: proposal / discussion, not yet executed, except the P0 fix plan (Hang, Lock Graph,
+Finalizable Object, Segment Reservation) and the P1 fix plan (Crash/Exception, Async Task) below,
+both shipped 2026-09-08.
 
 ## Current pipeline (as-built, 4 stages)
 
@@ -24,13 +26,13 @@ generator disagree on what triggers a warning, or on which field drives severity
 | Analyzer | Builder logic (`LeadFinding`) | Generator logic (`Findings`) | Verdict |
 |---|---|---|---|
 | LOH Fragmentation | `LohFragmentationSectionBuilder.cs:127-144` — ≥30%/≥15% on `FragmentationPercent` | `LohFragmentationFindingGenerator.cs:16-18` — same bands | Duplicated, currently consistent |
-| Finalizable Object | `FinalizableObjectSectionBuilder.cs:77-93` — `FinalizerQueueCount > 10_000` Critical / `> 1_000` Warning | `FinalizableObjectFindingGenerator.cs:10-11,27` — same numbers (`Gen2WarningThreshold`/`Gen2CriticalThreshold`) but applied to **`Gen2Count`**, a different field | **Divergent basis** — coincidentally identical magic numbers on the wrong metric |
-| Segment Reservation | `SegmentReservationSectionBuilder.cs:27-46` — `ReservedToCommittedRatio` vs. domain-supplied `RatioHigh/MediumPressureThreshold` | `SegmentReservationFindingGenerator.cs:21-27` — driven by `AddressSpacePressureRisk` + 32-bit check; ratio thresholds never referenced | **Divergent** — two unrelated decision trees for the same analyzer |
-| Crash / Exception | `ExceptionAnalysisSectionBuilder.cs:32-47` — fires only when `ActiveExceptions > 0` | `CrashFindingGenerator.cs:33-37` — also emits a Warning when `TotalExceptions > 0` with none active | **Gap** — that Warning case is silently absent from `LeadFinding` |
+| Finalizable Object | ~~`FinalizableObjectSectionBuilder.cs:77-93` — `FinalizerQueueCount > 10_000` Critical / `> 1_000` Warning~~ | `FinalizableObjectFindingGenerator.cs` — now also carries a `FinalizerQueueCount`-based backlog signal (`QueueCountWarningThreshold`/`QueueCountCriticalThreshold`), added before the builder block was deleted | **FIXED 2026-09-08** — builder's inline `LeadFinding` removed; derived from generator via `NormalizeSectionContractSlots` |
+| Segment Reservation | ~~`SegmentReservationSectionBuilder.cs:27-46` — `ReservedToCommittedRatio` vs. domain-supplied `RatioHigh/MediumPressureThreshold`~~ | `SegmentReservationFindingGenerator.cs` — now also carries a `RatioHighPressureThreshold`/`RatioMediumPressureThreshold` signal, independent of `AddressSpacePressureRisk`, added before the builder block was deleted | **FIXED 2026-09-08** — builder's inline `LeadFinding` removed; derived from generator via `NormalizeSectionContractSlots` |
+| Crash / Exception | ~~`ExceptionAnalysisSectionBuilder.cs:32-47` — fired only when `ActiveExceptions > 0`~~ | `CrashFindingGenerator.cs` — now also carries the weighted per-candidate confidence/caveat computation formerly only in the builder, added before the builder block was deleted | **FIXED 2026-09-08** — builder's inline `LeadFinding` removed; the Warning-when-inactive case and the richer confidence scoring are both now sourced from the generator |
 | Leak Candidate | `LeakAnalysisSectionBuilder.cs:40-44` — reads `LeakCandidateRecord.Severity`, a field already computed in the domain layer | `LeakCandidateFindingGenerator.cs` — reads the same `Severity`/`Classification` fields | Consistent — benign parallel selection, not re-derived logic |
-| Async Task | `AsyncAnalysisSectionBuilder.cs:29-40` — only checks `MaxContinuationDepth >= 15` | `AsyncTaskFindingGenerator.cs` — 7 other signals (cycle detected, orphaned tasks, faulted tasks, pending tasks, Gen2/LOH TCS leaks), several of which reach Critical | **Gap** — a Critical async-deadlock cycle finding can exist while `LeadFinding` still shows (or omits) a lesser continuation-depth Warning |
-| Lock Graph | `LockGraphSectionBuilder.cs:137-152` — fires on `DeadlockCandidateCount > 0` | `LockGraphFindingGenerator.cs:16-17` — severity driven by `ContestedLockCount > 0` | **Divergent trigger condition**, not just different thresholds |
-| Hang | `HangSectionBuilder.cs:25-42` — fires on `IsStarved \|\| HealthScore < 50`, always "Warning" | `HangFindingGenerator.cs:18-20` — `WaitingPercent >= 80` → Critical, `>= 50` or `QueuedWorkItems > 500` → Warning, else Info | **Divergent** — generator can reach Critical; builder's `LeadFinding` never surfaces higher than Warning |
+| Async Task | ~~`AsyncAnalysisSectionBuilder.cs:29-40` — only checked `MaxContinuationDepth >= 15`~~ | `AsyncTaskFindingGenerator.cs` — 7 other signals (cycle detected, orphaned tasks, faulted tasks, pending tasks, Gen2/LOH TCS leaks), several of which reach Critical | **FIXED 2026-09-08** — builder's inline `LeadFinding` removed; a Critical async-deadlock cycle finding can no longer be masked by a lesser continuation-depth Warning |
+| Lock Graph | ~~`LockGraphSectionBuilder.cs:137-152` — fires on `DeadlockCandidateCount > 0`~~ | `LockGraphFindingGenerator.cs:16-17` — severity driven by `ContestedLockCount > 0` | **FIXED 2026-09-08** — builder's inline `LeadFinding` removed (generator's `Recommendation` already special-cased `DeadlockCandidateCount >= 2`, so no information was lost) |
+| Hang | ~~`HangSectionBuilder.cs:25-42` — fires on `IsStarved \|\| HealthScore < 50`, always "Warning"~~ | `HangFindingGenerator.cs:18-20` — `WaitingPercent >= 80` → Critical, `>= 50` or `QueuedWorkItems > 500` → Warning, else Info | **FIXED 2026-09-08** — builder's inline `LeadFinding` removed; generator can now surface Critical where the builder was capped at Warning |
 
 Additional lower-priority, non-`LeadFinding` judgment spotted during the audit (not full-blown duplication,
 but still presentation code making its own classification call rather than reading one from the domain/finding
@@ -69,13 +71,29 @@ This only runs `if (leadFinding is null)` — i.e. it's a fallback for section b
 1. Delete the inline `SectionLeadFinding` construction (and its duplicated/divergent threshold logic) from each of the 8 section builders in the table above.
 2. Let `NormalizeSectionContractSlots`'s existing derivation-from-`Findings` path become the sole source of `LeadFinding`.
 3. Suggested triage order — fix divergent-trigger cases first, since those are live correctness bugs (report can under-report severity), before the purely-duplicated (currently-consistent) cases which are lower urgency:
-   - P0 (wrong signal today): Hang, Lock Graph, Finalizable Object, Segment Reservation
-   - P1 (silently drops a real finding): Crash/Exception, Async Task
+   - P0 (wrong signal today): Hang, Lock Graph, Finalizable Object, Segment Reservation — **shipped 2026-09-08**
+   - P1 (silently drops a real finding): Crash/Exception, Async Task — **shipped 2026-09-08**
    - P2 (duplicated but consistent — cleanup, not a bug): LOH Fragmentation, Leak Candidate
-4. While touching `SectionBuilderBase.BuildConfidenceBand`, note there are now **three** independent copies of essentially the same confidence-score → band/symbol ladder: `SectionBuilderBase.cs:19-25`, `ReportSectionAssembler.cs:216-221` (inside `NormalizeSectionContractSlots`), and `LeakAnalysisSectionBuilder.cs:27` inlines its own copy too. Worth consolidating into one shared helper as part of this pass, since it's the same drift risk at a smaller scale.
+4. ~~While touching `SectionBuilderBase.BuildConfidenceBand`, note there are now **three** independent copies of essentially the same confidence-score → band/symbol ladder: `SectionBuilderBase.cs:19-25`, `ReportSectionAssembler.cs:216-221` (inside `NormalizeSectionContractSlots`), and `LeakAnalysisSectionBuilder.cs:27` inlines its own copy too. Worth consolidating into one shared helper as part of this pass, since it's the same drift risk at a smaller scale.~~
+   **FIXED 2026-09-08.** `SectionBuilderBase.SymbolForScore` widened from `protected` to `internal`
+   (same assembly, so no new project dependency); `ReportSectionAssembler` and
+   `LeakAnalysisSectionBuilder` both now call it instead of carrying their own copy of the ladder.
+   One copy left.
 5. Re-run report golden/snapshot tests per analyzer to confirm the derived `SectionLeadFinding` text (`Title`/`Summary`/`Recommendation` sourced from `InsightFinding.Title`/`Evidence`/`Recommendation`) doesn't regress narrative quality — the wording between hand-written `SectionLeadFinding.Summary` and `InsightFinding.Evidence` is not always identical today, so this is a behavior-visible change, not a pure refactor. For the P0/P1 cases, the visible severity is *expected* to change (that's the bug fix) — flag those explicitly to whoever reviews the report diff so it isn't mistaken for a regression.
 
 ## P0 fix plan — Hang, Lock Graph, Finalizable Object, Segment Reservation
+
+**Status: shipped 2026-09-08 (all four).** All four builder-side `SectionLeadFinding` blocks below
+were deleted exactly as planned. For #3 and #4, the generator-side addition was landed first, per
+the "order of operations" note below — see `FinalizableObjectFindingGenerator`'s new
+`FinalizerQueueCount` backlog signal and `SegmentReservationFindingGenerator`'s new
+`RatioHighPressureThreshold`/`RatioMediumPressureThreshold` signal, both added in the same change
+as the builder deletion (a small, low-risk pairing, not a case needing `git bisect` isolation).
+Build is clean; existing Reporting/golden test suites (183 tests) plus 3 new
+`FinalizableObjectFindingGeneratorTests` covering the new backlog signal all pass. Verification was
+via build + tests, not a live-dump report diff (no dump on hand currently exercises these four
+`LeadFinding` paths) — flag this if a future report diff on a real dump shows an unexpected
+severity change in these four sections.
 
 These four are live correctness bugs today (report's `LeadFinding` can show a wrong or weaker
 severity than the analyzer actually determined) and are independent of the broader stage-boundary
@@ -117,6 +135,38 @@ deleting the builder logic, in a separate commit, so `git bisect`/review can dis
 `LeadFinding` path, confirm the post-change `LeadFinding` (now generator-derived) still fires and with the
 severity you'd expect from `IFindingGenerator`'s own logic — this is the behavior-visible check called out
 in item 5 above, scoped to just these four.
+
+## P1 fix plan — Crash/Exception, Async Task
+
+**Status: shipped 2026-09-08 (both).** Same mechanism as the P0 fix plan above — delete the
+builder-side `SectionLeadFinding` block, let `NormalizeSectionContractSlots` derive `LeadFinding`
+from the matching `IFindingGenerator`'s findings — but each needed different handling before the
+builder logic could be safely deleted:
+
+1. **`AsyncAnalysisSectionBuilder`** — simple deletion, like the Hang/Lock Graph cases.
+   `AsyncTaskFindingGenerator` was already a strict superset: it aggregates 7 signals (cycle
+   detected, orphaned/faulted/pending tasks, Gen2/LOH TCS/VTS leaks) and its "risk cluster" and
+   "top signal" findings are constructed so they always agree in severity with the true
+   highest-severity signal found, by construction of the aggregation loop. Nothing needed to move
+   into the generator.
+2. **`ExceptionAnalysisSectionBuilder`** — not a simple deletion. Unlike the P0 cases, the
+   builder's `Critical` branch (`ActiveExceptions > 0`) already agreed with
+   `CrashFindingGenerator`'s severity — the audited "Gap" was that the builder's own weighted
+   per-candidate confidence computation (`ComputeLeadFindingConfidence`/`ConfidenceTierScore`/
+   `SummarizeConfidenceTiers`, weighting `OriginalStackTraceConfidence` tiers by
+   `ActiveExceptionCount`) existed *only* in the builder, so deleting it outright would have
+   silently dropped that judgment rather than just relocating it. Ported that computation into
+   `CrashFindingGenerator` first (now setting `InsightFinding.ConfidenceScore`/`Caveats` on the
+   Critical finding), then deleted the builder's block. The Warning-when-`ActiveExceptions == 0`
+   case was, on inspection, already correctly handled by `NormalizeSectionContractSlots`'s fallback
+   even before this change (the builder left `LeadFinding` null in that branch) — the real bug was
+   the confidence computation being builder-only, not a missing severity.
+
+Verification: build clean; 218 Reporting/Analysis/golden tests pass, including a new
+`CrashFindingGeneratorTests.cs` (5 tests) covering the ported confidence computation, replacing the
+4 tests in `ExceptionAnalysisSectionBuilderTests.cs` that asserted `LeadFinding` directly from
+`Build()` (now meaningless there, since `LeadFinding` is only populated later during report
+assembly). As with the P0 fixes, verification was via build + tests, not a live-dump report diff.
 
 ## Stage 1 purity audit — Analyzer domain results are not pure data either
 

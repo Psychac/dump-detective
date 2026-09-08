@@ -2,7 +2,8 @@
 
 Part of [../modularity-plan.md](../modularity-plan.md). The payoff phase — where multi-source stops
 being "two reports in one file" and becomes findings neither source could produce alone. Depends on
-[phase-6-trace-source.md](phase-6-trace-source.md).
+[phase-6-trace-source.md](phase-6-trace-source.md) — specifically 6b, since correlation needs
+findings from trace-fed analyzers, not just the raw ingest 6a alone provides.
 
 ## Goal
 
@@ -24,6 +25,44 @@ Everything needed already exists if Phases 1–6 landed as designed:
 So this phase is mostly **authoring correlation rules plus the confidence machinery** — not new
 infrastructure. That's by design: the expensive work was front-loaded precisely so the payoff phase
 would be small. If this phase looks like it needs major new plumbing, something earlier was skipped.
+
+## Cross-checked against a sibling implementation — a cheaper path ships real value first
+
+A sibling tool (`d:\POC\Rohit_DumpDetective`) already ships dump+trace correlation in production,
+and it validates two things this phase should act on, one confirming the plan and one questioning
+its sequencing:
+
+- **Confirms the entity-join design is solving a real problem, not a hypothetical one.** Its
+  `TraceDumpCorrelator`/`CorrelationEngine` implement **26 correlation rules total** (16 cross-source
+  in `TraceDumpCorrelator`, 10 trace-only in `CorrelationEngine`) as hand-written static methods, each
+  comparing pre-aggregated fields on named POCOs (`ctx.Sql.SlowCommandCount`, `ctx.Snapshot.ConnectionCount`,
+  …) with hand-picked thresholds and hand-tuned integer confidence scores built by literal
+  `score += 15; score = Math.Min(score, 95)` arithmetic repeated in every rule. This is precisely the
+  "N independently-drifted judgment sites" failure mode this project's own analyzer-pipeline audit
+  and [§10 point 4](../modularity-plan.md#10-external-review-2026-09-08--where-this-can-be-questioned)
+  warn about, now observed in a second, independent codebase — good evidence the risk is real, not
+  theoretical, and that `ConfidenceBreakdown`'s named, versioned rules are worth the investment
+  planned here.
+- **Questions whether entity-join machinery needs to exist before correlation ships value.** Of
+  those 16 cross-source rules, only one (`CheckAllocConvergesWithHeapDominance`, "top allocating type
+  from trace also dominates the heap in the dump") does anything resembling an entity join, and it
+  does it with a plain `HashSet<string>` case-insensitive type-name match — no canonicalizer, no
+  `MatchFidelity`, no `EntityRef`. The other 15 correlate purely on **aggregate signal thresholds**
+  (counts, rates, percentages) with no per-entity join at all. That means most of this sibling's
+  real, shipped diagnostic value — 15 of 16 rules — needed none of Phases 1–6's entity-identity
+  investment. Recommend adding a lightweight milestone, **Phase 7a**, that ships signal-level
+  correlation rules (modeled directly on `ITraceDumpCorrelationRule`/`TraceDumpCorrelationContext`)
+  as soon as Phase 6's trace analyzers exist, in parallel with — not gated behind — the full
+  `EntityRef`/`ConfidenceBreakdown` machinery in this phase, which then only needs to land for the
+  minority of recipes (starting with allocation-convergence) that actually require an entity join.
+  This is a concrete instance of this plan's own §8 minimum-viable-path argument, with a real
+  reference implementation to model the interim shape on.
+- Its 16 rules also expand the recipe list below well past the five in
+  [observation-and-correlation-model.md § 4](observation-and-correlation-model.md): LOH growth ×
+  fragmentation, pinned handles × GC pause, finalizer-queue backlog × allocation rate, HTTP latency ×
+  async backlog, CPU saturation × idle thread-pool workers, deadlock wait-chain overlap × blocked
+  threads, connection-pool leak × live connection count, and GC-handle growth × pinned-handle count —
+  worth adopting as additional recipes rather than re-deriving them from scratch.
 
 ## Work
 

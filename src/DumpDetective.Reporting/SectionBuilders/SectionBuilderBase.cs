@@ -25,8 +25,11 @@ internal abstract class SectionBuilderBase
     }
 
     /// <summary>Same four-dot scale as <see cref="BuildConfidenceBand"/>, exposed standalone for
-    /// callers (e.g. a <c>SectionLeadFinding</c>) that compute their own confidence score.</summary>
-    protected static string SymbolForScore(double score) =>
+    /// callers (e.g. a <c>SectionLeadFinding</c>) that compute their own confidence score. Internal
+    /// (not just protected) so <c>ReportSectionAssembler.NormalizeSectionContractSlots</c> — which
+    /// derives its own <c>SectionLeadFinding</c> and is not a <see cref="SectionBuilderBase"/>
+    /// subclass — can share it instead of carrying a fourth independent copy of this ladder.</summary>
+    internal static string SymbolForScore(double score) =>
         score >= 0.85 ? "●●●●" : score >= 0.65 ? "●●●○" : score >= 0.45 ? "●●○○" : "●○○○";
 
     /// <summary>

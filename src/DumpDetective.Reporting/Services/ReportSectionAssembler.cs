@@ -2,6 +2,7 @@
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using DumpDetective.Reporting.SectionBuilders;
 
 namespace DumpDetective.Reporting.Services;
 
@@ -192,11 +193,7 @@ internal static class ReportSectionAssembler
                 if (top is not null)
                 {
                     double score = top.EffectiveConfidenceScore;
-                    // Bands: High ≥0.8 ●●●●, Medium-High ≥0.65 ●●●○, Medium ≥0.45 ●●○○, Low <0.45 ●○○○
-                    string symbol = score >= 0.85 ? "●●●●"
-                                  : score >= 0.65 ? "●●●○"
-                                  : score >= 0.45 ? "●●○○"
-                                  : "●○○○";
+                    string symbol = SectionBuilderBase.SymbolForScore(score);
 
                     leadFinding = new SectionLeadFinding(
                         Severity:          top.Severity.ToString(),

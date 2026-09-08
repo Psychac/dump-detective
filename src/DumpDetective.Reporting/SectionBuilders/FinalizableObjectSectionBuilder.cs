@@ -98,25 +98,10 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
             }
         }
 
+        // LeadFinding is derived from FinalizableObjectFindingGenerator's InsightFinding by
+        // ReportSectionAssembler.NormalizeSectionContractSlots \u2014 see
+        // docs/refactor/analyzer-pipeline-stages-and-leadfinding-dedup.md P0 fix plan.
         SectionLeadFinding? leadFinding = null;
-        if (d.FinalizerQueueCount > 10_000)
-            leadFinding = new SectionLeadFinding(
-                Severity: "Critical",
-                Title: $"Critical finalizer queue backlog \u2014 {d.FinalizerQueueCount:N0} objects queued",
-                Summary: $"Finalizer queue holds {d.FinalizerQueueCount:N0} objects retaining ~{FormatHelper.FormatBytes(d.FinalizerQueueRetainedBytes)}. Finalizer thread may be blocked or unable to drain.",
-                Recommendation: "Implement IDisposable + GC.SuppressFinalize in Dispose() to prevent queuing. Check whether the finalizer thread is blocked (see \u00A7D1 Thread Overview).",
-                ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
-                ConfidenceScore: 0.9,
-                Caveats: []);
-        else if (d.FinalizerQueueCount > 1_000)
-            leadFinding = new SectionLeadFinding(
-                Severity: "Warning",
-                Title: $"Elevated finalizer queue \u2014 {d.FinalizerQueueCount:N0} objects pending finalization",
-                Summary: $"Finalizer queue holds {d.FinalizerQueueCount:N0} objects retaining ~{FormatHelper.FormatBytes(d.FinalizerQueueRetainedBytes)}.",
-                Recommendation: "Review finalizable types for IDisposable compliance and call GC.SuppressFinalize after Dispose().",
-                ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
-                ConfidenceScore: 0.9,
-                Caveats: []);
 
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,

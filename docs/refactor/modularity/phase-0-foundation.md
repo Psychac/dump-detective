@@ -42,7 +42,16 @@ to become source-neutral.
    plugin packages (see [phase-3-plugin-packaging.md](phase-3-plugin-packaging.md)). Pure move,
    reviewable as a rename-only diff.
 5. **Characterization test coverage.** Any analyzer domain lacking a golden/snapshot test gets one
-   *before* it moves. The safety net must exist before the motion, not after.
+   *before* it moves. The safety net must exist before the motion, not after. **Bound by scenario
+   diversity, not just domain presence** (per
+   [modularity-plan.md § 10 point 6](../modularity-plan.md#10-external-review-2026-09-08--where-this-can-be-questioned)):
+   one snapshot per domain only proves the happy path survived the move, and this codebase's own
+   history has a case of exactly that gap — a regex-drift regression in `AsyncStateMachineAnalyzer`
+   that slipped past existing tests in the same session it was introduced, because the specific
+   branch it broke wasn't covered. For each analyzer domain, enumerate the distinct severity tiers
+   (Critical/Warning/Info/etc.) and distinct decision branches its finding-generation logic can
+   reach, and cover each with a scenario before the domain moves — not one snapshot exercising
+   whichever branch the sample dump happens to hit.
 6. **Architecture-conformance harness.** A lightweight boundary test (NetArchTest or a hand-rolled
    Roslyn/reflection check) asserting today's intended dependency direction. Every later phase adds
    a rule to this same harness rather than inventing a new enforcement mechanism.
@@ -53,12 +62,19 @@ to become source-neutral.
   checked in.
 - `InternalsVisibleTo` entries catalogued with a disposition each.
 - Analyzer namespaces match eventual package grouping.
-- Every analyzer domain has ≥ 1 characterization test.
+- Every analyzer domain's distinct severity tiers and decision branches each have a covering
+  characterization test — not just ≥ 1 test per domain.
 - Architecture-conformance test green in CI against current `main`.
 
 ## Risk / effort
 
-Low risk, low-to-medium effort — but the capability map (item 3) is genuinely intellectual work,
-not mechanical, and it's the item most likely to be rushed. Getting it wrong means Phase 3 ships
-analyzers with mis-declared requirements, which surfaces as "analyzer silently skipped" bugs that
-are annoying to diagnose. Budget real time for it.
+Low risk, low-to-medium effort — but two items are genuinely intellectual work, not mechanical, and
+are the ones most likely to be rushed:
+- The capability map (item 3). Getting it wrong means Phase 3 ships analyzers with mis-declared
+  requirements, which surfaces as "analyzer silently skipped" bugs that are annoying to diagnose.
+- Characterization test coverage at the tightened bar (item 5). Enumerating each domain's severity
+  tiers and branches is real analysis work per analyzer, not a mechanical snapshot-and-move — this
+  is the phase's only safety net for Phases 4 and 5, the two highest-behavioral-risk phases in the
+  plan, so under-scoping it here is the kind of gap that doesn't surface until much later.
+
+Budget real time for both.

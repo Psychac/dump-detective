@@ -12,56 +12,18 @@ public sealed class ExceptionAnalysisSectionBuilderTests
 {
     private readonly ExceptionAnalysisSectionBuilder _builder = new();
 
+    // LeadFinding is no longer built here — the per-candidate confidence-weighting logic moved to
+    // CrashFindingGeneratorTests, since LeadFinding is now derived from CrashFindingGenerator's
+    // InsightFinding by ReportSectionAssembler.NormalizeSectionContractSlots. See
+    // docs/refactor/analyzer-pipeline-stages-and-leadfinding-dedup.md P1 fix plan.
+
     [Fact]
-    public void Build_AllCandidatesExact_YieldsHighConfidenceLeadFinding()
+    public void Build_NeverSetsLeadFindingDirectly()
     {
         var crash = CrashResult(activeExceptions: 3, candidates:
         [
             Candidate(threadId: 1, activeCount: 3, InferenceConfidence.Exact)
         ]);
-
-        var section = _builder.Build(crash);
-
-        section.LeadFinding.Should().NotBeNull();
-        section.LeadFinding!.ConfidenceScore.Should().BeApproximately(0.95, 0.0001);
-        section.LeadFinding.ConfidenceSymbol.Should().Be("●●●●");
-    }
-
-    [Fact]
-    public void Build_AllCandidatesNone_YieldsLowConfidenceLeadFinding()
-    {
-        var crash = CrashResult(activeExceptions: 2, candidates:
-        [
-            Candidate(threadId: 1, activeCount: 2, InferenceConfidence.None)
-        ]);
-
-        var section = _builder.Build(crash);
-
-        section.LeadFinding!.ConfidenceScore.Should().BeApproximately(0.15, 0.0001);
-        section.LeadFinding.ConfidenceSymbol.Should().Be("●○○○");
-    }
-
-    [Fact]
-    public void Build_MixedConfidenceTiers_WeightsByActiveExceptionCount()
-    {
-        var crash = CrashResult(activeExceptions: 4, candidates:
-        [
-            Candidate(threadId: 1, activeCount: 3, InferenceConfidence.Exact),
-            Candidate(threadId: 2, activeCount: 1, InferenceConfidence.None),
-        ]);
-
-        var section = _builder.Build(crash);
-
-        // (0.95*3 + 0.15*1) / 4 = 0.75
-        section.LeadFinding!.ConfidenceScore.Should().BeApproximately(0.75, 0.0001);
-        section.LeadFinding.ConfidenceSymbol.Should().Be("●●●○");
-        section.LeadFinding.Caveats.Should().Contain(c => c.Contains("Exact") && c.Contains("None"));
-    }
-
-    [Fact]
-    public void Build_NoActiveExceptions_OmitsLeadFinding()
-    {
-        var crash = CrashResult(activeExceptions: 0, candidates: []);
 
         var section = _builder.Build(crash);
 

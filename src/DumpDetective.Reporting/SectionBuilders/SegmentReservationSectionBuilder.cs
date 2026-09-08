@@ -23,36 +23,10 @@ internal sealed class SegmentReservationSectionBuilder : SectionBuilderBase, IAn
         var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
+        // LeadFinding is derived from SegmentReservationFindingGenerator's InsightFinding by
+        // ReportSectionAssembler.NormalizeSectionContractSlots \u2014 see
+        // docs/refactor/analyzer-pipeline-stages-and-leadfinding-dedup.md P0 fix plan.
         SectionLeadFinding? leadFinding = null;
-        if (d.ReservedToCommittedRatio > d.RatioHighPressureThreshold || (d.AddressSpacePressureRisk && d.ReservedToCommittedRatio > d.RatioMediumPressureThreshold))
-        {
-            bool critical = d.ReservedToCommittedRatio > d.RatioHighPressureThreshold;
-            string reason = d.AddressSpacePressureRisk && !string.IsNullOrWhiteSpace(d.PressureRiskReason)
-                ? d.PressureRiskReason
-                : $"Reserved/committed ratio is {d.ReservedToCommittedRatio:F1}\u00d7.";
-            leadFinding = new SectionLeadFinding(
-                Severity: critical ? "Critical" : "Warning",
-                Title: $"Address space pressure \u2014 reserved/committed ratio {d.ReservedToCommittedRatio:F1}\u00d7",
-                Summary: reason,
-                Recommendation: "Review segment reservation settings. On Server GC, consider reducing MaxHeapSize or enabling DATAS. On Workstation GC, check for LOH fragmentation or large pinned regions.",
-                ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
-                ConfidenceScore: 0.85,
-                Caveats: []);
-        }
-        else if (d.ReservedToCommittedRatio > d.RatioMediumPressureThreshold)
-        {
-            string reason = d.AddressSpacePressureRisk && !string.IsNullOrWhiteSpace(d.PressureRiskReason)
-                ? d.PressureRiskReason
-                : $"Reserved/committed ratio is {d.ReservedToCommittedRatio:F1}\u00d7 (threshold: {d.RatioMediumPressureThreshold:F0}\u00d7).";
-            leadFinding = new SectionLeadFinding(
-                Severity: "Warning",
-                Title: $"Elevated segment reservation \u2014 ratio {d.ReservedToCommittedRatio:F1}\u00d7",
-                Summary: reason,
-                Recommendation: "Monitor heap reservation growth. Reduce MaxHeapSize or consolidate heap segments if address space is constrained.",
-                ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
-                ConfidenceScore: 0.85,
-                Caveats: []);
-        }
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {

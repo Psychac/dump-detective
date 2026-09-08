@@ -27,24 +27,10 @@ internal sealed class HangSectionBuilder : SectionBuilderBase, IAnalyzerSectionB
         var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
+        // LeadFinding is derived from HangFindingGenerator's InsightFinding by
+        // ReportSectionAssembler.NormalizeSectionContractSlots — see
+        // docs/refactor/analyzer-pipeline-stages-and-leadfinding-dedup.md P0 fix plan.
         SectionLeadFinding? leadFinding = null;
-        if (d.IsStarved || d.HealthScore < 50)
-        {
-            leadFinding = new SectionLeadFinding(
-                Severity: d.IsStarved ? "Warning" : "Warning",
-                Title: d.IsStarved
-                    ? "Thread pool starvation detected — queue length exceeds max worker threads"
-                    : $"Thread pool health degraded (score {d.HealthScore:N0})",
-                Summary: d.IsStarved
-                    ? $"Queued work items: {d.QueuedWorkItems:N0}, active workers at max ({d.RuntimeMaxThreads:N0})."
-                    : $"Health score {d.HealthScore:N0} is below the healthy threshold of 50.",
-                Recommendation: "Increase thread pool min/max threads, reduce synchronous blocking on async paths, or profile CPU-bound work.",
-                ConfidenceSymbol: "●●●●",
-                ConfidenceScore: 0.85,
-                Caveats: d.RuntimeThreadPoolDataAvailable
-                    ? []
-                    : ["Runtime thread-pool data was unavailable; some metrics are estimated."]);
-        }
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {

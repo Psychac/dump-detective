@@ -135,6 +135,41 @@ public sealed class FinalizableObjectFindingGeneratorTests
     }
 
     [Fact]
+    public void Generate_FinalizerQueueCountAtWarningThreshold_EmitsNoBacklogFinding()
+    {
+        var gen = new FinalizableObjectFindingGenerator();
+        var result = BuildResult(finalizerQueueCount: 1_000);
+
+        var findings = gen.Generate(result);
+
+        findings.Should().NotContain(f => f.Tags.Contains("backlog"));
+    }
+
+    [Fact]
+    public void Generate_FinalizerQueueCountAboveWarningThreshold_EmitsWarningBacklogFinding()
+    {
+        var gen = new FinalizableObjectFindingGenerator();
+        var result = BuildResult(finalizerQueueCount: 1_500, finalizerQueueRetainedBytes: 4096);
+
+        var findings = gen.Generate(result);
+
+        var finding = findings.Should().ContainSingle(f => f.Tags.Contains("backlog")).Subject;
+        finding.Severity.Should().Be(FindingSeverity.Warning);
+    }
+
+    [Fact]
+    public void Generate_FinalizerQueueCountAboveCriticalThreshold_EmitsCriticalBacklogFinding()
+    {
+        var gen = new FinalizableObjectFindingGenerator();
+        var result = BuildResult(finalizerQueueCount: 15_000, finalizerQueueRetainedBytes: 4096);
+
+        var findings = gen.Generate(result);
+
+        var finding = findings.Should().ContainSingle(f => f.Tags.Contains("backlog")).Subject;
+        finding.Severity.Should().Be(FindingSeverity.Critical);
+    }
+
+    [Fact]
     public void Generate_NoKnownPatternTypesInQueue_EmitsNoKnownPatternFindings()
     {
         var gen = new FinalizableObjectFindingGenerator();
@@ -149,6 +184,8 @@ public sealed class FinalizableObjectFindingGeneratorTests
     private static FinalizableObjectDomainResult BuildResult(
         int criticalFinalizerQueueCount = 0,
         ulong criticalFinalizerQueueBytes = 0,
+        int finalizerQueueCount = 0,
+        ulong finalizerQueueRetainedBytes = 0,
         IReadOnlyList<QueueTypeStatistic>? topCriticalFinalizerTypesByCount = null,
         IReadOnlyList<QueueTypeStatistic>? topQueueTypesByCount = null) =>
         new(
@@ -158,8 +195,8 @@ public sealed class FinalizableObjectFindingGeneratorTests
             Gen1Count: 30,
             Gen2Count: 20,
             LohCount: 0,
-            FinalizerQueueCount: criticalFinalizerQueueCount > 0 ? criticalFinalizerQueueCount : 5,
-            FinalizerQueueRetainedBytes: 0,
+            FinalizerQueueCount: finalizerQueueCount > 0 ? finalizerQueueCount : (criticalFinalizerQueueCount > 0 ? criticalFinalizerQueueCount : 5),
+            FinalizerQueueRetainedBytes: finalizerQueueRetainedBytes,
             IsRetainedEstimatePartial: false,
             HasUndisposedDisposableInQueue: false,
             CriticalFinalizerQueueCount: criticalFinalizerQueueCount,

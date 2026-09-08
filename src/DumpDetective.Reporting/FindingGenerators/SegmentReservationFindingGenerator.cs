@@ -35,6 +35,32 @@ internal sealed class SegmentReservationFindingGenerator : IFindingGenerator
                 MetricUnit: "ratio"));
         }
 
+        // Reserved/committed ratio crossing its own configured pressure thresholds — a distinct
+        // signal from AddressSpacePressureRisk, which is the analyzer's broader risk heuristic and
+        // does not reference RatioHighPressureThreshold/RatioMediumPressureThreshold at all.
+        if (r.ReservedToCommittedRatio > r.RatioMediumPressureThreshold)
+        {
+            bool critical = r.ReservedToCommittedRatio > r.RatioHighPressureThreshold;
+            string reason = r.AddressSpacePressureRisk && !string.IsNullOrWhiteSpace(r.PressureRiskReason)
+                ? r.PressureRiskReason
+                : $"Reserved/committed ratio is {r.ReservedToCommittedRatio:F1}x (threshold: {r.RatioMediumPressureThreshold:F0}x).";
+
+            findings.Add(new InsightFinding(
+                Analyzer: AnalyzerName,
+                Category: "Memory",
+                Severity: critical ? FindingSeverity.Critical : FindingSeverity.Warning,
+                Title: critical
+                    ? $"Address space pressure — reserved/committed ratio {r.ReservedToCommittedRatio:F1}x"
+                    : $"Elevated segment reservation — ratio {r.ReservedToCommittedRatio:F1}x",
+                Evidence: reason,
+                Recommendation: critical
+                    ? "Review segment reservation settings. On Server GC, consider reducing MaxHeapSize or enabling DATAS. On Workstation GC, check for LOH fragmentation or large pinned regions."
+                    : "Monitor heap reservation growth. Reduce MaxHeapSize or consolidate heap segments if address space is constrained.",
+                Tags: ["segments", "virtual-memory", "reservation-ratio"],
+                MetricValue: r.ReservedToCommittedRatio,
+                MetricUnit: "ratio"));
+        }
+
         // Ephemeral segment fill critical (> 90 %).
         if (r.AvgEphemeralFillPct > 90.0)
         {

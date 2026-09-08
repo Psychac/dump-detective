@@ -9,8 +9,8 @@
 > **Date**: 2026-07-28
 >
 > **Superseded note (2026-08-24):** the `AnalysisProfile` tier system referenced in Bug 1 below no
-> longer exists — see §9.26 of
-> [analysis-profile-removal-plan.md](../../refactor/analysis-profile-removal-plan.md).
+> longer exists — see §9.26 of the AnalysisProfile removal plan (that doc was retired from the tree
+> after the migration completed; see git history, commit `ad37513b`).
 > `CrashAnalysisOptions` no longer varies `MaxOriginalStackFramesToPrint`/
 > `MaxCurrentThreadFramesToPrint`/`TopCrashThreadCandidates` by tier (seven of eight knobs were
 > deleted outright; `MaxExceptionsPerType` was kept as a fixed constant) — the "Full requests 40,

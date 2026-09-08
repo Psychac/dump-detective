@@ -721,6 +721,14 @@ Implements **T6**. Four reference kinds, in descending strength:
 | **Internal distribution** | always | `12.4% of managed bytes; rank 1 of 131,568 types; p99.99 by instance count` |
 | **Declared budget** | user supplies expectations | `8.2 GB against a 4 GB budget — 205%` |
 
+"Always" in the internal-distribution row holds for **per-entity** measures — there is a natural
+population to rank against (types by retained bytes, threads by wait time). It does not hold for
+**whole-process scalars** with no intra-dump population — total thread count, total managed heap
+bytes, finalizer queue depth as a single number. Those fall back to rate-normalization only if the
+measure is cumulative and uptime is known; absent both, a single-dump run can legitimately render
+"no reference available" for exactly this class of measure, which no worked example here shows.
+See [§21 open question 8](#21-risks-assumptions-and-open-questions).
+
 ### 8.1 Declared expectation
 
 The one that needs new input: a small file the user supplies alongside the dump.
@@ -1561,6 +1569,10 @@ metadata.
    observations at Phase 5. My position: the report should lead, because the observation model's
    value is invisible until something consumes it, and M1–M3 can be built over today's domain
    results with an adapter. The risk of leading is building an adapter that outlives its welcome.
+   [modularity-plan.md § 4b](../refactor/modularity-plan.md#4b-relationship-to-the-report-vision-doc)
+   takes the position that this is narrower than a resequencing question: M1, M2 and M4 already
+   depend on nothing per § 19's own table, so they aren't blocked on this plan at all; only full
+   observation lineage is.
 2. **Does the query language earn its complexity?** It is the most speculative piece here. A
    defensible smaller version: structured filter chips plus `dd.query()` over a plain predicate
    object, with the URL carrying that object as JSON. Grammar and parser only if readers actually
@@ -1581,6 +1593,14 @@ metadata.
 7. **How does an entity dossier stay bounded** for a type with 4 million instances? The dossier is
    per-entity aggregate, so it should be fine, but the "relations" panel is a graph query and needs
    a stated boundary — which then needs to appear in `coverage.boundary` rather than as a silent cap.
+8. **Does "internal distribution" actually cover whole-process scalars?** [§8](#8-baselines-and-expectation)
+   marks it "always" available, but that's only true where a measure has a natural per-entity
+   population to rank against. A whole-process scalar — total thread count, total managed heap
+   bytes, finalizer queue depth — has none; on a single dump with uptime unavailable, such a measure
+   has no reference from any of the four kinds. Options: define a cross-dump corpus to rank
+   process-scalars against (which §8.1 explicitly rules out as "a built-in constant is a guess about
+   someone else's service"), or accept that a minority of scalar measures render "no reference
+   available" honestly rather than force one. Not yet resolved.
 
 ---
 

@@ -154,15 +154,19 @@ Two variants of the same underlying complaint: the Analyzer decides *what's wort
 ranking/selection decision) rather than exposing complete per-entity raw data and letting a later
 stage decide.
 
-**Acute variant (Memory only, confirmed):** `MemoryDomainResult.TopTypes` is not "top-N by size" —
-`MemoryAnalysisProjection.cs` builds three separately-sorted lists (`bySize`, `byCompositePressure`,
-`bySize` again) and merges them via per-criterion quotas driven by four configurable weights
+**Acute variant (Memory, resolved):** `MemoryDomainResult.TopTypes` was not "top-N by size" —
+`MemoryAnalysisProjection.cs` built three separately-sorted lists (`bySize`, `byCompositePressure`,
+`bySize` again) and merged them via per-criterion quotas driven by four configurable weights
 (`TopTypesBySizeWeight`/`ByCountWeight`/`ByLohWeight`/`ByAverageSizeWeight`), where `byCompositePressure`
-itself reuses the same normalized/weighted scoring math as `MemoryPressureScore`. The **row selection
-itself** — which types even appear in the report — is a multi-criteria judgment call baked into stage
-1, not just the displayed score. This is already independently documented in
-[analysis-profile-removal-plan.md §9.27](./analysis-profile-removal-plan.md) as *"the tier changes
-which types are selected, not how many"* and categorized there as `5 — ranking function (keep)`.
+itself reused the same normalized/weighted scoring math as `MemoryPressureScore`. The **row selection
+itself** — which types even appear in the report — was a multi-criteria judgment call baked into
+stage 1, not just the displayed score. This is exactly what the (now-retired) AnalysisProfile removal
+plan executed under its §9.27 Memory audit: the weighted quota-merge was deleted outright rather than
+de-tiered, since the type list is now complete (every distinct type, sorted by bytes), leaving no more
+"which N types get shown" judgment call for the weights to bias. One correction survived from that
+work: `TopTypesCount` also gated a real per-type bounded BFS, not just report width, so the expensive
+retained-size *enrichment* stays scoped to a fixed internal constant rather than becoming genuinely
+uncapped — the row *list* is exact, the per-row enrichment is not.
 
 **Milder, widespread variant (many analyzers):** several domain results carry multiple independently
 capped `Top*` lists that all slice the *same* underlying per-entity population by a different single
@@ -181,18 +185,18 @@ bookkeeping. `FinalizableObjectDomainResult` (checked earlier) is the good count
 `FinalizerQueueEntry`-shaped data is arguably one list with two sort orders applied downstream, not two
 analyzer-side artifacts.
 
-**Why this matters now specifically:** `analysis-profile-removal-plan.md` Category 1 already commits
-to "analyzer emits complete ranked aggregate; renderer slices" for every `Top-N` cap — that plan is the
-natural place this gets fixed, since removing the caps is already forcing a per-analyzer touch of every
-`Top*` list. The refinement this doc adds: when doing that Category-1 migration, don't just relocate
-each list's N-limit to the render layer independently — check whether the several lists on that
-analyzer's domain result are views over the same entity, and if so, **collapse them into one complete
-raw table** (all entities, all the raw columns needed to sort by any dimension) instead of relocating N
-separately-capped lists. That removes N-1 redundant scan/dedup/cap code paths per analyzer, not just
-the cap itself. This is an addendum to the profile-removal plan's execution, not a competing plan —
-defer sequencing to that document's §11 pre-implementation checklist (B1-B4, D1-D9), since Category 1's
-render-layer mechanism (D5, using Crash as the reference implementation per that doc) needs to exist
-before "collapse to one table" can be verified end-to-end.
+**Why this matters now specifically:** the (now-retired) AnalysisProfile removal plan's Category 1
+committed to "analyzer emits complete ranked aggregate; renderer slices" for every `Top-N` cap, and
+that migration is substantially complete — nearly every analyzer in its §9 per-analyzer audit closed
+GREEN (a handful stayed AMBER for reasons unrelated to this concern). The refinement this doc adds,
+and which that plan's per-analyzer passes didn't uniformly apply: when several `Top*` lists on one
+analyzer's domain result are views over the same entity, collapse them into one complete raw table
+(all entities, all the raw columns needed to sort by any dimension) instead of relocating N
+separately-capped lists as N separately-relocated ones. That removes N-1 redundant scan/dedup/cap code
+paths per analyzer, not just the cap itself. Memory's own audit (§9.27, above) already did exactly
+this collapse for its three `Top*` lists, so it's a proven pattern here, not a speculative one — worth
+checking the remaining multi-`Top*`-list analyzers (`AsyncTaskDomainResult`,
+`AllocationPatternDomainResult`, above) against it individually.
 
 ## Recommended stage boundary (going forward, supersedes the earlier 3-stage draft below)
 
@@ -235,4 +239,4 @@ preserved by decomposing *within* the merged stage rather than *between* stages.
 - Where is `LeakCandidateRecord.SuspicionScore`/`Severity`/`Classification` actually computed? Not yet traced to a source file — needed before Smell A's Leak Candidate row can be acted on.
 - Does `ExplainableScoringEngine.ComputeScores` (`DumpDetective.Reporting/Services/ExplainableScoringEngine.cs:36`) reuse the stage-1 baked scores (`LeakCandidateRecord.SuspicionScore`, `HangAnalyzer.ComputeHealthScore`) or recompute independently? If independent, it's a further drift point beyond the 6 already catalogued in Smell A.
 - Smell A/B audit covered every file in `DumpDetective.Analysis/Models/` at the field-shape level (grep for `FindingSeverity`/`*Score`/`*Classification`/`*Level` fields, and Top* list counts) but only deep-read a sample (Memory, Allocation Pattern, Event Leak, GC Root, Hang, Leak Candidate, Async Task, Infrastructure group, Finalizable Object). The remaining ~20 files with 1-2 `Top*` lists each are lower risk (single list is much harder to have a multi-criteria-merge problem) but haven't been individually confirmed clean.
-- How does "collapse N capped lists into one raw table" (Smell B, milder variant) interact with the project's bounded-memory rule (CLAUDE.md)? A single complete per-entity table with no cap could be large for high-cardinality entities (e.g. all task types, all thread waits) — needs the same exactness-vs-memory reasoning `analysis-profile-removal-plan.md` already applies to scan caps, not a free pass just because it's "one table instead of many."
+- How does "collapse N capped lists into one raw table" (Smell B, milder variant) interact with the project's bounded-memory rule (CLAUDE.md)? A single complete per-entity table with no cap could be large for high-cardinality entities (e.g. all task types, all thread waits) — needs the same exactness-vs-memory reasoning [performance-checklist.md](../performance-checklist.md) already applies to scan caps (disk-backed indexing keeps the *store* bounded even when the row *count* isn't), not a free pass just because it's "one table instead of many."

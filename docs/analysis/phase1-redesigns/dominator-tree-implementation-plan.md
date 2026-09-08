@@ -13,8 +13,9 @@ see Phase 4/6 below. Report integration (swapping the P2-4 sub-table's heuristic
 Phase 7.
 
 > **Superseded note (2026-08-24):** the `AnalysisProfile` tier system mentioned in Phase 4 below
-> (`AnalysisProfile.Preset(...)`) has since been deleted entirely — see §9.18 of
-> [analysis-profile-removal-plan.md](../../refactor/analysis-profile-removal-plan.md). D9's
+> (`AnalysisProfile.Preset(...)`) has since been deleted entirely — see §9.18 of the AnalysisProfile
+> removal plan (that doc was retired from the tree after the migration completed; see git history,
+> commit `ad37513b`). D9's
 > prediction that `EnableExactDominatorTree` would stay independent of it held: `Preset`/`Default`
 > were removed from `RetentionOptions` and every kept field stopped tier-varying, exactly as
 > anticipated here.

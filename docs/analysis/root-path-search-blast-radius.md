@@ -6,8 +6,9 @@
 > — the two real, profiled instances of this bug that triggered this audit.
 >
 > **Superseded note (2026-08-24):** the `AnalysisProfile.Fast` exposure described below (§ "A
-> structurally identical bug in a separate implementation") is resolved — see §9.20/D1 of
-> [analysis-profile-removal-plan.md](../refactor/analysis-profile-removal-plan.md).
+> structurally identical bug in a separate implementation") is resolved — see §9.20/D1 of the
+> AnalysisProfile removal plan (that doc was retired from the tree after the migration completed;
+> see git history, commit `ad37513b`).
 > `ReferenceChainSearchMode` (and `TryFindAnyRootPath_Fast`, the vulnerable per-root-BFS
 > implementation) were deleted outright; `ReferenceChainAnalyzer` now uses a single bounded
 > bidirectional search strategy unconditionally, with no `AnalysisProfile`/tier dependency left to

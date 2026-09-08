@@ -194,8 +194,10 @@ reasonable evidence the conclusion is right.
   **disk-backed index**, observations reference it via `EvidenceRef`, and selection/ranking happens
   in synthesis or render. That also answers the audit's own open question about bounded memory —
   a complete uncapped table is safe precisely because it's disk-backed, which is what the platform
-  already does for heap objects. Sequencing still defers to
-  [analysis-profile-removal-plan.md](analysis-profile-removal-plan.md) § 11.
+  already does for heap objects. What this was sequenced behind is done: the AnalysisProfile removal
+  plan it deferred to is complete and its doc retired from the tree (see git history, commit
+  `ad37513b`) — nearly every analyzer's `Top*`-list migration closed GREEN in that audit's §9, so
+  this phase inherits a largely-finished migration rather than a pending one.
 
 ### A contradiction the audit exposed in the observation model
 
@@ -234,6 +236,37 @@ Doing them first also *reduces* Phase 5's work: every builder that stops constru
 - The three near-identical confidence-band ladders (`SectionBuilderBase`, `ReportSectionAssembler`,
   `LeakAnalysisSectionBuilder`) collapse into `ConfidenceBreakdown` (Phase 5), but should be
   consolidated *now* per the audit rather than waiting.
+
+---
+
+## 4b. Relationship to the report vision doc
+
+[ReportSystemVision.md](../ReportStructure/ReportSystemVision.md) is the from-scratch specification
+for the report this plan eventually feeds. It's a consumer of this plan, not an alternative to it —
+its session model is this plan's session model (its § 3.2), and its observation store is explicitly
+aligned to [observation-and-correlation-model.md](modularity/observation-and-correlation-model.md)
+(its § 5.1), restated there "because the report is its consumer and depends on the purity rule."
+
+Where it disagrees is sequencing. This plan schedules the report last (Phase 8); its § 21 open
+question 1 argues the opposite — the report should lead, because it's the only consumer that makes
+the observation model's value visible to anyone outside the team. The disagreement is narrower than
+it looks, and the vision doc's own § 19 minimum-viable path already shows why: M1 (claims), M2
+(entities), and M4 (payload/virtualized tables) are marked as depending on nothing, meaning they can
+be built now, as a thin adapter over today's `AnalyzerDomainResult` / `InsightFinding` — they don't
+need Phase 5's observations to exist. This lines up with what
+[phase-8](modularity/phase-8-sinks-and-ui.md) already says about `IReportSink` and unconditional
+`report.json`: those land "right after Phase 1," not behind Phase 5.
+
+What genuinely can't move earlier is anything claiming full observation lineage — a claim citing the
+observations that support it, confidence split into measurement vs. inference, cross-analyzer
+synthesis without a bespoke `InsightEngine` per analyzer. The vision doc's own mapping (§ 19, "§3
+sessions, §5 observations → modularity Phases 1, 5") already says this. Building the claim graph's
+`derivedFrom`/`support`/`counter` fields against pre-Phase-5 domain results would mean re-deriving
+them once observations land — the same two-independent-passes-over-the-same-facts failure mode
+[§4a](#4a-relationship-analyzer-pipeline--leadfinding-audit) diagnoses, one layer up.
+
+So: neither doc needs to be resequenced. The report can start now (M1–M4, against today's data); it
+just can't claim full lineage until Phase 5 exists to back it.
 
 ---
 

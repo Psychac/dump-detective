@@ -4,6 +4,13 @@ Part of [../modularity-plan.md](../modularity-plan.md). Implements north-star **
 Depends on [phase-1-contracts-sdk.md](phase-1-contracts-sdk.md) for the schema; the low-risk pieces
 can land opportunistically much earlier.
 
+The report *content* model this phase gestures at below (schema v3's `sources[]`/`timeline`/
+`capabilityReport`, findings with observation lineage) is a floor, not the target shape — the full
+specification (claim graph, entity dossier, coverage, dual confidence) is
+[ReportSystemVision.md](../../ReportStructure/ReportSystemVision.md). See
+[modularity-plan.md § 4b](../modularity-plan.md#4b-relationship-to-the-report-vision-doc) for how
+that doc's sequencing argument relates to this phase.
+
 ## Goal
 
 Replace `IReportFormatter` (produces a string) with **sinks** consuming the versioned session

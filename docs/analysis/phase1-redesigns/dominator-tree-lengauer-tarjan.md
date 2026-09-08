@@ -10,7 +10,8 @@ Supersedes §4 ("A Bounded True Dominator Computation Over the Candidate Closure
 
 > **Superseded note (2026-08-24):** D9 below anticipated the `AnalysisProfile` tier system would be
 > "simplified (likely to two tiers) at some point" — it was instead deleted outright. See §9.18 of
-> [analysis-profile-removal-plan.md](../../refactor/analysis-profile-removal-plan.md):
+> the AnalysisProfile removal plan (that doc was retired from the tree after the migration completed;
+> see git history, commit `ad37513b`):
 > `RetentionOptions.Preset`/`Default` are gone and every surviving field (including
 > `EnableExactDominatorTree`/`ExactDominatorTreeMemoryBudgetBytes`, both still live and consumed
 > exactly as described below) stopped tier-varying. D9's own design — gating exact mode on an

@@ -16,8 +16,8 @@
 > outstanding as of this re-audit are tracked below.
 >
 > **Superseded note (2026-08-24):** the `AnalysisProfile` tier system (Fast/Balanced/Full) referenced
-> below no longer exists — see §9.30 of
-> [analysis-profile-removal-plan.md](../../refactor/analysis-profile-removal-plan.md).
+> below no longer exists — see §9.30 of the AnalysisProfile removal plan (that doc was retired from
+> the tree after the migration completed; see git history, commit `ad37513b`).
 > `SelectionMode`/`ScanStrategy`/`SelectionPriority` collapsed to one algorithm (`CompositeScore`
 > ranking, classify-every-candidate-first), so every dump now produces the same selection regardless
 > of any tier a user might still configure — the "two reports differ because of a tier" concern this

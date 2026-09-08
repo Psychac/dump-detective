@@ -1,9 +1,10 @@
 # Building the exact dominator tree during Phase 1 index build
 
 Computes the exact dominator tree ("what would freeing X free?") during the same Phase 1 pass that
-builds the heap index, instead of recomputing it live in Phase 2 per analyzer. Supersedes
-[analysis-profile-removal-plan.md §10a](../../refactor/analysis-profile-removal-plan.md#10a-b2-design-the-dominator-tree-retention-provider)'s
-in-memory cache-provider idea and [dominator-tree-lengauer-tarjan.md §D7](dominator-tree-lengauer-tarjan.md)'s
+builds the heap index, instead of recomputing it live in Phase 2 per analyzer. Supersedes the
+AnalysisProfile removal plan's §10a in-memory cache-provider idea (that doc was retired from the tree
+after the migration completed; see git history, commit `ad37513b`) and
+[dominator-tree-lengauer-tarjan.md §D7](dominator-tree-lengauer-tarjan.md)'s
 "defer to Phase 2, append after `Finish()`" stance — both wrong because everything the tree needs (GC
 roots, forward edges, per-object shallow sizes) already exists inside the Phase 1 job, before the
 container closes.

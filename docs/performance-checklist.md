@@ -30,9 +30,9 @@ wrong in either direction is a real bug, not a style nit:
   **accumulator, a total, or a boolean like "is this object retained"** while the analyzer still
   reports that value as authoritative is a correctness bug wearing a performance-rule costume —
   streaming and disk-backed indexing exist precisely so the work doesn't need to be bounded to keep
-  memory bounded. See
-  [analysis-profile-removal-plan.md](refactor/analysis-profile-removal-plan.md) (§3 categories,
-  §6.1-6.3, §9 per-analyzer audit) for the worked examples that motivated this split, and
+  memory bounded. The worked examples that motivated this split are in the AnalysisProfile removal
+  plan's §3 categories, §6.1-6.3, and §9 per-analyzer audit — that doc was retired from the tree
+  after the migration completed (see git history, commit `ad37513b`). See
   [dominator-tree-phase1-integration.md](analysis/phase1-redesigns/dominator-tree-phase1-integration.md)
   for the concrete architecture (uncapped reachability walk + disk-backed exact dominator tree) that
   makes "bounded work" unnecessary for reachability/retained-bytes correctness.

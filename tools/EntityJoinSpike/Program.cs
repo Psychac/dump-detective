@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 using Microsoft.Diagnostics.Runtime;
 using Microsoft.Diagnostics.Tracing.Etlx;
@@ -78,6 +79,75 @@ Console.WriteLine("Sample dump-only, i.e. canonicalization candidates (first 30)
 foreach (string name in dumpOnly.Take(30))
     Console.WriteLine($"  {name}");
 
+// Compiler-generated breakdown: how do lambda/closure/state-machine names behave under exact-
+// string join, and does stripping the compiler-assigned ordinal (which can shift between builds)
+// recover matches that exact join missed? This only measures same-build behavior — it cannot
+// prove ordinals are stable across builds, only whether canonicalization has anything to recover.
+var dumpCompilerGenerated = new List<string>();
+foreach (string name in dumpTypeNames)
+{
+    if (IsCompilerGenerated(name))
+        dumpCompilerGenerated.Add(name);
+}
+
+var traceCompilerGenerated = new List<string>();
+var traceCanonical = new HashSet<string>(StringComparer.Ordinal);
+foreach (string name in traceTypeNames)
+{
+    if (IsCompilerGenerated(name))
+        traceCompilerGenerated.Add(name);
+    traceCanonical.Add(Canonicalize(name));
+}
+
+int compilerGeneratedExactMatches = 0;
+var compilerGeneratedDumpOnly = new List<string>();
+foreach (string name in dumpCompilerGenerated)
+{
+    if (traceTypeNames.Contains(name))
+        compilerGeneratedExactMatches++;
+    else
+        compilerGeneratedDumpOnly.Add(name);
+}
+
+int recoveredByCanonicalization = 0;
+var recoveredSamples = new List<(string Dump, string Canonical)>();
+foreach (string name in compilerGeneratedDumpOnly)
+{
+    string canonical = Canonicalize(name);
+    if (traceCanonical.Contains(canonical))
+    {
+        recoveredByCanonicalization++;
+        if (recoveredSamples.Count < 15)
+            recoveredSamples.Add((name, canonical));
+    }
+}
+
+Console.WriteLine();
+Console.WriteLine("--- Compiler-generated (lambda/closure/state-machine) breakdown ---");
+Console.WriteLine($"Dump compiler-generated type names: {dumpCompilerGenerated.Count} of {dumpTypeNames.Count}");
+Console.WriteLine($"Trace compiler-generated type names: {traceCompilerGenerated.Count} of {traceTypeNames.Count}");
+Console.WriteLine($"Exact-string match within compiler-generated subset: {compilerGeneratedExactMatches} of {dumpCompilerGenerated.Count}"
+    + (dumpCompilerGenerated.Count == 0 ? "" : $" ({(double)compilerGeneratedExactMatches / dumpCompilerGenerated.Count:P1})"));
+Console.WriteLine($"Additional matches recovered by ordinal-stripping canonicalization: {recoveredByCanonicalization} of {compilerGeneratedDumpOnly.Count} remaining"
+    + (compilerGeneratedDumpOnly.Count == 0 ? "" : $" ({(double)recoveredByCanonicalization / compilerGeneratedDumpOnly.Count:P1})"));
+
+Console.WriteLine();
+Console.WriteLine("Sample recovered by canonicalization (dump name -> canonical form, first 15):");
+foreach ((string dumpName, string canonical) in recoveredSamples)
+    Console.WriteLine($"  {dumpName}  ->  {canonical}");
+
+Console.WriteLine();
+Console.WriteLine("Sample still unmatched after canonicalization (first 15):");
+int shown = 0;
+foreach (string name in compilerGeneratedDumpOnly)
+{
+    if (traceCanonical.Contains(Canonicalize(name)))
+        continue;
+    Console.WriteLine($"  {name}");
+    if (++shown >= 15)
+        break;
+}
+
 return 0;
 
 static string? ExtractTypeName(string fullMethodName)
@@ -90,4 +160,20 @@ static string? ExtractTypeName(string fullMethodName)
 
     int lastDot = beforeArgs.LastIndexOf('.');
     return lastDot > 0 ? beforeArgs[..lastDot] : null;
+}
+
+static bool IsCompilerGenerated(string name) =>
+    name.Contains("DisplayClass", StringComparison.Ordinal)
+    || name.Contains("<>c", StringComparison.Ordinal)
+    || Regex.IsMatch(name, @">d__\d")
+    || Regex.IsMatch(name, @">b__\d");
+
+// Strips the compiler-assigned ordinal suffix so e.g. "<>c__DisplayClass5_0" and "<Foo>d__12"
+// compare equal across builds where the compiler renumbered them but the shape didn't change.
+static string Canonicalize(string name)
+{
+    name = Regex.Replace(name, @"(DisplayClass)\d+(_\d+)?", "$1");
+    name = Regex.Replace(name, @"(>d__)\d+", "$1");
+    name = Regex.Replace(name, @"(>b__)\d+", "$1");
+    return name;
 }

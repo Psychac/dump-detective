@@ -1,6 +1,7 @@
 # Modular Multi-Source Diagnostics Platform — Architecture & Migration Plan
 
-Status: draft, not started. Supersedes the dump-only modularity draft and reworks
+Status: draft; entity-join spike resolved 2026-09-08 (go, § 8 step 4). Phase 1 not yet started.
+Supersedes the dump-only modularity draft and reworks
 [../improvements/unified-dump-trace-architecture.md](../improvements/unified-dump-trace-architecture.md)
 into the modularity plan rather than treating them as separate efforts.
 
@@ -325,8 +326,8 @@ skipping the parts that are refactor rather than capability:
    ingest can reuse them. Skip the `Sources.ClrDump` reorganization; leave dump code where it is
    behind a thin `IArtifactSource` adapter.
 3. **Phase 6 trace ingest + 2–3 analyzers** (CPU hotspot, contention). Real new value.
-4. **Cross-source join measurement.** Before building more: measure entity join rates on a real
-   dump+trace pair. Go/no-go.
+4. ~~**Cross-source join measurement.** Before building more: measure entity join rates on a real
+   dump+trace pair. Go/no-go.~~ **Resolved 2026-09-08 — go.** See below.
 5. **Phase 7, two correlation recipes** (leak-with-allocation-site, contention-with-duration) —
    enough to prove the thesis and deliver findings neither source produces alone.
 6. **`report.json` unconditional** (from Phase 8) so a UI has a contract.
@@ -340,6 +341,54 @@ The tradeoff is honest: skipping Phases 3–5 means the mode-explosion problem c
 without the session DAG something still has to route dump vs. trace vs. combined. Accept an interim
 router, with the explicit understanding it's technical debt the deferred phases are meant to pay
 off — not a permanent design.
+
+### Entity-join spike — measured, 2026-09-08
+
+Ran `tools/EntityJoinSpike` (see line 141 above) against two real dump+ETL pairs, both
+`w3wp.exe` / `BALLOADTESTEXAPIS`, joining ClrMD heap-live type names against TraceEvent
+method-declaring-type names for the same process.
+
+**Pair 1 — April 30, PID 10160.** Dump at 12:42 PM, ETL captured 12:48 PM (`/MaxCollectSec:60`).
+8,180 distinct dump types, 1,537 distinct trace types. Exact-string join: 562 matched — 6.9% of
+dump types, 36.6% of trace types. The dump-only 93% is dominated by pure-data BCL types
+(`System.String`, arrays, `RuntimeType`, resource-manager internals) that structurally can't have
+a trace-side match — they own no executing methods — so this isn't evidence against joinability,
+just a denominator effect. The matched set includes real app/framework types (EF `Edm.*`, ASP.NET
+pipeline, WCF, DevExpress) — exactly what a leak-with-allocation-site recipe would key off.
+
+**Pair 2 — May 8, PID 8044.** Dump at 5:35 PM, ETL captured over the same session
+(`/MaxCollectSec:1200`). 6,082 distinct dump types, 2,928 distinct trace types. Exact-string join:
+968 matched — 15.9% of dump types, 33.1% of trace types.
+
+**Compiler-generated subset (lambdas/closures/state machines), the specific worry about ordinals
+shifting between builds:**
+
+| | Pair 1 (60s trace) | Pair 2 (~20min trace) |
+|---|---|---|
+| Dump types that are compiler-generated | 790 / 8,180 | 454 / 6,082 |
+| Exact-string match within that subset | 10.8% (85/790) | 35.0% (159/454) |
+| + ordinal-stripping canonicalization | 22.0% (174/790) | 39.9% (181/454) |
+| Uplift from canonicalization | +11.3 points | +4.8 points |
+
+Before trusting Pair 2 as a genuine cross-build data point, verified it actually was one: PDB Guid
+of `Excellon.FW5.Data.dll` differs between the two dumps (`411d277e-...` vs `2ff84ead-...`, plus a
+1,728,512 vs 1,744,896 byte size difference), confirming Pair 1 and Pair 2 are different builds,
+not the same build re-captured. (Checked with a second throwaway probe,
+`tools/ModuleTimestampProbe`, comparing `ClrModule.Pdb` across dumps — cheap, no heap walk.)
+
+**Conclusion:** canonicalization measurably recovers real matches across a confirmed rebuild
+(+5 to +11 points on the compiler-generated subset, including genuine app-level closures like
+`Excellon.FW5.Stores.DbStore+<>c__DisplayClass13_0`) — the mechanism has real substance, not zero.
+But it's a second-order effect: the dominant swing between the two pairs (10.8% → 35.0% exact
+match) tracks trace **duration/coverage** (60s vs ~20min), not build drift — a lot of the
+remaining unmatched compiler-generated types are `<>c` lambda-cache singletons that simply never
+appeared on a sampled call stack in the shorter window, regardless of naming. Cross-build ordinal
+instability is real but smaller than the coverage-window effect, and it's exactly the class of risk
+`MatchFidelity` ([source-model.md § 4](modularity/source-model.md)) was designed to discount rather
+than something that blocks Phase 1.
+
+**Decision: go.** Proceed to Phase 1 (identity + capability + observation contracts). Cross-build
+drift stays a tracked, capped-fidelity risk rather than an open blocker.
 
 ---
 

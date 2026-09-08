@@ -148,6 +148,19 @@ handle. Without it, the canonicalization rules in
 [source-model.md § 4](modularity/source-model.md) rest on assumptions about how each source formats
 names, which is precisely the thing that's expensive to get wrong.
 
+**A second, equally cheap spike belonged alongside it: verify `TraceEvent`/`EventPipeEventSource`
+before Phase 6 commits to it.** ~~[phase-6-trace-source.md](modularity/phase-6-trace-source.md)
+flagged its ingest library as "unverified in this session"~~ — **resolved 2026-09-08, go, with a
+design correction.** Ran `tools/TraceEventSpike` against a real 54.9 MB ETW capture: MIT-licensed,
+and the raw event-callback reader (`ETWTraceEventSource`/`EventPipeEventSource`) streams with flat
+7 MB working-set delta across a 1.5M-event pass, independent of trace size — genuine bounded-memory
+streaming. The correction: `TraceLog.OpenOrConvert` — the API `tools/EntityJoinSpike` happened to
+use — is a different, non-streaming tool that measured 4.2× the source size in working set and
+2.73× on disk to build its random-access index, and must not be the API Phase 6's bulk ingest is
+built on. Full write-up in
+[phase-1-contracts-sdk.md § TraceEvent dependency spike](modularity/phase-1-contracts-sdk.md#traceevent-dependency-spike--measured-2026-09-08),
+correction folded into [phase-6-trace-source.md](modularity/phase-6-trace-source.md#ingest).
+
 ### Why trace comes at Phase 6, not earlier
 
 Two reasons, both about de-risking. Phase 2's extraction of the columnar/interning/container
@@ -264,7 +277,7 @@ synthesis without a bespoke `InsightEngine` per analyzer. The vision doc's own m
 sessions, §5 observations → modularity Phases 1, 5") already says this. Building the claim graph's
 `derivedFrom`/`support`/`counter` fields against pre-Phase-5 domain results would mean re-deriving
 them once observations land — the same two-independent-passes-over-the-same-facts failure mode
-[§4a](#4a-relationship-analyzer-pipeline--leadfinding-audit) diagnoses, one layer up.
+[§4a](#4a-relationship-to-the-analyzer-pipeline--leadfinding-audit) diagnoses, one layer up.
 
 So: neither doc needs to be resequenced. The report can start now (M1–M4, against today's data); it
 just can't claim full lineage until Phase 5 exists to back it.
@@ -321,7 +334,9 @@ skipping the parts that are refactor rather than capability:
 
 1. **Phase 1, identity + capability + observation contracts only.** Skip the full SDK extraction;
    just add the new types. This is the irreducible core — without `EntityRef` there is no
-   correlation.
+   correlation. **Do the TraceEvent dependency spike (Phase 1 step 3a) first** — it's the one
+   remaining unverified assumption gating step 3 below, and it's cheap to check before anything
+   else here is built.
 2. **Phase 2, storage extraction only.** Pull out the columnar/intern/container primitives so trace
    ingest can reuse them. Skip the `Sources.ClrDump` reorganization; leave dump code where it is
    behind a thin `IArtifactSource` adapter.
@@ -389,6 +404,17 @@ than something that blocks Phase 1.
 
 **Decision: go.** Proceed to Phase 1 (identity + capability + observation contracts). Cross-build
 drift stays a tracked, capped-fidelity risk rather than an open blocker.
+
+**Scope of this "go," stated precisely:** the measured rates above are aggregate join rates across
+all types, most of which nobody will ever ask to correlate. They are sufficient evidence that the
+canonicalization mechanism has real substance and that Phase 1 is worth building. They are **not**
+evidence that any specific recipe — `leak-with-allocation-site` in particular — will reliably join
+the one type an investigator actually cares about, especially against a short trace capture. That
+question is recipe-level, not aggregate, and it is exactly what Phase 7's negative-control test and
+precision/recall measurement (see
+[phase-7-cross-source-correlation.md](modularity/phase-7-cross-source-correlation.md)) are for. Do
+not read this section as a guarantee that correlation recipes will fire reliably — only that the
+identity layer they depend on is worth building.
 
 ---
 

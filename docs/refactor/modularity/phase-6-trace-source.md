@@ -15,12 +15,24 @@ Trace-only sessions work end-to-end; combined sessions produce both sources' fin
 ## Ingest
 
 **Library**: `Microsoft.Diagnostics.Tracing.TraceEvent` (`EventPipeEventSource` for streaming
-`.nettrace`). *Unverified in this session* — confirm the streaming API surface, memory behavior on
-multi-GB traces, and licensing before committing; the alternative is a hand-rolled nettrace parser,
-which is real work but gives full control over allocation behavior.
+`.nettrace`). The Phase 1 dependency spike (see
+[phase-1-contracts-sdk.md § TraceEvent dependency spike](phase-1-contracts-sdk.md#traceevent-dependency-spike--measured-2026-09-08))
+confirmed this: MIT-licensed, and the raw event-callback API streams with flat, bounded memory
+independent of trace size (measured: 7 MB constant working-set delta across a 1.5M-event pass).
+
+**The one thing that spike changed here: build `IArtifactSource.IndexAsync` on the raw
+event-callback reader, never on `TraceLog`/`TraceLog.OpenOrConvert`.** `TraceLog` is a different
+tool with a different cost profile — it materializes a full random-access index (measured: 4.2× the
+source trace's size in working set to build, 2.73× on disk as the `.etlx` file), which is exactly
+the non-streaming, size-proportional pattern this project forbids for dumps and must not accept for
+traces either. It's fine for `tools/EntityJoinSpike`-style one-off research or later, narrowly-scoped
+symbol/stack resolution — it must not be the bulk ingest path. `IndexAsync` extracts only the
+per-event fields Phase 2's columnar/intern primitives need, straight from the `AllEvents` callback,
+straight to disk — the same shape as today's heap scanner, no full-trace index in between.
 
 **Non-negotiable**: streaming, single-pass, bounded memory — the same discipline as heap scanning.
-A trace can be larger than a dump. Never materialize the event stream.
+A trace can be larger than a dump. Never materialize the event stream, and never materialize a
+full converted index of it either.
 
 ## Index sections
 

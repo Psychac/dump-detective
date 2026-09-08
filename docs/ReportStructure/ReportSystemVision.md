@@ -1121,6 +1121,16 @@ first and deriving light produces a better dark rendering and an equally good li
 - **Print is a first-class output**, because these get pasted into postmortems: sections
   auto-expand, chrome drops, page breaks per domain, links footnoted with their targets, provenance
   and coverage on page 1, claim fingerprints printed so a printed page is still citable.
+  **"Auto-expand" is bounded, and deliberately not the same operation as "show all."** It expands
+  every claim and the evidence rows that claim cites — the rows already selected in
+  [§5.4](#54-full-fidelity-store-progressive-disclosure)'s progressive default — never a full
+  68,576-row evidence table, which would mean materializing every row into the DOM at once and
+  defeats the entire virtualization contract in [§10.2](#102-rendering-large-sets-without-capping)
+  and the browser-heap budget in [§16.2](#162-delivery-side). A reader who wants the full table on
+  paper uses the explicit CSV/JSON export ([§12.3](#123-selection-diff-and-handoff)), not the print
+  button — the same distinction [§5.4](#54-full-fidelity-store-progressive-disclosure) draws between
+  disclosure and capping applies here: nothing is capped, but print discloses what a claim needs, not
+  everything that exists.
 - Layout: one grid; three named breakpoints (`--bp-compact/regular/wide`) against 13 today; widgets
   use container queries because a widget belongs to its container's width, not the viewport's.
 - Focus management on lazy inflate: expanding a segment moves focus to its heading.
@@ -1133,6 +1143,15 @@ first and deriving light produces a better dark rendering and an equally good li
 
 Every view is a query; the URL is the query. One engine serves the filter box, the console API, the
 deep link, the saved section bookmark and the test fixture.
+
+**This is the target shape, not the v1 scope.** Per [§21 open question 2](#21-risks-assumptions-and-open-questions),
+this is the most speculative piece of the whole spec, by the doc's own admission — nobody has typed
+a query into this report yet, because the report doesn't exist yet. What ships first is the
+defensible smaller version named there: structured filter chips plus `dd.query()` over a plain
+predicate object, with the URL carrying that object as JSON. The full grammar below is the direction
+that design should be able to grow into without a rewrite — it is not something to build against
+zero usage evidence. Build the parser only once real usage shows readers hitting the filter chips'
+ceiling.
 
 ```ebnf
 query      = clause { WS clause } [ pipeline ] ;
@@ -1363,8 +1382,18 @@ observation stream to sort it, and it may not hold the column store in memory to
 
 ### 16.2 Delivery side
 
-Budgets, gated in CI, measured against the Appendix A fixture (3.35 GB dump → 175,158 rows,
-131,568 unique type names):
+**These are pre-build targets, not a measured contract.** Every number below is a design goal set
+before the segmented envelope, column store or virtualized table exist — none of it has been spiked
+against a real payload yet. That's consistent with how this project treats performance claims
+elsewhere (design numbers get measured before they're load-bearing, not asserted and trusted); it
+should hold here too. Before the wire format in [§14](#14-envelope-and-segmentation) is locked, run
+a cheap spike against the existing Appendix A fixture — build the segmented envelope for that one
+real payload and measure time-to-verdict and browser heap directly — rather than committing the
+format to numbers nobody has checked. If the spike misses a target, that's the format's problem to
+solve before the rest of Part IV is built on top of it, not a target to quietly loosen later.
+
+Budgets, gated in CI once validated, measured against the Appendix A fixture (3.35 GB dump →
+175,158 rows, 131,568 unique type names):
 
 | Gate | Target | Today |
 |---|---|---|
@@ -1397,7 +1426,7 @@ protect.
 | Gate | Threshold |
 |---|---|
 | Claim without a structured `assertion` | 0 |
-| Claim without `falsifiedBy` | 0 |
+| Claim with an empty `falsifiedBy` array | 0 — CI-mechanical, presence only; see below |
 | Claim with severity ≥ Warning and no `counter` field (present, possibly empty with a stated reason) | 0 |
 | Claim without `coverage` | 0 |
 | Claim whose `derivedFrom` rules are not in the registry | 0 |
@@ -1407,6 +1436,18 @@ protect.
 | Signal that fires with no claim consuming it | 0 (rule-coverage bug) |
 | Verdict contradicting its own basis claims | 0 |
 | Unresolved anchor | 0 |
+
+**A gate on presence is not a gate on quality, and `falsifiedBy` is the row where that distinction
+matters most.** CI can only check that the array is non-empty; it cannot check that the test inside
+it is real rather than a boilerplate placeholder ("capture another dump") pasted across every claim
+a rule author wrote that afternoon. A hard mandatory field with only a mechanical check is a
+Goodhart's-law generator — the fastest way to satisfy it is to defeat its purpose. So: the CI gate
+above stays (schema-level, mandatory, cheap), but it is backstopped by the claim-quality corpus
+([§17.5](#175-testing-whether-the-report-is-right-not-just-well-formed)) and by periodic human
+review that specifically looks for `falsifiedBy` text repeated near-verbatim across many claims —
+that repetition is the tell that the field was filled to pass the gate, not to state a real
+falsification condition. Do not treat "the gate is green" as evidence the claims are trustworthy;
+treat it as evidence they are well-formed, which is all any gate in this section can prove.
 
 ### 17.2 Data gates
 
@@ -1504,11 +1545,25 @@ platform refactor to complete first.
 | **M2 — Entities** | entity table replacing the string pool; type + thread dossier | investigate by type and thread instead of by analyzer; ~9.9 MB of duplicate names disappears as a side effect; per-thread retention finally surfaces | nothing |
 | **M3 — Coverage** | `CoverageRecord` promoted out of the appendix; `unknown` as a real value with a reason; negative claims published | "we looked and did not find it" becomes visible; caveats become specific | M1 |
 | **M4 — Payload** | segmented envelope + column store + virtualized tables | opens instantly; full 68,576 rows genuinely navigable | nothing |
-| **M5 — Query** | one query engine; URL = query; every view a query | uncapped data becomes navigable; links are shareable and testable | M2, M4 |
+| **M5 — Query** | filter chips + `dd.query()` over a plain predicate object, URL = query (see [§12.1](#121-the-query-algebra) — the full grammar is a later growth target, not this milestone) | uncapped data becomes navigable; links are shareable and testable | M2, M4 |
 
 After M1–M5, the rest is mostly *consequence*: trend is a series over observations
 ([§3](#3-the-session-model)), diff is a two-anchor query, and a trace source adds artifacts to a
 session without touching the report.
+
+**A bound on the M1 adapter, stated up front because [§21 open question 1](#21-risks-assumptions-and-open-questions)
+names the risk without resolving it.** M1 builds `Claim` over today's `AnalyzerDomainResult`, before
+Phase 5's observations exist to back it — that's the right call, but only if the adapter stays an
+adapter. Concretely: the M1 adapter may map an existing domain result's already-computed fields
+(severity, the finding text, whatever confidence exists today) onto a `Claim`'s shape. It may **not**
+grow new judgment of its own — no new thresholds, no new banding, no new weighting invented inside
+the adapter to make a `Claim` look more complete than the domain result underneath it actually
+supports. The moment a `falsifiedBy` test or a `counter` entry requires reasoning the domain result
+doesn't already carry, that reasoning belongs in a Phase 5 synthesis rule, not in the adapter — an
+adapter that starts accumulating its own judgment is exactly the fifth judgment location
+[modularity-plan.md § 4a](../refactor/modularity-plan.md#4a-relationship-to-the-analyzer-pipeline--leadfinding-audit)
+already spent effort avoiding. If a claim can't be honestly built from what a domain result already
+computes, it waits for Phase 5 rather than getting a shortcut.
 
 Mapping to existing plans, so this does not become a third parallel roadmap:
 
@@ -1572,11 +1627,13 @@ metadata.
    [modularity-plan.md § 4b](../refactor/modularity-plan.md#4b-relationship-to-the-report-vision-doc)
    takes the position that this is narrower than a resequencing question: M1, M2 and M4 already
    depend on nothing per § 19's own table, so they aren't blocked on this plan at all; only full
-   observation lineage is.
-2. **Does the query language earn its complexity?** It is the most speculative piece here. A
-   defensible smaller version: structured filter chips plus `dd.query()` over a plain predicate
-   object, with the URL carrying that object as JSON. Grammar and parser only if readers actually
-   type queries.
+   observation lineage is. The "adapter that outlives its welcome" risk is no longer just named —
+   [§19](#19-minimum-viable-path) now states the specific bound the M1 adapter must stay inside.
+2. ~~**Does the query language earn its complexity?**~~ **Resolved:** no, not for v1. The full
+   grammar in [§12.1](#121-the-query-algebra) is the defensible smaller version's growth target,
+   not its starting point — v1 ships structured filter chips plus `dd.query()` over a plain
+   predicate object, with the URL carrying that object as JSON. Grammar and parser only get built if
+   readers actually type queries once the chips ship.
 3. **Who owns the rule registry?** Rules are where domain expertise lives. If they stay C# they are
    testable and fast but need a rebuild to tune; if they are data they are tunable but need their
    own validation and a safe evaluator. Recommendation: C# with versioned ids first; revisit only

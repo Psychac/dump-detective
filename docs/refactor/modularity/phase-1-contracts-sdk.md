@@ -88,6 +88,11 @@ and any consumer can target without knowing that dumps exist.
    thesis (if names don't join, Phase 7 is worthless regardless of engineering), and it replaces
    assumption with measurement in the canonicalizer design below. Without it, step 4 is built on
    guesses about how each source formats names.
+3a. ~~**TraceEvent dependency spike (same tier of risk, same cost to check).** Before Phase 6
+   commits to `Microsoft.Diagnostics.Tracing.TraceEvent` / `EventPipeEventSource`, confirm: it
+   actually streams a multi-GB `.nettrace` rather than buffering it whole, its licensing is
+   compatible with this project, and its memory behavior holds up under the project's
+   bounded-memory rules.~~ **Resolved 2026-09-08 — go, with a design correction.** See below.
 4. Implement `EntityCanonicalizer` with the normalization rules and fidelity ratings from
    [source-model.md § 4](source-model.md), informed by the spike, with an extensive test corpus of
    real type/method names (generics, async state machines, lambdas, local functions, arrays) —
@@ -97,6 +102,44 @@ and any consumer can target without knowing that dumps exist.
 6. Retire or shrink `DumpDetective.Core` per what Phase 0's inventory shows is left.
 7. Add SDK-boundary and registry-conformance rules to the architecture test.
 
+### TraceEvent dependency spike — measured, 2026-09-08
+
+Ran `tools/TraceEventSpike` against a real ETW capture (`HighCPU.etl`, 54.9 MB, 1,529,978 events,
+one of the artifacts alongside the entity-join spike's dump pair). No `.nettrace` (EventPipe)
+sample was available, so this tests `ETWTraceEventSource` as a proxy for `EventPipeEventSource` —
+both are `TraceEventDispatcher` subclasses in the same package sharing the same callback-dispatch
+architecture, but this is not a direct test of the EventPipe reader. Re-run against a real
+`.nettrace` before treating this as final for Phase 6.
+
+**Licensing: clear.** `Microsoft.Diagnostics.Tracing.TraceEvent` 3.2.2 is MIT-licensed
+(`license type="expression">MIT`, from the official PerfView feed). No concern.
+
+**Streaming behavior: confirmed, and it's exactly what Phase 6 needs.** Raw single-pass streaming
+via `ETWTraceEventSource` + `AllEvents` processed all 1,529,978 events in 0.6–0.9 s with a working-set
+delta that stayed flat at **7 MB for the entire pass**, sampled every 100,000 events from the first
+sample to the last — no growth correlated with events processed or bytes read. This is genuine
+`O(1)`-relative-to-trace-size streaming, matching the bounded-memory discipline this project already
+requires of heap scanning.
+
+**Design correction: `TraceLog.OpenOrConvert` — used by `tools/EntityJoinSpike` — is *not* that API,
+and Phase 6's ingest path must not be built on it.** Converting the same 54.9 MB trace from scratch
+took 6.0 s, peaked at **232 MB working-set delta (4.2× the source file size)**, and wrote a **149.7 MB
+`.etlx` index (2.73× the source file size) to disk**. Reloading an already-converted `.etlx` is cheap
+(45 MB, 0.4 s) — the cost is front-loaded into the one-time conversion, not amortized away. Both
+ratios are roughly constant per byte of input in this run, which means they're the kind of ratio
+that gets dangerous at scale: extrapolated to a multi-GB trace, `TraceLog`'s conversion step alone
+could need several times the trace size in RAM and produce a multi-GB `.etlx` file on disk before a
+single analyzer runs — precisely the pattern this project's core philosophy forbids for dumps, and
+there is no reason to accept it for traces. `TraceLog` remains reasonable for what
+`tools/EntityJoinSpike` used it for (a one-off research spike, or later, targeted symbol/stack
+resolution on an already-bounded subset) — it must not be the API `IArtifactSource.IndexAsync`
+builds its bulk ingest on. That path belongs on the raw event-callback readers
+(`ETWTraceEventSource`/`EventPipeEventSource`), extracting only the minimal per-event fields Phase 2's
+columnar/intern primitives need, streamed straight to disk exactly as the heap scanner does today.
+
+**Decision: go**, with that correction folded into [phase-6-trace-source.md](phase-6-trace-source.md)'s
+ingest design.
+
 ## Exit criteria
 
 - `DumpDetective.Sdk` builds standalone, zero project references.
@@ -105,6 +148,10 @@ and any consumer can target without knowing that dumps exist.
 - **Entity-join spike has produced a measured join rate per entity kind**, and that measurement —
   not an assumption — informs the canonicalizer's fidelity ratings. A poor result here is a
   legitimate trigger to stop and reconsider Phases 6–7 before investing in them.
+- ~~TraceEvent dependency spike has confirmed streaming behavior and license compatibility, or has
+  surfaced a blocker early enough to change the Phase 6 plan while that's still cheap.~~ **Done** —
+  see the measured results above. Licensing clear, raw streaming API confirmed bounded-memory;
+  Phase 6's ingest design corrected to avoid `TraceLog.OpenOrConvert` for bulk ingestion.
 - `EntityCanonicalizer` passes a real-world name corpus with documented fidelity per case.
 - Schemas + registries exist, versioned, with conformance tests.
 

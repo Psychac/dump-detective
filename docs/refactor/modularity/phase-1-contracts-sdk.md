@@ -3,6 +3,11 @@
 Part of [../modularity-plan.md](../modularity-plan.md). Implements north-star **Layer 0** (wire
 contracts) and **Layer 1** (SDK). Depends on [phase-0-foundation.md](phase-0-foundation.md).
 
+**Before picking up any more pending work here**, see
+[phase-1-sdk-review-findings.md](phase-1-sdk-review-findings.md) — a 2026-09-10 architecture review
+of every type shipped so far (21 findings, P0/P1/P2), being fixed before the retyping plan's pilot
+migration starts building on top of any of it.
+
 This is the most consequential phase in the plan. Everything downstream — trace, correlation,
 plugins, UI — is shaped by what lands here, and getting the identity/temporal model wrong is the
 one mistake that's genuinely expensive to undo.

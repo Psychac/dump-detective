@@ -20,8 +20,15 @@ public sealed class DependencyDirectionTests
 
         coreRefs.Should().BeEmpty();
         analysisRefs.Should().Equal(["DumpDetective.Core", "DumpDetective.Platform"]);
-        reportingRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core"]);
-        cliRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core", "DumpDetective.Reporting"]);
+        // DumpDetective.Sdk added 2026-09-09: TraceSessionReport (the trace-only report.json
+        // shape) belongs here, not in Cli — this project is the one that owns report-shape
+        // contracts (see AnalysisReportDocument), the same reasoning that already puts
+        // ReportOutputWriter's file-writing role in Cli instead.
+        reportingRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core", "DumpDetective.Sdk"]);
+        // DumpDetective.Sources.NetTrace added 2026-09-09: the interim trace/dump router
+        // (docs/refactor/modularity-plan.md § 8) needs Cli to reach the trace-only analysis path
+        // directly, the same way it already reaches dump analysis through Analysis/Reporting.
+        cliRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core", "DumpDetective.Reporting", "DumpDetective.Sources.NetTrace"]);
     }
 
     [Fact]

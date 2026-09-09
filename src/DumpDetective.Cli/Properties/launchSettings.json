@@ -24,6 +24,10 @@
     "Trend0604": {
       "commandName": "Project",
       "commandLineArgs": "--trend=D:\\DUmps\\06-04\\Date__04_06_2026__Time_11_44_57AM.dmp;D:\\DUmps\\06-04\\Date__04_06_2026__Time_12_58_17PM.dmp;D:\\DUmps\\06-04\\Date__04_06_2026__Time_06_43_20PM.dmp --memory-diagnostics"
+    },
+    "TraceAnalysis": {
+      "commandName": "Project",
+      "commandLineArgs": "D:\\Dumps\\08-05\\etls\\HighCPU_11.etl"
     }
   }
 }

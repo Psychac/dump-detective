@@ -20,6 +20,17 @@ internal sealed class DumpAnalysisService
     private readonly ISectionBuilderFactory _sectionBuilderFactory;
     private readonly SingleDumpOrchestrationService _singleDumpOrchestration;
     private readonly TrendOrchestrationService _trendOrchestration;
+    private readonly TraceOrchestrationService _traceOrchestration;
+
+    // Interim, extension-sniffed routing — the debt docs/refactor/modularity-plan.md § 8 explicitly
+    // accepts ("Accept an interim router... not a permanent design") in place of a real session
+    // model (Phase 4). A trace file must be routed before any of the dump-specific setup below runs
+    // (config resolution assumes a dump path; StartupValidator would reject a non-dump file), not
+    // handled as a special case inside the dump pipeline.
+    private static readonly string[] TraceFileExtensions = [".etl", ".nettrace"];
+
+    internal static bool IsTraceFile(string? path) =>
+        path is not null && TraceFileExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
 
     public DumpAnalysisService(
         ConfigurationResolver configurationResolver,
@@ -29,7 +40,8 @@ internal sealed class DumpAnalysisService
         IEnumerable<IAnalyzerTrendComparer> trendComparers,
         ISectionBuilderFactory sectionBuilderFactory,
         SingleDumpOrchestrationService singleDumpOrchestration,
-        TrendOrchestrationService trendOrchestration)
+        TrendOrchestrationService trendOrchestration,
+        TraceOrchestrationService traceOrchestration)
     {
         _configurationResolver = configurationResolver;
         _startupValidator = startupValidator;
@@ -39,14 +51,18 @@ internal sealed class DumpAnalysisService
         _sectionBuilderFactory = sectionBuilderFactory;
         _singleDumpOrchestration = singleDumpOrchestration;
         _trendOrchestration = trendOrchestration;
+        _traceOrchestration = traceOrchestration;
     }
 
     public async Task<int> ExecuteAsync(AnalysisCommandRequest request, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        
+
+        if (IsTraceFile(request.DumpPath))
+            return await _traceOrchestration.ExecuteAsync(request.DumpPath!, request.OutputPath, cancellationToken);
+
         ResolvedExecutionOptions resolved;
-        
+
         resolved = _configurationResolver.Resolve(request);
         _startupValidator.Validate(resolved);
 

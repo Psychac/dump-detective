@@ -11,7 +11,12 @@ internal sealed class RootCommandBuilder
     private readonly Argument<string?> _dumpPathArgument = new("dump-path")
     {
         Arity = ArgumentArity.ZeroOrOne,
-        Description = "Path to the dump file to analyze."
+        // Also accepts .etl/.nettrace trace captures — DumpAnalysisService.IsTraceFile sniffs the
+        // extension and routes to the trace-only pipeline (docs/refactor/modularity-plan.md § 8's
+        // interim router) before any dump-specific option resolution runs. Not a separate argument
+        // because the router already decides which pipeline runs from this one positional value;
+        // adding a second argument would just be two ways to say the same thing.
+        Description = "Path to the dump file (.dmp) or trace capture (.etl/.nettrace) to analyze."
     };
 
     private readonly Option<string?> _configPathOption = new("--config")
@@ -58,7 +63,13 @@ internal sealed class RootCommandBuilder
     {
         Description = "Report style version: v1 or v2."
     };
-    private readonly Option<string?> _outputPathOption = new("--output");
+    private readonly Option<string?> _outputPathOption = new("--output")
+    {
+        Description = "Output report path. For a dump, the rendered --report-format document; " +
+            "for a trace, the JSON observation report (content is always JSON regardless of the " +
+            "extension given here — § 8's report.json-unconditional step, see " +
+            "TraceReportWriter). Defaults next to the input file when omitted."
+    };
 
     // TODO: pre-render?? there is something like this??
     private readonly Option<bool> _preRenderOption = new("--pre-render") { Description = "Pre-render findings and analyzer sections server-side for faster initial paint." };

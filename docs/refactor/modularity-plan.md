@@ -370,11 +370,24 @@ skipping the parts that are refactor rather than capability:
    contention). Real new value. Excludes 6b's other sub-item (optional-capability wiring on
    *existing* dump analyzers) — that genuinely needs those analyzers migrated to observations, i.e.
    real Phase 5 work, so it's deferred along with Phase 5 itself, not part of this path.
+   **Done, 2026-09-09**: `GcPauseAnalyzer`, `ContentionAnalyzer`, and `CpuHotspotAnalyzer` all
+   shipped — CPU hotspot via a leaf-frame-only scope cut (resolves the sample's own instruction
+   pointer against `trace.methods`'s address ranges, skipping the `trace.stacks` call-tree work
+   named and deferred when `trace.methods` shipped, so exclusive-only, not inclusive) — plus the
+   interim router this section already names below, now built rather than only accepted as debt.
+   See [phase-6-trace-source.md § Phase 6b](modularity/phase-6-trace-source.md#the-interim-router--shipped-2026-09-09).
 4. ~~**Cross-source join measurement.** Before building more: measure entity join rates on a real
    dump+trace pair. Go/no-go.~~ **Resolved 2026-09-08 — go.** See below.
 5. **Phase 7, two correlation recipes** (leak-with-allocation-site, contention-with-duration) —
    enough to prove the thesis and deliver findings neither source produces alone.
-6. **`report.json` unconditional** (from Phase 8) so a UI has a contract.
+6. **`report.json` unconditional** (from Phase 8) so a UI has a contract. **Done, 2026-09-09, for
+   trace sessions** — `TraceSessionReport`/`TraceReportWriter`, written every run regardless of
+   `--output`. Deliberately not Phase 8's full schema v3 (`sources[]`/`timeline`/
+   `capabilityReport`) — that needs Phase 4's session model and Phase 5's synthesis engine, neither
+   in scope here. See
+   [phase-6-trace-source.md § report.json](modularity/phase-6-trace-source.md#reportjson--8-step-6--shipped-2026-09-09).
+   Dump-side `report.json` (today conditional on `--output`) unchanged — out of scope for this
+   step, which was scoped to what § 8's already-shipped trace work could support.
 
 Defer entirely: the plugin split (Phase 3), the DAG rewrite (Phase 4), the trend-comparer collapse
 (Phase 5), isolation (Phase 9). Those are *architecture* wins; the above is the *capability* win.
@@ -384,7 +397,10 @@ investments.
 The tradeoff is honest: skipping Phases 3–5 means the mode-explosion problem comes back, since
 without the session DAG something still has to route dump vs. trace vs. combined. Accept an interim
 router, with the explicit understanding it's technical debt the deferred phases are meant to pay
-off — not a permanent design. This is the debt the decision above knowingly takes on.
+off — not a permanent design. This is the debt the decision above knowingly takes on. **Built
+2026-09-09** — `DumpAnalysisService`'s extension-sniffed routing to `TraceOrchestrationService`, see
+the phase-6b cross-reference above. Trace-only only; a combined dump+trace session still isn't
+wired.
 
 ### Entity-join spike — measured, 2026-09-08
 

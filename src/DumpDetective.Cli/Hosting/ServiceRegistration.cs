@@ -49,6 +49,7 @@ internal static class ServiceRegistration
         services.AddSingleton<SingleDumpStageFactory>();
         services.AddSingleton<SingleDumpOrchestrationService>();
         services.AddSingleton<TrendOrchestrationService>();
+        services.AddSingleton<TraceOrchestrationService>();
         services.AddSingleton<IAnalyzerFactory, DefaultAnalyzerFactory>();
         services.AddSingleton<ISectionBuilderFactory, DefaultSectionBuilderFactory>();
 

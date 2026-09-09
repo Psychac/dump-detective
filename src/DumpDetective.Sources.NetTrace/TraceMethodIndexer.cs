@@ -28,7 +28,7 @@ internal static class TraceMethodIndexer
         using var writer = new TraceMethodIndexWriter(sectionStream);
         var seenMethodIds = new HashSet<long>();
 
-        using TraceEventDispatcher source = OpenSource(tracePath);
+        using TraceEventDispatcher source = TraceSourceOpener.Open(tracePath);
 
         void OnMethodEvent(MethodLoadUnloadVerboseTraceData data)
         {
@@ -82,15 +82,5 @@ internal static class TraceMethodIndexer
         source.Process();
 
         return writer.Flush();
-    }
-
-    private static TraceEventDispatcher OpenSource(string tracePath)
-    {
-        string extension = Path.GetExtension(tracePath);
-        return extension.Equals(".etl", StringComparison.OrdinalIgnoreCase)
-            ? new Microsoft.Diagnostics.Tracing.ETWTraceEventSource(tracePath)
-            : extension.Equals(".nettrace", StringComparison.OrdinalIgnoreCase)
-                ? new Microsoft.Diagnostics.Tracing.EventPipeEventSource(tracePath)
-                : throw new NotSupportedException($"Unsupported trace file extension: {extension}");
     }
 }

@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="DumpDetective.Tests" />
+    <InternalsVisibleTo Include="DumpDetective.Cli" />
   </ItemGroup>
 
 </Project>

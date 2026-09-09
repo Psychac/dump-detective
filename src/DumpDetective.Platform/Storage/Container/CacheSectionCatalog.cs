@@ -171,6 +171,11 @@ internal static class CacheSectionCatalog
         // path for every dump ever built, and Unused's own doc ("no writer and no reader in current
         // code") is inaccurate here, since DumpDetective.Sources.NetTrace has both.
         new(CacheSectionId.TraceMethods, "TraceMethods", CacheSectionRequirement.Conditional),
+        // Same reasoning as CacheSectionId.TraceMethods immediately above — trace-artifact
+        // sections, never written or expected by a dump build.
+        new(CacheSectionId.TraceGcEvents, "TraceGcEvents", CacheSectionRequirement.Conditional),
+        new(CacheSectionId.TraceContention, "TraceContention", CacheSectionRequirement.Conditional),
+        new(CacheSectionId.TraceCpuSamples, "TraceCpuSamples", CacheSectionRequirement.Conditional),
     ];
 
     /// <summary>

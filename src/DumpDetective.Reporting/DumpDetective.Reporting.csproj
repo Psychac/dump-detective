@@ -43,6 +43,7 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.9" />
     <ProjectReference Include="..\DumpDetective.Core\DumpDetective.Core.csproj" />
     <ProjectReference Include="..\DumpDetective.Analysis\DumpDetective.Analysis.csproj" />
+    <ProjectReference Include="..\DumpDetective.Sdk\DumpDetective.Sdk.csproj" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="DumpDetective.Cli" />

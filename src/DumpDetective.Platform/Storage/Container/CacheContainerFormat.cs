@@ -230,6 +230,35 @@ internal enum CacheSectionId
     /// NormalizedSignature(len-prefixed UTF-8)</c> records, one per distinct JIT'd or rundown method.
     /// </summary>
     TraceMethods = 43,
+    /// <summary>
+    /// Second trace-artifact section (docs/refactor/modularity/phase-6-trace-source.md § Phase 6a
+    /// — "trace.gcevents"). One record per GC-suspend/restart pause window, not per GC — a
+    /// background GC's collection window commonly spans several such pauses and is attributed to
+    /// none of them; see <c>DumpDetective.Sources.NetTrace.GcPauseIndexer</c> for why. Fixed
+    /// 34-byte records: <c>TimestampTicks(8) | ThreadId(4) | Reason(1) | PauseTicks(8) |
+    /// HasGcData(1) | Generation(4) | HeapBytes(8)</c>.
+    /// </summary>
+    TraceGcEvents = 44,
+    /// <summary>
+    /// Third trace-artifact section (docs/refactor/modularity/phase-6-trace-source.md § Phase 6a
+    /// — "trace.contention"). One record per lock-contention episode, paired from
+    /// ContentionStart/ContentionStop per thread rather than trusting
+    /// <c>ContentionStopTraceData.DurationNs</c> directly — see
+    /// <c>DumpDetective.Sources.NetTrace.ContentionIndexer</c> for the measured reason why. Fixed
+    /// 21-byte records: <c>StartTicks(8) | DurationTicks(8) | ThreadId(4) | Flags(1)</c>.
+    /// </summary>
+    TraceContention = 45,
+    /// <summary>
+    /// Fourth trace-artifact section (docs/refactor/modularity/phase-6-trace-source.md § Phase 6a
+    /// — "trace.cpu-samples"). One record per kernel CPU-sampling-profiler interrupt
+    /// (<c>PerfInfoSample</c>), leaf instruction pointer only — no call stack. Resolving a stack
+    /// needs an address-range index built from method-load events and was explicitly deferred when
+    /// <see cref="TraceMethods"/> shipped (real, separate design work); this section is scoped to
+    /// what's resolvable from the leaf frame alone against <see cref="TraceMethods"/>'s own address
+    /// ranges — see <c>DumpDetective.Sources.NetTrace.CpuHotspotAnalyzer</c>. Fixed 24-byte
+    /// records: <c>TimestampTicks(8) | ProcessId(4) | ThreadId(4) | InstructionPointer(8)</c>.
+    /// </summary>
+    TraceCpuSamples = 46,
 }
 
 /// <summary>

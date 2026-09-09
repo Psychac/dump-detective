@@ -77,7 +77,7 @@ namespace BenchmarkSuite1
                 throw new InvalidOperationException("No heap index available.");
             if (index.Modules is null)
                 throw new InvalidOperationException("No module registry in index.");
-            return ModuleAggregator.Aggregate(index.TypeAggregates, index.Modules, ModuleAnalysisOptions.Default);
+            return ModuleAggregator.Aggregate(index.TypeAggregates, index.Modules, new ModuleAnalysisOptions());
         }
 
         protected override void OnCleanup()

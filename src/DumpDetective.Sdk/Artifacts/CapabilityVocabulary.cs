@@ -1,3 +1,5 @@
+using DumpDetective.Sdk.Analysis;
+
 namespace DumpDetective.Sdk.Artifacts;
 
 /// <summary>
@@ -21,12 +23,25 @@ public static class CapabilityVocabulary
     public const string HeapStrings = "heap.strings";
     public const string HeapFinalizerQueue = "heap.finalizer-queue";
 
+    /// <summary>Dominator-tree-derived facts (retained size, immediate dominator, reachability,
+    /// thread retention) — added 2026-09-09. Kept as one capability rather than four separate ones
+    /// since all are backed by the same Stage A/B build and gated together in practice; see
+    /// <see cref="Analysis.IHeapDominatorQuery"/>'s own remarks.</summary>
+    public const string HeapDominators = "heap.dominators";
+
     // Runtime (dump-provided)
     public const string RuntimeModules = "runtime.modules";
     public const string RuntimeThreads = "runtime.threads";
     public const string RuntimeStacks = "runtime.stacks";
     public const string RuntimeExceptions = "runtime.exceptions";
     public const string RuntimeJit = "runtime.jit";
+
+    /// <summary>Live monitor locks (<c>lock</c>/<c>Monitor.Enter</c>). Was declared but unconsumed
+    /// until 2026-09-09, when <see cref="Analysis.IHeapSyncBlockQuery"/> became its first real
+    /// consumer, backing <c>LockGraphAnalyzer</c>'s <c>heap.EnumerateSyncBlocks()</c> usage — see
+    /// docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md. Named <c>runtime.*</c>
+    /// rather than <c>heap.*</c> despite sync blocks physically living on the object header, since
+    /// what they represent is runtime lock state, not object data.</summary>
     public const string RuntimeLocks = "runtime.locks";
 
     // Trace-provided
@@ -50,7 +65,7 @@ public static class CapabilityVocabulary
     public static readonly IReadOnlySet<string> Known = new HashSet<string>(StringComparer.Ordinal)
     {
         HeapObjects, HeapTypes, HeapRoots, HeapReferences, HeapReverseReferences, HeapGenerations,
-        HeapSegments, HeapHandles, HeapStatics, HeapStrings, HeapFinalizerQueue,
+        HeapSegments, HeapHandles, HeapStatics, HeapStrings, HeapFinalizerQueue, HeapDominators,
         RuntimeModules, RuntimeThreads, RuntimeStacks, RuntimeExceptions, RuntimeJit, RuntimeLocks,
         TraceCpuSamples, TraceGcEvents, TraceAllocSamples, TraceContentionEvents,
         TraceExceptionEvents, TraceThreadTimeline, TraceJitEvents, TraceHttpEvents, TraceCustomEvents,

@@ -634,6 +634,16 @@ shape.
      precondition folded into Phase 5's own work item 1 is an open sequencing question this document
      doesn't answer yet. Not resolved here — flagged so it isn't silently discovered mid-refactor the
      way § 10 point 1's `SectionLeadFinding` drift was.
+     **Sequencing answered 2026-09-09**, with a further finding that makes the bet bigger than this
+     point estimated: [phase-1-full-extraction-retyping-plan.md](modularity/phase-1-full-extraction-retyping-plan.md).
+     24 of the 35 analyzers do field-level object introspection (`ClrType.Fields`-equivalent reads),
+     not just coarse heap enumeration — a full source-neutral object/field model was considered and
+     rejected as speculative (no real second consumer needs it), so the plan splits capability
+     surfaces into a Tier 1 (SDK-safe coarse enumeration, ships now, zero behavior change) and a
+     Tier 2 (`dump.object-fields`, stays dump-only) instead. The retyping step itself gets a pilot
+     analyzer, per-batch characterization gates, and lands as its own track running alongside
+     Phase 3 rather than sequentially before or after it — the two are similar in size and largely
+     touch the same 35 files, so doing them separately would mean touching each file twice.
 
 ---
 

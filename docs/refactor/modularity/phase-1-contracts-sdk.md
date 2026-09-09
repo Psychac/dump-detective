@@ -127,7 +127,13 @@ behavior change, matching Phase 0's own rule. First real consumer is Phase 6a.
     the retyping step itself, documented at
     [modularity-plan.md § 10 point 8](../modularity-plan.md#10-external-review-2026-09-08--where-this-can-be-questioned) —
     not resolved there either, just precisely bounded instead of hand-waved as "~30 analyzers,
-    Phase 3/5 territory."
+    Phase 3/5 territory." **Full detailed plan written 2026-09-09**:
+    [phase-1-full-extraction-retyping-plan.md](phase-1-full-extraction-retyping-plan.md) — a further,
+    larger finding (24 of 35 analyzers also do field-level object introspection, not just coarse
+    heap enumeration) drove a two-tier capability-surface design and a concrete, gated migration
+    sequence for the retyping step itself. Still deferred pending execution; the SDK types + Tier-1
+    surfaces are additive/safe to build now, the analyzer retyping itself needs a pilot and
+    per-batch characterization gates before it touches production analyzer output.
 - `Artifacts/IArtifactSource.cs` and `IArtifactIndex.cs` — their `IndexAsync` signature depends on
   `IIndexStorage`/`IndexProgress`, which are Phase 2 storage types. **Partially superseded
   2026-09-09**: Phase 2's own trimmed pass shipped `IndexProgress` (in `DumpDetective.Platform`, not

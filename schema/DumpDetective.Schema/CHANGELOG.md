@@ -15,6 +15,17 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## 1.1.0 — 2026-09-09
+
+Adds `heap.dominators` (new — retained size/immediate dominator/reachability/thread retention as
+one capability) and gives `runtime.locks` (declared since 1.0.0, unconsumed) its first real
+designed consumer. Both back the Tier-1 capability-scoped SDK surfaces
+(`src/DumpDetective.Sdk/Analysis/IHeapDominatorQuery.cs`, `IHeapSyncBlockQuery.cs`) added in
+[phase-1-full-extraction-retyping-plan.md](../../docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md)'s
+step 1 — additive, zero behavior change, no existing analyzer touched yet. Deliberately did *not*
+add a new `heap.sync-blocks` capability for `LockGraphAnalyzer`'s `EnumerateSyncBlocks` usage after
+finding `runtime.locks` already reserved for exactly this.
+
 ## 1.0.0 — 2026-09-09
 
 Initial cut. All three files describe what's actually shipped and running today, not a forward

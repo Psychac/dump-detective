@@ -12,7 +12,7 @@ one mistake that's genuinely expensive to undo.
 Establish a small, stable, source-neutral contract surface that any artifact source, any analyzer,
 and any consumer can target without knowing that dumps exist.
 
-## Status: trimmed pass shipped 2026-09-08; schemas/registries added 2026-09-09, per § 8's minimum-viable path
+## Status: trimmed pass shipped 2026-09-08; schemas/registries + Tier-1 Analysis/ skeleton added 2026-09-09, per § 8's minimum-viable path
 
 Per [modularity-plan.md § 8](../modularity-plan.md#8-the-minimum-viable-unified-path--adopted-as-the-chosen-plan-2026-09-08)
 (adopted, see [§ 10 point 7](../modularity-plan.md#10-external-review-2026-09-08--where-this-can-be-questioned)):
@@ -101,12 +101,31 @@ behavior change, matching Phase 0's own rule. First real consumer is Phase 6a.
   - Conformance enforced by
     `tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs` — this is
     migration step 7's registry-conformance half, previously blocked on the registries not existing.
+- **`Analysis/` Tier-1 skeleton shipped 2026-09-09** — `IAnalyzer.cs`, `AnalysisContext.cs`, the
+  three capability attributes, `HeapObjectRef.cs`, `AnalyzerProgressReport.cs`, and 13 capability-scoped
+  query interfaces (`IHeapObjectStream`, `IHeapObjectLookup`, `IHeapRootQuery`, `IHeapHandleQuery`,
+  `IHeapSegmentQuery`, `IHeapFinalizerQueueQuery`, `IHeapSyncBlockQuery`, `IHeapTypeStatisticsQuery`,
+  `IHeapReferenceQuery`, `IHeapReverseReferenceQuery`, `IHeapDominatorQuery`, `IRuntimeThreadQuery`,
+  `IRuntimeModuleQuery`, `IRuntimeJitQuery` — not in the original target-shape file list below, added
+  per the two-tier capability-surface design
+  [phase-1-full-extraction-retyping-plan.md](phase-1-full-extraction-retyping-plan.md) worked out).
+  **This is a new, parallel SDK-side contract, not the move the "Deferred" bullet immediately below
+  describes** — `Core.Abstractions.IAnalyzer`/`Models.AnalysisContext` are untouched, no analyzer
+  implements the new SDK `IAnalyzer` yet, and nothing in the existing pipeline references any of
+  this. Purely additive, zero behavior change, verified by the full non-real-dump test suite passing
+  unchanged. Two capability-vocabulary items landed alongside it: `heap.dominators` (new) and
+  `runtime.locks` (already declared, previously unconsumed) — `capability-registry.json` bumped to
+  1.1.0. See the plan doc for what's still pending (dump-side implementations of these 13
+  interfaces, a legacy adapter, and the actual analyzer retyping — none of which are additive/safe
+  the way this skeleton was, so none of it has started).
 
 **Deferred**, per § 8's explicit scope:
-- `Analysis/` (`IAnalyzer`, `AnalysisContext`, `RequiresCapabilityAttribute`,
-  `OptionalCapabilityAttribute`, `AnalyzerModuleAttribute`) and `Presentation/`
-  (`IAnalyzerSectionBuilder`) — this is the "full SDK extraction" § 8 explicitly skips. These stay
-  in `Core`/`Reporting.Abstractions` as today.
+- `Analysis/`'s remaining pieces (dump-side implementations of the Tier-1 interfaces above, plus
+  `Presentation/IAnalyzerSectionBuilder.cs`) and the analyzer retyping itself — this is the "full SDK
+  extraction" § 8 explicitly skips, now that the skeleton above has separated "additive SDK
+  contracts" (shipped) from "actually rewiring analyzers onto them" (not started). `Core`'s
+  `IAnalyzer`/`AnalysisContext` and `Reporting.Abstractions.IAnalyzerSectionBuilder` remain what
+  every analyzer actually runs against today.
   - **Investigated 2026-09-09, staying deferred: this is not actually a move.** The real
     `src/DumpDetective.Core/Models/AnalysisContext.cs` carries its own dated boundary decision:
     `// Intentional boundary decision (Phase 7): Core remains dump-runtime-aware. AnalysisContext
@@ -163,10 +182,16 @@ behavior change, matching Phase 0's own rule. First real consumer is Phase 6a.
     Observations/
       Observation.cs  Measure.cs  Provenance.cs  EvidenceRef.cs
       IObservationSink.cs                -- analyzers emit through this, streaming
-    Analysis/
+    Analysis/                            -- skeleton shipped 2026-09-09, see Status above;
+                                          -- dump-side implementations + analyzer retyping pending
       IAnalyzer.cs            AnalysisContext.cs
       RequiresCapabilityAttribute.cs  OptionalCapabilityAttribute.cs
       AnalyzerModuleAttribute.cs
+      HeapObjectRef.cs  AnalyzerProgressReport.cs      -- not in the original list, added with the skeleton
+      IHeapObjectStream.cs  IHeapObjectLookup.cs  IHeapRootQuery.cs  IHeapHandleQuery.cs
+      IHeapSegmentQuery.cs  IHeapFinalizerQueueQuery.cs  IHeapSyncBlockQuery.cs
+      IHeapTypeStatisticsQuery.cs  IHeapReferenceQuery.cs  IHeapDominatorQuery.cs
+      IRuntimeThreadQuery.cs  IRuntimeModuleQuery.cs  IRuntimeJitQuery.cs
     Synthesis/
       ISynthesisRule.cs  Finding.cs  ConfidenceBreakdown.cs
     Presentation/
@@ -213,7 +238,13 @@ behavior change, matching Phase 0's own rule. First real consumer is Phase 6a.
 1. ~~Create `DumpDetective.Sdk`; move `IAnalyzer`, `IAnalyzerSectionBuilder` from
    `Core.Abstractions`, trimmed to the Phase 0 inventory.~~ **Skipped, per § 8** — this is the "full
    SDK extraction" the adopted minimum-viable path explicitly defers. `DumpDetective.Sdk` was
-   created (see Status above), but `IAnalyzer`/`IAnalyzerSectionBuilder` were not moved.
+   created (see Status above), but `IAnalyzer`/`IAnalyzerSectionBuilder` were not moved. **Still
+   accurate as a "move" 2026-09-09** — `Core.Abstractions.IAnalyzer` still hasn't moved anywhere.
+   What changed: a new, parallel SDK `IAnalyzer`/`AnalysisContext` (Tier-1 skeleton, see Status
+   above) now exists *alongside* the untouched `Core` one, per
+   [phase-1-full-extraction-retyping-plan.md](phase-1-full-extraction-retyping-plan.md)'s staged
+   approach — not a move, a second implementation nothing yet targets, so this step's "skipped"
+   status stands until that plan's retyping step actually retires the `Core` original.
 2. Author the new identity/temporal/observation/capability types. Genuinely new code — the largest
    greenfield chunk in the plan. **Done 2026-09-08** for the § 8-trimmed set — see Status above for
    exactly what shipped vs. what's still deferred (`IArtifactSource`/`IArtifactIndex`, the schema
@@ -356,7 +387,11 @@ adopted § 8 path, several don't apply yet — marked below rather than silently
 - ~~Every existing analyzer compiles against the SDK (still emitting domain results; observations
   come in Phase 5).~~ **Not applicable to the § 8-trimmed pass** — this criterion presumes step 1's
   full extraction (moving `IAnalyzer` into the SDK), which § 8 explicitly skips. Existing analyzers
-  are unchanged and don't reference the SDK at all yet.
+  are unchanged and don't reference the SDK at all yet. **Still true 2026-09-09** despite the new
+  Tier-1 `Analysis/` skeleton (see Status above) existing now — zero analyzers implement it; this
+  criterion becomes live only once
+  [phase-1-full-extraction-retyping-plan.md](phase-1-full-extraction-retyping-plan.md)'s pilot
+  migration begins.
 - **Entity-join spike has produced a measured join rate per entity kind**, and that measurement —
   not an assumption — informs the canonicalizer's fidelity ratings. A poor result here is a
   legitimate trigger to stop and reconsider Phases 6–7 before investing in them. Caveat accepted as

@@ -5,9 +5,9 @@ using System.IO.MemoryMappedFiles;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Container;
 
-namespace DumpDetective.Analysis.Indexing.Columns;
+namespace DumpDetective.Platform.Storage.Columns;
 
 /// <summary>
 /// Which object rows the reachability walk reached, as a bitmap over object rows plus a rank

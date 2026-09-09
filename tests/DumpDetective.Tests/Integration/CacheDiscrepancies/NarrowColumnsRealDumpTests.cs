@@ -2,8 +2,8 @@ using System.Diagnostics;
 
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Indexing.Columns;
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Columns;
+using DumpDetective.Platform.Storage.Container;
 using DumpDetective.Core.Abstractions;
 
 using FluentAssertions;

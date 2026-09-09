@@ -2,7 +2,7 @@ using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Container;
 using DumpDetective.Analysis.Indexing.Dominator;
 using DumpDetective.Analysis.Indexing.ReverseIndex;
 

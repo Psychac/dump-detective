@@ -8,8 +8,9 @@ using System.Runtime.InteropServices;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Cache;
-using DumpDetective.Analysis.Indexing.Columns;
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform;
+using DumpDetective.Platform.Storage.Columns;
+using DumpDetective.Platform.Storage.Container;
 using DumpDetective.Analysis.Indexing.Dominator;
 using DumpDetective.Analysis.Indexing.ForwardIndex;
 using DumpDetective.Analysis.Indexing.ReverseIndex;
@@ -42,6 +43,15 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
     // is unavailable for some other reason, or for future re-measurement).
     private static readonly bool ForceLiveClrMdWalk =
         Environment.GetEnvironmentVariable("DD_FORCE_LIVE_CLRMD_WALK") == "1";
+
+    // CacheContainerWriter lives in DumpDetective.Platform, which cannot reference
+    // DumpDetective.Core (zero deps beyond Sdk — see docs/refactor/modularity/phase-1-contracts-sdk.md),
+    // so it reports through the source-agnostic IndexProgress shape instead of
+    // Core.Abstractions.AnalyzerProgressReport. This adapts the one direction this file needs.
+    private static IProgress<IndexProgress>? WrapForContainerProgress(IProgress<AnalyzerProgressReport>? progress) =>
+        progress is null
+            ? null
+            : new Progress<IndexProgress>(p => progress.Report(new AnalyzerProgressReport(p.ScannedCount, p.Phase, p.Detail, p.Elapsed)));
 
     // §10.8 measurement pass (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md):
     // set DD_PERF_DOMINATOR_STAGEB=1 to print, in one Phase 1 run, everything §10.8 still needs a
@@ -217,7 +227,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             segGenScratchFiles[i] = Path.Combine(indexDir, $"ObjectIndex.bin.seg{i}.gen.tmp");
         }
 
-        using var containerWriter = new CacheContainerWriter(containerPath, dumpPath, progress);
+        using var containerWriter = new CacheContainerWriter(containerPath, dumpPath, WrapForContainerProgress(progress));
         Stream stream = containerWriter.Stream;
 
         // Sub-phase allocation checkpoints (DD_PERF_INDEX_MEMORY=1). The stage total is ~10.5GB on a
@@ -1194,12 +1204,12 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         // Handles — GC handle enumeration
         containerWriter.TryWriteSection(CacheSectionId.Handles, "enumerating GC handles",
             stream => HandleSnapshotWriter.Write(stream, heap.Runtime, cancellationToken, progress, stopwatch),
-            warnings, progress, stopwatch);
+            warnings, WrapForContainerProgress(progress), stopwatch);
 
         // Roots — GC root enumeration (can be slow on large dumps; progress reported every 50k roots)
         containerWriter.TryWriteSection(CacheSectionId.Roots, "enumerating GC roots",
             stream => RootIndexWriter.Write(stream, heap, cancellationToken, progress, stopwatch),
-            warnings, progress, stopwatch);
+            warnings, WrapForContainerProgress(progress), stopwatch);
 
         // RootStackThreadAttribution — §12.2 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md):
         // which thread owns each Stack-kind root. Same gate as Roots (a ClrRoot alone carries no
@@ -1209,7 +1219,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         containerWriter.TryWriteSection(CacheSectionId.RootStackThreadAttribution,
             "enumerating stack root thread ownership",
             stream => RootStackThreadIndexWriter.Write(stream, heap, cancellationToken, progress, stopwatch),
-            warnings, progress, stopwatch);
+            warnings, WrapForContainerProgress(progress), stopwatch);
 
         // Tasks — Task objects collected during heap scan
         containerWriter.TryWriteSection(CacheSectionId.Tasks, "writing Tasks section",
@@ -1223,7 +1233,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
                 }
                 return taskCandidates.Count;
             },
-            warnings, progress, stopwatch);
+            warnings, WrapForContainerProgress(progress), stopwatch);
 
         // LargeObjects — top-100 LOH objects by size
         var tracker = new LargeObjectTracker();
@@ -1231,13 +1241,13 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
             tracker.Consider(addr, mt, size);
         containerWriter.TryWriteSection(CacheSectionId.LargeObjects, "writing LargeObjects section",
             stream => { tracker.Write(stream); return largeCandidates.Count; },
-            warnings, progress, stopwatch);
+            warnings, WrapForContainerProgress(progress), stopwatch);
 
         // LohFreeBlocks — free block gaps already collected during the main scan;
         // no second segment walk required.
         containerWriter.TryWriteSection(CacheSectionId.LohFreeBlocks, "writing LohFreeBlocks section",
             stream => LohFreeBlockWriter.WriteFromCandidates(stream, lohFreeBlockCandidates, cancellationToken),
-            warnings, progress, stopwatch);
+            warnings, WrapForContainerProgress(progress), stopwatch);
 
         return warnings;
     }

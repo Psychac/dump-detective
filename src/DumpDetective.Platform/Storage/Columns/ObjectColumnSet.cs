@@ -1,8 +1,8 @@
 using System.IO.MemoryMappedFiles;
 
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Container;
 
-namespace DumpDetective.Analysis.Indexing.Columns;
+namespace DumpDetective.Platform.Storage.Columns;
 
 /// <summary>
 /// The four per-object columns opened together, with the encoding parameters a reader needs to

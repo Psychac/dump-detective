@@ -3,9 +3,9 @@ using System.Buffers.Binary;
 using System.IO.Hashing;
 using System.IO.MemoryMappedFiles;
 
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Container;
 
-namespace DumpDetective.Analysis.Indexing.Columns;
+namespace DumpDetective.Platform.Storage.Columns;
 
 /// <summary>
 /// The escape side-table of a narrowed column — the values that did not fit the column's stored

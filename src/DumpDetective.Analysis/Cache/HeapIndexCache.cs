@@ -1,6 +1,6 @@
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Container;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Enums;

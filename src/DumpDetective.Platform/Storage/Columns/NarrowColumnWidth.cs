@@ -1,4 +1,4 @@
-namespace DumpDetective.Analysis.Indexing.Columns;
+namespace DumpDetective.Platform.Storage.Columns;
 
 /// <summary>
 /// Picks the stored width of a narrowed column, and names the escape sentinel that goes with it

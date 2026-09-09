@@ -19,9 +19,23 @@ public sealed class DependencyDirectionTests
         IReadOnlyCollection<string> cliRefs = ReadProjectReferenceNames(Path.Combine(repoRoot, "src", "DumpDetective.Cli", "DumpDetective.Cli.csproj"));
 
         coreRefs.Should().BeEmpty();
-        analysisRefs.Should().Equal(["DumpDetective.Core"]);
+        analysisRefs.Should().Equal(["DumpDetective.Core", "DumpDetective.Platform"]);
         reportingRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core"]);
         cliRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core", "DumpDetective.Reporting"]);
+    }
+
+    [Fact]
+    public void PlatformProject_ShouldDependOnSdkOnly()
+    {
+        // Phase 2, § 8-trimmed: "source-agnostic; references Sdk only" — see
+        // docs/refactor/modularity/phase-2-artifact-platform.md. Platform must never pull in Core
+        // (which carries the ClrMD package reference), Analysis, Reporting, or Cli.
+        string repoRoot = FindRepositoryRoot();
+        string platformProjectPath = Path.Combine(repoRoot, "src", "DumpDetective.Platform", "DumpDetective.Platform.csproj");
+
+        IReadOnlyCollection<string> projectRefs = ReadProjectReferenceNames(platformProjectPath);
+
+        projectRefs.Should().Equal(["DumpDetective.Sdk"]);
     }
 
     [Fact]

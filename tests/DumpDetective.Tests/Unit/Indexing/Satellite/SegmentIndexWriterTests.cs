@@ -1,4 +1,4 @@
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Container;
 using DumpDetective.Analysis.Indexing.Satellite;
 
 using FluentAssertions;

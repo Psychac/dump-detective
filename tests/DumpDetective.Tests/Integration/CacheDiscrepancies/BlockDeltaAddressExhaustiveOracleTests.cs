@@ -2,7 +2,7 @@ using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Container;
 using DumpDetective.Core.Abstractions;
 
 using FluentAssertions;
@@ -17,7 +17,7 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 /// decoded <c>Address</c> as given and checks something else against it (live size at that address,
 /// or agreement between the streaming and lookup decode paths). Neither is an independent oracle for
 /// the address itself, and the streaming/lookup cross-check is not one either — both paths call the
-/// same <see cref="DumpDetective.Analysis.Indexing.Columns.BlockDeltaColumn.Decode(uint, long)"/>, so
+/// same <see cref="DumpDetective.Platform.Storage.Columns.BlockDeltaColumn.Decode(uint, long)"/>, so
 /// a systematic bug in that one method would make both paths agree while both are wrong.
 /// </summary>
 /// <remarks>

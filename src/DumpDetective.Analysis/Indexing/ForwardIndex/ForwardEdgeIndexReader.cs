@@ -2,7 +2,7 @@ using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Container;
 
 namespace DumpDetective.Analysis.Indexing.ForwardIndex;
 

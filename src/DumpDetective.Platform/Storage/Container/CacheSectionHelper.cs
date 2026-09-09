@@ -1,4 +1,4 @@
-namespace DumpDetective.Analysis.Indexing.Container;
+namespace DumpDetective.Platform.Storage.Container;
 
 /// <summary>
 /// Shared helper for opening sections from the cache container.

@@ -6,8 +6,8 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Indexing.Dominator;
 using DumpDetective.Analysis.Indexing.ReverseIndex;
 using DumpDetective.Analysis.Indexing.ForwardIndex;
-using DumpDetective.Analysis.Indexing.Columns;
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Columns;
+using DumpDetective.Platform.Storage.Container;
 using DumpDetective.Core.Enums;
 using System.Linq;
 
@@ -443,8 +443,8 @@ namespace DumpDetective.Analysis.Cache
             _threadRetentionCache.Dispose();
             _heapIndexCache.Dispose();
 
-            if (Indexing.Container.CacheContainerReader.PerfLogSession)
-                Console.Error.WriteLine(Indexing.Container.CacheContainerReader.PerfSummary());
+            if (CacheContainerReader.PerfLogSession)
+                Console.Error.WriteLine(CacheContainerReader.PerfSummary());
         }
     }
 

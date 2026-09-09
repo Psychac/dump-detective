@@ -4,7 +4,7 @@ using System.Diagnostics;
 using System.IO.Hashing;
 using System.IO.MemoryMappedFiles;
 
-namespace DumpDetective.Analysis.Indexing.Container;
+namespace DumpDetective.Platform.Storage.Container;
 
 /// <summary>
 /// Opens <c>cache.bin</c> and hands out bounded, section-scoped views. The TOC is small

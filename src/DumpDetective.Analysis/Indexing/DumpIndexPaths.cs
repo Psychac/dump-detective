@@ -12,7 +12,7 @@ namespace DumpDetective.Analysis.Indexing;
 ///     cache.bin
 /// </code>
 /// <c>cache.bin</c> is a single container file holding every index as a TOC-addressed
-/// section (see <see cref="DumpDetective.Analysis.Indexing.Container.CacheContainerFormat"/>).
+/// section (see <see cref="DumpDetective.Platform.Storage.Container.CacheContainerFormat"/>).
 /// Deleting the <c>.dumpindex/</c> folder performs a full cache invalidation.
 /// </remarks>
 internal static class DumpIndexPaths

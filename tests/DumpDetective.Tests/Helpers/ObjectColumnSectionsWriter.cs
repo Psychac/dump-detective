@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 
-using DumpDetective.Analysis.Indexing.Columns;
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Columns;
+using DumpDetective.Platform.Storage.Container;
 
 namespace DumpDetective.Tests.Helpers;
 

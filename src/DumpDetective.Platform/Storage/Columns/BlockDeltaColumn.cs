@@ -3,9 +3,9 @@ using System.Buffers.Binary;
 using System.IO.Hashing;
 using System.IO.MemoryMappedFiles;
 
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Container;
 
-namespace DumpDetective.Analysis.Indexing.Columns;
+namespace DumpDetective.Platform.Storage.Columns;
 
 /// <summary>
 /// Decodes an address column stored as a 4-byte delta from a per-block base

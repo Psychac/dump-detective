@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 
-namespace DumpDetective.Analysis.Indexing.Container;
+namespace DumpDetective.Platform.Storage.Container;
 
 /// <summary>
 /// Stable identifiers for each section stored in <c>cache.bin</c>. Values are persisted in the
@@ -212,7 +212,7 @@ internal enum CacheSectionId
     ObjectGenerationRuns = 41,
     /// <summary>
     /// Which object rows the reachability walk reached, as a bitmap over object rows plus a rank
-    /// directory — see <see cref="Indexing.Columns.ReachableRowBitmap"/>. Replaces
+    /// directory — see <see cref="DumpDetective.Platform.Storage.Columns.ReachableRowBitmap"/>. Replaces
     /// <see cref="DominatorReachableAddresses"/>, which stored every reachable address a second time
     /// (222.99 MiB with its bases and escape table on the 27.5 GB dump, against 10.70 MiB here).
     /// Reachable-row order is unchanged — ascending object row is ascending address, because the

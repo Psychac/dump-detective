@@ -3,8 +3,8 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO.Hashing;
 
-using DumpDetective.Analysis.Indexing.Columns;
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Columns;
+using DumpDetective.Platform.Storage.Container;
 using DumpDetective.Core.Abstractions;
 
 namespace DumpDetective.Analysis.Indexing.ReverseIndex;

@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 using Microsoft.Diagnostics.Runtime;
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Container;
 
 namespace DumpDetective.Analysis.Indexing.Satellite;
 

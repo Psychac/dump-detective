@@ -1,7 +1,7 @@
 using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Container;
 using DumpDetective.Analysis.Indexing.Dominator;
 
 namespace DumpDetective.Analysis.Indexing.ReverseIndex;

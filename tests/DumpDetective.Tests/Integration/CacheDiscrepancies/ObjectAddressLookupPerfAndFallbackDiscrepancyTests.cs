@@ -2,7 +2,7 @@ using System.Diagnostics;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Container;
 using FluentAssertions;
 using Xunit;
 using Xunit.Abstractions;

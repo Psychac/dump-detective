@@ -1,4 +1,4 @@
-namespace DumpDetective.Analysis.Indexing.Container;
+namespace DumpDetective.Platform.Storage.Container;
 
 /// <summary>
 /// Whether a section's absence from a finished <c>cache.bin</c> means the build is broken, or

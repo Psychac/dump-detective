@@ -2,8 +2,8 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.IO.Hashing;
 
-using DumpDetective.Analysis.Indexing.Columns;
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Columns;
+using DumpDetective.Platform.Storage.Container;
 
 namespace DumpDetective.Analysis.Indexing.Dominator;
 

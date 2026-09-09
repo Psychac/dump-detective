@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.IO.MemoryMappedFiles;
 
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Container;
 
 using FluentAssertions;
 

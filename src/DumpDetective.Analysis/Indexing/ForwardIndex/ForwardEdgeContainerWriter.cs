@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.IO.Hashing;
 using System.Text.Json;
 
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Container;
 using DumpDetective.Core.Abstractions;
 
 namespace DumpDetective.Analysis.Indexing.ForwardIndex;

@@ -17,6 +17,7 @@
   <ItemGroup>
     <PackageReference Include="System.IO.Hashing" Version="10.0.9" />
     <ProjectReference Include="..\DumpDetective.Core\DumpDetective.Core.csproj" />
+    <ProjectReference Include="..\DumpDetective.Platform\DumpDetective.Platform.csproj" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="DumpDetective.Cli" />

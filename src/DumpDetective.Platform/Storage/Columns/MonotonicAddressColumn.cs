@@ -1,9 +1,9 @@
 using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Container;
 
-namespace DumpDetective.Analysis.Indexing.Columns;
+namespace DumpDetective.Platform.Storage.Columns;
 
 /// <summary>
 /// A strictly ascending address column plus the two-level <c>address → row</c> rank search over it:

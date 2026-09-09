@@ -2,7 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.IO.Hashing;
 
-namespace DumpDetective.Analysis.Indexing.Container;
+namespace DumpDetective.Platform.Storage.Container;
 
 /// <summary>
 /// Computes a fast, sampled content signature for a dump file — the cache's identity key

@@ -1,8 +1,8 @@
 using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 
-using DumpDetective.Analysis.Indexing.Columns;
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Columns;
+using DumpDetective.Platform.Storage.Container;
 
 namespace DumpDetective.Analysis.Indexing.Dominator;
 

@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Container;
 using DumpDetective.Analysis.Traversal.Dominator;
 
 namespace DumpDetective.Analysis.Indexing.Dominator;

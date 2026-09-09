@@ -2,9 +2,9 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.IO.Hashing;
 
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Container;
 
-namespace DumpDetective.Analysis.Indexing.Columns;
+namespace DumpDetective.Platform.Storage.Columns;
 
 /// <summary>
 /// Per-object GC generation, run-length encoded: one record per *change* of generation rather than

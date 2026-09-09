@@ -1,9 +1,9 @@
 using System.Buffers;
 using System.IO.Hashing;
 
-using DumpDetective.Core.Abstractions;
+using DumpDetective.Platform;
 
-namespace DumpDetective.Analysis.Indexing.Container;
+namespace DumpDetective.Platform.Storage.Container;
 
 /// <summary>
 /// Builds <c>cache.bin</c>: one section at a time, each section's body byte-identical to
@@ -26,7 +26,7 @@ internal sealed class CacheContainerWriter : IDisposable
     private readonly string _finalPath;
     private readonly string _tmpPath;
     private readonly string? _dumpPath;
-    private readonly IProgress<AnalyzerProgressReport>? _progress;
+    private readonly IProgress<IndexProgress>? _progress;
     private readonly FileStream _stream;
     private readonly List<CacheTocEntry> _entries = new(ReservedSectionCount);
     private readonly HashSet<CacheSectionId> _intendedSections = new(ReservedSectionCount);
@@ -47,7 +47,7 @@ internal sealed class CacheContainerWriter : IDisposable
     /// <see cref="ChecksumProgressThresholdBytes"/>). Every other write path here already reports
     /// through the caller's own progress instance directly.
     /// </param>
-    public CacheContainerWriter(string finalPath, string? dumpPath = null, IProgress<AnalyzerProgressReport>? progress = null)
+    public CacheContainerWriter(string finalPath, string? dumpPath = null, IProgress<IndexProgress>? progress = null)
     {
         _finalPath = finalPath;
         _dumpPath = dumpPath;
@@ -161,12 +161,12 @@ internal sealed class CacheContainerWriter : IDisposable
         string progressMessage,
         Func<Stream, long> write,
         List<string> warnings,
-        IProgress<AnalyzerProgressReport>? progress = null,
+        IProgress<IndexProgress>? progress = null,
         System.Diagnostics.Stopwatch? stopwatch = null)
     {
         try
         {
-            progress?.Report(new AnalyzerProgressReport(0, progressMessage, Detail: null,
+            progress?.Report(new IndexProgress(0, progressMessage, Detail: null,
                 Elapsed: stopwatch?.Elapsed ?? TimeSpan.Zero));
             BeginSection(id);
             long recordCount = write(Stream);
@@ -239,7 +239,7 @@ internal sealed class CacheContainerWriter : IDisposable
                     if (processedSinceLastReport >= ChecksumProgressReportEveryBytes)
                     {
                         processedSinceLastReport = 0;
-                        _progress!.Report(new AnalyzerProgressReport(0, $"verifying {_activeSectionId} section",
+                        _progress!.Report(new IndexProgress(0, $"verifying {_activeSectionId} section",
                             Detail: $"{processed / (1024 * 1024)}/{length / (1024 * 1024)} MB", Elapsed: stopwatch!.Elapsed));
                     }
                 }

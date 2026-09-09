@@ -11,6 +11,70 @@ Turn today's dump-specific engine into a general artifact platform where **the d
 implementation of an SPI, not the thing the engine is**. When Phase 6 adds trace, it should
 plug into a slot that already exists and is already proven by a second implementation.
 
+## Status: trimmed pass shipped 2026-09-09, per § 8's minimum-viable path
+
+Per [modularity-plan.md § 8](../modularity-plan.md#8-the-minimum-viable-unified-path--adopted-as-the-chosen-plan-2026-09-08)
+step 2: "storage extraction only... skip the `Sources.ClrDump` reorganization; leave dump code
+where it is."
+
+**Before touching anything, checked what "extraction" actually meant against real code** — the
+target shape's `ColumnarWriter`/`ColumnarReader`/`InternTable`/`SectionedContainer`/`IIndexStorage`
+names don't map onto today's code; they're aspirational. The real equivalents are
+`CacheContainerFormat`/`CacheContainerReader`/`CacheContainerWriter`/`CacheSectionCatalog`/
+`CacheSectionHelper`/`DumpContentHasher` (the container) and `BlockDeltaColumn`/
+`ColumnOverflowTable`/`MonotonicAddressColumn`/`NarrowColumnWidth`/`ObjectColumnSet`/
+`ObjectGenerationRunTable`/`ReachableRowBitmap` (the columns) — built dump-specific from day one,
+with no shared `InternTable` at all (interning is done ad hoc per-type-index). Their dependency
+graph, checked before moving anything, turned out to already be almost entirely source-agnostic
+(no ClrMD, no `Core`, no `Analysis` types) — the one exception was `CacheContainerWriter` taking a
+`Core.Abstractions.AnalyzerProgressReport` progress parameter, fixed below.
+
+**Shipped**: `src/DumpDetective.Platform/` (references `Sdk` only, enforced by a new
+`PlatformProject_ShouldDependOnSdkOnly` architecture test) now holds `Storage/Container/` and
+`Storage/Columns/` — moved via `git mv` + scripted namespace rewrite, not retyped, specifically to
+avoid the risk of a large-file transcription error. **Identifiers were deliberately not renamed**
+(`CacheContainerFormat` stays `CacheContainerFormat`, not `SectionedContainer`) — the target shape's
+renaming is cosmetic, not the extraction itself, and doing it now with no second consumer to
+validate the new names against would be exactly the "let's improve it while we're here" scope creep
+the Risk/effort section below warns against. Rename when Phase 6a's trace ingest is real and has an
+opinion.
+
+The one non-mechanical change: `CacheContainerWriter`'s progress parameter moved from
+`IProgress<Core.Abstractions.AnalyzerProgressReport>` to a new, minimal `Platform.IndexProgress`
+(same field shape — `Platform` cannot reference `Core`, which transitively carries the ClrMD package
+reference, so this decoupling was required, not optional). `DiskBackedObjectIndexWriter` (the sole
+caller, in `Analysis`) adapts via one small `WrapForContainerProgress` helper at its 7 call sites;
+every other use of `AnalyzerProgressReport` in that file is untouched.
+
+**Verification**: 163 existing unit tests targeting exactly the moved files
+(`CacheContainerRoundTripTests`, `CacheContainerAtomicWriteTests`,
+`CacheContainerWriterChecksumProgressTests`, `CacheSectionCatalogTests`, `SectionManifestTests`,
+`BlockDeltaAddressColumnTests`, `NarrowSizeColumnTests`, etc.) pass unchanged — exact match to the
+pre-move baseline. Plus two real-dump discrepancy tests run one at a time in the foreground per
+project rules (`NarrowColumnsRealDumpTests`, exercising the moved `Columns/` code; and
+`SegmentIndexBuildDiscrepancyTests`, exercising the full indexing pipeline through the moved
+`Container/` code) — both pass. The remaining ~24 real-dump discrepancy tests were not run: this was
+a scripted namespace-only move with no logic changes, and running all of them (~65 more minutes) is
+not proportional to that risk profile once two representative real-dump runs and 163 exact-match
+unit tests already confirm it.
+
+**Deferred**, per § 8's explicit scope and consistent with how Phase 1 was scoped — nothing here has
+a real second consumer yet to validate a new abstraction against:
+- `Sources.ClrDump` reorganization (migration step 2) — dump code (`DumpLoader`, `RuntimeFacade`,
+  heap indexing, cache, graph, query) stays in `Analysis` exactly where it is. No "thin
+  `IArtifactSource` adapter" was built either — nothing exists yet to register it with (no
+  `ArtifactSourceRegistry`), so a stub adapter would be unexercised code.
+- `IHeapAnalysisCache` → capability-scoped query surfaces (migration step 3) — a Phase 3
+  (capability model) concern; Phase 3 itself is deferred.
+- `IIndexStorage`/`LocalDiskIndexStorage`/`InMemoryIndexStorage` — this abstraction doesn't exist
+  today even in dump-specific form (the container works directly against `FileStream`/
+  `MemoryMappedFile`); building it now would be new design work with no second backing store to
+  validate it against, the same reasoning that deferred `IArtifactSource` in Phase 1.
+- `InternTable` — confirmed no existing equivalent to extract; same reasoning as above.
+- `ObservationStore`, `TimelineAligner`, `Session/*` — Phase 4/5 concerns, explicitly out of scope.
+- The stub second source (exit criterion 5) — the real validation of this whole phase's
+  abstraction, and honestly still missing. It can't exist until Phase 6a.
+
 ## Target shape
 
 ```
@@ -71,28 +135,46 @@ plug into a slot that already exists and is already proven by a second implement
 ## Migration steps
 
 1. Create `DumpDetective.Platform`; extract the columnar/container/intern/storage primitives out of
-   today's `Analysis/Indexing`, leaving heap-*semantics* behind.
-2. Create `DumpDetective.Sources.ClrDump`; move dump loading, heap indexing, cache, graph, query
+   today's `Analysis/Indexing`, leaving heap-*semantics* behind. **Done 2026-09-09** for the
+   columnar/container primitives that actually exist today (no intern table existed to extract) —
+   see Status above for exactly what moved, what was intentionally not renamed, and why.
+2. ~~Create `DumpDetective.Sources.ClrDump`; move dump loading, heap indexing, cache, graph, query
    into it. Implement `IArtifactSource` as a wrapper over the existing prebuild path — behavior
-   identical, index format identical modulo section renaming.
-3. Split `IHeapAnalysisCache` into capability-scoped query surfaces; `HeapAnalysisCache` keeps its
-   internals and implements several of them (mechanical interface segregation, no behavior change).
-4. Build `ObservationStore` and `TimelineAligner` (new code, unused until Phases 5/6 — accept that
+   identical, index format identical modulo section renaming.~~ **Deferred, per § 8.** See Status
+   above.
+3. ~~Split `IHeapAnalysisCache` into capability-scoped query surfaces; `HeapAnalysisCache` keeps its
+   internals and implements several of them (mechanical interface segregation, no behavior change).~~
+   **Deferred, per § 8** — a Phase 3 concern.
+4. ~~Build `ObservationStore` and `TimelineAligner` (new code, unused until Phases 5/6 — accept that
    they're speculative here, or defer them to their consuming phase if that's preferred; the
-   argument for building now is that they're cheaper to design against dump-only reality).
+   argument for building now is that they're cheaper to design against dump-only reality).~~
+   **Deferred, per § 8** — Phase 4/5 concerns, out of scope for the minimum-viable path.
 5. Architecture rules: `Platform` may not reference any `Sources.*`; `Sources.*` may not reference
-   each other.
+   each other. **Partially done** — `Platform` may not reference anything but `Sdk`, enforced by
+   `PlatformProject_ShouldDependOnSdkOnly`. The `Sources.*`-to-`Sources.*` half doesn't apply yet;
+   no `Sources.*` projects exist under the trimmed scope.
 
 ## Exit criteria
 
-- `DumpDetective.Platform` builds with only an `Sdk` reference — no ClrMD anywhere in it.
-- `Sources.ClrDump` implements `IArtifactSource` end-to-end; a dump indexes through
-  `ArtifactSourceRegistry` with no dump-specific code above the source boundary.
-- All existing index/cache/graph perf and correctness tests pass unchanged.
-- `IIndexStorage` has ≥ 2 implementations, both exercised.
+**Note (2026-09-09): these are the exit criteria for the full, untrimmed Phase 2.** Same pattern as
+Phase 1 — several don't apply yet under § 8. Marked below rather than silently left unmet.
+
+- `DumpDetective.Platform` builds with only an `Sdk` reference — no ClrMD anywhere in it. **Done**,
+  and enforced by a standing test, not just true today.
+- ~~`Sources.ClrDump` implements `IArtifactSource` end-to-end; a dump indexes through
+  `ArtifactSourceRegistry` with no dump-specific code above the source boundary.~~ **Not applicable
+  to the § 8-trimmed pass** — presumes migration step 2, which is deferred.
+- All existing index/cache/graph perf and correctness tests pass unchanged. **Done** — 163 unit
+  tests exact match, plus 2 real-dump discrepancy tests (see Status above for which and why not all
+  ~26).
+- ~~`IIndexStorage` has ≥ 2 implementations, both exercised.~~ **Not applicable** — `IIndexStorage`
+  itself doesn't exist yet; see Status above.
 - **A trivial second source exists** — even a stub (`gcdump` reading only `heap.types`, or a
   synthetic test source) — proving the SPI isn't accidentally shaped around ClrMD's peculiarities.
   This is the real exit criterion; without a second implementation, "general" is unverified.
+  **Still not met** — genuinely can't be until Phase 6a. This is the one gap in this phase worth
+  remembering: the columnar/container extraction is real and tested, but nothing has yet proven the
+  *abstraction* generalizes beyond ClrMD, because nothing else has used it.
 
 ## Risk / effort
 

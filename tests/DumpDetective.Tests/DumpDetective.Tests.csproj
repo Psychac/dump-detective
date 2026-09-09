@@ -21,6 +21,7 @@
     <ProjectReference Include="..\..\src\DumpDetective.Reporting\DumpDetective.Reporting.csproj" />
     <ProjectReference Include="..\..\src\DumpDetective.Cli\DumpDetective.Cli.csproj" />
     <ProjectReference Include="..\..\src\DumpDetective.Sdk\DumpDetective.Sdk.csproj" />
+    <ProjectReference Include="..\..\src\DumpDetective.Platform\DumpDetective.Platform.csproj" />
   </ItemGroup>
 
   <ItemGroup>

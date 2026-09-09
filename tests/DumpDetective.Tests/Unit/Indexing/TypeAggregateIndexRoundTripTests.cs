@@ -1,5 +1,5 @@
 using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Indexing.Container;
+using DumpDetective.Platform.Storage.Container;
 
 using FluentAssertions;
 

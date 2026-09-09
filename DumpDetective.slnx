@@ -5,6 +5,7 @@
     <Project Path="src/DumpDetective.Core/DumpDetective.Core.csproj" Id="5180d7cf-9bb3-472b-a800-1c25e0a45ac4" />
     <Project Path="src/DumpDetective.Reporting/DumpDetective.Reporting.csproj" Id="2c8ded00-4d2d-4021-940d-4d6b4216d223" />
     <Project Path="src/DumpDetective.Sdk/DumpDetective.Sdk.csproj" />
+    <Project Path="src/DumpDetective.Platform/DumpDetective.Platform.csproj" />
     <Project Path="src/BenchmarkSuite1/BenchmarkSuite1.csproj" />
   </Folder>
   <Folder Name="/tests/">

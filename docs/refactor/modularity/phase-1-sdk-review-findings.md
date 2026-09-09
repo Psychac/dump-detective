@@ -12,11 +12,22 @@ is severity first (P0, then P1), otherwise in the order below; reorder freely.
 
 ## P0 — real bugs/inconsistencies
 
-1. **`IAnalyzer.Category` has no default implementation.** `Analysis/IAnalyzer.cs` declares
-   `string Category { get; }`; the real `Core.Abstractions.IAnalyzer` it's meant to match has
-   `string Category => AnalyzerCategory.Infer(Name);`. The SDK version's own XML doc claims "same
-   member shape," which is false — it silently requires every future implementer to supply
-   `Category` explicitly. **Status: Open.**
+1. ~~`IAnalyzer.Category` has no default implementation.~~ **Resolved 2026-09-10 — not a bug, a
+   deliberate improvement, kept as-is.** `Core.Abstractions.IAnalyzer.Category` defaults to
+   `AnalyzerCategory.Infer(Name)` — a nine-keyword substring match on the class name that most of
+   today's 35 analyzers (`WcfChannelAnalyzer`, `SqlCommandAnalyzer`, `AsyncStateMachineAnalyzer`,
+   `ObjectShapeAnalyzer`, `DominatorAnalyzer`, and more) fall through to `"General"`, checked and
+   confirmed by reading the real implementation. `.Category` is read in 26 files today (CLI
+   `--only`/`--tags` filtering, report section builders, trend composition, TOC sidebar
+   grouping) — real, load-bearing data populated by a heuristic that mostly doesn't categorize
+   anything. Decision: require every analyzer to state its own category explicitly (no default),
+   which the SDK version already does — kept a property rather than moved to an attribute, since
+   none of those 26 call sites need discovery-time (pre-instantiation) access the way capability
+   filtering does; moving it would trade 26 direct property reads for 26 reflection calls for no
+   benefit. XML doc on `IAnalyzer.Category` updated to state this as intentional instead of falsely
+   claiming shape-parity with `Core`'s version. **Status: Fixed (doc-only; no behavior change —
+   `Core.Abstractions.IAnalyzer` and its 35 implementers are untouched, this only concerns the new
+   SDK-side type).**
 
 2. **`MatchFidelity`'s doc contradicts the code that depends on it.** `Identity/MatchFidelity.cs`'s
    remarks say ordinal ordering is "deliberately avoided as an assumption," but

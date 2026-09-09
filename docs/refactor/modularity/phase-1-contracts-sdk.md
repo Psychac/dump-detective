@@ -119,12 +119,15 @@ behavior change, matching Phase 0's own rule. First real consumer is Phase 6a.
     Doing this "for real" means designing a *new* capability-scoped `AnalysisContext`/`IAnalyzer` in
     the SDK — which is Phase 2 migration step 3 (splitting `IHeapAnalysisCache` into per-capability
     query surfaces, itself still deferred — see
-    [phase-2-artifact-platform.md](phase-2-artifact-platform.md)) — and then migrating all ~30
-    existing analyzers onto it, which is Phase 3/5 territory (golden-file-gated, by design, because
-    it touches live production analyzer output). Confirmed by reading the real
-    `AnalysisContext`/`IAnalyzer` source directly, not assumed from the target shape's file list.
-    Left deferred as originally scoped; revisiting it means reopening Phase 2/3/5, not extending
-    Phase 1.
+    [phase-2-artifact-platform.md](phase-2-artifact-platform.md)) — and then migrating all existing
+    analyzers onto it. Confirmed by reading the real `AnalysisContext`/`IAnalyzer` source directly,
+    not assumed from the target shape's file list. Left deferred as originally scoped; revisiting it
+    means reopening Phase 2/3/5, not extending Phase 1. **Scoped in full** — real numbers (35
+    analyzers, all 35 touching `ClrHeap`/`ClrRuntime` directly) and a genuine phase-ownership gap for
+    the retyping step itself, documented at
+    [modularity-plan.md § 10 point 8](../modularity-plan.md#10-external-review-2026-09-08--where-this-can-be-questioned) —
+    not resolved there either, just precisely bounded instead of hand-waved as "~30 analyzers,
+    Phase 3/5 territory."
 - `Artifacts/IArtifactSource.cs` and `IArtifactIndex.cs` — their `IndexAsync` signature depends on
   `IIndexStorage`/`IndexProgress`, which are Phase 2 storage types. **Partially superseded
   2026-09-09**: Phase 2's own trimmed pass shipped `IndexProgress` (in `DumpDetective.Platform`, not

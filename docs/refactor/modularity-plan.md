@@ -597,6 +597,43 @@ shape.
    top of that doc) on the related risk of building trace analyzers on an observation model Phase 5
    hasn't yet validated. Status line and § 8 heading updated to reflect this is now the chosen plan,
    not a fallback.
+8. **No phase doc owns retyping analyzers from `Core`'s `IAnalyzer`/`AnalysisContext` to the SDK's
+   — IDENTIFIED 2026-09-09, not resolved.** Found while scoping out
+   [phase-1-contracts-sdk.md](modularity/phase-1-contracts-sdk.md)'s deferred "full SDK extraction"
+   item (`Analysis/IAnalyzer.cs`, `AnalysisContext.cs`, the capability attributes,
+   `Presentation/IAnalyzerSectionBuilder.cs`). That item isn't a file move — the real
+   `src/DumpDetective.Core/Models/AnalysisContext.cs` carries a dated `// Intentional boundary
+   decision (Phase 7): Core remains dump-runtime-aware` comment and directly exposes `ClrRuntime`,
+   which an SDK type (zero `PackageReference`s, enforced by
+   `SdkProject_ShouldHaveZeroDependenciesBeyondTheBcl`) cannot. Tracing the real dependency chain
+   this implies surfaces a gap none of Phases 2–5 currently claim:
+   - **Phase 2 migration step 3** (still deferred, no target design written) is the closest owner of
+     "replace `IHeapAnalysisCache` with capability-scoped query surfaces," but that interface is
+     bigger and more ClrMD-coupled than its one-line mention suggests: 18 members
+     (`src/DumpDetective.Core/Abstractions/IHeapAnalysisCache.cs`), nearly every one taking `ClrHeap`
+     or `ClrThread` directly as a parameter (root/static-field lookups, stack-frame-owner
+     resolution, type statistics, four separate provider accessors for reverse/forward-reference,
+     reachability, and dominator-tree queries, thread retention, global size buckets, distinct
+     method tables). None of it can be exposed through an SDK-typed surface as-is.
+   - **Phase 1 itself** would then design the new capability-scoped `AnalysisContext`/`IAnalyzer` —
+     but only *after* Phase 2 step 3's surfaces exist, since `AnalysisContext`'s shape is derived
+     from what capability query interfaces are available to resolve, not designed independently.
+   - **The step nobody owns:** actually retyping each analyzer's `: IAnalyzer` and `AnalysisContext
+     context` parameter to the new SDK types. Grepped: **35 files implement `IAnalyzer` today**
+     (`src/DumpDetective.Analysis/Analyzers/*.cs`), and **all 35 reference `context.Heap` or
+     `context.Runtime` directly** — not filtered through `IHeapAnalysisCache` alone, meaning the
+     coupling this retyping has to unwind is closer to universal than partial. Phase 3's migration
+     steps only add capability *attributes* for discovery on top of whatever `IAnalyzer` an analyzer
+     already implements — they never mention changing the interface or context type itself. Phase 5
+     assumes analyzers already have a context capable of producing `Observation`s via
+     `IObservationSink` by the time its work begins, but doesn't say how they got one. **This
+     retyping — 35 analyzers, near-universal direct `ClrHeap`/`ClrRuntime` coupling, needing the
+     same byte-identical-output discipline Phase 5 already applies to its own migration — currently
+     has no phase, no migration steps, and no exit criterion anywhere in this plan.** Whether it
+     belongs inside Phase 2 (immediately after step 3), as a new step in Phase 3, or as a
+     precondition folded into Phase 5's own work item 1 is an open sequencing question this document
+     doesn't answer yet. Not resolved here — flagged so it isn't silently discovered mid-refactor the
+     way § 10 point 1's `SectionLeadFinding` drift was.
 
 ---
 

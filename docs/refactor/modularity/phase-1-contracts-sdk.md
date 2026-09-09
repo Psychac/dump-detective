@@ -12,6 +12,67 @@ one mistake that's genuinely expensive to undo.
 Establish a small, stable, source-neutral contract surface that any artifact source, any analyzer,
 and any consumer can target without knowing that dumps exist.
 
+## Status: trimmed pass shipped 2026-09-08, per § 8's minimum-viable path
+
+Per [modularity-plan.md § 8](../modularity-plan.md#8-the-minimum-viable-unified-path--adopted-as-the-chosen-plan-2026-09-08)
+(adopted, see [§ 10 point 7](../modularity-plan.md#10-external-review-2026-09-08--where-this-can-be-questioned)):
+"identity + capability + observation contracts only... skip the full SDK extraction; just add the
+new types." `src/DumpDetective.Sdk/` now exists — net10.0, zero `ProjectReference`s, zero
+`PackageReference`s (enforced by
+`tests/DumpDetective.Tests/Unit/Architecture/DependencyDirectionTests.cs`'s
+`SdkProject_ShouldHaveZeroDependenciesBeyondTheBcl`, per migration step 7 below) — and is not yet
+referenced by any existing project. Existing analyzers, `Core.Abstractions.IAnalyzer`, and
+`Reporting.Abstractions.IAnalyzerSectionBuilder` are unchanged; this is purely additive, zero
+behavior change, matching Phase 0's own rule. First real consumer is Phase 6a.
+
+**Shipped**, matching the target shape below exactly except where noted:
+- `Artifacts/`: `ArtifactId`, `ArtifactDescriptor`, `ProcessIdentity`, `Capability`,
+  `CapabilityVocabulary` (the known-vocabulary constants from
+  [source-model.md § 3](source-model.md), serving as the vocabulary source of truth until the
+  registry below lands).
+- `Identity/`: `EntityRef`, `TypeRef`, `MethodRef`, `ModuleRef` (not in the original target list —
+  added because `TypeRef.Module` needs it), `ThreadRef`, `ObjectRef`, `EntityKind` (not in the
+  original list — needed for `EntityRef.Kind`'s discriminator), `MatchFidelity`,
+  `EntityCanonicalizer`.
+- `Temporal/`: `TimeAnchor`, `TemporalExtent`, `AnchorConfidence`, `TemporalKind` (not in the
+  original list — needed for `TemporalExtent.Kind`).
+- `Observations/`: `Observation`, `Measure`, `Provenance`, `EvidenceRef`, `IObservationSink`, plus
+  `ObservationId`, `MeasureUnit`, `MeasureSemantics`, `FidelityLevel` (supporting types the target
+  shape's file list didn't spell out individually).
+- `Synthesis/`: `ISynthesisRule`, `Finding`, `ConfidenceBreakdown`, plus `Severity` (a distinct
+  SDK-owned enum — cannot reuse `Core.Enums.FindingSeverity` since the SDK has zero deps on Core),
+  and `ObservationQuery`/`ObservationMatchSet`/`SynthesisContext` (the types `ISynthesisRule.Match`
+  and `SynthesizeAsync` need; explicitly first-cut, not the final declarative-matching design —
+  see their own XML doc remarks and
+  [observation-and-correlation-model.md § 7](observation-and-correlation-model.md#7-open-questions)).
+- `SdkVersion.cs`.
+- `EntityCanonicalizer`'s ordinal-stripping logic is grounded in what `tools/EntityJoinSpike/Program.cs`
+  already measured recovering real matches on real data, not a fresh guess — see the type's own XML
+  doc remarks for exactly which table rows are fully handled vs. conservatively deferred (the
+  biggest honest gap: dynamic/reflection-emitted type detection isn't attempted at all, since it
+  needs module-level info a name-only canonicalizer doesn't have). Covered by
+  `tests/DumpDetective.Tests/Unit/Sdk/EntityCanonicalizerTests.cs` and `IdentityTests.cs` (21 tests).
+- Architecture-conformance harness (Phase 0 item 6, which turned out to already exist — see
+  [phase-0-foundation.md](phase-0-foundation.md)) extended with the SDK-boundary rule per migration
+  step 7 below.
+
+**Deferred**, per § 8's explicit scope:
+- `Analysis/` (`IAnalyzer`, `AnalysisContext`, `RequiresCapabilityAttribute`,
+  `OptionalCapabilityAttribute`, `AnalyzerModuleAttribute`) and `Presentation/`
+  (`IAnalyzerSectionBuilder`) — this is the "full SDK extraction" § 8 explicitly skips. These stay
+  in `Core`/`Reporting.Abstractions` as today.
+- `Artifacts/IArtifactSource.cs` and `IArtifactIndex.cs` — their `IndexAsync` signature depends on
+  `IIndexStorage`/`IndexProgress`, which are Phase 2 storage types that don't exist yet. Defining
+  them now would mean forward-referencing undefined types; left for Phase 2/6a, which are their
+  actual consumers.
+- `/schema/DumpDetective.Schema/` (`session-report.schema.json` v3, `observation.schema.json`,
+  `capability-registry.json`, `observation-type-registry.json`, `index-container-format.md`,
+  `CHANGELOG.md`) — real content needs actual capability/observation-type declarations and a real
+  wire format to describe, neither of which exist until Phase 6a/6b produce them. Stubbing empty
+  files now was considered and rejected as premature.
+- Registry-conformance rules (the other half of migration step 7) — nothing to validate against
+  until the registries above exist.
+
 ## Target shape
 
 ```
@@ -77,10 +138,14 @@ and any consumer can target without knowing that dumps exist.
 
 ## Migration steps
 
-1. Create `DumpDetective.Sdk`; move `IAnalyzer`, `IAnalyzerSectionBuilder` from
-   `Core.Abstractions`, trimmed to the Phase 0 inventory.
+1. ~~Create `DumpDetective.Sdk`; move `IAnalyzer`, `IAnalyzerSectionBuilder` from
+   `Core.Abstractions`, trimmed to the Phase 0 inventory.~~ **Skipped, per § 8** — this is the "full
+   SDK extraction" the adopted minimum-viable path explicitly defers. `DumpDetective.Sdk` was
+   created (see Status above), but `IAnalyzer`/`IAnalyzerSectionBuilder` were not moved.
 2. Author the new identity/temporal/observation/capability types. Genuinely new code — the largest
-   greenfield chunk in the plan.
+   greenfield chunk in the plan. **Done 2026-09-08** for the § 8-trimmed set — see Status above for
+   exactly what shipped vs. what's still deferred (`IArtifactSource`/`IArtifactIndex`, the schema
+   files).
 3. **Entity-join spike (do this before step 4, not after).** A throwaway probe that pulls
    method/type names out of a `.nettrace` and diffs them against ClrMD-side names from a dump of
    the *same process*, measuring join rate per entity kind. No trace source, no index, no
@@ -97,10 +162,23 @@ and any consumer can target without knowing that dumps exist.
    [source-model.md § 4](source-model.md), informed by the spike, with an extensive test corpus of
    real type/method names (generics, async state machines, lambdas, local functions, arrays) —
    this is the component most likely to be subtly wrong and most expensive to be wrong about.
-5. Write `session-report.schema.json` (v3) and `observation.schema.json`; generalize
-   `docs/binary-format.md` into the versioned container spec with namespaced sections.
-6. Retire or shrink `DumpDetective.Core` per what Phase 0's inventory shows is left.
-7. Add SDK-boundary and registry-conformance rules to the architecture test.
+   **First pass done 2026-09-08** — grounded in the ordinal-stripping technique
+   `tools/EntityJoinSpike/Program.cs` already measured recovering matches on real data, covered by
+   21 tests, but explicitly not the "extensive real-world corpus" hardening this step calls for
+   (that needs Phase 6a's larger cross-source corpus). See the Status section above and the type's
+   own XML doc remarks for the precise, honestly-stated scope — including one known gap (dynamic/
+   reflection-emitted type detection isn't attempted).
+5. ~~Write `session-report.schema.json` (v3) and `observation.schema.json`; generalize
+   `docs/binary-format.md` into the versioned container spec with namespaced sections.~~ **Deferred,
+   per § 8** — no real wire format to describe until Phase 6a/6b exist. See Status above.
+6. ~~Retire or shrink `DumpDetective.Core` per what Phase 0's inventory shows is left.~~ **Not
+   applicable to the § 8-trimmed pass** — step 1 (the extraction this cleanup follows from) was
+   itself skipped, so there's nothing yet to retire from Core.
+7. Add SDK-boundary and registry-conformance rules to the architecture test. **SDK-boundary half
+   done 2026-09-08** — see `SdkProject_ShouldHaveZeroDependenciesBeyondTheBcl` in
+   `DependencyDirectionTests.cs`, extending the harness Phase 0 discovered already exists rather
+   than inventing a new one. Registry-conformance half deferred along with the registries
+   themselves (step 5's `capability-registry.json`/`observation-type-registry.json`).
 
 ### TraceEvent dependency spike — measured, 2026-09-08
 
@@ -189,9 +267,15 @@ What still stands from reading the sibling's code, independent of the reverted n
 
 ## Exit criteria
 
-- `DumpDetective.Sdk` builds standalone, zero project references.
-- Every existing analyzer compiles against the SDK (still emitting domain results; observations
-  come in Phase 5).
+**Note (2026-09-08): these are the exit criteria for the full, untrimmed Phase 1.** Under the
+adopted § 8 path, several don't apply yet — marked below rather than silently left unmet.
+
+- `DumpDetective.Sdk` builds standalone, zero project references. **Done** — also zero package
+  references, and enforced by a standing test (see migration step 7 above), not just true today.
+- ~~Every existing analyzer compiles against the SDK (still emitting domain results; observations
+  come in Phase 5).~~ **Not applicable to the § 8-trimmed pass** — this criterion presumes step 1's
+  full extraction (moving `IAnalyzer` into the SDK), which § 8 explicitly skips. Existing analyzers
+  are unchanged and don't reference the SDK at all yet.
 - **Entity-join spike has produced a measured join rate per entity kind**, and that measurement —
   not an assumption — informs the canonicalizer's fidelity ratings. A poor result here is a
   legitimate trigger to stop and reconsider Phases 6–7 before investing in them. Caveat accepted as
@@ -204,8 +288,12 @@ What still stands from reading the sibling's code, independent of the reverted n
   surfaced a blocker early enough to change the Phase 6 plan while that's still cheap.~~ **Done** —
   see the measured results above. Licensing clear, raw streaming API confirmed bounded-memory;
   Phase 6's ingest design corrected to avoid `TraceLog.OpenOrConvert` for bulk ingestion.
-- `EntityCanonicalizer` passes a real-world name corpus with documented fidelity per case.
-- Schemas + registries exist, versioned, with conformance tests.
+- ~~`EntityCanonicalizer` passes a real-world name corpus with documented fidelity per case.~~
+  **Partially done** — passes a hand-written unit corpus (21 tests) grounded in the entity-join
+  spike's proven technique; the "extensive real-world corpus" this criterion actually means is
+  Phase 6a's job (see migration step 4 above).
+- ~~Schemas + registries exist, versioned, with conformance tests.~~ **Deferred, per § 8** — no real
+  content to put in them yet. See Status above.
 
 ## Risk / effort
 

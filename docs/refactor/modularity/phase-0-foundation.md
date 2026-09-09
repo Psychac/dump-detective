@@ -52,9 +52,32 @@ to become source-neutral.
    (Critical/Warning/Info/etc.) and distinct decision branches its finding-generation logic can
    reach, and cover each with a scenario before the domain moves — not one snapshot exercising
    whichever branch the sample dump happens to hit.
-6. **Architecture-conformance harness.** A lightweight boundary test (NetArchTest or a hand-rolled
-   Roslyn/reflection check) asserting today's intended dependency direction. Every later phase adds
-   a rule to this same harness rather than inventing a new enforcement mechanism.
+6. **Architecture-conformance harness — already exists, verified and cleaned up 2026-09-08.** A
+   lightweight boundary test asserting today's intended dependency direction. This isn't new work:
+   `tests/DumpDetective.Tests/Unit/Architecture/DependencyDirectionTests.cs` (project-reference
+   direction: `Core` ← `Analysis` ← `Reporting` ← `Cli`, matching
+   [architecture.md § 2](../../architecture.md#2-project-layout-and-dependency-graph)) and
+   `FitnessEnforcementTests.cs` (source-level namespace-boundary checks for
+   Core/Analysis/Reporting, plus a hotspot-guardrail file-existence check) already do this — built
+   for an earlier, unrelated, now-concluded refactor program
+   ([consolidated-refactor-program.md](../../improvements/consolidated-refactor-program.md)), but
+   still real, still running, and directly reusable here. **Every later phase should add a rule to
+   this existing harness rather than inventing a new one** — starting with Phase 1 step 7's
+   SDK-boundary and registry-conformance rules.
+
+   One stale leftover found and removed while verifying this: `FitnessEnforcementTests` had a fifth
+   test, `BaselineHarness_ShouldExistForCiFitnessGate`, asserting a baseline script existed at
+   `tools/Phase0/Invoke-Phase0Baseline.ps1`. That script (and the CI workflow that ran it) had been
+   deliberately deleted in two prior commits once the older program concluded (`9f1aaebd` "remove
+   concluded spike/validator tools and Phase0 harness", `16b99725` "removed phase8 workflow which
+   just always fails anyway") — the test was never updated to match, leaving a permanently-red
+   assertion for tooling that was retired on purpose. Removed rather than resurrected; the four
+   remaining checks were all green before and after.
+
+   **Residual gap, not closed**: there is currently no CI workflow running these tests
+   automatically (`.github/workflows/` is empty — the old one was removed for always failing).
+   "Green in CI" below currently means "green when run locally"; standing up real CI automation is a
+   separate decision, not assumed here.
 
 ## Exit criteria
 
@@ -64,7 +87,9 @@ to become source-neutral.
 - Analyzer namespaces match eventual package grouping.
 - Every analyzer domain's distinct severity tiers and decision branches each have a covering
   characterization test — not just ≥ 1 test per domain.
-- Architecture-conformance test green in CI against current `main`.
+- Architecture-conformance test green locally against current `main` (done, 2026-09-08 — 4/4 in
+  `Unit/Architecture/`); CI automation to run it on every push/PR remains open, see the residual gap
+  noted above.
 
 ## Risk / effort
 

@@ -61,14 +61,6 @@ public sealed class FitnessEnforcementTests
         }
     }
 
-    [Fact]
-    public void BaselineHarness_ShouldExistForCiFitnessGate()
-    {
-        string repoRoot = FindRepositoryRoot();
-        string baselineScript = Path.Combine(repoRoot, "tools", "Phase0", "Invoke-Phase0Baseline.ps1");
-        File.Exists(baselineScript).Should().BeTrue();
-    }
-
     private static IReadOnlyList<string> FindNamespaceReferences(string root, IReadOnlyList<string> forbiddenPrefixes)
     {
         var offenders = new List<string>();

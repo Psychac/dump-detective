@@ -20,6 +20,7 @@
     <ProjectReference Include="..\..\src\DumpDetective.Analysis\DumpDetective.Analysis.csproj" />
     <ProjectReference Include="..\..\src\DumpDetective.Reporting\DumpDetective.Reporting.csproj" />
     <ProjectReference Include="..\..\src\DumpDetective.Cli\DumpDetective.Cli.csproj" />
+    <ProjectReference Include="..\..\src\DumpDetective.Sdk\DumpDetective.Sdk.csproj" />
   </ItemGroup>
 
   <ItemGroup>

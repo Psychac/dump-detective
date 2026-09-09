@@ -24,6 +24,36 @@ public sealed class DependencyDirectionTests
         cliRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core", "DumpDetective.Reporting"]);
     }
 
+    [Fact]
+    public void SdkProject_ShouldHaveZeroDependenciesBeyondTheBcl()
+    {
+        // Phase 1 migration step 7: "Add SDK-boundary ... rules to the architecture test." The
+        // whole point of the SDK is a contract surface any artifact source, any analyzer, any
+        // consumer can target without pulling in the rest of the product — see
+        // docs/refactor/modularity/phase-1-contracts-sdk.md.
+        string repoRoot = FindRepositoryRoot();
+        string sdkProjectPath = Path.Combine(repoRoot, "src", "DumpDetective.Sdk", "DumpDetective.Sdk.csproj");
+
+        IReadOnlyCollection<string> projectRefs = ReadProjectReferenceNames(sdkProjectPath);
+        IReadOnlyCollection<string> packageRefs = ReadPackageReferenceNames(sdkProjectPath);
+
+        projectRefs.Should().BeEmpty("the SDK must not depend on any other project in this repo.");
+        packageRefs.Should().BeEmpty("the SDK must not depend on any NuGet package — BCL only.");
+    }
+
+    private static IReadOnlyCollection<string> ReadPackageReferenceNames(string projectPath)
+    {
+        XDocument document = XDocument.Load(projectPath);
+
+        return document
+            .Descendants("PackageReference")
+            .Select(r => (string?)r.Attribute("Include"))
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name!)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+    }
+
     private static IReadOnlyCollection<string> ReadProjectReferenceNames(string projectPath)
     {
         XDocument document = XDocument.Load(projectPath);

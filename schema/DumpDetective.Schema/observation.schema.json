@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dumpdetective/schema/observation.schema.json",
+  "schemaVersion": "1.0.0",
+  "title": "DumpDetective Observation",
+  "description": "The fusion wire format: DumpDetective.Sdk.Observations.Observation as it actually serializes today via System.Text.Json with { PropertyNamingPolicy = CamelCase, Converters = { JsonStringEnumConverter } } — the exact options TraceReportWriter uses to write report.json (src/DumpDetective.Cli/Output/TraceReportWriter.cs). Verified empirically against a live build of DumpDetective.Sdk on 2026-09-09, not hand-derived from the C# source alone — see the 'Wire-format gotchas' notes below for the non-obvious results of that check. This is the real, shipped shape of trace-session report.json's `observations` array today; it is not a forward-looking design document.",
+  "notes": [
+    "GOTCHA 1 — mixed casing: PropertyNamingPolicy.CamelCase only renames property *names* (id, observationType, ...). Every enum (Kind, Fidelity, MeasureUnit, MeasureSemantics, AnchorConfidence, TemporalKind, FidelityLevel) carries its own [JsonConverter(typeof(JsonStringEnumConverter<T>))] with no naming policy, so enum *values* serialize in their literal C# casing (\"Method\", \"Exact\", \"Interval\", \"Full\"), not camelCase. Property names are camelCase; enum values are PascalCase. Both are correct — do not 'fix' one to match the other.",
+    "GOTCHA 2 — $kind vs kind: EntityRef's [JsonPolymorphic] discriminator ($kind, e.g. \"method\") is only emitted when a value is serialized through a property declared as the abstract EntityRef type — which is only true for Observation.Subjects. A field declared as a concrete subtype (MethodRef.DeclaringType : TypeRef, TypeRef.Module : ModuleRef?) never gets a $kind, even though it carries the same 'kind' property. A consumer parsing entities nested inside subjects (declaringType, module) must not expect $kind there.",
+    "GOTCHA 3 — wrapper types, not bare strings: ArtifactId, Capability, and ObservationId are all single-field record structs with no custom converter, so each serializes as a one-key object ({\"value\":\"...\"} for ArtifactId/ObservationId, {\"key\":\"...\"} for Capability), never as a bare JSON string.",
+    "GOTCHA 4 — ObservationId.ToString() lies: the type overrides ToString() to return Guid 'N' format (no hyphens), used nowhere in JSON serialization. The wire value is the Guid's default System.Text.Json representation (hyphenated 'D' format, e.g. \"5dedca19-ade3-45b7-bed6-726f92d31d80\").",
+    "GOTCHA 5 — 64-bit handles as JSON numbers: ulong fields (ObjectRef.Address, TypeRef.MethodTable, MethodRef.MethodDesc, ModuleRef.ModuleAddress) serialize as plain JSON numeric literals with full precision. A JS/TS consumer using JSON.parse will silently lose precision above 2^53 — heap addresses on a 64-bit process routinely exceed that. Any UI/Phase 8 consumer must parse these as strings or a BigInt-safe parser, not JSON.parse's default number handling.",
+    "TimeSpan fields (TimeAnchor.ProcessUptime) serialize via .NET's constant ('c') TimeSpan format, e.g. \"00:00:01\" or \"1.02:03:04.5000000\" for a value spanning more than a day."
+  ],
+  "$defs": {
+    "wrappedString": {
+      "type": "object",
+      "description": "ArtifactId or ObservationId — see GOTCHA 3.",
+      "properties": { "value": { "type": "string" } },
+      "required": ["value"],
+      "additionalProperties": false
+    },
+    "capability": {
+      "type": "object",
+      "description": "Capability — see GOTCHA 3. Key must be a member of capability-registry.json.",
+      "properties": { "key": { "type": "string" } },
+      "required": ["key"],
+      "additionalProperties": false
+    },
+    "matchFidelity": { "type": "string", "enum": ["None", "Low", "Medium", "High", "Exact"] },
+    "entityKind": { "type": "string", "enum": ["Type", "Method", "Module", "Thread", "Object"] },
+    "fidelityLevel": { "type": "string", "enum": ["Full", "Degraded"] },
+    "anchorConfidence": { "type": "string", "enum": ["Exact", "Approximate", "Unknown"] },
+    "temporalKind": { "type": "string", "enum": ["Point", "Interval", "Series"] },
+    "measureUnit": { "type": "string", "enum": ["Count", "Bytes", "Percent", "Ratio", "Milliseconds", "PerSecond", "Custom"] },
+    "measureSemantics": { "type": "string", "enum": ["Absolute", "Rate", "Ratio", "Count", "Duration"] },
+
+    "typeRefBody": {
+      "type": "object",
+      "description": "TypeRef fields when nested via a concretely-typed property (no $kind — see GOTCHA 2).",
+      "properties": {
+        "kind": { "const": "Type" },
+        "canonicalName": { "type": "string" },
+        "methodTable": { "type": ["integer", "null"], "description": "ulong dump handle — see GOTCHA 5." },
+        "typeToken": { "type": ["integer", "null"] },
+        "module": { "oneOf": [{ "$ref": "#/$defs/moduleRefBody" }, { "type": "null" }] },
+        "joinKey": { "type": "string" },
+        "fidelity": { "$ref": "#/$defs/matchFidelity" }
+      },
+      "required": ["kind", "canonicalName", "joinKey", "fidelity"],
+      "additionalProperties": false
+    },
+    "moduleRefBody": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "Module" },
+        "simpleName": { "type": "string" },
+        "moduleAddress": { "type": ["integer", "null"], "description": "ulong dump handle — see GOTCHA 5." },
+        "joinKey": { "type": "string" },
+        "fidelity": { "$ref": "#/$defs/matchFidelity" }
+      },
+      "required": ["kind", "simpleName", "joinKey", "fidelity"],
+      "additionalProperties": false
+    },
+    "entityRef": {
+      "type": "object",
+      "description": "Only shape used for Observation.Subjects elements — carries $kind (see GOTCHA 2).",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "$kind": { "const": "type" },
+            "kind": { "const": "Type" },
+            "canonicalName": { "type": "string" },
+            "methodTable": { "type": ["integer", "null"], "description": "ulong dump handle — see GOTCHA 5." },
+            "typeToken": { "type": ["integer", "null"] },
+            "module": { "oneOf": [{ "$ref": "#/$defs/moduleRefBody" }, { "type": "null" }] },
+            "joinKey": { "type": "string" },
+            "fidelity": { "$ref": "#/$defs/matchFidelity" }
+          },
+          "required": ["$kind", "kind", "canonicalName", "joinKey", "fidelity"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "$kind": { "const": "method" },
+            "kind": { "const": "Method" },
+            "declaringType": { "$ref": "#/$defs/typeRefBody" },
+            "name": { "type": "string" },
+            "normalizedSignature": { "type": "string" },
+            "methodDesc": { "type": ["integer", "null"], "description": "ulong dump handle — see GOTCHA 5." },
+            "methodToken": { "type": ["integer", "null"] },
+            "joinKey": { "type": "string" },
+            "fidelity": { "$ref": "#/$defs/matchFidelity" }
+          },
+          "required": ["$kind", "kind", "declaringType", "name", "joinKey", "fidelity"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "$kind": { "const": "module" },
+            "kind": { "const": "Module" },
+            "simpleName": { "type": "string" },
+            "moduleAddress": { "type": ["integer", "null"], "description": "ulong dump handle — see GOTCHA 5." },
+            "joinKey": { "type": "string" },
+            "fidelity": { "$ref": "#/$defs/matchFidelity" }
+          },
+          "required": ["$kind", "kind", "simpleName", "joinKey", "fidelity"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "$kind": { "const": "thread" },
+            "kind": { "const": "Thread" },
+            "osThreadId": { "type": "integer", "minimum": 0 },
+            "managedThreadId": { "type": ["integer", "null"] },
+            "joinKey": { "type": "string" },
+            "fidelity": { "$ref": "#/$defs/matchFidelity" }
+          },
+          "required": ["$kind", "kind", "osThreadId", "joinKey", "fidelity"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "$kind": { "const": "object" },
+            "kind": { "const": "Object" },
+            "address": { "type": "integer", "description": "ulong heap address — see GOTCHA 5." },
+            "artifact": { "$ref": "#/$defs/wrappedString" },
+            "joinKey": { "type": "string" },
+            "fidelity": { "$ref": "#/$defs/matchFidelity" }
+          },
+          "required": ["$kind", "kind", "address", "artifact", "joinKey", "fidelity"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "timeAnchor": {
+      "type": "object",
+      "properties": {
+        "wallClockUtc": { "type": ["string", "null"], "format": "date-time" },
+        "processUptime": { "type": ["string", "null"], "description": ".NET TimeSpan 'c' format, e.g. \"00:00:01\"." },
+        "monotonicTicks": { "type": ["integer", "null"] },
+        "confidence": { "$ref": "#/$defs/anchorConfidence" }
+      },
+      "required": ["confidence"],
+      "additionalProperties": false
+    },
+    "temporalExtent": {
+      "type": "object",
+      "properties": {
+        "kind": { "$ref": "#/$defs/temporalKind" },
+        "start": { "$ref": "#/$defs/timeAnchor" },
+        "end": { "oneOf": [{ "$ref": "#/$defs/timeAnchor" }, { "type": "null" }] }
+      },
+      "required": ["kind", "start"],
+      "additionalProperties": false
+    },
+    "measure": {
+      "type": "object",
+      "description": "Must be a raw fact, never a weighted composite — see Observation.cs's purity-rules remark.",
+      "properties": {
+        "value": { "type": "number" },
+        "unit": { "$ref": "#/$defs/measureUnit" },
+        "semantics": { "$ref": "#/$defs/measureSemantics" }
+      },
+      "required": ["value", "unit", "semantics"],
+      "additionalProperties": false
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "artifact": { "$ref": "#/$defs/wrappedString" },
+        "analyzerKey": { "type": "string" },
+        "capabilitiesUsed": { "type": "array", "items": { "$ref": "#/$defs/capability" } },
+        "fidelity": { "$ref": "#/$defs/fidelityLevel" }
+      },
+      "required": ["artifact", "analyzerKey", "capabilitiesUsed", "fidelity"],
+      "additionalProperties": false
+    },
+    "evidenceRef": {
+      "type": "object",
+      "properties": {
+        "artifact": { "$ref": "#/$defs/wrappedString" },
+        "locator": { "type": "string" },
+        "description": { "type": ["string", "null"] }
+      },
+      "required": ["artifact", "locator"],
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "properties": {
+    "id": { "$ref": "#/$defs/wrappedString" },
+    "observationType": {
+      "type": "string",
+      "description": "Free-form per Observation.cs by design; the checked-in list of types actually emitted today lives in observation-type-registry.json, not as a closed enum here."
+    },
+    "subjects": { "type": "array", "items": { "$ref": "#/$defs/entityRef" } },
+    "when": { "$ref": "#/$defs/temporalExtent" },
+    "measures": { "type": "object", "additionalProperties": { "$ref": "#/$defs/measure" } },
+    "provenance": { "$ref": "#/$defs/provenance" },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidenceRef" } }
+  },
+  "required": ["id", "observationType", "subjects", "when", "measures", "provenance", "confidence"],
+  "additionalProperties": false
+}

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dumpdetective/schema/observation-type-registry.json",
+  "registryVersion": "1.0.0",
+  "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
+  "observationTypes": {
+    "gc.pause": {
+      "producedBy": "GcPauseAnalyzer",
+      "sourceFile": "src/DumpDetective.Sources.NetTrace/GcPauseAnalyzer.cs",
+      "requiresCapabilities": ["trace.gc-events"],
+      "subjectKind": "thread",
+      "temporalKind": "interval",
+      "measures": {
+        "gc.suspend-reason": { "unit": "custom", "semantics": "absolute" },
+        "pause.duration": { "unit": "milliseconds", "semantics": "duration" },
+        "gc.generation": { "unit": "count", "semantics": "absolute" },
+        "heap.size": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "addedIn": "1.0.0"
+    },
+    "contention.episode": {
+      "producedBy": "ContentionAnalyzer",
+      "sourceFile": "src/DumpDetective.Sources.NetTrace/ContentionAnalyzer.cs",
+      "requiresCapabilities": ["trace.contention-events"],
+      "subjectKind": "thread",
+      "temporalKind": "interval",
+      "measures": {
+        "contention.duration": { "unit": "milliseconds", "semantics": "duration" }
+      },
+      "note": "Named 'contention.episode', not the earlier design table's 'contention.hotspot' — 'hotspot' is a ranking/severity claim, which observation purity rules push to a synthesis rule (Phase 5, not yet built) instead. See the analyzer's own remarks.",
+      "addedIn": "1.0.0"
+    },
+    "cpu.sample-attribution": {
+      "producedBy": "CpuHotspotAnalyzer",
+      "sourceFile": "src/DumpDetective.Sources.NetTrace/CpuHotspotAnalyzer.cs",
+      "requiresCapabilities": ["trace.cpu-samples"],
+      "subjectKind": "method",
+      "temporalKind": "interval",
+      "measures": {
+        "cpu.sample-count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "Named 'cpu.sample-attribution', not 'cpu.hotspot', same reasoning as contention.episode above. Leaf-frame-only (exclusive samples), not an inclusive call-tree breakdown — see the analyzer's own remarks.",
+      "addedIn": "1.0.0"
+    }
+  }
+}

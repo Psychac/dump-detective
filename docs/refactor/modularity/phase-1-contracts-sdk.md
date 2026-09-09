@@ -12,7 +12,7 @@ one mistake that's genuinely expensive to undo.
 Establish a small, stable, source-neutral contract surface that any artifact source, any analyzer,
 and any consumer can target without knowing that dumps exist.
 
-## Status: trimmed pass shipped 2026-09-08, per § 8's minimum-viable path
+## Status: trimmed pass shipped 2026-09-08; schemas/registries added 2026-09-09, per § 8's minimum-viable path
 
 Per [modularity-plan.md § 8](../modularity-plan.md#8-the-minimum-viable-unified-path--adopted-as-the-chosen-plan-2026-09-08)
 (adopted, see [§ 10 point 7](../modularity-plan.md#10-external-review-2026-09-08--where-this-can-be-questioned)):
@@ -51,27 +51,90 @@ behavior change, matching Phase 0's own rule. First real consumer is Phase 6a.
   doc remarks for exactly which table rows are fully handled vs. conservatively deferred (the
   biggest honest gap: dynamic/reflection-emitted type detection isn't attempted at all, since it
   needs module-level info a name-only canonicalizer doesn't have). Covered by
-  `tests/DumpDetective.Tests/Unit/Sdk/EntityCanonicalizerTests.cs` and `IdentityTests.cs` (21 tests).
+  `tests/DumpDetective.Tests/Unit/Sdk/EntityCanonicalizerTests.cs` and `IdentityTests.cs`
+  (13 + 8 = 21 tests as of the fix below).
+- **`EntityRef` JSON-polymorphism bug found and fixed 2026-09-09**, surfaced by Phase 6a/6b's trace
+  `report.json` — the first real code outside the SDK's own tests to serialize an `EntityRef`
+  through its base type (`Observation.Subjects` is `IReadOnlyList<EntityRef>`). The
+  `[JsonPolymorphic]` discriminator was originally named `"kind"`, which collides with
+  `EntityRef.Kind` itself (also `"kind"` in camelCase) and throws at serialize time; renamed the
+  discriminator to `$kind`, matching the same pattern `AnalysisReportDocument` (Reporting project)
+  already uses for its own polymorphic base. Regression-guarded by
+  `IdentityTests.EntityRef_SerializesAndRoundTripsThroughThePolymorphicBaseType`, which round-trips
+  through the base type specifically — serializing a concrete subtype directly wouldn't have
+  exercised the polymorphic path that broke. This is the first real evidence that Phase 1's design
+  benefits from an actual downstream consumer exercising it, not just unit tests against the SDK in
+  isolation.
 - Architecture-conformance harness (Phase 0 item 6, which turned out to already exist — see
   [phase-0-foundation.md](phase-0-foundation.md)) extended with the SDK-boundary rule per migration
   step 7 below.
+- **`/schema/DumpDetective.Schema/` shipped 2026-09-09** (except `session-report.schema.json` v3 —
+  see Deferred below): `capability-registry.json`, `observation-type-registry.json`,
+  `observation.schema.json`, `index-container-format.md`, `CHANGELOG.md`. Unblocked by Phase 6a/6b
+  actually landing — real capability/observation-type content and a real wire format to describe
+  now exist, so this is no longer the "stubbing empty files now was considered and rejected as
+  premature" case the previous version of this doc described. Every file describes what's actually
+  shipped and running, not a forward design:
+  - `capability-registry.json` mirrors `CapabilityVocabulary.Known` verbatim (29 entries).
+  - `observation-type-registry.json` records the three `ObservationType` values real analyzers emit
+    today (`gc.pause`, `contention.episode`, `cpu.sample-attribution`) with their real measure keys.
+  - `observation.schema.json` was derived from an actual build of `DumpDetective.Sdk` (a throwaway
+    probe serializing real SDK types through `TraceReportWriter`'s exact
+    `JsonSerializerOptions`), then validated round-trip against that same live output with a Python
+    `jsonschema` validator across all five `EntityRef` subtypes — not hand-derived from the C#
+    source and never executed. That process surfaced five non-obvious wire-format facts now
+    recorded in the schema's own `notes` array (mixed camelCase-property/PascalCase-enum-value
+    casing; `$kind` only appearing on the polymorphically-typed `Subjects` field, never on a
+    concretely-typed field like `MethodRef.DeclaringType`; `ArtifactId`/`Capability`/`ObservationId`
+    serializing as one-key wrapper objects, never bare strings; `ObservationId.ToString()`
+    disagreeing with its own JSON form; and 64-bit dump handles exceeding IEEE-754-safe integer
+    precision, a real trap for any future JS/TS consumer).
+  - `index-container-format.md` documents what the Phase 2/6a "generalized container" actually
+    turned out to be: one flat, append-only `CacheSectionId` enum shared by dump and trace sections
+    alike (not the string-namespaced `"heap.*"`/`"trace.*"` design the original target shape
+    sketched), demonstrated by the four `Trace*` ids Phase 6a/6b added with no format-version bump.
+    It also flags, without fixing, that `docs/binary-format.md`'s own header table is now
+    significantly stale (`FormatVersion` "Current: 4" there vs. the real
+    `CacheContainerFormat.CurrentFormatVersion = 10`, and its 17-entry section table is missing
+    over 20 real ids) — pre-existing cache-subsystem debt, unrelated to this generalization, called
+    out so it isn't mistaken for something this pass resolved.
+  - Conformance enforced by
+    `tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs` — this is
+    migration step 7's registry-conformance half, previously blocked on the registries not existing.
 
 **Deferred**, per § 8's explicit scope:
 - `Analysis/` (`IAnalyzer`, `AnalysisContext`, `RequiresCapabilityAttribute`,
   `OptionalCapabilityAttribute`, `AnalyzerModuleAttribute`) and `Presentation/`
   (`IAnalyzerSectionBuilder`) — this is the "full SDK extraction" § 8 explicitly skips. These stay
   in `Core`/`Reporting.Abstractions` as today.
+  - **Investigated 2026-09-09, staying deferred: this is not actually a move.** The real
+    `src/DumpDetective.Core/Models/AnalysisContext.cs` carries its own dated boundary decision:
+    `// Intentional boundary decision (Phase 7): Core remains dump-runtime-aware. AnalysisContext
+    carries ClrRuntime/ClrHeap as shared execution substrate.` — with `public required ClrRuntime
+    Runtime { get; init; }` right below it. That directly conflicts with this doc's own design rule
+    two sections below ("The SDK knows nothing about ClrMD... `AnalysisContext` exposes
+    capability-scoped query surfaces, never `ClrRuntime`/`RuntimeFacade`"): the concrete
+    `AnalysisContext` every analyzer uses today cannot move into a zero-`PackageReference` SDK
+    without dragging ClrMD in and failing `SdkProject_ShouldHaveZeroDependenciesBeyondTheBcl`.
+    Doing this "for real" means designing a *new* capability-scoped `AnalysisContext`/`IAnalyzer` in
+    the SDK — which is Phase 2 migration step 3 (splitting `IHeapAnalysisCache` into per-capability
+    query surfaces, itself still deferred — see
+    [phase-2-artifact-platform.md](phase-2-artifact-platform.md)) — and then migrating all ~30
+    existing analyzers onto it, which is Phase 3/5 territory (golden-file-gated, by design, because
+    it touches live production analyzer output). Confirmed by reading the real
+    `AnalysisContext`/`IAnalyzer` source directly, not assumed from the target shape's file list.
+    Left deferred as originally scoped; revisiting it means reopening Phase 2/3/5, not extending
+    Phase 1.
 - `Artifacts/IArtifactSource.cs` and `IArtifactIndex.cs` — their `IndexAsync` signature depends on
-  `IIndexStorage`/`IndexProgress`, which are Phase 2 storage types that don't exist yet. Defining
-  them now would mean forward-referencing undefined types; left for Phase 2/6a, which are their
-  actual consumers.
-- `/schema/DumpDetective.Schema/` (`session-report.schema.json` v3, `observation.schema.json`,
-  `capability-registry.json`, `observation-type-registry.json`, `index-container-format.md`,
-  `CHANGELOG.md`) — real content needs actual capability/observation-type declarations and a real
-  wire format to describe, neither of which exist until Phase 6a/6b produce them. Stubbing empty
-  files now was considered and rejected as premature.
-- Registry-conformance rules (the other half of migration step 7) — nothing to validate against
-  until the registries above exist.
+  `IIndexStorage`/`IndexProgress`, which are Phase 2 storage types. **Partially superseded
+  2026-09-09**: Phase 2's own trimmed pass shipped `IndexProgress` (in `DumpDetective.Platform`, not
+  the SDK — see [phase-2-artifact-platform.md](phase-2-artifact-platform.md)), but `IIndexStorage`
+  still doesn't exist. `IArtifactSource`/`IArtifactIndex` remain correctly deferred on that missing
+  half; left for Phase 2/6a, which are their actual consumers.
+- `session-report.schema.json` v3 — still needs Phase 4's session model
+  (`sources[]`/`timeline`/per-finding source attribution can't be described honestly without a real
+  session/artifact model to back them), which still doesn't exist. The rest of the schema directory
+  shipped 2026-09-09 (see Shipped above); this one file is the sole remaining gap in it.
 
 ## Target shape
 
@@ -168,17 +231,26 @@ behavior change, matching Phase 0's own rule. First real consumer is Phase 6a.
    (that needs Phase 6a's larger cross-source corpus). See the Status section above and the type's
    own XML doc remarks for the precise, honestly-stated scope — including one known gap (dynamic/
    reflection-emitted type detection isn't attempted).
-5. ~~Write `session-report.schema.json` (v3) and `observation.schema.json`; generalize
-   `docs/binary-format.md` into the versioned container spec with namespaced sections.~~ **Deferred,
-   per § 8** — no real wire format to describe until Phase 6a/6b exist. See Status above.
+5. Write `session-report.schema.json` (v3) and `observation.schema.json`; generalize
+   `docs/binary-format.md` into the versioned container spec with namespaced sections. **Done
+   2026-09-09, except `session-report.schema.json` v3** — Phase 6a/6b landing unblocked real
+   content for `observation.schema.json`, `capability-registry.json`,
+   `observation-type-registry.json`, and `index-container-format.md` (see Status above for what
+   each actually contains and how it was validated). `session-report.schema.json` v3 stays deferred
+   — still needs Phase 4's session model, which doesn't exist. "Namespaced sections" shipped as a
+   flat, append-only `CacheSectionId` enum shared across artifact kinds rather than the string
+   `"heap.*"`/`"trace.*"` namespacing originally sketched — see `index-container-format.md` for why
+   that's the real, cheaper equivalent, not a shortfall.
 6. ~~Retire or shrink `DumpDetective.Core` per what Phase 0's inventory shows is left.~~ **Not
    applicable to the § 8-trimmed pass** — step 1 (the extraction this cleanup follows from) was
    itself skipped, so there's nothing yet to retire from Core.
-7. Add SDK-boundary and registry-conformance rules to the architecture test. **SDK-boundary half
-   done 2026-09-08** — see `SdkProject_ShouldHaveZeroDependenciesBeyondTheBcl` in
+7. Add SDK-boundary and registry-conformance rules to the architecture test. **Done 2026-09-09** —
+   SDK-boundary half done 2026-09-08, see `SdkProject_ShouldHaveZeroDependenciesBeyondTheBcl` in
    `DependencyDirectionTests.cs`, extending the harness Phase 0 discovered already exists rather
-   than inventing a new one. Registry-conformance half deferred along with the registries
-   themselves (step 5's `capability-registry.json`/`observation-type-registry.json`).
+   than inventing a new one. Registry-conformance half done 2026-09-09, once step 5's registries
+   existed to validate against — see `SdkRegistryConformanceTests.cs`
+   (`CapabilityRegistry_ShouldMatchCapabilityVocabularyExactly`,
+   `ObservationTypeRegistry_ShouldContainEveryObservationTypeRealAnalyzersEmit`).
 
 ### TraceEvent dependency spike — measured, 2026-09-08
 
@@ -292,8 +364,9 @@ adopted § 8 path, several don't apply yet — marked below rather than silently
   **Partially done** — passes a hand-written unit corpus (21 tests) grounded in the entity-join
   spike's proven technique; the "extensive real-world corpus" this criterion actually means is
   Phase 6a's job (see migration step 4 above).
-- ~~Schemas + registries exist, versioned, with conformance tests.~~ **Deferred, per § 8** — no real
-  content to put in them yet. See Status above.
+- **Schemas + registries exist, versioned, with conformance tests.** **Done 2026-09-09**, except
+  `session-report.schema.json` v3 (still genuinely blocked on Phase 4's session model, not
+  deferrable-by-choice like the rest of this list was). See Status above.
 
 ## Risk / effort
 

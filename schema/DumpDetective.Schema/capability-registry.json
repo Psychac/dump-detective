@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dumpdetective/schema/capability-registry.json",
+  "registryVersion": "1.0.0",
+  "description": "Canonical capability vocabulary an artifact can provide and an analyzer can require or optionally use. Source of truth is src/DumpDetective.Sdk/Artifacts/CapabilityVocabulary.cs; this file is the checked-in, versioned mirror docs/refactor/modularity/phase-1-contracts-sdk.md calls for, validated against the code by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. See docs/refactor/modularity/source-model.md § 3.",
+  "capabilities": {
+    "heap.objects": { "group": "heap", "providedBy": "dump", "addedIn": "1.0.0" },
+    "heap.types": { "group": "heap", "providedBy": "dump", "addedIn": "1.0.0" },
+    "heap.roots": { "group": "heap", "providedBy": "dump", "addedIn": "1.0.0" },
+    "heap.references": { "group": "heap", "providedBy": "dump", "addedIn": "1.0.0" },
+    "heap.reverse-references": { "group": "heap", "providedBy": "dump", "addedIn": "1.0.0" },
+    "heap.generations": { "group": "heap", "providedBy": "dump", "addedIn": "1.0.0" },
+    "heap.segments": { "group": "heap", "providedBy": "dump", "addedIn": "1.0.0" },
+    "heap.handles": { "group": "heap", "providedBy": "dump", "addedIn": "1.0.0" },
+    "heap.statics": { "group": "heap", "providedBy": "dump", "addedIn": "1.0.0" },
+    "heap.strings": { "group": "heap", "providedBy": "dump", "addedIn": "1.0.0" },
+    "heap.finalizer-queue": { "group": "heap", "providedBy": "dump", "addedIn": "1.0.0" },
+
+    "runtime.modules": { "group": "runtime", "providedBy": "dump", "addedIn": "1.0.0" },
+    "runtime.threads": { "group": "runtime", "providedBy": "dump", "addedIn": "1.0.0" },
+    "runtime.stacks": { "group": "runtime", "providedBy": "dump", "addedIn": "1.0.0" },
+    "runtime.exceptions": { "group": "runtime", "providedBy": "dump", "addedIn": "1.0.0" },
+    "runtime.jit": { "group": "runtime", "providedBy": "dump", "addedIn": "1.0.0" },
+    "runtime.locks": { "group": "runtime", "providedBy": "dump", "addedIn": "1.0.0" },
+
+    "trace.cpu-samples": {
+      "group": "trace", "providedBy": "trace", "addedIn": "1.0.0",
+      "note": "In production use since Phase 6b's CpuHotspotAnalyzer (src/DumpDetective.Sources.NetTrace/CpuHotspotAnalyzer.cs)."
+    },
+    "trace.gc-events": {
+      "group": "trace", "providedBy": "trace", "addedIn": "1.0.0",
+      "note": "In production use since Phase 6b's GcPauseAnalyzer (src/DumpDetective.Sources.NetTrace/GcPauseAnalyzer.cs)."
+    },
+    "trace.alloc-samples": { "group": "trace", "providedBy": "trace", "addedIn": "1.0.0", "note": "Declared, not yet produced by any shipped indexer or analyzer." },
+    "trace.contention-events": {
+      "group": "trace", "providedBy": "trace", "addedIn": "1.0.0",
+      "note": "In production use since Phase 6b's ContentionAnalyzer (src/DumpDetective.Sources.NetTrace/ContentionAnalyzer.cs)."
+    },
+    "trace.exception-events": { "group": "trace", "providedBy": "trace", "addedIn": "1.0.0", "note": "Declared, not yet produced by any shipped indexer or analyzer." },
+    "trace.thread-timeline": { "group": "trace", "providedBy": "trace", "addedIn": "1.0.0", "note": "Declared, not yet produced by any shipped indexer or analyzer." },
+    "trace.jit-events": { "group": "trace", "providedBy": "trace", "addedIn": "1.0.0", "note": "Declared, not yet produced by any shipped indexer or analyzer." },
+    "trace.http-events": { "group": "trace", "providedBy": "trace", "addedIn": "1.0.0", "note": "Declared, not yet produced by any shipped indexer or analyzer." },
+    "trace.custom-events": { "group": "trace", "providedBy": "trace", "addedIn": "1.0.0", "note": "Declared, not yet produced by any shipped indexer or analyzer." },
+
+    "temporal.point": { "group": "temporal", "providedBy": "any", "addedIn": "1.0.0" },
+    "temporal.interval": { "group": "temporal", "providedBy": "any", "addedIn": "1.0.0" },
+    "temporal.series": { "group": "temporal", "providedBy": "any", "addedIn": "1.0.0" }
+  }
+}

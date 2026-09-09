@@ -10,12 +10,17 @@ namespace DumpDetective.Sdk.Identity;
 /// strongly the two observations agree.
 /// </summary>
 /// <remarks>
-/// Ordered worst-to-best is deliberately avoided as an assumption here — callers that need to
-/// compare two fidelities (e.g. take the minimum across a join lineage) should do so explicitly
-/// against the ranking documented in
-/// docs/refactor/modularity/source-model.md § 4's canonicalization-rules table:
-/// <see cref="None"/> &lt; <see cref="Low"/> &lt; <see cref="Medium"/> &lt; <see cref="High"/> &lt;
-/// <see cref="Exact"/>.
+/// <b>Declaration order is the ranking, guaranteed.</b> <see cref="None"/> &lt; <see cref="Low"/>
+/// &lt; <see cref="Medium"/> &lt; <see cref="High"/> &lt; <see cref="Exact"/> — this is the exact
+/// ranking documented in docs/refactor/modularity/source-model.md § 4's canonicalization-rules
+/// table, and ordinal comparison (<c>&lt;</c>/<c>&gt;</c>) against it is safe and intended, not an
+/// assumption to avoid. Pinned by
+/// <c>tests/DumpDetective.Tests/Unit/Sdk/IdentityTests.cs</c>'s
+/// <c>MatchFidelity_DeclarationOrderMatchesDocumentedRanking</c> — inserting or reordering a member
+/// anywhere but the correct rank position is a breaking change and must update that test. Prefer
+/// <see cref="MatchFidelityExtensions.Min"/> over inline comparisons for "take the weaker of two
+/// fidelities" (the exact recurring need once cross-source correlation code exists) so this
+/// guarantee has one central, named consumer instead of being re-derived ad hoc at every call site.
 /// </remarks>
 [JsonConverter(typeof(JsonStringEnumConverter<MatchFidelity>))]
 public enum MatchFidelity

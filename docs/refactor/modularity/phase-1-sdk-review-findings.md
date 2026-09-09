@@ -29,13 +29,17 @@ is severity first (P0, then P1), otherwise in the order below; reorder freely.
    `Core.Abstractions.IAnalyzer` and its 35 implementers are untouched, this only concerns the new
    SDK-side type).**
 
-2. **`MatchFidelity`'s doc contradicts the code that depends on it.** `Identity/MatchFidelity.cs`'s
-   remarks say ordinal ordering is "deliberately avoided as an assumption," but
-   `EntityCanonicalizer.NormalizeSignature` does `if (fidelity < worst) worst = fidelity;`, which
-   only works because declaration order happens to match the documented None→Exact ranking.
-   Inserting a new member anywhere but the end silently breaks this. Needs either an explicit,
-   test-pinned contract ("ordinal order IS the ranking, guaranteed") or a real ranking table instead
-   of `<`. **Status: Open.**
+2. ~~`MatchFidelity`'s doc contradicts the code that depends on it.~~ **Fixed 2026-09-10.** Flipped
+   the remarks from "avoid assuming ordinal order" to an affirmative, guaranteed contract (ordinal
+   order *is* the ranking), pinned by a new test —
+   `IdentityTests.MatchFidelity_DeclarationOrderMatchesDocumentedRanking` asserts
+   `Enum.GetValues<MatchFidelity>()` equals the exact documented sequence, so a future reorder/insert
+   fails loudly instead of silently miscomputing every downstream confidence cap. Added
+   `Identity/MatchFidelityExtensions.Min(this MatchFidelity, MatchFidelity)` as the one named,
+   doc-commented place that relies on the contract, and switched
+   `EntityCanonicalizer.NormalizeSignature`'s inline `if (fidelity < worst)` to use it — one
+   consumer instead of every future caller re-deriving "take the weaker fidelity" ad hoc. 25 SDK
+   unit tests pass (4 new); full suite 1220/1220 non-real-dump tests pass.
 
 3. **`EntityRef` subtypes use default record equality, including `Fidelity`.** Two `TypeRef`s with
    the same `CanonicalName` but different `Fidelity` are `!=` under default equality, even though

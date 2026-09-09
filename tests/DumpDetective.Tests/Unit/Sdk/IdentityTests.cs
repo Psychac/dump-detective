@@ -11,6 +11,29 @@ namespace DumpDetective.Tests.Unit.Sdk;
 
 public sealed class IdentityTests
 {
+    /// <summary>
+    /// Pins the exact declaration order MatchFidelity's own remarks claim is a guaranteed ranking
+    /// contract — see docs/refactor/modularity/phase-1-sdk-review-findings.md item 2. Reordering or
+    /// inserting a member anywhere but the correct rank position must fail this test, not silently
+    /// change what every fidelity comparison in the codebase means.
+    /// </summary>
+    [Fact]
+    public void MatchFidelity_DeclarationOrderMatchesDocumentedRanking()
+    {
+        Enum.GetValues<MatchFidelity>().Should().Equal(
+            MatchFidelity.None, MatchFidelity.Low, MatchFidelity.Medium, MatchFidelity.High, MatchFidelity.Exact);
+    }
+
+    [Theory]
+    [InlineData(MatchFidelity.None, MatchFidelity.Exact, MatchFidelity.None)]
+    [InlineData(MatchFidelity.High, MatchFidelity.Low, MatchFidelity.Low)]
+    [InlineData(MatchFidelity.Medium, MatchFidelity.Medium, MatchFidelity.Medium)]
+    public void MatchFidelityExtensions_Min_ReturnsWeakerFidelity(MatchFidelity a, MatchFidelity b, MatchFidelity expected)
+    {
+        a.Min(b).Should().Be(expected);
+        b.Min(a).Should().Be(expected);
+    }
+
     [Fact]
     public void TypeRef_JoinKey_IsCanonicalName()
     {

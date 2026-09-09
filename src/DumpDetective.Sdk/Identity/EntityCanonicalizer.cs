@@ -104,10 +104,7 @@ public static class EntityCanonicalizer
         {
             (string canonical, MatchFidelity fidelity) = CanonicalizeTypeName(parameterTypeNames[i]);
             canonicalParams[i] = canonical;
-            if (fidelity < worst)
-            {
-                worst = fidelity;
-            }
+            worst = worst.Min(fidelity);
         }
 
         return ($"({string.Join(",", canonicalParams)})", worst);

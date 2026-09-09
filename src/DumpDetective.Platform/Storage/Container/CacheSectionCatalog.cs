@@ -162,6 +162,15 @@ internal static class CacheSectionCatalog
         new(CacheSectionId.ReverseEdgeDegreeOverflow, "ReverseEdgeDegreeOverflow", CacheSectionRequirement.Conditional),
         new(CacheSectionId.ObjectGenerationRuns, "ObjectGenerationRuns", CacheSectionRequirement.Required),
         new(CacheSectionId.ReachableRowBitmap, "ReachableRowBitmap", CacheSectionRequirement.Conditional),
+        // Trace-artifact section, never written or expected by a dump build at all — see
+        // CacheSectionId.TraceMethods and docs/refactor/modularity/phase-6-trace-source.md.
+        // Conditional is the closest fit of the three requirement levels: unlike the documented
+        // Conditional reasons above (format-version gap, deterministic failure at scale), a dump
+        // container's permanent absence of this section isn't a degraded/partial build, it's simply
+        // the wrong artifact kind for it — but Required would break the dump-side cache-hit fast
+        // path for every dump ever built, and Unused's own doc ("no writer and no reader in current
+        // code") is inaccurate here, since DumpDetective.Sources.NetTrace has both.
+        new(CacheSectionId.TraceMethods, "TraceMethods", CacheSectionRequirement.Conditional),
     ];
 
     /// <summary>

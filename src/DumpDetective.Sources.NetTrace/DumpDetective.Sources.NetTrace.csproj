@@ -5,18 +5,16 @@
     <LangVersion>14.0</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <RootNamespace>DumpDetective.Platform</RootNamespace>
+    <RootNamespace>DumpDetective.Sources.NetTrace</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.IO.Hashing" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.2.2" />
     <ProjectReference Include="..\DumpDetective.Sdk\DumpDetective.Sdk.csproj" />
+    <ProjectReference Include="..\DumpDetective.Platform\DumpDetective.Platform.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="DumpDetective.Analysis" />
-    <InternalsVisibleTo Include="DumpDetective.Sources.NetTrace" />
     <InternalsVisibleTo Include="DumpDetective.Tests" />
   </ItemGroup>
 

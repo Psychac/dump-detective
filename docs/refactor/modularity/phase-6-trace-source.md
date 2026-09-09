@@ -42,6 +42,78 @@ side (actual *correlation* is Phase 7).
 
 ## Phase 6a — Trace Ingest
 
+### Status: first slice shipped 2026-09-09 — `trace.methods` only
+
+Per the discussion that started this phase (see
+[modularity-plan.md § 8](../modularity-plan.md#8-the-minimum-viable-unified-path--adopted-as-the-chosen-plan-2026-09-08)):
+concrete trace-ingest code first, `IArtifactSource`/`IIndexStorage` extracted later once real usage
+informs their shape, not designed in a vacuum first.
+
+**Only `.etl` (ETW) sample data exists in this environment — no `.nettrace` (EventPipe) sample
+anywhere**, the same two files already used for the Phase 1 spikes. `EventPipeEventSource` and
+`ETWTraceEventSource` are both `TraceEventDispatcher` subclasses sharing the identical
+callback-dispatch API, so `DumpDetective.Sources.NetTrace` is built generically against that shared
+base — same code path for both — and verified end-to-end against the real 912.1 MB `.etl`.
+`.nettrace` support is architecturally identical but **unverified against a real sample**, the same
+kind of gap and the same treatment as
+[modularity-plan.md § 10 point 3](../modularity-plan.md#10-external-review-2026-09-08--where-this-can-be-questioned)'s
+WCF/EF corpus gap: named, not silently assumed away.
+
+**Scoped down from the full section table before writing code**: building `trace.stacks` needs
+mapping raw instruction-pointer addresses (from stack-walk events) to the method owning that address
+range, which means building an address-range index from the method-load events — real, separate
+design work the raw-event-callback approach doesn't get for free (unlike `TraceLog`, which was
+rejected in Phase 1 for its 4.2×/2.73× memory/disk cost). `trace.methods` alone is fully buildable
+from event payloads with no address resolution at all — `MethodLoadVerbose` (JIT'd during the trace)
+and `MethodDCStartVerboseV2`/`MethodDCStopVerboseV2` (rundown, for methods already loaded when
+tracing started/ended — the exact case this doc's own Entity resolution section warns can be missing
+or truncated) all carry `MethodID`, `MethodStartAddress`, `MethodSize`, `MethodNamespace`,
+`MethodName`, `MethodSignature` directly as fields, verified against the decompiled TraceEvent
+package and against real captured data (`tools/MethodEventProbe`, kept in the tree alongside
+`EntityJoinSpike`/`TraceEventSpike` for future re-verification, e.g. against a real `.nettrace` once
+one exists). `trace.stacks` is deferred as its own next increment.
+
+**Shipped**: `src/DumpDetective.Sources.NetTrace/` (references `Sdk` + `Platform` +
+`Microsoft.Diagnostics.Tracing.TraceEvent`). `TraceMethodIndexer` streams the trace once via
+`source.Clr.MethodLoadVerbose`/`MethodDCStartVerboseV2`/`MethodDCStopVerboseV2`, dedupes by
+`MethodID` (bounded by distinct-method count, not event count — the same "orders of magnitude fewer
+distinct X than raw events" discipline already applied to stack interning), canonicalizes the
+declaring type via Phase 1's `EntityCanonicalizer`, and writes through `TraceMethodIndexWriter` into
+a `trace.methods` section. `TraceIndexBuilder` wraps this in `Platform`'s existing
+`CacheContainerWriter`/`TryWriteSection` — genuinely reusing the container machinery, not a bespoke
+format — which is the real point of having extracted it in Phase 2.
+
+**A real generalization question resolved simply**: reusing the container for a new artifact kind
+first looked like it needed making `CacheContainerWriter`/`Reader`/`CacheTocEntry` generic over the
+section-id type (touching ~40 existing declaration sites in `Analysis`). It doesn't — container
+files are already one-per-artifact, so a dump's `cache.bin` and a trace's own container file never
+collide, and section ids only need to be unique *within* one container. Added `CacheSectionId.TraceMethods`
+as one new member to the existing enum instead — the same "purely additive, no format-version bump"
+pattern already used a dozen times in that enum's own history — with a matching entry in
+`CacheSectionCatalog` (`Conditional`: a dump build never writes it, which the catalog's `Required`/
+`Unused` semantics don't fit). Zero changes to `CacheContainerWriter`/`Reader` or any of the ~40
+existing `Analysis`-side call sites.
+
+**A real, evidence-grounded fidelity call**: `IsDynamic`-flagged methods (real example from
+`tools/MethodEventProbe`: `IL_STUB_PInvoke` under the synthetic `dynamicClass` namespace — 2 of the
+first 5 real samples, not a rare case) get `MatchFidelity.None` directly from the trace event's own
+flag, rather than relying on `EntityCanonicalizer`'s documented gap (it cannot detect
+dynamic/reflection-emitted types from a name string alone). This is domain-specific knowledge applied
+at the ingest layer where the flag is available, not a fix to the generic canonicalizer, which still
+has no way to know this in general (e.g. for a dump-side name with no such flag).
+
+**Known, named simplification**: `MethodSignature` is stored as the raw IL-notation string (e.g.
+`"void  (value class System.Web.EtwTraceConfigType,int)"`, confirmed against real data), not parsed
+into individual canonicalized parameter types. That parsing is real IL-signature-grammar work,
+deferred rather than guessed at.
+
+**Verified**: end-to-end against the real 912.1 MB `.etl` — `TraceMethodIndexerRealTraceTests`
+(gated the same way as `[DiscrepancyFact]` real-dump tests, reusing `DD_RUN_DISCREPANCY_TESTS=1`
+rather than adding a second opt-in switch) builds a real container, reads it back through
+`CacheContainerReader`, and checks record uniqueness, non-empty names, and the `IsDynamic` →
+`MatchFidelity.None` case against real data. 24 s end to end (streaming, not dump-loading, so much
+faster than the real-dump test category it's gated alongside). Full suite: 1199 passed, 0 failed.
+
 ### Ingest
 
 **Library**: `Microsoft.Diagnostics.Tracing.TraceEvent` (`EventPipeEventSource` for streaming
@@ -94,7 +166,7 @@ off:
 
 | Section | Columns | Notes |
 |---|---|---|
-| `trace.methods` | methodId → `MethodRef` | Interned; the cross-source join table |
+| `trace.methods` | methodId → `MethodRef` | Interned; the cross-source join table. **Shipped 2026-09-09** — see Status above. Not yet "interned" in the dedicated `InternTable` sense (that type doesn't exist — Phase 2 confirmed no equivalent to extract); dedup here is a `HashSet<long>` of seen `MethodID`s during the single pass. |
 | `trace.types` | typeId → `TypeRef` | Interned |
 | `trace.stacks` | stackId → frame list (methodId[]) | Interned; stacks repeat heavily — dedup is the single biggest size win |
 | `trace.samples` | timestamp, threadId, stackId | The CPU sample stream; largest section |
@@ -135,8 +207,20 @@ That cross-source corpus is the most valuable test asset this phase produces.
 
 ### Phase 6a exit criteria
 
-- Multi-GB `.nettrace` indexes within bounded memory, streaming, in reasonable time.
-- Cross-source entity-resolution corpus exists, with a documented pass rate per entity kind.
+**Note (2026-09-09): these are the exit criteria for all of 6a; only `trace.methods` has shipped so
+far** (Index sections table above still lists 9 more). Marked below rather than silently left unmet.
+
+- ~~Multi-GB `.nettrace` indexes within bounded memory, streaming, in reasonable time.~~
+  **Partially verified** — streaming/single-pass confirmed for `.etl` against a real 912.1 MB
+  capture (24 s); `.nettrace` architecturally identical but unverified (no real sample available,
+  see Status above). "Multi-GB" itself not yet measured — 912.1 MB is the largest real sample on
+  hand.
+- ~~Cross-source entity-resolution corpus exists, with a documented pass rate per entity kind.~~
+  **Not yet done.** `trace.methods` proves the ingest+canonicalization pipeline runs end-to-end
+  against real trace data, but the actual dump↔trace join-rate corpus (pairing this trace output
+  against a dump of the same process, the way `tools/EntityJoinSpike` did for the Phase 1 spike)
+  hasn't been built yet — the next natural step once more sections exist to make the corpus worth
+  building.
 
 ---
 

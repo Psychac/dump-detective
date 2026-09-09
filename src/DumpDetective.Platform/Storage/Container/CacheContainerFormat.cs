@@ -219,6 +219,17 @@ internal enum CacheSectionId
     /// object column is monotonic by construction (O1).
     /// </summary>
     ReachableRowBitmap = 42,
+    /// <summary>
+    /// First trace-artifact section id (docs/refactor/modularity/phase-6-trace-source.md § Phase 6a
+    /// — "trace.methods"). Written to a trace's own container file, never a dump's — container files
+    /// are already one-per-artifact, so there is no collision risk sharing this id space rather than
+    /// generalizing the writer/reader to a pluggable section-id type: a dump container never writes
+    /// this id and a trace container never writes any of the ids above it. Fixed
+    /// <c>MethodId(8) | ModuleId(8) | StartAddress(8) | Size(4) | TypeToken(4) | Flags(4) |
+    /// DeclaringTypeCanonicalName(len-prefixed UTF-8) | Name(len-prefixed UTF-8) |
+    /// NormalizedSignature(len-prefixed UTF-8)</c> records, one per distinct JIT'd or rundown method.
+    /// </summary>
+    TraceMethods = 43,
 }
 
 /// <summary>

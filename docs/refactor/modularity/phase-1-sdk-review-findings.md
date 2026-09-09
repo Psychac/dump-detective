@@ -77,13 +77,18 @@ is severity first (P0, then P1), otherwise in the order below; reorder freely.
    differs by `JoinKey`, `ObjectRef` still differs by artifact despite same address). 1223/1223
    non-real-dump tests pass.
 
-4. **`IHeapDominatorQuery` bundles two data tiers that aren't co-available.** Gated behind one
-   capability (`heap.dominators`), but the real cache format has reachability as a **Stage A**
-   product and retained-size/immediate-dominator/thread-retention as **Stage B**
-   (`IRequiresDominatorTreeIndex`-gated, optional even when Stage A succeeds — see
-   `CacheSectionCatalog`'s own remarks). The interface forces all-or-nothing when the underlying
-   data doesn't. Split into `IHeapReachabilityQuery` (Stage A) + a narrower `IHeapDominatorQuery`
-   (Stage B). **Status: Open.**
+4. ~~`IHeapDominatorQuery` bundles two data tiers that aren't co-available.~~ **Fixed 2026-09-10.**
+   Split into `IHeapReachabilityQuery` (`IsReachableFromRoot` — Stage A, the reverse-edge index +
+   walk) and a narrowed `IHeapDominatorQuery` (`TryGetRetainedSize`/`TryGetImmediateDominator`/
+   `TryGetThreadRetainedSize` — Stage B, `IRequiresDominatorTreeIndex`-gated, optional even when
+   Stage A succeeds). New capability `heap.reachability` added alongside the existing
+   `heap.dominators` (now Stage-B-scoped only) — `capability-registry.json` bumped to 1.2.0. Also
+   corrected a stale note in `phase-1-full-extraction-retyping-plan.md`'s Tier-1 table that still
+   described the sync-blocks row as needing a new `heap.sync-blocks` capability, when it was
+   actually wired to the pre-existing `runtime.locks` back when finding item's neighbor (the
+   capability-vocabulary gap) was fixed. Additive, zero behavior change — no dump-side
+   implementation exists yet for either interface, so nothing consumed the old bundled shape to
+   migrate. 37/37 architecture+SDK tests pass; full suite 1223/1223 non-real-dump tests pass.
 
 5. **Positional records with adjacent same-typed parameters — transposition risk.**
    - `HeapRootRef(HeapRootKind Kind, ulong TargetAddress, ulong RootAddress, ...)` — swapping

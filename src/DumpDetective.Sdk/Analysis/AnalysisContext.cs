@@ -35,6 +35,7 @@ public sealed class AnalysisContext
     public IHeapTypeStatisticsQuery? HeapTypeStatistics { get; init; }
     public IHeapReferenceQuery? HeapReferences { get; init; }
     public IHeapReverseReferenceQuery? HeapReverseReferences { get; init; }
+    public IHeapReachabilityQuery? HeapReachability { get; init; }
     public IHeapDominatorQuery? HeapDominators { get; init; }
     public IRuntimeThreadQuery? RuntimeThreads { get; init; }
     public IRuntimeModuleQuery? RuntimeModules { get; init; }

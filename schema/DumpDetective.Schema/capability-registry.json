@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/capability-registry.json",
-  "registryVersion": "1.1.0",
+  "registryVersion": "1.2.0",
   "description": "Canonical capability vocabulary an artifact can provide and an analyzer can require or optionally use. Source of truth is src/DumpDetective.Sdk/Artifacts/CapabilityVocabulary.cs; this file is the checked-in, versioned mirror docs/refactor/modularity/phase-1-contracts-sdk.md calls for, validated against the code by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. See docs/refactor/modularity/source-model.md § 3.",
   "capabilities": {
     "heap.objects": { "group": "heap", "providedBy": "dump", "addedIn": "1.0.0" },
@@ -15,9 +15,13 @@
     "heap.statics": { "group": "heap", "providedBy": "dump", "addedIn": "1.0.0" },
     "heap.strings": { "group": "heap", "providedBy": "dump", "addedIn": "1.0.0" },
     "heap.finalizer-queue": { "group": "heap", "providedBy": "dump", "addedIn": "1.0.0" },
+    "heap.reachability": {
+      "group": "heap", "providedBy": "dump", "addedIn": "1.2.0",
+      "note": "Split out from heap.dominators in 1.2.0 (see phase-1-sdk-review-findings.md item 4): reachability-from-root is a Stage A product, independently gated from the Stage B dominator-tree build that heap.dominators covers. Backs IHeapReachabilityQuery (src/DumpDetective.Sdk/Analysis/); not yet consumed by any migrated analyzer."
+    },
     "heap.dominators": {
       "group": "heap", "providedBy": "dump", "addedIn": "1.1.0",
-      "note": "Covers retained size, immediate dominator, reachability, and thread retention as one capability, backed by the same Stage A/B dominator-tree build. Declared for the Tier-1 SDK surface (IHeapDominatorQuery, src/DumpDetective.Sdk/Analysis/) in phase-1-full-extraction-retyping-plan.md; not yet consumed by any migrated analyzer."
+      "note": "Covers retained size, immediate dominator, and thread retention as one capability, backed by the same Stage B dominator-tree build. Narrowed in 1.2.0 when reachability (a Stage A product, independently available) was split out to heap.reachability above. Declared for the Tier-1 SDK surface (IHeapDominatorQuery, src/DumpDetective.Sdk/Analysis/) in phase-1-full-extraction-retyping-plan.md; not yet consumed by any migrated analyzer."
     },
 
     "runtime.modules": { "group": "runtime", "providedBy": "dump", "addedIn": "1.0.0" },

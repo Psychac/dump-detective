@@ -23,9 +23,16 @@ public static class CapabilityVocabulary
     public const string HeapStrings = "heap.strings";
     public const string HeapFinalizerQueue = "heap.finalizer-queue";
 
-    /// <summary>Dominator-tree-derived facts (retained size, immediate dominator, reachability,
-    /// thread retention) — added 2026-09-09. Kept as one capability rather than four separate ones
-    /// since all are backed by the same Stage A/B build and gated together in practice; see
+    /// <summary>Reachability-from-root facts — added 2026-09-09, split out from
+    /// <see cref="HeapDominators"/> 2026-09-10 once it turned out to be backed by a genuinely
+    /// different, independently-gated build stage (Stage A, not Stage B); see
+    /// <see cref="Analysis.IHeapReachabilityQuery"/>'s own remarks.</summary>
+    public const string HeapReachability = "heap.reachability";
+
+    /// <summary>Dominator-tree-derived facts (retained size, immediate dominator, thread retention)
+    /// — added 2026-09-09, narrowed to Stage-B-only 2026-09-10 (reachability split out to
+    /// <see cref="HeapReachability"/> above). Kept as one capability rather than three since all
+    /// three are backed by the same Stage B build and gated together in practice; see
     /// <see cref="Analysis.IHeapDominatorQuery"/>'s own remarks.</summary>
     public const string HeapDominators = "heap.dominators";
 
@@ -65,7 +72,8 @@ public static class CapabilityVocabulary
     public static readonly IReadOnlySet<string> Known = new HashSet<string>(StringComparer.Ordinal)
     {
         HeapObjects, HeapTypes, HeapRoots, HeapReferences, HeapReverseReferences, HeapGenerations,
-        HeapSegments, HeapHandles, HeapStatics, HeapStrings, HeapFinalizerQueue, HeapDominators,
+        HeapSegments, HeapHandles, HeapStatics, HeapStrings, HeapFinalizerQueue,
+        HeapReachability, HeapDominators,
         RuntimeModules, RuntimeThreads, RuntimeStacks, RuntimeExceptions, RuntimeJit, RuntimeLocks,
         TraceCpuSamples, TraceGcEvents, TraceAllocSamples, TraceContentionEvents,
         TraceExceptionEvents, TraceThreadTimeline, TraceJitEvents, TraceHttpEvents, TraceCustomEvents,

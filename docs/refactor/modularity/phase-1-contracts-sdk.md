@@ -106,21 +106,27 @@ behavior change, matching Phase 0's own rule. First real consumer is Phase 6a.
   - Conformance enforced by
     `tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs` — this is
     migration step 7's registry-conformance half, previously blocked on the registries not existing.
-- **`Analysis/` Tier-1 skeleton shipped 2026-09-09** — `IAnalyzer.cs`, `AnalysisContext.cs`, the
-  three capability attributes, `HeapObjectRef.cs`, `AnalyzerProgressReport.cs`, and 13 capability-scoped
-  query interfaces (`IHeapObjectStream`, `IHeapObjectLookup`, `IHeapRootQuery`, `IHeapHandleQuery`,
-  `IHeapSegmentQuery`, `IHeapFinalizerQueueQuery`, `IHeapSyncBlockQuery`, `IHeapTypeStatisticsQuery`,
-  `IHeapReferenceQuery`, `IHeapReverseReferenceQuery`, `IHeapDominatorQuery`, `IRuntimeThreadQuery`,
-  `IRuntimeModuleQuery`, `IRuntimeJitQuery` — not in the original target-shape file list below, added
-  per the two-tier capability-surface design
+- **`Analysis/` Tier-1 skeleton shipped 2026-09-09, revised 2026-09-10** — `IAnalyzer.cs`,
+  `AnalysisContext.cs`, the three capability attributes, `HeapObjectRef.cs`,
+  `AnalyzerProgressReport.cs`, and 14 capability-scoped query interfaces (`IHeapObjectStream`,
+  `IHeapObjectLookup`, `IHeapRootQuery`, `IHeapHandleQuery`, `IHeapSegmentQuery`,
+  `IHeapFinalizerQueueQuery`, `IHeapSyncBlockQuery`, `IHeapTypeStatisticsQuery`,
+  `IHeapReferenceQuery`, `IHeapReverseReferenceQuery`, `IHeapReachabilityQuery`,
+  `IHeapDominatorQuery`, `IRuntimeThreadQuery`, `IRuntimeModuleQuery`, `IRuntimeJitQuery` — not in
+  the original target-shape file list below, added per the two-tier capability-surface design
   [phase-1-full-extraction-retyping-plan.md](phase-1-full-extraction-retyping-plan.md) worked out).
+  `IHeapReachabilityQuery` split out of what was originally a single `IHeapDominatorQuery` on
+  2026-09-10, per [phase-1-sdk-review-findings.md](phase-1-sdk-review-findings.md) item 4 — it
+  bundled a Stage A product (reachability) with Stage B ones (retained size, immediate dominator,
+  thread retention) that aren't actually co-available.
   **This is a new, parallel SDK-side contract, not the move the "Deferred" bullet immediately below
   describes** — `Core.Abstractions.IAnalyzer`/`Models.AnalysisContext` are untouched, no analyzer
   implements the new SDK `IAnalyzer` yet, and nothing in the existing pipeline references any of
   this. Purely additive, zero behavior change, verified by the full non-real-dump test suite passing
-  unchanged. Two capability-vocabulary items landed alongside it: `heap.dominators` (new) and
-  `runtime.locks` (already declared, previously unconsumed) — `capability-registry.json` bumped to
-  1.1.0. See the plan doc for what's still pending (dump-side implementations of these 13
+  unchanged. Capability-vocabulary items landed alongside it: `heap.dominators` (new, 2026-09-09,
+  narrowed 2026-09-10), `heap.reachability` (new, 2026-09-10), and `runtime.locks` (already declared,
+  previously unconsumed) — `capability-registry.json` now at 1.2.0. See the plan doc for what's
+  still pending (dump-side implementations of these 14
   interfaces, a legacy adapter, and the actual analyzer retyping — none of which are additive/safe
   the way this skeleton was, so none of it has started).
 
@@ -195,7 +201,8 @@ behavior change, matching Phase 0's own rule. First real consumer is Phase 6a.
       HeapObjectRef.cs  AnalyzerProgressReport.cs      -- not in the original list, added with the skeleton
       IHeapObjectStream.cs  IHeapObjectLookup.cs  IHeapRootQuery.cs  IHeapHandleQuery.cs
       IHeapSegmentQuery.cs  IHeapFinalizerQueueQuery.cs  IHeapSyncBlockQuery.cs
-      IHeapTypeStatisticsQuery.cs  IHeapReferenceQuery.cs  IHeapDominatorQuery.cs
+      IHeapTypeStatisticsQuery.cs  IHeapReferenceQuery.cs
+      IHeapReachabilityQuery.cs  IHeapDominatorQuery.cs   -- split 2026-09-10, see Status above
       IRuntimeThreadQuery.cs  IRuntimeModuleQuery.cs  IRuntimeJitQuery.cs
     Synthesis/
       ISynthesisRule.cs  Finding.cs  ConfidenceBreakdown.cs

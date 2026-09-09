@@ -48,10 +48,11 @@ existing `CapabilityVocabulary` entry:
 | `IHeapHandleQuery` | `heap.handles` | `.EnumerateHandles()` |
 | `IHeapSegmentQuery` | `heap.segments` | `heap.GetSegmentByAddress()`, `SegmentKindMapper` |
 | `IHeapFinalizerQueueQuery` | `heap.finalizer-queue` | `heap.EnumerateFinalizableObjects()` |
-| `IHeapSyncBlockQuery` | **`heap.sync-blocks` — missing from `CapabilityVocabulary` today, must be added** | `heap.EnumerateSyncBlocks()` (`LockGraphAnalyzer`) |
+| `IHeapSyncBlockQuery` | `runtime.locks` — already declared, unconsumed until this surface (not a new `heap.sync-blocks`; see the "New SDK types" section below) | `heap.EnumerateSyncBlocks()` (`LockGraphAnalyzer`) |
 | `IHeapTypeStatisticsQuery` | `heap.types` | `GetOrBuildTypeStatistics`, `TryGetDistinctMethodTables`, `TryGetGlobalSizeBuckets` |
 | `IHeapReferenceQuery` / `IHeapReverseReferenceQuery` | `heap.references` / `heap.reverse-references` | `TryGetForwardIndexProvider`/`TryGetReverseIndexProvider`, re-signed to take `ulong`/`TypeRef` instead of `ClrHeap` |
-| `IHeapDominatorQuery` | (new capability needed, e.g. `heap.dominators`) | `TryGetDominatorTreeProvider`, `TryGetReachableAddressProvider`, `TryGetThreadRetentionProvider` |
+| `IHeapReachabilityQuery` | `heap.reachability` (new, split from `heap.dominators` 2026-09-10 — see [phase-1-sdk-review-findings.md](phase-1-sdk-review-findings.md) item 4) | `TryGetReachableAddressProvider` — a Stage A product, independently gated from Stage B below |
+| `IHeapDominatorQuery` | `heap.dominators` (new capability, narrowed 2026-09-10 to Stage B only) | `TryGetDominatorTreeProvider`, `TryGetThreadRetentionProvider` |
 | `IRuntimeThreadQuery` | `runtime.threads` | `Runtime.Threads`, thread-stack-root counting |
 | `IRuntimeModuleQuery` | `runtime.modules` | `Runtime.AppDomains`/module enumeration |
 | `IRuntimeJitQuery` | `runtime.jit` | `Runtime.EnumerateJitManagers()` |

@@ -15,6 +15,18 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## 1.2.0 — 2026-09-10
+
+Splits `heap.dominators` into `heap.dominators` (narrowed to retained size/immediate
+dominator/thread retention) and new `heap.reachability` — a
+[Phase 1 SDK review](../../docs/refactor/modularity/phase-1-sdk-review-findings.md) finding (item 4)
+that 1.1.0's single capability bundled two independently-gated build stages: reachability is a
+Stage A product, the rest of `heap.dominators` is Stage B (gated on an analyzer implementing
+`IRequiresDominatorTreeIndex`, optional even when Stage A succeeds). A session where Stage A
+succeeded but Stage B didn't had no way to expose reachability alone under the old shape. Backs the
+new `IHeapReachabilityQuery` interface alongside a narrowed `IHeapDominatorQuery`
+(`src/DumpDetective.Sdk/Analysis/`). Additive, zero behavior change, no existing analyzer touched.
+
 ## 1.1.0 — 2026-09-09
 
 Adds `heap.dominators` (new — retained size/immediate dominator/reachability/thread retention as

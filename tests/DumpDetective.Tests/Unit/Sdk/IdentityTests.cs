@@ -83,6 +83,68 @@ public sealed class IdentityTests
         refA.JoinKey.Should().NotBe(refB.JoinKey);
     }
 
+    /// <summary>
+    /// Guards docs/refactor/modularity/phase-1-sdk-review-findings.md item 3: default record
+    /// equality would compare every field (CanonicalName, MethodTable, TypeToken, Module, Fidelity),
+    /// so a dump-side and trace-side <see cref="TypeRef"/> for the exact same type — same
+    /// <see cref="TypeRef.JoinKey"/>, different source-local handles, possibly different
+    /// <see cref="MatchFidelity"/> — would never be <c>==</c>. That defeats the entire point of
+    /// <see cref="EntityRef"/>: finding matching entities across sources.
+    /// </summary>
+    [Fact]
+    public void TypeRef_Equality_IgnoresFidelityAndSourceLocalHandles()
+    {
+        var dumpSide = new TypeRef
+        {
+            CanonicalName = "System.String",
+            Fidelity = MatchFidelity.Exact,
+            MethodTable = 0x7ffabc,
+            TypeToken = null,
+            Module = new ModuleRef { SimpleName = "System.Private.CoreLib", Fidelity = MatchFidelity.Exact },
+        };
+        var traceSide = new TypeRef
+        {
+            CanonicalName = "System.String",
+            Fidelity = MatchFidelity.High,
+            MethodTable = null,
+            TypeToken = 0x02000123,
+            Module = null,
+        };
+
+        dumpSide.Equals(traceSide).Should().BeTrue();
+        (dumpSide == traceSide).Should().BeTrue();
+        dumpSide.GetHashCode().Should().Be(traceSide.GetHashCode());
+
+        // The same two instances, compared through their common base type, must agree with the
+        // typed comparison above — static-type-dependent equality would be its own trap.
+        EntityRef dumpSideAsEntityRef = dumpSide;
+        EntityRef traceSideAsEntityRef = traceSide;
+        dumpSideAsEntityRef.Equals(traceSideAsEntityRef).Should().BeTrue();
+        (dumpSideAsEntityRef == traceSideAsEntityRef).Should().BeTrue();
+    }
+
+    [Fact]
+    public void TypeRef_Equality_StillDiffersByCanonicalName()
+    {
+        var a = new TypeRef { CanonicalName = "System.String", Fidelity = MatchFidelity.Exact };
+        var b = new TypeRef { CanonicalName = "System.Int32", Fidelity = MatchFidelity.Exact };
+
+        a.Equals(b).Should().BeFalse();
+        ((EntityRef)a == (EntityRef)b).Should().BeFalse();
+    }
+
+    [Fact]
+    public void ObjectRef_Equality_StillDiffersByArtifactDespiteSameAddress()
+    {
+        // ObjectRef is the one subtype where JoinKey already includes everything the type carries
+        // (Address + Artifact) — nothing extra to exclude, but it still needs its own override (see
+        // EntityRef.Equals's remarks on why every subtype must re-declare it).
+        var refA = new ObjectRef { Address = 0x1000, Artifact = new ArtifactId("dump-a"), Fidelity = MatchFidelity.Exact };
+        var refB = new ObjectRef { Address = 0x1000, Artifact = new ArtifactId("dump-b"), Fidelity = MatchFidelity.Exact };
+
+        refA.Equals(refB).Should().BeFalse();
+    }
+
     [Fact]
     public void MatchFidelity_IsOrderedWorstToBestForMinComparisons()
     {

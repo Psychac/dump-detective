@@ -36,4 +36,29 @@ public abstract record EntityRef
 
     /// <summary>How trustworthy <see cref="JoinKey"/> is for this specific entity.</summary>
     public required MatchFidelity Fidelity { get; init; }
+
+    /// <summary>
+    /// Identity equality — <see cref="Kind"/> + <see cref="JoinKey"/> only. Deliberately excludes
+    /// every source-local handle (a dump's <c>MethodTable</c>, a trace's <c>TypeToken</c>, ...) and
+    /// <see cref="Fidelity"/> itself: per source-model.md § 4, "JoinKey is the canonical
+    /// cross-source identity; [handles] are carried along for drill-down but never used for
+    /// joining," and Fidelity is a trust rating *of* the identity, not part of it — two refs to the
+    /// same entity resolved with different fidelity are still the same entity. Without this
+    /// override, default record equality compares every field, so a dump-side and trace-side
+    /// <see cref="TypeRef"/> for the exact same type are never <c>==</c> (their <c>MethodTable</c>/
+    /// <c>TypeToken</c> are never both populated), which defeats the one thing <c>EntityRef</c>
+    /// exists to make possible: <c>Dictionary&lt;EntityRef,_&gt;</c>/<c>GroupBy</c>/<c>Distinct</c>
+    /// finding matching entities across sources. See
+    /// docs/refactor/modularity/phase-1-sdk-review-findings.md item 3.
+    /// </summary>
+    /// <remarks>
+    /// Every sealed subtype must re-declare this exact override (records generate a separate typed
+    /// <c>Equals</c>/<c>GetHashCode</c> pair at each level of the hierarchy; a derived record does
+    /// not inherit a base's override as its own), delegating back to this implementation so the
+    /// actual comparison logic lives in exactly one place. See each subtype's own two-line override
+    /// for the pattern.
+    /// </remarks>
+    public virtual bool Equals(EntityRef? other) => other is not null && Kind == other.Kind && JoinKey == other.JoinKey;
+
+    public override int GetHashCode() => HashCode.Combine(Kind, JoinKey);
 }

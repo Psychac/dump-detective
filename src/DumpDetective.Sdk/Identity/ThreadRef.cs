@@ -15,4 +15,10 @@ public sealed record ThreadRef : EntityRef
     public int? ManagedThreadId { get; init; }
 
     public override string JoinKey => OsThreadId.ToString();
+
+    /// <summary>Delegates to <see cref="EntityRef.Equals(EntityRef?)"/> — see its remarks for why
+    /// <see cref="ManagedThreadId"/> is deliberately excluded from equality.</summary>
+    public bool Equals(ThreadRef? other) => base.Equals(other);
+
+    public override int GetHashCode() => base.GetHashCode();
 }

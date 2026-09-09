@@ -16,4 +16,10 @@ public sealed record ModuleRef : EntityRef
     public ulong? ModuleAddress { get; init; }
 
     public override string JoinKey => SimpleName;
+
+    /// <summary>Delegates to <see cref="EntityRef.Equals(EntityRef?)"/> — see its remarks for why
+    /// <see cref="ModuleAddress"/> is deliberately excluded from equality.</summary>
+    public bool Equals(ModuleRef? other) => base.Equals(other);
+
+    public override int GetHashCode() => base.GetHashCode();
 }

@@ -23,4 +23,11 @@ public sealed record MethodRef : EntityRef
     public int? MethodToken { get; init; }
 
     public override string JoinKey => $"{DeclaringType.JoinKey}::{Name}{NormalizedSignature}";
+
+    /// <summary>Delegates to <see cref="EntityRef.Equals(EntityRef?)"/> — see its remarks for why
+    /// <see cref="MethodDesc"/>/<see cref="MethodToken"/> are deliberately excluded from
+    /// equality.</summary>
+    public bool Equals(MethodRef? other) => base.Equals(other);
+
+    public override int GetHashCode() => base.GetHashCode();
 }

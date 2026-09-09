@@ -41,12 +41,41 @@ is severity first (P0, then P1), otherwise in the order below; reorder freely.
    consumer instead of every future caller re-deriving "take the weaker fidelity" ad hoc. 25 SDK
    unit tests pass (4 new); full suite 1220/1220 non-real-dump tests pass.
 
-3. **`EntityRef` subtypes use default record equality, including `Fidelity`.** Two `TypeRef`s with
-   the same `CanonicalName` but different `Fidelity` are `!=` under default equality, even though
-   they're the same identity by `JoinKey`. Nothing overrides `Equals`/`GetHashCode` to key off
-   `JoinKey`. A future `Dictionary<EntityRef,_>`/`GroupBy`/`Distinct` (exactly what correlation code
-   will do) will silently double-count entities resolved through two paths with different fidelity.
-   **Status: Open.**
+3. ~~`EntityRef` subtypes use default record equality, including `Fidelity`.~~ **Fixed 2026-09-10.**
+   Turned out worse than originally scoped once implemented: default equality also compares
+   source-local handles (`MethodTable`/`TypeToken` for `TypeRef`, etc.), which are essentially
+   *never* both populated across a dump-side and trace-side ref for the same real entity — so
+   `EntityRef` couldn't correctly identify the same entity across sources at all, not just in the
+   fidelity-mismatch edge case originally described.
+   
+   Added `virtual bool Equals(EntityRef? other)` + `override GetHashCode()` on `EntityRef` itself,
+   comparing `Kind`+`JoinKey` only (per source-model.md § 4: handles are "carried along for
+   drill-down but never used for joining"; `Fidelity` is a trust rating *of* the identity, not part
+   of it). Every sealed subtype (`TypeRef`, `MethodRef`, `ModuleRef`, `ThreadRef`, `ObjectRef`) needed
+   its own two-line override too — C# records generate a separate typed `Equals`/`GetHashCode` pair
+   at *each* level of a record hierarchy; a derived record doesn't inherit a base's override as its
+   own, so without this every subtype would still silently fall back to comparing its own extra
+   fields even with the base fixed.
+   
+   **Real bug caught by the tests written for this fix, not by inspection**: the first version
+   delegated via `Equals((EntityRef?)other)` from each subtype, which — because `Equals(EntityRef?)`
+   is virtual and the compiler *also* synthesizes a derived-level override of it (to support
+   polymorphic `EqualityContract` comparison) that calls back down into the subtype's own typed
+   `Equals` — recursed infinitely and stack-overflowed the test host on the very first equality
+   check. Fixed by calling `base.Equals(other)` (non-virtual dispatch straight to `EntityRef`'s
+   implementation) instead. Left as a permanent reminder in this item that "should obviously work"
+   record-inheritance equality patterns need a real test, not a read-through, before trusting them —
+   exactly the kind of thing this review pass exists to catch, just recursively, in fixing its own
+   fix.
+   
+   Also required `override GetHashCode() => base.GetHashCode();` in every subtype, not just the
+   base: without it, each derived record's auto-generated `GetHashCode` would fold in its own extra
+   fields on top of the base's, breaking the fundamental `Equals ⟹ same GetHashCode` contract for
+   exactly the cases this fix exists to make equal.
+   
+   3 new tests (cross-source equality ignoring handles/fidelity + hash-code consistency, still
+   differs by `JoinKey`, `ObjectRef` still differs by artifact despite same address). 1223/1223
+   non-real-dump tests pass.
 
 4. **`IHeapDominatorQuery` bundles two data tiers that aren't co-available.** Gated behind one
    capability (`heap.dominators`), but the real cache format has reachability as a **Stage A**

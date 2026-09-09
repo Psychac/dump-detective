@@ -18,4 +18,12 @@ public sealed record ObjectRef : EntityRef
     public required ArtifactId Artifact { get; init; }
 
     public override string JoinKey => $"{Artifact.Value}:0x{Address:X}";
+
+    /// <summary>Delegates to <see cref="EntityRef.Equals(EntityRef?)"/>. Unlike the other subtypes
+    /// this doesn't exclude anything extra — <see cref="Address"/>/<see cref="Artifact"/> are
+    /// already exactly what <see cref="JoinKey"/> is built from — but every subtype must still
+    /// re-declare the override; see the base's remarks.</summary>
+    public bool Equals(ObjectRef? other) => base.Equals(other);
+
+    public override int GetHashCode() => base.GetHashCode();
 }

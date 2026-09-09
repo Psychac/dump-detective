@@ -21,4 +21,11 @@ public sealed record TypeRef : EntityRef
     public ModuleRef? Module { get; init; }
 
     public override string JoinKey => CanonicalName;
+
+    /// <summary>Delegates to <see cref="EntityRef.Equals(EntityRef?)"/> — see its remarks for why
+    /// <see cref="MethodTable"/>/<see cref="TypeToken"/>/<see cref="Module"/> are deliberately
+    /// excluded from equality.</summary>
+    public bool Equals(TypeRef? other) => base.Equals(other);
+
+    public override int GetHashCode() => base.GetHashCode();
 }

@@ -266,9 +266,18 @@ is severity first (P0, then P1), otherwise in the order below; reorder freely.
       `ArtifactDescriptor` is worth keeping as forward-looking scaffolding for when Phase 2/4 build
       real artifact discovery, or whether it's premature and should be reconsidered/removed, is a
       real open question — bigger than this finding, not resolved here.
-16. `ObservationQuery.AdditionalPredicate` is a raw `Func<Observation,bool>?` — already flagged as
+16. ~~`ObservationQuery.AdditionalPredicate` is a raw `Func<Observation,bool>?` — already flagged as
     first-cut, but concretely: can't be validated at plugin-discovery time or survive an ALC
-    boundary (Phase 9). Blocks those phases until replaced with something declarative.
+    boundary (Phase 9). Blocks those phases until replaced with something declarative.~~ **Resolved
+    2026-09-10 — left as-is, consequence made explicit rather than fixed.** Checked usage first:
+    `ISynthesisRule` has zero real implementations anywhere (Phase 5 doesn't exist yet), so there is
+    no real synthesis rule to design a declarative replacement against — same situation as findings
+    3/15, and guessing at a grammar without a real consumer risks building the wrong one, which the
+    type's own doc comment already correctly avoided claiming to have solved. Added a concrete
+    remark to `AdditionalPredicate` itself naming the real cost plainly (can't be inspected at
+    plugin-discovery time, can't cross an `AssemblyLoadContext` boundary) so Phase 5's rule authoring
+    and Phase 9's isolation work hit this directly instead of rediscovering it as a surprise.
+    Documentation-only, no shape change — no `SdkVersion` bump.
 17. `EntityRef.JoinKey`'s base contract says "cross-source-comparable" — `ObjectRef.JoinKey`
     explicitly is not (artifact-scoped, by its own doc). Same member name/contract meaning
     different things per subtype; nothing breaks today only because the values never happen to

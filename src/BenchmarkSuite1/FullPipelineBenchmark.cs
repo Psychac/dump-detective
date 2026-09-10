@@ -86,7 +86,7 @@ public class FullPipelineBenchmark
         _pipeline = new AnalysisPipeline(new IAnalyzer[]
         {
             new MemoryAnalyzer(),
-            new GCGenerationAnalyzer(),
+            new GCGenerationAnalyzerLegacyAdapter(),
             new HeapTopologyAnalyzer(),
             new ModuleAnalyzer(),
             new CrashAnalyzer(),

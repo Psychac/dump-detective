@@ -155,14 +155,65 @@ found no phase owns. Concrete sequencing:
 2. **Build one bridging adapter**, e.g. `LegacyAnalyzerAdapter : Core.Abstractions.IAnalyzer`,
    wrapping an `Sdk.Analysis.IAnalyzer` and translating the old `AnalysisContext` into the new one
    per call. This lets the existing pipeline run a new-style analyzer with zero pipeline changes,
-   so step 3's pilot doesn't also have to prove pipeline-wiring changes at the same time.
-3. **Pilot: migrate exactly one Tier-1-only analyzer.** Recommend `GCGenerationAnalyzer` — smallest
-   Tier-1-only file, two `heap.GetTypeByMethodTable` calls, no field introspection, no dependency on
-   any other analyzer. Gate: existing golden/characterization tests for it must pass byte-identical
-   before/after (Phase 0's tightened per-branch-coverage exit criterion already requires this
-   analyzer have that coverage). This is a real, if small, production-behavior change and is the
-   right place to pause and confirm the pattern before committing to the other 34 — **not** a change
-   to make in the same sweep as step 1's additive work.
+   so step 3's pilot doesn't also have to prove pipeline-wiring changes at the same time. **Done
+   2026-09-10** — see pilot notes below; `LegacyAnalyzerAdapter<TSdkAnalyzer>` lives in
+   `DumpDetective.Analysis/Sdk/`.
+3. **Pilot: migrate exactly one Tier-1-only analyzer. Done 2026-09-10 — `GCGenerationAnalyzer`.**
+   The original "two `heap.GetTypeByMethodTable` calls, no field introspection" premise turned out
+   wrong on inspection — checking six of the eleven Tier-1-only candidates
+   (`GCGenerationAnalyzer`, `GCHandleAnalyzer`, `FinalizableObjectAnalyzer`, `ModuleAnalyzer`,
+   `JitAnalyzer`, `SegmentReservationAnalyzer`) found every one needs data richer than the shipped
+   Tier-1 interfaces exposed (generation-segmented per-type counts, dominator retained bytes,
+   root-path search, AppDomain/module cross-referencing, or per-thread JIT stack walks) — there was
+   no analyzer that migrates "for free." Proceeded with `GCGenerationAnalyzer` anyway since the
+   gap was already fully field-mapped. What actually shipped, beyond what this plan anticipated:
+   - **`IHeapTypeStatisticsQuery`/`HeapTypeStatistics` extended**, not just implemented: added
+     `Gen0Count`/`Gen1Count`/`Gen2Count`/`LohCount`/`LohSize`/`Gen2TotalSize`/`IsFinalizableType`
+     per type, a `HasExactGenerationData` flag (mirrors the old fast-index-vs-fallback fork), and
+     `GetExactGenerationByteTotals()` (segment-based, always available). Sized to exactly what
+     `GCGenerationAnalyzer` measurably needed, not speculatively further.
+   - **`Sdk.Analysis.AnalysisContext` gained `AnalyzerOptions` (`object?`)** — a single untyped
+     slot for an analyzer's own options record, since `AnalysisOptions` deliberately wasn't ported
+     (see that type's own remarks). One slot, not a keyed bag — only one analyzer needs it so far.
+   - **The `AnalyzerDomainResult` hand-off question `Sdk.Analysis.IAnalyzer`'s own remarks left
+     open — SDK's `AnalyzeAsync` returns bare `ValueTask`, and the SDK can't reference
+     `AnalyzerDomainResult` at all — got its answer**: a legacy-bridge-only
+     `IProducesAnalyzerDomainResult` interface (`DumpDetective.Analysis/Sdk/`, not part of the SDK)
+     that a migrated analyzer implements alongside `Sdk.Analysis.IAnalyzer`, setting `LastResult` as
+     the last step of `AnalyzeAsync`; `LegacyAnalyzerAdapter` reads it back out. Retires once Phase 5
+     gives analyzers a real way to report results.
+   - **Dump-side `heap.types` implementation** (`HeapTypeStatisticsQuery`) lives in
+     `DumpDetective.Analysis/Sdk/`, not a `Sources.ClrDump` project — that project doesn't exist yet;
+     written to move unchanged once it does. `DumpDetective.Analysis` now references
+     `DumpDetective.Sdk` (updated `DependencyDirectionTests`).
+   - **Every per-analyzer subclass (`LegacyAnalyzerAdapter<TSdkAnalyzer>` and
+     `IProducesAnalyzerDomainResult`) had to be made public, not internal** — `AnalyzerBenchmarkBase<T>`'s
+     `where T : IAnalyzer, new()` constraint needs a public parameterless constructor on the concrete
+     adapter subclass, which forces its base and the base's own generic constraints to be at least as
+     accessible (CS0060/CS0703). Affects every future per-analyzer adapter the same way.
+   - **Known, accepted gap, documented on the type itself, not fixed speculatively**: the index-path
+     dictionary is keyed by resolved type *name*, not `MethodTable` — two distinct method tables
+     resolving to the same display name would collide (last write wins). Rare, unexercised by the
+     characterization test, left for a real dump to surface if it ever does.
+   - **Gate met**: no prior per-analyzer unit test existed for `GCGenerationAnalyzer` to diff
+     against, so a new one was written —
+     `tests/.../GCGenerationAnalyzerRetypingCharacterizationTests.cs`, covering both the
+     fast (exact-generation) and fallback paths, hand-computing expected arithmetic from injected
+     fixture data (real method tables from a live self-attached test-process heap, per the existing
+     `LiveHeapSnapshotFixture`/`AnalysisPipelineTests.InjectHeapIndex` patterns) rather than diffing
+     against the old implementation, which no longer exists in-tree to diff against. Full
+     non-real-dump suite (1229 tests) passes unchanged.
+   - Call sites updated: `DefaultAnalyzerFeatureModuleCatalog`, `GCGenerationAnalyzerBenchmark`,
+     `FullPipelineBenchmark`, `SmallDumpLatencyBenchmark` all now construct
+     `GCGenerationAnalyzerLegacyAdapter`, never `GCGenerationAnalyzer` directly.
+   - **Real-dump verification (step 5 below) done 2026-09-10** — new `[DiscrepancyFact]`
+     `GCGenerationAnalyzerRealDumpTests` (one dump, foreground, per the project's one-at-a-time
+     real-dump rule) runs the adapter through a real `HeapAnalysisCache.PrebuildHeapIndex` scan of
+     the 3.5 GB `Crash_IIS_BALTSTPRD` reference dump — hundreds of thousands of distinct real types,
+     not the synthetic 3-type fixture above. Passed in 42s: index-backed (non-fallback) path taken,
+     no exceptions, internally consistent output (`SohTotal` identity, LOH-sorted-descending,
+     `FinalizableGen2Count`/`Bytes` cross-checked against the per-type profile list). Step 3 (pilot)
+     is now fully closed, including its real-dump gate.
 4. **Batch the remaining 34, Tier-1-only first, 3–5 analyzers per batch/session**, each batch gated
    the same way as the pilot. Tier-1+Tier-2 analyzers wait until the `dump.object-fields` escape
    hatch (Tier 2) exists — build that once the first Tier-1+Tier-2 analyzer is reached, not

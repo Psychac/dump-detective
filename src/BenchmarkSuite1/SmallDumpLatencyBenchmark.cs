@@ -78,7 +78,7 @@ public class SmallDumpLatencyBenchmark
         var pipeline = new AnalysisPipeline(new IAnalyzer[]
         {
             new MemoryAnalyzer(),
-            new GCGenerationAnalyzer(),
+            new GCGenerationAnalyzerLegacyAdapter(),
             new HeapTopologyAnalyzer(),
             new ModuleAnalyzer(),
             new CrashAnalyzer(),

@@ -17,7 +17,7 @@ one mistake that's genuinely expensive to undo.
 Establish a small, stable, source-neutral contract surface that any artifact source, any analyzer,
 and any consumer can target without knowing that dumps exist.
 
-## Status: trimmed pass shipped 2026-09-08; schemas/registries + Tier-1 Analysis/ skeleton added 2026-09-09, per § 8's minimum-viable path
+## Status: trimmed pass shipped 2026-09-08; schemas/registries + Tier-1 Analysis/ skeleton added 2026-09-09, per § 8's minimum-viable path; retyping pilot (`GCGenerationAnalyzer`) shipped 2026-09-10 — see [phase-1-full-extraction-retyping-plan.md](phase-1-full-extraction-retyping-plan.md) step 3
 
 Per [modularity-plan.md § 8](../modularity-plan.md#8-the-minimum-viable-unified-path--adopted-as-the-chosen-plan-2026-09-08)
 (adopted, see [§ 10 point 7](../modularity-plan.md#10-external-review-2026-09-08--where-this-can-be-questioned)):

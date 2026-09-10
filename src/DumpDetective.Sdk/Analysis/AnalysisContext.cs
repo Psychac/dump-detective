@@ -12,12 +12,12 @@ namespace DumpDetective.Sdk.Analysis;
 /// should already have made non-surprising by the time <c>AnalyzeAsync</c> runs.
 /// </summary>
 /// <remarks>
-/// Deliberately does not yet carry <c>AnalysisOptions</c>/<c>DiagnosticsOptions</c>/
-/// <c>IAnalysisDiagnosticsSink</c>. <c>Core.Options.AnalysisOptions</c> is a 23-sub-record,
-/// reflection-keyed options bag tied to every individual analyzer's own option type — mirroring it
-/// wholesale here would mean porting 23 more types on a guess, not a measured need. Left out until
-/// the pilot/batch retyping migration shows exactly what a capability-scoped analyzer actually needs
-/// from it, per this project's hard-need-basis convention.
+/// Deliberately does not carry <c>DiagnosticsOptions</c>/<c>IAnalysisDiagnosticsSink</c>, and does
+/// not mirror <c>Core.Options.AnalysisOptions</c>'s 23-sub-record, reflection-keyed shape wholesale
+/// — that would mean porting 23 more types on a guess, not a measured need. What the pilot
+/// (<c>GCGenerationAnalyzer</c>, docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md)
+/// did measurably need is a way for an analyzer to receive its own narrowly-typed options record:
+/// see <see cref="AnalyzerOptions"/>.
 ///
 /// <b>Fixed named properties, not a generic <c>TryGetCapability&lt;T&gt;()</c> resolver — considered
 /// and rejected 2026-09-10</b> (docs/refactor/modularity/phase-1-sdk-review-findings.md item 12).
@@ -42,6 +42,17 @@ public sealed class AnalysisContext
     public required IObservationSink Observations { get; init; }
 
     public IProgress<AnalyzerProgressReport>? Progress { get; set; }
+
+    /// <summary>
+    /// This analyzer's own options record, or <c>null</c> when it declares none. Untyped —
+    /// analyzer-specific option types live outside the SDK (today, in <c>Core.Options</c>, which the
+    /// SDK cannot reference) — the analyzer casts to its own known type. Deliberately a single slot,
+    /// not a keyed bag: only one analyzer needs this so far (the pilot), and a real multi-analyzer
+    /// options registry would be speculative design ahead of a second measured need. Revisit once
+    /// the batch migration (phase-1-full-extraction-retyping-plan.md) shows what a shared shape
+    /// should look like.
+    /// </summary>
+    public object? AnalyzerOptions { get; init; }
 
     public IHeapObjectStream? HeapObjects { get; init; }
     public IHeapObjectLookup? HeapObjectLookup { get; init; }

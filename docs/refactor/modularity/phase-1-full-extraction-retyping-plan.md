@@ -639,7 +639,7 @@ found no phase owns. Concrete sequencing:
    the same way `GCRootAnalyzerLegacyAdapter` already carries `IRequiresDominatorTreeIndex`), and
    re-checking the other three quartet members' full source (not just grepping them) found two more
    tier-split corrections: `LockGraphAnalyzer` and `ThreadStackClusterAnalyzer` are actually Tier-1
-   only, both retyped 2026-09-11 (see the thread-quartet plan's §§7–8). `ThreadAnalyzer` itself was
+   only, both retyped 2026-09-11 (see the thread-quartet plan's §§5–6). `ThreadAnalyzer` itself was
    re-checked too, resolving the thread-quartet plan's own open question: `ClrException.Message`
    (reflected via ilspycmd, not guessed) reads a raw field offset off the exception object, making it
    genuinely Tier 2 — and `ThreadAnalyzer` uses exactly that, in `ThreadExceptionSnapshot.ExceptionMessage`.

@@ -221,10 +221,20 @@ is severity first (P0, then P1), otherwise in the order below; reorder freely.
     `IHeapFinalizerQueueQuery`, `IHeapSyncBlockQuery`, `IHeapReferenceQuery`/
     `IHeapReverseReferenceQuery`, `IRuntimeThreadQuery`, `IRuntimeModuleQuery`, `IRuntimeJitQuery`).
     Documentation-only, no shape change — no `SdkVersion` bump.
-14. `CapabilityVocabulary.Known` is hand-maintained (const + separately-listed set) — the exact
-    drift risk hit firsthand adding `HeapDominators`. Reflection-populating `Known` would make
-    drift structurally impossible instead of relying on `SdkRegistryConformanceTests` to catch it
-    after the fact.
+14. ~~`CapabilityVocabulary.Known` is hand-maintained (const + separately-listed set) — the exact
+    drift risk hit firsthand adding `HeapDominators`.~~ **Fixed 2026-09-10.** Considered a source
+    generator and a Roslyn analyzer first — both rejected as disproportionate ceremony for one
+    ~30-member class (the right tool if this exact pattern needed repeating across many types, not
+    here). `Known` now reflects over the class's own `const string` fields
+    (`IsLiteral` + `GetRawConstantValue()`) instead of a hand-listed `HashSet` initializer — drift is
+    now structurally impossible rather than caught after the fact by
+    `SdkRegistryConformanceTests`. The fields stay `const` (not `static readonly`) deliberately, so
+    a future analyzer can write `[RequiresCapability(CapabilityVocabulary.HeapObjects)]` — a
+    compile-time-constant attribute argument — which is exactly what rules out any non-reflection
+    enumeration mechanism. Verified `SdkRegistryConformanceTests` still passes (confirms the
+    reflected set is identical to the old hand-maintained one); full suite 1227/1227 non-real-dump
+    tests pass. No `SdkVersion` bump — `Known`'s public type and contents are unchanged, only its
+    internal population mechanism.
 15. No `SourceKind` constants class, unlike `Capability`/`CapabilityVocabulary` — same open-string
     exposure, smaller surface (`ArtifactDescriptor.SourceKind`).
 16. `ObservationQuery.AdditionalPredicate` is a raw `Func<Observation,bool>?` — already flagged as

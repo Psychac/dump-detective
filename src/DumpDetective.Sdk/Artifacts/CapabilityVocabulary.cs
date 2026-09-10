@@ -1,3 +1,5 @@
+using System.Reflection;
+
 using DumpDetective.Sdk.Analysis;
 
 namespace DumpDetective.Sdk.Artifacts;
@@ -67,16 +69,28 @@ public static class CapabilityVocabulary
     public const string TemporalInterval = "temporal.interval";
     public const string TemporalSeries = "temporal.series";
 
-    /// <summary>Every capability named above, for build-time/test-time validation that a
-    /// declared capability isn't a typo against this vocabulary.</summary>
-    public static readonly IReadOnlySet<string> Known = new HashSet<string>(StringComparer.Ordinal)
-    {
-        HeapObjects, HeapTypes, HeapRoots, HeapReferences, HeapReverseReferences, HeapGenerations,
-        HeapSegments, HeapHandles, HeapStatics, HeapStrings, HeapFinalizerQueue,
-        HeapReachability, HeapDominators,
-        RuntimeModules, RuntimeThreads, RuntimeStacks, RuntimeExceptions, RuntimeJit, RuntimeLocks,
-        TraceCpuSamples, TraceGcEvents, TraceAllocSamples, TraceContentionEvents,
-        TraceExceptionEvents, TraceThreadTimeline, TraceJitEvents, TraceHttpEvents, TraceCustomEvents,
-        TemporalPoint, TemporalInterval, TemporalSeries,
-    };
+    /// <summary>
+    /// Every capability named above, for build-time/test-time validation that a declared capability
+    /// isn't a typo against this vocabulary.
+    /// </summary>
+    /// <remarks>
+    /// Reflected over this class's own <c>const string</c> fields rather than hand-listed —
+    /// considered and switched 2026-09-10
+    /// (docs/refactor/modularity/phase-1-sdk-review-findings.md item 14) after hitting the drift
+    /// this was meant to prevent twice in one session (adding <see cref="HeapDominators"/>, then
+    /// <see cref="HeapReachability"/>, each requiring a separate edit here that
+    /// <c>SdkRegistryConformanceTests</c> had to catch after the fact). These fields must stay
+    /// <c>const</c>, not <c>static readonly</c> — so a future analyzer can write
+    /// <c>[RequiresCapability(CapabilityVocabulary.HeapObjects)]</c>, a compile-time-constant
+    /// attribute argument, instead of a raw string literal — which rules out any non-reflection way
+    /// to enumerate them; this isn't a workaround, it's the only mechanism that matches the
+    /// constraint the type already has for a good reason. A source generator would do the same job
+    /// with zero runtime cost, but is disproportionate ceremony for one ~30-member class; revisit
+    /// only if this exact pattern needs repeating across many types.
+    /// </remarks>
+    public static readonly IReadOnlySet<string> Known = typeof(CapabilityVocabulary)
+        .GetFields(BindingFlags.Public | BindingFlags.Static)
+        .Where(field => field.IsLiteral && field.FieldType == typeof(string))
+        .Select(field => (string)field.GetRawConstantValue()!)
+        .ToHashSet(StringComparer.Ordinal);
 }

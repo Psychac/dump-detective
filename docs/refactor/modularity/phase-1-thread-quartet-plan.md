@@ -39,15 +39,15 @@ directions:
 
 | Analyzer | Original classification | Corrected | Why |
 |---|---|---|---|
-| `ThreadAnalyzer` | Tier 1 only | **Tier 1 only** (confirmed) | No field-value reads. Deferred purely for the shared-scan reason above, now resolved. |
+| `ThreadAnalyzer` | Tier 1 only | **Tier 1 + Tier 2** (corrected again, 2026-09-11) | The shared-scan reason for deferring it is resolved (§ 3's bridge works), but re-reading the full source found `ProcessThread` sets `ThreadWithStackTrace.ExceptionMessage = currentException.Message` — `ClrException.Message` (reflected via ilspycmd against v4.0.732401) reads a raw field offset off the live exception object (`Type.Module.DataReader.ReadPointer(Address + messageOffset)` then resolves the string), real Tier-2 field-value extraction, same category as `Task.m_stateFlags`/`AssemblyLoadContext._name`. (`currentException.Type?.Name`, the only other `ClrException` member it touches, stays Tier 1 — `Type` is pure type resolution, no field read.) Deferred, alongside `HangAnalyzer`. |
 | `HangAnalyzer` | Tier 1 + Tier 2 | **Tier 1 + Tier 2** (confirmed) | `stateField.Read<int>(obj, interior: false)` reads a live `Task`'s `m_stateFlags` field directly — real field-value extraction. Also implements a *second* shared-scan interface, `IParallelHeapIndexScanParticipant` (parallel-worker heap-index scan, separate from the thread-stack scan) — more machinery than the other three, and blocked on the same `dump.object-fields` hatch as `FinalizableObjectAnalyzer`/`ModuleAnalyzer`. Stays deferred. |
-| `LockGraphAnalyzer` | Tier 1 + Tier 2 | **Tier 1 only** (corrected) | No field-value reads found. Uses `heap.EnumerateSyncBlocks()` (`IHeapSyncBlockQuery`, declared, unimplemented), `IHeapObjectLookup` (already built) for type-name-by-address, and structural `ClrThread`/`ClrStackFrame` facts only. |
-| `ThreadStackClusterAnalyzer` | Tier 1 + Tier 2 | **Tier 1 only** (corrected) | No field-value reads found. Uses only thread state flags (`IsGc`/`IsFinalizer`/`TS_TPWorkerThread`), method signatures, and frame names — all structural. |
+| `LockGraphAnalyzer` | Tier 1 + Tier 2 | **Tier 1 only** (corrected). Retyped 2026-09-11 — § 7. | No field-value reads found. Uses `heap.EnumerateSyncBlocks()` (`IHeapSyncBlockQuery`, declared, unimplemented), `IHeapObjectLookup` (already built) for type-name-by-address, and structural `ClrThread`/`ClrStackFrame` facts only. |
+| `ThreadStackClusterAnalyzer` | Tier 1 + Tier 2 | **Tier 1 only** (corrected). Retyped 2026-09-11 — § 8. | No field-value reads found. Uses only thread state flags (`IsGc`/`IsFinalizer`/`TS_TPWorkerThread`), method signatures, and frame names — all structural. |
 
-Net effect: **three of the four can be retyped now**; only `HangAnalyzer` is genuinely blocked on
-Tier 2. The main plan doc's tier-split table and counts should be updated again once this batch
-actually starts (currently still says the pre-quartet-investigation ~9/~26 split from the
-`ModuleAnalyzer` deferral).
+Net effect: **two of the four (`LockGraphAnalyzer`, `ThreadStackClusterAnalyzer`) were retyped**;
+`ThreadAnalyzer` and `HangAnalyzer` are both genuinely blocked on Tier 2 and stay deferred until the
+`dump.object-fields` escape hatch exists. This closes out the thread-domain quartet's Tier-1 work —
+see the main plan doc's "Remaining Tier-1-only" note for the project-wide conclusion this implies.
 
 ## 3. The adapter-side push/pull bridge
 
@@ -91,46 +91,39 @@ but it is bounded, mechanical, and shared across all three retyped members rathe
 per analyzer — likely worth factoring into a small reusable base
 (`ThreadStackScanParticipantLegacyAdapter<T>` or similar) once the first one is built.
 
-## 4. Capability gaps found while sizing this (not yet built)
+## 4. Capability gaps found while sizing this (historical — all resolved or moot now)
 
-- **`RuntimeThreadRef` still needs `ThreadAnalyzer`-specific extension.** `IsAlive` (Batch 5) and
-  `LockCount` (Batch 8, `LockGraphAnalyzer`) shipped earlier; `IsGc`/`IsFinalizer`/
-  `IsThreadpoolWorker`/`IsCompletionPortThread` shipped in Batch 9 (`ThreadStackClusterAnalyzer`, see
-  § 8). Still outstanding for `ThreadAnalyzer` alone: `AppDomainName`
-  (`thread.CurrentAppDomain?.Name`), `GcMode` (`thread.GCMode.ToString()`), `TS_Background`,
-  `StackBase`/`StackLimit` (or a pre-derived `StackSizeBytes`), and current-exception info (type name
-  + message — see next point).
-- **Open question, not resolved here: is `ClrException.Message`/`.Type` Tier 2?**
-  `thread.CurrentException.Message` reads a live exception object's message off the heap — the same
-  *kind* of application-state recovery as `AssemblyLoadContext._name` or `Task.m_stateFlags`, just
-  exposed through a ClrMD convenience wrapper (`ClrException`) instead of a raw
-  `GetFieldByName`/`.Read<T>()` call. This needs a real answer (reflect what `ClrException.Message`
-  actually does internally, per this project's own "verify via ilspycmd, don't guess" convention)
-  before `ThreadAnalyzer` can be scoped as cleanly Tier-1-only — if it turns out to be Tier 2,
-  `ThreadAnalyzer`'s exception-tracking fields would need to either wait for the Tier-2 hatch too,
-  or be dropped/degraded, the same choice already made for `ModuleAnalyzer`.
-- **`HeapSyncBlockRef` needs extension for `LockGraphAnalyzer`**: today it only carries
-  `ObjectAddress`/`SyncBlockIndex`/`IsMonitorHeld`/`HoldingOsThreadId`. Missing `RecursionCount` and
-  `WaitingThreadCount` (both read directly off ClrMD's `SyncBlock` struct, no field-value extraction —
-  Tier 1). Note `HoldingOsThreadId`, not a raw `ClrThread` address like the pre-retyping analyzer's
-  own `SyncBlock.HoldingThreadAddress` — this is actually *more* correct for the SDK (avoids leaking
-  a raw dump-local address), so the retyped analyzer correlates lock ownership by OS thread ID
-  against `RuntimeThreadRef.Thread.OsThreadId` instead of by address; a deliberate, already-anticipated
-  difference (see that type's own doc comment), not a gap to "fix."
-- **New dump-side `HeapSyncBlockQuery`** — `IHeapSyncBlockQuery` is declared, unimplemented (same
-  state `IHeapHandleQuery` was in before Batch 7).
+- **`RuntimeThreadRef` extension.** `IsAlive` (Batch 5), `LockCount` (Batch 8, `LockGraphAnalyzer`),
+  and `IsGc`/`IsFinalizer`/`IsThreadpoolWorker`/`IsCompletionPortThread` (Batch 9,
+  `ThreadStackClusterAnalyzer`, see § 8) all shipped. `ThreadAnalyzer`'s remaining needs
+  (`AppDomainName`, `GcMode`, `TS_Background`, `StackBase`/`StackLimit`, current-exception info) are
+  moot now that `ThreadAnalyzer` is confirmed deferred — see the next point.
+- **Resolved: `ClrException.Message`/`.Type` Tier question.** Reflected `ClrException` via ilspycmd
+  against v4.0.732401 (not guessed): `.Message` reads a raw field offset off the live exception
+  object (`Type.Module.DataReader.ReadPointer(Address + messageOffset)`, then resolves the string) —
+  genuine Tier 2, same category as `Task.m_stateFlags`/`AssemblyLoadContext._name`. `.Type` is pure
+  type resolution (`_object.Type`) — Tier 1. `ThreadAnalyzer`'s `ProcessThread` sets
+  `ThreadWithStackTrace.ExceptionMessage = currentException.Message` — a real, reported field, not
+  incidental — so `ThreadAnalyzer` is confirmed Tier 1 + Tier 2 and deferred (§ 2's corrected table).
+- **`HeapSyncBlockRef` extension for `LockGraphAnalyzer`** — shipped in Batch 8 (§ 7):
+  `HasHoldingThread`/`RecursionCount`/`WaitingThreadCount` added; `HoldingOsThreadId` (not a raw
+  `ClrThread` address) used to correlate lock ownership against `RuntimeThreadRef.Thread.OsThreadId`.
+- **`HeapSyncBlockQuery`** — implemented in Batch 8 (§ 7) as `HeapSyncBlockQuery`.
 
-## 5. Suggested batch order
+## 5. Batch order (as executed)
 
-1. **`LockGraphAnalyzer` first. Done 2026-09-11** — see § 7 below for what actually shipped.
-2. **`ThreadStackClusterAnalyzer` second. Done 2026-09-11** — see § 8 below for what actually shipped.
-3. **`ThreadAnalyzer` last** — the largest domain result of the three (thread categorization,
-   AppDomain/GC-mode/exception distributions, stack-memory percentiles, async chain depth), and
-   depends on resolving the `ClrException.Message` Tier-1-vs-2 question first.
-4. **`HangAnalyzer` stays deferred**, grouped with `FinalizableObjectAnalyzer`/`ModuleAnalyzer` for
-   whenever the `dump.object-fields` Tier-2 escape hatch gets built — its `IParallelHeapIndexScanParticipant`
-   side is unrelated to this doc's scope entirely (that's the *heap-index* shared scan, not the
-   thread-stack one) and would need its own investigation regardless.
+1. **`LockGraphAnalyzer`. Done 2026-09-11** — see § 7 for what actually shipped.
+2. **`ThreadStackClusterAnalyzer`. Done 2026-09-11** — see § 8 for what actually shipped.
+3. **`ThreadAnalyzer`: confirmed deferred, 2026-09-11** — genuinely Tier 1 + Tier 2 once the
+   `ClrException.Message` question above was resolved; not retyped. Joins `HangAnalyzer` (below).
+4. **`HangAnalyzer` stays deferred**, grouped with `FinalizableObjectAnalyzer`/`ModuleAnalyzer`/
+   `ThreadAnalyzer` for whenever the `dump.object-fields` Tier-2 escape hatch gets built — its
+   `IParallelHeapIndexScanParticipant` side is unrelated to this doc's scope entirely (that's the
+   *heap-index* shared scan, not the thread-stack one) and would need its own investigation
+   regardless.
+
+This closes out the thread-domain quartet's Tier-1 work: 2 of 4 members retyped, 2 confirmed and
+deferred to Tier 2 — no member is left unresolved or unscoped.
 
 ## 6. Gates (once actual implementation starts)
 

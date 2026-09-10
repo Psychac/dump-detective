@@ -639,8 +639,14 @@ found no phase owns. Concrete sequencing:
    the same way `GCRootAnalyzerLegacyAdapter` already carries `IRequiresDominatorTreeIndex`), and
    re-checking the other three quartet members' full source (not just grepping them) found two more
    tier-split corrections: `LockGraphAnalyzer` and `ThreadStackClusterAnalyzer` are actually Tier-1
-   only too (only `HangAnalyzer` genuinely needs Tier 2) — so three of the four are plannable now,
-   not blocked on the Tier-2 hatch or on each other.
+   only, both retyped 2026-09-11 (see the thread-quartet plan's §§7–8). `ThreadAnalyzer` itself was
+   re-checked too, resolving the thread-quartet plan's own open question: `ClrException.Message`
+   (reflected via ilspycmd, not guessed) reads a raw field offset off the exception object, making it
+   genuinely Tier 2 — and `ThreadAnalyzer` uses exactly that, in `ThreadExceptionSnapshot.ExceptionMessage`.
+   So `ThreadAnalyzer` joins `HangAnalyzer` as the quartet's two genuinely-Tier-2 members, deferred
+   alongside `ModuleAnalyzer`/`FinalizableObjectAnalyzer` until the `dump.object-fields` hatch exists —
+   **Tier 1 is now fully finished**: every originally-Tier-1-only analyzer, plus both quartet members
+   that turned out to be Tier-1-only on re-inspection, are retyped.
 
 5. **Real-dump verification stays one-at-a-time, in the foreground**, per this project's standing
    rule — run it once per batch on the reference dumps, not once per analyzer, to keep measurement

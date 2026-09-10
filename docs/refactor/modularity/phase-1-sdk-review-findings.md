@@ -297,8 +297,20 @@ is severity first (P0, then P1), otherwise in the order below; reorder freely.
 
 ## P2 — polish, not blocking
 
-18. `EnumerateReferences`/`EnumerateReferrers` naming asymmetry (forward/reverse would read
-    clearer).
+18. ~~`EnumerateReferences`/`EnumerateReferrers` naming asymmetry (forward/reverse would read
+    clearer).~~ **Fixed 2026-09-10 — smaller fix than originally proposed.** Checked usage before
+    renaming either: `IHeapReferenceQuery.EnumerateReferences` deliberately mirrors the real ClrMD
+    API it wraps (`ClrObject.EnumerateReferences(carefully: true)`, used at 18+ call sites across
+    the dump-side codebase) — left untouched, renaming it would have broken that intentional
+    parity. Only `IHeapReverseReferenceQuery.EnumerateReferrers` was actually inconsistent (no
+    single ClrMD method it mirrors — reverse lookup is this project's own built index, so there was
+    no external naming to preserve); renamed to `EnumerateReverseReferences`, matching its own
+    interface's naming pattern. Confirmed zero real usage before renaming. Full suite 1227/1227
+    non-real-dump tests pass (one pre-existing flaky test, different and unrelated to the one seen
+    in finding 11's commit — `RetainedSizeCandidateSelectorTests`, passes standalone and on retry;
+    worth noting this is the second different flaky test seen this session, suggesting real
+    order-dependency in the suite worth investigating separately, not something this change
+    caused).
 19. `ISynthesisRule.Match` (property) vs. `ObservationQuery.Matches()` (method) is mildly awkward
     read together.
 20. `HeapRootKind`/`HeapHandleKind` were designed from memory/convention, **not measured against

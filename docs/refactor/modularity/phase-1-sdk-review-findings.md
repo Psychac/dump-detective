@@ -121,16 +121,25 @@ is severity first (P0, then P1), otherwise in the order below; reorder freely.
    remark on `ArtifactId` explaining the asymmetry instead of "fixing" it either direction, same
    resolution shape as finding 1.
 
-8. **`ArtifactId`/`Capability`/`ObservationId` serialize as one-key wrapper objects**
-   (`{"value":"..."}`/`{"key":"..."}`), not bare strings — documented as "Gotcha 3" in
-   `observation.schema.json` rather than fixed. A custom `JsonConverter` per type serializing as a
-   plain string is more idiomatic JSON and removes the gotcha instead of footnoting it.
-   **Status: Open.**
-
-9. **`ObservationId.ToString()` disagrees with its own JSON form.** Override returns Guid `"N"`
-   format (no hyphens); JSON serialization uses the default `"D"` format (hyphenated). The same
-   class of bug already found and fixed for `EntityRef`'s `$kind` discriminator is still sitting,
-   unfixed, in `ObservationId` itself. **Status: Open.**
+8 & 9. ~~`ArtifactId`/`Capability`/`ObservationId` serialize as one-key wrapper objects; `ObservationId.ToString()`
+   disagrees with its own JSON form.~~ **Both fixed together 2026-09-10** — implementing 8's fix
+   forces a decision on ObservationId's exact JSON string format anyway, so doing them separately
+   would have meant touching `ObservationId` twice. Each type now carries its own
+   `JsonConverter<T>`, serializing as a bare JSON string instead of a one-key wrapper object
+   (`{"value":"..."}"`/`{"key":"..."}"`); `ObservationId`'s converter uses Guid `"N"` format (no
+   hyphens), matching `ToString()` exactly instead of silently disagreeing with it (previously the
+   wire form used the Guid default `"D"` format via the wrapper object). Verified empirically with
+   a throwaway probe (not just read-through) that all three round-trip correctly and that
+   `ObservationId`'s JSON now equals its `ToString()` byte-for-byte.
+   
+   `observation.schema.json` updated to match — `wrappedString`/`capability` `$defs` collapsed into
+   one `idString: { "type": "string" }`, re-validated against a fresh live-build probe covering all
+   five `EntityRef` subtypes (same discipline the schema was originally built with), bumped to
+   `schemaVersion` 2.0.0 (a real breaking wire-format change, scoped to that one file —
+   `capability-registry.json`/`observation-type-registry.json` stay at 1.2.0). No real consumer
+   existed for the 1.0.0 shape (no UI, no persisted `report.json` corpus depending on it), so this
+   was the right time to fix it rather than a migration to plan around. Full suite 1223/1223
+   non-real-dump tests pass unchanged — no existing test asserted the old wrapper shape.
 
 10. **`SdkVersion` (0.1) hasn't moved across two sessions that both added public API** (the `$kind`
     fix, then the entire `Analysis/` namespace + two capability additions). Its own doc says

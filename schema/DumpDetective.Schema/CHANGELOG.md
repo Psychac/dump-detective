@@ -15,6 +15,23 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation.schema.json` 2.0.0 — 2026-09-10
+
+Scoped to `observation.schema.json` only — `capability-registry.json`/`observation-type-registry.json`
+stay at 1.2.0 below; each file in this directory versions independently via its own
+`schemaVersion`/`registryVersion` field, even where changelog entries share a version number by
+coincidence.
+
+Breaking change to the wire shape: `ArtifactId`, `Capability`, and `ObservationId` now serialize as
+bare JSON strings instead of one-key wrapper objects (`{"value":"..."}"`/`{"key":"..."}"`), and
+`ObservationId`'s string form now matches its `ToString()` exactly (both `"N"` format, no hyphens —
+previously the wire form silently used the Guid default `"D"` format instead). Found by the
+[Phase 1 SDK review](../../docs/refactor/modularity/phase-1-sdk-review-findings.md) (items 8 and 9);
+fixed by giving each type its own `JsonConverter`. No real consumer existed for the 1.0.0 shape yet
+(no UI, no persisted `report.json` corpus depending on it), so this was the correct time to fix it
+rather than a migration anyone needs to plan around — verified by re-running the same live-build
+probe-and-validate process the 1.0.0 schema was originally derived from.
+
 ## 1.2.0 — 2026-09-10
 
 Splits `heap.dominators` into `heap.dominators` (narrowed to retained size/immediate

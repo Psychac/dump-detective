@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace DumpDetective.Sdk.Artifacts;
 
 /// <summary>
@@ -16,8 +19,26 @@ namespace DumpDetective.Sdk.Artifacts;
 /// <c>TraceAnalysisRunner</c>) — there's no repeated-literal ergonomics to buy, and an implicit
 /// conversion there would instead risk a stray string silently becoming a session identity by
 /// accident. See docs/refactor/modularity/phase-1-sdk-review-findings.md item 7.
+///
+/// Carries its own <see cref="JsonConverter"/> so it serializes as a bare JSON string
+/// (<c>"trace.etl"</c>), not a one-key wrapper object (<c>{"value":"trace.etl"}</c>) — the default
+/// System.Text.Json shape for a record with one property, a real reported gotcha in
+/// <c>observation.schema.json</c> until fixed 2026-09-10; see
+/// docs/refactor/modularity/phase-1-sdk-review-findings.md item 8.
 /// </remarks>
+[JsonConverter(typeof(ArtifactIdJsonConverter))]
 public readonly record struct ArtifactId(string Value)
 {
     public override string ToString() => Value;
+}
+
+/// <summary>Serializes <see cref="ArtifactId"/> as a bare JSON string instead of the default
+/// one-key wrapper object System.Text.Json would otherwise produce for a single-property record.</summary>
+public sealed class ArtifactIdJsonConverter : JsonConverter<ArtifactId>
+{
+    public override ArtifactId Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        new(reader.GetString() ?? throw new JsonException("Expected a JSON string for ArtifactId."));
+
+    public override void Write(Utf8JsonWriter writer, ArtifactId value, JsonSerializerOptions options) =>
+        writer.WriteStringValue(value.Value);
 }

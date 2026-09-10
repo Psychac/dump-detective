@@ -67,7 +67,7 @@ public interface IArtifactSource
     ValueTask<ArtifactDescriptor> ProbeAsync(string path, CancellationToken ct);
     ValueTask<IArtifactIndex> IndexAsync(ArtifactDescriptor descriptor,
                                          IIndexStorage storage,
-                                         IProgress<IndexProgress> progress,
+                                         IProgress<Sdk.Analysis.AnalyzerProgressReport> progress,
                                          CancellationToken ct);
 }
 ```

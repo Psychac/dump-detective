@@ -165,11 +165,14 @@ behavior change, matching Phase 0's own rule. First real consumer is Phase 6a.
     surfaces are additive/safe to build now, the analyzer retyping itself needs a pilot and
     per-batch characterization gates before it touches production analyzer output.
 - `Artifacts/IArtifactSource.cs` and `IArtifactIndex.cs` — their `IndexAsync` signature depends on
-  `IIndexStorage`/`IndexProgress`, which are Phase 2 storage types. **Partially superseded
-  2026-09-09**: Phase 2's own trimmed pass shipped `IndexProgress` (in `DumpDetective.Platform`, not
-  the SDK — see [phase-2-artifact-platform.md](phase-2-artifact-platform.md)), but `IIndexStorage`
-  still doesn't exist. `IArtifactSource`/`IArtifactIndex` remain correctly deferred on that missing
-  half; left for Phase 2/6a, which are their actual consumers.
+  `IIndexStorage`/a progress-report type, which are Phase 2 storage types. **Partially superseded
+  2026-09-09, then again 2026-09-10**: Phase 2's own trimmed pass shipped `Platform.IndexProgress`
+  on 2026-09-09 (see [phase-2-artifact-platform.md](phase-2-artifact-platform.md)) — since retired
+  in favor of `Sdk.Analysis.AnalyzerProgressReport` (item 21 of
+  [phase-1-sdk-review-findings.md](phase-1-sdk-review-findings.md)) once that SDK type existed to
+  remove the duplication. `IIndexStorage` still doesn't exist. `IArtifactSource`/`IArtifactIndex`
+  remain correctly deferred on that missing half; left for Phase 2/6a, which are their actual
+  consumers.
 - `session-report.schema.json` v3 — still needs Phase 4's session model
   (`sources[]`/`timeline`/per-finding source attribution can't be described honestly without a real
   session/artifact model to back them), which still doesn't exist. The rest of the schema directory

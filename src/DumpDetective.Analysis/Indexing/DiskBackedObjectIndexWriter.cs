@@ -46,12 +46,18 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
 
     // CacheContainerWriter lives in DumpDetective.Platform, which cannot reference
     // DumpDetective.Core (zero deps beyond Sdk — see docs/refactor/modularity/phase-1-contracts-sdk.md),
-    // so it reports through the source-agnostic IndexProgress shape instead of
-    // Core.Abstractions.AnalyzerProgressReport. This adapts the one direction this file needs.
-    private static IProgress<IndexProgress>? WrapForContainerProgress(IProgress<AnalyzerProgressReport>? progress) =>
+    // so it reports through Sdk.Analysis.AnalyzerProgressReport (the same shape Platform.IndexProgress
+    // used to duplicate, before that duplicate was retired 2026-09-10 in favor of Platform's already-
+    // legitimate ProjectReference to Sdk — see docs/refactor/modularity/phase-1-sdk-review-findings.md
+    // item 21) instead of Core.Abstractions.AnalyzerProgressReport. This adapts the one direction this
+    // file needs. Fully qualified rather than a using-alias: Core's AnalyzerProgressReport is already
+    // in unqualified scope here (via `using DumpDetective.Core.Abstractions;`) for every other progress
+    // report in this file, and an alias would only save one line at the cost of an extra indirection to
+    // follow.
+    private static IProgress<DumpDetective.Sdk.Analysis.AnalyzerProgressReport>? WrapForContainerProgress(IProgress<AnalyzerProgressReport>? progress) =>
         progress is null
             ? null
-            : new Progress<IndexProgress>(p => progress.Report(new AnalyzerProgressReport(p.ScannedCount, p.Phase, p.Detail, p.Elapsed)));
+            : new Progress<DumpDetective.Sdk.Analysis.AnalyzerProgressReport>(p => progress.Report(new AnalyzerProgressReport(p.ScannedCount, p.Phase, p.Detail, p.Elapsed)));
 
     // §10.8 measurement pass (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md):
     // set DD_PERF_DOMINATOR_STAGEB=1 to print, in one Phase 1 run, everything §10.8 still needs a

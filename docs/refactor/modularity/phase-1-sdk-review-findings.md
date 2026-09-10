@@ -339,5 +339,35 @@ is severity first (P0, then P1), otherwise in the order below; reorder freely.
     with `Other` narrowed to a genuine forward-compat catch-all instead of a bucket that silently
     swallowed known, current values. Confirmed zero real usage before restructuring. Full suite
     1227/1227 non-real-dump tests pass.
-21. Third copy-pasted `AnalyzerProgressReport`/`IndexProgress` shape (Core, Platform, Sdk) — fine
-    for now; a 4th copy would be the signal to extract a shared micro-package instead.
+21. ~~Third copy-pasted `AnalyzerProgressReport`/`IndexProgress` shape (Core, Platform, Sdk) — fine
+    for now; a 4th copy would be the signal to extract a shared micro-package instead.~~ **Partially
+    fixed 2026-09-10 — the simple consolidation done, the rest noted, not pursued.**
+    
+    **Done:** the original "fine for now" verdict was written before connecting that
+    `DumpDetective.Platform.csproj` already carries a legitimate `ProjectReference` to
+    `DumpDetective.Sdk` (`PlatformProject_ShouldDependOnSdkOnly`) — a path that didn't exist to use
+    when `Platform.IndexProgress` was created on 2026-09-09 (the SDK's own
+    `AnalyzerProgressReport` didn't exist yet at that point). Retired `Platform/IndexProgress.cs`
+    entirely; `CacheContainerWriter`, `DiskBackedObjectIndexWriter`'s
+    `WrapForContainerProgress` adapter, `TraceIndexBuilder`, and their tests now report through
+    `Sdk.Analysis.AnalyzerProgressReport` directly — three copies down to two. Updated the three
+    other docs that had recorded `IndexProgress` as current
+    (`phase-1-contracts-sdk.md`, `phase-2-artifact-platform.md`, `source-model.md`'s
+    `IArtifactSource.IndexAsync` sketch) with dated corrections rather than leaving them stale.
+    Confirmed via full build + 1227/1227 non-real-dump tests (including
+    `CacheContainerWriterChecksumProgressTests`, which directly exercises the changed path) — no
+    real-dump run needed, this is a pure type substitution with no heap-scanning logic touched.
+    
+    **Left as documented, not pursued:** Core's own copy (`Core.Abstractions.AnalyzerProgressReport`)
+    cannot be collapsed the same way — the SDK still cannot reference `Core` (ClrMD dependency),
+    and `Core` cannot reference the SDK's copy without breaking the same boundary rule this whole
+    file exists to enforce, so two copies is the real floor here, not zero. Also noticed, not
+    fixed (out of the "simple consolidation" scope asked for): `IndexProgress` was itself a
+    positional record with adjacent same-typed parameters (`Phase`/`Detail`, both effectively
+    `string`) — the same transposition-risk pattern finding 5 already fixed elsewhere — and
+    `Sdk.Analysis.AnalyzerProgressReport` inherited that exact shape when it was created to mirror
+    it. Now that this type is the sole canonical copy two more projects report through directly,
+    it may be worth the same named-property fix finding 5 applied, in a future pass — not done
+    here to stay within what was actually asked.
+    
+    **Review complete: all 21 findings resolved or explicitly deferred with reasoning recorded.**

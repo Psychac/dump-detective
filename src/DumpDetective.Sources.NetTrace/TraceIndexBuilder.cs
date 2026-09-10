@@ -1,5 +1,5 @@
-using DumpDetective.Platform;
 using DumpDetective.Platform.Storage.Container;
+using DumpDetective.Sdk.Analysis;
 
 namespace DumpDetective.Sources.NetTrace;
 
@@ -42,7 +42,7 @@ internal static class TraceIndexBuilder
         string containerPath,
         int? targetProcessId,
         CancellationToken cancellationToken = default,
-        IProgress<IndexProgress>? progress = null,
+        IProgress<AnalyzerProgressReport>? progress = null,
         IReadOnlySet<CacheSectionId>? sections = null)
     {
         sections ??= AllSections;

@@ -1,5 +1,5 @@
-using DumpDetective.Platform;
 using DumpDetective.Platform.Storage.Container;
+using DumpDetective.Sdk.Analysis;
 
 using FluentAssertions;
 
@@ -27,8 +27,8 @@ public class CacheContainerWriterChecksumProgressTests : IDisposable
     public void EndSection_LargeSection_ReportsChecksumProgress()
     {
         string containerPath = Path.Combine(_testDir, "cache.bin");
-        var reports = new List<IndexProgress>();
-        var progress = new SynchronousProgress<IndexProgress>(r => reports.Add(r));
+        var reports = new List<AnalyzerProgressReport>();
+        var progress = new SynchronousProgress<AnalyzerProgressReport>(r => reports.Add(r));
 
         // Above both the 32 MB reporting threshold and the 64 MB report-every interval, so
         // EndSection's checksum re-read should surface at least one progress tick instead of
@@ -51,8 +51,8 @@ public class CacheContainerWriterChecksumProgressTests : IDisposable
     public void EndSection_SmallSection_ReportsNoChecksumProgress()
     {
         string containerPath = Path.Combine(_testDir, "cache.bin");
-        var reports = new List<IndexProgress>();
-        var progress = new SynchronousProgress<IndexProgress>(r => reports.Add(r));
+        var reports = new List<AnalyzerProgressReport>();
+        var progress = new SynchronousProgress<AnalyzerProgressReport>(r => reports.Add(r));
 
         using (var writer = new CacheContainerWriter(containerPath, dumpPath: null, progress))
         {

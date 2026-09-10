@@ -46,6 +46,15 @@ reference, so this decoupling was required, not optional). `DiskBackedObjectInde
 caller, in `Analysis`) adapts via one small `WrapForContainerProgress` helper at its 7 call sites;
 every other use of `AnalyzerProgressReport` in that file is untouched.
 
+**Correction, 2026-09-10** (see
+[phase-1-sdk-review-findings.md](phase-1-sdk-review-findings.md) item 21): `Platform.IndexProgress`
+was retired the same day `DumpDetective.Sdk.Analysis.AnalyzerProgressReport` came to exist (Phase
+1's Tier-1 skeleton) — it had duplicated that exact shape only because it predated it, and Platform
+already legitimately references the SDK (`PlatformProject_ShouldDependOnSdkOnly`), so the
+duplication was no longer necessary once the SDK had its own copy to point at instead.
+`CacheContainerWriter` and `WrapForContainerProgress` now report through
+`Sdk.Analysis.AnalyzerProgressReport` directly.
+
 **Verification**: 163 existing unit tests targeting exactly the moved files
 (`CacheContainerRoundTripTests`, `CacheContainerAtomicWriteTests`,
 `CacheContainerWriterChecksumProgressTests`, `CacheSectionCatalogTests`, `SectionManifestTests`,

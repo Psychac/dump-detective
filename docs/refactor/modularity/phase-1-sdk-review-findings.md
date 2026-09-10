@@ -248,8 +248,24 @@ is severity first (P0, then P1), otherwise in the order below; reorder freely.
     reflected set is identical to the old hand-maintained one); full suite 1227/1227 non-real-dump
     tests pass. No `SdkVersion` bump — `Known`'s public type and contents are unchanged, only its
     internal population mechanism.
-15. No `SourceKind` constants class, unlike `Capability`/`CapabilityVocabulary` — same open-string
-    exposure, smaller surface (`ArtifactDescriptor.SourceKind`).
+15. ~~No `SourceKind` constants class, unlike `Capability`/`CapabilityVocabulary` — same open-string
+    exposure, smaller surface (`ArtifactDescriptor.SourceKind`).~~ **Resolved 2026-09-10 — no fix,
+    for a more fundamental reason than "not yet needed."** Checked real usage before building
+    anything: `ArtifactDescriptor.SourceKind` is never constructed anywhere in the codebase — not in
+    production code, not in a single test. `new ArtifactDescriptor` returns zero matches, full stop.
+    The real interim dump/trace routing that actually ships (`DumpAnalysisService`, Phase 6a/6b)
+    doesn't use `ArtifactDescriptor`/`SourceKind` at all — it does raw file-extension sniffing
+    instead (`TraceFileExtensions = [".etl", ".nettrace"]`). A `SourceKindVocabulary` constants
+    class would have nothing to guard against typos in, since nothing sets this field to anything,
+    ever. Building it now would be the exact speculative work this project's conventions push
+    back on.
+    - **Bigger, unresolved observation flagged here, not decided:** `ArtifactDescriptor` as a whole
+      (not just `SourceKind`) appears to be dead code today — part of Phase 1's original 2026-09-08
+      sketch (alongside `ArtifactId`, `ProcessIdentity`) that never got wired to anything once the
+      interim router shipped later with its own, separate extension-sniffing mechanism. Whether
+      `ArtifactDescriptor` is worth keeping as forward-looking scaffolding for when Phase 2/4 build
+      real artifact discovery, or whether it's premature and should be reconsidered/removed, is a
+      real open question — bigger than this finding, not resolved here.
 16. `ObservationQuery.AdditionalPredicate` is a raw `Func<Observation,bool>?` — already flagged as
     first-cut, but concretely: can't be validated at plugin-discovery time or survive an ALC
     boundary (Phase 9). Blocks those phases until replaced with something declarative.

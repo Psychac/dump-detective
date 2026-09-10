@@ -38,6 +38,9 @@ public readonly record struct HeapRootRef
 }
 
 /// <summary>The <c>heap.roots</c> capability.</summary>
+/// <remarks>Sync <see cref="IEnumerable{T}"/>, no <see cref="CancellationToken"/> — see
+/// <see cref="IHeapObjectStream"/>'s remarks for why, shared by every Tier-1 streaming
+/// surface.</remarks>
 public interface IHeapRootQuery
 {
     IEnumerable<HeapRootRef> EnumerateRoots();

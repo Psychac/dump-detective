@@ -197,10 +197,30 @@ is severity first (P0, then P1), otherwise in the order below; reorder freely.
     
     Both documented directly on `AnalysisContext`'s own remarks rather than left as open questions
     elsewhere. No code/behavior change — no `SdkVersion` bump.
-13. `IHeapObjectStream`/`IHeapReferenceQuery`/etc. are sync `IEnumerable<T>` with no
+13. ~~`IHeapObjectStream`/`IHeapReferenceQuery`/etc. are sync `IEnumerable<T>` with no
     `CancellationToken` — matches today's ClrMD-foreach pattern, but trace sources are naturally
     async/callback-driven; will resurface once a trace-backed implementation of these same
-    interfaces is attempted.
+    interfaces is attempted.~~ **Resolved 2026-09-10 — the premise was wrong, not just the
+    conclusion.** This finding conflated ingest-time and analysis-time concerns: by the time
+    analysis calls any Tier-1 streaming method, the underlying data has already been ingested into
+    a disk-backed, sequential index during an earlier, separate phase (the dump's single-pass heap
+    scan, or a trace's ingest — `GcPauseIndexer` et al. already turn live
+    `TraceEventDispatcher` callbacks into disk sections before any analyzer runs). The real
+    already-shipped trace-side reader (`TraceMethodIndexReader.ReadAll(stream)`, used by
+    `CpuHotspotAnalyzer` today) is itself a plain synchronous sequential stream read, not a live
+    callback subscription — async ingest is real, async analysis-time query was never actually
+    needed. Sync `IEnumerable<T>` with no `CancellationToken` parameter matches both real
+    precedents exactly: ClrMD's own `ClrHeap.EnumerateObjects()` (sync, no cancellation parameter,
+    what all 35 existing dump analyzers are built on) and the real trace-side reader above.
+    Cancellation flows through the outer `AnalyzeAsync(AnalysisContext, CancellationToken)` call and
+    is checked inside the consuming loop, the same pattern used everywhere today.
+    
+    Documented in full on `IHeapObjectStream`'s own remarks (the canonical explanation, not repeated
+    per interface) with a one-line cross-reference added to the other nine Tier-1 streaming
+    interfaces (`IHeapRootQuery`, `IHeapHandleQuery`, `IHeapSegmentQuery`,
+    `IHeapFinalizerQueueQuery`, `IHeapSyncBlockQuery`, `IHeapReferenceQuery`/
+    `IHeapReverseReferenceQuery`, `IRuntimeThreadQuery`, `IRuntimeModuleQuery`, `IRuntimeJitQuery`).
+    Documentation-only, no shape change — no `SdkVersion` bump.
 14. `CapabilityVocabulary.Known` is hand-maintained (const + separately-listed set) — the exact
     drift risk hit firsthand adding `HeapDominators`. Reflection-populating `Known` would make
     drift structurally impossible instead of relying on `SdkRegistryConformanceTests` to catch it

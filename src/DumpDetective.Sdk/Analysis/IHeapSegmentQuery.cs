@@ -18,6 +18,9 @@ public readonly record struct HeapSegmentRef
 }
 
 /// <summary>The <c>heap.segments</c> capability.</summary>
+/// <remarks>Sync <see cref="IEnumerable{T}"/>, no <see cref="CancellationToken"/> — see
+/// <see cref="IHeapObjectStream"/>'s remarks for why, shared by every Tier-1 streaming
+/// surface.</remarks>
 public interface IHeapSegmentQuery
 {
     IEnumerable<HeapSegmentRef> EnumerateSegments();

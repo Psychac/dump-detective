@@ -12,6 +12,9 @@ namespace DumpDetective.Sdk.Analysis;
 public readonly record struct HeapSyncBlockRef(ulong ObjectAddress, int SyncBlockIndex, bool IsMonitorHeld, uint? HoldingOsThreadId = null);
 
 /// <summary>The <c>runtime.locks</c> capability.</summary>
+/// <remarks>Sync <see cref="IEnumerable{T}"/>, no <see cref="CancellationToken"/> — see
+/// <see cref="IHeapObjectStream"/>'s remarks for why, shared by every Tier-1 streaming
+/// surface.</remarks>
 public interface IHeapSyncBlockQuery
 {
     IEnumerable<HeapSyncBlockRef> EnumerateSyncBlocks();

@@ -21,6 +21,9 @@ public enum HeapHandleKind
 public readonly record struct HeapHandleRef(HeapHandleKind Kind, ulong Address, ulong? DependentTargetAddress = null);
 
 /// <summary>The <c>heap.handles</c> capability.</summary>
+/// <remarks>Sync <see cref="IEnumerable{T}"/>, no <see cref="CancellationToken"/> — see
+/// <see cref="IHeapObjectStream"/>'s remarks for why, shared by every Tier-1 streaming
+/// surface.</remarks>
 public interface IHeapHandleQuery
 {
     IEnumerable<HeapHandleRef> EnumerateHandles();

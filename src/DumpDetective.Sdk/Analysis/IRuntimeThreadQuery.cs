@@ -8,6 +8,9 @@ namespace DumpDetective.Sdk.Analysis;
 public readonly record struct RuntimeThreadRef(ThreadRef Thread, bool IsGCSuspendPending, int StackRootCount);
 
 /// <summary>The <c>runtime.threads</c> capability.</summary>
+/// <remarks>Sync <see cref="IEnumerable{T}"/>, no <see cref="CancellationToken"/> — see
+/// <see cref="IHeapObjectStream"/>'s remarks for why, shared by every Tier-1 streaming
+/// surface.</remarks>
 public interface IRuntimeThreadQuery
 {
     IEnumerable<RuntimeThreadRef> EnumerateThreads();

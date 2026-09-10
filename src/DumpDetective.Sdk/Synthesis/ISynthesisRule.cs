@@ -12,7 +12,11 @@ public interface ISynthesisRule
 {
     string RuleId { get; }
 
-    ObservationQuery Match { get; }
+    /// <summary>Named <c>Query</c>, not <c>Match</c> — renamed 2026-09-10
+    /// (docs/refactor/modularity/phase-1-sdk-review-findings.md item 19) to remove the collision
+    /// with <see cref="ObservationQuery.Matches"/> sitting right next to it
+    /// (<c>rule.Match.Matches(observation)</c> read awkwardly); named after its own type instead.</summary>
+    ObservationQuery Query { get; }
 
     ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default);
 }

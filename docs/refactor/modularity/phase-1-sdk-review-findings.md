@@ -311,8 +311,14 @@ is severity first (P0, then P1), otherwise in the order below; reorder freely.
     worth noting this is the second different flaky test seen this session, suggesting real
     order-dependency in the suite worth investigating separately, not something this change
     caused).
-19. `ISynthesisRule.Match` (property) vs. `ObservationQuery.Matches()` (method) is mildly awkward
-    read together.
+19. ~~`ISynthesisRule.Match` (property) vs. `ObservationQuery.Matches()` (method) is mildly awkward
+    read together.~~ **Fixed 2026-09-10.** Renamed `ISynthesisRule.Match` → `Query`, named after its
+    own type (`ObservationQuery`) instead of describing what it conceptually does — removes the
+    collision with `ObservationQuery.Matches()` entirely rather than picking a third word.
+    `rule.Query.Matches(observation)` reads cleanly. Confirmed zero real usage before renaming
+    (`ISynthesisRule` has zero implementations, same as finding 16); updated the one doc
+    cross-reference in `ObservationMatchSet.cs`. Full suite 1227/1227 non-real-dump tests pass, no
+    flaky failures this run.
 20. `HeapRootKind`/`HeapHandleKind` were designed from memory/convention, **not measured against
     ClrMD's real `ClrRootKind`/`ClrHandleKind` enums.** Needs a real check before the dump-side
     implementation is built, or real values will silently collapse into `Other`.

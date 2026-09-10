@@ -180,9 +180,23 @@ is severity first (P0, then P1), otherwise in the order below; reorder freely.
     actual analyzer's actual output, not just a hand-built example. Full suite 1227/1227 non-real-dump
     tests pass (one pre-existing flaky, order-dependent test unrelated to this change — passes
     standalone and on retry).
-12. `AnalysisContext`'s 13 nullable properties vs. a generic `TryGetCapability<T>()` resolver —
-    current shape is IntelliSense-friendly but doesn't scale cleanly and doesn't distinguish
-    "required, so trust it's non-null" from "optional, really check."
+12. ~~`AnalysisContext`'s 14 nullable properties (13 at review time; finding 4 added a 14th) vs. a
+    generic `TryGetCapability<T>()` resolver — current shape is IntelliSense-friendly but doesn't
+    scale cleanly and doesn't distinguish "required, so trust it's non-null" from "optional, really
+    check."~~ **Resolved 2026-09-10, two separate outcomes, both documentation-only:**
+    - **Fixed properties stay — the "doesn't scale" framing was overstated.** Phase 3's
+      "avoid hardcoded catalogs" concern is about the *analyzer* count (large, plugin-extensible);
+      capability *surfaces* are a different, much smaller, SDK-curated axis that no plugin invents.
+      A generic resolver would trade real IntelliSense/type-safety for an extensibility need that
+      doesn't exist.
+    - **Required-vs-optional nullability stays undistinguished, genuinely deferred, not fixed.**
+      Whether a property is actually guaranteed non-null for a given run depends on the
+      orchestrator having filtered that analyzer in — a promise only Phase 4's orchestrator can
+      make, and it doesn't exist yet. Nothing at this layer can encode that guarantee in the
+      meantime.
+    
+    Both documented directly on `AnalysisContext`'s own remarks rather than left as open questions
+    elsewhere. No code/behavior change — no `SdkVersion` bump.
 13. `IHeapObjectStream`/`IHeapReferenceQuery`/etc. are sync `IEnumerable<T>` with no
     `CancellationToken` — matches today's ClrMD-foreach pattern, but trace sources are naturally
     async/callback-driven; will resurface once a trace-backed implementation of these same

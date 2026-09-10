@@ -98,4 +98,26 @@ public interface IHeapSegmentQuery
 
     /// <summary>Whether the process ran Server GC (one heap per logical CPU) vs. Workstation GC.</summary>
     bool IsServerGc { get; }
+
+    /// <summary>Number of logical (sub-)heaps — 1 for Workstation GC, one per logical CPU for
+    /// Server GC. Added 2026-09-11 for <c>HeapTopologyAnalyzer</c>'s retyping.</summary>
+    int LogicalHeapCount { get; }
+
+    /// <summary>
+    /// Live, non-free objects on exactly this segment — added 2026-09-11 for
+    /// <c>HeapTopologyAnalyzer</c>'s retyping, which walks LOH/POH/Frozen/Unknown segments
+    /// individually (never the whole heap; SOH is deliberately never walked per-object at all —
+    /// see that analyzer's own remarks) rather than filtering <c>heap.objects</c>' whole-heap
+    /// stream. <paramref name="segment"/> must have come from this same query's
+    /// <see cref="EnumerateSegments"/>/<see cref="TryGetSegment"/>.
+    /// </summary>
+    /// <remarks>
+    /// Yields <see cref="HeapObjectRef"/> — carrying a full <c>TypeRef</c>, not a raw type name,
+    /// for SDK-wide consistency with <see cref="IHeapObjectStream"/>. That means
+    /// every yielded object pays <c>EntityCanonicalizer</c>'s canonicalization cost even though
+    /// today's only consumer (`HeapTopologyAnalyzer`) only reads the raw display name back off it —
+    /// accepted because LOH/POH/Frozen/Unknown populations are, by construction, far smaller than
+    /// SOH's (which this method is never called for), not because the cost is free.
+    /// </remarks>
+    IEnumerable<HeapObjectRef> EnumerateObjects(HeapSegmentRef segment);
 }

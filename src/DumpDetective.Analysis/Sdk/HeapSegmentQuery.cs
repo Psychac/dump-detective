@@ -3,6 +3,7 @@ using DumpDetective.Core.Abstractions;
 
 using Microsoft.Diagnostics.Runtime;
 
+using SdkHeapObjectRef = DumpDetective.Sdk.Analysis.HeapObjectRef;
 using SdkHeapSegmentRef = DumpDetective.Sdk.Analysis.HeapSegmentRef;
 
 namespace DumpDetective.Analysis.SdkBridge;
@@ -27,6 +28,8 @@ internal sealed class HeapSegmentQuery(ClrHeap heap, ClrRuntime runtime, IHeapAn
 
     public bool IsServerGc => heap.IsServer;
 
+    public int LogicalHeapCount => heap.SubHeaps.Length;
+
     public IEnumerable<SdkHeapSegmentRef> EnumerateSegments()
     {
         IReadOnlyList<SegmentSummary> summaries = cache is HeapAnalysisCache heapCache
@@ -50,6 +53,22 @@ internal sealed class HeapSegmentQuery(ClrHeap heap, ClrRuntime runtime, IHeapAn
 
         segment = default;
         return false;
+    }
+
+    public IEnumerable<SdkHeapObjectRef> EnumerateObjects(SdkHeapSegmentRef segment)
+    {
+        ClrSegment? clrSegment = heap.GetSegmentByAddress(segment.Start);
+        if (clrSegment is null)
+            yield break;
+
+        foreach (ClrObject obj in clrSegment.EnumerateObjects())
+        {
+            if (!obj.IsValid || obj.IsFree || obj.Type is null)
+                continue;
+
+            string name = obj.Type.Name ?? $"MT:0x{obj.Type.MethodTable:x}";
+            yield return new SdkHeapObjectRef(obj.Address, SdkTypeRefFactory.FromName(name, obj.Type.MethodTable), obj.Size, name);
+        }
     }
 
     private static SdkHeapSegmentRef ToRef(SegmentSummary summary) => new()

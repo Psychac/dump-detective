@@ -87,16 +87,26 @@ internal sealed class HeapTypeStatisticsQuery(ClrHeap heap, IHeapAnalysisCache c
         return result;
     }
 
-    private static TypeRef ToTypeRef(string rawName, ulong? methodTable)
-    {
-        (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(rawName);
-        return new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity, MethodTable = methodTable };
-    }
+    private static TypeRef ToTypeRef(string rawName, ulong? methodTable) => SdkTypeRefFactory.FromName(rawName, methodTable);
 
     public (ulong Gen0Bytes, ulong Gen1Bytes, ulong Gen2Bytes) GetExactGenerationByteTotals()
     {
         AnalyzerHelpers.ComputeExactGenBytes(heap, out ulong gen0Bytes, out ulong gen1Bytes, out ulong gen2Bytes);
         return (gen0Bytes, gen1Bytes, gen2Bytes);
+    }
+
+    public long? ExactObjectCount =>
+        cache is IHeapIndexBuilder builder && builder.TryGetHeapIndex(out HeapIndexBuildResult? idx) ? idx.ObjectCount : null;
+
+    public ulong GetTotalIndexedBytes()
+    {
+        if (cache is not IHeapIndexBuilder builder || !builder.TryGetHeapIndex(out HeapIndexBuildResult? idx))
+            return 0;
+
+        ulong total = 0;
+        foreach (TypeAggregateIndexEntry e in idx.TypeAggregates.Values)
+            total += e.TotalSize;
+        return total;
     }
 
     public IReadOnlyList<TypeRef>? TryGetDistinctTypes()

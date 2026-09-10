@@ -47,6 +47,26 @@ public interface IHeapTypeStatisticsQuery
     /// </summary>
     (ulong Gen0Bytes, ulong Gen1Bytes, ulong Gen2Bytes) GetExactGenerationByteTotals();
 
+    /// <summary>
+    /// Exact total live object count from the Phase 1 scan, or <c>null</c> when
+    /// <see cref="HasExactGenerationData"/> is <c>false</c> (no index). Added 2026-09-11 for
+    /// <c>HeapTopologyAnalyzer</c>'s retyping — distinct from summing
+    /// <see cref="HeapTypeStatistics.InstanceCount"/> across <see cref="GetTypeStatistics"/>, which
+    /// can undercount: that dictionary is keyed by resolved type <em>name</em>, so two distinct
+    /// method tables resolving to the same name collapse to one entry (documented, accepted gap on
+    /// the dump-side implementation); this property is not derived from that dictionary.
+    /// </summary>
+    long? ExactObjectCount { get; }
+
+    /// <summary>
+    /// Sum of <see cref="HeapTypeStatistics.TotalSize"/> across every indexed type, or 0 when
+    /// <see cref="HasExactGenerationData"/> is <c>false</c>. Added 2026-09-11 for
+    /// <c>HeapTopologyAnalyzer</c>'s retyping — computed directly from the index on the dump-side
+    /// implementation, not by summing <see cref="GetTypeStatistics"/>'s result, for the same
+    /// name-collision reason as <see cref="ExactObjectCount"/>.
+    /// </summary>
+    ulong GetTotalIndexedBytes();
+
     /// <summary>Mirrors <c>IHeapAnalysisCache.TryGetDistinctMethodTables</c> — type
     /// least one live instance, without full object-index scan. <c>null</c> unavailable.</summary>
     IReadOnlyList<TypeRef>? TryGetDistinctTypes();

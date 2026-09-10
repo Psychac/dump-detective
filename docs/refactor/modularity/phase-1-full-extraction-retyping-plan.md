@@ -262,6 +262,46 @@ found no phase owns. Concrete sequencing:
    - Call site updated: `DefaultAnalyzerFeatureModuleCatalog` now constructs
      `SegmentReservationAnalyzerLegacyAdapter`. No benchmark referenced this analyzer directly
      (unlike the pilot's three benchmark call sites).
+
+   **Batch 2: `HeapTopologyAnalyzer`. Done 2026-09-11.** The pairing Batch 1 queued — its segment
+   needs were already covered by Batch 1's `IHeapSegmentQuery` extension; what it needed beyond that:
+   - **`IHeapSegmentQuery` extended again**: `EnumerateObjects(HeapSegmentRef)` (per-segment object
+     enumeration — this analyzer walks LOH/POH/Frozen/Unknown segments individually, deliberately
+     never the whole heap, since SOH's ~87M+ objects are never walked per-object at all) and
+     `LogicalHeapCount`. `EnumerateObjects` excludes invalid/free/untyped objects at the capability
+     boundary (documented side effect: progress-report cadence can differ slightly from the
+     pre-retyping version on segments with free blocks — the domain-result fields it feeds do not,
+     since progress is a side channel).
+   - **`IHeapTypeStatisticsQuery` extended**: `ExactObjectCount`/`GetTotalIndexedBytes()`, computed
+     directly from the index (not derived from `GetTypeStatistics()`'s name-keyed dictionary, to
+     avoid inheriting that dictionary's documented method-table-collision gap) — needed for the
+     exact-SOH-object/byte derivation this analyzer already did pre-retyping.
+   - **`HeapObjectRef` gained `TypeDisplayName`**, a real, if narrow, SDK-wide implication: its
+     existing `Type: TypeRef` field is a *canonical* identity — cross-source join key, deliberately
+     rewritten by `EntityCanonicalizer` for compiler-generated names (async state machines unwrap to
+     their declaring method, closures/lambdas lose their ordinal). This analyzer's per-type
+     POH/Frozen breakdown needs the dump's exact display name unchanged (it's a report label, not a
+     join key) — using `CanonicalName` instead would have silently renamed exactly the type names a
+     report must show verbatim. First real construction site for `HeapObjectRef`
+     (`HeapSegmentQuery.EnumerateObjects`); no prior caller existed to break.
+   - New shared `SdkTypeRefFactory` (`DumpDetective.Analysis/Sdk/`) — the one `EntityCanonicalizer`
+     call site for every dump-side Tier-1 implementation, replacing `HeapTypeStatisticsQuery`'s
+     private copy.
+   - **Gate met**: new `HeapTopologyAnalyzerRetypingCharacterizationTests` — two tests, one exercising
+     the no-index fallback (catching a real test-authoring mistake along the way: `SohObjects` is
+     `-1`, not `0`, when no index is available — a pre-existing sentinel-propagation quirk the
+     assertion initially got wrong, not a retyping regression, fixed once traced), one exercising the
+     exact-SOH-derivation branch via a *synthetic* injected index sized from real ClrMD ground-truth
+     counts (deliberately not a real `PrebuildHeapIndex` scan against the test process's own live
+     heap — avoids that scan's disk side effects and runtime cost for a assertion that only needs
+     the derivation arithmetic, not a real index). New `HeapTopologyAnalyzerRealDumpTests`
+     (`[DiscrepancyFact]`, one dump, foreground) repeats the ClrMD ground-truth cross-check against
+     the real 3.5 GB reference dump with a real prebuilt index — passed: 8 segments, ~1.46M SOH
+     objects derived exactly, 4 LOH segments, Server GC across 4 logical heaps, 2 s. Full
+     non-real-dump suite (1232 tests) passes.
+   - Call sites updated: `DefaultAnalyzerFeatureModuleCatalog`, `FullPipelineBenchmark`,
+     `SmallDumpLatencyBenchmark` (both benchmarks already needed the same fix for the pilot's
+     `GCGenerationAnalyzer` — same two files, same pattern, second time).
 5. **Real-dump verification stays one-at-a-time, in the foreground**, per this project's standing
    rule — run it once per batch on the reference dumps, not once per analyzer, to keep measurement
    cost proportional to what a mechanical retype-and-characterize change actually risks.

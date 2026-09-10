@@ -24,7 +24,10 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         Module("allocation-pattern", "Allocation Pattern Analysis", typeof(AllocationPatternAnalyzer), typeof(AllocationPatternFindingGenerator), typeof(AllocationPatternTrendComparer), typeof(AllocationPatternSectionBuilder), 120, ["gc", "allocation"]),
         Module("object-shape", "Object Shape Analysis", typeof(ObjectShapeAnalyzer), typeof(ObjectShapeFindingGenerator), typeof(ObjectShapeTrendComparer), typeof(ObjectShapeSectionBuilder), 130, ["types"]),
         Module("gc-root", "GC Root Analysis", typeof(GCRootAnalyzer), typeof(GCRootFindingGenerator), typeof(GCRootTrendComparer), typeof(GCRootIntelligenceSectionBuilder), 140, ["roots"]),
-        Module("heap-topology", "Heap Topology Analysis", typeof(HeapTopologyAnalyzer), typeof(HeapTopologyFindingGenerator), typeof(HeapTopologyTrendComparer), typeof(HeapTopologySectionBuilder), 150, ["heap"]),
+        // HeapTopologyAnalyzerLegacyAdapter, not HeapTopologyAnalyzer directly, since 2026-09-11
+        // (segment-capability retyping batch, alongside SegmentReservationAnalyzer) — see
+        // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("heap-topology", "Heap Topology Analysis", typeof(HeapTopologyAnalyzerLegacyAdapter), typeof(HeapTopologyFindingGenerator), typeof(HeapTopologyTrendComparer), typeof(HeapTopologySectionBuilder), 150, ["heap"]),
         Module("module", "Module Analysis", typeof(ModuleAnalyzer), typeof(ModuleFindingGenerator), typeof(ModuleTrendComparer), typeof(ModuleSectionBuilder), 160, ["runtime"]),
         Module("crash", "Crash Analysis", typeof(CrashAnalyzer), typeof(CrashFindingGenerator), typeof(CrashTrendComparer), typeof(ExceptionAnalysisSectionBuilder), 170, ["exceptions"]),
         Module("hang", "Hang Analysis", typeof(HangAnalyzer), typeof(HangFindingGenerator), typeof(HangTrendComparer), typeof(HangSectionBuilder), 180, ["threads"]),

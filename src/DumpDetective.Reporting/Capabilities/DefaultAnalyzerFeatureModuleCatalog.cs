@@ -15,7 +15,9 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
 {
     public IReadOnlyList<AnalyzerFeatureModule> Modules { get; } =
     [
-        Module("memory", "Memory Analysis", typeof(MemoryAnalyzer), typeof(MemoryFindingGenerator), typeof(MemoryAnalyzerTrendComparer), typeof(MemoryAnalysisSectionBuilder), 100, ["memory"]),
+        // MemoryAnalyzerLegacyAdapter, not MemoryAnalyzer directly, since 2026-09-11 (Batch 4 of the
+        // Phase 1 retyping) — see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("memory", "Memory Analysis", typeof(MemoryAnalyzerLegacyAdapter), typeof(MemoryFindingGenerator), typeof(MemoryAnalyzerTrendComparer), typeof(MemoryAnalysisSectionBuilder), 100, ["memory"]),
         // GCGenerationAnalyzerLegacyAdapter, not GCGenerationAnalyzer directly, since 2026-09-10 —
         // the Phase 1 retyping pilot; GCGenerationAnalyzer now implements the SDK's capability-scoped
         // Sdk.Analysis.IAnalyzer, not Core.Abstractions.IAnalyzer. See
@@ -23,7 +25,9 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         Module("gc-generation", "GC Generation Analysis", typeof(GCGenerationAnalyzerLegacyAdapter), typeof(GCGenerationFindingGenerator), typeof(GCGenerationTrendComparer), typeof(GCPressureSectionBuilder), 110, ["gc"]),
         Module("allocation-pattern", "Allocation Pattern Analysis", typeof(AllocationPatternAnalyzer), typeof(AllocationPatternFindingGenerator), typeof(AllocationPatternTrendComparer), typeof(AllocationPatternSectionBuilder), 120, ["gc", "allocation"]),
         Module("object-shape", "Object Shape Analysis", typeof(ObjectShapeAnalyzer), typeof(ObjectShapeFindingGenerator), typeof(ObjectShapeTrendComparer), typeof(ObjectShapeSectionBuilder), 130, ["types"]),
-        Module("gc-root", "GC Root Analysis", typeof(GCRootAnalyzer), typeof(GCRootFindingGenerator), typeof(GCRootTrendComparer), typeof(GCRootIntelligenceSectionBuilder), 140, ["roots"]),
+        // GCRootAnalyzerLegacyAdapter, not GCRootAnalyzer directly, since 2026-09-11 (GC root
+        // capability retyping batch) — see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("gc-root", "GC Root Analysis", typeof(GCRootAnalyzerLegacyAdapter), typeof(GCRootFindingGenerator), typeof(GCRootTrendComparer), typeof(GCRootIntelligenceSectionBuilder), 140, ["roots"]),
         // HeapTopologyAnalyzerLegacyAdapter, not HeapTopologyAnalyzer directly, since 2026-09-11
         // (segment-capability retyping batch, alongside SegmentReservationAnalyzer) — see
         // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
@@ -38,8 +42,13 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         Module("collection", "Collection Analysis", typeof(CollectionAnalyzer), typeof(CollectionFindingGenerator), typeof(CollectionTrendComparer), typeof(CollectionSectionBuilder), 240, ["collections"]),
         Module("static-root", "Static Root Leak Detection", typeof(StaticRootLeakDetector), typeof(StaticRootFindingGenerator), typeof(StaticRootTrendComparer), typeof(StaticRootSectionBuilder), 250, ["roots", "leaks"]),
         Module("reference-chain", "Reference Chain Analysis", typeof(ReferenceChainAnalyzer), typeof(ReferenceChainFindingGenerator), typeof(ReferenceChainTrendComparer), typeof(ReferenceChainSectionBuilder), 260, ["roots"]),
-        Module("gc-handle", "GC Handle Analysis", typeof(GCHandleAnalyzer), typeof(GCHandleFindingGenerator), typeof(GCHandleTrendComparer), typeof(GCHandleSectionBuilder), 270, ["handles"]),
-        Module("loh-fragmentation", "LOH & POH Fragmentation Analysis", typeof(LohFragmentationAnalyzer), typeof(LohFragmentationFindingGenerator), typeof(LohFragmentationTrendComparer), typeof(LohFragmentationSectionBuilder), 290, ["gc", "loh", "poh"]),
+        // GCHandleAnalyzerLegacyAdapter, not GCHandleAnalyzer directly, since 2026-09-11 (Batch 7 of
+        // the Phase 1 retyping) — see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("gc-handle", "GC Handle Analysis", typeof(GCHandleAnalyzerLegacyAdapter), typeof(GCHandleFindingGenerator), typeof(GCHandleTrendComparer), typeof(GCHandleSectionBuilder), 270, ["handles"]),
+        // LohFragmentationAnalyzerLegacyAdapter, not LohFragmentationAnalyzer directly, since
+        // 2026-09-11 (Batch 6 of the Phase 1 retyping) — see
+        // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("loh-fragmentation", "LOH & POH Fragmentation Analysis", typeof(LohFragmentationAnalyzerLegacyAdapter), typeof(LohFragmentationFindingGenerator), typeof(LohFragmentationTrendComparer), typeof(LohFragmentationSectionBuilder), 290, ["gc", "loh", "poh"]),
         Module("thread-stack-cluster", "Thread Stack Cluster Analysis", typeof(ThreadStackClusterAnalyzer), typeof(ThreadStackClusterFindingGenerator), typeof(ThreadStackClusterTrendComparer), typeof(ThreadStackClusterSectionBuilder), 300, ["threads"]),
         Module("thread", "Thread Analysis", typeof(ThreadAnalyzer), typeof(ThreadFindingGenerator), typeof(ThreadTrendComparer), typeof(ThreadSectionBuilder), 310, ["threads"]),
         Module("lock-graph", "Lock Graph Analysis", typeof(LockGraphAnalyzer), typeof(LockGraphFindingGenerator), typeof(LockGraphTrendComparer), typeof(LockGraphSectionBuilder), 320, ["threads", "locks"]),
@@ -53,7 +62,9 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         Module("segment-reservation", "Segment Reservation Analysis", typeof(SegmentReservationAnalyzerLegacyAdapter), typeof(SegmentReservationFindingGenerator), typeof(SegmentReservationTrendComparer), typeof(SegmentReservationSectionBuilder), 380, ["gc", "segments"]),
         Module("weak-reference", "Weak Reference Analysis", typeof(WeakReferenceAnalyzer), typeof(WeakReferenceFindingGenerator), typeof(WeakReferenceTrendComparer), typeof(WeakReferenceSectionBuilder), 390, ["gc"]),
         Module("boxing", "Boxing Analysis", typeof(BoxingAnalyzer), typeof(BoxingFindingGenerator), typeof(BoxingTrendComparer), typeof(BoxingSectionBuilder), 400, ["types", "perf"]),
-        Module("jit", "JIT Analysis", typeof(JitAnalyzer), typeof(JitFindingGenerator), typeof(JitTrendComparer), typeof(JitSectionBuilder), 410, ["runtime", "perf"]),
+        // JitAnalyzerLegacyAdapter, not JitAnalyzer directly, since 2026-09-11 (Batch 5 of the Phase
+        // 1 retyping) — see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("jit", "JIT Analysis", typeof(JitAnalyzerLegacyAdapter), typeof(JitFindingGenerator), typeof(JitTrendComparer), typeof(JitSectionBuilder), 410, ["runtime", "perf"]),
         Module("db-connection", "DbConnection Analysis", typeof(DbConnectionAnalyzer), typeof(DbConnectionFindingGenerator), typeof(DbConnectionTrendComparer), typeof(DbConnectionSectionBuilder), 420, ["infra", "network"]),
         Module("sql-transaction", "SQL Transaction Analysis", typeof(SqlTransactionAnalyzer), typeof(SqlTransactionFindingGenerator), typeof(SqlTransactionTrendComparer), typeof(SqlTransactionSectionBuilder), 425, ["infra", "network"]),
         Module("sql-command", "SQL Command Analysis", typeof(SqlCommandAnalyzer), typeof(SqlCommandFindingGenerator), typeof(SqlCommandTrendComparer), typeof(SqlCommandSectionBuilder), 426, ["infra", "network"]),

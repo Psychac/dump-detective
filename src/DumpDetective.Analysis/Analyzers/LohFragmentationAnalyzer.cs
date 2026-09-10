@@ -1,17 +1,43 @@
-﻿using DumpDetective.Analysis.Cache;
+using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
-using DumpDetective.Platform.Storage.Container;
-using DumpDetective.Core.Abstractions;
+using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
-using DumpDetective.Analysis.Indexing.Satellite;
+using DumpDetective.Platform.Storage.Container;
+using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 
 using Microsoft.Diagnostics.Runtime;
 
 using System.Buffers.Binary;
 
+// DumpDetective.Analysis.Models and DumpDetective.Sdk.Analysis both declare HeapSegmentKind
+// (deliberately identical names, see SdkSegmentKindMapper) — alias the SDK one (what this analyzer
+// sources segment data as) to disambiguate.
+using SdkHeapSegmentKind = DumpDetective.Sdk.Analysis.HeapSegmentKind;
+
 namespace DumpDetective.Analysis.Analyzers
 {
-    public sealed class LohFragmentationAnalyzer : IAnalyzer
+    /// <summary>
+    /// Phase 1 retyping batch (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
+    /// retyped onto the SDK's capability-scoped <see cref="Sdk.Analysis.IAnalyzer"/>, sourcing
+    /// segments/free-blocks/captured-large-objects through <see cref="IHeapSegmentQuery"/>
+    /// (<c>heap.segments</c>) and exact-index type aggregates through
+    /// <see cref="IHeapTypeStatisticsQuery"/> (<c>heap.types</c>). Runs through the existing pipeline
+    /// via <see cref="LohFragmentationAnalyzerLegacyAdapter"/>.
+    /// </summary>
+    /// <remarks>
+    /// The pre-retyping analyzer's own fast/fallback fork (Phase-1 disk satellite indices vs. a live
+    /// per-object segment scan) mostly disappears here — <see cref="IHeapSegmentQuery.EnumerateLohFreeBlocks"/>
+    /// hides that fork internally, since both modes answer the exact same question (every free
+    /// block, no cap). It stays explicit for exactly one thing: the large-object list and the
+    /// per-type LOH/POH consumption view, because those two paths are genuinely different features
+    /// pre-retyping, not just different implementations of the same one — the disk path is a
+    /// capped, observation-order top-100 sample; the live-scan path is exact and unbounded. See
+    /// <see cref="IHeapSegmentQuery.HasLohSatelliteIndex"/>'s own remarks for why this can't be the
+    /// same signal as <see cref="IHeapTypeStatisticsQuery.HasExactGenerationData"/>.
+    /// </remarks>
+    public sealed class LohFragmentationAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     {
         // Matches LargeObjectTracker's LOH threshold so both modes select the same candidates.
         private const ulong LohThreshold = 85_000;
@@ -20,170 +46,198 @@ namespace DumpDetective.Analysis.Analyzers
         private static readonly (ulong Min, ulong Max, string Label)[] s_gapBuckets =
         [
             (0,              1_024UL,            "< 1 KB"),
-            (1_024UL,        65_536UL,           "1 KB \u2013 64 KB"),
-            (65_536UL,       524_288UL,          "64 KB \u2013 512 KB"),
-            (524_288UL,      1_048_576UL,        "512 KB \u2013 1 MB"),
-            (1_048_576UL,    10_485_760UL,       "1 MB \u2013 10 MB"),
-            (10_485_760UL,   104_857_600UL,      "10 MB \u2013 100 MB"),
-            (104_857_600UL,  ulong.MaxValue,     "\u2265 100 MB"),
+            (1_024UL,        65_536UL,           "1 KB – 64 KB"),
+            (65_536UL,       524_288UL,          "64 KB – 512 KB"),
+            (524_288UL,      1_048_576UL,        "512 KB – 1 MB"),
+            (1_048_576UL,    10_485_760UL,       "1 MB – 10 MB"),
+            (10_485_760UL,   104_857_600UL,      "10 MB – 100 MB"),
+            (104_857_600UL,  ulong.MaxValue,     "≥ 100 MB"),
         ];
 
         public string Name => "LOH & POH Fragmentation Analysis";
         public string Category => "Memory";
 
-        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        public AnalyzerDomainResult? LastResult { get; private set; }
+
+        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, cancellationToken).Stamp(this));
+
+            IHeapSegmentQuery segmentQuery = context.HeapSegments
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapSegments}' capability.");
+            IHeapTypeStatisticsQuery typeStatistics = context.HeapTypeStatistics
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapTypes}' capability.");
+
+            LastResult = Analyze(segmentQuery, typeStatistics, context.Progress, cancellationToken);
+            return ValueTask.CompletedTask;
         }
 
-        /// <summary>Entry point for benchmarks and direct callers (no cache — falls back to heap scan).</summary>
-        public AnalyzerDomainResult Analyze(ClrHeap heap)
+        private static LohFragmentationDomainResult Analyze(
+            IHeapSegmentQuery segmentQuery,
+            IHeapTypeStatisticsQuery typeStatistics,
+            IProgress<AnalyzerProgressReport>? progress,
+            CancellationToken cancellationToken)
         {
-            return AnalyzeFromHeap(heap, progress: null);
-        }
+            progress?.Report(new(0, "reading LOH/POH segment metadata"));
 
-        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache? cache, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
-        {
-            // Fast path: use Phase 1 pre-built LOH indices — no per-segment EnumerateObjects call.
-            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
-                return AnalyzeFromIndex(heap, heapIndex, progress, cancellationToken);
-
-            // Fallback: full segment object scan (benchmarks, tests, or no index available).
-            return AnalyzeFromHeap(heap, progress);
-        }
-
-        private AnalyzerDomainResult AnalyzeFromHeap(ClrHeap heap, IProgress<AnalyzerProgressReport>? progress)
-        {
-            // NOTE: fallback path — used when no Phase 1 index is available.
-
-            var segmentStats = new List<LohSegmentStats>();
-            int[] freeGapBucketCounts = new int[s_gapBuckets.Length];
-            var largeObjectCandidates = new List<(ulong Address, string TypeName, ulong Size)>();
-            var typeAggregation = new Dictionary<string, (int Count, ulong TotalBytes)>();
-            var scanCounter = new ObjectScanCounter("scanning LOH segments", progress, reportEveryObjects: 100_000, reportEveryElapsed: TimeSpan.FromSeconds(2));
-
-            foreach (ClrSegment segment in heap.Segments)
+            var lohSegments = new List<HeapSegmentRef>();
+            foreach (HeapSegmentRef segment in segmentQuery.EnumerateSegments())
             {
-                if (!IsLohSegment(segment))
-                    continue;
-
-                // Match disk mode's Step 1 (GetSegmentTotalBytes): committed segment span,
-                // not the sum of enumerable object sizes — those can differ by the
-                // reserve/alignment padding past the last object.
-                ulong totalBytes = GetSegmentTotalBytes(segment);
-                ulong freeBytes = 0;
-                ulong largestFreeBlock = 0;
-                ulong largestFreeBlockAddress = 0;
-                int objectCount = 0;
-                int freeObjectCount = 0;
-
-                foreach (ClrObject obj in segment.EnumerateObjects())
-                {
-                    scanCounter.Tick();
-
-                    if (!obj.IsValid || obj.Address == 0)
-                        continue;
-
-                    AccumulateSegmentObject(
-                        obj,
-                        freeGapBucketCounts,
-                        largeObjectCandidates,
-                        typeAggregation,
-                        ref freeBytes,
-                        ref largestFreeBlock,
-                        ref largestFreeBlockAddress,
-                        ref objectCount,
-                        ref freeObjectCount);
-                }
-
-                // Match disk mode's Step 3 derivation (totalBytes - freeBytes): keeps the
-                // Total = Used + Free invariant consistent between modes now that
-                // GetSegmentTotalBytes can include committed padding no per-object scan sees.
-                ulong usedBytes = totalBytes > freeBytes ? totalBytes - freeBytes : 0;
-
-                double fragmentationPercent = totalBytes == 0 ? 0 : freeBytes * 100.0 / totalBytes;
-                segmentStats.Add(new LohSegmentStats(GetSegmentAddress(segment), totalBytes, usedBytes, freeBytes, largestFreeBlock, largestFreeBlockAddress, objectCount, freeObjectCount, fragmentationPercent, SegmentKindMapper.Map(segment)));
+                if (IsLohOrPohKind(segment.Kind))
+                    lohSegments.Add(segment);
             }
 
-            scanCounter.Complete();
-
-            if (segmentStats.Count == 0)
-            {
+            if (lohSegments.Count == 0)
                 return new LohFragmentationDomainResult(0, 0, 0, 0, 0, 0, 0);
+
+            // ── Free blocks — same shape/semantics whether the capability's fast or fallback path
+            // answered it; this analyzer aggregates identically either way. ──
+            progress?.Report(new(0, "reading LOH/POH free blocks"));
+            var freeBySegment = new Dictionary<ulong, (ulong TotalFree, ulong Largest, ulong LargestAddress, int Count)>();
+            var allFreeSizes = new List<ulong>(capacity: 256);
+            foreach (HeapFreeBlockRef block in segmentQuery.EnumerateLohFreeBlocks())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                allFreeSizes.Add(block.Size);
+                if (freeBySegment.TryGetValue(block.SegmentAddress, out var existing))
+                    freeBySegment[block.SegmentAddress] = block.Size > existing.Largest
+                        ? (existing.TotalFree + block.Size, block.Size, block.Address, existing.Count + 1)
+                        : (existing.TotalFree + block.Size, existing.Largest, existing.LargestAddress, existing.Count + 1);
+                else
+                    freeBySegment[block.SegmentAddress] = (block.Size, block.Size, block.Address, 1);
             }
 
-            double overallFragmentation = CalculateOverallFragmentationPercent(segmentStats);
-            ulong totalAllBytes = 0, totalUsedBytes = 0, totalFreeBytes = 0, maxFreeBlock = 0;
+            ulong totalAllBytes = 0, totalFreeBytes = 0, totalUsedBytes = 0, maxFreeBlock = 0;
             int totalFreeBlocks = 0;
-            foreach (var s in segmentStats)
+            var segStats = new List<(ulong Address, ulong TotalBytes, double FragPct, ulong FreeBytes, ulong LargestFree, ulong LargestFreeAddress, SdkHeapSegmentKind Kind)>(lohSegments.Count);
+
+            foreach (HeapSegmentRef segment in lohSegments)
             {
-                totalAllBytes += s.TotalBytes;
-                totalUsedBytes += s.UsedBytes;
-                totalFreeBytes += s.FreeBytes;
-                totalFreeBlocks += s.FreeObjectCount;
-                if (s.LargestFreeBlock > maxFreeBlock) maxFreeBlock = s.LargestFreeBlock;
+                ulong totalBytes = segment.CommittedBytes;
+                ulong segFree = 0, segLargest = 0, segLargestAddress = 0;
+                int segFreeCount = 0;
+                if (freeBySegment.TryGetValue(segment.Start, out var fb))
+                {
+                    segFree = fb.TotalFree;
+                    segLargest = fb.Largest;
+                    segLargestAddress = fb.LargestAddress;
+                    segFreeCount = fb.Count;
+                }
+                ulong segUsed = totalBytes > segFree ? totalBytes - segFree : 0;
+                double fragPct = totalBytes == 0 ? 0 : segFree * 100.0 / totalBytes;
+
+                totalAllBytes += totalBytes;
+                totalFreeBytes += segFree;
+                totalUsedBytes += segUsed;
+                totalFreeBlocks += segFreeCount;
+                if (segLargest > maxFreeBlock) maxFreeBlock = segLargest;
+
+                segStats.Add((segment.Start, totalBytes, fragPct, segFree, segLargest, segLargestAddress, segment.Kind));
             }
 
-            segmentStats.Sort(static (a, b) =>
+            double overallFragPct = totalAllBytes == 0 ? 0 : totalFreeBytes * 100.0 / totalAllBytes;
+
+            // Sort top fragmented segments descending by fragmentation %, then free bytes.
+            segStats.Sort(static (a, b) =>
             {
-                int cmp = b.FragmentationPercent.CompareTo(a.FragmentationPercent);
+                int cmp = b.FragPct.CompareTo(a.FragPct);
                 return cmp != 0 ? cmp : b.FreeBytes.CompareTo(a.FreeBytes);
             });
-            var topSegments = new List<LohSegmentSnapshot>(segmentStats.Count);
-            var kindInputs = new List<(HeapSegmentKind Kind, ulong TotalBytes, ulong FreeBytes, ulong UsedBytes, ulong LargestFreeBlock)>(segmentStats.Count);
-            foreach (var s in segmentStats)
-            {
-                topSegments.Add(new LohSegmentSnapshot(s.Address, s.TotalBytes, s.FragmentationPercent, s.FreeBytes, s.LargestFreeBlock, s.LargestFreeBlockAddress, s.Kind));
-                kindInputs.Add((s.Kind, s.TotalBytes, s.FreeBytes, s.UsedBytes, s.LargestFreeBlock));
-            }
 
+            var topSegs = new List<LohSegmentSnapshot>(segStats.Count);
+            var kindInputs = new List<(Models.HeapSegmentKind Kind, ulong TotalBytes, ulong FreeBytes, ulong UsedBytes, ulong LargestFreeBlock)>(segStats.Count);
+            foreach (var s in segStats)
+            {
+                Models.HeapSegmentKind dumpKind = SdkSegmentKindMapper.ToDump(s.Kind);
+                topSegs.Add(new LohSegmentSnapshot(s.Address, s.TotalBytes, s.FragPct, s.FreeBytes, s.LargestFree, s.LargestFreeAddress, dumpKind));
+                ulong segUsedForKind = s.TotalBytes > s.FreeBytes ? s.TotalBytes - s.FreeBytes : 0;
+                kindInputs.Add((dumpKind, s.TotalBytes, s.FreeBytes, segUsedForKind, s.LargestFree));
+            }
             List<LohKindBreakdown> kindBreakdown = BuildKindBreakdown(kindInputs);
 
-            var freeGapHistogram = new List<FreeGapBucket>(s_gapBuckets.Length);
-            for (int b = 0; b < s_gapBuckets.Length; b++)
-                if (freeGapBucketCounts[b] > 0)
-                    freeGapHistogram.Add(new FreeGapBucket(s_gapBuckets[b].Label, freeGapBucketCounts[b]));
+            List<FreeGapBucket> freeGapHistogram = BuildFreeGapHistogram(allFreeSizes, cancellationToken);
 
-            largeObjectCandidates.Sort(static (a, b) => b.Size.CompareTo(a.Size));
-            var topLargeObjects = new List<LargeObjectSnapshot>(largeObjectCandidates.Count);
-            foreach (var cand in largeObjectCandidates)
-                topLargeObjects.Add(new LargeObjectSnapshot(cand.Address, cand.TypeName, cand.Size));
+            // ── Large objects + per-type LOH/POH consumption — genuinely different fast/fallback
+            // semantics (see this class's own remarks), so explicit here. ──
+            List<LargeObjectSnapshot> topLargeObjects;
+            List<LohTypeProfile> typeProfiles;
 
-            // Build type-aggregated LOH consumption view: top types by total bytes.
-            var typeProfiles = new List<LohTypeProfile>(typeAggregation.Count);
-            foreach ((string typeName, (int count, ulong totalBytes)) in typeAggregation)
-                typeProfiles.Add(new LohTypeProfile(typeName, count, totalBytes));
-            typeProfiles.Sort(static (a, b) => b.TotalBytes.CompareTo(a.TotalBytes));
-
-            return new LohFragmentationDomainResult(segmentStats.Count, totalAllBytes, totalFreeBytes, totalUsedBytes, totalFreeBlocks, overallFragmentation, maxFreeBlock, topSegments, freeGapHistogram, topLargeObjects, typeProfiles, kindBreakdown);
-        }
-
-        private static double CalculateOverallFragmentationPercent(List<LohSegmentStats> segmentStats)
-        {
-            ulong totalBytes = 0;
-            ulong freeBytes = 0;
-
-            foreach (var segment in segmentStats)
+            if (segmentQuery.HasLohSatelliteIndex)
             {
-                totalBytes += segment.TotalBytes;
-                freeBytes += segment.FreeBytes;
+                progress?.Report(new(0, "reading captured large objects"));
+                topLargeObjects = new List<LargeObjectSnapshot>();
+                foreach (HeapObjectRef obj in segmentQuery.EnumerateCapturedLargeObjects())
+                    topLargeObjects.Add(new LargeObjectSnapshot(obj.Address, obj.TypeDisplayName, obj.Size));
+
+                typeProfiles = new List<LohTypeProfile>();
+                foreach (KeyValuePair<string, HeapTypeStatistics> kv in typeStatistics.GetTypeStatistics())
+                {
+                    if (kv.Value.LohCount == 0)
+                        continue;
+                    if (string.Equals(kv.Key, "Free", StringComparison.Ordinal))
+                        continue;
+                    typeProfiles.Add(new LohTypeProfile(kv.Key, (int)Math.Min(kv.Value.LohCount, int.MaxValue), kv.Value.LohSize));
+                }
+            }
+            else
+            {
+                progress?.Report(new(0, "scanning LOH/POH segments"));
+                var largeObjectCandidates = new List<(ulong Address, string TypeName, ulong Size)>();
+                var typeAggregation = new Dictionary<string, (int Count, ulong TotalBytes)>();
+
+                foreach (HeapSegmentRef segment in lohSegments)
+                {
+                    foreach (HeapObjectRef obj in segmentQuery.EnumerateObjects(segment, includeFree: false))
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        if (typeAggregation.TryGetValue(obj.TypeDisplayName, out var existing))
+                            typeAggregation[obj.TypeDisplayName] = (existing.Count + 1, existing.TotalBytes + obj.Size);
+                        else
+                            typeAggregation[obj.TypeDisplayName] = (1, obj.Size);
+
+                        if (obj.Size >= LohThreshold)
+                        {
+                            // Unbounded: LOH-threshold-sized objects (>= 85 KB) are a small fraction
+                            // of any real heap's population, so keeping every candidate and sorting
+                            // once at the end costs single-digit MB even on a 25 GB dump.
+                            largeObjectCandidates.Add((obj.Address, obj.TypeDisplayName, obj.Size));
+                        }
+                    }
+                }
+
+                largeObjectCandidates.Sort(static (a, b) => b.Size.CompareTo(a.Size));
+                topLargeObjects = new List<LargeObjectSnapshot>(largeObjectCandidates.Count);
+                foreach (var cand in largeObjectCandidates)
+                    topLargeObjects.Add(new LargeObjectSnapshot(cand.Address, cand.TypeName, cand.Size));
+
+                typeProfiles = new List<LohTypeProfile>(typeAggregation.Count);
+                foreach ((string typeName, (int count, ulong totalBytes)) in typeAggregation)
+                    typeProfiles.Add(new LohTypeProfile(typeName, count, totalBytes));
             }
 
-            return totalBytes == 0 ? 0 : freeBytes * 100.0 / totalBytes;
+            typeProfiles.Sort(static (a, b) => b.TotalBytes.CompareTo(a.TotalBytes));
+
+            return new LohFragmentationDomainResult(
+                lohSegments.Count, totalAllBytes, totalFreeBytes, totalUsedBytes,
+                totalFreeBlocks, overallFragPct, maxFreeBlock,
+                topSegs, freeGapHistogram, topLargeObjects, typeProfiles, kindBreakdown);
         }
+
+        private static bool IsLohOrPohKind(SdkHeapSegmentKind kind) =>
+            kind == SdkHeapSegmentKind.LargeObjectHeap || kind == SdkHeapSegmentKind.PinnedObjectHeap;
 
         // ── LOH/POH kind breakdown ───────────────────────────────────────────────
 
         /// <summary>
-        /// Groups per-segment stats by <see cref="HeapSegmentKind"/> (Large vs. Pinned) so the
+        /// Groups per-segment stats by <see cref="Models.HeapSegmentKind"/> (Large vs. Pinned) so the
         /// report can distinguish LOH from POH fragmentation instead of only showing the combined
         /// total that both heap-scan and index paths compute.
         /// </summary>
         internal static List<LohKindBreakdown> BuildKindBreakdown(
-            IEnumerable<(HeapSegmentKind Kind, ulong TotalBytes, ulong FreeBytes, ulong UsedBytes, ulong LargestFreeBlock)> segments)
+            IEnumerable<(Models.HeapSegmentKind Kind, ulong TotalBytes, ulong FreeBytes, ulong UsedBytes, ulong LargestFreeBlock)> segments)
         {
-            var byKind = new Dictionary<HeapSegmentKind, (int Count, ulong TotalBytes, ulong FreeBytes, ulong UsedBytes, ulong LargestFreeBlock)>();
+            var byKind = new Dictionary<Models.HeapSegmentKind, (int Count, ulong TotalBytes, ulong FreeBytes, ulong UsedBytes, ulong LargestFreeBlock)>();
             foreach (var s in segments)
             {
                 if (byKind.TryGetValue(s.Kind, out var acc))
@@ -207,217 +261,18 @@ namespace DumpDetective.Analysis.Analyzers
             return result;
         }
 
-        // Matches LohFreeBlockWriter.Write which indexes both Large and Pinned segments.
-        private static bool IsLohSegment(ClrSegment segment) => IsLohSegment(segment.Kind);
-
+        // Matches LohFreeBlockWriter.Write which indexes both Large and Pinned segments. Kept for
+        // its existing direct unit-test coverage (LohFragmentationAnalyzerTests) — no longer called
+        // by this analyzer's own retyped logic, which filters via the SDK's HeapSegmentKind instead.
         internal static bool IsLohSegment(GCSegmentKind kind)
             => kind == GCSegmentKind.Large || kind == GCSegmentKind.Pinned;
 
-        private static ulong GetSegmentAddress(ClrSegment segment) => segment.Start;
-
-        private static void AccumulateSegmentObject(
-            ClrObject obj,
-            int[] freeGapBucketCounts,
-            List<(ulong Address, string TypeName, ulong Size)> largeObjectCandidates,
-            Dictionary<string, (int Count, ulong TotalBytes)> typeAggregation,
-            ref ulong freeBytes,
-            ref ulong largestFreeBlock,
-            ref ulong largestFreeBlockAddress,
-            ref int objectCount,
-            ref int freeObjectCount)
-        {
-            if (obj.IsFree)
-            {
-                ulong size = obj.Size;
-                freeObjectCount++;
-                freeBytes += size;
-
-                // Accumulate directly into bucket counts instead of intermediate list (reduces memory on highly fragmented heaps).
-                for (int b = 0; b < s_gapBuckets.Length; b++)
-                {
-                    if (size >= s_gapBuckets[b].Min && size < s_gapBuckets[b].Max)
-                    {
-                        freeGapBucketCounts[b]++;
-                        break;
-                    }
-                }
-
-                if (size > largestFreeBlock)
-                {
-                    largestFreeBlock = size;
-                    largestFreeBlockAddress = obj.Address;
-                }
-            }
-            else
-            {
-                objectCount++;
-
-                ulong size = obj.Size;
-                string typeName = obj.Type?.Name ?? "Unknown";
-
-                // Aggregate by type for type-grouped LOH consumption view.
-                if (typeAggregation.TryGetValue(typeName, out var existing))
-                    typeAggregation[typeName] = (existing.Count + 1, existing.TotalBytes + size);
-                else
-                    typeAggregation[typeName] = (1, size);
-
-                if (size >= LohThreshold)
-                {
-                    // Unbounded: LOH-threshold-sized objects (>= 85 KB) are a small fraction of any
-                    // real heap's population, so keeping every candidate and sorting once at the end
-                    // costs single-digit MB even on a 25 GB dump.
-                    largeObjectCandidates.Add((obj.Address, typeName, size));
-                }
-            }
-        }
-
-        // ── Index-based fast path ─────────────────────────────────────────────────
-
-        private AnalyzerDomainResult AnalyzeFromIndex(
-            ClrHeap heap,
-            HeapIndexBuildResult heapIndex,
-            IProgress<AnalyzerProgressReport>? progress,
-            CancellationToken cancellationToken)
-        {
-            string indexDir = Path.GetDirectoryName(heapIndex.IndexPath) ?? string.Empty;
-
-            // Memory mode: IndexPath is "<memory>", so indexDir is "". The satellite files
-            // (LohFreeBlockIndex.bin, LargeObjectIndex.bin) only exist in disk mode.
-            // Fall back to the full segment scan so both modes produce identical rich output.
-            if (indexDir.Length == 0)
-                return AnalyzeFromHeap(heap, progress);
-
-            progress?.Report(new(0, "reading LOH segment metadata", null, TimeSpan.Zero));
-
-            // Step 1: Read LOH segment committed bytes from heap metadata (no object enumeration).
-            var segmentTotalBytes = new Dictionary<ulong, ulong>();
-            var segmentKinds = new Dictionary<ulong, HeapSegmentKind>();
-            foreach (ClrSegment segment in heap.Segments)
-            {
-                if (!IsLohSegment(segment))
-                    continue;
-                ulong addr = GetSegmentAddress(segment);
-                ulong bytes = GetSegmentTotalBytes(segment);
-                if (addr != 0)
-                {
-                    segmentTotalBytes[addr] = bytes;
-                    segmentKinds[addr] = SegmentKindMapper.Map(segment);
-                }
-            }
-
-            if (segmentTotalBytes.Count == 0)
-                return new LohFragmentationDomainResult(0, 0, 0, 0, 0, 0, 0);
-
-            // Step 2: Read LohFreeBlockIndex.bin.
-            var freeBySegment = new Dictionary<ulong, (ulong TotalFree, ulong Largest, ulong LargestAddress, int Count)>();
-            var allFreeSizes = new List<ulong>(capacity: 256);
-            progress?.Report(new(0, "reading LohFreeBlockIndex.bin", null, TimeSpan.Zero));
-            ReadFreeBlocks(heapIndex.IndexPath, freeBySegment, allFreeSizes, cancellationToken);
-
-            // Step 3: Compute per-segment and global stats.
-            ulong totalAllBytes = 0, totalFreeBytes = 0, totalUsedBytes = 0, maxFreeBlock = 0;
-            int totalFreeBlocks = 0;
-            var segStats = new List<(ulong Address, ulong TotalBytes, double FragPct, ulong FreeBytes, ulong LargestFree, ulong LargestFreeAddress, HeapSegmentKind Kind)>(segmentTotalBytes.Count);
-
-            foreach ((ulong addr, ulong totalBytes) in segmentTotalBytes)
-            {
-                ulong segFree = 0, segLargest = 0, segLargestAddress = 0;
-                int segFreeCount = 0;
-                if (freeBySegment.TryGetValue(addr, out var fb))
-                {
-                    segFree = fb.TotalFree;
-                    segLargest = fb.Largest;
-                    segLargestAddress = fb.LargestAddress;
-                    segFreeCount = fb.Count;
-                }
-                ulong segUsed = totalBytes > segFree ? totalBytes - segFree : 0;
-                double fragPct = totalBytes == 0 ? 0 : segFree * 100.0 / totalBytes;
-
-                totalAllBytes += totalBytes;
-                totalFreeBytes += segFree;
-                totalUsedBytes += segUsed;
-                totalFreeBlocks += segFreeCount;
-                if (segLargest > maxFreeBlock) maxFreeBlock = segLargest;
-
-                segStats.Add((addr, totalBytes, fragPct, segFree, segLargest, segLargestAddress, segmentKinds[addr]));
-            }
-
-            double overallFragPct = totalAllBytes == 0 ? 0 : totalFreeBytes * 100.0 / totalAllBytes;
-
-            // Sort top fragmented segments descending by fragmentation %, then free bytes.
-            segStats.Sort(static (a, b) =>
-            {
-                int cmp = b.FragPct.CompareTo(a.FragPct);
-                return cmp != 0 ? cmp : b.FreeBytes.CompareTo(a.FreeBytes);
-            });
-
-            var topSegs = new List<LohSegmentSnapshot>(segStats.Count);
-            var kindInputs = new List<(HeapSegmentKind Kind, ulong TotalBytes, ulong FreeBytes, ulong UsedBytes, ulong LargestFreeBlock)>(segStats.Count);
-            foreach (var s in segStats)
-            {
-                topSegs.Add(new LohSegmentSnapshot(s.Address, s.TotalBytes, s.FragPct, s.FreeBytes, s.LargestFree, s.LargestFreeAddress, s.Kind));
-                ulong segUsedForKind = s.TotalBytes > s.FreeBytes ? s.TotalBytes - s.FreeBytes : 0;
-                kindInputs.Add((s.Kind, s.TotalBytes, s.FreeBytes, segUsedForKind, s.LargestFree));
-            }
-            List<LohKindBreakdown> kindBreakdown = BuildKindBreakdown(kindInputs);
-
-            // Step 4: Build free-gap histogram.
-            var freeGapHistogram = BuildFreeGapHistogram(allFreeSizes, cancellationToken);
-
-            // Step 5: Read LargeObjectIndex.bin for the top-N individual-object list. This file is
-            // deliberately capped (top-100 by size, see LargeObjectTracker) — fine for a "biggest
-            // single objects" table, but not for a type-level rollup (see Step 6).
-            List<LargeObjectSnapshot> topLargeObjects = [];
-            progress?.Report(new(0, "reading LargeObjectIndex.bin", null, TimeSpan.Zero));
-            LargeObjectTracker.ReadRecords(heapIndex.IndexPath, (address, mt, size) => {
-                // OPT (docs/cache/cache-architecture.md Phase 5): mt is already a
-                // parameter of this callback — resolve via the metadata cache instead of
-                // materializing a ClrObject. A null type is the equivalent "unresolvable" gate
-                // heap.GetObject(address).IsValid served before.
-                ClrType? type = heap.GetTypeByMethodTable(mt);
-                if (type is null) return;
-                string typeName = type.Name ?? "Unknown";
-                if (string.Equals(typeName, "Free", StringComparison.Ordinal)) return;
-                topLargeObjects.Add(new LargeObjectSnapshot(address, typeName, size));
-            }, cancellationToken);
-
-            // Rank by size descending — the index file itself carries no size ordering.
-            topLargeObjects.Sort(static (a, b) => b.Size.CompareTo(a.Size));
-
-            // Step 6: Build the type-aggregated LOH/POH consumption view from the Phase 1
-            // TypeAggregates (LohCount/LohSize) instead of LargeObjectIndex.bin's top-100 sample.
-            // TypeAggregates already covers every LOH/POH-sized object seen during the single
-            // heap-scan pass, so this is unbounded and free of the top-100 cap's size bias — a
-            // type with thousands of moderately-sized large objects no longer gets crowded out by
-            // 100 individually huge objects of other types.
-            var typeProfiles = new List<LohTypeProfile>();
-            foreach (TypeAggregateIndexEntry agg in heapIndex.TypeAggregates.Values)
-            {
-                if (agg.LohCount == 0)
-                    continue;
-                string typeName = TypeAggregateNameResolver.ResolveTypeName(heap, agg.MethodTable, agg.SampleAddress);
-                if (string.Equals(typeName, "Free", StringComparison.Ordinal))
-                    continue;
-                typeProfiles.Add(new LohTypeProfile(typeName, (int)agg.LohCount, agg.LohSize));
-            }
-            typeProfiles.Sort(static (a, b) => b.TotalBytes.CompareTo(a.TotalBytes));
-
-            return new LohFragmentationDomainResult(
-                segmentTotalBytes.Count, totalAllBytes, totalFreeBytes, totalUsedBytes,
-                totalFreeBlocks, overallFragPct, maxFreeBlock,
-                topSegs, freeGapHistogram, topLargeObjects, typeProfiles, kindBreakdown);
-        }
-
-        // ── Segment metadata helpers ──────────────────────────────────────────────
-
-        private static ulong GetSegmentTotalBytes(ClrSegment segment)
-        {
-            MemoryRange mem = segment.CommittedMemory;
-            return mem.End >= mem.Start ? mem.End - mem.Start : 0;
-        }
-
         // ── Index readers ─────────────────────────────────────────────────────────
 
+        // Kept for its existing direct unit-test coverage (LohFragmentationAnalyzerTests) — no
+        // longer called by this analyzer's own retyped logic, which reads free blocks through
+        // IHeapSegmentQuery.EnumerateLohFreeBlocks (backed by SdkBridge.HeapSegmentQuery's own copy
+        // of this same read, since a source-neutral SDK capability can't take a raw disk path).
         internal static void ReadFreeBlocks(
             string containerPath,
             Dictionary<ulong, (ulong TotalFree, ulong Largest, ulong LargestAddress, int Count)> bySegment,
@@ -463,7 +318,6 @@ namespace DumpDetective.Analysis.Analyzers
             }
         }
 
-
         // ── Free-gap histogram ────────────────────────────────────────────────────
 
         internal static List<FreeGapBucket> BuildFreeGapHistogram(List<ulong> allFreeSizes, CancellationToken cancellationToken = default)
@@ -492,22 +346,6 @@ namespace DumpDetective.Analysis.Analyzers
             return result;
         }
 
-        // ── Heap-scan fallback ────────────────────────────────────────────────────
-
-        private readonly record struct LohSegmentStats(
-            ulong Address,
-            ulong TotalBytes,
-            ulong UsedBytes,
-            ulong FreeBytes,
-            ulong LargestFreeBlock,
-            ulong LargestFreeBlockAddress,
-            int ObjectCount,
-            int FreeObjectCount,
-            double FragmentationPercent,
-            HeapSegmentKind Kind);
-
         public void Dispose() { }
     }
 }
-
-

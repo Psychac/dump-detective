@@ -111,7 +111,7 @@ public sealed class DominatorAnalyzerExactTreeRealDumpTests(ITestOutputHelper ou
             // §12.1 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): with
             // Stage B built above, GCRootAnalyzer's ByKind rollup should now come back exact rather
             // than shallow-size-summed.
-            var gcRootAnalyzer = new GCRootAnalyzer();
+            using var gcRootAnalyzer = new GCRootAnalyzerLegacyAdapter();
             var gcRootContext = new AnalysisContext
             {
                 Runtime = runtime,

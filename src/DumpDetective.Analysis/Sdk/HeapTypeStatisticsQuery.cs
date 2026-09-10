@@ -39,7 +39,7 @@ internal sealed class HeapTypeStatisticsQuery(ClrHeap heap, IHeapAnalysisCache c
         if (cache is IHeapIndexBuilder builder && builder.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
             return BuildFromIndex(heapIndex.TypeAggregates);
 
-        return BuildFromCachedStatistics(cache.GetOrBuildTypeStatistics(heap));
+        return BuildFromCachedStatistics(cache, cache.GetOrBuildTypeStatistics(heap));
     }
 
     private Dictionary<string, HeapTypeStatistics> BuildFromIndex(IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates)
@@ -61,12 +61,14 @@ internal sealed class HeapTypeStatisticsQuery(ClrHeap heap, IHeapAnalysisCache c
                 Gen1Count: e.Gen1Count,
                 Gen2Count: e.Gen2Count,
                 Gen2TotalSize: e.Gen2TotalSize,
-                IsFinalizableType: (e.Flags & TypeAggregateFlags.IsFinalizableType) != 0);
+                IsFinalizableType: (e.Flags & TypeAggregateFlags.IsFinalizableType) != 0,
+                SampleAddress: e.SampleAddress,
+                ModuleName: TypeAggregateNameResolver.ResolveModuleName(heap, methodTable, e.SampleAddress));
         }
         return result;
     }
 
-    private static Dictionary<string, HeapTypeStatistics> BuildFromCachedStatistics(Dictionary<string, CachedTypeStatistics> stats)
+    private static Dictionary<string, HeapTypeStatistics> BuildFromCachedStatistics(IHeapAnalysisCache cache, Dictionary<string, CachedTypeStatistics> stats)
     {
         var result = new Dictionary<string, HeapTypeStatistics>(stats.Count, StringComparer.Ordinal);
         foreach (KeyValuePair<string, CachedTypeStatistics> kv in stats)
@@ -82,7 +84,9 @@ internal sealed class HeapTypeStatisticsQuery(ClrHeap heap, IHeapAnalysisCache c
                 Gen1Count: 0,
                 Gen2Count: 0,
                 Gen2TotalSize: 0,
-                IsFinalizableType: false);
+                IsFinalizableType: false,
+                SampleAddress: cache.GetSampleInstanceAddress(kv.Key) ?? 0,
+                ModuleName: s.ModuleName);
         }
         return result;
     }

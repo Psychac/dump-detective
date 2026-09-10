@@ -33,11 +33,11 @@ public enum HeapRootKind
 }
 
 /// <summary>
-/// One GC root. <see cref="OwnerTypeName"/>/<see cref="FieldName"/> are populated only for
-/// <see cref="HeapRootKind.StaticVar"/>/<see cref="HeapRootKind.ThreadStaticVar"/> roots resolved to
-/// a declaring field (mirrors <c>IHeapAnalysisCache.GetStaticFieldsByRootAddress</c>); left
-/// <c>null</c> otherwise rather than forcing every root through a resolution step most callers
-/// don't need.
+/// One GC root. <see cref="OwnerTypeName"/>/<see cref="FieldName"/>/<see cref="AppDomainId"/> are
+/// populated only for <see cref="HeapRootKind.StaticVar"/>/<see cref="HeapRootKind.ThreadStaticVar"/>
+/// roots resolved to a declaring field (mirrors
+/// <c>IHeapAnalysisCache.GetStaticFieldsByRootAddress</c>); left <c>null</c> otherwise rather than
+/// forcing every root through a resolution step most callers don't need.
 /// </summary>
 /// <remarks>
 /// Named `required` properties, not positional construction — <see cref="TargetAddress"/> and
@@ -53,6 +53,11 @@ public readonly record struct HeapRootRef
     public required ulong RootAddress { get; init; }
     public string? OwnerTypeName { get; init; }
     public string? FieldName { get; init; }
+
+    /// <summary>The declaring field's AppDomain id, or <c>null</c> alongside <see cref="OwnerTypeName"/>/
+    /// <see cref="FieldName"/> when not resolved. Kept distinct from the default (id 1) so callers can
+    /// tell "unresolved" apart from "resolved, default AppDomain" without a sentinel value.</summary>
+    public int? AppDomainId { get; init; }
 }
 
 /// <summary>The <c>heap.roots</c> capability.</summary>

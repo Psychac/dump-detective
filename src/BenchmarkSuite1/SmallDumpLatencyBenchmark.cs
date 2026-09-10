@@ -77,7 +77,7 @@ public class SmallDumpLatencyBenchmark
 
         var pipeline = new AnalysisPipeline(new IAnalyzer[]
         {
-            new MemoryAnalyzer(),
+            new MemoryAnalyzerLegacyAdapter(),
             new GCGenerationAnalyzerLegacyAdapter(),
             new HeapTopologyAnalyzerLegacyAdapter(),
             new ModuleAnalyzer(),
@@ -88,8 +88,8 @@ public class SmallDumpLatencyBenchmark
             new CollectionAnalyzer(),
             new StaticRootLeakDetector(),
             new ReferenceChainAnalyzer(),
-            new GCHandleAnalyzer(),
-            new LohFragmentationAnalyzer(),
+            new GCHandleAnalyzerLegacyAdapter(),
+            new LohFragmentationAnalyzerLegacyAdapter(),
             new ThreadStackClusterAnalyzer(),
             new ThreadAnalyzer(),
             new LockGraphAnalyzer(),

@@ -76,6 +76,24 @@ public readonly record struct HeapSegmentRef
     public required ulong Gen2Bytes { get; init; }
 }
 
+/// <summary>Mirrors dump-side <c>DumpDetective.Core.Enums.GenerationTag</c> 1:1 — a per-*object*
+/// (not per-segment) generation classification. Distinct from <see cref="HeapSegmentRef.Generation"/>:
+/// an ephemeral (Workstation GC) segment holds Gen0/Gen1/Gen2 objects together in one range, so two
+/// objects on the very same segment can carry different <see cref="HeapGenerationTag"/> values.
+/// Added 2026-09-11 for <c>GCRootAnalyzer</c>'s retyping
+/// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md), which needs per-root-target
+/// generation for its by-kind Gen0/Gen1/Gen2/LOH fraction breakdown.</summary>
+public enum HeapGenerationTag
+{
+    Gen0,
+    Gen1,
+    Gen2,
+    Loh,
+    Poh,
+    Frozen,
+    Unknown,
+}
+
 /// <summary>The <c>heap.segments</c> capability.</summary>
 /// <remarks>Sync <see cref="IEnumerable{T}"/>, no <see cref="CancellationToken"/> — see
 /// <see cref="IHeapObjectStream"/>'s remarks for why, shared by every Tier-1 streaming
@@ -103,6 +121,14 @@ public interface IHeapSegmentQuery
     /// Server GC. Added 2026-09-11 for <c>HeapTopologyAnalyzer</c>'s retyping.</summary>
     int LogicalHeapCount { get; }
 
+    /// <summary>Whether this heap can be walked at all — <c>false</c> for a heap ClrMD judged too
+    /// corrupted/incomplete to enumerate safely. Added 2026-09-11 for <c>MemoryAnalyzer</c>'s
+    /// retyping, which skips its retained-size enrichment entirely (rather than attempting a walk
+    /// that would fail) when this is <c>false</c>. Heap-wide, not segment-specific, but bundled here
+    /// alongside <see cref="DumpPointerSize"/>/<see cref="IsServerGc"/> for the same reason those
+    /// are: no consumer outside segment-adjacent analysis needs it yet.</summary>
+    bool CanWalkHeap { get; }
+
     /// <summary>
     /// Live, non-free objects on exactly this segment — added 2026-09-11 for
     /// <c>HeapTopologyAnalyzer</c>'s retyping, which walks LOH/POH/Frozen/Unknown segments
@@ -118,6 +144,62 @@ public interface IHeapSegmentQuery
     /// today's only consumer (`HeapTopologyAnalyzer`) only reads the raw display name back off it —
     /// accepted because LOH/POH/Frozen/Unknown populations are, by construction, far smaller than
     /// SOH's (which this method is never called for), not because the cost is free.
+    ///
+    /// <paramref name="includeFree"/> (default <c>false</c>, added 2026-09-11 for
+    /// <c>MemoryAnalyzer</c>'s retyping) includes GC free-space pseudo-objects — excluded by default
+    /// since <c>HeapTopologyAnalyzer</c>'s per-type breakdown has no use for them, but
+    /// <c>MemoryAnalyzer</c>'s LOH fragmentation ratio needs the full committed span (live +
+    /// free) to compute a free-byte delta against committed bytes, matching its pre-retyping
+    /// behavior exactly.
     /// </remarks>
-    IEnumerable<HeapObjectRef> EnumerateObjects(HeapSegmentRef segment);
+    IEnumerable<HeapObjectRef> EnumerateObjects(HeapSegmentRef segment, bool includeFree = false);
+
+    /// <summary>Per-object generation classification for <paramref name="address"/> — resolves an
+    /// ephemeral segment's internal Gen0/Gen1/Gen2 sub-range when the segment's own
+    /// <see cref="HeapSegmentKind"/> doesn't already determine it uniquely (LOH/POH/Frozen segments
+    /// always resolve directly from their kind). Returns <see cref="HeapGenerationTag.Unknown"/> for
+    /// an address not on any live segment.</summary>
+    HeapGenerationTag GetGeneration(ulong address);
+
+    /// <summary>
+    /// Every free (unallocated) block on this heap's LOH/POH segments. Added 2026-09-11 for
+    /// <c>LohFragmentationAnalyzer</c>'s retyping
+    /// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md) — hidden fast/fallback
+    /// fork (the Phase-1 disk-backed free-block index when available, a live per-object scan of just
+    /// LOH/POH segments otherwise) with identical semantics either way: every free block found, no
+    /// cap, no size filter — unlike <see cref="EnumerateCapturedLargeObjects"/>, whose two modes are
+    /// genuinely different features, this one's two modes answer the exact same question. Callers
+    /// aggregate (per-segment totals, a size histogram, ...) themselves; this only streams.
+    /// </summary>
+    IEnumerable<HeapFreeBlockRef> EnumerateLohFreeBlocks();
+
+    /// <summary>
+    /// The up-to-100 largest objects captured during the Phase-1 scan (see
+    /// <c>LargeObjectTracker</c>), sorted descending by size — a capped sample admitted by
+    /// observation order during the single-pass scan, not a guaranteed top-100-by-final-size (an
+    /// object larger than everything admitted so far but seen after the sample filled can still lose
+    /// to a smaller earlier entry — see that type's own admission logic). Added 2026-09-11 for
+    /// <c>LohFragmentationAnalyzer</c>'s retyping. Disk-index-only: empty when
+    /// <see cref="HasLohSatelliteIndex"/> is <c>false</c> — unlike <see cref="EnumerateLohFreeBlocks"/>,
+    /// there is no live-scan equivalent that reproduces this exact capped-sample set, so callers
+    /// needing an exhaustive large-object list in that case derive one themselves from
+    /// <see cref="EnumerateObjects"/> over LOH/POH segments instead.
+    /// </summary>
+    IEnumerable<HeapObjectRef> EnumerateCapturedLargeObjects();
+
+    /// <summary>
+    /// Whether a real disk-backed Phase-1 index is available to back
+    /// <see cref="EnumerateCapturedLargeObjects"/> (and the fast path of
+    /// <see cref="EnumerateLohFreeBlocks"/>). Added 2026-09-11 for <c>LohFragmentationAnalyzer</c>'s
+    /// retyping — deliberately <em>not</em> the same signal as
+    /// <see cref="IHeapTypeStatisticsQuery.HasExactGenerationData"/>: that one is <c>true</c> whenever
+    /// any <c>HeapIndexBuildResult</c> exists, including an in-memory-mode one with no backing
+    /// directory for these LOH-specific satellite files, which this property correctly reports as
+    /// <c>false</c>.
+    /// </summary>
+    bool HasLohSatelliteIndex { get; }
 }
+
+/// <summary>One free (unallocated) block on a LOH/POH segment. <see cref="SegmentAddress"/> matches
+/// the owning <see cref="HeapSegmentRef.Start"/>.</summary>
+public readonly record struct HeapFreeBlockRef(ulong SegmentAddress, ulong Address, ulong Size);

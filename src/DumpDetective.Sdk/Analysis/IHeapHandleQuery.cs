@@ -24,11 +24,31 @@ public enum HeapHandleKind
 }
 
 /// <summary>
-/// One GC handle. <see cref="DependentTargetAddress"/> is populated only for
-/// <see cref="HeapHandleKind.Dependent"/> handles (mirrors <c>HandleSnapshot.bin</c>'s
-/// <c>DependentTarget</c> column — see docs/binary-format.md).
+/// One GC handle. Redesigned 2026-09-11 for <c>GCHandleAnalyzer</c>'s retyping
+/// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md) — the original shape
+/// (<c>Address</c>, no target-type field) had zero real consumers and didn't match what the one
+/// analyzer that actually needs this capability does.
 /// </summary>
-public readonly record struct HeapHandleRef(HeapHandleKind Kind, ulong Address, ulong? DependentTargetAddress = null);
+/// <param name="TargetAddress">The handle's target object address, or 0 for a handle with no live
+/// target (mirrors <c>HandleRecord.Address</c>).</param>
+/// <param name="TargetTypeDisplayName">
+/// The target's type display name, resolved from the handle record's own captured method table —
+/// not a live lookup at <see cref="TargetAddress"/> — so it stays resolvable even for a
+/// since-collected weak-handle target (a method table is a per-*type*, not per-instance, EE
+/// structure that outlives any specific collected instance). Empty when <see cref="TargetAddress"/>
+/// is 0. Falls back to <c>"Object@0x{address:X}"</c> (not the SDK-wide <c>"MT:0x{mt:x}"</c>
+/// convention used elsewhere) when the method table itself doesn't resolve to a <c>ClrType</c> —
+/// matches the pre-retyping analyzer's own fallback exactly, a deliberate, narrow divergence from
+/// the shared convention for the same reason <c>HeapObjectLookup</c>'s divergence was accepted in
+/// the GC-root retyping batch.
+/// </param>
+/// <param name="DependentTargetAddress">Populated only for <see cref="HeapHandleKind.Dependent"/>
+/// handles (mirrors <c>HandleSnapshot.bin</c>'s <c>DependentTarget</c> column).</param>
+public readonly record struct HeapHandleRef(
+    HeapHandleKind Kind,
+    ulong TargetAddress,
+    string TargetTypeDisplayName,
+    ulong? DependentTargetAddress = null);
 
 /// <summary>The <c>heap.handles</c> capability.</summary>
 /// <remarks>Sync <see cref="IEnumerable{T}"/>, no <see cref="CancellationToken"/> — see

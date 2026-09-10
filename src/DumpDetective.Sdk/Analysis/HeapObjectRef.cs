@@ -17,4 +17,13 @@ namespace DumpDetective.Sdk.Analysis;
 /// avoids forcing every display-facing consumer to either violate <c>TypeRef</c>'s "never computed
 /// ad hoc" contract by re-deriving a name, or accept a silently-rewritten label.
 /// </remarks>
-public readonly record struct HeapObjectRef(ulong Address, TypeRef Type, ulong Size, string TypeDisplayName);
+/// <param name="IsFree">
+/// Whether this is a GC free (unallocated gap) pseudo-object rather than a live one. Added
+/// 2026-09-11 for <c>LohFragmentationAnalyzer</c>'s retyping
+/// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md) — a first-class boolean
+/// mirroring <c>ClrObject.IsFree</c>, rather than requiring callers to detect a free object by
+/// checking <see cref="TypeDisplayName"/> against the literal string <c>"Free"</c>. Always
+/// <c>false</c> for anything yielded by a stream that excludes free objects by construction (e.g.
+/// <see cref="IHeapSegmentQuery.EnumerateObjects"/> with its default <c>includeFree: false</c>).
+/// </param>
+public readonly record struct HeapObjectRef(ulong Address, TypeRef Type, ulong Size, string TypeDisplayName, bool IsFree = false);

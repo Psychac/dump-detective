@@ -20,7 +20,26 @@ public readonly record struct HeapTypeStatistics(
     long Gen1Count,
     long Gen2Count,
     ulong Gen2TotalSize,
-    bool IsFinalizableType);
+    bool IsFinalizableType,
+    /// <summary>
+    /// A representative live instance's address for this type, or 0 when none is known. Added
+    /// 2026-09-11 for <c>MemoryAnalyzer</c>'s retyping — mirrors
+    /// <c>IHeapAnalysisCache.GetSampleInstanceAddress</c>/<c>TypeAggregateIndexEntry.SampleAddress</c>,
+    /// carried alongside the rest of this type's stats rather than as a separate by-name lookup
+    /// method (which would either repeat this interface's per-type dictionary scan per call, or
+    /// duplicate one internally) — a caller who already has a <see cref="HeapTypeStatistics"/> in
+    /// hand never needs a second round trip.
+    /// </summary>
+    ulong SampleAddress = 0,
+    /// <summary>
+    /// The declaring module's file name, or an empty string when unresolved — mirrors
+    /// <c>CachedTypeStatistics.ModuleName</c>. Deliberately not <c>string?</c>: the dump-side cache's
+    /// own field is never null, only sometimes empty, and this preserves that exactly rather than
+    /// introducing a normalization this interface doesn't need to make (callers that want `null` for
+    /// "unresolved" — e.g. a report field — normalize at that point, same as the pre-retyping analyzer
+    /// already did).
+    /// </summary>
+    string ModuleName = "");
 
 /// <summary>The <c>heap.types</c> capability's aggregate-statistics surface (distinct
 /// <see cref="IHeapObjectStream"/>/<see cref="IHeapObjectLookup"/>, per-object).</summary>

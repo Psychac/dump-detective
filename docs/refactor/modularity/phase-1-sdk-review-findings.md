@@ -141,10 +141,14 @@ is severity first (P0, then P1), otherwise in the order below; reorder freely.
    was the right time to fix it rather than a migration to plan around. Full suite 1223/1223
    non-real-dump tests pass unchanged — no existing test asserted the old wrapper shape.
 
-10. **`SdkVersion` (0.1) hasn't moved across two sessions that both added public API** (the `$kind`
-    fix, then the entire `Analysis/` namespace + two capability additions). Its own doc says
-    "bumped on any breaking change" but doesn't say whether additive changes should bump `Minor` —
-    which, given the field's name, they probably should. **Status: Open.**
+10. ~~`SdkVersion` (0.1) hasn't moved across two sessions that both added public API.~~ **Resolved
+    2026-09-10 — policy decided: per-finding.** `Minor` now bumps once per fix that changes the
+    SDK's public API surface, additive or breaking, in the same commit as the fix — not batched
+    later, since "bump it eventually" is exactly what let this field sit untouched across two whole
+    sessions of real API changes. `Major` reserved for an actual breaking change once something
+    real depends on this assembly. Bumped to 2 now as one catch-up for everything already shipped
+    this session (not a precise per-change reconstruction — nothing depends on intermediate values
+    enough to make that worth simulating). Every P0 fix from here on carries its own bump.
 
 ## P1 — real tensions, no obviously-correct answer
 

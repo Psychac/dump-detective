@@ -14,9 +14,13 @@
 - `ResolvedExecutionOptions`
 
 **Performance / safety constraints:**
-- Make execution policy (timeouts, depth limits, index mode) configurable.
 - Surface progress and allow resume/caching where appropriate.
+- Analyzer behavior (thresholds, caps, exports) is fixed, not user-configurable — see
+  [docs/refactor/analysis-options-removal-plan.md](../refactor/analysis-options-removal-plan.md).
+  Only pipeline-level settings (dump/output paths, cache directory, index mode, report format,
+  which analyzers run) are configurable via CLI flags or `config.json`.
 
 **Related docs:**
 - [docs/architecture.md](docs/architecture.md)
 - [config.sample.json](config.sample.json)
+- [docs/refactor/analysis-options-removal-plan.md](../refactor/analysis-options-removal-plan.md)

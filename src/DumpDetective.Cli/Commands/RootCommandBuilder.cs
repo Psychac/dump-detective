@@ -36,12 +36,6 @@ internal sealed class RootCommandBuilder
         Description = "Semicolon-separated dump paths ordered oldest->newest."
     };
 
-    // TODO: Need to see if these options are necessary tbh, or if a simpler approach is better. For now, leaving them in for advanced users.
-    private readonly Option<int?> _highReferenceThresholdOption = new("--high-reference-threshold");
-    private readonly Option<int?> _maxDuplicateStringLengthOption = new("--max-duplicate-string-length");
-    private readonly Option<int?> _minDuplicateStringCountOption = new("--min-duplicate-string-count");
-    private readonly Option<int?> _maxReferenceAddressesOption = new("--max-reference-addresses");
-
     // TODO: Need to investigate why there is separate memory and performance diagnostics options
     private readonly Option<bool> _memoryDiagnosticsOption = new("--memory-diagnostics");
     private readonly Option<bool> _performanceDiagnosticsOption = new("--performance-diagnostics");
@@ -90,10 +84,6 @@ internal sealed class RootCommandBuilder
             _configPathOption,
             _baselineDumpOption,
             _trendDumpOption,
-            _highReferenceThresholdOption,
-            _maxDuplicateStringLengthOption,
-            _minDuplicateStringCountOption,
-            _maxReferenceAddressesOption,
             _memoryDiagnosticsOption,
             _performanceDiagnosticsOption,
             _diagnosticModeOption,
@@ -122,10 +112,6 @@ internal sealed class RootCommandBuilder
             parseResult.GetValue(_diagnosticModeOption),
             parseResult.GetValue(_baselineDumpOption),
             ParseTrend(parseResult.GetValue(_trendDumpOption)),
-            parseResult.GetValue(_highReferenceThresholdOption),
-            parseResult.GetValue(_maxDuplicateStringLengthOption),
-            parseResult.GetValue(_minDuplicateStringCountOption),
-            parseResult.GetValue(_maxReferenceAddressesOption),
             parseResult.GetValue(_memoryDiagnosticsOption),
             parseResult.GetValue(_performanceDiagnosticsOption),
             ParseReportStyle(parseResult.GetValue(_reportStyleOption)),

@@ -4,6 +4,7 @@ using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Cli.Console;
 using DumpDetective.Cli.Execution;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Options;
 using System.Diagnostics;
 
 namespace DumpDetective.Cli.Pipeline.Stages;
@@ -64,7 +65,9 @@ internal sealed class BuildHeapIndexStage(AnalyzerExecutionService analyzerExecu
                 cancellationToken,
                 progress: progress,
                 activeAnalyzers: state.ActiveAnalyzers,
-                enableExactDominatorTree: state.Resolved.MemoryLeak.EnableExactDominatorTree),
+                // RetentionOptions.EnableExactDominatorTree is no longer externally configurable
+                // (docs/refactor/analysis-options-removal-plan.md) — always its fixed default.
+                enableExactDominatorTree: new RetentionOptions().EnableExactDominatorTree),
             cancellationToken);
 
         while (true)

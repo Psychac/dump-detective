@@ -404,23 +404,17 @@ trend analysis all iterate the catalog generically.
 
 ---
 
-## 18. ExecutionPolicy (example)
+## 18. Analyzer behavior is fixed, not configurable
 
-The runtime reads an `ExecutionPolicy` / `Indexing` block from config (see `config.sample.json`)
-to centralize resource bounds and tuning:
+Per-analyzer thresholds, scan-scoping caps, and export toggles are fixed constants, not
+user-configurable — see
+[docs/refactor/analysis-options-removal-plan.md](refactor/analysis-options-removal-plan.md). The
+former `ExecutionPolicy` config block (`MaxLeakScanObjects`/`MaxReferenceAddresses`) was removed;
+those bounds now live as named constants next to `DominatorAnalyzer`'s live-heap fallback path.
 
-```json
-"ExecutionPolicy": {
-  "MaxLeakScanObjects": 2000000,
-  "MaxReferenceAddresses": 1000000,
-  "ReferenceChainMaxPathDepth": 25,
-  "ReferenceChainFastModeMaxDepth": 25,
-  "ReferenceChainMaxPathSearchObjects": 5000,
-  "IndexPrebuildMode": "auto"
-}
-```
-
-Place defaults in `config.sample.json` and document any CLI overrides in the CLI help text.
+Only pipeline-level settings stay configurable via `config.json` (see `config.sample.json`):
+dump/output/baseline/trend paths, cache directory, index mode, report format, diagnostics
+toggles, and which analyzers run (`IncludeAnalyzers`/`ExcludeAnalyzers`).
 
 ---
 

@@ -88,10 +88,6 @@ internal sealed class StartupValidator
             }
         }
 
-        ValidateRetentionOptions(options.MemoryLeak, errors);
-        ValidateStringAnalysisOptions(options.StringAnalysis, errors);
-        ValidateReferenceChainOptions(options.ReferenceChain, errors);
-
         var overlap = options.IncludeAnalyzers.Intersect(options.ExcludeAnalyzers, StringComparer.OrdinalIgnoreCase);
         if (overlap.Any())
         {
@@ -122,39 +118,6 @@ internal sealed class StartupValidator
 
         if (extraOrdered.Any())
             errors.Add($"Registered {label} without matching analyzer: {string.Join(", ", extraOrdered)}");
-    }
-
-    private static void ValidateRetentionOptions(RetentionOptions options, List<string> errors)
-    {
-        if (options.HighReferenceThreshold <= 0)
-        {
-            errors.Add("MemoryLeak.HighReferenceThreshold must be greater than zero.");
-        }
-        if (options.MaxReferenceAddresses <= 0)
-        {
-            errors.Add("MemoryLeak.MaxReferenceAddresses must be greater than zero.");
-        }
-    }
-
-    private static void ValidateStringAnalysisOptions(DumpDetective.Core.Options.StringAnalysisOptions options, List<string> errors)
-    {
-        if (options.MaxDuplicateStringLength <= 0)
-        {
-            errors.Add("StringAnalysis.MaxDuplicateStringLength must be greater than zero.");
-        }
-
-        if (options.MinDuplicateStringCount <= 0)
-        {
-            errors.Add("StringAnalysis.MinDuplicateStringCount must be greater than zero.");
-        }
-    }
-
-    private static void ValidateReferenceChainOptions(ReferenceChainOptions options, List<string> errors)
-    {
-        if (options.TopCount <= 0)
-        {
-            errors.Add("ReferenceChain.TopCount must be greater than zero.");
-        }
     }
 
 }

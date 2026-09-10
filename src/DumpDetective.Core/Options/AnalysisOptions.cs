@@ -6,7 +6,6 @@ public sealed record AnalysisOptions
     public ReferenceChainOptions ReferenceChain { get; init; } = new();
     public EventLeakOptions EventLeak { get; init; } = new();
     public DiagnosticsOptions Diagnostics { get; init; } = new();
-    public ExecutionPolicy ExecutionPolicy { get; init; } = ExecutionPolicy.Default;
     public CrashAnalysisOptions Crash { get; init; } = new();
     public AsyncStateMachineAnalysisOptions AsyncStateMachineAnalysis { get; init; } = new();
     public ArrayAnalysisOptions ArrayAnalysis { get; init; } = new();
@@ -25,24 +24,4 @@ public sealed record AnalysisOptions
     public GCHandleAnalysisOptions GCHandleAnalysis { get; init; } = new();
     public StaticRootLeakAnalysisOptions StaticRootLeakAnalysis { get; init; } = new();
     public MemoryAnalysisOptions MemoryAnalysis { get; init; } = new();
-
-    public bool TryGet<T>(out T? option) where T : class
-    {
-        System.Reflection.PropertyInfo[] properties = GetType().GetProperties();
-        for (int i = 0; i < properties.Length; i++)
-        {
-            System.Reflection.PropertyInfo property = properties[i];
-            if (!typeof(T).IsAssignableFrom(property.PropertyType))
-                continue;
-
-            if (property.GetValue(this) is T typed)
-            {
-                option = typed;
-                return true;
-            }
-        }
-
-        option = null;
-        return false;
-    }
 }

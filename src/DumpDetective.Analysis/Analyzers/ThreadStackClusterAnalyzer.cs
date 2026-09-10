@@ -5,9 +5,6 @@ using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
 
-using System.IO.Compression;
-using System.Text.Json;
-
 namespace DumpDetective.Analysis.Analyzers
 {
     /// <summary>
@@ -128,65 +125,7 @@ namespace DumpDetective.Analysis.Analyzers
 
             IReadOnlyList<ThreadClusterTreeNode> clusterTreeRoots = BuildClusterTree(filteredClusters);
 
-            IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? rawExports = null;
-            if (options.ProduceClusterExports)
-            {
-                try
-                {
-                    var artifacts = new List<DumpDetective.Core.Models.ReportArtifact>();
-                    // Produce a user-friendly pretty JSON export (inline content)
-                    try
-                    {
-                        var summary = filteredClusters.Select(c => new
-                        {
-                            count = c.Count,
-                            signature = c.Signature,
-                            sampleOsThreadIds = c.SampleOsThreadIds
-                        }).ToArray();
-
-                        var prettyJsonOpts = new JsonSerializerOptions { WriteIndented = true };
-                        string prettyJson = JsonSerializer.Serialize(summary, prettyJsonOpts);
-                        artifacts.Add(new DumpDetective.Core.Models.ReportArtifact("Thread Stack Cluster", "thread-clusters.json", prettyJson, "application/json"));
-                    }
-                    catch { }
-
-                    // Produce NDJSON gz export for the filtered clusters (machine-friendly, streaming)
-                    string tmp = Path.Combine(Path.GetTempPath(), $"dumpdetective-thread-clusters-{Guid.NewGuid():N}.ndjson.gz");
-                    try
-                    {
-                        using (var fs = File.Create(tmp))
-                        using (var gz = new GZipStream(fs, CompressionLevel.Optimal, leaveOpen: false))
-                        {
-                            var jsOpts = new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
-                            foreach (var c in filteredClusters)
-                            {
-                                var lineObj = new
-                                {
-                                    count = c.Count,
-                                    signature = c.Signature,
-                                    sampleOsThreadIds = c.SampleOsThreadIds
-                                };
-                                JsonSerializer.Serialize(gz, lineObj, jsOpts);
-                                gz.WriteByte((byte)'\n');
-                            }
-                        }
-
-                        artifacts.Add(new DumpDetective.Core.Models.ReportArtifact("Thread Stack Cluster", "thread-clusters.ndjson.gz", null, "application/gzip", tmp));
-                    }
-                    catch
-                    {
-                        try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
-                    }
-
-                    rawExports = artifacts;
-                }
-                catch
-                {
-                    rawExports = null;
-                }
-            }
-
-            return new ThreadStackClusterDomainResult(aliveThreads, clusters.Count, singletonSignatures, diversity, topSignatures, topClusterSnapshots, rawExports, topFrameHotspots, clusterTreeRoots);
+            return new ThreadStackClusterDomainResult(aliveThreads, clusters.Count, singletonSignatures, diversity, topSignatures, topClusterSnapshots, null, topFrameHotspots, clusterTreeRoots);
         }
 
         // P3-2: builds a shared-prefix trie over cluster signatures, innermost frame first (index 0

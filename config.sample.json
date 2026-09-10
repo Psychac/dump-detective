@@ -2,7 +2,6 @@
   "DumpPath": "D:\\DUMPS\\sample.dmp",
   "BaselineDumpPath": null,
   "TrendDumpPaths": [],
-  "Profile": "balanced",
   "IncludeAnalyzers": [ "MemoryLeak", "ReferenceChain" ],
   "ExcludeAnalyzers": [ "Thread" ],
   "CacheDirectory": null,
@@ -16,24 +15,7 @@
     "CollectAfterAnalyzerRunWorkingSetThresholdBytes": 0,
     "CompactLargeObjectHeapAfterAnalyzerCollection": true
   },
-  "Analyzers": {
-    "MemoryLeak": {
-      "Profile": "fast",
-      "HighReferenceThreshold": 100
-    },
-    "ReferenceChain": {
-      "TopCount": 10
-    }
-  },
   "Indexing": {
     "Mode": "auto"
-  },
-  "ExecutionPolicy": {
-    "MaxLeakScanObjects": 2000000,
-    "MaxReferenceAddresses": 1000000,
-    "ReferenceChainMaxPathDepth": 25,
-    "ReferenceChainFastModeMaxDepth": 25,
-    "ReferenceChainMaxPathSearchObjects": 5000,
-    "IndexPrebuildMode": "auto"
   }
 }

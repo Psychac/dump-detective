@@ -27,32 +27,10 @@ internal sealed class AnalyzerExecutionService(FindingGenerationPipeline finding
             Runtime = loadContext.Runtime,
             Cache = heapCache,
             RuntimeFacade = new RuntimeFacade(loadContext.Runtime, loadContext.Heap),
-            AnalysisOptions = new AnalysisOptions
-            {
-                MemoryLeak = resolved.MemoryLeak,
-                ReferenceChain = resolved.ReferenceChain,
-                EventLeak = resolved.EventLeak,
-                Diagnostics = resolved.Diagnostics,
-                ExecutionPolicy = resolved.ExecutionPolicy,
-                Crash = resolved.Crash,
-                AsyncStateMachineAnalysis = resolved.AsyncStateMachineAnalysis,
-                ArrayAnalysis = resolved.ArrayAnalysis,
-                BoxingAnalysis = resolved.BoxingAnalysis,
-                Collection = resolved.Collection,
-                StringAnalysis = resolved.StringAnalysis,
-                AllocationPatternAnalysis = resolved.AllocationPatternAnalysis,
-                ThreadStackClusterAnalysis = resolved.ThreadStackClusterAnalysis,
-                GCGenerationAnalysis = resolved.GCGenerationAnalysis,
-                SegmentReservationAnalysis = resolved.SegmentReservationAnalysis,
-                ThreadAnalysis = resolved.ThreadAnalysis,
-                HangAnalysis = resolved.HangAnalysis,
-                JitAnalysis = resolved.JitAnalysis,
-                WeakReferenceAnalysis = resolved.WeakReferenceAnalysis,
-                ModuleAnalysis = resolved.ModuleAnalysis,
-                GCHandleAnalysis = resolved.GCHandleAnalysis,
-                StaticRootLeakAnalysis = resolved.StaticRootLeakAnalysis,
-                MemoryAnalysis = resolved.MemoryAnalysis,
-            },
+            // Every per-analyzer options property on AnalysisOptions keeps its own fixed default —
+            // see docs/refactor/analysis-options-removal-plan.md. Nothing external can override
+            // them, so there's nothing left to thread through from `resolved` here.
+            AnalysisOptions = new AnalysisOptions(),
             Diagnostics = resolved.Diagnostics,
             DiagnosticsSink = new ConsoleDiagnosticsSink(resolved.DiagnosticMode, activeAnalyzers)
         };

@@ -31,6 +31,14 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
         _logger = logger;
     }
 
+    // Only used by AnalyzeObjectsPass's live-heap fallback (no disk-backed reverse index
+    // available) — the primary reverse-index path (BuildLeakSignalsFromReverseIndex) is
+    // exhaustive by construction and never capped by these. Not user-configurable — folded from
+    // the former ExecutionPolicy knob per docs/refactor/analysis-options-removal-plan.md: the same
+    // dump must always produce the same findings.
+    private const int FallbackMaxLeakScanObjects = 2_000_000;
+    private const int FallbackMaxReferenceAddresses = 1_000_000;
+
     // Fan-in (incoming-reference-count) histogram bucket boundaries (minCount inclusive, maxCount exclusive).
     private static readonly (int Min, int Max, string Label)[] s_fanInBuckets =
     [
@@ -80,7 +88,6 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
         cancellationToken.ThrowIfCancellationRequested();
 
         RetentionOptions options = context.AnalysisOptions.MemoryLeak;
-        ExecutionPolicy policy = context.AnalysisOptions.ExecutionPolicy;
         bool diag = context.Diagnostics.EnableMemoryDiagnostics && context.Diagnostics.EnablePerformanceDiagnostics;
 
         if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: entry", Console.Out);
@@ -88,7 +95,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
         IBackwardReferenceProvider? reverseIndex = context.Cache.TryGetReverseIndexProvider();
         LeakSignals signals = reverseIndex is not null
             ? BuildLeakSignalsFromReverseIndex(context.Heap, context.Cache, reverseIndex, options, context.Progress)
-            : AnalyzeObjectsPass(context.Heap, context.Cache, options, policy, context.Progress);
+            : AnalyzeObjectsPass(context.Heap, context.Cache, options, context.Progress);
 
         if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: leak signals built", Console.Out);
 
@@ -729,16 +736,16 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
     // No-index fallback: the pipeline dispatcher only calls BeforeHeapIndexScan/OnHeapEntry when
     // an on-disk heap index exists (see HeapIndexScanDispatcher.Run). When it doesn't, this method
     // runs the same reference-counting pass directly over the live heap (or an in-memory index).
-    private static LeakSignals AnalyzeObjectsPass(ClrHeap heap, IHeapAnalysisCache? cache, RetentionOptions options, ExecutionPolicy policy, IProgress<AnalyzerProgressReport>? progress)
+    private static LeakSignals AnalyzeObjectsPass(ClrHeap heap, IHeapAnalysisCache? cache, RetentionOptions options, IProgress<AnalyzerProgressReport>? progress)
     {
-        var referenceCount = new SpaceSavingCounter<ulong>(policy.MaxReferenceAddresses);
+        var referenceCount = new SpaceSavingCounter<ulong>(FallbackMaxReferenceAddresses);
         long approximatedReferenceAddresses = 0;
         bool objectScanCapped = false;
 
-        // MaxLeakScanObjects caps the number of heap.GetObject() + field-walk calls, which are
-        // the primary bottleneck on multi-GB dumps (each call reads object data from the dump file).
-        // 0 = unlimited. The cap applies to both disk and memory index paths.
-        int maxScan = policy.MaxLeakScanObjects;
+        // FallbackMaxLeakScanObjects caps the number of heap.GetObject() + field-walk calls, which
+        // are the primary bottleneck on multi-GB dumps (each call reads object data from the dump
+        // file). 0 = unlimited. The cap applies to both disk and memory index paths.
+        int maxScan = FallbackMaxLeakScanObjects;
         long objectsTraced = 0;
 
         var scanCounter = new ObjectScanCounter("scanning heap objects", progress);

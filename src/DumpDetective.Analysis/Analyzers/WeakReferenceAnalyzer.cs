@@ -152,38 +152,6 @@ namespace DumpDetective.Analysis.Analyzers
                 }
             }
 
-            // Optional exports
-            IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? rawExports = null;
-            string? tmpNdjsonPath = null;
-            System.IO.FileStream? tmpFs = null;
-            System.IO.Compression.GZipStream? tmpGz = null;
-            var sampleRecords = new List<object>();
-            var jsOpts = new System.Text.Json.JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
-            void WriteExportRecord(ulong a, ulong mt, byte k)
-            {
-                try
-                {
-                    if (tmpGz is null) return;
-                    var obj = new { address = a, methodTable = mt, kind = k };
-                    System.Text.Json.JsonSerializer.Serialize(tmpGz, obj, jsOpts);
-                    tmpGz.WriteByte((byte)'\n');
-                    if (sampleRecords.Count < 100) sampleRecords.Add(obj);
-                }
-                catch { }
-            }
-
-            // Prepare exporter if requested
-            if (options.ProduceRawExports)
-            {
-                try
-                {
-                    tmpNdjsonPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"dumpdetective-weakrefs-{Guid.NewGuid():N}.ndjson.gz");
-                    tmpFs = System.IO.File.Create(tmpNdjsonPath);
-                    tmpGz = new System.IO.Compression.GZipStream(tmpFs, System.IO.Compression.CompressionLevel.Optimal, leaveOpen: false);
-                }
-                catch { tmpGz = null; tmpFs = null; tmpNdjsonPath = null; }
-            }
-
             // Try to reuse any pre-enumerated in-memory handle snapshot (memory-index mode)
             if (heapIndex is not null && heapIndex.InMemoryHandleSnapshot is { Length: > 0 } inMem)
             {
@@ -225,8 +193,6 @@ namespace DumpDetective.Analysis.Analyzers
                                 IncrementDict(deadByKind, kindName);
                             }
                         }
-                        if (options.ProduceRawExports)
-                            WriteExportRecord(rec.Addr, rec.Mt, rec.Kind);
                     }
 
                     // Phase C: Dependent kind branch
@@ -248,8 +214,6 @@ namespace DumpDetective.Analysis.Analyzers
                                 TrackDependentDeadKeyValueType(rec.DependentTarget);
                             }
                         }
-                        if (options.ProduceRawExports)
-                            WriteExportRecord(rec.Addr, rec.Mt, rec.Kind);
                     }
                 }
             }
@@ -309,8 +273,6 @@ namespace DumpDetective.Analysis.Analyzers
                                         IncrementDict(deadByKind, kindName);
                                     }
                                 }
-                                if (options.ProduceRawExports)
-                                    WriteExportRecord(rec.Address, rec.MethodTable, rec.Kind);
                             }
 
                             // Phase C: Dependent kind branch
@@ -330,18 +292,12 @@ namespace DumpDetective.Analysis.Analyzers
                                         TrackDependentDeadKeyValueType(rec.DependentTarget);
                                     }
                                 }
-                                if (options.ProduceRawExports)
-                                    WriteExportRecord(rec.Address, rec.MethodTable, rec.Kind);
                             }
                         }
                         scanCounter.Complete();
                     }
                 }
             }
-
-            // Dispose export stream after both phases complete
-            try { tmpGz?.Dispose(); tmpGz = null; tmpFs = null; }
-            catch { }
 
             // ── Phase B: WeakReference<T> object analysis ─────────────────────
             int weakRefObjCount = 0;
@@ -509,37 +465,6 @@ namespace DumpDetective.Analysis.Analyzers
                 scanCounter.Complete();
             }
 
-            // Attach artifacts if exports were requested and produced
-            if (options.ProduceRawExports)
-            {
-                try
-                {
-                    var artifacts = new List<DumpDetective.Core.Models.ReportArtifact>();
-                    try
-                    {
-                        var summary = new
-                        {
-                            totalWeakHandles,
-                            aliveWeakTargets,
-                            deadWeakTargets,
-                            dependentHandleDeadKeyCount,
-                            sampleRecords
-                        };
-                        string prettyJson = System.Text.Json.JsonSerializer.Serialize(summary, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
-                        artifacts.Add(new DumpDetective.Core.Models.ReportArtifact("Weak Reference Analysis", "weakrefs.json", prettyJson, "application/json"));
-                    }
-                    catch { }
-
-                    if (!string.IsNullOrEmpty(tmpNdjsonPath) && System.IO.File.Exists(tmpNdjsonPath))
-                    {
-                        artifacts.Add(new DumpDetective.Core.Models.ReportArtifact("Weak Reference Analysis", "weakrefs.ndjson.gz", null, "application/gzip", tmpNdjsonPath));
-                    }
-
-                    if (artifacts.Count > 0) rawExports = artifacts;
-                }
-                catch { rawExports = null; }
-            }
-
             // ── Build output ──────────────────────────────────────────────────
             double deadRatio = totalWeakHandles == 0
                 ? 0.0
@@ -567,7 +492,7 @@ namespace DumpDetective.Analysis.Analyzers
                 DependentHandleDeadKeyCount: dependentHandleDeadKeyCount,
                 PhaseBFallbackUsed: phaseBFallbackUsed,
                 PhaseBSkipped: phaseBSkipped,
-                Artifacts: rawExports,
+                Artifacts: null,
                 AliveWeakTargetsRetainedBytes: aliveWeakTargetsRetainedBytes,
                 AliveWeakTargetsRetainedBytesIsExact: weakTreeProvider is not null,
                 WeakHandleKindLiveness: kindLiveness,

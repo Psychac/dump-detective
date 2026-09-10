@@ -840,87 +840,6 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
             }
             topDuplicateTypes = top;
         }
-        // Build raw exports when requested
-        IReadOnlyList<DumpDetective.Core.Models.ReportArtifact>? rawExports = null;
-        if (stringOptions.ProduceRawExports)
-        {
-            try
-            {
-                // JSON export: all duplicate patterns, ranked by wasted bytes descending
-                var exportObj = new
-                {
-                    TotalStrings = totalStrings,
-                    TotalStringMemoryBytes = totalStringMemory,
-                    SampledUniquePatterns = sampledUniquePatterns,
-                    DuplicatePatternCount = duplicatePatternCount,
-                    DuplicateWastedBytes = duplicateWastedBytes,
-                    Duplicates = topDuplicates.Select(d => new { d.Preview, d.Count, d.WastedBytes, SampleAddresses = d.SampleAddresses, d.DominantMethodTable })
-                };
-                string json = System.Text.Json.JsonSerializer.Serialize(exportObj, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
-
-                // CSV export: all duplicate patterns
-                var sw = new System.Text.StringBuilder();
-                sw.AppendLine("Preview,Count,WastedBytes,SampleAddresses,DominantMethodTable");
-                foreach (var d in topDuplicates)
-                {
-                    string samples = d.SampleAddresses is null ? "" : string.Join('|', d.SampleAddresses);
-                    sw.Append('"').Append(d.Preview.Replace("\"", "\"\"")).Append('"').Append(',')
-                      .Append(d.Count).Append(',').Append(d.WastedBytes).Append(',')
-                      .Append('"').Append(samples).Append('"').Append(',')
-                      .Append(d.DominantMethodTable).AppendLine();
-                }
-
-                var artifacts = new List<DumpDetective.Core.Models.ReportArtifact>(capacity: 3)
-                {
-                    new DumpDetective.Core.Models.ReportArtifact("String Analysis", "string-duplicates.json", json, "application/json"),
-                    new DumpDetective.Core.Models.ReportArtifact("String Analysis", "string-duplicates.csv", sw.ToString(), "text/csv")
-                };
-
-                // Produce NDJSON gzipped export by streaming directly to a temp file (no base64)
-                string tmp = Path.Combine(Path.GetTempPath(), $"dumpdetective-string-duplicates-{Guid.NewGuid():N}.ndjson.gz");
-                try
-                {
-                    using (var fs = File.Create(tmp))
-                    using (var gz = new System.IO.Compression.GZipStream(fs, System.IO.Compression.CompressionLevel.Optimal, leaveOpen: false))
-                    {
-                        var jsOpts = new System.Text.Json.JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
-                        foreach (var d in topDuplicates)
-                        {
-                            // Tweak NDJSON contents: include preview, count, wasted, totalSize, avgSize, sampling, fingerprint hex, dominant type
-                            var lineObj = new
-                            {
-                                preview = d.Preview,
-                                count = d.Count,
-                                wastedBytes = d.WastedBytes,
-                                totalSize = d.TotalSize > 0 ? d.TotalSize : (ulong?)null,
-                                avgSize = d.AvgSize > 0 ? d.AvgSize : (int?)null,
-                                samplingSource = d.SamplingSource,
-                                fingerprint = d.FingerprintHash.HasValue ? $"0x{d.FingerprintHash.Value:X16}" : null,
-                                dominantMethodTable = d.DominantMethodTable != 0 ? $"0x{d.DominantMethodTable:X}" : null,
-                                dominantType = d.DominantType,
-                                sampleAddresses = d.SampleAddresses
-                            };
-                            System.Text.Json.JsonSerializer.Serialize(gz, lineObj, jsOpts);
-                            gz.WriteByte((byte)'\n');
-                        }
-                    }
-
-                    // Add artifact referencing the temp file path (WriteOutputStage will move it into artifacts dir)
-                    artifacts.Add(new DumpDetective.Core.Models.ReportArtifact("String Analysis", "string-duplicates.ndjson.gz", null, "application/gzip", tmp));
-                }
-                catch
-                {
-                    // Cleanup on error
-                    try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
-                }
-
-                rawExports = artifacts;
-            }
-            catch
-            {
-                rawExports = null; // swallow export errors — reporting should not fail analysis
-            }
-        }
 
         totalStopwatch.Stop();
 
@@ -1021,7 +940,7 @@ internal sealed class StringAnalyzer : IAnalyzer, IParallelHeapIndexScanParticip
             TopDuplicateTypes: topDuplicateTypes,
             TopStringOwnerTypes: topStringOwnerTypes,
             Distribution: distribution,
-            Artifacts: rawExports,
+            Artifacts: null,
             TopDuplicateRetentionPaths: retentionPaths);
     }
 

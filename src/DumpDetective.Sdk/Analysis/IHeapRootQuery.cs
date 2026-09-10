@@ -5,21 +5,39 @@ namespace DumpDetective.Sdk.Analysis;
 /// but deliberately not reusing it (SDK has zero ClrMD dependency) — see
 /// docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
 /// </summary>
+/// <remarks>
+/// A faithful 1:1 mirror of every real <c>ClrRootKind</c> member (verified 2026-09-10 by reflecting
+/// the actual installed package, v4.0.732401 — not designed from memory/convention; see
+/// docs/refactor/modularity/phase-1-sdk-review-findings.md item 20) except <c>None</c>, ClrMD's own
+/// sentinel/unset value that no real enumerated root ever has. <c>StaticVar</c>/<c>ThreadStaticVar</c>
+/// are kept as two distinct values, not collapsed into one <c>Static</c> — that distinction is
+/// already actively used in real production code (<c>StaticRootLeakDetector</c>). <c>Other</c> is a
+/// forward-compat catch-all only, for a future ClrMD version adding something new — not, as an
+/// earlier version of this enum did, a bucket that silently swallowed known, current values
+/// (<c>FinalizerQueue</c> had no representation at all; <c>StrongHandle</c>/<c>RefCountedHandle</c>/
+/// <c>SizedRefHandle</c> were collapsed into one generic <c>Handle</c>, inconsistent with
+/// <c>PinnedHandle</c>/<c>AsyncPinnedHandle</c> already being kept separate).
+/// </remarks>
 public enum HeapRootKind
 {
     Stack,
-    Static,
-    Pinned,
-    AsyncPinned,
-    Handle,
+    StaticVar,
+    ThreadStaticVar,
+    FinalizerQueue,
+    StrongHandle,
+    PinnedHandle,
+    AsyncPinnedHandle,
+    RefCountedHandle,
+    SizedRefHandle,
     Other,
 }
 
 /// <summary>
 /// One GC root. <see cref="OwnerTypeName"/>/<see cref="FieldName"/> are populated only for
-/// <see cref="HeapRootKind.Static"/> roots resolved to a declaring field (mirrors
-/// <c>IHeapAnalysisCache.GetStaticFieldsByRootAddress</c>); left <c>null</c> otherwise rather than
-/// forcing every root through a resolution step most callers don't need.
+/// <see cref="HeapRootKind.StaticVar"/>/<see cref="HeapRootKind.ThreadStaticVar"/> roots resolved to
+/// a declaring field (mirrors <c>IHeapAnalysisCache.GetStaticFieldsByRootAddress</c>); left
+/// <c>null</c> otherwise rather than forcing every root through a resolution step most callers
+/// don't need.
 /// </summary>
 /// <remarks>
 /// Named `required` properties, not positional construction — <see cref="TargetAddress"/> and

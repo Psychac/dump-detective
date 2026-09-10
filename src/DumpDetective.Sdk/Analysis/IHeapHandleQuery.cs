@@ -1,15 +1,25 @@
 namespace DumpDetective.Sdk.Analysis;
 
 /// <summary>Mirrors ClrMD's <c>ClrHandleKind</c> without depending on it — SDK has zero ClrMD dependency.</summary>
+/// <remarks>
+/// A faithful 1:1 mirror of every real <c>ClrHandleKind</c> member (verified 2026-09-10 by
+/// reflecting the actual installed package, v4.0.732401 — not designed from memory/convention; see
+/// docs/refactor/modularity/phase-1-sdk-review-findings.md item 20), adding <see cref="SizedRef"/>
+/// and <see cref="WeakWinRT"/>, which an earlier version of this enum was missing (both would have
+/// silently collapsed into <see cref="Other"/>). <see cref="Other"/> is a forward-compat catch-all
+/// only, for a future ClrMD version adding something new.
+/// </remarks>
 public enum HeapHandleKind
 {
-    Strong,
     WeakShort,
     WeakLong,
+    Strong,
     Pinned,
-    AsyncPinned,
     RefCounted,
     Dependent,
+    AsyncPinned,
+    SizedRef,
+    WeakWinRT,
     Other,
 }
 

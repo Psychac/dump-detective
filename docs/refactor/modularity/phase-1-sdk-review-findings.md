@@ -319,8 +319,25 @@ is severity first (P0, then P1), otherwise in the order below; reorder freely.
     (`ISynthesisRule` has zero implementations, same as finding 16); updated the one doc
     cross-reference in `ObservationMatchSet.cs`. Full suite 1227/1227 non-real-dump tests pass, no
     flaky failures this run.
-20. `HeapRootKind`/`HeapHandleKind` were designed from memory/convention, **not measured against
-    ClrMD's real `ClrRootKind`/`ClrHandleKind` enums.** Needs a real check before the dump-side
-    implementation is built, or real values will silently collapse into `Other`.
+20. ~~`HeapRootKind`/`HeapHandleKind` were designed from memory/convention, not measured against
+    ClrMD's real `ClrRootKind`/`ClrHandleKind` enums.~~ **Fixed 2026-09-10 — measured, not
+    reasoned about.** Wrote a throwaway probe referencing the real installed ClrMD package
+    (v4.0.732401, the version this project uses) and reflected the actual enums rather than trust
+    memory:
+    - `ClrRootKind`: `None, FinalizerQueue, StrongHandle, PinnedHandle, Stack, RefCountedHandle,
+      AsyncPinnedHandle, SizedRefHandle, ThreadStaticVar, StaticVar`.
+    - `ClrHandleKind`: `WeakShort, WeakLong, Strong, Pinned, RefCounted, Dependent, AsyncPinned,
+      SizedRef, WeakWinRT`.
+    
+    `HeapHandleKind` was close (7/9 correct) but missing `SizedRef`/`WeakWinRT`. `HeapRootKind` had
+    real, consequential gaps: `Static` collapsed `StaticVar`/`ThreadStaticVar` into one value, even
+    though that distinction is already actively used in real production code
+    (`StaticRootLeakDetector`); `Handle` collapsed `StrongHandle`/`RefCountedHandle`/`SizedRefHandle`
+    into one generic bucket, inconsistent with `Pinned`/`AsyncPinned` already being kept separate;
+    `FinalizerQueue` had no representation at all. Both enums rebuilt as faithful 1:1 mirrors of the
+    real ClrMD names (omitting only `ClrRootKind.None`, a sentinel no real enumerated root has),
+    with `Other` narrowed to a genuine forward-compat catch-all instead of a bucket that silently
+    swallowed known, current values. Confirmed zero real usage before restructuring. Full suite
+    1227/1227 non-real-dump tests pass.
 21. Third copy-pasted `AnalyzerProgressReport`/`IndexProgress` shape (Core, Platform, Sdk) — fine
     for now; a 4th copy would be the signal to extract a shared micro-package instead.

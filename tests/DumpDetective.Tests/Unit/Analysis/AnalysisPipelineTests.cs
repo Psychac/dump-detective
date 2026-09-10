@@ -1,8 +1,10 @@
 ﻿using System.Buffers.Binary;
 using System.Reflection;
 
+using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Models;
 using DumpDetective.Platform.Storage.Container;
 using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Core.Abstractions;
@@ -10,6 +12,8 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 
 using FluentAssertions;
+
+using Microsoft.Diagnostics.Runtime;
 
 using Xunit;
 
@@ -104,6 +108,49 @@ public sealed class AnalysisPipelineTests
             analyzer.ScannedEntries.Select(e => e.Address).Should().Equal(entries.Select(e => e.Addr));
             analyzer.BeforeHeapIndexScanCallCount.Should().Be(1);
         }
+    }
+
+    /// <summary>
+    /// Gate for the thread-domain quartet retyping
+    /// (docs/refactor/modularity/phase-1-thread-quartet-plan.md § 6): proves the pipeline's shared
+    /// <c>ThreadStackScanDispatcher</c> pass still runs exactly once per thread when a retyped
+    /// analyzer (<see cref="LockGraphAnalyzerLegacyAdapter"/>, which implements
+    /// <see cref="IThreadStackScanParticipant"/> on the adapter, not the inner SDK analyzer) is
+    /// registered alongside still-legacy participants — the property this whole retyping approach
+    /// depends on, asserted directly rather than assumed from the design.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_ScansThreadStacksExactlyOnce_WhenRetypedAndLegacyParticipantsAreMixed()
+    {
+        using DataTarget dataTarget = DataTarget.CreateSnapshotAndAttach(Environment.ProcessId);
+        ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();
+
+        int expectedThreadCount = 0;
+        foreach (ClrThread _ in runtime.Threads)
+            expectedThreadCount++;
+
+        var first = new ThreadStackScanParticipantTestAnalyzer("First", 0);
+        using LockGraphAnalyzerLegacyAdapter lockGraph = new();
+        var second = new ThreadStackScanParticipantTestAnalyzer("Second", 2);
+        IAnalyzer[] analyzers = [first, lockGraph, second];
+
+        AnalysisPipeline pipeline = new(analyzers, new FindingGenerationPipeline([]));
+        RuntimeAnalysisContext context = new() { Runtime = runtime, Cache = new HeapAnalysisCache() };
+
+        IReadOnlyList<AnalyzerRunResult> results = await pipeline.ExecuteAsync(context, CancellationToken.None);
+
+        // Each participant must see every thread exactly once — if the shared scan ever ran more
+        // than once per pipeline execution, these counts would be multiplied.
+        foreach (ThreadStackScanParticipantTestAnalyzer analyzer in new[] { first, second })
+        {
+            analyzer.OnThreadStackCallCount.Should().Be(expectedThreadCount);
+            analyzer.BeforeThreadStackScanCallCount.Should().Be(1);
+        }
+
+        // The retyped adapter's own result still comes out correctly through the bridge.
+        AnalyzerRunResult lockGraphRun = results.Single(r => r.AnalyzerName == lockGraph.Name);
+        lockGraphRun.Status.Should().Be(AnalyzerExecutionStatus.Success);
+        lockGraphRun.Result.Should().BeOfType<LockGraphDomainResult>();
     }
 
     private static RuntimeAnalysisContext CreateContext(bool continueOnFailure)
@@ -218,6 +265,33 @@ public sealed class AnalysisPipelineTests
         public void BeforeHeapIndexScan(CoreAnalysisContext context) => BeforeHeapIndexScanCallCount++;
 
         public void OnHeapEntry(in HeapEntry entry) => ScannedEntries.Add(entry);
+
+        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(CoreAnalysisContext context, CancellationToken cancellationToken)
+        {
+            AnalyzerDomainResult result = new GenericAnalyzerDomainResult
+            {
+                AnalyzerName = Name,
+                Category = Category
+            };
+
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class ThreadStackScanParticipantTestAnalyzer(string name, int order) : IAnalyzer, IThreadStackScanParticipant
+    {
+        public string Name { get; } = name;
+        public int Order { get; } = order;
+        public string Category => "Test";
+
+        public int OnThreadStackCallCount { get; private set; }
+        public int BeforeThreadStackScanCallCount { get; private set; }
+
+        public int GetRequiredFrameCount(CoreAnalysisContext context) => 1;
+
+        public void BeforeThreadStackScan(CoreAnalysisContext context) => BeforeThreadStackScanCallCount++;
+
+        public void OnThreadStack(in ThreadStackSnapshot snapshot) => OnThreadStackCallCount++;
 
         public ValueTask<AnalyzerDomainResult> AnalyzeAsync(CoreAnalysisContext context, CancellationToken cancellationToken)
         {

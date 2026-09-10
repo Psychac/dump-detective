@@ -1,6 +1,5 @@
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Sdk.Analysis;
-using DumpDetective.Sdk.Identity;
 
 using Microsoft.Diagnostics.Runtime;
 
@@ -21,11 +20,7 @@ internal sealed class RuntimeThreadQuery(ClrRuntime runtime, IHeapAnalysisCache?
         foreach (ClrThread thread in runtime.Threads)
         {
             int stackRootCount = cache?.GetOrCountThreadStackRoots(thread, MaxStackRootsToCount) ?? 0;
-            yield return new RuntimeThreadRef(
-                Thread: new ThreadRef { OsThreadId = thread.OSThreadId, ManagedThreadId = thread.ManagedThreadId, Fidelity = MatchFidelity.Exact },
-                IsGCSuspendPending: (thread.State & ClrThreadState.TS_GCSuspendPending) != 0,
-                StackRootCount: stackRootCount,
-                IsAlive: thread.IsAlive);
+            yield return ThreadStackTranslator.ToThreadRef(thread, stackRootCount);
         }
     }
 
@@ -38,41 +33,7 @@ internal sealed class RuntimeThreadQuery(ClrRuntime runtime, IHeapAnalysisCache?
             yield break;
 
         foreach (ClrStackFrame frame in clrThread.EnumerateStackTrace())
-        {
-            if (frame.Kind != ClrStackFrameKind.ManagedMethod)
-            {
-                yield return new ThreadStackFrameRef(IsManagedMethod: false, HasMethod: false,
-                    DeclaringTypeName: "", ModuleName: "", IsDynamicModule: false, IsReadyToRun: false,
-                    MethodDesc: 0, NativeCodeAddress: 0, HotSize: 0, ColdSize: 0, MethodDisplayName: "");
-                continue;
-            }
-
-            ClrMethod? method = frame.Method;
-            if (method is null)
-            {
-                yield return new ThreadStackFrameRef(IsManagedMethod: true, HasMethod: false,
-                    DeclaringTypeName: "", ModuleName: "", IsDynamicModule: false, IsReadyToRun: false,
-                    MethodDesc: 0, NativeCodeAddress: 0, HotSize: 0, ColdSize: 0, MethodDisplayName: "");
-                continue;
-            }
-
-            string typeName = method.Type?.Name ?? "Unknown";
-            string moduleName = method.Type?.Module?.Name ?? "Unknown";
-            HotColdRegions hcr = method.HotColdInfo;
-
-            yield return new ThreadStackFrameRef(
-                IsManagedMethod: true,
-                HasMethod: true,
-                DeclaringTypeName: typeName,
-                ModuleName: moduleName,
-                IsDynamicModule: method.Type?.Module?.IsDynamic == true,
-                IsReadyToRun: method.CompilationType == MethodCompilationType.Ngen,
-                MethodDesc: method.MethodDesc,
-                NativeCodeAddress: method.NativeCode,
-                HotSize: hcr.HotSize,
-                ColdSize: hcr.ColdSize,
-                MethodDisplayName: method.Signature ?? typeName + "." + (method.Name ?? "?"));
-        }
+            yield return ThreadStackTranslator.ToFrameRef(frame);
     }
 
     private Dictionary<uint, ClrThread> BuildThreadsByOsId()

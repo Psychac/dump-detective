@@ -42,11 +42,24 @@ public abstract class LegacyAnalyzerAdapter<TSdkAnalyzer> : IAnalyzer
     /// analyzer needs one.</summary>
     protected virtual object? ResolveOptions(AnalysisOptions options) => null;
 
+    /// <summary>
+    /// Builds the SDK context this adapter's inner analyzer runs against. Base default is
+    /// <see cref="LegacyAnalysisContextTranslator.Translate"/> — override to substitute a capability
+    /// implementation before delegating to the base, the same shape
+    /// <see cref="Analyzers.LockGraphAnalyzerLegacyAdapter"/> uses to swap in a precomputed
+    /// <c>IRuntimeThreadQuery</c> backed by data <see cref="Pipeline.IThreadStackScanParticipant"/>
+    /// already accumulated during the pipeline's shared thread-stack scan, instead of
+    /// <see cref="LegacyAnalysisContextTranslator"/>'s normal live one (which would re-walk every
+    /// thread's stack independently).
+    /// </summary>
+    protected virtual Sdk.Analysis.AnalysisContext BuildSdkContext(AnalysisContext context) =>
+        LegacyAnalysisContextTranslator.Translate(context, ResolveOptions(context.AnalysisOptions));
+
     public async ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        Sdk.Analysis.AnalysisContext sdkContext = LegacyAnalysisContextTranslator.Translate(context, ResolveOptions(context.AnalysisOptions));
+        Sdk.Analysis.AnalysisContext sdkContext = BuildSdkContext(context);
         await _inner.AnalyzeAsync(sdkContext, cancellationToken).ConfigureAwait(false);
 
         AnalyzerDomainResult result = _inner.LastResult

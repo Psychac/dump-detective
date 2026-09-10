@@ -92,7 +92,7 @@ public class SmallDumpLatencyBenchmark
             new LohFragmentationAnalyzerLegacyAdapter(),
             new ThreadStackClusterAnalyzer(),
             new ThreadAnalyzer(),
-            new LockGraphAnalyzer(),
+            new LockGraphAnalyzerLegacyAdapter(),
             new EventLeakAnalyzer(),
         }, new FindingGenerationPipeline(Array.Empty<IFindingGenerator>()));
 

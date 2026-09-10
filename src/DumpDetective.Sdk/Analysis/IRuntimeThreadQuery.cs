@@ -9,7 +9,15 @@ namespace DumpDetective.Sdk.Analysis;
 /// <c>ClrThread.IsAlive</c>; <see cref="EnumerateThreads"/> yields every thread, alive or not,
 /// leaving the alive-only filtering an analyzer's own pre-retyping code already did to the analyzer,
 /// not baked into the stream itself.</summary>
-public readonly record struct RuntimeThreadRef(ThreadRef Thread, bool IsGCSuspendPending, int StackRootCount, bool IsAlive);
+public readonly record struct RuntimeThreadRef(
+    ThreadRef Thread,
+    bool IsGCSuspendPending,
+    int StackRootCount,
+    bool IsAlive,
+    /// <summary>Number of monitor locks this thread currently holds — mirrors <c>ClrThread.LockCount</c>.
+    /// Added 2026-09-11 for <c>LockGraphAnalyzer</c>'s retyping
+    /// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md).</summary>
+    int LockCount = 0);
 
 /// <summary>
 /// One stack frame, source-neutral. <see cref="HasMethod"/> distinguishes "not a managed-method
@@ -50,11 +58,16 @@ public interface IRuntimeThreadQuery
     IEnumerable<RuntimeThreadRef> EnumerateThreads();
 
     /// <summary>
-    /// Walks <paramref name="thread"/>'s full stack (managed and unmanaged frames), unbounded — no
-    /// frame-count cap, matching <c>ThreadAnalyzer</c>'s own precedent (§11.4 M8: measured no cost
-    /// concern walking a real dump's deepest stack, 135 threads, 2 ms) rather than the
-    /// shallower caps some earlier code used. <paramref name="thread"/> must have come from this
-    /// same query's <see cref="EnumerateThreads"/>.
+    /// Streams <paramref name="thread"/>'s stack frames (managed and unmanaged), innermost first.
+    /// The live dump-side implementation walks the whole stack unbounded — no frame-count cap,
+    /// matching <c>ThreadAnalyzer</c>'s own precedent (§11.4 M8: measured no cost concern walking a
+    /// real dump's deepest stack, 135 threads, 2 ms) rather than the shallower caps some earlier
+    /// code used. A precomputed implementation backed by the pipeline's shared thread-stack scan
+    /// (see <c>LockGraphAnalyzerLegacyAdapter</c> and the rest of the thread-domain quartet) may
+    /// yield only however many frames that shared scan captured per thread — still enough for any
+    /// consumer requesting fewer, since every participant negotiates its own minimum via
+    /// <c>IThreadStackScanParticipant.GetRequiredFrameCount</c>. <paramref name="thread"/> must have
+    /// come from this same query's <see cref="EnumerateThreads"/>.
     /// </summary>
     IEnumerable<ThreadStackFrameRef> EnumerateStackFrames(RuntimeThreadRef thread);
 }

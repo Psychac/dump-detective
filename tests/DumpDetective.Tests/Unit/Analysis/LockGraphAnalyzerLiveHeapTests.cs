@@ -199,8 +199,8 @@ public sealed class LockGraphAnalyzerLiveHeapTests
         using DataTarget dataTarget = DataTarget.CreateSnapshotAndAttach(Environment.ProcessId);
         ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();
         var context = new AnalysisContext { Runtime = runtime, Cache = new HeapAnalysisCache() };
-        LockGraphAnalyzer analyzer = new();
-        return (LockGraphDomainResult)await analyzer.AnalyzeAsync(context, CancellationToken.None);
+        using LockGraphAnalyzerLegacyAdapter adapter = new();
+        return (LockGraphDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
     }
 
     private static async Task<LockGraphDomainResult> AnalyzeUntilAsync(

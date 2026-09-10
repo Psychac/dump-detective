@@ -121,9 +121,7 @@ per analyzer — likely worth factoring into a small reusable base
 
 ## 5. Suggested batch order
 
-1. **`LockGraphAnalyzer` first** — smallest surface (needs `FrameScanDepth = 8` frames, not
-   unbounded), and proves the adapter push/pull bridge and the new `HeapSyncBlockQuery` in one
-   self-contained batch before the bigger `ThreadAnalyzer`/`ThreadStackClusterAnalyzer` lift.
+1. **`LockGraphAnalyzer` first. Done 2026-09-11** — see § 7 below for what actually shipped.
 2. **`ThreadStackClusterAnalyzer` second** — reuses the bridge mechanism `LockGraphAnalyzer` proves
    out; its own needs (thread state flags, frame signatures) are additive to what Batch 1 already
    needs from `RuntimeThreadRef`.
@@ -146,3 +144,54 @@ still holds post-retyping (e.g. instrument or count `ClrThread.EnumerateStackTra
 pipeline run with a mix of retyped-adapter and legacy quartet members, assert exactly one walk per
 thread) — this property is the entire reason this migration needed its own plan, so it should be
 asserted directly, not just assumed from the design.
+
+## 7. `LockGraphAnalyzer` — done 2026-09-11
+
+Shipped essentially as designed in § 3, with two things found only once actually building it:
+
+- **A third field on `HeapSyncBlockRef` was needed, not anticipated in § 4**: `HasHoldingThread`
+  (mirrors `SyncBlock.HoldingThreadAddress != 0`), distinct from `HoldingOsThreadId` being non-null.
+  The pre-retyping analyzer's `LocksWithOwnerAddress`/`UnresolvedOwnerCount` domain-result fields
+  depend on telling apart "no owner at all" from "owner address present but didn't resolve to a live
+  thread" — collapsing both into one nullable `HoldingOsThreadId` (the design § 4 sketched) would
+  have made that distinction unrecoverable. Caught before it shipped, while writing the analyzer
+  against the interface, not after.
+- **`LegacyAnalyzerAdapter<TSdkAnalyzer>` itself needed one small addition**: a
+  `protected virtual Sdk.Analysis.AnalysisContext BuildSdkContext(Core.Abstractions.AnalysisContext context)`
+  method (default: today's `LegacyAnalysisContextTranslator.Translate` call), which
+  `AnalyzeAsync` now calls instead of the static translator directly. This is the actual seam the
+  adapter-side bridge hooks into — `LockGraphAnalyzerLegacyAdapter` overrides it to pass a
+  `PrecomputedRuntimeThreadQuery` (or `null` to fall back to the normal live one) via a new optional
+  `runtimeThreadsOverride` parameter on `LegacyAnalysisContextTranslator.Translate`. Purely additive;
+  every other existing adapter is unaffected (uninherited override, same default behavior).
+- **`ThreadStackTranslator`** (`DumpDetective.Analysis/Sdk/`) extracted the `ClrThread`/`ClrStackFrame`
+  → `RuntimeThreadRef`/`ThreadStackFrameRef` mapping out of `RuntimeThreadQuery` into a shared static
+  helper, used by both the live query and the adapter's `OnThreadStack` accumulation — exactly the
+  "one translation, two call sites" § 3 point 1 called for.
+- **`RuntimeThreadRef` gained `LockCount`** (mirrors `ClrThread.LockCount`) — the only new field this
+  analyzer needed from § 4's larger anticipated list (the rest — `AppDomainName`, `GcMode`, `IsGc`,
+  `IsFinalizer`, state flags, stack size, exception info — are `ThreadAnalyzer`/
+  `ThreadStackClusterAnalyzer`'s needs, not built yet, per hard-need-basis).
+- **The owner-thread frame capture simplified**: the pre-retyping analyzer's `CaptureOwnerThreadFrames`
+  did a second, independent, unbounded `EnumerateStackTrace()` walk for each deadlock candidate (on
+  top of the participant-captured top-frame signature). The retyped version reuses the same
+  `FrameScanDepth`-bounded frames the shared scan already captured instead — an accepted, narrow
+  simplification (documented in the analyzer itself): if fewer than 3 of a candidate's first 8 frames
+  resolve to a method signature, this returns fewer than 3 instead of continuing further down the
+  stack, which deadlock candidates being rare makes acceptable.
+- **Gate met, and then some**: beyond the usual characterization/real-dump pair
+  (`LockGraphAnalyzerRetypingCharacterizationTests`, `LockGraphAnalyzerRealDumpTests`), a
+  *pre-existing* test suite (`LockGraphAnalyzerLiveHeapTests`) using real background threads and real
+  `lock` statements to force genuine monitor contention and a real deadlock-candidate scenario needed
+  only a one-line update (call through the adapter instead of the old analyzer directly) and passed
+  unchanged — strong evidence the retyping preserved real behavior, not just structurally-similar
+  behavior. Also added `AnalysisPipelineTests.ExecuteAsync_ScansThreadStacksExactlyOnce_WhenRetypedAndLegacyParticipantsAreMixed`
+  (§ 6's own called-for gate) — mixes `LockGraphAnalyzerLegacyAdapter` with two dummy legacy
+  `IThreadStackScanParticipant`s in a real `AnalysisPipeline` run and asserts each sees every thread
+  exactly once, proving the shared-scan property directly rather than by inspection. Full
+  non-real-dump suite (1240 tests) passes.
+- Call sites updated: `DefaultAnalyzerFeatureModuleCatalog`, `FullPipelineBenchmark`,
+  `SmallDumpLatencyBenchmark`, `LockGraphAnalyzerBenchmark` (retargeted at
+  `AnalyzerBenchmarkBase<LockGraphAnalyzerLegacyAdapter>` — it calls `AnalyzeAsync` directly, not
+  through the pipeline, so it exercises the adapter's live-query fallback path, not the precomputed
+  one).

@@ -100,7 +100,7 @@ public class FullPipelineBenchmark
             new LohFragmentationAnalyzerLegacyAdapter(),
             new ThreadStackClusterAnalyzer(),
             new ThreadAnalyzer(),
-            new LockGraphAnalyzer(),
+            new LockGraphAnalyzerLegacyAdapter(),
             new EventLeakAnalyzer(),
         }, new FindingGenerationPipeline(Array.Empty<DumpDetective.Core.Abstractions.IFindingGenerator>()));
     }

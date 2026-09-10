@@ -152,8 +152,34 @@ is severity first (P0, then P1), otherwise in the order below; reorder freely.
 
 ## P1 — real tensions, no obviously-correct answer
 
-11. `TimeAnchor` ("never all three" set) and `TemporalExtent` (`Kind == Point` vs. `End`
-    nullability) state invariants in prose that nothing enforces at construction time.
+11. ~~`TimeAnchor` ("never all three" set) and `TemporalExtent` (`Kind == Point` vs. `End`
+    nullability) state invariants in prose that nothing enforces at construction time.~~ **Resolved
+    2026-09-10, three separate outcomes:**
+    - **Not enforced at construction, by design.** Both types' producers are trusted first-party
+      analyzer code, not external input — per this project's own convention (CLAUDE.md: "only
+      validate at system boundaries"), a throw-on-invalid check here would be exactly the kind of
+      defensive validation this codebase deliberately avoids. Left as a documented, trusted
+      contract instead.
+    - **`TimeAnchor`'s "never all three populated" half was dropped, not kept.** Having all three
+      fields set isn't actually harmful, just unusual — there was nothing real to protect against by
+      forbidding it. Only "at least one must be populated" survives as the real invariant.
+    - **Bigger finding: `TemporalKind.Series` was removed, not built out — a real redesign, not a
+      validation gap.** Discussion surfaced that a `TemporalExtent` lives on one `Observation`,
+      which is scoped to exactly one artifact (`Provenance.Artifact` is singular) — it can only ever
+      describe a point or a bounded interval for that one artifact, never a series across several.
+      `Series` never had a valid representation here and trying to give it one (an anchor list, for
+      example) would have been modeling the wrong owner for the concept. The real "ordered view
+      across N artifacts" belongs on `AnalysisSession.Timeline : SessionTimeline`
+      (source-model.md § 6) — Phase 4 territory, not yet built, correctly still deferred. Confirmed
+      zero code anywhere constructed `TemporalKind.Series` before removing it; `source-model.md` § 5
+      corrected in place (dated note, not silently rewritten) rather than left describing a shape
+      the shipped type no longer has.
+    
+    Guarded by `TemporalTests.cs` (enum-member pin + example shapes) and a real-producer
+    characterization assertion added to `CpuHotspotAnalyzerTests.cs`'s existing boundary test — the
+    actual analyzer's actual output, not just a hand-built example. Full suite 1227/1227 non-real-dump
+    tests pass (one pre-existing flaky, order-dependent test unrelated to this change — passes
+    standalone and on retry).
 12. `AnalysisContext`'s 13 nullable properties vs. a generic `TryGetCapability<T>()` resolver —
     current shape is IntelliSense-friendly but doesn't scale cleanly and doesn't distinguish
     "required, so trust it's non-null" from "optional, really check."

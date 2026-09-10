@@ -2,6 +2,7 @@ using DumpDetective.Platform.Storage.Container;
 using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 using DumpDetective.Sources.NetTrace;
 
 using FluentAssertions;
@@ -62,6 +63,12 @@ public sealed class CpuHotspotAnalyzerTests : IDisposable
 
         Observation methodBObs = observations.Single(o => ((MethodRef)o.Subjects[0]).Name == "MethodB");
         methodBObs.Measures["cpu.sample-count"].Value.Should().Be(2, "two samples fall inside MethodB's range");
+
+        // Real-producer characterization for docs/refactor/modularity/phase-1-sdk-review-findings.md
+        // item 11: TemporalExtent's Kind/End invariant is a trusted-producer contract, not
+        // runtime-enforced — this is that trust being verified against a real analyzer's actual output.
+        methodAObs.When.Kind.Should().Be(TemporalKind.Interval);
+        methodAObs.When.End.Should().NotBeNull("an Interval-kind extent must carry an End anchor");
     }
 
     [Fact]

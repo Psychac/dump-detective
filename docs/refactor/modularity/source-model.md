@@ -203,8 +203,8 @@ high-confidence, no matter how strongly the two observations agree.
 
 ## 5. Temporal model
 
-A dump is a point; a trace is an interval; a multi-dump sequence is a sparse series. Making time
-explicit is what lets trend, trace, and combined analysis be *the same mechanism*.
+A dump is a point; a trace is an interval. Making time explicit is what lets trend, trace, and
+combined analysis be *the same mechanism*.
 
 ```csharp
 public sealed record TimeAnchor
@@ -217,11 +217,21 @@ public sealed record TimeAnchor
 
 public sealed record TemporalExtent
 {
-    public TemporalKind Kind { get; init; }   // Point | Interval | Series
+    public TemporalKind Kind { get; init; }   // Point | Interval
     public TimeAnchor Start { get; init; }
     public TimeAnchor? End { get; init; }
 }
 ```
+
+**Correction, 2026-09-10** (see
+[phase-1-sdk-review-findings.md](phase-1-sdk-review-findings.md) item 11): this section originally
+sketched a third `TemporalKind.Series` for "a multi-dump sequence is a sparse series," attached to
+`TemporalExtent`. That was the wrong home for it and was removed from the shipped SDK type rather
+than built out. A `TemporalExtent` lives on one `Observation`, which is scoped to exactly one
+artifact (`Provenance.Artifact` is singular) — it can only ever describe a point or a bounded
+interval for that one artifact, never a series across several. The ordered, multi-artifact view a
+multi-dump trend actually needs belongs on the session instead — see § 6's
+`AnalysisSession.Timeline : SessionTimeline` below, still Phase 4 territory, not yet built.
 
 ### Alignment strategies, in preference order
 

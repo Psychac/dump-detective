@@ -278,10 +278,22 @@ is severity first (P0, then P1), otherwise in the order below; reorder freely.
     plugin-discovery time, can't cross an `AssemblyLoadContext` boundary) so Phase 5's rule authoring
     and Phase 9's isolation work hit this directly instead of rediscovering it as a surprise.
     Documentation-only, no shape change — no `SdkVersion` bump.
-17. `EntityRef.JoinKey`'s base contract says "cross-source-comparable" — `ObjectRef.JoinKey`
+17. ~~`EntityRef.JoinKey`'s base contract says "cross-source-comparable" — `ObjectRef.JoinKey`
     explicitly is not (artifact-scoped, by its own doc). Same member name/contract meaning
     different things per subtype; nothing breaks today only because the values never happen to
-    collide.
+    collide.~~ **Fixed 2026-09-10, documentation-only — no restructure.** Considered pulling
+    `ObjectRef` out of the `EntityRef` hierarchy entirely (since it doesn't honor the base
+    contract), but rejected: `ObjectRef` genuinely needs to stay part of the same polymorphic set —
+    `Observation.Subjects` needs to be able to say "this finding is about this specific object," the
+    same way it says "this method" or "this thread." No behavior was actually wrong either — finding
+    3's equality fix already handles this correctly in practice
+    (`ObjectRef_Equality_StillDiffersByArtifactDespiteSameAddress` proves two different-artifact
+    refs are correctly non-equal); this was purely a documentation-contract precision problem, same
+    class as findings 12/15/16. `EntityRef.JoinKey`'s doc corrected to state the real rule:
+    cross-source-comparable for every subtype except `ObjectRef`, named explicitly rather than left
+    as a blanket claim one subtype quietly violates. No `SdkVersion` bump.
+    
+    **P1 tier closed — all of findings 11–17 resolved.**
 
 ## P2 — polish, not blocking
 

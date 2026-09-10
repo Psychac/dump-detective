@@ -31,7 +31,21 @@ public abstract record EntityRef
 {
     public abstract EntityKind Kind { get; }
 
-    /// <summary>Canonical, cross-source-comparable identity. Never a source-local handle.</summary>
+    /// <summary>
+    /// Canonical identity. Never a source-local handle.
+    /// </summary>
+    /// <remarks>
+    /// Cross-source-comparable for every subtype <b>except</b> <see cref="ObjectRef"/> — corrected
+    /// 2026-09-10 (docs/refactor/modularity/phase-1-sdk-review-findings.md item 17) after this
+    /// blanket claim was found to directly contradict <see cref="ObjectRef"/>'s own doc, which
+    /// states its <see cref="ObjectRef.JoinKey"/> is artifact-scoped by nature and "must never [be]
+    /// treat[ed]... as comparable" across artifacts. A caller holding an <see cref="EntityRef"/>
+    /// without knowing its concrete subtype could otherwise assume every <c>JoinKey</c> is safe to
+    /// compare across sources — false for one of the five. Nothing breaks today only because
+    /// <see cref="ObjectRef.JoinKey"/> happens to bake its <c>ArtifactId</c> into itself (so two
+    /// different-artifact refs never collide by value), which is a property of that value, not a
+    /// guarantee this contract was actually making.
+    /// </remarks>
     public abstract string JoinKey { get; }
 
     /// <summary>How trustworthy <see cref="JoinKey"/> is for this specific entity.</summary>

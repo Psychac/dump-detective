@@ -32,6 +32,18 @@ fixed by giving each type its own `JsonConverter`. No real consumer existed for 
 rather than a migration anyone needs to plan around — verified by re-running the same live-build
 probe-and-validate process the 1.0.0 schema was originally derived from.
 
+## 1.3.0 — 2026-09-10
+
+Removes `temporal.series`, added in 1.0.0 but never consumed by any real code. Same reasoning as
+`TemporalKind.Series`'s removal
+([Phase 1 SDK review](../../docs/refactor/modularity/phase-1-sdk-review-findings.md), follow-on to
+item 11): a `Capability` is declared per-*artifact* (`ArtifactDescriptor.Provides`), and no single
+artifact can provide "a series" any more than a single `Observation` can hold one. If a
+session-level capability concept (`AnalysisSession.AvailableCapabilities` computing something no
+individual artifact provides) turns out to be real once Phase 4 exists, reintroduce it there with
+actual grounding — not kept here on a guess. `temporal.point`/`temporal.interval` are also
+currently unconsumed by any real code but were left alone; removing them wasn't part of this pass.
+
 ## 1.2.0 — 2026-09-10
 
 Splits `heap.dominators` into `heap.dominators` (narrowed to retained size/immediate

@@ -67,7 +67,14 @@ public static class CapabilityVocabulary
     // Temporal
     public const string TemporalPoint = "temporal.point";
     public const string TemporalInterval = "temporal.interval";
-    public const string TemporalSeries = "temporal.series";
+
+    // No TemporalSeries — removed 2026-09-10, same reasoning as TemporalKind.Series's removal (see
+    // docs/refactor/modularity/phase-1-sdk-review-findings.md item 11 and its follow-on note): a
+    // Capability is declared per-artifact (ArtifactDescriptor.Provides), and no single artifact can
+    // provide "a series" any more than a single Observation can. Zero real usage anywhere before
+    // removing it. If a session-level capability concept (AnalysisSession.AvailableCapabilities
+    // computing something no individual artifact provides) turns out to be real once Phase 4
+    // exists, reintroduce it there with actual grounding — not kept here on a guess.
 
     /// <summary>
     /// Every capability named above, for build-time/test-time validation that a declared capability

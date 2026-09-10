@@ -19,13 +19,14 @@ public static class SdkVersion
 {
     public const int Major = 0;
 
-    /// <summary>3 as of 2026-09-10 (finding 11: removed <c>TemporalKind.Series</c>) — the first
-    /// bump under the per-finding policy above. Before that, one catch-up bump (0.1 → 0.2) covered
-    /// every SDK API change already made this session before the policy existed (the `Analysis/`
-    /// namespace, capability additions/splits, the `EntityRef`/`IHeapDominatorQuery`/positional-record/
-    /// JSON-converter fixes) — not a precise per-change reconstruction, since nothing yet depends on
-    /// intermediate values enough to make that worth simulating.</summary>
-    public const int Minor = 3;
+    /// <summary>4 as of 2026-09-10 (removed <c>CapabilityVocabulary.TemporalSeries</c>, follow-on
+    /// to finding 11's <c>TemporalKind.Series</c> removal) — bumped from 3 (finding 11 itself). Before
+    /// that, one catch-up bump (0.1 → 0.2) covered every SDK API change already made this session
+    /// before the per-finding policy above existed (the `Analysis/` namespace, capability
+    /// additions/splits, the `EntityRef`/`IHeapDominatorQuery`/positional-record/JSON-converter
+    /// fixes) — not a precise per-change reconstruction, since nothing yet depends on intermediate
+    /// values enough to make that worth simulating.</summary>
+    public const int Minor = 4;
 
     public static string AsString => $"{Major}.{Minor}";
 }

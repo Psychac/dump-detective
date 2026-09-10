@@ -96,8 +96,17 @@ trace.cpu-samples       trace.gc-events         trace.alloc-samples
 trace.contention-events trace.exception-events  trace.thread-timeline
 trace.jit-events        trace.http-events       trace.custom-events
 
-temporal.point          temporal.interval       temporal.series
+temporal.point          temporal.interval
 ```
+
+**Correction, 2026-09-10** (follow-on to the § 5 correction above; see
+[phase-1-sdk-review-findings.md](phase-1-sdk-review-findings.md) item 11): this table originally
+also listed `temporal.series`, removed from the shipped vocabulary for the same reason
+`TemporalKind.Series` was removed from `TemporalExtent` — a `Capability` is declared per-artifact
+(`ArtifactDescriptor.Provides`), and no single artifact can provide "a series" any more than a
+single `Observation` can hold one. The "3 artifacts → temporal series" line further down this
+section describes the *session's* shape, not any one artifact's capability, and stays correct as
+written.
 
 Analyzers declare requirements, not source types:
 

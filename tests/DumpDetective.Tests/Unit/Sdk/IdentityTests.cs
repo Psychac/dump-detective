@@ -171,7 +171,7 @@ public sealed class IdentityTests
     {
         CapabilityVocabulary.Known.Should().Contain(CapabilityVocabulary.HeapObjects);
         CapabilityVocabulary.Known.Should().Contain(CapabilityVocabulary.TraceGcEvents);
-        CapabilityVocabulary.Known.Should().Contain(CapabilityVocabulary.TemporalSeries);
+        CapabilityVocabulary.Known.Should().Contain(CapabilityVocabulary.TemporalInterval);
     }
 
     /// <summary>

@@ -180,6 +180,19 @@ is severity first (P0, then P1), otherwise in the order below; reorder freely.
     actual analyzer's actual output, not just a hand-built example. Full suite 1227/1227 non-real-dump
     tests pass (one pre-existing flaky, order-dependent test unrelated to this change — passes
     standalone and on retry).
+    
+    **Follow-on, 2026-09-10 — `CapabilityVocabulary.TemporalSeries` had the identical flaw, found
+    while working on finding 14.** Same reasoning applies exactly: a `Capability` is declared
+    per-artifact (`ArtifactDescriptor.Provides`), and no single artifact can provide "a series" any
+    more than a single `Observation` can hold one. Confirmed zero real usage anywhere (only
+    self-referential: the const declaration, its registry mirror, and one test spot-checking the
+    Temporal group's presence in `Known`) before removing it — same standard applied as the
+    `TemporalKind.Series` removal itself. `capability-registry.json` bumped to 1.3.0;
+    `source-model.md` § 3's vocabulary table corrected in place (dated note, same pattern as § 5).
+    `temporal.point`/`temporal.interval` are also currently unconsumed by any real code but were
+    left alone — a broader question about whether the whole Temporal capability group is
+    under-justified, not raised or resolved here. `SdkVersion.Minor` bumped to 4 (a real public API
+    removal).
 12. ~~`AnalysisContext`'s 14 nullable properties (13 at review time; finding 4 added a 14th) vs. a
     generic `TryGetCapability<T>()` resolver — current shape is IntelliSense-friendly but doesn't
     scale cleanly and doesn't distinguish "required, so trust it's non-null" from "optional, really

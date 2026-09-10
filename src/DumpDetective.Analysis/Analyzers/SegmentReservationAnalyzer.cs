@@ -1,40 +1,53 @@
-using DumpDetective.Analysis.Cache;
-using DumpDetective.Core.Abstractions;
+using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
+using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 
-using Microsoft.Diagnostics.Runtime;
+// DumpDetective.Analysis.Models and DumpDetective.Sdk.Analysis both declare HeapSegmentKind and
+// RegionGenerationKind (deliberately identical names, see SdkSegmentKindMapper) — alias the
+// dump-side ones (what this analyzer's still-unchanged *DomainResult output needs) to disambiguate.
+using DumpHeapSegmentKind = DumpDetective.Analysis.Models.HeapSegmentKind;
+using DumpRegionGenerationKind = DumpDetective.Analysis.Models.RegionGenerationKind;
+using SdkHeapSegmentRef = DumpDetective.Sdk.Analysis.HeapSegmentRef;
 
 namespace DumpDetective.Analysis.Analyzers;
 
 /// <summary>
-/// Phase-2 analyzer covering §25.1 (committed vs reserved), §25.2 (segment lifecycle),
-/// and §25.3 (address space pressure).
+/// Phase 1 retyping batch (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
+/// retyped onto the SDK's capability-scoped <see cref="Sdk.Analysis.IAnalyzer"/>, sourcing
+/// everything through <see cref="IHeapSegmentQuery"/> (the <c>heap.segments</c> capability) instead
+/// of a raw <c>ClrHeap</c>/<c>IHeapAnalysisCache</c>. Runs through the existing pipeline via
+/// <see cref="SegmentReservationAnalyzerLegacyAdapter"/>.
 ///
-/// Operates entirely on <see cref="ClrHeap.Segments"/> — no heap object scan.
-/// Each segment contributes committed bytes (<see cref="ClrSegment.CommittedMemory"/>) and
-/// reserved bytes (<see cref="ClrSegment.ReservedMemory"/>), and is classified as ephemeral
-/// or non-ephemeral based on its <see cref="ClrSegment.Kind"/> string.
-/// Logical heap index (<see cref="ClrSubHeap.Index"/>) enables per-CPU reservation breakdown
-/// for Server GC configurations.
+/// Covers §25.1 (committed vs reserved), §25.2 (segment lifecycle), and §25.3 (address space
+/// pressure). Operates entirely on segment metadata — no heap object scan.
 /// </summary>
-public sealed class SegmentReservationAnalyzer : IAnalyzer
+public sealed class SegmentReservationAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
-    // Address space pressure thresholds (§25.3).
-    public void Dispose() { }
     public string Name => "Segment Reservation Analysis";
     public string Category => "Memory";
 
-    public ValueTask<AnalyzerDomainResult> AnalyzeAsync(
-        AnalysisContext context,
-        CancellationToken cancellationToken)
+    public AnalyzerDomainResult? LastResult { get; private set; }
+
+    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        SegmentReservationAnalysisOptions options = context.AnalysisOptions.SegmentReservationAnalysis;
-        return ValueTask.FromResult(Analyze(context, context.Heap, context.Progress, options, cancellationToken).Stamp(this));
+
+        IHeapSegmentQuery segmentQuery = context.HeapSegments
+            ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapSegments}' capability.");
+        SegmentReservationAnalysisOptions options = context.AnalyzerOptions as SegmentReservationAnalysisOptions ?? new SegmentReservationAnalysisOptions();
+
+        LastResult = Analyze(segmentQuery, options, context.Progress, cancellationToken);
+        return ValueTask.CompletedTask;
     }
 
-    private static AnalyzerDomainResult Analyze(AnalysisContext context, ClrHeap heap, IProgress<AnalyzerProgressReport>? progress, SegmentReservationAnalysisOptions options, CancellationToken cancellationToken)
+    private static AnalyzerDomainResult Analyze(
+        IHeapSegmentQuery segmentQuery,
+        SegmentReservationAnalysisOptions options,
+        IProgress<AnalyzerProgressReport>? progress,
+        CancellationToken cancellationToken)
     {
         ulong totalCommitted = 0;
         ulong totalReserved = 0;
@@ -46,42 +59,31 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
         var segmentTable = new List<SegmentReservationEntry>(64);
         var reservedByHeap = new Dictionary<int, ulong>(16);
         var committedByHeap = new Dictionary<int, ulong>(16);
-        var reservedByKind = new Dictionary<HeapSegmentKind, ulong>();
-        var committedByKind = new Dictionary<HeapSegmentKind, ulong>();
-        var segmentCountByKind = new Dictionary<HeapSegmentKind, int>();
-        var regionBuckets = new Dictionary<RegionGenerationKind, RegionBucketAccumulator>(8);
+        var reservedByKind = new Dictionary<DumpHeapSegmentKind, ulong>();
+        var committedByKind = new Dictionary<DumpHeapSegmentKind, ulong>();
+        var segmentCountByKind = new Dictionary<DumpHeapSegmentKind, int>();
+        var regionBuckets = new Dictionary<DumpRegionGenerationKind, RegionBucketAccumulator>(8);
 
         int totalSegmentCount = 0;
         double maxEphemeralFillPct = 0.0;
         bool isRegionsBased = false;
         const int ProgressReportInterval = 128;
 
-        // Shared with HeapTopologyAnalyzer — see docs/refactor/heap-segment-shared-pass-plan.md.
-        // Falls back to a local classification pass when the cache isn't the concrete
-        // HeapAnalysisCache (e.g. a bare IHeapAnalysisCache test double).
-        IReadOnlyList<SegmentSummary> summaries = context.Cache is HeapAnalysisCache heapCache
-            ? heapCache.GetOrBuildSegmentSummaries(heap)
-            : SegmentSummaryCache.Build(heap);
-
-        for (int summaryIndex = 0; summaryIndex < summaries.Count; summaryIndex++)
+        foreach (SdkHeapSegmentRef segment in segmentQuery.EnumerateSegments())
         {
-            SegmentSummary summary = summaries[summaryIndex];
-            ClrSegment segment = summary.Segment;
-
-            // Mid-loop cancellation check and progress reporting (every 128 segments).
             if ((totalSegmentCount % ProgressReportInterval) == 0)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 progress?.Report(new(totalSegmentCount, "analyzing segment reservation", $"{totalSegmentCount} segments processed"));
             }
 
-            ulong committed = summary.CommittedBytes;
-            ulong reserved = summary.ReservedBytes;
-            bool isEphemeral = summary.IsEphemeral;
-            int logicalHeap = summary.LogicalHeapIndex >= 0 ? summary.LogicalHeapIndex : 0;
-            HeapSegmentKind kind = summary.Kind;
-            RegionGenerationKind regionKind = summary.RegionKind;
-            if (regionKind is RegionGenerationKind.Generation0 or RegionGenerationKind.Generation1)
+            ulong committed = segment.CommittedBytes;
+            ulong reserved = segment.ReservedBytes;
+            bool isEphemeral = segment.IsEphemeral;
+            int logicalHeap = segment.LogicalHeapIndex >= 0 ? segment.LogicalHeapIndex : 0;
+            DumpHeapSegmentKind kind = SdkSegmentKindMapper.ToDump(segment.Kind);
+            DumpRegionGenerationKind regionKind = SdkSegmentKindMapper.ToDump(segment.RegionKind);
+            if (regionKind is DumpRegionGenerationKind.Generation0 or DumpRegionGenerationKind.Generation1)
                 isRegionsBased = true;
 
             totalCommitted += committed;
@@ -121,10 +123,11 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
             // it can feed both the ephemeral-only aggregate below and the per-region bucket stats
             // (regions-based GC benefits from a fill % on non-ephemeral kinds too, since Gen2/LOH
             // regions are small individually and a near-empty one is a real decommit candidate).
+            ulong length = segment.End > segment.Start ? segment.End - segment.Start : 0;
             double fillPct = 0.0;
-            if (segment.Length > 0)
+            if (length > 0)
             {
-                fillPct = committed / (double)segment.Length * 100.0;
+                fillPct = committed / (double)length * 100.0;
                 if (fillPct > 100.0) fillPct = 100.0;
             }
 
@@ -134,7 +137,7 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
                 ephemeralFillSum += fillPct;
                 if (fillPct > maxEphemeralFillPct) maxEphemeralFillPct = fillPct;
             }
-            else if (kind == HeapSegmentKind.SmallObjectHeap)
+            else if (kind == DumpHeapSegmentKind.SmallObjectHeap)
             {
                 nonEphemeralSohCount++;
             }
@@ -162,7 +165,7 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
         double avgFill = ephemeralCount > 0 ? ephemeralFillSum / ephemeralCount : 0.0;
 
         // Evaluate address space pressure (§25.3).
-        int dumpPointerSize = context.Runtime.DataTarget.DataReader.PointerSize;
+        int dumpPointerSize = segmentQuery.DumpPointerSize;
         bool pressureRisk = false;
         string pressureReason = string.Empty;
         if (dumpPointerSize == 4 && totalReserved > options.ThirtyTwoBitPressureThresholdBytes)
@@ -183,7 +186,7 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
         ulong nearEmptyRegionCommittedBytes = 0;
         if (isRegionsBased)
         {
-            foreach (KeyValuePair<RegionGenerationKind, RegionBucketAccumulator> kvp in regionBuckets)
+            foreach (KeyValuePair<DumpRegionGenerationKind, RegionBucketAccumulator> kvp in regionBuckets)
             {
                 RegionBucketAccumulator b = kvp.Value;
                 regionStats.Add(new RegionGenerationStats(
@@ -222,7 +225,7 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
             RatioHighPressureThreshold: options.RatioHighPressureThreshold,
             RatioMediumPressureThreshold: 4.0,
             DumpPointerSize: dumpPointerSize,
-            IsServerGc: heap.IsServer,
+            IsServerGc: segmentQuery.IsServerGc,
             LogicalHeapCount: reservedByHeap.Count,
             IsRegionsBased: isRegionsBased,
             RegionStats: regionStats,
@@ -231,17 +234,7 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
             NearEmptyRegionFillPctThreshold: options.NearEmptyRegionFillPctThreshold);
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Returns true when the segment is an ephemeral SOH segment (contains Gen0/Gen1).
-    /// Detection is based on the <c>Kind</c> string — ClrMD uses "Ephemeral" for the
-    /// classic non-regions ephemeral segment; individual generation segments in a regions-based
-    /// heap are classified as Small/SOH and have non-empty <c>Generation0</c> ranges.
-    /// </summary>
-    // Classification helpers moved to SegmentKindMapper
-
-    /// <summary>Mutable per-<see cref="RegionGenerationKind"/> accumulator — at most 7 live instances (one per bucket).</summary>
+    /// <summary>Mutable per-<see cref="DumpRegionGenerationKind"/> accumulator — at most 7 live instances (one per bucket).</summary>
     private sealed class RegionBucketAccumulator
     {
         public int Count;
@@ -266,4 +259,6 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer
             }
         }
     }
+
+    public void Dispose() { }
 }

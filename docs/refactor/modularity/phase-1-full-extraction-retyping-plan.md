@@ -218,6 +218,50 @@ found no phase owns. Concrete sequencing:
    the same way as the pilot. Tier-1+Tier-2 analyzers wait until the `dump.object-fields` escape
    hatch (Tier 2) exists — build that once the first Tier-1+Tier-2 analyzer is reached, not
    speculatively up front.
+
+   **Batch 1: `SegmentReservationAnalyzer`. Done 2026-09-11.** Sized down from the plan's own 3–5
+   suggestion to one analyzer this session — checking `HeapTopologyAnalyzer` (its natural pairing,
+   since both already share one `HeapAnalysisCache.GetOrBuildSegmentSummaries` pass) found it needs
+   materially more beyond the segment surface built here: per-segment object enumeration scoped to
+   POH/Frozen segments only (for its per-type breakdown), and cross-referencing the heap index's
+   `TypeAggregates`/`ObjectCount` for exact SOH derivation. Queued for the next batch rather than
+   rushed into this one.
+   - **`IHeapSegmentQuery`/`HeapSegmentRef` extended**, not just implemented: added
+     `Address` (verified via decompiling the installed ClrMD package that this is genuinely distinct
+     from `Start`/`End` — the segment object's own address, not the object range it holds), `Kind`,
+     `RegionKind` (two new SDK enums, `HeapSegmentKind`/`RegionGenerationKind`, mirroring the
+     dump-side ones 1:1), `CommittedBytes`, `ReservedBytes`, `LogicalHeapIndex`, `IsEphemeral`,
+     `Gen0Bytes`/`Gen1Bytes`/`Gen2Bytes`, plus `DumpPointerSize` and `IsServerGc` on the interface
+     itself (heap-wide facts bundled alongside segment enumeration for the same reason
+     `IHeapTypeStatisticsQuery` already bundles `HasExactGenerationData`/exact-gen-bytes — no
+     better-fitting existing capability). Sized to exactly what `SegmentReservationAnalyzer`
+     measurably needed, deliberately including the extra fields `HeapTopologyAnalyzer` will also
+     need (its shared `SegmentSummary` pass means this surface should already cover it), not
+     further.
+   - **Dump-side `heap.segments` implementation** (`HeapSegmentQuery`) + a new
+     `SdkSegmentKindMapper` centralizing the two-way SDK-enum ↔ dump-side-enum mapping (both
+     directions are real call sites: the dump-side implementation maps dump→SDK, the retyped
+     analyzer maps SDK→dump since its `*DomainResult` output is unchanged and still dump-side-typed)
+     — both in `DumpDetective.Analysis/Sdk/`.
+   - **New recurring gotcha, will hit again on every future segment/type-adjacent analyzer**:
+     `DumpDetective.Analysis.Models` and `DumpDetective.Sdk.Analysis` deliberately declare
+     same-named enums (`HeapSegmentKind`, `RegionGenerationKind`) — any file needing both
+     unqualified must alias one side (`using DumpHeapSegmentKind = ...`) to avoid CS0104. Distinct
+     from the earlier `DumpDetective.Analysis.Sdk` vs. `DumpDetective.Sdk` *namespace* collision
+     found during the pilot — this one is a *type-name* collision between two namespaces that don't
+     shadow each other.
+   - **Gate met**: new `SegmentReservationAnalyzerRetypingCharacterizationTests` — unlike the
+     pilot's hand-crafted-fixture approach, `SegmentSummary` wraps a real, live `ClrSegment` that
+     can't be synthesized via reflection injection, so this cross-checks the retyped output directly
+     against ClrMD ground truth (`heap.Segments`, `DataReader.PointerSize`, `heap.IsServer`) on a
+     self-attached live process heap, plus internal-consistency checks (per-kind/per-heap sums equal
+     totals, segment table sorted descending, fill % in range). New
+     `SegmentReservationAnalyzerRealDumpTests` (`[DiscrepancyFact]`, one dump, foreground) repeats
+     the same cross-check against the real 3.5 GB reference dump — passed, 8 segments, Server GC,
+     classic (non-regions) layout, 707 ms. Full non-real-dump suite (1230 tests) passes.
+   - Call site updated: `DefaultAnalyzerFeatureModuleCatalog` now constructs
+     `SegmentReservationAnalyzerLegacyAdapter`. No benchmark referenced this analyzer directly
+     (unlike the pilot's three benchmark call sites).
 5. **Real-dump verification stays one-at-a-time, in the foreground**, per this project's standing
    rule — run it once per batch on the reference dumps, not once per analyzer, to keep measurement
    cost proportional to what a mechanical retype-and-characterize change actually risks.

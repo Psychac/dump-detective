@@ -111,9 +111,15 @@ is severity first (P0, then P1), otherwise in the order below; reorder freely.
    anywhere today), so this was a zero-risk mechanical change. Full suite 1223/1223 non-real-dump
    tests pass.
 
-7. **`ArtifactId` vs `Capability` — inconsistent construction ergonomics.** `Capability` has
-   `implicit operator Capability(string)`; `ArtifactId` has none, requires `new ArtifactId("x")`
-   everywhere. Either intentional (should say why) or drift. **Status: Open.**
+7. ~~`ArtifactId` vs `Capability` — inconsistent construction ergonomics.~~ **Resolved 2026-09-10 —
+   not a bug, justified by different real usage, kept as-is.** Checked actual construction sites
+   before deciding: `Capability`'s implicit conversion is genuinely load-bearing — all three
+   shipped analyzers (`GcPauseAnalyzer`/`ContentionAnalyzer`/`CpuHotspotAnalyzer`) write
+   `new HashSet<Capability> { CapabilityVocabulary.TraceGcEvents }`, relying on it every time.
+   `ArtifactId` is constructed explicitly exactly once in production code (`TraceAnalysisRunner`,
+   one identity per real artifact) plus test fixtures — never as a repeated literal. Added an XML
+   remark on `ArtifactId` explaining the asymmetry instead of "fixing" it either direction, same
+   resolution shape as finding 1.
 
 8. **`ArtifactId`/`Capability`/`ObservationId` serialize as one-key wrapper objects**
    (`{"value":"..."}`/`{"key":"..."}`), not bare strings — documented as "Gotcha 3" in

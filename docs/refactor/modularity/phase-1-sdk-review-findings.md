@@ -90,18 +90,19 @@ is severity first (P0, then P1), otherwise in the order below; reorder freely.
    implementation exists yet for either interface, so nothing consumed the old bundled shape to
    migrate. 37/37 architecture+SDK tests pass; full suite 1223/1223 non-real-dump tests pass.
 
-5. **Positional records with adjacent same-typed parameters — transposition risk.**
-   - `HeapRootRef(HeapRootKind Kind, ulong TargetAddress, ulong RootAddress, ...)` — swapping
-     `TargetAddress`/`RootAddress` compiles and produces a plausible-looking, silently-wrong root
-     path.
-   - `HeapSegmentRef(ulong Start, ulong End, int Generation)` — same risk for a segment range.
-   - Pre-existing `ConfidenceBreakdown(double Composite, double EvidenceStrength, double
-     IdentityFidelityCap, double TemporalAlignmentCap, double CapabilityFidelity, double
-     ConflictPenalty, ...)` — six adjacent `double`s, zero compiler protection.
+5. ~~Positional records with adjacent same-typed parameters — transposition risk.~~ **Fixed
+   2026-09-10.** All three converted from positional construction to named `required X { get; init; }`
+   properties, matching `Observation`/`Provenance`/`Finding`/`TemporalExtent`'s established
+   convention:
+   - `HeapRootRef` (`TargetAddress`/`RootAddress` were the adjacent-`ulong` risk).
+   - `HeapSegmentRef` (`Start`/`End`).
+   - `ConfidenceBreakdown` (six adjacent `double`s).
    
-   `Observation`/`Provenance`/`Finding`/`TemporalExtent` all already use named
-   `required X { get; init; }` construction specifically to avoid this; these three break that
-   established convention. **Status: Open.**
+   `HeapRootRef`/`HeapSegmentRef` stayed `readonly record struct` — value-type, matching
+   `HeapObjectRef`/`HeapEntry`'s existing precedent for hot-path streamed DTOs; only the
+   construction syntax changed, not the perf characteristics. Zero call-site impact: grepped first
+   and confirmed nothing anywhere in the codebase constructs any of the three types yet, so this
+   was a zero-risk mechanical change. Full suite 1223/1223 non-real-dump tests pass.
 
 6. **`IHeapTypeStatisticsQuery.TryGetGlobalSizeBuckets()` returns raw mutable `long[]?`.** Every
    other SDK collection type is `IReadOnlyList`/`IReadOnlySet`/`IReadOnlyDictionary`. Copied

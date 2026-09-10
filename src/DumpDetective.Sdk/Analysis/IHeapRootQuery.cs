@@ -21,12 +21,21 @@ public enum HeapRootKind
 /// <c>IHeapAnalysisCache.GetStaticFieldsByRootAddress</c>); left <c>null</c> otherwise rather than
 /// forcing every root through a resolution step most callers don't need.
 /// </summary>
-public readonly record struct HeapRootRef(
-    HeapRootKind Kind,
-    ulong TargetAddress,
-    ulong RootAddress,
-    string? OwnerTypeName = null,
-    string? FieldName = null);
+/// <remarks>
+/// Named `required` properties, not positional construction — <see cref="TargetAddress"/> and
+/// <see cref="RootAddress"/> are adjacent same-typed (`ulong`) fields that would be silently
+/// transposable at a positional call site, semantically dangerous to swap (which one is kept alive
+/// vs. which is the root's own storage location) and undetectable by the compiler. See
+/// docs/refactor/modularity/phase-1-sdk-review-findings.md item 5.
+/// </remarks>
+public readonly record struct HeapRootRef
+{
+    public required HeapRootKind Kind { get; init; }
+    public required ulong TargetAddress { get; init; }
+    public required ulong RootAddress { get; init; }
+    public string? OwnerTypeName { get; init; }
+    public string? FieldName { get; init; }
+}
 
 /// <summary>The <c>heap.roots</c> capability.</summary>
 public interface IHeapRootQuery

@@ -16,6 +16,10 @@ public interface IHeapTypeStatisticsQuery
     /// least one live instance, without a full object-index scan. <c>null</c> when unavailable.</summary>
     IReadOnlyList<TypeRef>? TryGetDistinctTypes();
 
-    /// <summary>Mirrors <c>IHeapAnalysisCache.TryGetGlobalSizeBuckets</c>. <c>null</c> when unavailable.</summary>
-    long[]? TryGetGlobalSizeBuckets();
+    /// <summary>Mirrors <c>IHeapAnalysisCache.TryGetGlobalSizeBuckets</c> — that method returns a
+    /// raw <c>long[]?</c>, but every other SDK collection type is `IReadOnly*`, so this is
+    /// `IReadOnlyList` instead rather than reproducing the encapsulation leak; see
+    /// docs/refactor/modularity/phase-1-sdk-review-findings.md item 6. <c>null</c> when
+    /// unavailable.</summary>
+    IReadOnlyList<long>? TryGetGlobalSizeBuckets();
 }

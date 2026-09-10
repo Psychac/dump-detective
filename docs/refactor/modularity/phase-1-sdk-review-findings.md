@@ -104,10 +104,12 @@ is severity first (P0, then P1), otherwise in the order below; reorder freely.
    and confirmed nothing anywhere in the codebase constructs any of the three types yet, so this
    was a zero-risk mechanical change. Full suite 1223/1223 non-real-dump tests pass.
 
-6. **`IHeapTypeStatisticsQuery.TryGetGlobalSizeBuckets()` returns raw mutable `long[]?`.** Every
-   other SDK collection type is `IReadOnlyList`/`IReadOnlySet`/`IReadOnlyDictionary`. Copied
-   verbatim from `IHeapAnalysisCache` without reapplying the SDK's own stricter convention.
-   **Status: Open.**
+6. ~~`IHeapTypeStatisticsQuery.TryGetGlobalSizeBuckets()` returns raw mutable `long[]?`.~~ **Fixed
+   2026-09-10.** Changed to `IReadOnlyList<long>?`, matching the SDK's own convention everywhere
+   else. Confirmed zero usages of the SDK interface's method before changing it (only
+   `Core.Abstractions.IHeapAnalysisCache`'s original — untouched, unaffected — is actually called
+   anywhere today), so this was a zero-risk mechanical change. Full suite 1223/1223 non-real-dump
+   tests pass.
 
 7. **`ArtifactId` vs `Capability` — inconsistent construction ergonomics.** `Capability` has
    `implicit operator Capability(string)`; `ArtifactId` has none, requires `new ArtifactId("x")`

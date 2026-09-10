@@ -22,7 +22,11 @@ internal static class ThreadStackTranslator
         IsGCSuspendPending: (thread.State & ClrThreadState.TS_GCSuspendPending) != 0,
         StackRootCount: stackRootCount,
         IsAlive: thread.IsAlive,
-        LockCount: (int)thread.LockCount);
+        LockCount: (int)thread.LockCount,
+        IsGc: thread.IsGc,
+        IsFinalizer: thread.IsFinalizer,
+        IsThreadpoolWorker: (thread.State & ClrThreadState.TS_TPWorkerThread) != 0,
+        IsCompletionPortThread: (thread.State & ClrThreadState.TS_CompletionPortThread) != 0);
 
     public static ThreadStackFrameRef ToFrameRef(ClrStackFrame frame)
     {
@@ -30,7 +34,8 @@ internal static class ThreadStackTranslator
         {
             return new ThreadStackFrameRef(IsManagedMethod: false, HasMethod: false,
                 DeclaringTypeName: "", ModuleName: "", IsDynamicModule: false, IsReadyToRun: false,
-                MethodDesc: 0, NativeCodeAddress: 0, HotSize: 0, ColdSize: 0, MethodDisplayName: "");
+                MethodDesc: 0, NativeCodeAddress: 0, HotSize: 0, ColdSize: 0, MethodDisplayName: "",
+                FrameName: frame.FrameName);
         }
 
         ClrMethod? method = frame.Method;
@@ -38,7 +43,8 @@ internal static class ThreadStackTranslator
         {
             return new ThreadStackFrameRef(IsManagedMethod: true, HasMethod: false,
                 DeclaringTypeName: "", ModuleName: "", IsDynamicModule: false, IsReadyToRun: false,
-                MethodDesc: 0, NativeCodeAddress: 0, HotSize: 0, ColdSize: 0, MethodDisplayName: "");
+                MethodDesc: 0, NativeCodeAddress: 0, HotSize: 0, ColdSize: 0, MethodDisplayName: "",
+                FrameName: frame.FrameName);
         }
 
         string typeName = method.Type?.Name ?? "Unknown";
@@ -56,6 +62,8 @@ internal static class ThreadStackTranslator
             NativeCodeAddress: method.NativeCode,
             HotSize: hcr.HotSize,
             ColdSize: hcr.ColdSize,
-            MethodDisplayName: method.Signature ?? typeName + "." + (method.Name ?? "?"));
+            MethodDisplayName: method.Signature ?? typeName + "." + (method.Name ?? "?"),
+            FrameName: frame.FrameName,
+            RawMethodSignature: method.Signature);
     }
 }

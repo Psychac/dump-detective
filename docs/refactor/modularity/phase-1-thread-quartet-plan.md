@@ -93,12 +93,13 @@ per analyzer — likely worth factoring into a small reusable base
 
 ## 4. Capability gaps found while sizing this (not yet built)
 
-- **`RuntimeThreadRef` needs real extension.** Batch 5 only added `IsAlive`. `ThreadAnalyzer` alone
-  needs: `AppDomainName` (`thread.CurrentAppDomain?.Name`), `GcMode` (`thread.GCMode.ToString()`),
-  `LockCount` (`thread.LockCount`), `IsGc`, `IsFinalizer`, thread state flags or pre-derived booleans
-  for at least `TS_Background`/`TS_TPWorkerThread` (`ThreadStackClusterAnalyzer` needs `IsGc`/
-  `IsFinalizer`/`TS_TPWorkerThread` too), `StackBase`/`StackLimit` (or a pre-derived
-  `StackSizeBytes`), and current-exception info (type name + message — see next point).
+- **`RuntimeThreadRef` still needs `ThreadAnalyzer`-specific extension.** `IsAlive` (Batch 5) and
+  `LockCount` (Batch 8, `LockGraphAnalyzer`) shipped earlier; `IsGc`/`IsFinalizer`/
+  `IsThreadpoolWorker`/`IsCompletionPortThread` shipped in Batch 9 (`ThreadStackClusterAnalyzer`, see
+  § 8). Still outstanding for `ThreadAnalyzer` alone: `AppDomainName`
+  (`thread.CurrentAppDomain?.Name`), `GcMode` (`thread.GCMode.ToString()`), `TS_Background`,
+  `StackBase`/`StackLimit` (or a pre-derived `StackSizeBytes`), and current-exception info (type name
+  + message — see next point).
 - **Open question, not resolved here: is `ClrException.Message`/`.Type` Tier 2?**
   `thread.CurrentException.Message` reads a live exception object's message off the heap — the same
   *kind* of application-state recovery as `AssemblyLoadContext._name` or `Task.m_stateFlags`, just
@@ -122,9 +123,7 @@ per analyzer — likely worth factoring into a small reusable base
 ## 5. Suggested batch order
 
 1. **`LockGraphAnalyzer` first. Done 2026-09-11** — see § 7 below for what actually shipped.
-2. **`ThreadStackClusterAnalyzer` second** — reuses the bridge mechanism `LockGraphAnalyzer` proves
-   out; its own needs (thread state flags, frame signatures) are additive to what Batch 1 already
-   needs from `RuntimeThreadRef`.
+2. **`ThreadStackClusterAnalyzer` second. Done 2026-09-11** — see § 8 below for what actually shipped.
 3. **`ThreadAnalyzer` last** — the largest domain result of the three (thread categorization,
    AppDomain/GC-mode/exception distributions, stack-memory percentiles, async chain depth), and
    depends on resolving the `ClrException.Message` Tier-1-vs-2 question first.
@@ -195,3 +194,52 @@ Shipped essentially as designed in § 3, with two things found only once actuall
   `AnalyzerBenchmarkBase<LockGraphAnalyzerLegacyAdapter>` — it calls `AnalyzeAsync` directly, not
   through the pipeline, so it exercises the adapter's live-query fallback path, not the precomputed
   one).
+
+## 8. `ThreadStackClusterAnalyzer` — done 2026-09-11
+
+Shipped exactly the push/pull bridge § 3 designed, reusing `LockGraphAnalyzerLegacyAdapter`'s shape
+almost verbatim (`ThreadStackClusterAnalyzerLegacyAdapter` implements `IThreadStackScanParticipant`
+and overrides `BuildSdkContext` the same way). A few things found only while building it:
+
+- **`RuntimeThreadRef` gained `IsGc`, `IsFinalizer`, `IsThreadpoolWorker` (`TS_TPWorkerThread`), and
+  `IsCompletionPortThread` (`TS_CompletionPortThread`)** — exactly the four facts § 4 anticipated,
+  no more. Used both to accumulate per-cluster `ThreadpoolWorkerCount`/`GcCount`/`FinalizerCount` and
+  to synthesize the `"<No managed frames> (...)"` signature for threads with no resolvable frames.
+- **`ThreadStackFrameRef` needed two new raw fields, not anticipated in § 4**: `FrameName` (raw
+  `ClrStackFrame.FrameName`, populated for every frame regardless of `HasMethod`) and
+  `RawMethodSignature` (raw `ClrMethod.Signature`, `null` when absent — no fallback). The existing
+  `MethodDisplayName` field couldn't be reused for cluster-signature purposes: `JitAnalyzer` already
+  depends on its synthesized `Type.Method` fallback when `Signature` is `null`, but the pre-retyping
+  analyzer's `BuildSignature` needed the *raw* signature-or-frame-name chain with no synthesis, to
+  reproduce cluster identity exactly. Kept the two concerns orthogonal (raw fields vs. a
+  business-logic-flavored display field) rather than parameterizing `MethodDisplayName`'s fallback.
+- **The address-indirection machinery in the pre-retyping analyzer (`osThreadIdByAddress`,
+  `ProjectSampleOsThreadIds`, `StackCluster.SampleThreadAddresses`) disappeared entirely** — it only
+  ever existed to map a `ClrThread.Address` back to an `OSThreadId` for display, and
+  `RuntimeThreadRef.Thread.OsThreadId` already carries that directly. `StackCluster` now accumulates
+  `SampleOsThreadIds` (`List<uint>`) straight from each thread as it's processed; the retyped
+  `Analyze` and its NDJSON/JSON export block are correspondingly simpler than the pre-retyping
+  version, not just re-typed.
+- **All pure-string/pure-logic static members kept their exact pre-retyping signatures**:
+  `StackCluster`, `BuildClusterTree`, `ConvertTrieNode`, `ClassifyFrameworkPattern`,
+  `BuildTopFrameHotspots` — none of them touch ClrMD types, so none needed to change, and the
+  pre-existing `ThreadStackClusterAnalyzerOptionsTests` (23 tests exercising these directly) passed
+  unchanged with zero edits.
+- Progress reporting (`ObjectScanCounter` ticking during the stack walk) was dropped, matching the
+  precedent already set by `LockGraphAnalyzer`'s retyping (§ 7) and every other retyped Tier-1
+  analyzer — none of them thread `context.Progress` through their `Analyze` method.
+- New gates: `ThreadStackClusterAnalyzerRetypingCharacterizationTests` (self-attached process vs.
+  `ClrThread`/`ClrMD` ground truth — alive-thread count, cluster-count-sums-to-alive-threads,
+  per-cluster sample-ID-count-equals-cluster-count) and `ThreadStackClusterAnalyzerRealDumpTests`
+  (`[DiscrepancyFact]`, run standalone in the foreground, ~21s against the reference 3.5GB dump, same
+  invariants). `AnalysisPipelineTests.ExecuteAsync_ScansThreadStacksExactlyOnce_WhenRetypedAndLegacyParticipantsAreMixed`
+  (§ 6's gate) extended to mix both retyped quartet adapters (`LockGraphAnalyzerLegacyAdapter` and
+  `ThreadStackClusterAnalyzerLegacyAdapter`) alongside the two dummy legacy participants in one
+  pipeline run, asserting each still sees every thread exactly once and both adapters' own results
+  come back correctly. Full non-real-dump suite (1241 tests) passes; `LockGraphAnalyzerRealDumpTests`
+  re-run standalone afterward to confirm the shared `RuntimeThreadRef`/`ThreadStackFrameRef` field
+  additions caused no regression there.
+- Call sites updated: `DefaultAnalyzerFeatureModuleCatalog`, `FullPipelineBenchmark`,
+  `SmallDumpLatencyBenchmark`, `ThreadStackClusterAnalyzerBenchmark` (retargeted at
+  `AnalyzerBenchmarkBase<ThreadStackClusterAnalyzerLegacyAdapter>`, same live-query-fallback caveat as
+  `LockGraphAnalyzerBenchmark`).

@@ -113,11 +113,11 @@ public sealed class AnalysisPipelineTests
     /// <summary>
     /// Gate for the thread-domain quartet retyping
     /// (docs/refactor/modularity/phase-1-thread-quartet-plan.md § 6): proves the pipeline's shared
-    /// <c>ThreadStackScanDispatcher</c> pass still runs exactly once per thread when a retyped
-    /// analyzer (<see cref="LockGraphAnalyzerLegacyAdapter"/>, which implements
-    /// <see cref="IThreadStackScanParticipant"/> on the adapter, not the inner SDK analyzer) is
-    /// registered alongside still-legacy participants — the property this whole retyping approach
-    /// depends on, asserted directly rather than assumed from the design.
+    /// <c>ThreadStackScanDispatcher</c> pass still runs exactly once per thread when retyped
+    /// analyzers (<see cref="LockGraphAnalyzerLegacyAdapter"/>, <see cref="ThreadStackClusterAnalyzerLegacyAdapter"/>
+    /// — both implement <see cref="IThreadStackScanParticipant"/> on the adapter, not the inner SDK
+    /// analyzer) are registered alongside still-legacy participants — the property this whole
+    /// retyping approach depends on, asserted directly rather than assumed from the design.
     /// </summary>
     [Fact]
     public async Task ExecuteAsync_ScansThreadStacksExactlyOnce_WhenRetypedAndLegacyParticipantsAreMixed()
@@ -131,8 +131,9 @@ public sealed class AnalysisPipelineTests
 
         var first = new ThreadStackScanParticipantTestAnalyzer("First", 0);
         using LockGraphAnalyzerLegacyAdapter lockGraph = new();
+        using ThreadStackClusterAnalyzerLegacyAdapter threadStackCluster = new();
         var second = new ThreadStackScanParticipantTestAnalyzer("Second", 2);
-        IAnalyzer[] analyzers = [first, lockGraph, second];
+        IAnalyzer[] analyzers = [first, lockGraph, threadStackCluster, second];
 
         AnalysisPipeline pipeline = new(analyzers, new FindingGenerationPipeline([]));
         RuntimeAnalysisContext context = new() { Runtime = runtime, Cache = new HeapAnalysisCache() };
@@ -147,10 +148,14 @@ public sealed class AnalysisPipelineTests
             analyzer.BeforeThreadStackScanCallCount.Should().Be(1);
         }
 
-        // The retyped adapter's own result still comes out correctly through the bridge.
+        // Both retyped adapters' own results still come out correctly through the bridge.
         AnalyzerRunResult lockGraphRun = results.Single(r => r.AnalyzerName == lockGraph.Name);
         lockGraphRun.Status.Should().Be(AnalyzerExecutionStatus.Success);
         lockGraphRun.Result.Should().BeOfType<LockGraphDomainResult>();
+
+        AnalyzerRunResult threadStackClusterRun = results.Single(r => r.AnalyzerName == threadStackCluster.Name);
+        threadStackClusterRun.Status.Should().Be(AnalyzerExecutionStatus.Success);
+        threadStackClusterRun.Result.Should().BeOfType<ThreadStackClusterDomainResult>();
     }
 
     private static RuntimeAnalysisContext CreateContext(bool continueOnFailure)

@@ -90,7 +90,7 @@ public class SmallDumpLatencyBenchmark
             new ReferenceChainAnalyzer(),
             new GCHandleAnalyzerLegacyAdapter(),
             new LohFragmentationAnalyzerLegacyAdapter(),
-            new ThreadStackClusterAnalyzer(),
+            new ThreadStackClusterAnalyzerLegacyAdapter(),
             new ThreadAnalyzer(),
             new LockGraphAnalyzerLegacyAdapter(),
             new EventLeakAnalyzer(),

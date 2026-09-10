@@ -1,156 +1,97 @@
-﻿using DumpDetective.Analysis.Cache;
-using DumpDetective.Core.Abstractions;
+using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
-
-using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 
 using System.IO.Compression;
 using System.Text.Json;
 
 namespace DumpDetective.Analysis.Analyzers
 {
-    public class ThreadStackClusterAnalyzer : IAnalyzer, IThreadStackScanParticipant
+    /// <summary>
+    /// Phase 1 retyping batch, thread-domain quartet item 2
+    /// (docs/refactor/modularity/phase-1-thread-quartet-plan.md): retyped onto SDK's
+    /// capability-scoped <see cref="Sdk.Analysis.IAnalyzer"/>, sourcing threads/stack frames through
+    /// <see cref="IRuntimeThreadQuery"/> (<c>runtime.threads</c>). Runs through the existing pipeline
+    /// via <see cref="ThreadStackClusterAnalyzerLegacyAdapter"/>, which also carries the
+    /// <c>IThreadStackScanParticipant</c> implementation — this analyzer's stack-frame reads rely on
+    /// the pipeline sharing a single walk across the whole thread-domain quartet; see the adapter's
+    /// own remarks and the plan doc's § 3 for why that lives there, not here.
+    /// </summary>
+    /// <remarks>
+    /// Re-verified during this retyping (not just grepped, per this project's own convention): this
+    /// analyzer reads no live object field values anywhere — cluster signatures are built purely from
+    /// frame method signatures/frame names and thread state flags, all coarse/structural.
+    /// </remarks>
+    public sealed class ThreadStackClusterAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     {
         public string Name => "Thread Stack Signature Clustering";
         public string Category => "Threads";
 
-        // Instance accumulator state for the IThreadStackScanParticipant path — shares
-        // ThreadStackScanDispatcher's single EnumerateStackTrace() pass with ThreadAnalyzer/
-        // HangAnalyzer/LockGraphAnalyzer instead of independently walking runtime.Threads.
-        private Dictionary<ulong, uint>? _participantOsThreadIdByAddress;
-        private Dictionary<string, StackCluster>? _participantClusters;
-        private Dictionary<string, int>? _participantFrameHistogram;
-        private int _participantAliveThreads;
-        private ObjectScanCounter? _participantScanCounter;
-        private bool _participantScanSucceeded;
+        public AnalyzerDomainResult? LastResult { get; private set; }
 
         // P2-4: how many entries the frame-level hotspot histogram surfaces in the domain result.
         private const int TopFrameHotspotsToReport = 10;
 
         // P3-2: shared-prefix cluster tree render-width limits — the trie itself is built from the
-        // complete filtered-cluster set, these only bound how many nodes the report renders.
+        // complete filtered-cluster set, only the bound nodes it reports render.
         private const int MaxTreeChildrenPerNode = 8;
         private const int MaxTreeNodes = 400;
 
-        // Safety bound (not a display truncation) on rendered TreeNode nesting depth, same
+        // Safety bound (not a display truncation) on rendered TreeNode nesting depth, for the same
         // reasoning as RetentionOptions.MaxDominatorChainDepth: a real call stack's depth is
         // bounded only by the deepest recursion in the target app (e.g. an unbounded/stack-overflow
         // recursive call), and each branch point in the trie adds one nested TreeNode.Children
-        // level in the JSON report — unbounded depth there previously tripped
-        // System.Text.Json's MaxDepth guard ("possible object cycle detected") on real dumps with
-        // deep, branchy stacks. Unbranched runs already collapse into one chain node below, so this
-        // only bounds how many distinct branch points get their own nesting level.
+        // level in the JSON report — an unbounded depth previously tripped
+        // System.Text.Json's MaxDepth guard ("possible object cycle detected") on such stacks.
         private const int MaxTreeDepth = 64;
 
-        // P3-1: well-known framework wait/idle frames matched against a cluster's whole pipe-joined
-        // signature via ThreadWaitClassifier — these represent expected framework activity rather
-        // than application-level contention, so findings can avoid treating them as hotspots.
+        // P3-1: well-known wait/idle signatures, pipe-joined into a single Contains scan per frame.
+        // Ordered so the first, most specific application-level match wins.
         private static readonly WaitPattern[] FrameworkPatterns =
-        {
+        [
             new("Threadpool-idle", "ThreadPoolWorkQueue", "CLR thread pool worker waiting for work"),
             new("Threadpool-idle", "PortableThreadPool", "CLR thread pool worker waiting for work"),
             new("GC", "<No managed frames> (GC)", "Garbage collector thread"),
             new("Finalizer", "<No managed frames> (Finalizer)", "Finalizer thread waiting on finalization queue"),
             new("IOCP-idle", "<No managed frames> (IOCP)", "I/O completion port thread waiting for completions"),
             new("Threadpool-idle", "<No managed frames> (Threadpool)", "CLR thread pool worker waiting for work"),
-        };
+        ];
 
-        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        public ValueTask AnalyzeAsync(Sdk.Analysis.AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            ThreadStackClusterAnalysisOptions options = context.AnalysisOptions.ThreadStackClusterAnalysis;
-            return ValueTask.FromResult(Analyze(context.Runtime, context.Progress, options).Stamp(this));
+
+            IRuntimeThreadQuery threadQuery = context.RuntimeThreads
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.RuntimeThreads}' capability.");
+
+            ThreadStackClusterAnalysisOptions options = context.AnalyzerOptions as ThreadStackClusterAnalysisOptions ?? new ThreadStackClusterAnalysisOptions();
+
+            LastResult = Analyze(threadQuery, options, cancellationToken);
+            return ValueTask.CompletedTask;
         }
 
-        public AnalyzerDomainResult Analyze(ClrRuntime runtime)
+        private static ThreadStackClusterDomainResult Analyze(
+            IRuntimeThreadQuery threadQuery,
+            ThreadStackClusterAnalysisOptions options,
+            CancellationToken cancellationToken)
         {
-            return Analyze(runtime, progress: null, new ThreadStackClusterAnalysisOptions());
-        }
+            var clusters = new Dictionary<string, StackCluster>(StringComparer.Ordinal);
+            var frameHistogram = new Dictionary<string, int>(StringComparer.Ordinal);
+            int aliveThreads = 0;
 
-        public int GetRequiredFrameCount(AnalysisContext context) => ThreadAnalyzer.UnboundedFrameCount;
-
-        public void BeforeThreadStackScan(AnalysisContext context)
-        {
-            _participantOsThreadIdByAddress = new Dictionary<ulong, uint>();
-            _participantClusters = new Dictionary<string, StackCluster>(StringComparer.Ordinal);
-            _participantFrameHistogram = new Dictionary<string, int>(StringComparer.Ordinal);
-            _participantAliveThreads = 0;
-            _participantScanCounter = new ObjectScanCounter("clustering thread stacks", context.Progress, reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
-            _participantScanSucceeded = false;
-        }
-
-        void IThreadStackScanParticipant.OnThreadStack(in ThreadStackSnapshot snapshot) => OnThreadStack(in snapshot);
-
-        private void OnThreadStack(in ThreadStackSnapshot snapshot)
-        {
-            _participantScanCounter!.Tick();
-
-            ClrThread thread = snapshot.Thread;
-            if (thread.Address != 0)
-                _participantOsThreadIdByAddress![thread.Address] = thread.OSThreadId;
-
-            if (!thread.IsAlive)
-                return;
-
-            _participantAliveThreads++;
-            string signature = BuildSignature(snapshot.TopFrames, thread, _participantFrameHistogram);
-            AccumulateCluster(_participantClusters!, signature, thread);
-        }
-
-        public void OnThreadStackScanCompleted(bool succeeded)
-        {
-            _participantScanSucceeded = succeeded;
-            if (succeeded)
-                _participantScanCounter?.Complete();
-        }
-
-        private AnalyzerDomainResult Analyze(ClrRuntime runtime, IProgress<AnalyzerProgressReport>? progress, ThreadStackClusterAnalysisOptions options)
-        {
-            Dictionary<ulong, uint> osThreadIdByAddress;
-            Dictionary<string, StackCluster> clusters;
-            Dictionary<string, int> frameHistogram;
-            int aliveThreads;
-
-            if (_participantScanSucceeded)
+            foreach (RuntimeThreadRef thread in threadQuery.EnumerateThreads())
             {
-                // BeforeThreadStackScan/OnThreadStack already ran via the pipeline's
-                // ThreadStackScanDispatcher — read back the accumulated state instead of a
-                // second independent walk of runtime.Threads.
-                osThreadIdByAddress = _participantOsThreadIdByAddress!;
-                clusters = _participantClusters!;
-                frameHistogram = _participantFrameHistogram!;
-                aliveThreads = _participantAliveThreads;
-            }
-            else
-            {
-                // Fallback (non-participant) path: used when this analyzer is invoked directly
-                // (tests, benchmarks) instead of through AnalysisPipeline's dispatcher.
-                osThreadIdByAddress = new Dictionary<ulong, uint>();
-                foreach (ClrThread thread in runtime.Threads)
-                {
-                    if (thread.Address != 0)
-                        osThreadIdByAddress[thread.Address] = thread.OSThreadId;
-                }
+                cancellationToken.ThrowIfCancellationRequested();
 
-                clusters = new Dictionary<string, StackCluster>(StringComparer.Ordinal);
-                frameHistogram = new Dictionary<string, int>(StringComparer.Ordinal);
-                aliveThreads = 0;
-                var scanCounter = new ObjectScanCounter("clustering thread stacks", progress, reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
+                if (!thread.IsAlive)
+                    continue;
 
-                foreach (ClrThread thread in runtime.Threads)
-                {
-                    scanCounter.Tick();
-
-                    if (!thread.IsAlive)
-                        continue;
-
-                    aliveThreads++;
-                    string signature = BuildSignature(thread.EnumerateStackTrace(), thread, frameHistogram);
-                    AccumulateCluster(clusters, signature, thread);
-                }
-
-                scanCounter.Complete();
+                aliveThreads++;
+                string signature = BuildSignature(threadQuery.EnumerateStackFrames(thread), thread, frameHistogram);
+                AccumulateCluster(clusters, signature, thread);
             }
 
             IReadOnlyList<NameCountEntry> topFrameHotspots = BuildTopFrameHotspots(frameHistogram);
@@ -176,7 +117,7 @@ namespace DumpDetective.Analysis.Analyzers
             var topClusterSnapshots = filteredClusters
                 .Select(c => new ThreadClusterSnapshot(
                     c.Count,
-                    ProjectSampleOsThreadIds(c.SampleThreadAddresses, osThreadIdByAddress),
+                    c.SampleOsThreadIds,
                     c.Signature,
                     c.ThreadpoolWorkerCount,
                     c.GcCount,
@@ -200,7 +141,7 @@ namespace DumpDetective.Analysis.Analyzers
                         {
                             count = c.Count,
                             signature = c.Signature,
-                            sampleOsThreadIds = ProjectSampleOsThreadIds(c.SampleThreadAddresses, osThreadIdByAddress)
+                            sampleOsThreadIds = c.SampleOsThreadIds
                         }).ToArray();
 
                         var prettyJsonOpts = new JsonSerializerOptions { WriteIndented = true };
@@ -223,8 +164,7 @@ namespace DumpDetective.Analysis.Analyzers
                                 {
                                     count = c.Count,
                                     signature = c.Signature,
-                                    sampleThreadAddresses = c.SampleThreadAddresses,
-                                    sampleOsThreadIds = ProjectSampleOsThreadIds(c.SampleThreadAddresses, osThreadIdByAddress)
+                                    sampleOsThreadIds = c.SampleOsThreadIds
                                 };
                                 JsonSerializer.Serialize(gz, lineObj, jsOpts);
                                 gz.WriteByte((byte)'\n');
@@ -252,7 +192,7 @@ namespace DumpDetective.Analysis.Analyzers
         // P3-2: builds a shared-prefix trie over cluster signatures, innermost frame first (index 0
         // of BuildSignature's " | "-joined parts is the currently-executing frame), so branches
         // converge on threads' shared blocking point even when reached via different call sites —
-        // information the flat per-cluster signature list can't surface on its own. See
+        // information a flat per-cluster signature list can't surface on its own. See
         // docs/refactor/collapsible-tree-widget-design.md.
         internal static IReadOnlyList<ThreadClusterTreeNode> BuildClusterTree(IReadOnlyList<StackCluster> filteredClusters)
         {
@@ -266,9 +206,10 @@ namespace DumpDetective.Analysis.Analyzers
                 TrieBuildNode node = root;
                 foreach (string frame in frames)
                 {
-                    node = GetOrAddChild(node, frame);
                     node.Count += cluster.Count;
+                    node = GetOrAddChild(node, frame);
                 }
+                node.Count += cluster.Count;
                 node.OwnLeafCount += cluster.Count;
             }
 
@@ -278,8 +219,10 @@ namespace DumpDetective.Analysis.Analyzers
             {
                 if (nodeBudget <= 0)
                     break;
+
                 roots.Add(ConvertTrieNode(child.Key, child.Value, ref nodeBudget, depth: 0));
             }
+
             return roots;
         }
 
@@ -308,9 +251,9 @@ namespace DumpDetective.Analysis.Analyzers
         {
             nodeBudget--;
 
-            // Collapse straight-line runs of single-child ancestors (no cluster terminates along
-            // the way) into one chain node instead of one node per frame — real stacks are commonly
-            // 50+ frames deep and most of that depth is unbranched.
+            // Collapse straight-line runs of single-child ancestors (no cluster terminates along the
+            // way) into one chain node instead of one node per frame — real stacks commonly run
+            // 50+ frames deep with most of that depth unbranched.
             bool isChain = false;
             while (node.OwnLeafCount == 0 && node.Children.Count == 1)
             {
@@ -345,10 +288,10 @@ namespace DumpDetective.Analysis.Analyzers
             public Dictionary<string, TrieBuildNode> Children { get; } = new(StringComparer.Ordinal);
         }
 
-        // P2-4: the most frequently occurring individual frames across the entire alive-thread
-        // population (not per-cluster) — surfaces hot call sites shared by threads that otherwise
-        // cluster into different signatures (e.g. same lock-acquire frame reached via different
-        // call paths), which per-cluster signatures alone can't reveal.
+        // P2-4: alive-thread-weighted frame-level hotspot histogram (every resolvable frame counted
+        // once per cluster member, not once per-cluster) — surfaces frames that dominate across many
+        // distinct call paths (e.g. a lock-acquire helper reached from several callers) that a
+        // per-cluster signature view alone can't.
         private static IReadOnlyList<NameCountEntry> BuildTopFrameHotspots(Dictionary<string, int> frameHistogram)
         {
             if (frameHistogram.Count == 0)
@@ -361,7 +304,6 @@ namespace DumpDetective.Analysis.Analyzers
             var result = new List<NameCountEntry>(limit);
             for (int i = 0; i < limit; i++)
                 result.Add(new NameCountEntry(top[i].Key, top[i].Value));
-
             return result;
         }
 
@@ -370,19 +312,7 @@ namespace DumpDetective.Analysis.Analyzers
         internal static string? ClassifyFrameworkPattern(string signature) =>
             ThreadWaitClassifier.ClassifySignature(signature, FrameworkPatterns)?.Category;
 
-        private static IReadOnlyList<uint> ProjectSampleOsThreadIds(IReadOnlyList<ulong> sampleThreadAddresses, IReadOnlyDictionary<ulong, uint> osThreadIdByAddress)
-        {
-            var sampleIds = new List<uint>(sampleThreadAddresses.Count);
-            foreach (ulong threadAddress in sampleThreadAddresses)
-            {
-                if (osThreadIdByAddress.TryGetValue(threadAddress, out uint osThreadId))
-                    sampleIds.Add(osThreadId);
-            }
-
-            return sampleIds;
-        }
-
-        private static void AccumulateCluster(Dictionary<string, StackCluster> clusters, string signature, ClrThread thread)
+        internal static void AccumulateCluster(Dictionary<string, StackCluster> clusters, string signature, RuntimeThreadRef thread)
         {
             if (!clusters.TryGetValue(signature, out StackCluster? cluster))
             {
@@ -391,36 +321,31 @@ namespace DumpDetective.Analysis.Analyzers
             }
 
             cluster.Count++;
-            if (thread.State.HasFlag(ClrThreadState.TS_TPWorkerThread))
+            if (thread.IsThreadpoolWorker)
                 cluster.ThreadpoolWorkerCount++;
             if (thread.IsGc)
                 cluster.GcCount++;
             if (thread.IsFinalizer)
                 cluster.FinalizerCount++;
 
-            // Every thread's address is recorded — the display-width cap on how many sample IDs
-            // to show per cluster is a render-layer concern (§9.24 D5), not an accumulation cap.
-            if (thread.Address != 0)
-            {
-                cluster.SampleThreadAddresses.Add(thread.Address);
-                cluster.SampleManagedThreadIds.Add(thread.ManagedThreadId);
-            }
+            // Every thread's ID is recorded — the display-width cap on how many sample IDs to show
+            // per cluster is a render-layer concern (§9.24 D5), not an accumulation cap.
+            cluster.SampleOsThreadIds.Add(thread.Thread.OsThreadId);
+            cluster.SampleManagedThreadIds.Add(thread.Thread.ManagedThreadId ?? 0);
         }
 
-        // Cluster identity is the thread's whole captured stack — no artificial frame-count cap
+        // Cluster identity is a thread's whole captured stack — no artificial frame-count cap
         // (§9.24). A signature match now means two threads share their entire call stack, not just
-        // its top N frames, so distinct threads whose stacks diverge below frame N are no longer
+        // the top N frames, so distinct threads whose stacks diverge below frame N are no longer
         // merged into the same cluster.
-        private static string BuildSignature(IEnumerable<ClrStackFrame> frames, ClrThread? thread = null, Dictionary<string, int>? frameHistogram = null)
+        internal static string BuildSignature(IEnumerable<ThreadStackFrameRef> frames, RuntimeThreadRef? thread = null, Dictionary<string, int>? frameHistogram = null)
         {
             var parts = new List<string>();
-
-            foreach (ClrStackFrame frame in frames)
+            foreach (ThreadStackFrameRef frame in frames)
             {
-                string? name = frame.Method?.Signature;
+                string? name = frame.RawMethodSignature;
                 if (string.IsNullOrWhiteSpace(name))
                     name = frame.FrameName;
-
                 if (string.IsNullOrWhiteSpace(name))
                     continue;
 
@@ -436,15 +361,15 @@ namespace DumpDetective.Analysis.Analyzers
 
             if (parts.Count == 0)
             {
-                if (thread != null)
+                if (thread is { } t)
                 {
-                    if (thread.IsGc)
+                    if (t.IsGc)
                         return "<No managed frames> (GC)";
-                    if (thread.IsFinalizer)
+                    if (t.IsFinalizer)
                         return "<No managed frames> (Finalizer)";
-                    if (thread.State.HasFlag(ClrThreadState.TS_CompletionPortThread))
+                    if (t.IsCompletionPortThread)
                         return "<No managed frames> (IOCP)";
-                    if (thread.State.HasFlag(ClrThreadState.TS_TPWorkerThread))
+                    if (t.IsThreadpoolWorker)
                         return "<No managed frames> (Threadpool)";
                 }
                 return "<No managed frames>";
@@ -460,7 +385,7 @@ namespace DumpDetective.Analysis.Analyzers
             public int ThreadpoolWorkerCount { get; set; }
             public int GcCount { get; set; }
             public int FinalizerCount { get; set; }
-            public List<ulong> SampleThreadAddresses { get; } = new();
+            public List<uint> SampleOsThreadIds { get; } = new();
             public List<int> SampleManagedThreadIds { get; } = new();
 
             public StackCluster(string signature)
@@ -472,5 +397,3 @@ namespace DumpDetective.Analysis.Analyzers
         public void Dispose() { }
     }
 }
-
-

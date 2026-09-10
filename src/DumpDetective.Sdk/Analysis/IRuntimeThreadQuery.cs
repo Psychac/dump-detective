@@ -17,7 +17,15 @@ public readonly record struct RuntimeThreadRef(
     /// <summary>Number of monitor locks this thread currently holds — mirrors <c>ClrThread.LockCount</c>.
     /// Added 2026-09-11 for <c>LockGraphAnalyzer</c>'s retyping
     /// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md).</summary>
-    int LockCount = 0);
+    int LockCount = 0,
+    /// <summary>Mirrors <c>ClrThread.IsGc</c>/<c>IsFinalizer</c> and the <c>TS_TPWorkerThread</c>/
+    /// <c>TS_CompletionPortThread</c> state flags — added 2026-09-11 for
+    /// <c>ThreadStackClusterAnalyzer</c>'s retyping (thread-quartet item 2), which classifies
+    /// threads with no managed frames by these facts alone.</summary>
+    bool IsGc = false,
+    bool IsFinalizer = false,
+    bool IsThreadpoolWorker = false,
+    bool IsCompletionPortThread = false);
 
 /// <summary>
 /// One stack frame, source-neutral. <see cref="HasMethod"/> distinguishes "not a managed-method
@@ -47,7 +55,18 @@ public readonly record struct ThreadStackFrameRef(
     ulong NativeCodeAddress,
     uint HotSize,
     uint ColdSize,
-    string MethodDisplayName);
+    string MethodDisplayName,
+    /// <summary>Raw <c>ClrStackFrame.FrameName</c> — populated for every frame, managed or not (unlike
+    /// <see cref="MethodDisplayName"/>, which is only meaningful when <see cref="HasMethod"/>).
+    /// Added 2026-09-11 for <c>ThreadStackClusterAnalyzer</c>'s retyping: its cluster signature falls
+    /// back to this exact string when a frame has no resolvable method, and to
+    /// <see cref="RawMethodSignature"/> (not <see cref="MethodDisplayName"/>'s synthesized fallback)
+    /// when it does.</summary>
+    string? FrameName = null,
+    /// <summary>Raw <c>ClrMethod.Signature</c>, unlike <see cref="MethodDisplayName"/> which
+    /// substitutes a synthesized <c>Type.Method</c> string when the raw signature is null. Added
+    /// alongside <see cref="FrameName"/> for the same reason.</summary>
+    string? RawMethodSignature = null);
 
 /// <summary>The <c>runtime.threads</c> capability.</summary>
 /// <remarks>Sync <see cref="IEnumerable{T}"/>, no <see cref="CancellationToken"/> — see

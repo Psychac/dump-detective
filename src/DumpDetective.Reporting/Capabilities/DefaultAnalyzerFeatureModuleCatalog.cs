@@ -49,7 +49,10 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         // 2026-09-11 (Batch 6 of the Phase 1 retyping) — see
         // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("loh-fragmentation", "LOH & POH Fragmentation Analysis", typeof(LohFragmentationAnalyzerLegacyAdapter), typeof(LohFragmentationFindingGenerator), typeof(LohFragmentationTrendComparer), typeof(LohFragmentationSectionBuilder), 290, ["gc", "loh", "poh"]),
-        Module("thread-stack-cluster", "Thread Stack Cluster Analysis", typeof(ThreadStackClusterAnalyzer), typeof(ThreadStackClusterFindingGenerator), typeof(ThreadStackClusterTrendComparer), typeof(ThreadStackClusterSectionBuilder), 300, ["threads"]),
+        // ThreadStackClusterAnalyzerLegacyAdapter, not ThreadStackClusterAnalyzer directly, since
+        // 2026-09-11 (thread-domain quartet Batch 2) — see
+        // docs/refactor/modularity/phase-1-thread-quartet-plan.md.
+        Module("thread-stack-cluster", "Thread Stack Cluster Analysis", typeof(ThreadStackClusterAnalyzerLegacyAdapter), typeof(ThreadStackClusterFindingGenerator), typeof(ThreadStackClusterTrendComparer), typeof(ThreadStackClusterSectionBuilder), 300, ["threads"]),
         Module("thread", "Thread Analysis", typeof(ThreadAnalyzer), typeof(ThreadFindingGenerator), typeof(ThreadTrendComparer), typeof(ThreadSectionBuilder), 310, ["threads"]),
         // LockGraphAnalyzerLegacyAdapter, not LockGraphAnalyzer directly, since 2026-09-11 (thread-
         // domain quartet Batch 1) — see docs/refactor/modularity/phase-1-thread-quartet-plan.md.

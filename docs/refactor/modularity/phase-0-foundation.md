@@ -181,8 +181,13 @@ to become source-neutral.
      score via unrelated timer/property-changed scenarios, just never asserted `.Severity`). 1 new
      file + 1 extended, 6 new test methods. Full non-real-dump suite green (1351/0/41, up from
      1345); both rows now show no missing severities.
-   - Then, worst-to-best by the same measure: **Async** (1/2), **Gc** (1/4), **Infra** (1/7,
-     nearly clean already).
+   - **Async — done 2026-09-11.** 1/2 had a gap: `AsyncStateMachineFindingGenerator`'s 5 existing
+     tests exclusively covered the async-void branch (always Warning, no Critical tier); the other
+     3 of its 4 decision branches (high total count, fire-and-forget, large captures — each with
+     its own Warning/Critical ladder) had zero coverage at any severity, not just the missing
+     Critical the audit flagged. 9 new test methods added, all branches and both severities now
+     covered. Full non-real-dump suite green (1360/0/41, up from 1351).
+   - Then, worst-to-best by the same measure: **Gc** (1/4), **Infra** (1/7, nearly clean already).
 6. **Architecture-conformance harness — already exists, verified and cleaned up 2026-09-08.** A
    lightweight boundary test asserting today's intended dependency direction. This isn't new work:
    `tests/DumpDetective.Tests/Unit/Architecture/DependencyDirectionTests.cs` (project-reference

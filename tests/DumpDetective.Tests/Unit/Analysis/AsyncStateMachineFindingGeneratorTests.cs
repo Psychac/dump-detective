@@ -15,13 +15,131 @@ public sealed class AsyncStateMachineFindingGeneratorTests
         int totalStateMachines = 100,
         ulong totalBytes = 1000,
         IReadOnlyList<StateMachineTypeProfile>? topTypes = null,
-        IReadOnlyList<SuspendedMethodEntry>? suspendedMethods = null) =>
+        IReadOnlyList<SuspendedMethodEntry>? suspendedMethods = null,
+        IReadOnlyList<HighCaptureStateMachine>? topByCapturedSize = null) =>
         new(
             TotalStateMachines: totalStateMachines,
             TotalStateMachineBytes: totalBytes,
             TopStateMachineTypes: topTypes ?? [],
-            TopByCapturedSize: [],
+            TopByCapturedSize: topByCapturedSize ?? [],
             SuspendedMethodMap: suspendedMethods ?? []);
+
+    [Fact]
+    public void Generate_TotalStateMachinesAtOrAboveTenThousand_EmitsCriticalFinding()
+    {
+        var gen = new AsyncStateMachineFindingGenerator();
+        var result = MakeResult(totalStateMachines: 15_000);
+
+        var findings = gen.Generate(result);
+
+        findings.Should().Contain(f => f.Tags.Contains("suspend") && f.Severity == FindingSeverity.Critical);
+    }
+
+    [Fact]
+    public void Generate_TotalStateMachinesAtOrAboveOneThousand_BelowTenThousand_EmitsWarningFinding()
+    {
+        var gen = new AsyncStateMachineFindingGenerator();
+        var result = MakeResult(totalStateMachines: 2_000);
+
+        var findings = gen.Generate(result);
+
+        findings.Should().Contain(f => f.Tags.Contains("suspend") && f.Severity == FindingSeverity.Warning);
+    }
+
+    [Fact]
+    public void Generate_TotalStateMachinesBelowOneThousand_EmitsNoHighCountFinding()
+    {
+        var gen = new AsyncStateMachineFindingGenerator();
+        var result = MakeResult(totalStateMachines: 500);
+
+        var findings = gen.Generate(result);
+
+        findings.Should().NotContain(f => f.Tags.Contains("suspend"));
+    }
+
+    [Fact]
+    public void Generate_FireAndForgetSuspendedCountAtOrAboveTenThousand_EmitsCriticalFinding()
+    {
+        var gen = new AsyncStateMachineFindingGenerator();
+        var result = MakeResult(suspendedMethods:
+        [
+            new SuspendedMethodEntry(DeclaringType: "MyApp.Worker", MethodName: "ProcessAsync", SuspendedCount: 12_000, TotalBytes: 500_000)
+        ]);
+
+        var findings = gen.Generate(result);
+
+        findings.Should().Contain(f => f.Tags.Contains("fire-and-forget") && f.Severity == FindingSeverity.Critical);
+    }
+
+    [Fact]
+    public void Generate_FireAndForgetSuspendedCountAtOrAboveHundred_BelowCritical_EmitsWarningFinding()
+    {
+        var gen = new AsyncStateMachineFindingGenerator();
+        var result = MakeResult(suspendedMethods:
+        [
+            new SuspendedMethodEntry(DeclaringType: "MyApp.Worker", MethodName: "ProcessAsync", SuspendedCount: 150, TotalBytes: 5_000)
+        ]);
+
+        var findings = gen.Generate(result);
+
+        findings.Should().Contain(f => f.Tags.Contains("fire-and-forget") && f.Severity == FindingSeverity.Warning);
+    }
+
+    [Fact]
+    public void Generate_FireAndForgetSuspendedCountBelowHundred_EmitsNoFireAndForgetFinding()
+    {
+        var gen = new AsyncStateMachineFindingGenerator();
+        var result = MakeResult(suspendedMethods:
+        [
+            new SuspendedMethodEntry(DeclaringType: "MyApp.Worker", MethodName: "ProcessAsync", SuspendedCount: 20, TotalBytes: 500)
+        ]);
+
+        var findings = gen.Generate(result);
+
+        findings.Should().NotContain(f => f.Tags.Contains("fire-and-forget"));
+    }
+
+    [Fact]
+    public void Generate_CapturedBytesAtOrAboveTwoHundredMb_EmitsCriticalFinding()
+    {
+        var gen = new AsyncStateMachineFindingGenerator();
+        var result = MakeResult(topByCapturedSize:
+        [
+            new HighCaptureStateMachine(Address: 0x1000, TypeName: "MyApp.Handler<>d__1", TotalCapturedRefBytes: 250_000_000UL, LargeCaptures: ["_dbContext"])
+        ]);
+
+        var findings = gen.Generate(result);
+
+        findings.Should().Contain(f => f.Tags.Contains("capture") && f.Severity == FindingSeverity.Critical);
+    }
+
+    [Fact]
+    public void Generate_CapturedBytesAtOrAboveFiftyMb_BelowCritical_EmitsWarningFinding()
+    {
+        var gen = new AsyncStateMachineFindingGenerator();
+        var result = MakeResult(topByCapturedSize:
+        [
+            new HighCaptureStateMachine(Address: 0x1000, TypeName: "MyApp.Handler<>d__1", TotalCapturedRefBytes: 60_000_000UL, LargeCaptures: ["_buffer"])
+        ]);
+
+        var findings = gen.Generate(result);
+
+        findings.Should().Contain(f => f.Tags.Contains("capture") && f.Severity == FindingSeverity.Warning);
+    }
+
+    [Fact]
+    public void Generate_CapturedBytesBelowFiftyMb_EmitsNoCaptureFinding()
+    {
+        var gen = new AsyncStateMachineFindingGenerator();
+        var result = MakeResult(topByCapturedSize:
+        [
+            new HighCaptureStateMachine(Address: 0x1000, TypeName: "MyApp.Handler<>d__1", TotalCapturedRefBytes: 1_000_000UL, LargeCaptures: [])
+        ]);
+
+        var findings = gen.Generate(result);
+
+        findings.Should().NotContain(f => f.Tags.Contains("capture"));
+    }
 
     [Fact]
     public void Generate_NoAsyncVoid_NoFinding()

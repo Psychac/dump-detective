@@ -31,8 +31,12 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         // Sdk.Analysis.IAnalyzer, not Core.Abstractions.IAnalyzer. See
         // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("gc-generation", "GC Generation Analysis", typeof(GCGenerationAnalyzerLegacyAdapter), typeof(GCGenerationFindingGenerator), typeof(GCGenerationTrendComparer), typeof(GCPressureSectionBuilder), 110, ["gc"]),
-        Module("allocation-pattern", "Allocation Pattern Analysis", typeof(AllocationPatternAnalyzer), typeof(AllocationPatternFindingGenerator), typeof(AllocationPatternTrendComparer), typeof(AllocationPatternSectionBuilder), 120, ["gc", "allocation"]),
-        Module("object-shape", "Object Shape Analysis", typeof(ObjectShapeAnalyzer), typeof(ObjectShapeFindingGenerator), typeof(ObjectShapeTrendComparer), typeof(ObjectShapeSectionBuilder), 130, ["types"]),
+        // AllocationPatternAnalyzerLegacyAdapter, not AllocationPatternAnalyzer directly, since
+        // 2026-09-11 (Tier-1 mop-up batch) -- see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("allocation-pattern", "Allocation Pattern Analysis", typeof(AllocationPatternAnalyzerLegacyAdapter), typeof(AllocationPatternFindingGenerator), typeof(AllocationPatternTrendComparer), typeof(AllocationPatternSectionBuilder), 120, ["gc", "allocation"]),
+        // ObjectShapeAnalyzerLegacyAdapter, not ObjectShapeAnalyzer directly, since 2026-09-11
+        // (Tier-1 mop-up batch) -- see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("object-shape", "Object Shape Analysis", typeof(ObjectShapeAnalyzerLegacyAdapter), typeof(ObjectShapeFindingGenerator), typeof(ObjectShapeTrendComparer), typeof(ObjectShapeSectionBuilder), 130, ["types"]),
         // GCRootAnalyzerLegacyAdapter, not GCRootAnalyzer directly, since 2026-09-11 (GC root
         // capability retyping batch) — see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("gc-root", "GC Root Analysis", typeof(GCRootAnalyzerLegacyAdapter), typeof(GCRootFindingGenerator), typeof(GCRootTrendComparer), typeof(GCRootIntelligenceSectionBuilder), 140, ["roots"]),

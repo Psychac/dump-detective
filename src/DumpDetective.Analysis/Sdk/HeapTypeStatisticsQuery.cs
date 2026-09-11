@@ -34,22 +34,40 @@ internal sealed class HeapTypeStatisticsQuery(ClrHeap heap, IHeapAnalysisCache c
     public bool HasExactGenerationData =>
         cache is IHeapIndexBuilder builder && builder.TryGetHeapIndex(out _);
 
+    public bool HasTypeShapeData =>
+        cache is IHeapIndexBuilder builder && builder.TryGetHeapIndex(out HeapIndexBuildResult? idx) && idx.TypeShapeCache is not null;
+
     public IReadOnlyDictionary<string, HeapTypeStatistics> GetTypeStatistics()
     {
         if (cache is IHeapIndexBuilder builder && builder.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
-            return BuildFromIndex(heapIndex.TypeAggregates);
+            return BuildFromIndex(heapIndex);
 
         return BuildFromCachedStatistics(cache, cache.GetOrBuildTypeStatistics(heap));
     }
 
-    private Dictionary<string, HeapTypeStatistics> BuildFromIndex(IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates)
+    private Dictionary<string, HeapTypeStatistics> BuildFromIndex(HeapIndexBuildResult heapIndex)
     {
+        IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates = heapIndex.TypeAggregates;
+        IReadOnlyDictionary<ulong, TypeShapeEntry>? shapes = heapIndex.TypeShapeCache;
+
         var result = new Dictionary<string, HeapTypeStatistics>(aggregates.Count, StringComparer.Ordinal);
         foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in aggregates)
         {
             ulong methodTable = kv.Key;
             TypeAggregateIndexEntry e = kv.Value;
-            string name = heap.GetTypeByMethodTable(methodTable)?.Name ?? $"MT:0x{methodTable:x}";
+            ClrType? type = heap.GetTypeByMethodTable(methodTable);
+            string name = type?.Name ?? $"MT:0x{methodTable:x}";
+
+            int totalFields = 0, refFields = 0, valFields = 0, baseDepth = 0, ifaceCount = 0;
+            if (type is not null && shapes is not null && shapes.TryGetValue(methodTable, out TypeShapeEntry shape))
+            {
+                totalFields = shape.TotalFields;
+                refFields = shape.RefFields;
+                valFields = shape.ValFields;
+                baseDepth = ComputeBaseTypeDepth(type);
+                try { ifaceCount = type.EnumerateInterfaces().Count(); }
+                catch { /* corrupt/unusual type -- defaults to 0, matches the pre-retyping analyzer's own defensive catch */ }
+            }
 
             result[name] = new HeapTypeStatistics(
                 Type: ToTypeRef(name, methodTable),
@@ -63,9 +81,29 @@ internal sealed class HeapTypeStatisticsQuery(ClrHeap heap, IHeapAnalysisCache c
                 Gen2TotalSize: e.Gen2TotalSize,
                 IsFinalizableType: (e.Flags & TypeAggregateFlags.IsFinalizableType) != 0,
                 SampleAddress: e.SampleAddress,
-                ModuleName: TypeAggregateNameResolver.ResolveModuleName(heap, methodTable, e.SampleAddress));
+                ModuleName: TypeAggregateNameResolver.ResolveModuleName(heap, methodTable, e.SampleAddress),
+                TotalFields: totalFields,
+                ReferenceFields: refFields,
+                ValueFields: valFields,
+                IsValueType: type?.IsValueType ?? false,
+                IsArray: type?.IsArray ?? false,
+                BaseTypeChainDepth: baseDepth,
+                InterfaceCount: ifaceCount);
         }
         return result;
+    }
+
+    // Matches the pre-retyping ObjectShapeAnalyzer's own cap exactly.
+    private static int ComputeBaseTypeDepth(ClrType type)
+    {
+        int depth = 0;
+        ClrType? cur = type.BaseType;
+        while (cur is not null && depth < 20)
+        {
+            depth++;
+            cur = cur.BaseType;
+        }
+        return depth;
     }
 
     private static Dictionary<string, HeapTypeStatistics> BuildFromCachedStatistics(IHeapAnalysisCache cache, Dictionary<string, CachedTypeStatistics> stats)

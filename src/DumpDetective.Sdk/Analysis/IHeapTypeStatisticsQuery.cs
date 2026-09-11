@@ -39,7 +39,31 @@ public readonly record struct HeapTypeStatistics(
     /// "unresolved" — e.g. a report field — normalize at that point, same as the pre-retyping analyzer
     /// already did).
     /// </summary>
-    string ModuleName = "");
+    string ModuleName = "",
+    /// <summary>
+    /// Declared instance field count, split reference vs. value — mirrors <c>TypeShapeEntry.TotalFields</c>/
+    /// <c>RefFields</c>/<c>ValFields</c>. Added 2026-09-11 for <c>ObjectShapeAnalyzer</c>'s retyping.
+    /// All three are 0 when <see cref="IHeapTypeStatisticsQuery.HasTypeShapeData"/> is <c>false</c> —
+    /// a genuinely different gate from <see cref="IHeapTypeStatisticsQuery.HasExactGenerationData"/>,
+    /// since the dump-side <c>TypeShapeCache</c> can be absent even when the rest of the per-type
+    /// generation index is present (e.g. an older on-disk cache format).
+    /// </summary>
+    int TotalFields = 0,
+    int ReferenceFields = 0,
+    int ValueFields = 0,
+    /// <summary>Mirrors <c>ClrType.IsValueType</c>/<c>IsArray</c> — always available regardless of
+    /// <see cref="IHeapTypeStatisticsQuery.HasTypeShapeData"/>, since both come from the type itself,
+    /// not the shape cache.</summary>
+    bool IsValueType = false,
+    bool IsArray = false,
+    /// <summary>Depth of the <c>BaseType</c> chain, capped at 20 (mirrors the pre-retyping analyzer's
+    /// own cap) — 0 when <see cref="IHeapTypeStatisticsQuery.HasTypeShapeData"/> is <c>false</c>.</summary>
+    int BaseTypeChainDepth = 0,
+    /// <summary>Count from <c>ClrType.EnumerateInterfaces()</c>; 0 on enumeration failure (a rare,
+    /// defensive fallback the pre-retyping analyzer logged and this one silently accepts — see that
+    /// type's own remarks) as well as when <see cref="IHeapTypeStatisticsQuery.HasTypeShapeData"/> is
+    /// <c>false</c>.</summary>
+    int InterfaceCount = 0);
 
 /// <summary>The <c>heap.types</c> capability's aggregate-statistics surface (distinct
 /// <see cref="IHeapObjectStream"/>/<see cref="IHeapObjectLookup"/>, per-object).</summary>
@@ -58,6 +82,18 @@ public interface IHeapTypeStatisticsQuery
     /// than just count/size) should check this before trusting the generation fields.
     /// </summary>
     bool HasExactGenerationData { get; }
+
+    /// <summary>
+    /// <c>true</c> when <see cref="GetTypeStatistics"/>'s <see cref="HeapTypeStatistics.TotalFields"/>/
+    /// <see cref="HeapTypeStatistics.ReferenceFields"/>/<see cref="HeapTypeStatistics.ValueFields"/>/
+    /// <see cref="HeapTypeStatistics.BaseTypeChainDepth"/>/<see cref="HeapTypeStatistics.InterfaceCount"/>
+    /// carry real data (backed by the dump's prebuilt per-type shape cache); <c>false</c> when no
+    /// shape cache was built, in which case every one of those fields reads as its default. Added
+    /// 2026-09-11 for <c>ObjectShapeAnalyzer</c>'s retyping — deliberately not folded into
+    /// <see cref="HasExactGenerationData"/>, since the dump-side shape cache and generation index are
+    /// built and can go missing independently of each other.
+    /// </summary>
+    bool HasTypeShapeData { get; }
 
     /// <summary>
     /// Exact per-generation byte totals for the small object heap (excludes LOH/POH), computed

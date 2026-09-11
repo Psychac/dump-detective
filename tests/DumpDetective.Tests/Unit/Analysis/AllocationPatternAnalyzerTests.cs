@@ -12,6 +12,25 @@ using DumpDetective.Analysis.Analyzers.Memory;
 
 namespace DumpDetective.Tests.Unit.Analysis;
 
+/// <summary>
+/// Ported for the Tier-1 mop-up batch (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
+/// <see cref="AllocationPatternAnalyzerLegacyAdapter"/> in place of the retyped
+/// <see cref="AllocationPatternAnalyzer"/> directly (the pipeline only ever sees the registered
+/// <c>Core.Abstractions.IAnalyzer</c>). All synthetic <c>TypeAggregates</c>/<c>HeapIndexBuildResult</c>
+/// injection is unchanged from the pre-retyping version.
+///
+/// One real, structural finding from the port: these tests used <c>Runtime = null!</c>
+/// pre-retyping, relying on the old analyzer's own <c>try { ComputeExactGenBytes(context.Heap,...) }
+/// catch { ComputeApproxGenBytes(aggregates,...) }</c> to incidentally swallow the null-Runtime NRE
+/// and fall back to the aggregates-only path. <c>LegacyAnalysisContextTranslator.Translate</c>
+/// eagerly constructs every Tier-1 capability implementation up front, regardless of which ones this
+/// specific analyzer actually needs, so it dereferences <c>legacy.Heap</c> (-&gt; <c>Runtime.Heap</c>)
+/// unconditionally and throws before the analyzer ever runs. Not something to fix speculatively in
+/// the shared translator for one analyzer's test convenience — these tests now attach a real,
+/// self-process <c>ClrRuntime</c> instead (same pattern every other retyping's characterization
+/// tests already use), which the retyped analyzer's own logic still never touches beyond the one
+/// segment-based gen-bytes call.
+/// </summary>
 public sealed class AllocationPatternAnalyzerTests
 {
     [Fact]
@@ -35,20 +54,22 @@ public sealed class AllocationPatternAnalyzerTests
             Elapsed: TimeSpan.Zero,
             TypeAggregates: aggregates);
 
-        // Create HeapAnalysisCache and inject the heapIndex via reflection
+        using DataTarget dataTarget = DataTarget.CreateSnapshotAndAttach(Environment.ProcessId);
+        ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();
+
         var cache = new HeapAnalysisCache();
         var fi = typeof(HeapAnalysisCache).GetField("_heapIndex", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
         fi.SetValue(cache, heapIndex);
 
         var context = new AnalysisContext
         {
-            Runtime = null!,
+            Runtime = runtime,
             Cache = cache,
             AnalysisOptions = new AnalysisOptions { AllocationPatternAnalysis = new AllocationPatternAnalysisOptions() }
         };
 
-        var analyzer = new AllocationPatternAnalyzer();
-        var result = (AllocationPatternDomainResult)await analyzer.AnalyzeAsync(context, CancellationToken.None);
+        using AllocationPatternAnalyzerLegacyAdapter adapter = new();
+        var result = (AllocationPatternDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
 
         result.Profile.Should().Be(AllocationProfile.Mixed);
         result.TopTransientTypes.Should().ContainSingle(t => t.TypeName.StartsWith("MT:0x1", System.StringComparison.OrdinalIgnoreCase));
@@ -73,19 +94,22 @@ public sealed class AllocationPatternAnalyzerTests
             Elapsed: TimeSpan.Zero,
             TypeAggregates: aggregates);
 
+        using DataTarget dataTarget = DataTarget.CreateSnapshotAndAttach(Environment.ProcessId);
+        ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();
+
         var cache = new HeapAnalysisCache();
         var fi = typeof(HeapAnalysisCache).GetField("_heapIndex", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
         fi.SetValue(cache, heapIndex);
 
         var context = new AnalysisContext
         {
-            Runtime = null!,
+            Runtime = runtime,
             Cache = cache,
             AnalysisOptions = new AnalysisOptions { AllocationPatternAnalysis = new AllocationPatternAnalysisOptions() }
         };
 
-        var analyzer = new AllocationPatternAnalyzer();
-        var result = (AllocationPatternDomainResult)await analyzer.AnalyzeAsync(context, CancellationToken.None);
+        using AllocationPatternAnalyzerLegacyAdapter adapter = new();
+        var result = (AllocationPatternDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
 
         result.TopTransientTypes.Should().HaveCount(500);
     }
@@ -113,19 +137,22 @@ public sealed class AllocationPatternAnalyzerTests
             Elapsed: TimeSpan.Zero,
             TypeAggregates: aggregates);
 
+        using DataTarget dataTarget = DataTarget.CreateSnapshotAndAttach(Environment.ProcessId);
+        ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();
+
         var cache = new HeapAnalysisCache();
         var fi = typeof(HeapAnalysisCache).GetField("_heapIndex", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
         fi.SetValue(cache, heapIndex);
 
         var context = new AnalysisContext
         {
-            Runtime = null!,
+            Runtime = runtime,
             Cache = cache,
             AnalysisOptions = new AnalysisOptions { AllocationPatternAnalysis = new AllocationPatternAnalysisOptions() }
         };
 
-        var analyzer = new AllocationPatternAnalyzer();
-        var result = (AllocationPatternDomainResult)await analyzer.AnalyzeAsync(context, CancellationToken.None);
+        using AllocationPatternAnalyzerLegacyAdapter adapter = new();
+        var result = (AllocationPatternDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
 
         // The Gen0-heavy MT 0xB should appear in transient or shortish despite lower count
         (result.TopTransientTypes.Any(t => t.TypeName.StartsWith("MT:0xB", System.StringComparison.OrdinalIgnoreCase))
@@ -150,13 +177,16 @@ public sealed class AllocationPatternAnalyzerTests
             Elapsed: TimeSpan.Zero,
             TypeAggregates: aggregates);
 
+        using DataTarget dataTarget = DataTarget.CreateSnapshotAndAttach(Environment.ProcessId);
+        ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();
+
         var cache = new HeapAnalysisCache();
         var fi = typeof(HeapAnalysisCache).GetField("_heapIndex", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
         fi.SetValue(cache, heapIndex);
 
-        var context = new AnalysisContext { Runtime = null!, Cache = cache, AnalysisOptions = new AnalysisOptions { AllocationPatternAnalysis = new AllocationPatternAnalysisOptions() } };
-        var analyzer = new AllocationPatternAnalyzer();
-        var result = (AllocationPatternDomainResult)await analyzer.AnalyzeAsync(context, CancellationToken.None);
+        var context = new AnalysisContext { Runtime = runtime, Cache = cache, AnalysisOptions = new AnalysisOptions { AllocationPatternAnalysis = new AllocationPatternAnalysisOptions() } };
+        using AllocationPatternAnalyzerLegacyAdapter adapter = new();
+        var result = (AllocationPatternDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
 
         result.FinalizableTypeCount.Should().Be(1);
         result.FinalizableBytes.Should().Be(1000);
@@ -190,13 +220,16 @@ public sealed class AllocationPatternAnalyzerTests
             TypeAggregates: aggregates,
             GlobalSizeBuckets: globalBuckets);
 
+        using DataTarget dataTarget = DataTarget.CreateSnapshotAndAttach(Environment.ProcessId);
+        ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();
+
         var cache = new HeapAnalysisCache();
         var fi = typeof(HeapAnalysisCache).GetField("_heapIndex", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
         fi.SetValue(cache, heapIndex);
 
-        var context = new AnalysisContext { Runtime = null!, Cache = cache, AnalysisOptions = new AnalysisOptions { AllocationPatternAnalysis = new AllocationPatternAnalysisOptions() } };
-        var analyzer = new AllocationPatternAnalyzer();
-        var result = (AllocationPatternDomainResult)await analyzer.AnalyzeAsync(context, CancellationToken.None);
+        var context = new AnalysisContext { Runtime = runtime, Cache = cache, AnalysisOptions = new AnalysisOptions { AllocationPatternAnalysis = new AllocationPatternAnalysisOptions() } };
+        using AllocationPatternAnalyzerLegacyAdapter adapter = new();
+        var result = (AllocationPatternDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
 
         result.LohSizeBands.Should().NotBeNull();
         result.LohSizeBands!.Should().HaveCount(3);

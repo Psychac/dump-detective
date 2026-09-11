@@ -7,7 +7,7 @@ using DumpDetective.Analysis.Analyzers.Memory;
 namespace BenchmarkSuite1
 {
     [MemoryDiagnoser]
-    public class AllocationPatternAnalyzerBenchmark : AnalyzerBenchmarkBase<AllocationPatternAnalyzer>
+    public class AllocationPatternAnalyzerBenchmark : AnalyzerBenchmarkBase<AllocationPatternAnalyzerLegacyAdapter>
     {
         protected override IHeapAnalysisCache? CreateCache() => new DumpDetective.Analysis.Cache.HeapAnalysisCache();
 

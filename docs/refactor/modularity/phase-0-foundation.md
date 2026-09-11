@@ -125,7 +125,41 @@ to become source-neutral.
    branch it broke wasn't covered. For each analyzer domain, enumerate the distinct severity tiers
    (Critical/Warning/Info/etc.) and distinct decision branches its finding-generation logic can
    reach, and cover each with a scenario before the domain moves — not one snapshot exercising
-   whichever branch the sample dump happens to hit.
+   whichever branch the sample dump happens to hit. **Gap-analysis audit done 2026-09-11; the
+   test-writing this item's exit criteria actually requires is not — see below.** `tools/CharacterizationCoverageAudit`
+   (Roslyn, same syntax-only standard as items 1/3) scans the 36 `IFindingGenerator` implementations
+   — severity/decision-branch logic lives there, not in the analyzers — for two scripted signals:
+   count of `new InsightFinding(` construction sites (a proxy for distinct finding kinds/branches)
+   and distinct `FindingSeverity` values producible vs. actually asserted in `[Fact]`/`[Theory]`
+   methods attributed to that generator (method-level, via both direct class-name references and
+   class-level fixture-field type tracking — an earlier, file-level-only version of this
+   attribution silently missed generators tested through the common "field declared once, used via
+   variable per test" xUnit pattern; found and fixed by spot-checking `CrashFindingGenerator`,
+   which the buggy version showed as having only 1 vestigial test when it actually has 6 solid
+   ones). Output: [characterization-coverage.md](characterization-coverage.md). Headline: of 36
+   generators, **11 have zero attributable test methods** (`HeapTopologyFindingGenerator`,
+   `BoxingFindingGenerator`, `StringFindingGenerator`, `SegmentReservationFindingGenerator`,
+   `GCRootFindingGenerator`, `StaticRootFindingGenerator`, `AllocationPatternFindingGenerator`,
+   `HangFindingGenerator`, `LohFragmentationFindingGenerator`, `ArrayFindingGenerator`,
+   `LockGraphFindingGenerator`), and **20 more have tests that never assert at least one severity
+   the generator can produce** — spot-checked two of these (`GCGenerationFindingGenerator`,
+   `JitFindingGenerator`) and confirmed both are genuine gaps, not tool artifacts: their existing
+   tests check `Title`/`Evidence`/count but never read `.Severity` at all. This is exactly the
+   scenario-diversity gap this item exists to close.
+
+   **Test-writing in progress, batched by package domain (worst-gap domain first), re-verified
+   against `characterization-coverage.md` after each batch:**
+   - **Memory — done 2026-09-11.** All 5 generators (`MemoryFindingGenerator`,
+     `GCGenerationFindingGenerator`, `AllocationPatternFindingGenerator`,
+     `LohFragmentationFindingGenerator`, `SegmentReservationFindingGenerator`) had gaps — the
+     worst domain, 5/5. 3 new test files from zero, 2 existing files extended with the missing
+     severity-tier scenarios. 36 new test methods; full non-real-dump suite green (1277/0/41,
+     up from 1241); coverage doc regenerated, all 5 rows now show no missing severities.
+   - **Types — next.** 4/5 have gaps (`ArrayFindingGenerator`, `BoxingFindingGenerator`,
+     `StringFindingGenerator` from zero; `CollectionFindingGenerator` severity-gap).
+   - Then, worst-to-best by the same measure: **Threads** (3/4), **Runtime** (3/4, but only 1
+     zero-test), **Leaks** (2/5), **Async** (1/2), **Gc** (1/4), **Infra** (1/7, nearly clean
+     already).
 6. **Architecture-conformance harness — already exists, verified and cleaned up 2026-09-08.** A
    lightweight boundary test asserting today's intended dependency direction. This isn't new work:
    `tests/DumpDetective.Tests/Unit/Architecture/DependencyDirectionTests.cs` (project-reference

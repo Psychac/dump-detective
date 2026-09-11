@@ -8,8 +8,9 @@ namespace DumpDetective.Analysis.SdkBridge;
 /// a <see cref="LegacyAnalyzerAdapter{TSdkAnalyzer}"/> receives from the existing pipeline. Only
 /// populates the capabilities a migrated analyzer actually needs (<c>HeapTypeStatistics</c>,
 /// <c>HeapSegments</c>, <c>HeapRoots</c>, <c>HeapObjectLookup</c>, <c>HeapReferences</c>,
-/// <c>HeapDominators</c>, <c>HeapHandles</c>, <c>HeapSyncBlocks</c>, <c>RuntimeThreads</c>,
-/// <c>RuntimeJit</c>, <c>DumpObjectFields</c> — see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md).
+/// <c>HeapDominators</c>, <c>HeapRootPaths</c>, <c>HeapHandles</c>, <c>HeapSyncBlocks</c>,
+/// <c>RuntimeThreads</c>, <c>RuntimeJit</c>, <c>DumpObjectFields</c> — see
+/// docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md).
 /// Every other capability-scoped property on the built context is left null, which is correct here
 /// (not merely incomplete): no migrated analyzer needs them yet, and the SDK context's own contract
 /// already treats null as "not available for this session."
@@ -58,6 +59,7 @@ internal static class LegacyAnalysisContextTranslator
             HeapDominators = treeProvider is not null
                 ? new HeapDominatorQuery(treeProvider, legacy.Cache.TryGetThreadRetentionProvider())
                 : null,
+            HeapRootPaths = new HeapRootPathQuery(legacy.Heap, legacy.Cache),
             RuntimeThreads = runtimeThreadsOverride ?? new RuntimeThreadQuery(legacy.Runtime, legacy.Cache),
             RuntimeJit = new RuntimeJitQuery(legacy.Runtime),
             DumpObjectFields = new DumpObjectFieldQuery(legacy.Heap),

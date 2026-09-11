@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/capability-registry.json",
-  "registryVersion": "1.5.0",
+  "registryVersion": "1.6.0",
   "description": "Canonical capability vocabulary an artifact can provide and an analyzer can require or optionally use. Source of truth is src/DumpDetective.Sdk/Artifacts/CapabilityVocabulary.cs; this file is the checked-in, versioned mirror docs/refactor/modularity/phase-1-contracts-sdk.md calls for, validated against the code by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. See docs/refactor/modularity/source-model.md § 3.",
   "capabilities": {
     "heap.objects": { "group": "heap", "providedBy": "dump", "addedIn": "1.0.0" },
@@ -21,7 +21,11 @@
     },
     "heap.dominators": {
       "group": "heap", "providedBy": "dump", "addedIn": "1.1.0",
-      "note": "Covers retained size, immediate dominator, and thread retention as one capability, backed by the same Stage B dominator-tree build. Narrowed in 1.2.0 when reachability (a Stage A product, independently available) was split out to heap.reachability above. Declared for the Tier-1 SDK surface (IHeapDominatorQuery, src/DumpDetective.Sdk/Analysis/) in phase-1-full-extraction-retyping-plan.md; not yet consumed by any migrated analyzer."
+      "note": "Covers retained size, immediate dominator, and thread retention as one capability, backed by the same Stage B dominator-tree build. Narrowed in 1.2.0 when reachability (a Stage A product, independently available) was split out to heap.reachability above. Declared for the Tier-1 SDK surface (IHeapDominatorQuery, src/DumpDetective.Sdk/Analysis/) in phase-1-full-extraction-retyping-plan.md."
+    },
+    "heap.root-paths": {
+      "group": "heap", "providedBy": "dump", "addedIn": "1.6.0",
+      "note": "GC-root reachability paths (the !gcroot workflow) -- built for DbConnectionAnalyzer/TimerLeakAnalyzer's retyping. Backs IHeapRootPathQuery (src/DumpDetective.Sdk/Analysis/); a thin wrapper over the pre-existing dump-side RootPathFinder, not a reimplementation. phase-1-full-extraction-retyping-plan.md."
     },
 
     "runtime.modules": { "group": "runtime", "providedBy": "dump", "addedIn": "1.0.0" },

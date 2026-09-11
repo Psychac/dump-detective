@@ -66,6 +66,7 @@ public sealed class AnalysisContext
     public IHeapReverseReferenceQuery? HeapReverseReferences { get; init; }
     public IHeapReachabilityQuery? HeapReachability { get; init; }
     public IHeapDominatorQuery? HeapDominators { get; init; }
+    public IHeapRootPathQuery? HeapRootPaths { get; init; }
     public IRuntimeThreadQuery? RuntimeThreads { get; init; }
     public IRuntimeModuleQuery? RuntimeModules { get; init; }
     public IRuntimeJitQuery? RuntimeJit { get; init; }

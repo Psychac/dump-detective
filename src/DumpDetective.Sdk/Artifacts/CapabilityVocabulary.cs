@@ -38,6 +38,11 @@ public static class CapabilityVocabulary
     /// <see cref="Analysis.IHeapDominatorQuery"/>'s own remarks.</summary>
     public const string HeapDominators = "heap.dominators";
 
+    /// <summary>GC-root reachability paths ("is this object reachable, and via what chain?") —
+    /// added 2026-09-11 for <c>DbConnectionAnalyzer</c>/<c>TimerLeakAnalyzer</c>'s retyping; see
+    /// <see cref="Analysis.IHeapRootPathQuery"/>'s own remarks.</summary>
+    public const string HeapRootPaths = "heap.root-paths";
+
     // Runtime (dump-provided)
     public const string RuntimeModules = "runtime.modules";
     public const string RuntimeThreads = "runtime.threads";

@@ -19,7 +19,11 @@ public static class SdkVersion
 {
     public const int Major = 0;
 
-    /// <summary>7 as of 2026-09-11 (added <see cref="Analysis.IDumpObjectFieldQuery.TryGetStringValue"/>
+    /// <summary>8 as of 2026-09-11 (added <see cref="Analysis.IHeapRootPathQuery"/> and
+    /// <see cref="Analysis.RootPathSearchOptions"/>, plus <c>CapabilityVocabulary.HeapRootPaths</c>
+    /// and <c>Analysis.AnalysisContext.HeapRootPaths</c> — the <c>heap.root-paths</c> capability
+    /// built for <c>DbConnectionAnalyzer</c>/<c>TimerLeakAnalyzer</c>'s retyping).
+    /// Before that, 7 as of 2026-09-11 (added <see cref="Analysis.IDumpObjectFieldQuery.TryGetStringValue"/>
     /// — a second Tier-2 <c>dump.object-fields</c> primitive for "interpret this address as a string
     /// directly," found necessary by <c>HttpObjectAnalyzer</c>'s retyping: several field-chase chains
     /// call <c>ClrObject.AsString()</c> on a field's object-reference *result*, not on a named
@@ -44,7 +48,7 @@ public static class SdkVersion
     /// additions/splits, the `EntityRef`/`IHeapDominatorQuery`/positional-record/JSON-converter
     /// fixes) — not a precise per-change reconstruction, since nothing yet depends on intermediate
     /// values enough to make that worth simulating.</summary>
-    public const int Minor = 7;
+    public const int Minor = 8;
 
     public static string AsString => $"{Major}.{Minor}";
 }

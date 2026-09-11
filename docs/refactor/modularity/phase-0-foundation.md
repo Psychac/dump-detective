@@ -176,8 +176,13 @@ to become source-neutral.
      extraction can't distinguish reachable from dead code, so this is a known false-positive, not
      a real remaining gap — no test was written to force it, since there is no code path that
      produces it. Full non-real-dump suite green (1345/0/41, up from 1325).
-   - Then, worst-to-best by the same measure: **Leaks** (2/5), **Async** (1/2), **Gc** (1/4),
-     **Infra** (1/7, nearly clean already).
+   - **Leaks — done 2026-09-11.** 2/5 had gaps (`StaticRootFindingGenerator` from zero;
+     `EventLeakFindingGenerator`'s 7 existing tests already exercised the Warning-range severity
+     score via unrelated timer/property-changed scenarios, just never asserted `.Severity`). 1 new
+     file + 1 extended, 6 new test methods. Full non-real-dump suite green (1351/0/41, up from
+     1345); both rows now show no missing severities.
+   - Then, worst-to-best by the same measure: **Async** (1/2), **Gc** (1/4), **Infra** (1/7,
+     nearly clean already).
 6. **Architecture-conformance harness — already exists, verified and cleaned up 2026-09-08.** A
    lightweight boundary test asserting today's intended dependency direction. This isn't new work:
    `tests/DumpDetective.Tests/Unit/Architecture/DependencyDirectionTests.cs` (project-reference

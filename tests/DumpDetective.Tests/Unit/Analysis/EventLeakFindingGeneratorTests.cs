@@ -110,6 +110,30 @@ public sealed class EventLeakFindingGeneratorTests
     }
 
     [Fact]
+    public void Generate_ModerateSeverityScore_EmitsWarningFinding()
+    {
+        var gen = new EventLeakFindingGenerator();
+        var result = BuildResult(
+            new EventLeakGroupSnapshot("OrderPublisher", "Changed", false, SeverityScore: 22, InstanceCount: 8, TotalSubscribers: 64, AverageSubscribers: 8.0, MinSubscribers: 1, MaxSubscribers: 12));
+
+        var findings = gen.Generate(result);
+
+        findings.Should().ContainSingle().Which.Severity.Should().Be(FindingSeverity.Warning);
+    }
+
+    [Fact]
+    public void Generate_LowSeverityScore_EmitsInfoFinding()
+    {
+        var gen = new EventLeakFindingGenerator();
+        var result = BuildResult(
+            new EventLeakGroupSnapshot("OrderPublisher", "Changed", false, SeverityScore: 10, InstanceCount: 8, TotalSubscribers: 64, AverageSubscribers: 8.0, MinSubscribers: 1, MaxSubscribers: 12));
+
+        var findings = gen.Generate(result);
+
+        findings.Should().ContainSingle().Which.Severity.Should().Be(FindingSeverity.Info);
+    }
+
+    [Fact]
     public void Generate_NoTimerOrPropertyChangedGroups_DoesNotAddCategoryTags()
     {
         var gen = new EventLeakFindingGenerator();

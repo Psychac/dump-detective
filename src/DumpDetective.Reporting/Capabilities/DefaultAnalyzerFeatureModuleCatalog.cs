@@ -103,7 +103,9 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         // HttpObjectAnalyzerLegacyAdapter, not HttpObjectAnalyzer directly, since 2026-09-11 --
         // see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("http-object", "Http Object Analysis", typeof(HttpObjectAnalyzerLegacyAdapter), typeof(HttpObjectFindingGenerator), typeof(HttpObjectTrendComparer), typeof(HttpObjectSectionBuilder), 440, ["infra", "network"]),
-        Module("timer-leak", "Timer Leak Analysis", typeof(TimerLeakAnalyzer), typeof(TimerLeakFindingGenerator), typeof(TimerLeakTrendComparer), typeof(TimerLeakSectionBuilder), 450, ["infra", "timers"]),
+        // TimerLeakAnalyzerLegacyAdapter, not TimerLeakAnalyzer directly, since 2026-09-12 --
+        // see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("timer-leak", "Timer Leak Analysis", typeof(TimerLeakAnalyzerLegacyAdapter), typeof(TimerLeakFindingGenerator), typeof(TimerLeakTrendComparer), typeof(TimerLeakSectionBuilder), 450, ["infra", "timers"]),
     ];
 
     public IReadOnlyList<Type> GlobalReportSectionBuilderTypes { get; } =

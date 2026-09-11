@@ -19,7 +19,12 @@ public static class SdkVersion
 {
     public const int Major = 0;
 
-    /// <summary>8 as of 2026-09-11 (added <see cref="Analysis.IHeapRootPathQuery"/> and
+    /// <summary>9 as of 2026-09-12 (added <see cref="Analysis.FieldValueKind"/>'s <c>UInt32</c> case
+    /// and <c>FieldValue.ForUInt32</c>/<c>AsUInt32</c> — found necessary by <c>TimerLeakAnalyzer</c>'s
+    /// retyping: <c>TimerQueueTimer._period</c>/<c>m_period</c> is a genuine <c>uint</c> field whose
+    /// <c>uint.MaxValue</c> "infinite" sentinel reinterprets incorrectly through <c>Int32</c>'s signed
+    /// semantics).
+    /// Before that, 8 as of 2026-09-11 (added <see cref="Analysis.IHeapRootPathQuery"/> and
     /// <see cref="Analysis.RootPathSearchOptions"/>, plus <c>CapabilityVocabulary.HeapRootPaths</c>
     /// and <c>Analysis.AnalysisContext.HeapRootPaths</c> — the <c>heap.root-paths</c> capability
     /// built for <c>DbConnectionAnalyzer</c>/<c>TimerLeakAnalyzer</c>'s retyping).
@@ -48,7 +53,7 @@ public static class SdkVersion
     /// additions/splits, the `EntityRef`/`IHeapDominatorQuery`/positional-record/JSON-converter
     /// fixes) — not a precise per-change reconstruction, since nothing yet depends on intermediate
     /// values enough to make that worth simulating.</summary>
-    public const int Minor = 8;
+    public const int Minor = 9;
 
     public static string AsString => $"{Major}.{Minor}";
 }

@@ -9,6 +9,11 @@ public enum FieldValueKind
     Double,
     String,
     ObjectReference,
+    /// <summary>Added 2026-09-12 for <c>TimerLeakAnalyzer</c>'s retyping: <c>TimerQueueTimer._period</c>/
+    /// <c>m_period</c> is a genuine <c>uint</c> field (decompile-verified across .NET Framework and
+    /// every modern .NET version checked), whose <c>uint.MaxValue</c> "infinite" sentinel reinterprets
+    /// incorrectly if forced through <see cref="Int32"/>'s signed semantics.</summary>
+    UInt32,
 }
 
 /// <summary>
@@ -50,6 +55,7 @@ public readonly struct FieldValue
     public static FieldValue ForBool(bool value) => new(FieldValueKind.Bool, numeric: value ? 1 : 0);
     public static FieldValue ForInt32(int value) => new(FieldValueKind.Int32, numeric: value);
     public static FieldValue ForInt64(long value) => new(FieldValueKind.Int64, numeric: value);
+    public static FieldValue ForUInt32(uint value) => new(FieldValueKind.UInt32, numeric: value);
     public static FieldValue ForDouble(double value) => new(FieldValueKind.Double, @double: value);
     public static FieldValue ForString(string value) => new(FieldValueKind.String, @string: value);
     public static FieldValue ForObjectReference(ulong address) => new(FieldValueKind.ObjectReference, address: address);
@@ -67,6 +73,10 @@ public readonly struct FieldValue
     public long AsInt64() => Kind is FieldValueKind.Int64 or FieldValueKind.Int32
         ? _numeric
         : throw new InvalidOperationException($"FieldValue is {Kind}, not {FieldValueKind.Int64}.");
+
+    public uint AsUInt32() => Kind == FieldValueKind.UInt32
+        ? (uint)_numeric
+        : throw new InvalidOperationException($"FieldValue is {Kind}, not {FieldValueKind.UInt32}.");
 
     public double AsDouble() => Kind == FieldValueKind.Double
         ? _double

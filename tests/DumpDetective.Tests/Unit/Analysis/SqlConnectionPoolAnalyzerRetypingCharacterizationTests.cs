@@ -1,4 +1,3 @@
-using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Analyzers.Infra;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
@@ -19,6 +18,10 @@ namespace DumpDetective.Tests.Unit.Analysis;
 /// snapshotted heap. Unlike every prior batch's segment/root/handle/thread data, a field *value* has
 /// no live-ClrMD-only shape to fabricate — this is the first Tier-1/Tier-2 surface simple enough to
 /// fake directly, so this test needs no <c>LiveHeapSnapshotFixture</c>/<c>DataTarget</c> at all.
+///
+/// Candidates are handed to the analyzer via <see cref="AnalysisContext.HeapObjects"/>
+/// (<c>heap.objects</c>) — corrected from the pilot's original design, which overloaded
+/// <c>AnalyzerOptions</c> for this.
 /// </summary>
 public sealed class SqlConnectionPoolAnalyzerRetypingCharacterizationTests
 {
@@ -26,6 +29,7 @@ public sealed class SqlConnectionPoolAnalyzerRetypingCharacterizationTests
     private const ulong OptionsAddress = 0x2000;
     private const ulong GroupAddress = 0x3000;
     private const ulong ConnOptionsAddress = 0x4000;
+    private const string PoolTypeName = "Microsoft.Data.ProviderBase.DbConnectionPool";
 
     [Fact]
     public async Task AnalyzeAsync_FullFieldChain_ProducesExactSnapshot()
@@ -39,7 +43,7 @@ public sealed class SqlConnectionPoolAnalyzerRetypingCharacterizationTests
         fields.SetObjectReference(GroupAddress, "_connectionOptions", ConnOptionsAddress);
         fields.SetString(ConnOptionsAddress, "_usersConnectionString", "Server=myserver;Database=mydb;User Id=sa;Password=hunter2;");
 
-        SqlConnectionPoolDomainResult result = await Analyze(fields, [new SqlConnectionPoolCandidate(PoolAddress, "Microsoft.Data.ProviderBase.DbConnectionPool")]);
+        SqlConnectionPoolDomainResult result = await Analyze(fields, [PoolCandidate(PoolAddress)]);
 
         result.PoolsFound.Should().BeTrue();
         result.TotalPools.Should().Be(1);
@@ -61,7 +65,7 @@ public sealed class SqlConnectionPoolAnalyzerRetypingCharacterizationTests
         var fields = new FakeDumpObjectFieldQuery();
         fields.SetString(PoolAddress, "_totalObjects", "not-an-int");
 
-        SqlConnectionPoolDomainResult result = await Analyze(fields, [new SqlConnectionPoolCandidate(PoolAddress, "Microsoft.Data.ProviderBase.DbConnectionPool")]);
+        SqlConnectionPoolDomainResult result = await Analyze(fields, [PoolCandidate(PoolAddress)]);
 
         result.PoolsFound.Should().BeFalse();
         result.TotalPools.Should().Be(0);
@@ -74,7 +78,7 @@ public sealed class SqlConnectionPoolAnalyzerRetypingCharacterizationTests
         fields.SetInt32(PoolAddress, "_totalObjects", 12);
         // No "_connectionPoolGroupOptions" field at all.
 
-        SqlConnectionPoolDomainResult result = await Analyze(fields, [new SqlConnectionPoolCandidate(PoolAddress, "Microsoft.Data.ProviderBase.DbConnectionPool")]);
+        SqlConnectionPoolDomainResult result = await Analyze(fields, [PoolCandidate(PoolAddress)]);
 
         result.Pools[0].MaxPoolSize.Should().Be(-1);
         result.Pools[0].MinPoolSize.Should().Be(-1);
@@ -91,15 +95,37 @@ public sealed class SqlConnectionPoolAnalyzerRetypingCharacterizationTests
         result.Pools.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task AnalyzeAsync_NoHeapObjectStream_ReturnsEmptyResult()
+    {
+        // context.HeapObjects itself null (no scan-participant pass ever ran) must degrade the same
+        // way as "ran but found nothing" -- both are "no candidates," not an error.
+        SqlConnectionPoolAnalyzer analyzer = new();
+        AnalysisContext context = new()
+        {
+            Observations = NoOpObservationSink.Instance,
+            DumpObjectFields = new FakeDumpObjectFieldQuery(),
+            HeapObjects = null,
+        };
+
+        await analyzer.AnalyzeAsync(context, CancellationToken.None);
+        var result = (SqlConnectionPoolDomainResult)analyzer.LastResult!;
+
+        result.PoolsFound.Should().BeFalse();
+    }
+
+    private static HeapObjectRef PoolCandidate(ulong address) => new(
+        address, SdkTypeRefFactory.FromName(PoolTypeName, null), Size: 0, TypeDisplayName: PoolTypeName);
+
     private static async Task<SqlConnectionPoolDomainResult> Analyze(
-        FakeDumpObjectFieldQuery fields, IReadOnlyList<SqlConnectionPoolCandidate> candidates)
+        FakeDumpObjectFieldQuery fields, IReadOnlyList<HeapObjectRef> candidates)
     {
         SqlConnectionPoolAnalyzer analyzer = new();
         AnalysisContext context = new()
         {
             Observations = NoOpObservationSink.Instance,
             DumpObjectFields = fields,
-            AnalyzerOptions = candidates,
+            HeapObjects = new PrecomputedHeapObjectStream(candidates),
         };
 
         await analyzer.AnalyzeAsync(context, CancellationToken.None);

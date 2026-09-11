@@ -24,7 +24,18 @@ internal static class LegacyAnalysisContextTranslator
     /// would re-walk every thread's stack independently. Null (the default, every other adapter)
     /// means "build the normal live one."
     /// </param>
-    public static Sdk.Analysis.AnalysisContext Translate(Core.Abstractions.AnalysisContext legacy, object? analyzerOptions, IRuntimeThreadQuery? runtimeThreadsOverride = null)
+    /// <param name="heapObjectsOverride">
+    /// Same shape as <paramref name="runtimeThreadsOverride"/>, for <c>heap.objects</c> — used by
+    /// <see cref="TypedResourceCandidateStreamingLegacyAdapter{TSelf, TSdkAnalyzer}"/> to hand its
+    /// inner analyzer the candidate objects the pipeline's shared heap-index scan already
+    /// discovered, instead of the inner analyzer re-deriving them. Null (the default) means "no
+    /// live default exists yet" — unlike <c>RuntimeThreads</c>, no dump-side always-on
+    /// <c>IHeapObjectStream</c> implementation has been built, since no non-scan-participant
+    /// consumer has needed one so far.
+    /// </param>
+    public static Sdk.Analysis.AnalysisContext Translate(
+        Core.Abstractions.AnalysisContext legacy, object? analyzerOptions,
+        IRuntimeThreadQuery? runtimeThreadsOverride = null, IHeapObjectStream? heapObjectsOverride = null)
     {
         // Resolved once, upfront — GCRootAnalyzer's own pre-retyping gate was "is Stage B's
         // provider non-null at all", not a per-address check, so HeapDominators is either fully
@@ -36,6 +47,7 @@ internal static class LegacyAnalysisContextTranslator
             Observations = NoOpObservationSink.Instance,
             Progress = WrapProgress(legacy.Progress),
             AnalyzerOptions = analyzerOptions,
+            HeapObjects = heapObjectsOverride,
             HeapTypeStatistics = new HeapTypeStatisticsQuery(legacy.Heap, legacy.Cache),
             HeapSegments = new HeapSegmentQuery(legacy.Heap, legacy.Runtime, legacy.Cache),
             HeapRoots = new HeapRootQuery(legacy.Heap, legacy.Cache),

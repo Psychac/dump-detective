@@ -4,6 +4,8 @@ using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Analyzers.Infra;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Pipeline;
+using DumpDetective.Analysis.SdkBridge;
+using DumpDetective.Sdk.Analysis;
 
 using FluentAssertions;
 
@@ -12,14 +14,14 @@ using Xunit;
 namespace DumpDetective.Tests.Unit.Analysis;
 
 /// <summary>
-/// Ported from testing <c>SqlConnectionPoolAnalyzer</c> directly to testing
-/// <see cref="SqlConnectionPoolAnalyzerLegacyAdapter"/> — the Tier-2 pilot
-/// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md) moved candidate discovery
-/// (<see cref="ITypedResourceCandidateSource"/>/<see cref="IParallelHeapIndexScanParticipant"/>) off
-/// the inner SDK analyzer onto the adapter, since the pipeline only ever sees the registered
-/// <c>Core.Abstractions.IAnalyzer</c>. Discovery now only accumulates address + type name
-/// (<c>SqlConnectionPoolCandidate</c>) — full <see cref="SqlConnectionPoolSnapshot"/> construction
-/// (which needs field reads) moved to <c>SqlConnectionPoolAnalyzer.AnalyzeAsync</c>.
+/// Ported twice now: first from testing <c>SqlConnectionPoolAnalyzer</c> directly to testing
+/// <see cref="SqlConnectionPoolAnalyzerLegacyAdapter"/> (candidate discovery moved off the inner SDK
+/// analyzer, since the pipeline only ever sees the registered <c>Core.Abstractions.IAnalyzer</c>);
+/// then again once discovery itself moved onto the shared
+/// <see cref="TypedResourceCandidateStreamingLegacyAdapter{TSelf, TSdkAnalyzer}"/> base, and
+/// collected candidates became <see cref="HeapObjectRef"/> (the existing Tier-1 shape) instead of a
+/// bespoke <c>SqlConnectionPoolCandidate</c> record. See
+/// docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
 /// </summary>
 public sealed class SqlConnectionPoolAnalyzerHeapIndexScanTests
 {
@@ -51,10 +53,10 @@ public sealed class SqlConnectionPoolAnalyzerHeapIndexScanTests
     public void MergePartial_ConcatenatesCandidatesFromAllWorkers()
     {
         SqlConnectionPoolAnalyzerLegacyAdapter primary = new();
-        SeedCandidates(primary, [new SqlConnectionPoolCandidate(0x1000, "Microsoft.Data.ProviderBase.DbConnectionPool")]);
+        SeedCandidates(primary, [PoolCandidate(0x1000)]);
 
         SqlConnectionPoolAnalyzerLegacyAdapter worker = new();
-        SeedCandidates(worker, [new SqlConnectionPoolCandidate(0x2000, "Microsoft.Data.ProviderBase.DbConnectionPool")]);
+        SeedCandidates(worker, [PoolCandidate(0x2000)]);
 
         ((IParallelHeapIndexScanParticipant)primary).MergePartial([worker]);
 
@@ -79,15 +81,22 @@ public sealed class SqlConnectionPoolAnalyzerHeapIndexScanTests
         actual.Should().Be(expected);
     }
 
-    private static void SeedCandidates(SqlConnectionPoolAnalyzerLegacyAdapter adapter, List<SqlConnectionPoolCandidate> candidates)
+    private static HeapObjectRef PoolCandidate(ulong address) => new(
+        address, SdkTypeRefFactory.FromName("Microsoft.Data.ProviderBase.DbConnectionPool", null),
+        Size: 0, TypeDisplayName: "Microsoft.Data.ProviderBase.DbConnectionPool");
+
+    // "_candidates" is declared on the shared TypedResourceCandidateStreamingLegacyAdapter<,> base,
+    // not on SqlConnectionPoolAnalyzerLegacyAdapter itself -- GetField on the derived type does not
+    // see a base class's private instance field, so these walk .BaseType explicitly.
+    private static void SeedCandidates(SqlConnectionPoolAnalyzerLegacyAdapter adapter, List<HeapObjectRef> candidates)
     {
-        var field = typeof(SqlConnectionPoolAnalyzerLegacyAdapter).GetField("_candidates", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var list = (List<SqlConnectionPoolCandidate>)field.GetValue(adapter)!;
+        var field = adapter.GetType().BaseType!.GetField("_candidates", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var list = (List<HeapObjectRef>)field.GetValue(adapter)!;
         list.AddRange(candidates);
     }
 
-    private static List<SqlConnectionPoolCandidate> GetCandidates(SqlConnectionPoolAnalyzerLegacyAdapter adapter) =>
-        (List<SqlConnectionPoolCandidate>)typeof(SqlConnectionPoolAnalyzerLegacyAdapter)
+    private static List<HeapObjectRef> GetCandidates(SqlConnectionPoolAnalyzerLegacyAdapter adapter) =>
+        (List<HeapObjectRef>)adapter.GetType().BaseType!
             .GetField("_candidates", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(adapter)!;
 }

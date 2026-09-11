@@ -25,6 +25,12 @@ namespace DumpDetective.Analysis.Analyzers.Infra;
 /// per-field <c>try/catch</c> moved down into <see cref="DumpObjectFieldQuery.TryReadField"/> itself
 /// (every read is independently defensive there); this class no longer needs its own wrapping
 /// <c>try/catch</c> around a whole snapshot read.
+///
+/// Candidates arrive through <see cref="AnalysisContext.HeapObjects"/> (<c>heap.objects</c>), the
+/// existing Tier-1 <see cref="HeapObjectRef"/> shape — not a bespoke per-analyzer record, and not
+/// <c>AnalyzerOptions</c>, which stays reserved for actual analyzer configuration. Corrected from
+/// the pilot's original design, which reused <c>AnalyzerOptions</c> for this and was recognized as
+/// overloading one slot for two unrelated purposes.
 /// </remarks>
 public sealed class SqlConnectionPoolAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
@@ -42,23 +48,19 @@ public sealed class SqlConnectionPoolAnalyzer : IAnalyzer, IProducesAnalyzerDoma
         IDumpObjectFieldQuery fields = context.DumpObjectFields
             ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.DumpObjectFields}' capability.");
 
-        IReadOnlyList<SqlConnectionPoolCandidate> candidates =
-            context.AnalyzerOptions as IReadOnlyList<SqlConnectionPoolCandidate> ?? [];
-
-        LastResult = Analyze(fields, candidates);
+        LastResult = Analyze(fields, context.HeapObjects);
         return ValueTask.CompletedTask;
     }
 
-    private static SqlConnectionPoolDomainResult Analyze(
-        IDumpObjectFieldQuery fields, IReadOnlyList<SqlConnectionPoolCandidate> candidates)
+    private static SqlConnectionPoolDomainResult Analyze(IDumpObjectFieldQuery fields, IHeapObjectStream? candidates)
     {
-        if (candidates.Count == 0)
+        if (candidates is null)
             return Empty();
 
-        var pools = new List<SqlConnectionPoolSnapshot>(candidates.Count);
-        foreach (SqlConnectionPoolCandidate candidate in candidates)
+        var pools = new List<SqlConnectionPoolSnapshot>();
+        foreach (HeapObjectRef candidate in candidates.EnumerateObjects())
         {
-            SqlConnectionPoolSnapshot? snap = TryReadPoolSnapshot(fields, candidate.Address, candidate.TypeName);
+            SqlConnectionPoolSnapshot? snap = TryReadPoolSnapshot(fields, candidate.Address, candidate.TypeDisplayName);
             if (snap is not null)
                 pools.Add(snap);
         }
@@ -140,11 +142,3 @@ public sealed class SqlConnectionPoolAnalyzer : IAnalyzer, IProducesAnalyzerDoma
 
     public void Dispose() { }
 }
-
-/// <summary>
-/// One candidate heap object <see cref="SqlConnectionPoolAnalyzerLegacyAdapter"/> discovered during
-/// the pipeline's shared heap-index scan (Tier-1-shaped: address + type name only). Field-value
-/// extraction happens later, in <see cref="SqlConnectionPoolAnalyzer.AnalyzeAsync"/>, via
-/// <see cref="IDumpObjectFieldQuery"/>.
-/// </summary>
-internal sealed record SqlConnectionPoolCandidate(ulong Address, string TypeName);

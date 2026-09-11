@@ -95,7 +95,9 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         // capability, not Core.Abstractions.IAnalyzer directly. See
         // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("sql-connection-pool", "SQL Connection Pool Analysis", typeof(SqlConnectionPoolAnalyzerLegacyAdapter), typeof(SqlConnectionPoolFindingGenerator), typeof(SqlConnectionPoolTrendComparer), typeof(SqlConnectionPoolSectionBuilder), 427, ["infra", "network"]),
-        Module("wcf-channel", "WCF Channel Analysis", typeof(WcfChannelAnalyzer), typeof(WcfChannelFindingGenerator), typeof(WcfChannelTrendComparer), typeof(WcfChannelSectionBuilder), 430, ["infra", "network"]),
+        // WcfChannelAnalyzerLegacyAdapter, not WcfChannelAnalyzer directly, since 2026-09-11 --
+        // see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("wcf-channel", "WCF Channel Analysis", typeof(WcfChannelAnalyzerLegacyAdapter), typeof(WcfChannelFindingGenerator), typeof(WcfChannelTrendComparer), typeof(WcfChannelSectionBuilder), 430, ["infra", "network"]),
         // HttpObjectAnalyzerLegacyAdapter, not HttpObjectAnalyzer directly, since 2026-09-11 --
         // see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("http-object", "Http Object Analysis", typeof(HttpObjectAnalyzerLegacyAdapter), typeof(HttpObjectFindingGenerator), typeof(HttpObjectTrendComparer), typeof(HttpObjectSectionBuilder), 440, ["infra", "network"]),

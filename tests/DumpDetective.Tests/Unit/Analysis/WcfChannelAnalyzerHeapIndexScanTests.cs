@@ -1,9 +1,4 @@
-using System.Reflection;
-
-using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Analyzers.Infra;
-using DumpDetective.Analysis.Models;
-using DumpDetective.Analysis.Pipeline;
 
 using FluentAssertions;
 
@@ -11,70 +6,38 @@ using Xunit;
 
 namespace DumpDetective.Tests.Unit.Analysis;
 
+/// <summary>
+/// Tier-2 wave retyping (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
+/// <see cref="WcfChannelAnalyzerLegacyAdapter.CreateWorkerInstance"/>/<c>MergePartial</c> are now
+/// pure generic base-class behavior (<c>TypedResourceCandidateStreamingLegacyAdapter</c>), already
+/// covered once by <c>SqlConnectionPoolAnalyzerHeapIndexScanTests</c> — re-testing the identical
+/// generic logic per adapter would be pure duplication. Covers the adapter-specific
+/// <see cref="WcfChannelAnalyzerLegacyAdapter.IsCandidateType"/> wiring plus the classification
+/// helpers that stayed unchanged on <see cref="WcfChannelAnalyzer"/> through the retyping.
+/// </summary>
 public sealed class WcfChannelAnalyzerHeapIndexScanTests
 {
-    [Fact]
-    public void CreateWorkerInstance_ReturnsFreshWcfChannelAnalyzer()
+    [Theory]
+    [InlineData("System.ServiceModel.Channels.ServiceChannel", true)]
+    [InlineData("System.ServiceModel.ClientBase`1", true)]
+    [InlineData("System.ServiceModel.Channels.CommunicationObject", true)]
+    [InlineData("System.ServiceModel.Channels.TcpChannelFactory+ClientFramingDuplexSessionChannel", true)]
+    [InlineData("System.ServiceModel.Channels.TcpChannelFactory", false)] // factory, not a channel
+    [InlineData("Microsoft.Data.SqlClient.SqlCommand", false)]
+    public void IsCandidateType_MatchesWcfChannelNamespaceAndSuffixOrTokens(string typeName, bool expected)
     {
-        WcfChannelAnalyzer primary = new();
+        WcfChannelAnalyzerLegacyAdapter adapter = new();
 
-        var worker = ((IParallelHeapIndexScanParticipant)primary).CreateWorkerInstance();
-
-        worker.Should().NotBeNull();
-        worker.Should().NotBeSameAs(primary);
-        worker.Should().BeOfType<WcfChannelAnalyzer>();
+        adapter.IsCandidateType(typeName).Should().Be(expected);
     }
 
-    [Fact]
-    public void MergePartial_SumsStateChangeCounts_PerMethodTable()
+    [Theory]
+    [InlineData("System.ServiceModel.Channels.TcpChannelFactory", true)]
+    [InlineData("System.ServiceModel.Channels.NamedPipeChannelFactory", true)]
+    [InlineData("System.ServiceModel.Channels.TcpChannelFactory+ClientFramingDuplexSessionChannel", false)] // channel, not a factory
+    public void IsFactoryType_MatchesWcfChannelFactoryNamespaceAndSuffixOrTokens(string typeName, bool expected)
     {
-        WcfChannelAnalyzer primary = new();
-        SeedTypeStats(primary, new Dictionary<ulong, (string, int, int, int, int, int, int, int, int, ulong)>
-        {
-            [0x1000] = ("SomeChannel", 100, opening: 1, opened: 10, faulted: 3, closing: 2, closed: 5, other: 2, invalidState: 1, bytes: 999)
-        });
-
-        WcfChannelAnalyzer worker = new();
-        SeedTypeStats(worker, new Dictionary<ulong, (string, int, int, int, int, int, int, int, int, ulong)>
-        {
-            [0x1000] = ("SomeChannel", 100, opening: 0, opened: 7, faulted: 2, closing: 1, closed: 4, other: 1, invalidState: 2, bytes: 999)
-        });
-
-        ((IParallelHeapIndexScanParticipant)primary).MergePartial([worker]);
-
-        var merged = GetTypeStats(primary)[0x1000];
-        merged.Total.Should().Be(100); // not summed — pre-seeded from TypeAggregates
-        merged.Opening.Should().Be(1);
-        merged.Opened.Should().Be(17);
-        merged.Faulted.Should().Be(5);
-        merged.Closing.Should().Be(3);
-        merged.Closed.Should().Be(9);
-        merged.Other.Should().Be(3);
-        merged.InvalidState.Should().Be(3);
-        merged.Bytes.Should().Be(999); // not summed
-    }
-
-    [Fact]
-    public void MergePartial_AddsNewKeyFromWorker_WhenNotPresentInPrimary()
-    {
-        WcfChannelAnalyzer primary = new();
-        SeedTypeStats(primary, new Dictionary<ulong, (string, int, int, int, int, int, int, int, int, ulong)>
-        {
-            [0x1000] = ("TypeA", 50, 1, 10, 2, 0, 5, 1, 0, 100)
-        });
-
-        WcfChannelAnalyzer worker = new();
-        SeedTypeStats(worker, new Dictionary<ulong, (string, int, int, int, int, int, int, int, int, ulong)>
-        {
-            [0x2000] = ("TypeB", 30, 0, 5, 1, 2, 3, 0, 0, 200)
-        });
-
-        ((IParallelHeapIndexScanParticipant)primary).MergePartial([worker]);
-
-        var stats = GetTypeStats(primary);
-        stats.Should().ContainKey(0x1000UL);
-        stats.Should().ContainKey(0x2000UL);
-        stats[0x2000].Faulted.Should().Be(1);
+        WcfChannelAnalyzer.IsFactoryType(typeName).Should().Be(expected);
     }
 
     [Theory]
@@ -105,27 +68,4 @@ public sealed class WcfChannelAnalyzerHeapIndexScanTests
     {
         WcfChannelAnalyzer.IsSessionChannelType(typeName).Should().Be(expected);
     }
-
-    // ── Helpers ──────────────────────────────────────────────────────────────────────────────
-
-    private static void SeedTypeStats(
-        WcfChannelAnalyzer analyzer,
-        Dictionary<ulong, (string Name, int Total, int Opening, int Opened, int Faulted, int Closing, int Closed, int Other, int InvalidState, ulong Bytes)> stats)
-    {
-        typeof(WcfChannelAnalyzer)
-            .GetField("_typeStats", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .SetValue(analyzer, stats);
-
-        // Seed an empty sampler so MergePartial doesn't null-deref.
-        var sampler = new InstanceStateSampler<WcfChannelSnapshot>();
-        typeof(WcfChannelAnalyzer)
-            .GetField("_sampler", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .SetValue(analyzer, sampler);
-    }
-
-    private static Dictionary<ulong, (string Name, int Total, int Opening, int Opened, int Faulted, int Closing, int Closed, int Other, int InvalidState, ulong Bytes)>
-        GetTypeStats(WcfChannelAnalyzer analyzer) =>
-        (Dictionary<ulong, (string, int, int, int, int, int, int, int, int, ulong)>)typeof(WcfChannelAnalyzer)
-            .GetField("_typeStats", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .GetValue(analyzer)!;
 }

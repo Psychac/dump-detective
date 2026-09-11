@@ -73,7 +73,11 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         Module("db-connection", "DbConnection Analysis", typeof(DbConnectionAnalyzer), typeof(DbConnectionFindingGenerator), typeof(DbConnectionTrendComparer), typeof(DbConnectionSectionBuilder), 420, ["infra", "network"]),
         Module("sql-transaction", "SQL Transaction Analysis", typeof(SqlTransactionAnalyzer), typeof(SqlTransactionFindingGenerator), typeof(SqlTransactionTrendComparer), typeof(SqlTransactionSectionBuilder), 425, ["infra", "network"]),
         Module("sql-command", "SQL Command Analysis", typeof(SqlCommandAnalyzer), typeof(SqlCommandFindingGenerator), typeof(SqlCommandTrendComparer), typeof(SqlCommandSectionBuilder), 426, ["infra", "network"]),
-        Module("sql-connection-pool", "SQL Connection Pool Analysis", typeof(SqlConnectionPoolAnalyzer), typeof(SqlConnectionPoolFindingGenerator), typeof(SqlConnectionPoolTrendComparer), typeof(SqlConnectionPoolSectionBuilder), 427, ["infra", "network"]),
+        // SqlConnectionPoolAnalyzerLegacyAdapter, not SqlConnectionPoolAnalyzer directly, since 2026-09-11
+        // (Tier-2 pilot) -- SqlConnectionPoolAnalyzer now implements SDK IDumpObjectFieldQuery
+        // capability, not Core.Abstractions.IAnalyzer directly. See
+        // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("sql-connection-pool", "SQL Connection Pool Analysis", typeof(SqlConnectionPoolAnalyzerLegacyAdapter), typeof(SqlConnectionPoolFindingGenerator), typeof(SqlConnectionPoolTrendComparer), typeof(SqlConnectionPoolSectionBuilder), 427, ["infra", "network"]),
         Module("wcf-channel", "WCF Channel Analysis", typeof(WcfChannelAnalyzer), typeof(WcfChannelFindingGenerator), typeof(WcfChannelTrendComparer), typeof(WcfChannelSectionBuilder), 430, ["infra", "network"]),
         Module("http-object", "Http Object Analysis", typeof(HttpObjectAnalyzer), typeof(HttpObjectFindingGenerator), typeof(HttpObjectTrendComparer), typeof(HttpObjectSectionBuilder), 440, ["infra", "network"]),
         Module("timer-leak", "Timer Leak Analysis", typeof(TimerLeakAnalyzer), typeof(TimerLeakFindingGenerator), typeof(TimerLeakTrendComparer), typeof(TimerLeakSectionBuilder), 450, ["infra", "timers"]),

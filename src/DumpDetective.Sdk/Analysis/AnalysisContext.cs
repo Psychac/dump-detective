@@ -69,4 +69,8 @@ public sealed class AnalysisContext
     public IRuntimeThreadQuery? RuntimeThreads { get; init; }
     public IRuntimeModuleQuery? RuntimeModules { get; init; }
     public IRuntimeJitQuery? RuntimeJit { get; init; }
+
+    /// <summary>Tier 2 (<c>dump.object-fields</c>) — see <see cref="IDumpObjectFieldQuery"/>'s own
+    /// remarks for why this lives here rather than a separate dump-only context type.</summary>
+    public IDumpObjectFieldQuery? DumpObjectFields { get; init; }
 }

@@ -10,13 +10,23 @@ using Xunit;
 
 namespace DumpDetective.Tests.Unit.Analysis;
 
+/// <summary>
+/// Ported from testing <c>SqlConnectionPoolAnalyzer</c> directly to testing
+/// <see cref="SqlConnectionPoolAnalyzerLegacyAdapter"/> — the Tier-2 pilot
+/// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md) moved candidate discovery
+/// (<see cref="ITypedResourceCandidateSource"/>/<see cref="IParallelHeapIndexScanParticipant"/>) off
+/// the inner SDK analyzer onto the adapter, since the pipeline only ever sees the registered
+/// <c>Core.Abstractions.IAnalyzer</c>. Discovery now only accumulates address + type name
+/// (<c>SqlConnectionPoolCandidate</c>) — full <see cref="SqlConnectionPoolSnapshot"/> construction
+/// (which needs field reads) moved to <c>SqlConnectionPoolAnalyzer.AnalyzeAsync</c>.
+/// </summary>
 public sealed class SqlConnectionPoolAnalyzerHeapIndexScanTests
 {
     [Fact]
     public void IsCandidateType_MatchesBothProviderPoolTypeNames()
     {
-        SqlConnectionPoolAnalyzer analyzer = new();
-        ITypedResourceCandidateSource source = analyzer;
+        SqlConnectionPoolAnalyzerLegacyAdapter adapter = new();
+        ITypedResourceCandidateSource source = adapter;
 
         source.IsCandidateType("System.Data.ProviderBase.DbConnectionPool").Should().BeTrue();
         source.IsCandidateType("Microsoft.Data.ProviderBase.DbConnectionPool").Should().BeTrue();
@@ -25,31 +35,31 @@ public sealed class SqlConnectionPoolAnalyzerHeapIndexScanTests
     }
 
     [Fact]
-    public void CreateWorkerInstance_ReturnsFreshSqlConnectionPoolAnalyzer()
+    public void CreateWorkerInstance_ReturnsFreshAdapter()
     {
-        SqlConnectionPoolAnalyzer primary = new();
+        SqlConnectionPoolAnalyzerLegacyAdapter primary = new();
 
         var worker = ((IParallelHeapIndexScanParticipant)primary).CreateWorkerInstance();
 
         worker.Should().NotBeNull();
         worker.Should().NotBeSameAs(primary);
-        worker.Should().BeOfType<SqlConnectionPoolAnalyzer>();
+        worker.Should().BeOfType<SqlConnectionPoolAnalyzerLegacyAdapter>();
     }
 
     [Fact]
-    public void MergePartial_ConcatenatesPoolsFromAllWorkers()
+    public void MergePartial_ConcatenatesCandidatesFromAllWorkers()
     {
-        SqlConnectionPoolAnalyzer primary = new();
-        SeedPools(primary, [new SqlConnectionPoolSnapshot("Microsoft.Data.ProviderBase.DbConnectionPool", 0x1000, 40, 100, 0, "Server=A")]);
+        SqlConnectionPoolAnalyzerLegacyAdapter primary = new();
+        SeedCandidates(primary, [new SqlConnectionPoolCandidate(0x1000, "Microsoft.Data.ProviderBase.DbConnectionPool")]);
 
-        SqlConnectionPoolAnalyzer worker = new();
-        SeedPools(worker, [new SqlConnectionPoolSnapshot("Microsoft.Data.ProviderBase.DbConnectionPool", 0x2000, 95, 100, 0, "Server=B")]);
+        SqlConnectionPoolAnalyzerLegacyAdapter worker = new();
+        SeedCandidates(worker, [new SqlConnectionPoolCandidate(0x2000, "Microsoft.Data.ProviderBase.DbConnectionPool")]);
 
         ((IParallelHeapIndexScanParticipant)primary).MergePartial([worker]);
 
-        GetPools(primary).Should().HaveCount(2);
-        GetPools(primary).Should().Contain(p => p.Address == 0x1000);
-        GetPools(primary).Should().Contain(p => p.Address == 0x2000);
+        GetCandidates(primary).Should().HaveCount(2);
+        GetCandidates(primary).Should().Contain(c => c.Address == 0x1000);
+        GetCandidates(primary).Should().Contain(c => c.Address == 0x2000);
     }
 
     [Theory]
@@ -68,15 +78,15 @@ public sealed class SqlConnectionPoolAnalyzerHeapIndexScanTests
         actual.Should().Be(expected);
     }
 
-    private static void SeedPools(SqlConnectionPoolAnalyzer analyzer, List<SqlConnectionPoolSnapshot> pools)
+    private static void SeedCandidates(SqlConnectionPoolAnalyzerLegacyAdapter adapter, List<SqlConnectionPoolCandidate> candidates)
     {
-        var field = typeof(SqlConnectionPoolAnalyzer).GetField("_pools", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var list = (List<SqlConnectionPoolSnapshot>)field.GetValue(analyzer)!;
-        list.AddRange(pools);
+        var field = typeof(SqlConnectionPoolAnalyzerLegacyAdapter).GetField("_candidates", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var list = (List<SqlConnectionPoolCandidate>)field.GetValue(adapter)!;
+        list.AddRange(candidates);
     }
 
-    private static List<SqlConnectionPoolSnapshot> GetPools(SqlConnectionPoolAnalyzer analyzer) =>
-        (List<SqlConnectionPoolSnapshot>)typeof(SqlConnectionPoolAnalyzer)
-            .GetField("_pools", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .GetValue(analyzer)!;
+    private static List<SqlConnectionPoolCandidate> GetCandidates(SqlConnectionPoolAnalyzerLegacyAdapter adapter) =>
+        (List<SqlConnectionPoolCandidate>)typeof(SqlConnectionPoolAnalyzerLegacyAdapter)
+            .GetField("_candidates", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(adapter)!;
 }

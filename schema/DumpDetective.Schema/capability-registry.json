@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/capability-registry.json",
-  "registryVersion": "1.3.0",
+  "registryVersion": "1.4.0",
   "description": "Canonical capability vocabulary an artifact can provide and an analyzer can require or optionally use. Source of truth is src/DumpDetective.Sdk/Artifacts/CapabilityVocabulary.cs; this file is the checked-in, versioned mirror docs/refactor/modularity/phase-1-contracts-sdk.md calls for, validated against the code by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. See docs/refactor/modularity/source-model.md § 3.",
   "capabilities": {
     "heap.objects": { "group": "heap", "providedBy": "dump", "addedIn": "1.0.0" },
@@ -32,6 +32,11 @@
     "runtime.locks": {
       "group": "runtime", "providedBy": "dump", "addedIn": "1.0.0",
       "note": "Declared since 1.0.0 but unconsumed until 1.1.0, when IHeapSyncBlockQuery (src/DumpDetective.Sdk/Analysis/) became its first real designed consumer, backing LockGraphAnalyzer's heap.EnumerateSyncBlocks() usage. Not yet wired to that analyzer — declared for the Tier-1 SDK surface, migration not yet done."
+    },
+
+    "dump.object-fields": {
+      "group": "dump", "providedBy": "dump", "addedIn": "1.4.0",
+      "note": "Tier 2 (phase-1-full-extraction-retyping-plan.md): per-field value reads off a live heap object. Dump-only forever, unlike every capability above -- no trace source will ever satisfy this, since traces carry no live object field layouts. Backs IDumpObjectFieldQuery (src/DumpDetective.Sdk/Analysis/). First real consumer: SqlConnectionPoolAnalyzer (Tier-2 pilot)."
     },
 
     "trace.cpu-samples": {

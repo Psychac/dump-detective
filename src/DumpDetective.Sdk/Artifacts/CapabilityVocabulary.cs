@@ -53,6 +53,13 @@ public static class CapabilityVocabulary
     /// what they represent is runtime lock state, not object data.</summary>
     public const string RuntimeLocks = "runtime.locks";
 
+    /// <summary>Tier 2 (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
+    /// per-field value reads off a live heap object, backing <see cref="Analysis.IDumpObjectFieldQuery"/>.
+    /// Dump-only forever — no trace source will ever satisfy this, unlike every other capability
+    /// above, which is source-neutral in shape even though only a dump implements it today. First
+    /// real consumer: <c>SqlConnectionPoolAnalyzer</c>, added 2026-09-11.</summary>
+    public const string DumpObjectFields = "dump.object-fields";
+
     // Trace-provided
     public const string TraceCpuSamples = "trace.cpu-samples";
     public const string TraceGcEvents = "trace.gc-events";

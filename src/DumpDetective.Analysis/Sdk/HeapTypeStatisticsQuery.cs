@@ -69,6 +69,20 @@ internal sealed class HeapTypeStatisticsQuery(ClrHeap heap, IHeapAnalysisCache c
                 catch { /* corrupt/unusual type -- defaults to 0, matches the pre-retyping analyzer's own defensive catch */ }
             }
 
+            string arrayElementTypeName = "";
+            int arrayRank = 0;
+            bool arrayElementIsObjectReference = false, arrayElementIsSupportedNumeric = false;
+            int arrayElementSizeBytes = 0;
+            if (type is { IsArray: true })
+            {
+                arrayElementTypeName = type.ComponentType?.Name ?? name;
+                arrayRank = ComputeArrayRank(name);
+                arrayElementIsObjectReference = type.ComponentType?.IsObjectReference == true;
+                ClrElementType componentElementType = type.ComponentType?.ElementType ?? ClrElementType.Unknown;
+                arrayElementIsSupportedNumeric = IsSupportedNumericElementType(componentElementType);
+                arrayElementSizeBytes = ElementSizeBytes(componentElementType);
+            }
+
             result[name] = new HeapTypeStatistics(
                 Type: ToTypeRef(name, methodTable),
                 InstanceCount: e.Count,
@@ -88,10 +102,52 @@ internal sealed class HeapTypeStatisticsQuery(ClrHeap heap, IHeapAnalysisCache c
                 IsValueType: type?.IsValueType ?? false,
                 IsArray: type?.IsArray ?? false,
                 BaseTypeChainDepth: baseDepth,
-                InterfaceCount: ifaceCount);
+                InterfaceCount: ifaceCount,
+                ArrayElementTypeName: arrayElementTypeName,
+                ArrayRank: arrayRank,
+                ArrayElementIsObjectReference: arrayElementIsObjectReference,
+                ArrayElementIsSupportedNumeric: arrayElementIsSupportedNumeric,
+                ArrayElementSizeBytes: arrayElementSizeBytes);
         }
         return result;
     }
+
+    // Rank from the array type's own name (e.g. "System.Int32[,]" has 1 comma -> rank 2) --
+    // matches the pre-retyping ArrayAnalyzer's own detection exactly. Returns 1 for a normal,
+    // single-dimension array (no comma found).
+    private static int ComputeArrayRank(string typeName)
+    {
+        int bracket = typeName.LastIndexOf('[');
+        if (bracket < 0)
+            return 1;
+
+        int commas = 0;
+        for (int i = bracket; i < typeName.Length; i++)
+            if (typeName[i] == ',') commas++;
+
+        return commas > 0 ? commas + 1 : 1;
+    }
+
+    // Matches the pre-retyping ArrayAnalyzer's own IsSupportedNumericElementType/ElementSizeBytes
+    // switches exactly -- moved here so the retyped analyzer never needs ClrElementType at all.
+    private static bool IsSupportedNumericElementType(ClrElementType elemType) => elemType switch
+    {
+        ClrElementType.Int8 or ClrElementType.UInt8
+            or ClrElementType.Int16 or ClrElementType.UInt16
+            or ClrElementType.Int32 or ClrElementType.UInt32
+            or ClrElementType.Int64 or ClrElementType.UInt64
+            or ClrElementType.Float or ClrElementType.Double => true,
+        _ => false,
+    };
+
+    private static int ElementSizeBytes(ClrElementType elemType) => elemType switch
+    {
+        ClrElementType.Int8 or ClrElementType.UInt8 => sizeof(byte),
+        ClrElementType.Int16 or ClrElementType.UInt16 => sizeof(short),
+        ClrElementType.Int32 or ClrElementType.UInt32 or ClrElementType.Float => sizeof(int),
+        ClrElementType.Int64 or ClrElementType.UInt64 or ClrElementType.Double => sizeof(long),
+        _ => 0,
+    };
 
     // Matches the pre-retyping ObjectShapeAnalyzer's own cap exactly.
     private static int ComputeBaseTypeDepth(ClrType type)

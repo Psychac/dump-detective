@@ -61,6 +61,7 @@ internal static class LegacyAnalysisContextTranslator
             RuntimeThreads = runtimeThreadsOverride ?? new RuntimeThreadQuery(legacy.Runtime, legacy.Cache),
             RuntimeJit = new RuntimeJitQuery(legacy.Runtime),
             DumpObjectFields = new DumpObjectFieldQuery(legacy.Heap),
+            DumpArrayShapes = new DumpArrayShapeQuery(legacy.Heap),
         };
     }
 

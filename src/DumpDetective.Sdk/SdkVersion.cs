@@ -19,7 +19,17 @@ public static class SdkVersion
 {
     public const int Major = 0;
 
-    /// <summary>5 as of 2026-09-11 (added <see cref="Analysis.IDumpObjectFieldQuery"/>,
+    /// <summary>6 as of 2026-09-11 (added <see cref="Analysis.IDumpArrayShapeQuery"/>,
+    /// <c>CapabilityVocabulary.DumpArrayElements</c>, <c>Analysis.AnalysisContext.DumpArrayShapes</c>,
+    /// and <see cref="Analysis.HeapTypeStatistics"/>'s <c>ArrayElementTypeName</c>/<c>ArrayRank</c>/
+    /// <c>ArrayElementIsObjectReference</c>/<c>ArrayElementIsSupportedNumeric</c>/<c>ArrayElementSizeBytes</c>
+    /// fields — <c>ArrayAnalyzer</c>'s retyping, the Tier-2 wave's second new capability). Also
+    /// covers the untracked bump this field owed from <c>ObjectShapeAnalyzer</c>'s retyping earlier
+    /// the same session (<c>HeapTypeStatistics.TotalFields</c>/<c>ReferenceFields</c>/<c>ValueFields</c>/
+    /// <c>IsValueType</c>/<c>IsArray</c>/<c>BaseTypeChainDepth</c>/<c>InterfaceCount</c> and
+    /// <c>IHeapTypeStatisticsQuery.HasTypeShapeData</c>) — missed at the time, folded in here rather
+    /// than issuing a separate bump for a change already shipped.
+    /// Before that, 5 as of 2026-09-11 (added <see cref="Analysis.IDumpObjectFieldQuery"/>,
     /// <see cref="Analysis.FieldValue"/>, <c>CapabilityVocabulary.DumpObjectFields</c>, and
     /// <c>Analysis.AnalysisContext.DumpObjectFields</c> — the Tier-2 pilot's new capability surface).
     /// Before that, 4 as of 2026-09-10 (removed <c>CapabilityVocabulary.TemporalSeries</c>, follow-on
@@ -29,7 +39,7 @@ public static class SdkVersion
     /// additions/splits, the `EntityRef`/`IHeapDominatorQuery`/positional-record/JSON-converter
     /// fixes) — not a precise per-change reconstruction, since nothing yet depends on intermediate
     /// values enough to make that worth simulating.</summary>
-    public const int Minor = 5;
+    public const int Minor = 6;
 
     public static string AsString => $"{Major}.{Minor}";
 }

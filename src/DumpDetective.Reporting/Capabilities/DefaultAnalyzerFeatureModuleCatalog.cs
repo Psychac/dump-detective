@@ -72,7 +72,9 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         Module("event-leak", "Event Leak Analysis", typeof(EventLeakAnalyzer), typeof(EventLeakFindingGenerator), typeof(EventLeakTrendComparer), typeof(EventLeakSectionBuilder), 330, ["events", "leaks"]),
         Module("finalizable-object", "Finalizable Object Analysis", typeof(FinalizableObjectAnalyzer), typeof(FinalizableObjectFindingGenerator), typeof(FinalizableObjectTrendComparer), typeof(FinalizableObjectSectionBuilder), 340, ["gc"]),
         Module("async-state-machine", "Async State Machine Analysis", typeof(AsyncStateMachineAnalyzer), typeof(AsyncStateMachineFindingGenerator), typeof(AsyncStateMachineTrendComparer), typeof(AsyncStateMachineSectionBuilder), 350, ["async"]),
-        Module("array", "Array Analysis", typeof(ArrayAnalyzer), typeof(ArrayFindingGenerator), typeof(ArrayTrendComparer), typeof(ArraySectionBuilder), 360, ["types"]),
+        // ArrayAnalyzerLegacyAdapter, not ArrayAnalyzer directly, since 2026-09-11 --
+        // see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("array", "Array Analysis", typeof(ArrayAnalyzerLegacyAdapter), typeof(ArrayFindingGenerator), typeof(ArrayTrendComparer), typeof(ArraySectionBuilder), 360, ["types"]),
         // SegmentReservationAnalyzerLegacyAdapter, not SegmentReservationAnalyzer directly, since
         // 2026-09-11 (segment-capability retyping batch, alongside GCGenerationAnalyzer's pilot) —
         // see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.

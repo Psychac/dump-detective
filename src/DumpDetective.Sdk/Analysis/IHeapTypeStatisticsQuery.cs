@@ -63,7 +63,27 @@ public readonly record struct HeapTypeStatistics(
     /// defensive fallback the pre-retyping analyzer logged and this one silently accepts — see that
     /// type's own remarks) as well as when <see cref="IHeapTypeStatisticsQuery.HasTypeShapeData"/> is
     /// <c>false</c>.</summary>
-    int InterfaceCount = 0);
+    int InterfaceCount = 0,
+    /// <summary>
+    /// Array-shape facts, meaningful only when <see cref="IsArray"/> is <c>true</c> (default/empty
+    /// otherwise) — added 2026-09-11 for <c>ArrayAnalyzer</c>'s retyping. Come from <c>ClrType.ComponentType</c>
+    /// directly, so available regardless of <see cref="IHeapTypeStatisticsQuery.HasTypeShapeData"/>,
+    /// same as <see cref="IsValueType"/>/<see cref="IsArray"/> themselves.
+    /// <see cref="ArrayElementTypeName"/> is the resolved component type's display name (e.g.
+    /// <c>"Int32"</c>, <c>"MyClass"</c>); <see cref="ArrayRank"/> is parsed from the array type's own
+    /// name (commas between the brackets), matching the pre-retyping analyzer's own detection
+    /// exactly; <see cref="ArrayElementIsObjectReference"/>/<see cref="ArrayElementIsSupportedNumeric"/>/
+    /// <see cref="ArrayElementSizeBytes"/> drive which sparse-walk strategy
+    /// <c>IDumpArrayShapeQuery.CountNullOrZeroElements</c>'s dump-side implementation picks and how
+    /// wasted bytes are computed from a null/zero count — mirroring the pre-retyping analyzer's own
+    /// <c>IsSupportedNumericElementType</c>/<c>ElementSizeBytes</c> switches, moved here so the SDK
+    /// consumer never needs to know ClrMD's <c>ClrElementType</c> at all.
+    /// </summary>
+    string ArrayElementTypeName = "",
+    int ArrayRank = 0,
+    bool ArrayElementIsObjectReference = false,
+    bool ArrayElementIsSupportedNumeric = false,
+    int ArrayElementSizeBytes = 0);
 
 /// <summary>The <c>heap.types</c> capability's aggregate-statistics surface (distinct
 /// <see cref="IHeapObjectStream"/>/<see cref="IHeapObjectLookup"/>, per-object).</summary>

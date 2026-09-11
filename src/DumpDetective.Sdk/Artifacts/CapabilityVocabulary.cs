@@ -60,6 +60,12 @@ public static class CapabilityVocabulary
     /// real consumer: <c>SqlConnectionPoolAnalyzer</c>, added 2026-09-11.</summary>
     public const string DumpObjectFields = "dump.object-fields";
 
+    /// <summary>Tier 2, second dump-only capability alongside <see cref="DumpObjectFields"/> — array
+    /// element shape/sparse-counting, backing <see cref="Analysis.IDumpArrayShapeQuery"/>. Dump-only
+    /// forever for the same reason <see cref="DumpObjectFields"/> is. First real consumer:
+    /// <c>ArrayAnalyzer</c>, added 2026-09-11.</summary>
+    public const string DumpArrayElements = "dump.array-elements";
+
     // Trace-provided
     public const string TraceCpuSamples = "trace.cpu-samples";
     public const string TraceGcEvents = "trace.gc-events";

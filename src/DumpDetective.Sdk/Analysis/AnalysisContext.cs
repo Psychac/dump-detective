@@ -73,4 +73,8 @@ public sealed class AnalysisContext
     /// <summary>Tier 2 (<c>dump.object-fields</c>) — see <see cref="IDumpObjectFieldQuery"/>'s own
     /// remarks for why this lives here rather than a separate dump-only context type.</summary>
     public IDumpObjectFieldQuery? DumpObjectFields { get; init; }
+
+    /// <summary>Tier 2 (<c>dump.array-elements</c>) — see <see cref="IDumpArrayShapeQuery"/>'s own
+    /// remarks.</summary>
+    public IDumpArrayShapeQuery? DumpArrayShapes { get; init; }
 }

@@ -84,7 +84,9 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         // JitAnalyzerLegacyAdapter, not JitAnalyzer directly, since 2026-09-11 (Batch 5 of the Phase
         // 1 retyping) — see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("jit", "JIT Analysis", typeof(JitAnalyzerLegacyAdapter), typeof(JitFindingGenerator), typeof(JitTrendComparer), typeof(JitSectionBuilder), 410, ["runtime", "perf"]),
-        Module("db-connection", "DbConnection Analysis", typeof(DbConnectionAnalyzer), typeof(DbConnectionFindingGenerator), typeof(DbConnectionTrendComparer), typeof(DbConnectionSectionBuilder), 420, ["infra", "network"]),
+        // DbConnectionAnalyzerLegacyAdapter, not DbConnectionAnalyzer directly, since 2026-09-12 --
+        // see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("db-connection", "DbConnection Analysis", typeof(DbConnectionAnalyzerLegacyAdapter), typeof(DbConnectionFindingGenerator), typeof(DbConnectionTrendComparer), typeof(DbConnectionSectionBuilder), 420, ["infra", "network"]),
         // SqlTransactionAnalyzerLegacyAdapter/SqlCommandAnalyzerLegacyAdapter, not the analyzers
         // directly, since 2026-09-11 (Tier-2 wave batch 1) -- see
         // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.

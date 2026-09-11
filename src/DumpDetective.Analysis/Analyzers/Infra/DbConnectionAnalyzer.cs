@@ -1,10 +1,8 @@
-using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Pipeline;
-using DumpDetective.Analysis.Traversal;
-using DumpDetective.Core.Abstractions;
+using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
-
-using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 
 namespace DumpDetective.Analysis.Analyzers.Infra;
 
@@ -19,15 +17,44 @@ namespace DumpDetective.Analysis.Analyzers.Infra;
 /// Connection state mapping (System.Data.ConnectionState):
 ///   Closed=0, Open=1, Connecting=2, Executing=4, Fetching=8, Broken=16
 /// </summary>
-public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanParticipant, ITypedResourceCandidateSource, ITypedResourceInstanceSampler<DbConnectionSnapshot>, IRequiresReachableGraphIndex
+/// <remarks>
+/// Tier-2 batch (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md), sixth
+/// consumer of <c>TypedResourceCandidateStreamingLegacyAdapter</c> and first consumer of the new
+/// <c>heap.root-paths</c> capability. Unlike <c>WcfChannelAnalyzer</c>'s retyping (same batch, same
+/// day), an unreadable state field here counts as <see cref="DbConnectionDomainResult.UnknownStateConnections"/>
+/// rather than being left out of every bucket — a real, pre-existing difference between the two
+/// analyzers' own field-probe semantics, not a retyping inconsistency: <c>DbConnectionAnalyzer</c>'s
+/// pre-retyping <c>OnHeapEntry</c> always incremented one of its counters (<c>unknown++</c> in the
+/// <c>snap is null</c> branch), while WCF's left a "state field not found at all" instance out of
+/// every bucket entirely.
+///
+/// <see cref="GenerationTagToSbyte"/> maps <see cref="HeapGenerationTag"/> to the sbyte convention
+/// <see cref="DbConnectionSnapshot.Generation"/> already used (0/1/2 for Gen0-2, higher for
+/// LOH/POH/Frozen, -1 unknown) -- matching <c>GCRootAnalyzer</c>'s own <c>Loh</c> index-3
+/// convention. Only 0 and 2 are ever compared against downstream (Gen0Open/Gen2Open), so the exact
+/// values picked for LOH/POH/Frozen are cosmetic.
+///
+/// Noted but out of scope, confirmed by decompiling the real assembly rather than guessed: on the
+/// 3.35GB reference dump, every single candidate came back Unknown-state (0 Open/Closed/Broken/Other
+/// out of 503). This is a genuine, pre-existing limitation, not a retyping regression --
+/// <c>Microsoft.Data.SqlClient.SqlConnection</c> (v5.2.2, the dominant modern package) declares no
+/// <c>_connectionState</c>/<c>_state</c>/<c>m_connectionState</c> field of its own; its public
+/// <c>State</c> property delegates to a separate <c>_innerConnection</c> (<c>DbConnectionInternal</c>)
+/// object's own state, which <see cref="StateFieldNames"/> was never written to chase into. The
+/// pre-retyping analyzer had the identical gap (same field names, same direct-field read). Left
+/// unfixed here since correctly reading <c>DbConnectionInternal</c>'s real state field would need
+/// its own verification pass (field name stability across the SqlClient/Npgsql/MySql/Oracle provider
+/// matrix this analyzer targets), not a quick addition to this batch.
+/// </remarks>
+public sealed class DbConnectionAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "DB Connection Analysis";
     public string Category => "Infrastructure";
 
     // ADO.NET ConnectionState enum values
-    private const int StateOpen      = 1;
-    private const int StateClosed    = 0;
-    private const int StateBroken    = 16;
+    private const int StateOpen = 1;
+    private const int StateClosed = 0;
+    private const int StateBroken = 16;
 
     // Namespace prefixes that identify DB connection types
     private static readonly string[] ConnectionNamespacePrefixes =
@@ -43,253 +70,164 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
         "System.Data.SQLite.",
     ];
 
-    // Candidate type must end in "Connection" (covers SqlConnection, NpgsqlConnection, etc.)
-    public bool IsCandidateType(string typeName) =>
-        TypeNamePatternMatcher.HasPrefixAndSuffixOrContains(typeName, ConnectionNamespacePrefixes, "Connection", null);
-
     // Field names to try in order when reading connection state
     private static readonly string[] StateFieldNames = ["_connectionState", "_state", "m_connectionState"];
 
-    // Field names to try when reading connection string
-    private static readonly string[] ConnectionStringFieldNames = ["_connectionString"];
+    private const int MaxRootPathEnrichment = 20;
 
-    DbConnectionSnapshot? ITypedResourceInstanceSampler<DbConnectionSnapshot>.TrySample(ClrHeap heap, in HeapEntry entry, string typeName)
-    {
-        int stateVal = InstanceStateSampler<DbConnectionSnapshot>.TryReadIntField(heap, entry.Address, StateFieldNames);
-        if (stateVal < 0)
-            return null;
+    private static readonly RootPathSearchOptions RootPathOptions = new(
+        MaxCandidateNodes: 5_000, MaxCandidateDepth: 8, MaxRootExpansionDepth: 12, LargeFanoutThreshold: 100);
 
-        string stateLabel = stateVal == StateOpen ? "Open" : stateVal == StateClosed ? "Closed" : stateVal == StateBroken ? "Broken" : "Other";
+    public AnalyzerDomainResult? LastResult { get; private set; }
 
-        // Try to read anonymised connection string for server/pool identification
-        string? anonymisedConnStr = TryReadAnonymisedConnectionString(heap, entry.Address);
+    // Candidate type must end in "Connection" (covers SqlConnection, NpgsqlConnection, etc.)
+    internal static bool IsCandidateType(string typeName) =>
+        TypeNamePatternMatcher.HasPrefixAndSuffixOrContains(typeName, ConnectionNamespacePrefixes, "Connection", null);
 
-        return new DbConnectionSnapshot(typeName, entry.Address, stateLabel, stateVal, anonymisedConnStr, entry.Generation);
-    }
-
-    private static string? TryReadAnonymisedConnectionString(ClrHeap heap, ulong address)
-    {
-        try
-        {
-            var obj = heap.GetObject(address);
-            if (!obj.IsValid || obj.Type == null)
-                return null;
-
-            // Try to read _connectionString field
-            var connStringField = obj.Type.GetFieldByName("_connectionString");
-            if (connStringField != null)
-            {
-                var connStringObj = connStringField.ReadObject(address, interior: false);
-                if (connStringObj.IsValid && connStringObj.AsString() is string connStr)
-                {
-                    return ConnectionStringAnonymiser.Anonymise(connStr);
-                }
-            }
-
-            return null;
-        }
-        catch
-        {
-            // Silently ignore errors reading connection strings
-            return null;
-        }
-    }
-
-    // Instance accumulator state for the IHeapIndexScanParticipant path. Populated by
-    // BeforeHeapIndexScan (called by the pipeline dispatcher) and mutated per-entry by
-    // OnHeapEntry; consumed by AnalyzeAsync once the shared index scan has completed.
-    private ClrHeap? _heap;
-    private IHeapAnalysisCache? _cache;
-    private Dictionary<ulong, (string TypeName, long Count, ulong Bytes)>? _candidateMts;
-    private Dictionary<ulong, (string Name, int Total, int Open, int Closed, int Broken, int Other, int Unknown, int Gen2Open, int Gen0Open, ulong Bytes)>? _typeStats;
-    private InstanceStateSampler<DbConnectionSnapshot>? _sampler;
-
-    /// <summary>
-    /// Resolves candidate connection-type MethodTables and pre-seeds per-type counters from
-    /// TypeAggregates, exactly mirroring the historical single-shot "Step 1 + pre-seed" logic.
-    /// </summary>
-    public void BeforeHeapIndexScan(AnalysisContext context)
-    {
-        ClrHeap heap = context.Heap;
-        _heap = heap;
-        _cache = context.Cache;
-
-        Dictionary<ulong, (string TypeName, long Count, ulong Bytes)> candidateMts =
-            TypedResourceScanDriver.DiscoverCandidates(this, heap, context.Cache);
-        _candidateMts = candidateMts;
-
-        var typeStats = new Dictionary<ulong, (string Name, int Total, int Open, int Closed, int Broken, int Other, int Unknown, int Gen2Open, int Gen0Open, ulong Bytes)>(candidateMts.Count);
-        foreach (KeyValuePair<ulong, (string TypeName, long Count, ulong Bytes)> kv in candidateMts)
-        {
-            // Pre-seed from TypeAggregates when available (no heap access needed for counts)
-            int total = (int)Math.Min(kv.Value.Count, int.MaxValue);
-            typeStats[kv.Key] = (kv.Value.TypeName, total, 0, 0, 0, 0, 0, 0, 0, kv.Value.Bytes);
-        }
-
-        _typeStats = typeStats;
-        _sampler = TypedResourceScanDriver.CreateSampler(this);
-    }
-
-    /// <summary>
-    /// Called once per disk-backed index entry, in address order, during the shared heap-index
-    /// scan pass. Mirrors the historical fast-path loop body, operating on instance fields.
-    /// Explicit interface implementation because <see cref="HeapEntry"/> is internal and this
-    /// class is public — an implicit implementation would leak the internal type as public API.
-    /// </summary>
-    void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => OnHeapEntry(in entry);
-
-    IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() =>
-        new DbConnectionAnalyzer();
-
-    // Merges per-type state-change counts (open/closed/other) and top open samples from
-    // disjoint-range workers. Total and Bytes come from TypeAggregates (pre-seeded identically
-    // on every worker by BeforeHeapIndexScan) and are not summed.
-    void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
-    {
-        var typeStats = _typeStats!;
-        var sampler = _sampler!;
-
-        foreach (IHeapIndexScanParticipant p in partials)
-        {
-            var other = (DbConnectionAnalyzer)p;
-            if (other._typeStats is null) continue;
-
-            foreach (var kvp in other._typeStats)
-            {
-                if (!typeStats.TryGetValue(kvp.Key, out var self))
-                {
-                    typeStats[kvp.Key] = kvp.Value;
-                    continue;
-                }
-
-                var o = kvp.Value;
-                typeStats[kvp.Key] = (self.Name, self.Total,
-                    self.Open + o.Open,
-                    self.Closed + o.Closed,
-                    self.Broken + o.Broken,
-                    self.Other + o.Other,
-                    self.Unknown + o.Unknown,
-                    self.Gen2Open + o.Gen2Open,
-                    self.Gen0Open + o.Gen0Open,
-                    self.Bytes);
-            }
-
-            if (other._sampler is not null)
-                sampler.MergeFrom(other._sampler);
-        }
-    }
-
-    private void OnHeapEntry(in HeapEntry entry)
-    {
-        var candidateMts = _candidateMts!;
-        var typeStats = _typeStats!;
-        var sampler = _sampler!;
-
-        if (!candidateMts.ContainsKey(entry.MethodTable)) return;
-        if (!typeStats.TryGetValue(entry.MethodTable, out var ts)) return;
-        string typeName = ts.Name;
-
-        DbConnectionSnapshot? snap = TypedResourceScanDriver.TryGetSample(this, _heap!, in entry, typeName);
-
-        // Tally state and generation
-        int open = ts.Open; int closed = ts.Closed; int broken = ts.Broken; int other = ts.Other; int unknown = ts.Unknown;
-        int gen2Open = ts.Gen2Open; int gen0Open = ts.Gen0Open;
-
-        if (snap is not null)
-        {
-            if (snap.StateValue == StateOpen)
-            {
-                open++;
-                // Track open connections by generation (Gen2 = long-lived/leaked, Gen0 = in-flight)
-                if (snap.Generation == 2)
-                    gen2Open++;
-                else if (snap.Generation == 0)
-                    gen0Open++;
-            }
-            else if (snap.StateValue == StateClosed) closed++;
-            else if (snap.StateValue == StateBroken) broken++;
-            else                                     other++;
-        }
-        else
-        {
-            // Field read failed; count as unknown state
-            unknown++;
-        }
-        typeStats[entry.MethodTable] = (typeName, ts.Total, open, closed, broken, other, unknown, gen2Open, gen0Open, ts.Bytes);
-
-        // Capture top-N open connections for the detail table
-        if (snap is not null && snap.StateValue == StateOpen)
-            sampler.AddTopSample(snap);
-    }
-
-    // Relies on the pipeline dispatcher having already called BeforeHeapIndexScan/OnHeapEntry
-    // for this context before AnalyzeAsync runs (see AnalysisPipeline.ExecuteAsync).
-    public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        return ValueTask.FromResult(BuildResult().Stamp(this));
+        IDumpObjectFieldQuery fields = context.DumpObjectFields
+            ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.DumpObjectFields}' capability.");
+        IHeapSegmentQuery segments = context.HeapSegments
+            ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.HeapSegments}' capability.");
+        IHeapRootPathQuery rootPaths = context.HeapRootPaths
+            ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.HeapRootPaths}' capability.");
+
+        LastResult = Analyze(fields, segments, context.HeapDominators, rootPaths, context.HeapObjects);
+        return ValueTask.CompletedTask;
     }
 
-    private DbConnectionDomainResult BuildResult()
+    private static DbConnectionDomainResult Analyze(
+        IDumpObjectFieldQuery fields, IHeapSegmentQuery segments, IHeapDominatorQuery? dominators, IHeapRootPathQuery rootPaths, IHeapObjectStream? candidates)
     {
-        if (_typeStats is null || _typeStats.Count == 0)
+        if (candidates is null)
+            return Empty();
+
+        var typeStats = new Dictionary<string, (int Total, int Open, int Closed, int Broken, int Other, int Unknown, int Gen2Open, int Gen0Open, ulong Bytes)>(StringComparer.Ordinal);
+        var topOpen = new List<DbConnectionSnapshot>();
+
+        foreach (HeapObjectRef candidate in candidates.EnumerateObjects())
+        {
+            int stateVal = TryReadState(fields, candidate.Address);
+
+            typeStats.TryGetValue(candidate.TypeDisplayName, out var ts);
+            int open = ts.Open, closed = ts.Closed, broken = ts.Broken, other = ts.Other, unknown = ts.Unknown;
+            int gen2Open = ts.Gen2Open, gen0Open = ts.Gen0Open;
+
+            if (stateVal < 0)
+            {
+                unknown++;
+            }
+            else if (stateVal == StateOpen)
+            {
+                open++;
+                // AnonymisedConnectionString/Generation are only ever observable on an Open
+                // snapshot (Closed/Broken/Other connections never surface a DbConnectionSnapshot
+                // at all) -- read here, not unconditionally for every readable candidate, unlike
+                // the pre-retyping analyzer's own TrySample (which computed both for every state,
+                // discarding the result for non-Open connections).
+                sbyte generation = GenerationTagToSbyte(segments.GetGeneration(candidate.Address));
+                if (generation == 2) gen2Open++;
+                else if (generation == 0) gen0Open++;
+
+                string? anonymisedConnStr = TryReadAnonymisedConnectionString(fields, candidate.Address);
+                topOpen.Add(new DbConnectionSnapshot(candidate.TypeDisplayName, candidate.Address, "Open", stateVal, anonymisedConnStr, generation));
+            }
+            else if (stateVal == StateClosed) closed++;
+            else if (stateVal == StateBroken) broken++;
+            else other++;
+
+            typeStats[candidate.TypeDisplayName] = (ts.Total + 1, open, closed, broken, other, unknown, gen2Open, gen0Open, ts.Bytes + candidate.Size);
+        }
+
+        if (typeStats.Count == 0)
             return Empty();
 
         int totalConnections = 0, totalOpen = 0, totalClosed = 0, totalBroken = 0, totalOther = 0, totalUnknown = 0;
         int totalGen2Open = 0, totalGen0Open = 0;
-        var byType = new List<DbConnectionTypeSummary>(_typeStats.Count);
-
-        foreach (var kv in _typeStats)
+        var byType = new List<DbConnectionTypeSummary>(typeStats.Count);
+        foreach (var kv in typeStats)
         {
             var ts = kv.Value;
-            byType.Add(new DbConnectionTypeSummary(ts.Name, ts.Total, ts.Open, ts.Closed, ts.Broken, ts.Other, ts.Unknown, ts.Bytes));
+            byType.Add(new DbConnectionTypeSummary(kv.Key, ts.Total, ts.Open, ts.Closed, ts.Broken, ts.Other, ts.Unknown, ts.Bytes));
             totalConnections += ts.Total;
-            totalOpen        += ts.Open;
-            totalClosed      += ts.Closed;
-            totalBroken      += ts.Broken;
-            totalOther       += ts.Other;
-            totalUnknown     += ts.Unknown;
-            totalGen2Open    += ts.Gen2Open;
-            totalGen0Open    += ts.Gen0Open;
+            totalOpen += ts.Open;
+            totalClosed += ts.Closed;
+            totalBroken += ts.Broken;
+            totalOther += ts.Other;
+            totalUnknown += ts.Unknown;
+            totalGen2Open += ts.Gen2Open;
+            totalGen0Open += ts.Gen0Open;
         }
 
         byType.Sort(static (a, b) => b.TotalCount.CompareTo(a.TotalCount));
 
-        IReadOnlyList<DbConnectionSnapshot> topOpenConnections = WithRetainedBytes(_sampler?.TopSamples ?? []);
-        topOpenConnections = WithRootPaths(topOpenConnections);
+        IReadOnlyList<DbConnectionSnapshot> topOpenConnections = WithRetainedBytes(topOpen, dominators);
+        topOpenConnections = WithRootPaths(topOpenConnections, rootPaths);
 
-        // Build top pools by server/database grouping
-        var topPools = BuildTopPools(topOpenConnections);
+        List<PoolSummary> topPools = BuildTopPools(topOpenConnections);
 
         return new DbConnectionDomainResult(
-            ConnectionsFound:    totalConnections > 0,
-            TotalConnections:    totalConnections,
-            OpenConnections:     totalOpen,
-            ClosedConnections:   totalClosed,
-            BrokenConnections:   totalBroken,
-            OtherConnections:    totalOther,
+            ConnectionsFound: totalConnections > 0,
+            TotalConnections: totalConnections,
+            OpenConnections: totalOpen,
+            ClosedConnections: totalClosed,
+            BrokenConnections: totalBroken,
+            OtherConnections: totalOther,
             UnknownStateConnections: totalUnknown,
             Gen2OpenConnections: totalGen2Open,
             Gen0OpenConnections: totalGen0Open,
-            ByType:              byType,
-            TopOpenConnections:  topOpenConnections,
-            TopPools:            topPools);
+            ByType: byType,
+            TopOpenConnections: topOpenConnections,
+            TopPools: topPools);
     }
+
+    private static int TryReadState(IDumpObjectFieldQuery fields, ulong address)
+    {
+        foreach (string fieldName in StateFieldNames)
+        {
+            if (fields.TryReadField(address, fieldName, out FieldValue value) && value.Kind == FieldValueKind.Int32)
+                return value.AsInt32();
+        }
+        return -1;
+    }
+
+    // _connectionString is a real string-typed field (unlike e.g. HttpObjectAnalyzer's Uri-typed
+    // fields), so TryReadField's own ClrElementType.String case already resolves it directly --
+    // no further TryGetStringValue chase needed. Same shape SqlConnectionPoolAnalyzer's pilot
+    // already established for _usersConnectionString.
+    private static string? TryReadAnonymisedConnectionString(IDumpObjectFieldQuery fields, ulong address)
+    {
+        if (fields.TryReadField(address, "_connectionString", out FieldValue value) && value.Kind == FieldValueKind.String)
+            return ConnectionStringAnonymiser.Anonymise(value.AsString());
+        return null;
+    }
+
+    private static sbyte GenerationTagToSbyte(HeapGenerationTag tag) => tag switch
+    {
+        HeapGenerationTag.Gen0 => 0,
+        HeapGenerationTag.Gen1 => 1,
+        HeapGenerationTag.Gen2 => 2,
+        HeapGenerationTag.Loh => 3,
+        HeapGenerationTag.Poh => 4,
+        HeapGenerationTag.Frozen => 5,
+        _ => -1,
+    };
 
     // §9 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): the biggest gap
     // found in that audit — DbConnectionSnapshot carried no size field of any kind. Applied to
     // the complete open-connection population (§9.32, D5) — no longer a capped list.
-    private IReadOnlyList<DbConnectionSnapshot> WithRetainedBytes(IReadOnlyList<DbConnectionSnapshot> snapshots)
+    private static IReadOnlyList<DbConnectionSnapshot> WithRetainedBytes(IReadOnlyList<DbConnectionSnapshot> snapshots, IHeapDominatorQuery? dominators)
     {
-        IDominatorTreeProvider? treeProvider = _cache?.TryGetDominatorTreeProvider();
-        if (treeProvider is null || snapshots.Count == 0)
+        if (dominators is null || snapshots.Count == 0)
             return snapshots;
 
         var result = new List<DbConnectionSnapshot>(snapshots.Count);
         foreach (DbConnectionSnapshot s in snapshots)
         {
-            result.Add(treeProvider.TryGetRetainedBytes(s.Address, out ulong retained)
+            result.Add(dominators.TryGetRetainedSize(s.Address, out ulong retained)
                 ? s with { RetainedBytes = retained }
                 : s);
         }
@@ -302,41 +240,20 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
     // leak. Scoped to Gen2 open connections (already the "likely leaked, not just in-flight"
     // subset per the existing generation split), ranked by retained bytes so the worst offenders
     // get a path first, and capped at MaxRootPathEnrichment total searches.
-    private const int MaxRootPathEnrichment = 20;
-
-    private static readonly RootPathSearchLimits RootPathLimits = new()
+    private static IReadOnlyList<DbConnectionSnapshot> WithRootPaths(IReadOnlyList<DbConnectionSnapshot> snapshots, IHeapRootPathQuery rootPaths)
     {
-        MaxCandidateNodes = 5_000,
-        MaxCandidateDepth = 8,
-        MaxRootExpansionDepth = 12,
-        LargeFanoutThreshold = 100,
-    };
-
-    private IReadOnlyList<DbConnectionSnapshot> WithRootPaths(IReadOnlyList<DbConnectionSnapshot> snapshots)
-    {
-        if (_cache is null || _heap is null || snapshots.Count == 0)
+        if (snapshots.Count == 0)
             return snapshots;
 
         List<DbConnectionSnapshot> enrichmentTargets = SelectForRootPathEnrichment(snapshots, MaxRootPathEnrichment);
         if (enrichmentTargets.Count == 0)
             return snapshots;
 
-        IReadOnlyList<(string RootKind, ulong Address)> validRoots = _cache.GetOrBuildValidRoots(_heap);
-        if (validRoots.Count == 0)
-            return snapshots;
-
-        var provider = new ReferenceGraph(_heap);
-        var finder = new RootPathFinder(
-            _heap, provider, RootPathLimits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType,
-            static _ => false, _cache.TryGetReverseIndexProvider(), _cache);
-
         var enrichedByAddress = new Dictionary<ulong, DbConnectionSnapshot>(enrichmentTargets.Count);
         foreach (DbConnectionSnapshot target in enrichmentTargets)
         {
-            bool found = finder.TryFindAnyRootPath(
-                target.Address, validRoots, out string? rootKind, out List<ulong>? addresses, out bool truncated, out _, out _);
-            string? formattedPath = found ? RootPathSearchSupport.FormatPath(_heap, rootKind!, addresses, _cache) : null;
-            enrichedByAddress[target.Address] = target with { RootPath = formattedPath, RootPathSearchTruncated = truncated };
+            bool found = rootPaths.TryFindRootPath(target.Address, RootPathOptions, out string? formattedPath, out bool truncated);
+            enrichedByAddress[target.Address] = target with { RootPath = found ? formattedPath : null, RootPathSearchTruncated = truncated };
         }
 
         var result = new List<DbConnectionSnapshot>(snapshots.Count);
@@ -389,4 +306,6 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IParallelHeapIndexScanPart
 
     private static DbConnectionDomainResult Empty() =>
         new(false, 0, 0, 0, 0, 0, 0, 0, 0, [], [], []);
+
+    public void Dispose() { }
 }

@@ -9,6 +9,7 @@ using DumpDetective.Core.Abstractions;
 
 using Xunit;
 using Xunit.Abstractions;
+using DumpDetective.Analysis.Analyzers.Leaks;
 
 namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 

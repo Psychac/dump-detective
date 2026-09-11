@@ -1,0 +1,1949 @@
+﻿using DumpDetective.Analysis.Analyzers.Leaks;
+using DumpDetective.Analysis.Cache;
+using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Traversal;
+using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Enums;
+using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
+
+using Microsoft.Diagnostics.Runtime;
+using Microsoft.Extensions.Logging;
+
+using System.Collections.Concurrent;
+
+namespace DumpDetective.Analysis.Analyzers.Types
+{
+    // TODO: Need to check why root stack frames are not showing in deep mode.
+    // Suspect a bug in ReferenceChainAnalyzer's root description logic where it doesn't populate descriptions for certain stack roots.
+    // This would impact the root hints shown for wasteful collections that are rooted in stacks.
+    // Also, need to refactor this class. It's currently doing too much (identification, waste analysis, root description) and could be split into multiple focused classes or methods for clarity and maintainability.
+    // Need to revisit the logic once again.
+    public sealed class CollectionAnalyzer : IAnalyzer, IParallelHeapIndexScanParticipant, IRequiresReachableGraphIndex
+    {
+        // Cache of resolved interesting instance fields per MethodTable to avoid
+        // repeatedly enumerating ClrType.Fields for every object of the same type.
+        private readonly struct FieldLayout
+        {
+            public readonly ClrInstanceField? SizeField;
+            public readonly ClrInstanceField? CountField;
+            public readonly ClrInstanceField? ItemsField;
+            public readonly ClrInstanceField? EntriesField;
+            public readonly ClrInstanceField? ArrayField;
+            public readonly ClrInstanceField? HeadField;
+            public readonly ClrInstanceField? TailField;
+            public readonly ClrInstanceField? AnyIntField;
+            public readonly ClrInstanceField? FreeCountField;
+            public readonly ClrType? ComponentType;
+            public readonly int ComponentStaticSize;
+            public readonly ulong ComputedElementSize;
+
+            public FieldLayout(ClrInstanceField? sizeField, ClrInstanceField? countField, ClrInstanceField? itemsField, ClrInstanceField? entriesField, ClrInstanceField? arrayField, ClrInstanceField? headField, ClrInstanceField? tailField, ClrInstanceField? anyIntField, ClrInstanceField? freeCountField, ClrType? componentType, int componentStaticSize, ulong computedElementSize)
+            {
+                SizeField = sizeField;
+                CountField = countField;
+                ItemsField = itemsField;
+                EntriesField = entriesField;
+                ArrayField = arrayField;
+                HeadField = headField;
+                TailField = tailField;
+                AnyIntField = anyIntField;
+                FreeCountField = freeCountField;
+                ComponentType = componentType;
+                ComponentStaticSize = componentStaticSize;
+                ComputedElementSize = computedElementSize;
+            }
+        }
+        private CollectionAnalysisOptions _options;
+        private ReferenceChainOptions? _refChainOptions;
+        private readonly ILogger<CollectionAnalyzer>? _logger;
+
+        // Session-scoped field layout cache: initialized per analysis session (BeforeHeapIndexScan)
+        // to prevent stale ClrInstanceField references and cross-dump MethodTable collisions.
+        private ConcurrentDictionary<ulong, FieldLayout>? _fieldLayoutCache;
+
+        // Instance accumulator state for the IHeapIndexScanParticipant path. Populated by
+        // BeforeHeapIndexScan (called by the pipeline dispatcher) and mutated per-entry by
+        // OnHeapEntry; consumed by BuildStatsFromParticipantState once the shared index scan
+        // has completed. Mirrors the locals of the old AnalyzeCollectionsSequentialDisk.
+        private static readonly int CollectionKindCount = Enum.GetValues(typeof(CollectionKind)).Length;
+
+        private ClrHeap? _heap;
+        private IHeapAnalysisCache? _cache;
+        private CollectionStatistics? _stats;
+        private List<WastefulCollection>? _wasteful;
+        private Dictionary<ulong, CollectionKind>? _methodTableKinds;
+        private Dictionary<CollectionKind, int[]>? _generationCounts;
+        private ObjectScanCounter? _scanCounter;
+        private IProgress<AnalyzerProgressReport>? _progress;
+        private int _topCapacity;
+        private int _wastefulCount;
+        private ulong _totalWasted;
+        private int[]? _wasteCountByKind;
+        private ulong[]? _wasteBytesByKind;
+        // ElementType is free-form (unbounded cardinality), unlike CollectionKind's small fixed
+        // enum, so this can't use the array-indexed accumulator pattern above — but it's only
+        // ever touched from RecordWasteful, i.e. bounded by wastefulCount, not total heap objects.
+        private Dictionary<string, int>? _wasteCountByElementType;
+        private Dictionary<string, ulong>? _wasteBytesByElementType;
+        // Set by OnHeapIndexScanCompleted — the single source of truth for whether the
+        // participant-accumulated state above is trustworthy. Avoids re-deriving "did the
+        // shared scan run" from a second cache.TryGetHeapIndex call in AnalyzeCollections.
+        private bool _participantScanSucceeded;
+
+        public string Name => "Collection Analysis";
+        public string Category => "Memory";
+        public IReadOnlyCollection<string> Tags => ["collections"];
+        public int Order => 240;
+
+        public CollectionAnalyzer()
+            : this(new CollectionAnalysisOptions(), logger: null)
+        {
+        }
+
+        /// <summary>Constructor for DI/factory use — options are read from the analysis context at run time.</summary>
+        public CollectionAnalyzer(ILogger<CollectionAnalyzer>? logger)
+            : this(new CollectionAnalysisOptions(), logger)
+        {
+        }
+
+        public CollectionAnalyzer(CollectionAnalysisOptions options, ILogger<CollectionAnalyzer>? logger = null)
+        {
+            _options = options ?? new CollectionAnalysisOptions();
+            _logger = logger;
+        }
+
+        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _options = context.AnalysisOptions.Collection;
+            _refChainOptions = context.AnalysisOptions.ReferenceChain;
+            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, cancellationToken).Stamp(this));
+        }
+
+        public AnalyzerDomainResult Analyze(ClrHeap heap)
+        {
+            return Analyze(heap, cache: null, progress: null, cancellationToken: CancellationToken.None);
+        }
+
+        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache? cache, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
+        {
+            var collectionStats = AnalyzeCollections(heap, cache, progress, cancellationToken);
+            int topToShow = Math.Min(_options.TopWastefulCollectionsToShow, collectionStats.WastefulCollections.Count);
+            var topSnapshots = new List<WastefulCollectionSnapshot>(topToShow);
+            // §9 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): a natural
+            // additional column now that it's cheap to compute exactly — only ever looked up for
+            // the already-capped top-N shown collections, never the full wasteful population.
+            IDominatorTreeProvider? collectionTreeProvider = cache?.TryGetDominatorTreeProvider();
+            for (int i = 0; i < topToShow; i++)
+            {
+                WastefulCollection w = collectionStats.WastefulCollections[i];
+                ulong? retainedBytes = collectionTreeProvider is not null
+                    && collectionTreeProvider.TryGetRetainedBytes(w.Address, out ulong exactRetained)
+                        ? exactRetained
+                        : null;
+                topSnapshots.Add(new WastefulCollectionSnapshot(
+                    w.Type,
+                    (CollectionKind)w.Kind,
+                    w.Count,
+                    w.Capacity,
+                    w.FillRate,
+                    w.WastedMemory,
+                    w.Address,
+                    w.Head,
+                    w.Tail,
+                    w.LargestContiguousFreeSegmentBytes,
+                    w.FreeSegmentCount,
+                    w.ElementSize,
+                    w.ElementType,
+                    w.SizeEstimateConfidence,
+                    w.DetectionMethod,
+                    w.RootDescription,
+                    retainedBytes,
+                    BuildResizeRecommendation(w.Kind, w.Count, w.Capacity, w.FillRate),
+                    w.OwnerTypeHint));
+            }
+
+            var domainResult = new CollectionDomainResult(
+                collectionStats.TotalCollections,
+                collectionStats.Dictionaries,
+                collectionStats.Lists,
+                collectionStats.ArrayLists,
+                collectionStats.Stacks,
+                collectionStats.SortedLists,
+                collectionStats.SortedSets,
+                collectionStats.HashSets,
+                collectionStats.Queues,
+                collectionStats.TotalWastedMemory,
+                collectionStats.WastefulCollectionCount,
+                topSnapshots,
+                collectionStats.WasteCountsByKind,
+                collectionStats.WasteBytesByKind,
+                collectionStats.GenerationBreakdown,
+                collectionStats.ImmutableArrays,
+                collectionStats.ImmutableArrayBuilders,
+                collectionStats.WasteCountsByElementType,
+                collectionStats.WasteBytesByElementType);
+
+            if (collectionStats.TotalCollections == 0)
+            {
+                return domainResult;
+            }
+
+            return domainResult;
+        }
+
+        private CollectionStatistics AnalyzeCollections(ClrHeap heap, IHeapAnalysisCache? cache, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
+        {
+            if (_participantScanSucceeded)
+                return BuildStatsFromParticipantState(heap, cache);
+
+            // No cache, or shared scan unavailable/failed: parallel over GC segments
+            return RunParallelCollectionAnalysis(heap, inMemoryEntries: null, progress: progress, cancellationToken: cancellationToken, cache: cache);
+        }
+
+        /// <summary>
+        /// Resets the accumulator state for the shared heap-index scan pass, mirroring the setup
+        /// AnalyzeCollectionsSequentialDisk used to do before its loop.
+        /// </summary>
+        public void BeforeHeapIndexScan(AnalysisContext context)
+        {
+            _options = context.AnalysisOptions.Collection;
+            _heap = context.Heap;
+            _cache = context.Cache;
+            _progress = context.Progress;
+
+            _fieldLayoutCache = new ConcurrentDictionary<ulong, FieldLayout>(concurrencyLevel: 4, capacity: 256);
+            _stats = new CollectionStatistics();
+            _topCapacity = Math.Max(1, Math.Max(_options.TopWastefulCollectionsToShow, _options.PathAnalysisTopN));
+            _wasteful = new List<WastefulCollection>(_topCapacity);
+            _methodTableKinds = new Dictionary<ulong, CollectionKind>(capacity: 64);
+
+            _generationCounts = new Dictionary<CollectionKind, int[]>(capacity: 16);
+            foreach (CollectionKind k in Enum.GetValues(typeof(CollectionKind)))
+                _generationCounts[k] = new int[4];
+
+            _scanCounter = new ObjectScanCounter("scanning collections", _progress, total: TryGetTotalObjectCountHint(_cache));
+            _wastefulCount = 0;
+            _totalWasted = 0;
+            _wasteCountByKind = new int[CollectionKindCount];
+            _wasteBytesByKind = new ulong[CollectionKindCount];
+            _wasteCountByElementType = new Dictionary<string, int>();
+            _wasteBytesByElementType = new Dictionary<string, ulong>();
+        }
+
+        /// <summary>
+        /// Called once per disk-backed index entry, in address order, during the shared heap-index
+        /// scan pass. Mirrors the old AnalyzeCollectionsSequentialDisk loop body, operating on
+        /// instance fields. Per-entry cancellation checks and heap-access locking are dropped: the
+        /// dispatcher already throws on cancellation per entry, and the shared pass is single-threaded.
+        /// </summary>
+        void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => OnHeapEntry(in entry);
+
+        public void OnHeapIndexScanCompleted(bool succeeded) => _participantScanSucceeded = succeeded;
+
+        IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() =>
+            new CollectionAnalyzer(_options, _logger);
+
+        // Each worker processed a disjoint address range, so merging is purely additive:
+        // sum the per-kind counters, combine + re-trim the wasteful lists, union the MT-kind
+        // cache (same key always maps to the same value), and sum generation arrays.
+        void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
+        {
+            CollectionStatistics stats = _stats!;
+            List<WastefulCollection> wasteful = _wasteful!;
+
+            foreach (IHeapIndexScanParticipant p in partials)
+            {
+                var other = (CollectionAnalyzer)p;
+                CollectionStatistics os = other._stats!;
+
+                stats.TotalCollections += os.TotalCollections;
+                stats.Dictionaries += os.Dictionaries;
+                stats.Lists += os.Lists;
+                stats.ArrayLists += os.ArrayLists;
+                stats.Stacks += os.Stacks;
+                stats.SortedLists += os.SortedLists;
+                stats.SortedSets += os.SortedSets;
+                stats.HashSets += os.HashSets;
+                stats.Queues += os.Queues;
+                stats.ImmutableArrays += os.ImmutableArrays;
+                stats.ImmutableArrayBuilders += os.ImmutableArrayBuilders;
+
+                _wastefulCount += other._wastefulCount;
+                _totalWasted += other._totalWasted;
+
+                for (int i = 0; i < CollectionKindCount; i++)
+                {
+                    _wasteCountByKind![i] += other._wasteCountByKind![i];
+                    _wasteBytesByKind![i] += other._wasteBytesByKind![i];
+                }
+
+                MergeElementTypeWaste(_wasteCountByElementType!, _wasteBytesByElementType!, other._wasteCountByElementType!, other._wasteBytesByElementType!);
+
+                // Merge wasteful collections: drain other's list via AddToTopWasteful so the
+                // combined set is trimmed to _topCapacity as we go — avoids allocating a
+                // temporary merged list just to re-trim.
+                foreach (WastefulCollection w in other._wasteful!)
+                    AddToTopWasteful(wasteful, w, _topCapacity);
+
+                // MT-kind cache: same key always resolves to the same CollectionKind.
+                foreach (var kvp in other._methodTableKinds!)
+                {
+                    if (!_methodTableKinds!.ContainsKey(kvp.Key))
+                        _methodTableKinds[kvp.Key] = kvp.Value;
+                }
+
+                // Generation counts: sum per kind per generation bucket.
+                foreach (var kvp in other._generationCounts!)
+                {
+                    if (_generationCounts!.TryGetValue(kvp.Key, out int[]? dest))
+                    {
+                        int[] src = kvp.Value;
+                        for (int i = 0; i < dest.Length && i < src.Length; i++)
+                            dest[i] += src[i];
+                    }
+                    else
+                    {
+                        _generationCounts[kvp.Key] = (int[])kvp.Value.Clone();
+                    }
+                }
+            }
+        }
+
+        // Below this ratio the collection is essentially empty relative to its capacity, which
+        // usually means the caller over-estimated the initial size rather than the collection
+        // having simply shrunk after churn — right-sizing the constructor call fixes the cause,
+        // where TrimExcess only fixes the current symptom.
+        private const double SparseFillRateThreshold = 10.0;
+
+        /// <summary>
+        /// Always a concrete capacity fix for the given collection, never a reachability claim —
+        /// <see cref="WastefulCollection.RootDescription"/> only reflects a budget-limited search
+        /// (see <see cref="PopulateRootDescriptions"/>), not proof the collection is unreachable.
+        /// </summary>
+        internal static string BuildResizeRecommendation(CollectionKind kind, int count, int capacity, double fillRate)
+        {
+            string trimApi = kind switch
+            {
+                CollectionKind.ArrayList => "TrimToSize()",
+                CollectionKind.ImmutableArrayBuilder => "ToImmutable()",
+                _ => "TrimExcess()",
+            };
+
+            if (kind == CollectionKind.ImmutableArrayBuilder)
+                return $"Call Builder.{trimApi} once population is complete to release the over-allocated backing array.";
+
+            if (fillRate < SparseFillRateThreshold && capacity > 0)
+                return $"Construct with an initial capacity near {count:N0} instead of the observed {capacity:N0} — this collection is populated far below its allocated capacity.";
+
+            return $"Call {trimApi} once population is complete to release unused capacity.";
+        }
+
+        private static Dictionary<CollectionKind, int> BuildKindDictionary(int[] countsByKind)
+        {
+            var result = new Dictionary<CollectionKind, int>(countsByKind.Length);
+            for (int i = 0; i < countsByKind.Length; i++)
+            {
+                if (countsByKind[i] > 0)
+                    result[(CollectionKind)i] = countsByKind[i];
+            }
+            return result;
+        }
+
+        private static Dictionary<CollectionKind, ulong> BuildKindDictionary(ulong[] bytesByKind)
+        {
+            var result = new Dictionary<CollectionKind, ulong>(bytesByKind.Length);
+            for (int i = 0; i < bytesByKind.Length; i++)
+            {
+                if (bytesByKind[i] > 0)
+                    result[(CollectionKind)i] = bytesByKind[i];
+            }
+            return result;
+        }
+
+        private void RecordWasteful(List<WastefulCollection> wasteful, WastefulCollection waste, CollectionKind kind)
+        {
+            waste.Kind = kind;
+            _wastefulCount++;
+            _totalWasted += waste.WastedMemory;
+            _wasteCountByKind![(int)kind]++;
+            _wasteBytesByKind![(int)kind] += waste.WastedMemory;
+            AccumulateElementTypeWaste(_wasteCountByElementType!, _wasteBytesByElementType!, waste.ElementType, waste.WastedMemory);
+            AddToTopWasteful(wasteful, waste, _topCapacity);
+        }
+
+        // "" is WastefulCollection.ElementType's default when the component type couldn't be
+        // resolved (see AnalyzeList/AnalyzeHashSet/etc.) — bucket it under one readable label
+        // instead of a blank dictionary key/report row.
+        private const string UnknownElementTypeLabel = "(unknown)";
+
+        internal static void AccumulateElementTypeWaste(Dictionary<string, int> counts, Dictionary<string, ulong> bytes, string elementType, ulong wastedMemory)
+        {
+            string key = string.IsNullOrEmpty(elementType) ? UnknownElementTypeLabel : elementType;
+            counts.TryGetValue(key, out int count);
+            counts[key] = count + 1;
+            bytes.TryGetValue(key, out ulong total);
+            bytes[key] = total + wastedMemory;
+        }
+
+        private static void MergeElementTypeWaste(Dictionary<string, int> destCounts, Dictionary<string, ulong> destBytes, Dictionary<string, int> srcCounts, Dictionary<string, ulong> srcBytes)
+        {
+            foreach (var kv in srcCounts)
+            {
+                destCounts.TryGetValue(kv.Key, out int count);
+                destCounts[kv.Key] = count + kv.Value;
+            }
+            foreach (var kv in srcBytes)
+            {
+                destBytes.TryGetValue(kv.Key, out ulong total);
+                destBytes[kv.Key] = total + kv.Value;
+            }
+        }
+
+        private void OnHeapEntry(in HeapEntry entry)
+        {
+            ClrHeap heap = _heap!;
+            CollectionStatistics stats = _stats!;
+            List<WastefulCollection> wasteful = _wasteful!;
+            Dictionary<ulong, CollectionKind> methodTableKinds = _methodTableKinds!;
+            Dictionary<CollectionKind, int[]> generationCounts = _generationCounts!;
+
+            if (_scanCounter!.ShouldReport())
+                _scanCounter.Report(wasteful.Count > 0 ? $"{wasteful.Count} wasteful" : null);
+
+            ulong objectAddress = entry.Address;
+            if (objectAddress == 0)
+                return;
+
+            CollectionKind kind = ResolveCollectionKind(heap, entry, methodTableKinds);
+
+            // SortedSet<T> is a red-black tree, not array-backed; exclude from waste analysis to avoid misleading fill rates
+            if (kind == CollectionKind.SortedSet)
+                return;
+
+            if (kind == CollectionKind.Dictionary)
+            {
+                stats.TotalCollections++;
+                stats.Dictionaries++;
+                int gen = entry.Generation;
+                if (gen >= 0)
+                {
+                    int idx = gen >= 3 ? 3 : gen;
+                    generationCounts[CollectionKind.Dictionary][idx]++;
+                }
+                var waste = AnalyzeDictionary(heap, objectAddress);
+                if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                {
+                    RecordWasteful(wasteful, waste, CollectionKind.Dictionary);
+                }
+            }
+            else if (kind == CollectionKind.List)
+            {
+                stats.TotalCollections++;
+                stats.Lists++;
+                int gen = entry.Generation;
+                if (gen >= 0)
+                {
+                    int idx = gen >= 3 ? 3 : gen;
+                    generationCounts[CollectionKind.List][idx]++;
+                }
+                var waste = AnalyzeList(heap, objectAddress);
+                if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                {
+                    RecordWasteful(wasteful, waste, CollectionKind.List);
+                }
+            }
+            else if (kind == CollectionKind.HashSet)
+            {
+                stats.TotalCollections++;
+                stats.HashSets++;
+                int gen = entry.Generation;
+                if (gen >= 0)
+                {
+                    int idx = gen >= 3 ? 3 : gen;
+                    generationCounts[CollectionKind.HashSet][idx]++;
+                }
+                var waste = AnalyzeHashSet(heap, objectAddress);
+                if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                {
+                    RecordWasteful(wasteful, waste, CollectionKind.HashSet);
+                }
+            }
+            else if (kind == CollectionKind.Queue)
+            {
+                stats.TotalCollections++;
+                stats.Queues++;
+                int gen = entry.Generation;
+                if (gen >= 0)
+                {
+                    int idx = gen >= 3 ? 3 : gen;
+                    generationCounts[CollectionKind.Queue][idx]++;
+                }
+                var qWaste = AnalyzeQueue(heap, objectAddress);
+                if (qWaste != null && qWaste.WastedMemory > _options.WasteThresholdBytes)
+                {
+                    RecordWasteful(wasteful, qWaste, CollectionKind.Queue);
+                }
+            }
+            else if (kind == CollectionKind.ArrayList)
+            {
+                stats.TotalCollections++;
+                stats.ArrayLists++;
+                int gen = entry.Generation;
+                if (gen >= 0)
+                {
+                    int idx = gen >= 3 ? 3 : gen;
+                    generationCounts[CollectionKind.ArrayList][idx]++;
+                }
+                var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
+                if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                {
+                    RecordWasteful(wasteful, waste, kind);
+                }
+            }
+            else if (kind == CollectionKind.Stack)
+            {
+                stats.TotalCollections++;
+                stats.Stacks++;
+                int gen = entry.Generation;
+                if (gen >= 0)
+                {
+                    int idx = gen >= 3 ? 3 : gen;
+                    generationCounts[CollectionKind.Stack][idx]++;
+                }
+                var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
+                if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                {
+                    RecordWasteful(wasteful, waste, kind);
+                }
+            }
+            else if (kind == CollectionKind.SortedList)
+            {
+                stats.TotalCollections++;
+                stats.SortedLists++;
+                int gen = entry.Generation;
+                if (gen >= 0)
+                {
+                    int idx = gen >= 3 ? 3 : gen;
+                    generationCounts[CollectionKind.SortedList][idx]++;
+                }
+                var waste = AnalyzeArrayBackedCollection(heap, objectAddress, kind);
+                if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                {
+                    RecordWasteful(wasteful, waste, kind);
+                }
+            }
+            else if (kind == CollectionKind.ImmutableArray)
+            {
+                // Boxed ImmutableArray<T>: its backing array is exactly Length elements, so there
+                // is no unused capacity to report — inventory only.
+                stats.TotalCollections++;
+                stats.ImmutableArrays++;
+                CountGeneration(generationCounts, CollectionKind.ImmutableArray, entry.Generation);
+            }
+            else if (kind == CollectionKind.ImmutableArrayBuilder)
+            {
+                stats.TotalCollections++;
+                stats.ImmutableArrayBuilders++;
+                CountGeneration(generationCounts, CollectionKind.ImmutableArrayBuilder, entry.Generation);
+
+                // Same shape as List<T>: an int count plus an over-allocated backing array,
+                // so the List probe resolves _count/_elements without a dedicated reader.
+                var waste = AnalyzeList(heap, objectAddress);
+                if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                {
+                    RecordWasteful(wasteful, waste, CollectionKind.ImmutableArrayBuilder);
+                }
+            }
+        }
+
+        private static void CountGeneration(Dictionary<CollectionKind, int[]> generationCounts, CollectionKind kind, int generation)
+        {
+            if (generation < 0)
+                return;
+
+            generationCounts[kind][generation >= 3 ? 3 : generation]++;
+        }
+
+        /// <summary>
+        /// Reads back the accumulator state populated by BeforeHeapIndexScan/OnHeapEntry once the
+        /// shared dispatcher pass has completed. Replaces the tail of the old
+        /// AnalyzeCollectionsSequentialDisk (everything after its loop).
+        /// </summary>
+        private CollectionStatistics BuildStatsFromParticipantState(ClrHeap heap, IHeapAnalysisCache? cache)
+        {
+            CollectionStatistics stats = _stats!;
+            List<WastefulCollection> wasteful = _wasteful!;
+
+            _scanCounter!.Complete(wasteful.Count > 0 ? $"{wasteful.Count} wasteful" : null);
+            _progress?.Report(new(_scanCounter.Scanned, "aggregating results"));
+
+            wasteful.Sort(static (a, b) => b.WastedMemory.CompareTo(a.WastedMemory));
+
+            stats.WastefulCollections = wasteful;
+            stats.WastefulCollectionCount = _wastefulCount;
+            stats.TotalWastedMemory = _totalWasted;
+
+            // populate generation breakdown for disk path
+            try
+            {
+                var genList = new List<CollectionGenerationStats>();
+                foreach (var kv in _generationCounts!)
+                {
+                    var a = kv.Value;
+                    genList.Add(new CollectionGenerationStats(kv.Key, a[0], a[1], a[2], a[3]));
+                }
+                stats.GenerationBreakdown = genList;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "Error computing generation breakdown (disk path)");
+            }
+
+            // Per-kind totals come from the scan accumulators, not from the wasteful list — that
+            // list is trimmed to _topCapacity and would undercount every kind.
+            stats.WasteCountsByKind = BuildKindDictionary(_wasteCountByKind!);
+            stats.WasteBytesByKind = BuildKindDictionary(_wasteBytesByKind!);
+            stats.WasteCountsByElementType = _wasteCountByElementType!;
+            stats.WasteBytesByElementType = _wasteBytesByElementType!;
+
+            // Post-scan root descriptions for top-N — never per-item during the scan.
+            PopulateRootDescriptions(heap, cache, stats.WastefulCollections, _options, _refChainOptions);
+
+            return stats;
+        }
+
+        // Unified parallel analysis — drives either a flat in-memory HeapEntry[] (cache path)
+        // or a per-segment ClrObject walk (no-cache path) using the same concurrent accumulation logic.
+        private CollectionStatistics RunParallelCollectionAnalysis(ClrHeap heap, HeapEntry[]? inMemoryEntries, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken, IHeapAnalysisCache? cache = null)
+        {
+            // Per-kind generation counts: index 0=Gen0,1=Gen1,2=Gen2,3=LOH/large
+            var generationCounts = new ConcurrentDictionary<CollectionKind, int[]>(concurrencyLevel: Math.Max(1, _options.MaxDegreeOfParallelism), capacity: 16);
+            foreach (CollectionKind k in Enum.GetValues(typeof(CollectionKind)))
+                generationCounts.TryAdd(k, new int[4]);
+
+            var methodTableKinds = new ConcurrentDictionary<ulong, CollectionKind>(
+                concurrencyLevel: Math.Max(1, _options.MaxDegreeOfParallelism), capacity: 64);
+            int topCapacity = Math.Max(1, Math.Max(_options.TopWastefulCollectionsToShow, _options.PathAnalysisTopN));
+            int kindCount = CollectionKindCount;
+            var localWaste = new ThreadLocal<LocalWasteAccumulator>(() => new LocalWasteAccumulator(topCapacity, kindCount), trackAllValues: true);
+            int totalCollections = 0, dictionaries = 0, lists = 0, arrayLists = 0, stacks = 0, sortedLists = 0, sortedSets = 0, hashSets = 0, queues = 0;
+            int immutableArrays = 0, immutableArrayBuilders = 0;
+            int skippedDictionaries = 0, skippedHashSets = 0, skippedQueues = 0, skippedLists = 0, skippedArrayLists = 0, skippedStacks = 0, skippedSortedLists = 0, skippedSortedSets = 0, skippedImmutableArrayBuilders = 0;
+            int wastefulCount = 0;
+            ulong totalWastedMemory = 0;
+            int wasteUnder1Kb = 0, waste1To10Kb = 0, waste10To100Kb = 0, waste100KbTo1Mb = 0, wasteAtLeast1Mb = 0;
+            int[] wasteCountByKind = new int[kindCount];
+            ulong[] wasteBytesByKind = new ulong[kindCount];
+            var wasteCountByElementType = new Dictionary<string, int>();
+            var wasteBytesByElementType = new Dictionary<string, ulong>();
+            long scanned = 0;
+            const long progressInterval = 50_000;
+            long? totalObjectsHint = TryGetTotalObjectCountHint(cache) ?? inMemoryEntries?.Length;
+            var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, _options.MaxDegreeOfParallelism), CancellationToken = cancellationToken };
+            // ClrMD heap/field reads are not reliably thread-safe under this analyzer's
+            // parallel per-entry execution. Serialize if configured, otherwise allow concurrent access.
+            object? heapLock = _options.SerializeHeapAccess ? new object() : null;
+
+            void TrackWasteful(WastefulCollection waste)
+            {
+                LocalWasteAccumulator? local = localWaste.Value;
+                if (local == null)
+                    return;
+
+                ulong wasteBytes = waste.WastedMemory;
+                local.WastefulCount++;
+                local.TotalWastedMemory += wasteBytes;
+
+                if (wasteBytes < 1 * 1024)
+                    local.WasteUnder1Kb++;
+                else if (wasteBytes < 10 * 1024)
+                    local.Waste1To10Kb++;
+                else if (wasteBytes < 100 * 1024)
+                    local.Waste10To100Kb++;
+                else if (wasteBytes < 1024 * 1024)
+                    local.Waste100KbTo1Mb++;
+                else
+                    local.WasteAtLeast1Mb++;
+
+                int kindIndex = (int)waste.Kind;
+                if ((uint)kindIndex < (uint)local.WasteCountByKind.Length)
+                {
+                    local.WasteCountByKind[kindIndex]++;
+                    local.WasteBytesByKind[kindIndex] += wasteBytes;
+                }
+
+                AccumulateElementTypeWaste(local.WasteCountByElementType, local.WasteBytesByElementType, waste.ElementType, wasteBytes);
+
+                AddToTopWasteful(local.TopWasteful, waste, topCapacity);
+            }
+
+            // precomputedGen is the persisted HeapEntry.Generation when available (inMemoryEntries
+            // path), or int.MinValue when the caller has no disk-backed index to read it from
+            // (the raw ClrObject segment walk below) — in that case generation falls back to a
+            // live ClrMD lookup, since there is no persisted value to read.
+            void ProcessEntry(ulong address, ulong mt, int precomputedGen)
+            {
+                long s = Interlocked.Increment(ref scanned);
+                if (s % progressInterval == 0)
+                    progress?.Report(new(s, "scanning collections", FormatScanPercent(s, totalObjectsHint)));
+                CollectionKind kind;
+                if (heapLock != null)
+                {
+                    lock (heapLock)
+                        kind = ResolveCollectionKindConcurrent(heap, mt, methodTableKinds);
+                }
+                else
+                {
+                    kind = ResolveCollectionKindConcurrent(heap, mt, methodTableKinds);
+                }
+                if (kind == CollectionKind.None)
+                    return;
+
+                // SortedSet<T> is a red-black tree, not array-backed; exclude from waste analysis to avoid misleading fill rates
+                if (kind == CollectionKind.SortedSet)
+                    return;
+
+                // determine generation and increment per-kind generation counter. Prefer the
+                // persisted value from the disk-backed index; only fall back to a live ClrMD
+                // lookup when no persisted value exists (raw ClrObject segment walk).
+                try
+                {
+                    int gen;
+                    if (precomputedGen != int.MinValue)
+                        gen = precomputedGen;
+                    else
+                        lock (heapLock)
+                            gen = SegmentKindMapper.ResolveGeneration(heap, address);
+                    if (gen >= 0)
+                    {
+                        int idx = gen >= 3 ? 3 : gen;
+                        var arr = generationCounts.GetOrAdd(kind, _ => new int[4]);
+                        Interlocked.Increment(ref arr[idx]);
+                    }
+                }
+                catch { /* best-effort, ignore generation failures */ }
+
+                Interlocked.Increment(ref totalCollections);
+
+                if (kind == CollectionKind.Dictionary)
+                {
+                    Interlocked.Increment(ref dictionaries);
+                    WastefulCollection? waste;
+                    if (heapLock != null)
+                    {
+                        lock (heapLock) { waste = AnalyzeDictionary(heap, address); }
+                    }
+                    else
+                    {
+                        waste = AnalyzeDictionary(heap, address);
+                    }
+                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                    {
+                        waste.Kind = CollectionKind.Dictionary;
+                        TrackWasteful(waste);
+                    }
+                    else if (waste == null) Interlocked.Increment(ref skippedDictionaries);
+                }
+                else if (kind == CollectionKind.List)
+                {
+                    Interlocked.Increment(ref lists);
+                    WastefulCollection? waste;
+                    if (heapLock != null)
+                    {
+                        lock (heapLock) { waste = AnalyzeList(heap, address); }
+                    }
+                    else
+                    {
+                        waste = AnalyzeList(heap, address);
+                    }
+                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                    {
+                        waste.Kind = CollectionKind.List;
+                        TrackWasteful(waste);
+                    }
+                    else if (waste == null) Interlocked.Increment(ref skippedLists);
+                }
+                else if (kind == CollectionKind.HashSet)
+                {
+                    Interlocked.Increment(ref hashSets);
+                    WastefulCollection? waste;
+                    if (heapLock != null)
+                    {
+                        lock (heapLock) { waste = AnalyzeHashSet(heap, address); }
+                    }
+                    else
+                    {
+                        waste = AnalyzeHashSet(heap, address);
+                    }
+                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                    {
+                        waste.Kind = CollectionKind.HashSet;
+                        TrackWasteful(waste);
+                    }
+                    else if (waste == null) Interlocked.Increment(ref skippedHashSets);
+                }
+                else if (kind == CollectionKind.ArrayList)
+                {
+                    Interlocked.Increment(ref arrayLists);
+                    WastefulCollection? waste;
+                    if (heapLock != null)
+                    {
+                        lock (heapLock) { waste = AnalyzeArrayBackedCollection(heap, address, kind); }
+                    }
+                    else
+                    {
+                        waste = AnalyzeArrayBackedCollection(heap, address, kind);
+                    }
+                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                    {
+                        waste.Kind = kind;
+                        TrackWasteful(waste);
+                    }
+                    else if (waste == null) Interlocked.Increment(ref skippedArrayLists);
+                }
+                else if (kind == CollectionKind.Stack)
+                {
+                    Interlocked.Increment(ref stacks);
+                    WastefulCollection? waste;
+                    if (heapLock != null)
+                    {
+                        lock (heapLock) { waste = AnalyzeArrayBackedCollection(heap, address, kind); }
+                    }
+                    else
+                    {
+                        waste = AnalyzeArrayBackedCollection(heap, address, kind);
+                    }
+                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                    {
+                        waste.Kind = kind;
+                        TrackWasteful(waste);
+                    }
+                    else if (waste == null) Interlocked.Increment(ref skippedStacks);
+                }
+                else if (kind == CollectionKind.SortedList)
+                {
+                    Interlocked.Increment(ref sortedLists);
+                    WastefulCollection? waste;
+                    if (heapLock != null)
+                    {
+                        lock (heapLock) { waste = AnalyzeArrayBackedCollection(heap, address, kind); }
+                    }
+                    else
+                    {
+                        waste = AnalyzeArrayBackedCollection(heap, address, kind);
+                    }
+                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                    {
+                        waste.Kind = kind;
+                        TrackWasteful(waste);
+                    }
+                    else if (waste == null) Interlocked.Increment(ref skippedSortedLists);
+                }
+                else if (kind == CollectionKind.SortedSet)
+                {
+                    Interlocked.Increment(ref sortedSets);
+                    WastefulCollection? waste;
+                    if (heapLock != null)
+                    {
+                        lock (heapLock) { waste = AnalyzeArrayBackedCollection(heap, address, kind); }
+                    }
+                    else
+                    {
+                        waste = AnalyzeArrayBackedCollection(heap, address, kind);
+                    }
+                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                    {
+                        waste.Kind = kind;
+                        TrackWasteful(waste);
+                    }
+                    else if (waste == null) Interlocked.Increment(ref skippedSortedSets);
+                }
+                else if (kind == CollectionKind.Queue)
+                {
+                    Interlocked.Increment(ref queues);
+                    WastefulCollection? qWaste;
+                    if (heapLock != null)
+                    {
+                        lock (heapLock) { qWaste = AnalyzeQueue(heap, address); }
+                    }
+                    else
+                    {
+                        qWaste = AnalyzeQueue(heap, address);
+                    }
+                    if (qWaste != null && qWaste.WastedMemory > _options.WasteThresholdBytes)
+                    {
+                        qWaste.Kind = CollectionKind.Queue;
+                        TrackWasteful(qWaste);
+                    }
+                    else if (qWaste == null) Interlocked.Increment(ref skippedQueues);
+                }
+                else if (kind == CollectionKind.ImmutableArray)
+                {
+                    // Boxed ImmutableArray<T> has no spare capacity by construction — inventory only.
+                    Interlocked.Increment(ref immutableArrays);
+                }
+                else if (kind == CollectionKind.ImmutableArrayBuilder)
+                {
+                    Interlocked.Increment(ref immutableArrayBuilders);
+                    WastefulCollection? waste;
+                    if (heapLock != null)
+                    {
+                        lock (heapLock) { waste = AnalyzeList(heap, address); }
+                    }
+                    else
+                    {
+                        waste = AnalyzeList(heap, address);
+                    }
+                    if (waste != null && waste.WastedMemory > _options.WasteThresholdBytes)
+                    {
+                        waste.Kind = CollectionKind.ImmutableArrayBuilder;
+                        TrackWasteful(waste);
+                    }
+                    else if (waste == null) Interlocked.Increment(ref skippedImmutableArrayBuilders);
+                }
+
+            }
+
+            try
+            {
+                if (inMemoryEntries != null)
+                {
+                    Parallel.ForEach(inMemoryEntries, parallelOptions, entry =>
+                    {
+                        parallelOptions.CancellationToken.ThrowIfCancellationRequested();
+                        if (entry.Address == 0 || entry.MethodTable == 0)
+                            return;
+                        ProcessEntry(entry.Address, entry.MethodTable, entry.Generation);
+                    });
+                }
+                else
+                {
+                    Parallel.ForEach(heap.Segments, parallelOptions, segment =>
+                    {
+                        parallelOptions.CancellationToken.ThrowIfCancellationRequested();
+                        foreach (ClrObject obj in segment.EnumerateObjects())
+                        {
+                            parallelOptions.CancellationToken.ThrowIfCancellationRequested();
+                            if (!obj.IsValid || obj.Type is null)
+                                continue;
+                            ulong mt = obj.Type.MethodTable;
+                            if (mt == 0)
+                                continue;
+                            ProcessEntry(obj.Address, mt, int.MinValue);
+                        }
+                    });
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                _logger?.LogInformation("Collection analysis cancelled by user.");
+            }
+
+            progress?.Report(new(scanned, "aggregating results"));
+            var wastefulList = new List<WastefulCollection>(topCapacity);
+            foreach (LocalWasteAccumulator local in localWaste.Values)
+            {
+                wastefulCount += local.WastefulCount;
+                totalWastedMemory += local.TotalWastedMemory;
+                wasteUnder1Kb += local.WasteUnder1Kb;
+                waste1To10Kb += local.Waste1To10Kb;
+                waste10To100Kb += local.Waste10To100Kb;
+                waste100KbTo1Mb += local.Waste100KbTo1Mb;
+                wasteAtLeast1Mb += local.WasteAtLeast1Mb;
+
+                for (int i = 0; i < kindCount; i++)
+                {
+                    wasteCountByKind[i] += local.WasteCountByKind[i];
+                    wasteBytesByKind[i] += local.WasteBytesByKind[i];
+                }
+
+                MergeElementTypeWaste(wasteCountByElementType, wasteBytesByElementType, local.WasteCountByElementType, local.WasteBytesByElementType);
+
+                for (int i = 0; i < local.TopWasteful.Count; i++)
+                    AddToTopWasteful(wastefulList, local.TopWasteful[i], topCapacity);
+            }
+            wastefulList.Sort(static (a, b) => b.WastedMemory.CompareTo(a.WastedMemory));
+            localWaste.Dispose();
+
+            var wasteCountDict = BuildKindDictionary(wasteCountByKind);
+            var wasteByteDict = BuildKindDictionary(wasteBytesByKind);
+
+            var stats = new CollectionStatistics
+            {
+                TotalCollections = totalCollections,
+                Dictionaries = dictionaries,
+                Lists = lists,
+                ArrayLists = arrayLists,
+                Stacks = stacks,
+                SortedLists = sortedLists,
+                SortedSets = sortedSets,
+                HashSets = hashSets,
+                Queues = queues,
+                ImmutableArrays = immutableArrays,
+                ImmutableArrayBuilders = immutableArrayBuilders,
+                WastefulCollections = wastefulList,
+                WastefulCollectionCount = wastefulCount,
+                TotalWastedMemory = totalWastedMemory,
+                WasteCountsByKind = wasteCountDict,
+                WasteBytesByKind = wasteByteDict,
+                WasteCountsByElementType = wasteCountByElementType,
+                WasteBytesByElementType = wasteBytesByElementType
+            };
+
+            // materialize generation breakdown
+            try
+            {
+                var genList = new List<CollectionGenerationStats>();
+                foreach (var kv in generationCounts)
+                {
+                    var a = kv.Value;
+                    genList.Add(new CollectionGenerationStats(kv.Key, a[0], a[1], a[2], a[3]));
+                }
+                stats.GenerationBreakdown = genList;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "Error computing generation breakdown");
+            }
+
+            // Post-scan: populate root descriptions for top-N only — never during the scan loop.
+            // Balanced/Deep only: run ReferenceChainAnalyzer for items without a description.
+            PopulateRootDescriptions(heap, cache, wastefulList, _options, _refChainOptions);
+
+            // Reporting-level summary warnings are handled by the findings generator.
+            // Log total wasted memory at debug level for diagnostic purposes.
+            _logger?.LogDebug("Total wasted memory from collections: {TotalWastedBytes}", stats.TotalWastedMemory);
+            _logger?.LogDebug(
+                "Collection scan summary — recognized: Dict={Dicts}, List={Lists}, HashSet={HashSets}, Queue={Queues} | " +
+                "probeNull (no fields/no waste): Dict={SkipD}, List={SkipL}, HashSet={SkipH}, Queue={SkipQ} | wasteful total={Wasteful}",
+                dictionaries, lists, hashSets, queues,
+                skippedDictionaries, skippedLists, skippedHashSets, skippedQueues,
+                stats.WastefulCollectionCount);
+
+            return stats;
+        }
+
+        private static readonly string[] BclCollectionNamespacePrefixes =
+        [
+            "System.Collections.",
+            "System.Collections.Generic.",
+            "System.Collections.Concurrent.",
+            "System.Collections.Immutable.",
+        ];
+
+        private const string ImmutableArrayTypeNamePrefix = "System.Collections.Immutable.ImmutableArray";
+
+        private const string NestedBuilderToken = "+Builder";
+
+        /// <summary>
+        /// Maps a resolved type name onto the collection kind whose capacity probe understands it.
+        /// Shared by both scan paths so a new kind can never be recognized by one and missed by the
+        /// other. Pure function of the name — callers screen out arrays before calling.
+        /// </summary>
+        /// <summary>
+        /// Total object count from the disk-backed heap index header (Phase 1's single scan
+        /// pass), when available — lets progress reporting show a percentage instead of a raw,
+        /// meaningless-without-context count. Null in in-memory mode or when the index wasn't
+        /// built (caller should fall back to any total it already knows, e.g. an in-memory
+        /// entries array length).
+        /// </summary>
+        private static long? TryGetTotalObjectCountHint(IHeapAnalysisCache? cache) =>
+            cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? idx) && idx.ObjectCount > 0
+                ? idx.ObjectCount
+                : null;
+
+        internal static string? FormatScanPercent(long scanned, long? total) =>
+            total is > 0 ? $"{Math.Min(100.0, scanned * 100.0 / total.Value):F0}%" : null;
+
+        internal static CollectionKind ClassifyCollectionTypeName(string typeName)
+        {
+            // ImmutableArray<T>.Builder is the one nested type worth probing: it is the only
+            // immutable-collection type with a mutable, over-allocated backing array. Every other
+            // nested type (Dictionary+Entry, ConcurrentDictionary+Node, ImmutableList+Builder over
+            // a tree) is an implementation detail with no capacity to reclaim. The nested type's own
+            // generic-argument bracket trails "+Builder" in ClrMD's rendered name, so this must be a
+            // Contains, not an EndsWith.
+            if (typeName.Contains(NestedBuilderToken, StringComparison.Ordinal))
+            {
+                return typeName.StartsWith(ImmutableArrayTypeNamePrefix, StringComparison.Ordinal)
+                    ? CollectionKind.ImmutableArrayBuilder
+                    : CollectionKind.None;
+            }
+
+            if (typeName.Contains('+'))
+                return CollectionKind.None;
+
+            // Match only well-known BCL collection namespaces to avoid false positives
+            // from arbitrary application types whose names happen to contain these words.
+            if (!TypeNamePatternMatcher.HasAnyPrefix(typeName, BclCollectionNamespacePrefixes))
+                return CollectionKind.None;
+
+            // normalize to the outer (non-generic) type name to avoid matching nested generic args
+            string shortName = TypeNamePatternMatcher.GetShortName(typeName);
+
+            // Exclude concurrent/non-array-backed variants explicitly
+            if (shortName.StartsWith("Concurrent", StringComparison.OrdinalIgnoreCase) ||
+                shortName.IndexOf("BlockingCollection", StringComparison.OrdinalIgnoreCase) >= 0)
+                return CollectionKind.None;
+
+            if (string.Equals(shortName, "Dictionary", StringComparison.OrdinalIgnoreCase))
+                return CollectionKind.Dictionary;
+            if (string.Equals(shortName, "List", StringComparison.OrdinalIgnoreCase))
+                return CollectionKind.List;
+            if (string.Equals(shortName, "HashSet", StringComparison.OrdinalIgnoreCase))
+                return CollectionKind.HashSet;
+            if (string.Equals(shortName, "Queue", StringComparison.OrdinalIgnoreCase))
+                return CollectionKind.Queue;
+            if (string.Equals(shortName, "ArrayList", StringComparison.OrdinalIgnoreCase))
+                return CollectionKind.ArrayList;
+            if (string.Equals(shortName, "Stack", StringComparison.OrdinalIgnoreCase))
+                return CollectionKind.Stack;
+            if (string.Equals(shortName, "SortedList", StringComparison.OrdinalIgnoreCase))
+                return CollectionKind.SortedList;
+            if (string.Equals(shortName, "SortedSet", StringComparison.OrdinalIgnoreCase))
+                return CollectionKind.SortedSet;
+            if (string.Equals(shortName, "ImmutableArray", StringComparison.OrdinalIgnoreCase))
+                return CollectionKind.ImmutableArray;
+
+            return CollectionKind.None;
+        }
+
+        private static CollectionKind ResolveCollectionKind(ClrHeap heap, in HeapEntry entry, Dictionary<ulong, CollectionKind> methodTableKinds)
+        {
+            if (entry.MethodTable == 0)
+                return CollectionKind.None;
+
+            if (methodTableKinds.TryGetValue(entry.MethodTable, out CollectionKind existing))
+                return existing;
+
+            // OPT (docs/cache/cache-architecture.md Phase 5): the MethodTable is already
+            // known here, so resolve the ClrType directly via the metadata cache instead of
+            // materializing a ClrObject — same ClrType either way, no dump I/O.
+            ClrType? type = heap.GetTypeByMethodTable(entry.MethodTable);
+
+            CollectionKind resolved = ClassifyCollectionType(type);
+            methodTableKinds[entry.MethodTable] = resolved;
+            return resolved;
+        }
+
+        private static CollectionKind ClassifyCollectionType(ClrType? type)
+        {
+            // Skip array objects (e.g. Dictionary<...>[]). We only analyze instance objects that
+            // represent collection types themselves (List<>, Dictionary<>, HashSet<>, Queue<>).
+            if (type == null || type.IsArray)
+                return CollectionKind.None;
+
+            return ClassifyCollectionTypeName(type.Name ?? string.Empty);
+        }
+
+        private static void AddToTopWasteful(List<WastefulCollection> topList, WastefulCollection candidate, int capacity)
+        {
+            if (topList.Count < capacity)
+            {
+                topList.Add(candidate);
+                return;
+            }
+
+            int minIndex = 0;
+            ulong minWaste = topList[0].WastedMemory;
+            for (int i = 1; i < topList.Count; i++)
+            {
+                ulong current = topList[i].WastedMemory;
+                if (current < minWaste)
+                {
+                    minWaste = current;
+                    minIndex = i;
+                }
+            }
+
+            if (candidate.WastedMemory <= minWaste)
+                return;
+
+            topList[minIndex] = candidate;
+        }
+
+        /// <summary>
+        /// Resolves (and caches) the well-known collection-internal fields for <paramref name="type"/>.
+        /// Gated once per unique MethodTable via <see cref="ConcurrentDictionary{TKey,TValue}.GetOrAdd"/>
+        /// — the factory may race and run more than once under concurrent <c>OnHeapEntry</c> callers,
+        /// but that's cheap and idempotent, unlike leaving a window where the entry can be observed
+        /// missing.
+        /// </summary>
+        /// <remarks>
+        /// PERF: the field-name fallback loop below uses <see cref="ClrInstanceField.ElementType"/>
+        /// for the array/int32 checks, not <c>field.Type</c> — same rationale as
+        /// <c>DiskBackedObjectIndexWriter.ComputeTypeShapeAndStringFields</c> (full <see cref="ClrType"/>
+        /// resolution is expensive and serializes badly under concurrent callers).
+        /// </remarks>
+        private FieldLayout GetOrBuildFieldLayout(ClrType? type)
+        {
+            if (type == null)
+                return default;
+
+            if (_fieldLayoutCache == null)
+                return default;
+
+            ulong mt = type.MethodTable;
+            return _fieldLayoutCache.GetOrAdd(mt, _ =>
+            {
+                // Prefer well-known field names first (fast path), then fall back to a single
+                // enumeration over fields to find reasonable candidates.
+                ClrInstanceField? sizeField = type.GetFieldByName("_size") ?? type.GetFieldByName("_count") ?? type.GetFieldByName("m_count");
+                ClrInstanceField? countField = type.GetFieldByName("_count") ?? type.GetFieldByName("m_count") ?? type.GetFieldByName("count");
+                ClrInstanceField? itemsField = type.GetFieldByName("_items") ?? type.GetFieldByName("_entries") ?? type.GetFieldByName("_array");
+                ClrInstanceField? entriesField = type.GetFieldByName("_entries");
+                ClrInstanceField? arrayField = type.GetFieldByName("_array");
+                ClrInstanceField? headField = type.GetFieldByName("_head");
+                ClrInstanceField? tailField = type.GetFieldByName("_tail");
+                ClrInstanceField? freeCountField = type.GetFieldByName("_freeCount");
+                ClrInstanceField? anyInt = null;
+                ClrType? compType = type.ComponentType;
+                int compStaticSize = compType != null ? compType.StaticSize : 0;
+                ulong computedElementSize = 0;
+                if (compType != null)
+                {
+                    computedElementSize = compType.IsValueType ? (ulong)compType.StaticSize : (ulong)IntPtr.Size;
+                }
+
+                if (sizeField == null || itemsField == null || entriesField == null || arrayField == null || headField == null || tailField == null || anyInt == null)
+                {
+                    foreach (ClrInstanceField f in type.Fields)
+                    {
+                        if (anyInt == null && f.ElementType == ClrElementType.Int32)
+                            anyInt = f;
+
+                        if (arrayField == null && f.ElementType is ClrElementType.SZArray or ClrElementType.Array)
+                            arrayField = f;
+
+                        string? name = f.Name;
+                        if (name == null)
+                            continue;
+
+                        if (itemsField == null && (name.IndexOf("items", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("entries", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("array", StringComparison.OrdinalIgnoreCase) >= 0))
+                            itemsField = f;
+
+                        if (entriesField == null && name.IndexOf("entries", StringComparison.OrdinalIgnoreCase) >= 0)
+                            entriesField = f;
+
+                        if (headField == null && name.IndexOf("head", StringComparison.OrdinalIgnoreCase) >= 0)
+                            headField = f;
+
+                        if (tailField == null && name.IndexOf("tail", StringComparison.OrdinalIgnoreCase) >= 0)
+                            tailField = f;
+
+                        if (sizeField == null && (name.IndexOf("size", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("count", StringComparison.OrdinalIgnoreCase) >= 0))
+                            sizeField = sizeField ?? f;
+                    }
+                }
+
+                // Normalize fallbacks: prefer itemsField -> arrayField; entriesField -> itemsField -> arrayField
+                ClrInstanceField? resolvedItems = itemsField ?? arrayField;
+                ClrInstanceField? resolvedEntries = entriesField ?? itemsField ?? arrayField;
+                ClrInstanceField? resolvedSize = sizeField ?? countField ?? anyInt;
+                ClrInstanceField? resolvedCount = countField ?? sizeField ?? anyInt;
+
+                return new FieldLayout(resolvedSize, resolvedCount, resolvedItems, resolvedEntries, arrayField, headField, tailField, anyInt, freeCountField, compType, compStaticSize, computedElementSize);
+            });
+        }
+
+        private void TrySetComputedElementSize(ulong methodTable, ClrType? compType, ulong computedSize)
+        {
+            if (computedSize == 0 || _fieldLayoutCache == null)
+                return;
+
+            while (true)
+            {
+                if (!_fieldLayoutCache.TryGetValue(methodTable, out var existing))
+                {
+                    // Entry doesn't exist yet; we cannot build from default value.
+                    // Return and let GetOrBuildFieldLayout handle the full initialization on next access.
+                    return;
+                }
+
+                if (existing.ComputedElementSize != 0)
+                    return;
+
+                var updated = new FieldLayout(existing.SizeField, existing.CountField, existing.ItemsField, existing.EntriesField, existing.ArrayField, existing.HeadField, existing.TailField, existing.AnyIntField, existing.FreeCountField, existing.ComponentType ?? compType, existing.ComponentStaticSize != 0 ? existing.ComponentStaticSize : (compType != null ? compType.StaticSize : 0), computedSize);
+                if (_fieldLayoutCache.TryUpdate(methodTable, updated, existing))
+                    return;
+            }
+        }
+
+        private static CollectionKind ResolveCollectionKindConcurrent(
+            ClrHeap heap, ulong methodTable,
+            ConcurrentDictionary<ulong, CollectionKind> methodTableKinds)
+        {
+            // OPT (docs/cache/cache-architecture.md Phase 5): methodTable is already the
+            // GetOrAdd key — resolve via the metadata cache instead of materializing a ClrObject.
+            return methodTableKinds.GetOrAdd(methodTable,
+                static (mt, heap) => ClassifyCollectionType(heap.GetTypeByMethodTable(mt)), heap);
+        }
+
+        // Populate root descriptions for the top-N items only, after the scan is complete.
+        // This avoids the catastrophic O(n * heap-walk) cost of doing it per item during scanning.
+        // Balanced/Deep only: uses RootPathFinder BFS for items still missing a description.
+        /// <summary>
+        /// One indexed "who points at this?" lookup (P3-4, docs/analysis/phase1/collection-analyzer-audit.md)
+        /// — not a traversal, so it's cheap enough to run for every top-N item regardless of
+        /// <see cref="RootPathFinder"/>'s BFS outcome. The reverse index has no notion of which
+        /// parent is the "real" owner when an object has more than one, so a single arbitrary
+        /// parent is never reported as if it were definitive — ambiguity (multiple parents, or a
+        /// truncated result the index couldn't fully extract) is surfaced explicitly instead.
+        /// </summary>
+        private static string? ResolveOwnerTypeHint(ClrHeap heap, IHeapAnalysisCache cache, IBackwardReferenceProvider? reverseIndexProvider, ulong address)
+        {
+            if (reverseIndexProvider is null)
+                return null;
+
+            if (!reverseIndexProvider.TryGetParents(address, out IReadOnlyList<ulong> parents, out bool truncated) || parents.Count == 0)
+                return null;
+
+            return FormatOwnerTypeHint(parents.Count, truncated, ResolveTypeName(heap, cache, parents[0]));
+        }
+
+        /// <summary>
+        /// Ambiguity-handling logic isolated from the reverse-index/ClrHeap lookups above so it's
+        /// directly unit-testable — the reverse index has no notion of which parent is the "real"
+        /// owner, so a count &gt; 1 (or a truncated extraction) is always surfaced explicitly
+        /// rather than silently reporting one arbitrary parent as definitive.
+        /// </summary>
+        internal static string? FormatOwnerTypeHint(int parentCount, bool truncated, string? firstOwnerType)
+        {
+            if (firstOwnerType is null)
+                return null;
+
+            if (parentCount == 1 && !truncated)
+                return firstOwnerType;
+
+            // truncated means the index hit its fanout cap extracting parents — parentCount is a
+            // lower bound on the real total, not the true count, so mark it as such.
+            string countLabel = truncated ? $"{parentCount}+" : parentCount.ToString();
+            return $"{countLabel} referrers, e.g. {firstOwnerType}";
+        }
+
+        private static string? ResolveTypeName(ClrHeap heap, IHeapAnalysisCache cache, ulong address) =>
+            cache.TryGetObjectMetadata(heap, address, out ulong methodTable, out _)
+                ? heap.GetTypeByMethodTable(methodTable)?.Name
+                : null;
+
+        private void PopulateRootDescriptions(ClrHeap heap, IHeapAnalysisCache? cache, List<WastefulCollection> wastefulList, CollectionAnalysisOptions options, ReferenceChainOptions? refChainOptions)
+        {
+            if (wastefulList.Count == 0 || options.PathAnalysisTopN <= 0 || cache is null || refChainOptions is null)
+                return;
+
+            int topN = Math.Min(options.PathAnalysisTopN, wastefulList.Count);
+
+            try
+            {
+                // Get roots once for all items to avoid redundant cache lookups
+                IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
+                if (roots.Count == 0)
+                    return;
+
+                // Create ReferenceGraph once, reused across all items to cache edges
+                var provider = new ReferenceGraph(heap);
+                IBackwardReferenceProvider? reverseIndexProvider = cache.TryGetReverseIndexProvider();
+
+                var limits = new RootPathSearchLimits
+                {
+                    MaxCandidateNodes = refChainOptions.MaxCandidateNodes,
+                    MaxCandidateDepth = refChainOptions.MaxCandidateDepth,
+                    MaxRootExpansionDepth = refChainOptions.MaxRootExpansionDepth,
+                    LargeFanoutThreshold = refChainOptions.LargeFanoutThreshold,
+                };
+
+                var telemetry = new ReferenceChainAnalyzer.TelemetryCounters();
+
+                for (int i = 0; i < topN; i++)
+                {
+                    var item = wastefulList[i];
+
+                    // Independent of the BFS below — a single indexed lookup, not a traversal —
+                    // so it's still worth having even when the deep search times out or misses.
+                    item.OwnerTypeHint = ResolveOwnerTypeHint(heap, cache, reverseIndexProvider, item.Address);
+
+                    if (!string.IsNullOrEmpty(item.RootDescription))
+                        continue;
+
+                    var finder = new RootPathFinder(
+                        heap,
+                        provider,
+                        limits,
+                        telemetry.AsProxy(),
+                        ReferenceChainAnalyzer.IsNoisyType,
+                        type => ReferenceChainAnalyzer.IsKnownLeakType(type, refChainOptions.KnownLeakTypePatterns),
+                        reverseIndexProvider,
+                        cache);
+
+                    bool found = finder.TryFindAnyRootPath(
+                        item.Address,
+                        roots,
+                        out string? rootKind,
+                        out List<ulong>? path,
+                        out bool searchTruncated,
+                        out _,
+                        out _);
+
+                    item.RootDescription = found
+                        ? $"{rootKind}: (reference path found)"
+                        : "No root path found (within budget)";
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "Error during targeted reference-path analysis for collections");
+            }
+        }
+
+        // Generic handler for array-backed collection types with a count/size field and an items/entries array.
+        private WastefulCollection? AnalyzeArrayBackedCollection(ClrHeap heap, ulong address, CollectionKind kind)
+        {
+            try
+            {
+                ClrObject obj = heap.GetObject(address);
+                if (!obj.IsValid || obj.Type == null)
+                    return null;
+
+                var layout = GetOrBuildFieldLayout(obj.Type);
+                var sizeField = layout.SizeField ?? layout.AnyIntField;
+                var itemsField = layout.ItemsField ?? layout.EntriesField ?? layout.ArrayField;
+
+                if (sizeField == null || itemsField == null)
+                    return null;
+
+                int count = Math.Max(0, sizeField.Read<int>(obj, interior: false));
+                var itemsObj = itemsField.ReadObject(obj, interior: false);
+                if (!itemsObj.IsValid || !itemsObj.IsArray)
+                    return null;
+
+                int capacity = itemsObj.AsArray().Length;
+                if (capacity <= 0 || count >= capacity)
+                    return null;
+
+                double fillRate = (count / (double)capacity) * 100;
+                var compType = itemsObj.Type?.ComponentType ?? obj.Type?.ComponentType;
+                ulong elementSize = 0;
+                // Prefer cached computed size from the layout if available.
+                var layoutMt = obj.Type?.MethodTable ?? 0UL;
+                if (layout.ComputedElementSize != 0)
+                {
+                    elementSize = layout.ComputedElementSize;
+                }
+                else if (compType != null)
+                {
+                    elementSize = compType.IsValueType ? (ulong)compType.StaticSize : (ulong)IntPtr.Size;
+                    // Try to cache this for future objects of the same MethodTable
+                    TrySetComputedElementSize(layoutMt, compType, elementSize);
+                }
+                else
+                {
+                    elementSize = itemsObj.Size / (ulong)capacity;
+                }
+
+                ulong wastedSlots = (ulong)(capacity - count);
+                ulong wastedMemory = wastedSlots * elementSize;
+
+                return new WastefulCollection
+                {
+                    Address = obj.Address,
+                    Type = obj.Type?.Name ?? "Collection",
+                    Count = count,
+                    Capacity = capacity,
+                    FillRate = fillRate,
+                    WastedMemory = wastedMemory,
+                    ElementSize = elementSize,
+                    ElementType = compType?.Name ?? string.Empty,
+                    SizeEstimateConfidence = compType != null ? "High" : "Low",
+                    DetectionMethod = itemsField?.Name ?? string.Empty
+                };
+            }
+            catch (Exception ex)
+            {
+                if (_options.SurfaceProbingExceptions)
+                    _logger?.LogError(ex, "Error analyzing collection at {Address}", address);
+                else
+                    _logger?.LogDebug(ex, "Ignored error analyzing collection at {Address}", address);
+            }
+
+            return null;
+        }
+
+        private WastefulCollection? AnalyzeDictionary(ClrHeap heap, ulong dictionaryAddress)
+        {
+            try
+            {
+                ClrObject dictObj = heap.GetObject(dictionaryAddress);
+                if (!dictObj.IsValid || dictObj.Type == null)
+                {
+                    _logger?.LogDebug("[Dictionary] 0x{Address:X} invalid or no type", dictionaryAddress);
+                    return null;
+                }
+
+                var layout = GetOrBuildFieldLayout(dictObj.Type);
+                var countField = layout.CountField ?? layout.SizeField ?? layout.AnyIntField;
+                var entriesField = layout.EntriesField ?? layout.ItemsField ?? layout.ArrayField;
+
+                if (countField == null)
+                {
+                    _logger?.LogDebug("[Dictionary] 0x{Address:X} type={Type}: _count field not found", dictionaryAddress, dictObj.Type?.Name);
+                    return null;
+                }
+                if (entriesField == null)
+                {
+                    _logger?.LogDebug("[Dictionary] 0x{Address:X} type={Type}: no backing array field found (tried _entries + fallback)", dictionaryAddress, dictObj.Type?.Name);
+                    return null;
+                }
+
+                int count = Math.Max(0, countField.Read<int>(dictObj, interior: false));
+                int freeCount = 0;
+                if (layout.FreeCountField != null)
+                {
+                    try
+                    {
+                        freeCount = Math.Max(0, layout.FreeCountField.Read<int>(dictObj, interior: false));
+                    }
+                    catch
+                    {
+                        // freeCount field read failed; ignore and use count as-is
+                    }
+                }
+                int liveCount = Math.Max(0, count - freeCount);
+
+                var entriesObj = entriesField.ReadObject(dictObj, interior: false);
+
+                if (!entriesObj.IsValid || !entriesObj.IsArray)
+                {
+                    // Null/uninitialized entries = empty dict never populated, no waste.
+                    return null;
+                }
+
+                int capacity = entriesObj.AsArray().Length;
+
+                // No waste if fully packed or empty
+                if (capacity <= 0 || liveCount >= capacity)
+                {
+                    // suppressed debug: no actionable waste detected for this collection
+                    return null;
+                }
+
+                double fillRate = (liveCount / (double)capacity) * 100;
+                // Prefer component type size when available. For value types use StaticSize; for references use pointer size.
+                ulong elementSize = 0;
+                var layoutMt = dictObj.Type?.MethodTable ?? 0UL;
+                var compType = entriesObj.Type?.ComponentType ?? dictObj.Type?.ComponentType ?? layout.ComponentType;
+                if (layout.ComputedElementSize != 0)
+                {
+                    elementSize = layout.ComputedElementSize;
+                }
+                else if (compType != null)
+                {
+                    elementSize = compType.IsValueType ? (ulong)compType.StaticSize : (ulong)(IntPtr.Size);
+                    TrySetComputedElementSize(layoutMt, compType, elementSize);
+                }
+                else
+                {
+                    elementSize = entriesObj.Size / (ulong)capacity; // fallback
+                }
+                ulong wastedSlots = (ulong)(capacity - liveCount);
+                ulong wastedMemory = wastedSlots * elementSize;
+
+                // Root descriptions are populated post-scan for the top-N only (see PopulateRootDescriptions).
+                return new WastefulCollection
+                {
+                    Address = dictObj.Address,
+                    Type = dictObj.Type?.Name ?? "Dictionary",
+                    Count = liveCount,
+                    Capacity = capacity,
+                    FillRate = fillRate,
+                    WastedMemory = wastedMemory,
+                    ElementSize = elementSize,
+                    ElementType = compType?.Name ?? string.Empty,
+                    SizeEstimateConfidence = compType != null ? "High" : "Low",
+                    DetectionMethod = entriesField?.Name ?? string.Empty,
+                    FreeEntryCount = freeCount > 0 ? freeCount : null
+                };
+            }
+            catch (Exception ex)
+            {
+                if (_options.SurfaceProbingExceptions)
+                    _logger?.LogError(ex, "Error analyzing Dictionary at {Address}", dictionaryAddress);
+                else
+                    _logger?.LogDebug(ex, "Ignored error analyzing Dictionary at {Address}", dictionaryAddress);
+            }
+
+            return null;
+        }
+
+        private WastefulCollection? AnalyzeQueue(ClrHeap heap, ulong queueAddress)
+        {
+            try
+            {
+                ClrObject queueObj = heap.GetObject(queueAddress);
+                if (!queueObj.IsValid || queueObj.Type == null)
+                    return null;
+
+                // Common field names in BCL: _array, _head, _tail, _size (.NET Core/Framework varies)
+                var layout = GetOrBuildFieldLayout(queueObj.Type);
+                var arrayField = layout.ArrayField ?? layout.ItemsField ?? layout.EntriesField;
+                var headField = layout.HeadField;
+                var tailField = layout.TailField;
+                var sizeField = layout.SizeField ?? layout.CountField ?? layout.AnyIntField;
+
+                // Only array + size are required to compute waste; head/tail are best-effort for diagnostics.
+                if (arrayField == null)
+                {
+                    _logger?.LogDebug("[Queue] 0x{Address:X} type={Type}: no backing array field found", queueAddress, queueObj.Type?.Name);
+                    return null;
+                }
+                if (sizeField == null)
+                {
+                    _logger?.LogDebug("[Queue] 0x{Address:X} type={Type}: no size/count field found", queueAddress, queueObj.Type?.Name);
+                    return null;
+                }
+
+                var arrayObj = arrayField.ReadObject(queueObj, interior: false);
+                if (!arrayObj.IsValid || !arrayObj.IsArray)
+                {
+                    _logger?.LogDebug("[Queue] 0x{Address:X} type={Type}: backing array object invalid or not array", queueAddress, queueObj.Type?.Name);
+                    return null;
+                }
+
+                int capacity = arrayObj.AsArray().Length;
+                int size = Math.Max(0, sizeField.Read<int>(queueObj, interior: false));
+
+                // read head/tail if available to compute contiguous free segments
+                int? head = null;
+                int? tail = null;
+                try
+                {
+                    if (headField != null)
+                        head = headField.Read<int>(queueObj, interior: false);
+                }
+                catch { head = null; }
+                try
+                {
+                    if (tailField != null)
+                        tail = tailField.Read<int>(queueObj, interior: false);
+                }
+                catch { tail = null; }
+
+                // No waste if full or empty
+                if (capacity <= 0 || size >= capacity)
+                {
+                    // suppressed debug: no actionable waste detected for this collection
+                    return null;
+                }
+
+                // compute fill rate and approximate element size similar to lists
+                double fillRate = (size / (double)capacity) * 100;
+                ulong elementSize = 0;
+                var layoutMt = queueObj.Type?.MethodTable ?? 0UL;
+                var compType = arrayObj.Type?.ComponentType ?? queueObj.Type?.ComponentType ?? layout.ComponentType;
+                if (layout.ComputedElementSize != 0)
+                {
+                    elementSize = layout.ComputedElementSize;
+                }
+                else if (compType != null)
+                {
+                    elementSize = compType.IsValueType ? (ulong)compType.StaticSize : (ulong)(IntPtr.Size);
+                    TrySetComputedElementSize(layoutMt, compType, elementSize);
+                }
+                else
+                {
+                    elementSize = arrayObj.Size / (ulong)capacity;
+                }
+
+                // compute wasted memory from slots and contiguous free-segment metrics using helper
+                ulong wastedMemory = CollectionAnalysisHelpers.ComputeWastedMemoryFromSlots(capacity, size, elementSize);
+                var (freeSegments, largestFreeSlots) = CollectionAnalysisHelpers.ComputeQueueFreeSegments(capacity, size, head);
+                ulong largestFreeBytes = (ulong)largestFreeSlots * elementSize;
+
+                return new WastefulCollection
+                {
+                    Address = queueObj.Address,
+                    Type = queueObj.Type?.Name ?? "Queue",
+                    Count = size,
+                    Capacity = capacity,
+                    FillRate = fillRate,
+                    WastedMemory = wastedMemory,
+                    ElementSize = elementSize,
+                    ElementType = compType?.Name ?? string.Empty,
+                    SizeEstimateConfidence = compType != null ? "High" : "Low",
+                    DetectionMethod = arrayField?.Name ?? string.Empty,
+                    Head = head,
+                    Tail = tail,
+                    FreeSegmentCount = freeSegments,
+                    LargestContiguousFreeSegmentBytes = largestFreeBytes
+                };
+            }
+            catch (Exception ex)
+            {
+                if (_options.SurfaceProbingExceptions)
+                    _logger?.LogError(ex, "Error analyzing Queue at {Address}", queueAddress);
+                else
+                    _logger?.LogDebug(ex, "Ignored error analyzing Queue at {Address}", queueAddress);
+            }
+
+            return null;
+        }
+
+        private WastefulCollection? AnalyzeList(ClrHeap heap, ulong listAddress)
+        {
+            try
+            {
+                ClrObject listObj = heap.GetObject(listAddress);
+                if (!listObj.IsValid || listObj.Type == null)
+                    return null;
+
+                var layout = GetOrBuildFieldLayout(listObj.Type);
+                var sizeField = layout.SizeField ?? layout.AnyIntField;
+                var itemsField = layout.ItemsField ?? layout.EntriesField ?? layout.ArrayField;
+
+                if (sizeField == null || itemsField == null)
+                    return null;
+
+                int count = Math.Max(0, sizeField.Read<int>(listObj, interior: false));
+                var itemsObj = itemsField.ReadObject(listObj, interior: false);
+
+                if (!itemsObj.IsValid || !itemsObj.IsArray)
+                    return null;
+
+                int capacity = itemsObj.AsArray().Length;
+
+                // No waste if fully packed or empty
+                if (capacity <= 0 || count >= capacity)
+                    return null;
+
+                double fillRate = (count / (double)capacity) * 100;
+                // Prefer component type size when available. For value types use StaticSize; for references use pointer size.
+                ulong elementSize = 0;
+                var layoutMt = listObj.Type?.MethodTable ?? 0UL;
+                var compType = itemsObj.Type?.ComponentType ?? listObj.Type?.ComponentType ?? layout.ComponentType;
+                if (layout.ComputedElementSize != 0)
+                {
+                    elementSize = layout.ComputedElementSize;
+                }
+                else if (compType != null)
+                {
+                    elementSize = compType.IsValueType ? (ulong)compType.StaticSize : (ulong)(IntPtr.Size);
+                    TrySetComputedElementSize(layoutMt, compType, elementSize);
+                }
+                else
+                {
+                    elementSize = itemsObj.Size / (ulong)capacity;
+                }
+                ulong wastedSlots = (ulong)(capacity - count);
+                ulong wastedMemory = wastedSlots * elementSize;
+
+                // Root descriptions are populated post-scan for the top-N only (see PopulateRootDescriptions).
+                return new WastefulCollection
+                {
+                    Address = listObj.Address,
+                    Type = listObj.Type?.Name ?? "List",
+                    Count = count,
+                    Capacity = capacity,
+                    FillRate = fillRate,
+                    WastedMemory = wastedMemory,
+                    ElementSize = elementSize,
+                    ElementType = compType?.Name ?? string.Empty,
+                    SizeEstimateConfidence = compType != null ? "High" : "Low",
+                    DetectionMethod = itemsField?.Name ?? string.Empty
+                };
+            }
+            catch (Exception ex)
+            {
+                if (_options.SurfaceProbingExceptions)
+                    _logger?.LogError(ex, "Error analyzing List at {Address}", listAddress);
+                else
+                    _logger?.LogDebug(ex, "Ignored error analyzing List at {Address}", listAddress);
+            }
+
+            return null;
+        }
+
+        private WastefulCollection? AnalyzeHashSet(ClrHeap heap, ulong hashSetAddress)
+        {
+            try
+            {
+                ClrObject hashSetObj = heap.GetObject(hashSetAddress);
+                if (!hashSetObj.IsValid || hashSetObj.Type == null)
+                {
+                    _logger?.LogDebug("[HashSet] 0x{Address:X} invalid or no type", hashSetAddress);
+                    return null;
+                }
+
+                var layout = GetOrBuildFieldLayout(hashSetObj.Type);
+                var countField = layout.CountField ?? layout.SizeField ?? layout.AnyIntField;
+                var entriesField = layout.EntriesField ?? layout.ItemsField ?? layout.ArrayField;
+
+                if (countField == null)
+                {
+                    _logger?.LogDebug("[HashSet] 0x{Address:X} type={Type}: _count field not found", hashSetAddress, hashSetObj.Type?.Name);
+                    return null;
+                }
+                if (entriesField == null)
+                {
+                    _logger?.LogDebug("[HashSet] 0x{Address:X} type={Type}: no backing array field found (tried _entries + fallback)", hashSetAddress, hashSetObj.Type?.Name);
+                    return null;
+                }
+
+                int count = Math.Max(0, countField.Read<int>(hashSetObj, interior: false));
+                int freeCount = 0;
+                if (layout.FreeCountField != null)
+                {
+                    try
+                    {
+                        freeCount = Math.Max(0, layout.FreeCountField.Read<int>(hashSetObj, interior: false));
+                    }
+                    catch
+                    {
+                        // freeCount field read failed; ignore and use count as-is
+                    }
+                }
+                int liveCount = Math.Max(0, count - freeCount);
+
+                var entriesObj = entriesField.ReadObject(hashSetObj, interior: false);
+
+                if (!entriesObj.IsValid || !entriesObj.IsArray)
+                {
+                    // Null/uninitialized entries = empty set never populated, no waste.
+                    return null;
+                }
+
+                int capacity = entriesObj.AsArray().Length;
+
+                // No waste if fully packed or empty
+                if (capacity <= 0 || liveCount >= capacity)
+                {
+                    // suppressed debug: no actionable waste detected for this collection
+                    return null;
+                }
+
+                double fillRate = (liveCount / (double)capacity) * 100;
+                // Prefer component type size when available. For value types use StaticSize; for references use pointer size.
+                ulong elementSize = 0;
+                var layoutMt = hashSetObj.Type?.MethodTable ?? 0UL;
+                var compType = entriesObj.Type?.ComponentType ?? hashSetObj.Type?.ComponentType ?? layout.ComponentType;
+                if (layout.ComputedElementSize != 0)
+                {
+                    elementSize = layout.ComputedElementSize;
+                }
+                else if (compType != null)
+                {
+                    elementSize = compType.IsValueType ? (ulong)compType.StaticSize : (ulong)(IntPtr.Size);
+                    TrySetComputedElementSize(layoutMt, compType, elementSize);
+                }
+                else
+                {
+                    elementSize = entriesObj.Size / (ulong)capacity;
+                }
+                ulong wastedSlots = (ulong)(capacity - liveCount);
+                ulong wastedMemory = wastedSlots * elementSize;
+
+                return new WastefulCollection
+                {
+                    Address = hashSetObj.Address,
+                    Type = hashSetObj.Type?.Name ?? "HashSet",
+                    Count = liveCount,
+                    Capacity = capacity,
+                    FillRate = fillRate,
+                    WastedMemory = wastedMemory,
+                    ElementSize = elementSize,
+                    ElementType = compType?.Name ?? string.Empty,
+                    SizeEstimateConfidence = compType != null ? "High" : "Low",
+                    DetectionMethod = entriesField?.Name ?? string.Empty,
+                    FreeEntryCount = freeCount > 0 ? freeCount : null
+                };
+            }
+            catch (Exception ex)
+            {
+                if (_options.SurfaceProbingExceptions)
+                    _logger?.LogError(ex, "Error analyzing HashSet at {Address}", hashSetAddress);
+                else
+                    _logger?.LogDebug(ex, "Ignored error analyzing HashSet at {Address}", hashSetAddress);
+            }
+
+            return null;
+        }
+
+        private sealed class LocalWasteAccumulator
+        {
+            public readonly List<WastefulCollection> TopWasteful;
+            public readonly int[] WasteCountByKind;
+            public readonly ulong[] WasteBytesByKind;
+            public readonly Dictionary<string, int> WasteCountByElementType;
+            public readonly Dictionary<string, ulong> WasteBytesByElementType;
+            public int WastefulCount;
+            public ulong TotalWastedMemory;
+            public int WasteUnder1Kb;
+            public int Waste1To10Kb;
+            public int Waste10To100Kb;
+            public int Waste100KbTo1Mb;
+            public int WasteAtLeast1Mb;
+
+            public LocalWasteAccumulator(int topCapacity, int kindCount)
+            {
+                TopWasteful = new List<WastefulCollection>(topCapacity);
+                WasteCountByKind = new int[kindCount];
+                WasteBytesByKind = new ulong[kindCount];
+                WasteCountByElementType = new Dictionary<string, int>();
+                WasteBytesByElementType = new Dictionary<string, ulong>();
+            }
+        }
+
+    }
+
+    
+
+    internal class CollectionStatistics
+    {
+        public int TotalCollections { get; set; }
+        public int Dictionaries { get; set; }
+        public int Lists { get; set; }
+        public int ArrayLists { get; set; }
+        public int Stacks { get; set; }
+        public int SortedLists { get; set; }
+        public int SortedSets { get; set; }
+        public int HashSets { get; set; }
+        public int Queues { get; set; }
+        public int ImmutableArrays { get; set; }
+        public int ImmutableArrayBuilders { get; set; }
+        public ulong TotalWastedMemory { get; set; }
+        public int WastefulCollectionCount { get; set; }
+        public List<WastefulCollection> WastefulCollections { get; set; } = new();
+        public IReadOnlyDictionary<CollectionKind, int> WasteCountsByKind { get; set; } = new Dictionary<CollectionKind, int>();
+        public IReadOnlyDictionary<CollectionKind, ulong> WasteBytesByKind { get; set; } = new Dictionary<CollectionKind, ulong>();
+        public IReadOnlyDictionary<string, int> WasteCountsByElementType { get; set; } = new Dictionary<string, int>();
+        public IReadOnlyDictionary<string, ulong> WasteBytesByElementType { get; set; } = new Dictionary<string, ulong>();
+        public IReadOnlyList<CollectionGenerationStats>? GenerationBreakdown { get; set; }
+    }
+
+    internal class WastefulCollection
+    {
+        public ulong Address { get; set; }
+        public string Type { get; set; } = string.Empty;
+        public CollectionKind Kind { get; set; }
+        public int Count { get; set; }
+        public int Capacity { get; set; }
+        public double FillRate { get; set; }
+        public ulong WastedMemory { get; set; }
+        public ulong ElementSize { get; set; }
+        public string ElementType { get; set; } = string.Empty;
+        public string SizeEstimateConfidence { get; set; } = "Unknown";
+        public string DetectionMethod { get; set; } = string.Empty;
+        public string? RootDescription { get; set; }
+        /// <summary>Immediate-parent hint from a single reverse-index lookup — cheap alternative
+        /// to <see cref="RootDescription"/>'s full BFS. See <see cref="CollectionAnalyzer.PopulateRootDescriptions"/>.</summary>
+        public string? OwnerTypeHint { get; set; }
+        public int? FreeEntryCount { get; set; }
+        // Queue-specific diagnostics
+        public int? Head { get; set; }
+        public int? Tail { get; set; }
+        public ulong? LargestContiguousFreeSegmentBytes { get; set; }
+        public int? FreeSegmentCount { get; set; }
+    }
+}
+
+

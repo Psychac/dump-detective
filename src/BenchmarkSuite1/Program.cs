@@ -14,6 +14,7 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Options;
+using DumpDetective.Analysis.Analyzers.Types;
 
 namespace BenchmarkSuite1
 {

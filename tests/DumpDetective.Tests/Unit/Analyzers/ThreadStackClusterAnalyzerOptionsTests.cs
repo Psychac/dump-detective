@@ -1,6 +1,7 @@
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Models;
 using DumpDetective.Analysis.Analyzers;
+using DumpDetective.Analysis.Analyzers.Threads;
 using DumpDetective.Analysis.Models;
 using FluentAssertions;
 using System.IO;

@@ -4,6 +4,7 @@ using DumpDetective.Analysis.Models;
 using FluentAssertions;
 
 using Xunit;
+using DumpDetective.Analysis.Analyzers.Runtime;
 
 namespace DumpDetective.Tests.Unit.Analysis;
 

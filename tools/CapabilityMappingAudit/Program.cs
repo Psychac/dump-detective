@@ -173,7 +173,9 @@ var optionalTraceCapabilities = new Dictionary<string, (string[] Capabilities, s
 
 var rows = new List<AnalyzerCapabilityRow>();
 
-foreach (string file in Directory.GetFiles(analyzersDir, "*.cs", SearchOption.TopDirectoryOnly)
+// AllDirectories: Phase 0 item 4 (2026-09-11) moved analyzers into per-domain package
+// subfolders (Memory/, Gc/, Threads/, ...); this must recurse to still find them.
+foreach (string file in Directory.GetFiles(analyzersDir, "*.cs", SearchOption.AllDirectories)
     .OrderBy(f => f, StringComparer.Ordinal))
 {
     string text = File.ReadAllText(file);

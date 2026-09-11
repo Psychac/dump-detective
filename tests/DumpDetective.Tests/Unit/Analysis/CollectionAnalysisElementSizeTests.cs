@@ -2,6 +2,7 @@ using DumpDetective.Analysis.Analyzers;
 using FluentAssertions;
 using Microsoft.Diagnostics.Runtime;
 using Xunit;
+using DumpDetective.Analysis.Analyzers.Types;
 
 namespace DumpDetective.Tests.Unit.Analysis;
 

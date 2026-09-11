@@ -2,6 +2,7 @@ using BenchmarkDotNet.Attributes;
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Core.Abstractions;
 using System;
+using DumpDetective.Analysis.Analyzers.Leaks;
 
 namespace BenchmarkSuite1
 {

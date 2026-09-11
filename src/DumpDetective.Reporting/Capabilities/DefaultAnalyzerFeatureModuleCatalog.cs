@@ -1,4 +1,12 @@
 using DumpDetective.Analysis.Analyzers;
+using DumpDetective.Analysis.Analyzers.Async;
+using DumpDetective.Analysis.Analyzers.Gc;
+using DumpDetective.Analysis.Analyzers.Infra;
+using DumpDetective.Analysis.Analyzers.Leaks;
+using DumpDetective.Analysis.Analyzers.Memory;
+using DumpDetective.Analysis.Analyzers.Runtime;
+using DumpDetective.Analysis.Analyzers.Threads;
+using DumpDetective.Analysis.Analyzers.Types;
 using DumpDetective.Analysis.Trend.Comparers;
 using DumpDetective.Reporting.FindingGenerators;
 using DumpDetective.Reporting.SectionBuilders;

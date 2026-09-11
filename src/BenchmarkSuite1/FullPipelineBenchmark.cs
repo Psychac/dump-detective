@@ -12,6 +12,12 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using DumpDetective.Analysis.Analyzers.Memory;
+using DumpDetective.Analysis.Analyzers.Runtime;
+using DumpDetective.Analysis.Analyzers.Threads;
+using DumpDetective.Analysis.Analyzers.Leaks;
+using DumpDetective.Analysis.Analyzers.Types;
+using DumpDetective.Analysis.Analyzers.Gc;
 
 namespace BenchmarkSuite1;
 

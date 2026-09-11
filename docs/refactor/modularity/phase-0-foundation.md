@@ -77,7 +77,6 @@ to become source-neutral.
    `SqlTransactionAnalyzer`) want something like `trace.db-events`, not currently in the
    vocabulary. Both are real inputs for Phase 3/6, not gaps in this audit. Item 3a (judgment-site
    inventory) is a separate, larger item — not started here.
-   dump-only behavior is the only behavior, avoids retrofitting guesses later.
 3a. **Judgment-site inventory** *(new — from the
    [analyzer-pipeline audit](../analyzer-pipeline-stages-and-leadfinding-dedup.md))*. That audit
    already catalogued judgment duplication across stages 1–3 but explicitly left gaps: only 8 of 39
@@ -87,9 +86,35 @@ to become source-neutral.
    every location that computes a severity, band, threshold, composite score, or row-selection
    ranking, across all four layers. This is the definitive input to Phase 5's synthesis-rule
    authoring, and Phase 5 cannot be scoped without it.
-4. **Namespace re-org in place.** Move analyzers into per-domain namespaces mirroring the eventual
-   plugin packages (see [phase-3-plugin-packaging.md](phase-3-plugin-packaging.md)). Pure move,
-   reviewable as a rename-only diff.
+4. **Namespace re-org in place. Done 2026-09-11.** Move analyzers into per-domain namespaces
+   mirroring the eventual plugin packages (see
+   [phase-3-plugin-packaging.md](phase-3-plugin-packaging.md)). Pure move, reviewable as a
+   rename-only diff. **Shipped**: all 36 `IAnalyzer` implementations plus their `LegacyAdapter`
+   siblings and domain-private helpers moved (`git mv`, history preserved) from the flat
+   `Analyzers/` into `Analyzers/{Memory,Gc,Threads,Async,Types,Leaks,Infra,Runtime}/`, namespaced
+   `DumpDetective.Analysis.Analyzers.<Package>` to match. `Plugins.Cpu` stays empty per the doc —
+   no dump-fed analyzer belongs there yet. Two things the source doc's table didn't cover, resolved
+   by inspection rather than guessed: (1) `SqlCommandAnalyzer`/`SqlConnectionPoolAnalyzer`/
+   `SqlTransactionAnalyzer` aren't in phase-3's package table (post-dates it) — placed in
+   `Infra` alongside `DbConnectionAnalyzer`, the existing precedent for DB/SQL connectivity
+   analyzers, along with the typed-resource-quartet helpers they share
+   (`ITypedResourceCandidateSource`, `TypedResourceScanDriver`, `TypedResourceSampler`,
+   `ConnectionStringAnonymiser` — confirmed single-domain via a full-repo reference sweep before
+   moving). (2) Three helpers (`AnalyzerHelpers`, `SegmentKindMapper`, `TypeNamePatternMatcher`)
+   are consumed across 3+ target packages or by the `Sdk/` bridge layer itself — moving any one of
+   them into a single package would violate phase-3's own "packages may not reference each other"
+   rule, so they stay at the `Analyzers/` root, unmoved. Every consumer across
+   `DumpDetective.Cli`/`.Reporting`/`.Tests`/`BenchmarkSuite1` fixed (mix of missing `using`
+   directives, two catalog-style files enumerating every analyzer by name, and one file using
+   fully-qualified `nameof(Analysis.Analyzers.X)` simplified to rely on the new `using`s). Also
+   fixed: both this phase's own audit tools (`ContractSurfaceAudit`, `CapabilityMappingAudit`)
+   scanned `Analyzers/` non-recursively and would have silently found zero analyzers after this
+   move — switched to recursive scan, regenerated both docs, confirmed byte-identical per-row
+   content (only row order changed, now naturally grouped by package). Verified: full solution
+   builds clean (`Analysis`, `Cli`, `Reporting`, `Tests`, `BenchmarkSuite1`,
+   `Sources.NetTrace`); full non-real-dump suite green, 1241 passed/0 failed/41 skipped; the 9
+   architecture-conformance tests (item 6's harness) green, confirming the namespace move didn't
+   cross a dependency-direction boundary.
 5. **Characterization test coverage.** Any analyzer domain lacking a golden/snapshot test gets one
    *before* it moves. The safety net must exist before the motion, not after. **Bound by scenario
    diversity, not just domain presence** (per

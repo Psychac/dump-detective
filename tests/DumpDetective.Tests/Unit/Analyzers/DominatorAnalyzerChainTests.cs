@@ -10,6 +10,7 @@ using FluentAssertions;
 using Microsoft.Diagnostics.Runtime;
 
 using Xunit;
+using DumpDetective.Analysis.Analyzers.Leaks;
 
 namespace DumpDetective.Tests.Unit.Analyzers;
 

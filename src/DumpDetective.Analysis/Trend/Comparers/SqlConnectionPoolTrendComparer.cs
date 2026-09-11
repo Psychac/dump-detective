@@ -1,4 +1,4 @@
-using DumpDetective.Analysis.Analyzers;
+using DumpDetective.Analysis.Analyzers.Infra;
 using DumpDetective.Core.Models;
 
 namespace DumpDetective.Analysis.Trend.Comparers

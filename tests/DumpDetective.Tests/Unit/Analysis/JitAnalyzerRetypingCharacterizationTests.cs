@@ -8,6 +8,7 @@ using FluentAssertions;
 using Microsoft.Diagnostics.Runtime;
 
 using Xunit;
+using DumpDetective.Analysis.Analyzers.Runtime;
 
 namespace DumpDetective.Tests.Unit.Analysis;
 

@@ -1,6 +1,7 @@
 using System.Reflection;
 
 using DumpDetective.Analysis.Analyzers;
+using DumpDetective.Analysis.Analyzers.Infra;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Pipeline;
 

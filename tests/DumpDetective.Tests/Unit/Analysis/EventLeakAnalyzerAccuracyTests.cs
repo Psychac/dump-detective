@@ -3,6 +3,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using FluentAssertions;
 using Xunit;
+using DumpDetective.Analysis.Analyzers.Leaks;
 
 namespace DumpDetective.Tests.Unit.Analysis;
 

@@ -1,4 +1,4 @@
-﻿using System.Buffers.Binary;
+using System.Buffers.Binary;
 using System.Reflection;
 
 using DumpDetective.Analysis.Analyzers;
@@ -16,6 +16,7 @@ using FluentAssertions;
 using Microsoft.Diagnostics.Runtime;
 
 using Xunit;
+using DumpDetective.Analysis.Analyzers.Threads;
 
 namespace DumpDetective.Tests.Unit.Analysis;
 

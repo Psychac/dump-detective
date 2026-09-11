@@ -9,6 +9,7 @@ using FluentAssertions;
 
 using Xunit;
 using Xunit.Abstractions;
+using DumpDetective.Analysis.Analyzers.Threads;
 
 namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 

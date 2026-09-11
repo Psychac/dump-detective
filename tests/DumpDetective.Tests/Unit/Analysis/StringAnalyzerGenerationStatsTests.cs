@@ -6,6 +6,7 @@ using DumpDetective.Analysis.Indexing;
 using FluentAssertions;
 
 using Xunit;
+using DumpDetective.Analysis.Analyzers.Types;
 
 namespace DumpDetective.Tests.Unit.Analysis;
 

@@ -3,6 +3,7 @@ using DumpDetective.Analysis.Analyzers;
 using FluentAssertions;
 
 using Xunit;
+using DumpDetective.Analysis.Analyzers.Types;
 
 namespace DumpDetective.Tests.Unit.Analysis;
 

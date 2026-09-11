@@ -1,6 +1,7 @@
 using System.Reflection;
 
 using DumpDetective.Analysis.Analyzers;
+using DumpDetective.Analysis.Analyzers.Threads;
 using DumpDetective.Analysis.Pipeline;
 
 using FluentAssertions;

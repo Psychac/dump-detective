@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 
 using DumpDetective.Analysis.Analyzers;
+using DumpDetective.Analysis.Analyzers.Types;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Core.Models;

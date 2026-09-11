@@ -5,6 +5,7 @@ using DumpDetective.Analysis.Models;
 using FluentAssertions;
 
 using Xunit;
+using DumpDetective.Analysis.Analyzers.Infra;
 
 // Test-only fixture type mirroring SqlCommandAnalyzer's expected SqlCommand field shape
 // (_activeConnection object reference) — declared under the real provider's namespace so

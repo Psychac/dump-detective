@@ -1,4 +1,4 @@
-using DumpDetective.Analysis.Analyzers;
+using DumpDetective.Analysis.Analyzers.Infra;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Enums;

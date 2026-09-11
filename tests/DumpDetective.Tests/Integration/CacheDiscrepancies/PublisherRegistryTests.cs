@@ -1,11 +1,12 @@
 using System.Threading;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Analyzers;
-using DumpDetective.Analysis.Analyzers.EventLeak;
+using DumpDetective.Analysis.Analyzers.Leaks.EventLeak;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Core.Options;
 using FluentAssertions;
 using Xunit;
+using DumpDetective.Analysis.Analyzers.Leaks;
 
 namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 

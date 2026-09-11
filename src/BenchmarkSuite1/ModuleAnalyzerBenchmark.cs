@@ -7,6 +7,7 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Options;
 using Microsoft.Diagnostics.Runtime;
 using System;
+using DumpDetective.Analysis.Analyzers.Runtime;
 
 namespace BenchmarkSuite1
 {

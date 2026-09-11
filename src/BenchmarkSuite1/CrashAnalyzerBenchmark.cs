@@ -3,6 +3,7 @@ using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Core.Abstractions;
 using System;
+using DumpDetective.Analysis.Analyzers.Runtime;
 
 namespace BenchmarkSuite1
 {

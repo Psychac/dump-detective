@@ -5,6 +5,7 @@ using DumpDetective.Analysis.Models;
 using FluentAssertions;
 
 using Xunit;
+using DumpDetective.Analysis.Analyzers.Infra;
 
 // Test-only fixture type mirroring DbConnectionAnalyzer's expected SqlConnection field shape
 // (_connectionState int, _connectionString string) — declared under the real provider's

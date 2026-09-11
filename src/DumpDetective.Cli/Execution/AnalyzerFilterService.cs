@@ -1,3 +1,11 @@
+using DumpDetective.Analysis.Analyzers.Async;
+using DumpDetective.Analysis.Analyzers.Gc;
+using DumpDetective.Analysis.Analyzers.Infra;
+using DumpDetective.Analysis.Analyzers.Leaks;
+using DumpDetective.Analysis.Analyzers.Memory;
+using DumpDetective.Analysis.Analyzers.Runtime;
+using DumpDetective.Analysis.Analyzers.Threads;
+using DumpDetective.Analysis.Analyzers.Types;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Cli.Services;
@@ -116,47 +124,47 @@ internal static class AnalyzerFilterService
         string typeName = analyzer.GetType().Name;
         return typeName switch
         {
-            nameof(Analysis.Analyzers.MemoryAnalyzer)
-            or nameof(Analysis.Analyzers.GCGenerationAnalyzer)
-            or nameof(Analysis.Analyzers.AllocationPatternAnalyzer)
-            or nameof(Analysis.Analyzers.ObjectShapeAnalyzer)
-            or nameof(Analysis.Analyzers.GCRootAnalyzer)
-            or nameof(Analysis.Analyzers.HeapTopologyAnalyzer)
-            or nameof(Analysis.Analyzers.ModuleAnalyzer)
+            nameof(MemoryAnalyzer)
+            or nameof(GCGenerationAnalyzer)
+            or nameof(AllocationPatternAnalyzer)
+            or nameof(ObjectShapeAnalyzer)
+            or nameof(GCRootAnalyzer)
+            or nameof(HeapTopologyAnalyzer)
+            or nameof(ModuleAnalyzer)
                 => 0,
 
-            nameof(Analysis.Analyzers.CrashAnalyzer)
-            or nameof(Analysis.Analyzers.HangAnalyzer)
-            or nameof(Analysis.Analyzers.AsyncTaskAnalyzer)
+            nameof(CrashAnalyzer)
+            or nameof(HangAnalyzer)
+            or nameof(AsyncTaskAnalyzer)
                 => 1,
 
-            nameof(Analysis.Analyzers.DominatorAnalyzer)
-            or nameof(Analysis.Analyzers.LeakCandidateAnalyzer)
-            or nameof(Analysis.Analyzers.CollectionAnalyzer)
-            or nameof(Analysis.Analyzers.StringAnalyzer)
+            nameof(DominatorAnalyzer)
+            or nameof(LeakCandidateAnalyzer)
+            or nameof(CollectionAnalyzer)
+            or nameof(StringAnalyzer)
                 => 2,
 
-            nameof(Analysis.Analyzers.StaticRootLeakDetector)
-            or nameof(Analysis.Analyzers.ReferenceChainAnalyzer)
+            nameof(StaticRootLeakDetector)
+            or nameof(ReferenceChainAnalyzer)
                 => 3,
 
-            nameof(Analysis.Analyzers.GCHandleAnalyzer)
-            or nameof(Analysis.Analyzers.LohFragmentationAnalyzer)
-            or nameof(Analysis.Analyzers.ThreadStackClusterAnalyzer)
+            nameof(GCHandleAnalyzer)
+            or nameof(LohFragmentationAnalyzer)
+            or nameof(ThreadStackClusterAnalyzer)
                 => 4,
 
-            nameof(Analysis.Analyzers.ThreadAnalyzer)
-            or nameof(Analysis.Analyzers.LockGraphAnalyzer)
-            or nameof(Analysis.Analyzers.EventLeakAnalyzer)
+            nameof(ThreadAnalyzer)
+            or nameof(LockGraphAnalyzer)
+            or nameof(EventLeakAnalyzer)
                 => 5,
 
-            nameof(Analysis.Analyzers.FinalizableObjectAnalyzer)
-            or nameof(Analysis.Analyzers.AsyncStateMachineAnalyzer)
-            or nameof(Analysis.Analyzers.ArrayAnalyzer)
-            or nameof(Analysis.Analyzers.SegmentReservationAnalyzer)
-            or nameof(Analysis.Analyzers.WeakReferenceAnalyzer)
-            or nameof(Analysis.Analyzers.BoxingAnalyzer)
-            or nameof(Analysis.Analyzers.JitAnalyzer)
+            nameof(FinalizableObjectAnalyzer)
+            or nameof(AsyncStateMachineAnalyzer)
+            or nameof(ArrayAnalyzer)
+            or nameof(SegmentReservationAnalyzer)
+            or nameof(WeakReferenceAnalyzer)
+            or nameof(BoxingAnalyzer)
+            or nameof(JitAnalyzer)
                 => 6,
 
             _ => 99

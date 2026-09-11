@@ -1,6 +1,7 @@
 using System.Reflection;
 
 using DumpDetective.Analysis.Analyzers;
+using DumpDetective.Analysis.Analyzers.Async;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Pipeline;

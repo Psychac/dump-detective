@@ -1,4 +1,5 @@
 using DumpDetective.Analysis.Analyzers;
+using DumpDetective.Analysis.Analyzers.Runtime;
 using DumpDetective.Analysis.Models;
 
 using FluentAssertions;

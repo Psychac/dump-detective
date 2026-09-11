@@ -99,20 +99,83 @@ public sealed class ModuleFindingGeneratorTests
         finding.Evidence.Should().Contain("13.0.0.0");
     }
 
+    [Fact]
+    public void Generate_ThreeOrMoreVersionConflicts_EmitsCriticalFinding()
+    {
+        var gen = new ModuleFindingGenerator();
+        var result = BuildResult(versionConflictGroups: 3);
+
+        var findings = gen.Generate(result);
+
+        var finding = findings.Should().ContainSingle(f => f.Title == "Module identity conflicts detected").Subject;
+        finding.Severity.Should().Be(FindingSeverity.Critical);
+    }
+
+    [Fact]
+    public void Generate_OneOrTwoVersionConflicts_EmitsWarningFinding()
+    {
+        var gen = new ModuleFindingGenerator();
+        var result = BuildResult(versionConflictGroups: 1);
+
+        var findings = gen.Generate(result);
+
+        var finding = findings.Should().ContainSingle(f => f.Title == "Module identity conflicts detected").Subject;
+        finding.Severity.Should().Be(FindingSeverity.Warning);
+    }
+
+    [Fact]
+    public void Generate_NoVersionConflicts_EmitsInfoFinding()
+    {
+        var gen = new ModuleFindingGenerator();
+        var result = BuildResult(versionConflictGroups: 0);
+
+        var findings = gen.Generate(result);
+
+        var finding = findings.Should().ContainSingle(f => f.Title == "Module dependency snapshot").Subject;
+        finding.Severity.Should().Be(FindingSeverity.Info);
+    }
+
+    [Fact]
+    public void Generate_DynamicModulesAtOrAboveOneHundred_EmitsCriticalFinding()
+    {
+        var gen = new ModuleFindingGenerator();
+        var result = BuildResult(totalDynamicModules: 150);
+
+        var findings = gen.Generate(result);
+
+        var finding = findings.Should().ContainSingle(f => f.Tags.Contains("dynamic-module")).Subject;
+        finding.Severity.Should().Be(FindingSeverity.Critical);
+    }
+
+    [Fact]
+    public void Generate_DynamicModulesAtOrAboveTwenty_BelowOneHundred_EmitsWarningFinding()
+    {
+        var gen = new ModuleFindingGenerator();
+        var result = BuildResult(totalDynamicModules: 30);
+
+        var findings = gen.Generate(result);
+
+        var finding = findings.Should().ContainSingle(f => f.Tags.Contains("dynamic-module")).Subject;
+        finding.Severity.Should().Be(FindingSeverity.Warning);
+    }
+
     private static ModuleDomainResult BuildResult(
         IReadOnlyList<CrossDomainModuleLoad>? crossDomainLoads = null,
         IReadOnlyList<AssemblyRefVersionMismatch>? assemblyRefVersionMismatches = null,
-        ulong heavyModuleWarningThresholdBytes = 200 * 1024 * 1024) =>
+        ulong heavyModuleWarningThresholdBytes = 200 * 1024 * 1024,
+        int versionConflictGroups = 0,
+        int totalDynamicModules = 0) =>
         new(
             TotalModules: 120,
             DynamicModules: 0,
             UniqueModuleNames: 100,
-            VersionConflictGroups: 0,
+            VersionConflictGroups: versionConflictGroups,
             ConflictingAssemblyNames: [],
             TopModulesBySize: [],
             ConflictDetails: [],
             HeavyModuleWarningThresholdBytes: heavyModuleWarningThresholdBytes,
             UnknownIdentityDuplicateModules: new HashSet<string>(),
             CrossDomainModuleLoads: crossDomainLoads ?? [],
-            AssemblyRefVersionMismatches: assemblyRefVersionMismatches ?? []);
+            AssemblyRefVersionMismatches: assemblyRefVersionMismatches ?? [],
+            TotalDynamicModules: totalDynamicModules);
 }

@@ -164,8 +164,18 @@ to become source-neutral.
      tests were otherwise thorough, just never asserted `.Severity` on the always-present summary
      finding). 2 new test files, 1 extended. 11 new test methods; full non-real-dump suite green
      (1325/0/41, up from 1314); all 4 Threads rows now show no missing severities.
-   - **Runtime — next.** 3/4 have gaps (`HeapTopologyFindingGenerator` from zero;
-     `ModuleFindingGenerator`/`JitFindingGenerator` severity-gaps).
+   - **Runtime — done 2026-09-11, with one documented tool false-positive.**
+     `HeapTopologyFindingGenerator` (from zero) and `ModuleFindingGenerator` (severity-gap: its 6
+     existing tests covered only the cross-domain/assembly-ref branches, never version-conflicts
+     or dynamic-module accumulation, both of which have their own `Critical` tier) are now fully
+     covered — 1 new file + 1 extended, 16 new test methods. `JitFindingGenerator` (extended, 4 new
+     methods covering the Warning/Info tiers and every signal branch) **still shows `Critical` as
+     missing after this batch — correctly**: traced the generator's own source and found
+     `FindingSeverity.Critical` appears exactly once, as an unreachable case label in a private
+     `SeverityRank` helper never assigned to an actual finding. The audit's regex-based severity
+     extraction can't distinguish reachable from dead code, so this is a known false-positive, not
+     a real remaining gap — no test was written to force it, since there is no code path that
+     produces it. Full non-real-dump suite green (1345/0/41, up from 1325).
    - Then, worst-to-best by the same measure: **Leaks** (2/5), **Async** (1/2), **Gc** (1/4),
      **Infra** (1/7, nearly clean already).
 6. **Architecture-conformance harness — already exists, verified and cleaned up 2026-09-08.** A

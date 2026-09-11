@@ -115,7 +115,7 @@ to become source-neutral.
    `Sources.NetTrace`); full non-real-dump suite green, 1241 passed/0 failed/41 skipped; the 9
    architecture-conformance tests (item 6's harness) green, confirming the namespace move didn't
    cross a dependency-direction boundary.
-5. **Characterization test coverage.** Any analyzer domain lacking a golden/snapshot test gets one
+5. **Characterization test coverage. Done 2026-09-11.** Any analyzer domain lacking a golden/snapshot test gets one
    *before* it moves. The safety net must exist before the motion, not after. **Bound by scenario
    diversity, not just domain presence** (per
    [modularity-plan.md § 10 point 6](../modularity-plan.md#10-external-review-2026-09-08--where-this-can-be-questioned)):
@@ -126,7 +126,8 @@ to become source-neutral.
    (Critical/Warning/Info/etc.) and distinct decision branches its finding-generation logic can
    reach, and cover each with a scenario before the domain moves — not one snapshot exercising
    whichever branch the sample dump happens to hit. **Gap-analysis audit done 2026-09-11; the
-   test-writing this item's exit criteria actually requires is not — see below.** `tools/CharacterizationCoverageAudit`
+   test-writing this item's exit criteria actually requires is also done, batched by domain
+   below.** `tools/CharacterizationCoverageAudit`
    (Roslyn, same syntax-only standard as items 1/3) scans the 36 `IFindingGenerator` implementations
    — severity/decision-branch logic lives there, not in the analyzers — for two scripted signals:
    count of `new InsightFinding(` construction sites (a proxy for distinct finding kinds/branches)
@@ -147,7 +148,7 @@ to become source-neutral.
    tests check `Title`/`Evidence`/count but never read `.Severity` at all. This is exactly the
    scenario-diversity gap this item exists to close.
 
-   **Test-writing in progress, batched by package domain (worst-gap domain first), re-verified
+   **Test-writing done, batched by package domain (worst-gap domain first), re-verified
    against `characterization-coverage.md` after each batch:**
    - **Memory — done 2026-09-11.** All 5 generators (`MemoryFindingGenerator`,
      `GCGenerationFindingGenerator`, `AllocationPatternFindingGenerator`,
@@ -191,7 +192,21 @@ to become source-neutral.
      decision branches (static-root retention, finalizer-queue pressure, pinned-handle
      accumulation, subgraph-walk-cap signal). 9 new test methods, all clean on first run. Full
      non-real-dump suite green (1369/0/41, up from 1360).
-   - **Infra — next, last domain.** 1/7 has a gap: `TimerLeakFindingGenerator` missing `Info`.
+   - **Infra — done 2026-09-11, last domain.** 1/7 had a gap: `TimerLeakFindingGenerator`'s
+     existing `TimerLeak_QueuePressureFinding_AtThreshold` test already exercised the missing
+     `Info` tier (queue pressure exactly at the 50-object threshold) but never asserted
+     `.Severity`; added that assertion plus one new test for the adjacent `Warning` tier
+     (≥150). 1 new test method + 1 extended assertion. Full non-real-dump suite green
+     (1370/0/41, up from 1369).
+
+   **All 8 domains done, 2026-09-11.** Final `characterization-coverage.md`: 36/36 generators
+   have at least one attributable test; 35/36 have every producible severity asserted. The one
+   remaining "missing severity" (`JitFindingGenerator` → `Critical`) is the documented tool
+   false-positive above — not a real gap, deliberately left unforced. This closes item 5's exit
+   criterion in full: every analyzer domain's distinct severity tiers and decision branches
+   (not just ≥ 1 test per domain) now have a covering characterization test. Total new/extended
+   test methods across all 8 batches: 129, growing the non-real-dump suite from 1241 to 1370
+   passing (0 failed throughout).
 6. **Architecture-conformance harness — already exists, verified and cleaned up 2026-09-08.** A
    lightweight boundary test asserting today's intended dependency direction. This isn't new work:
    `tests/DumpDetective.Tests/Unit/Architecture/DependencyDirectionTests.cs` (project-reference

@@ -553,7 +553,18 @@ public sealed class InfrastructureFindingGeneratorTests
         var gen = new TimerLeakFindingGenerator();
         var result = TimerResult(total: 60, threading: 10, queue: 25, holder: 25);
         var findings = gen.Generate(result);
-        findings.Should().ContainSingle(f => f.Title.Contains("Timer queue", StringComparison.OrdinalIgnoreCase));
+        var finding = findings.Should().ContainSingle(f => f.Title.Contains("Timer queue", StringComparison.OrdinalIgnoreCase)).Subject;
+        finding.Severity.Should().Be(FindingSeverity.Info);
+    }
+
+    [Fact]
+    public void TimerLeak_QueuePressureFinding_AtOrAboveOneHundredFifty_IsWarning()
+    {
+        var gen = new TimerLeakFindingGenerator();
+        var result = TimerResult(total: 200, threading: 10, queue: 100, holder: 60);
+        var findings = gen.Generate(result);
+        var finding = findings.Should().ContainSingle(f => f.Title.Contains("Timer queue", StringComparison.OrdinalIgnoreCase)).Subject;
+        finding.Severity.Should().Be(FindingSeverity.Warning);
     }
 
     [Fact]

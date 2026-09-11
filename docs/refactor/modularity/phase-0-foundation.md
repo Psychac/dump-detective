@@ -187,7 +187,11 @@ to become source-neutral.
      its own Warning/Critical ladder) had zero coverage at any severity, not just the missing
      Critical the audit flagged. 9 new test methods added, all branches and both severities now
      covered. Full non-real-dump suite green (1360/0/41, up from 1351).
-   - Then, worst-to-best by the same measure: **Gc** (1/4), **Infra** (1/7, nearly clean already).
+   - **Gc — done 2026-09-11.** 1/4 had a gap: `GCRootFindingGenerator` from zero tests, all 4
+     decision branches (static-root retention, finalizer-queue pressure, pinned-handle
+     accumulation, subgraph-walk-cap signal). 9 new test methods, all clean on first run. Full
+     non-real-dump suite green (1369/0/41, up from 1360).
+   - **Infra — next, last domain.** 1/7 has a gap: `TimerLeakFindingGenerator` missing `Info`.
 6. **Architecture-conformance harness — already exists, verified and cleaned up 2026-09-08.** A
    lightweight boundary test asserting today's intended dependency direction. This isn't new work:
    `tests/DumpDetective.Tests/Unit/Architecture/DependencyDirectionTests.cs` (project-reference

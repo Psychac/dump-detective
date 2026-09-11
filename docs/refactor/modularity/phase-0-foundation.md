@@ -155,11 +155,14 @@ to become source-neutral.
      worst domain, 5/5. 3 new test files from zero, 2 existing files extended with the missing
      severity-tier scenarios. 36 new test methods; full non-real-dump suite green (1277/0/41,
      up from 1241); coverage doc regenerated, all 5 rows now show no missing severities.
-   - **Types — next.** 4/5 have gaps (`ArrayFindingGenerator`, `BoxingFindingGenerator`,
-     `StringFindingGenerator` from zero; `CollectionFindingGenerator` severity-gap).
-   - Then, worst-to-best by the same measure: **Threads** (3/4), **Runtime** (3/4, but only 1
-     zero-test), **Leaks** (2/5), **Async** (1/2), **Gc** (1/4), **Infra** (1/7, nearly clean
-     already).
+   - **Types — done 2026-09-11.** 4/5 had gaps (`ArrayFindingGenerator`, `BoxingFindingGenerator`,
+     `StringFindingGenerator` from zero; `CollectionFindingGenerator` severity-gap). 3 new test
+     files, 1 extended. 37 new test methods; full non-real-dump suite green (1314/0/41, up from
+     1277); all 5 Types rows now show no missing severities.
+   - **Threads — next.** 3/4 have gaps (`HangFindingGenerator`, `LockGraphFindingGenerator` from
+     zero; `ThreadFindingGenerator` severity-gap).
+   - Then, worst-to-best by the same measure: **Runtime** (3/4, but only 1 zero-test), **Leaks**
+     (2/5), **Async** (1/2), **Gc** (1/4), **Infra** (1/7, nearly clean already).
 6. **Architecture-conformance harness — already exists, verified and cleaned up 2026-09-08.** A
    lightweight boundary test asserting today's intended dependency direction. This isn't new work:
    `tests/DumpDetective.Tests/Unit/Architecture/DependencyDirectionTests.cs` (project-reference

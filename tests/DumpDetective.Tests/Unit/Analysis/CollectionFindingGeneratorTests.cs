@@ -15,7 +15,8 @@ public sealed class CollectionFindingGeneratorTests
         Dictionary<CollectionKind, int>? countsByKind,
         Dictionary<CollectionKind, ulong>? bytesByKind,
         Dictionary<string, int>? countsByElementType = null,
-        Dictionary<string, ulong>? bytesByElementType = null) =>
+        Dictionary<string, ulong>? bytesByElementType = null,
+        ulong totalWastedMemory = 10_000) =>
         new(
             TotalCollections: 100,
             Dictionaries: 20,
@@ -26,12 +27,32 @@ public sealed class CollectionFindingGeneratorTests
             SortedSets: 0,
             HashSets: 0,
             Queues: 10,
-            TotalWastedMemory: 10_000,
+            TotalWastedMemory: totalWastedMemory,
             WastefulCollectionCount: 6,
             WasteCountsByKind: countsByKind,
             WasteBytesByKind: bytesByKind,
             WasteCountsByElementType: countsByElementType,
             WasteBytesByElementType: bytesByElementType);
+
+    [Fact]
+    public void Generate_TotalWastedMemoryAtOrAboveFiftyMb_EmitsWarningFinding()
+    {
+        var result = BuildResult(countsByKind: null, bytesByKind: null, totalWastedMemory: 60 * 1024 * 1024UL);
+
+        InsightFinding finding = new CollectionFindingGenerator().Generate(result).Single();
+
+        finding.Severity.Should().Be(FindingSeverity.Warning);
+    }
+
+    [Fact]
+    public void Generate_TotalWastedMemoryBelowFiftyMb_EmitsInfoFinding()
+    {
+        var result = BuildResult(countsByKind: null, bytesByKind: null, totalWastedMemory: 1_000_000UL);
+
+        InsightFinding finding = new CollectionFindingGenerator().Generate(result).Single();
+
+        finding.Severity.Should().Be(FindingSeverity.Info);
+    }
 
     [Fact]
     public void Generate_Evidence_ListsKindsByWastedBytesDescending()

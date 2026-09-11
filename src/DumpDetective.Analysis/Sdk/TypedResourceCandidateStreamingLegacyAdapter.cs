@@ -44,10 +44,14 @@ public abstract class TypedResourceCandidateStreamingLegacyAdapter<TSelf, TSdkAn
     {
     }
 
-    /// <summary>The dump-resolved type names this adapter's inner analyzer wants candidate objects for.</summary>
-    protected abstract IReadOnlySet<string> CandidateTypeNames { get; }
-
-    public bool IsCandidateType(string typeName) => CandidateTypeNames.Contains(typeName);
+    /// <summary>
+    /// Which dump-resolved type names this adapter's inner analyzer wants candidate objects for.
+    /// An abstract method, not a fixed <c>IReadOnlySet&lt;string&gt;</c> — found wrong on contact
+    /// with the second real consumer (<c>SqlCommandAnalyzer</c>/<c>SqlTransactionAnalyzer</c>),
+    /// which classify by namespace-prefix + suffix pattern (<c>TypeNamePatternMatcher</c>), not
+    /// exact-name-set membership like the pilot (<c>SqlConnectionPoolAnalyzer</c>) happened to.
+    /// </summary>
+    public abstract bool IsCandidateType(string typeName);
 
     public void BeforeHeapIndexScan(Core.Abstractions.AnalysisContext context) =>
         _candidateMts = TypedResourceScanDriver.DiscoverCandidates(this, context.Heap, context.Cache);

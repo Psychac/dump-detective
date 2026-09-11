@@ -1,9 +1,8 @@
-using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
-using DumpDetective.Core.Abstractions;
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
-
-using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 
 namespace DumpDetective.Analysis.Analyzers.Infra;
 
@@ -15,10 +14,24 @@ namespace DumpDetective.Analysis.Analyzers.Infra;
 ///
 /// Same namespace-prefix providers as <see cref="DbConnectionAnalyzer"/>/<see cref="SqlTransactionAnalyzer"/>.
 /// Unlike transactions, ADO.NET providers do not reliably null out a command's internal
-/// connection-reference field on <c>Dispose()</c>, so "Active" here means "still references a
+/// connection-reference field on <c>Dispose()</c>, so "Active" means "still references a
 /// connection object", not strictly "not yet disposed".
 /// </summary>
-public sealed class SqlCommandAnalyzer : IAnalyzer, IParallelHeapIndexScanParticipant, ITypedResourceCandidateSource, ITypedResourceInstanceSampler<SqlCommandSnapshot>
+/// <remarks>
+/// Tier-2 batch (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md), second real
+/// consumer of <c>TypedResourceCandidateStreamingLegacyAdapter</c> after the pilot. Candidate
+/// discovery (address + type name) stays Tier-1-shaped on
+/// <see cref="SqlCommandAnalyzerLegacyAdapter"/>; per-instance connection-field state, read here via
+/// <see cref="IDumpObjectFieldQuery"/>, moves entirely off the scan-participant path — the
+/// pre-retyping analyzer's <c>ITypedResourceInstanceSampler&lt;SqlCommandSnapshot&gt;</c> classified
+/// state inline during <c>OnHeapEntry</c>; this class does the same classification per candidate,
+/// after the shared scan, so the adapter no longer needs a sampler at all.
+///
+/// The pre-retyping analyzer tracked a fourth "Other" (unreadable-state) bucket internally but never
+/// surfaced it in <see cref="SqlCommandTypeSummary"/>/<see cref="SqlCommandDomainResult"/> — this
+/// retyping doesn't add it either, since that would be a real behavior change, not a plumbing one.
+/// </remarks>
+public sealed class SqlCommandAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "SQL Command Analysis";
     public string Category => "Infrastructure";
@@ -26,186 +39,87 @@ public sealed class SqlCommandAnalyzer : IAnalyzer, IParallelHeapIndexScanPartic
     private const int StateDisposed = 0;
     private const int StateActive = 1;
 
-    // Same provider namespaces as DbConnectionAnalyzer/SqlTransactionAnalyzer.
-    private static readonly string[] CommandNamespacePrefixes =
-    [
-        "System.Data.SqlClient.",
-        "Microsoft.Data.SqlClient.",
-        "System.Data.OleDb.",
-        "System.Data.Odbc.",
-        "Oracle.",
-        "Npgsql.",
-        "MySql.",
-        "Microsoft.Data.Sqlite.",
-        "System.Data.SQLite.",
-    ];
-
-    public bool IsCandidateType(string typeName) =>
-        TypeNamePatternMatcher.HasPrefixAndSuffixOrContains(typeName, CommandNamespacePrefixes, "Command", null);
-
     // Field names tried in order when reading the owning connection reference.
     private static readonly string[] ConnectionFieldNames = ["_activeConnection", "_connection", "Connection"];
 
-    SqlCommandSnapshot? ITypedResourceInstanceSampler<SqlCommandSnapshot>.TrySample(ClrHeap heap, in HeapEntry entry, string typeName)
-    {
-        int stateVal = TryReadCommandState(heap, entry.Address);
-        string stateLabel = stateVal == StateActive ? "Active" : stateVal == StateDisposed ? "Disposed" : "Other";
-        return new SqlCommandSnapshot(typeName, entry.Address, stateLabel, stateVal);
-    }
+    public AnalyzerDomainResult? LastResult { get; private set; }
 
-    private static int TryReadCommandState(ClrHeap heap, ulong address)
-    {
-        try
-        {
-            ClrObject obj = heap.GetObject(address);
-            if (!obj.IsValid || obj.Type == null)
-                return -1;
-
-            for (int i = 0; i < ConnectionFieldNames.Length; i++)
-            {
-                ClrInstanceField? field = obj.Type.GetFieldByName(ConnectionFieldNames[i]);
-                if (field == null)
-                    continue;
-
-                ClrObject connectionObj = field.ReadObject(address, interior: false);
-                return connectionObj.IsValid && connectionObj.Type != null ? StateActive : StateDisposed;
-            }
-
-            return -1;
-        }
-        catch
-        {
-            // Corrupt/unloaded object — treat as unreadable state, not a crash.
-            return -1;
-        }
-    }
-
-    // Instance accumulator state for the IHeapIndexScanParticipant path. Mirrors
-    // SqlTransactionAnalyzer's/DbConnectionAnalyzer's shared typed-resource quartet wiring.
-    private ClrHeap? _heap;
-    private Dictionary<ulong, (string TypeName, long Count, ulong Bytes)>? _candidateMts;
-    private Dictionary<ulong, (string Name, int Total, int Active, int Disposed, int Other, ulong Bytes)>? _typeStats;
-    private InstanceStateSampler<SqlCommandSnapshot>? _sampler;
-
-    public void BeforeHeapIndexScan(AnalysisContext context)
-    {
-        ClrHeap heap = context.Heap;
-        _heap = heap;
-
-        Dictionary<ulong, (string TypeName, long Count, ulong Bytes)> candidateMts =
-            TypedResourceScanDriver.DiscoverCandidates(this, heap, context.Cache);
-        _candidateMts = candidateMts;
-
-        var typeStats = new Dictionary<ulong, (string Name, int Total, int Active, int Disposed, int Other, ulong Bytes)>(candidateMts.Count);
-        foreach (KeyValuePair<ulong, (string TypeName, long Count, ulong Bytes)> kv in candidateMts)
-        {
-            int total = (int)Math.Min(kv.Value.Count, int.MaxValue);
-            typeStats[kv.Key] = (kv.Value.TypeName, total, 0, 0, 0, kv.Value.Bytes);
-        }
-
-        _typeStats = typeStats;
-        _sampler = TypedResourceScanDriver.CreateSampler(this);
-    }
-
-    void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => OnHeapEntry(in entry);
-
-    IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() =>
-        new SqlCommandAnalyzer();
-
-    void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
-    {
-        var typeStats = _typeStats!;
-        var sampler = _sampler!;
-
-        foreach (IHeapIndexScanParticipant p in partials)
-        {
-            var other = (SqlCommandAnalyzer)p;
-            if (other._typeStats is null) continue;
-
-            foreach (var kvp in other._typeStats)
-            {
-                if (!typeStats.TryGetValue(kvp.Key, out var self))
-                {
-                    typeStats[kvp.Key] = kvp.Value;
-                    continue;
-                }
-
-                var o = kvp.Value;
-                typeStats[kvp.Key] = (self.Name, self.Total,
-                    self.Active + o.Active,
-                    self.Disposed + o.Disposed,
-                    self.Other + o.Other,
-                    self.Bytes);
-            }
-
-            if (other._sampler is not null)
-                sampler.MergeFrom(other._sampler);
-        }
-    }
-
-    private void OnHeapEntry(in HeapEntry entry)
-    {
-        var candidateMts = _candidateMts!;
-        var typeStats = _typeStats!;
-        var sampler = _sampler!;
-
-        if (!candidateMts.ContainsKey(entry.MethodTable)) return;
-        if (!typeStats.TryGetValue(entry.MethodTable, out var ts)) return;
-        string typeName = ts.Name;
-
-        SqlCommandSnapshot? snap = TypedResourceScanDriver.TryGetSample(this, _heap!, in entry, typeName);
-
-        int active = ts.Active; int disposed = ts.Disposed; int other = ts.Other;
-        if (snap is not null)
-        {
-            if (snap.StateValue == StateActive) active++;
-            else if (snap.StateValue == StateDisposed) disposed++;
-            else other++;
-        }
-        else
-        {
-            other++;
-        }
-        typeStats[entry.MethodTable] = (typeName, ts.Total, active, disposed, other, ts.Bytes);
-
-        if (snap is not null && snap.StateValue == StateActive)
-            sampler.AddTopSample(snap);
-    }
-
-    public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(BuildResult().Stamp(this));
+
+        IDumpObjectFieldQuery fields = context.DumpObjectFields
+            ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.DumpObjectFields}' capability.");
+
+        LastResult = Analyze(fields, context.HeapObjects);
+        return ValueTask.CompletedTask;
     }
 
-    private SqlCommandDomainResult BuildResult()
+    private static SqlCommandDomainResult Analyze(IDumpObjectFieldQuery fields, IHeapObjectStream? candidates)
     {
-        if (_typeStats is null || _typeStats.Count == 0)
+        if (candidates is null)
+            return Empty();
+
+        var typeStats = new Dictionary<string, (int Total, int Active, int Disposed, ulong Bytes)>(StringComparer.Ordinal);
+        var topActive = new List<SqlCommandSnapshot>();
+
+        foreach (HeapObjectRef candidate in candidates.EnumerateObjects())
+        {
+            int stateVal = TryReadCommandState(fields, candidate.Address);
+            typeStats.TryGetValue(candidate.TypeDisplayName, out var ts);
+
+            int active = ts.Active, disposed = ts.Disposed;
+            if (stateVal == StateActive)
+            {
+                active++;
+                topActive.Add(new SqlCommandSnapshot(candidate.TypeDisplayName, candidate.Address, "Active", stateVal));
+            }
+            else if (stateVal == StateDisposed)
+            {
+                disposed++;
+            }
+
+            typeStats[candidate.TypeDisplayName] = (ts.Total + 1, active, disposed, ts.Bytes + candidate.Size);
+        }
+
+        if (typeStats.Count == 0)
             return Empty();
 
         int totalCommands = 0, totalActive = 0, totalDisposed = 0;
-        var byType = new List<SqlCommandTypeSummary>(_typeStats.Count);
-
-        foreach (var kv in _typeStats)
+        var byType = new List<SqlCommandTypeSummary>(typeStats.Count);
+        foreach (var kv in typeStats)
         {
-            var ts = kv.Value;
-            byType.Add(new SqlCommandTypeSummary(ts.Name, ts.Total, ts.Disposed, ts.Active, ts.Bytes));
-            totalCommands += ts.Total;
-            totalActive   += ts.Active;
-            totalDisposed += ts.Disposed;
+            byType.Add(new SqlCommandTypeSummary(kv.Key, kv.Value.Total, kv.Value.Disposed, kv.Value.Active, kv.Value.Bytes));
+            totalCommands += kv.Value.Total;
+            totalActive += kv.Value.Active;
+            totalDisposed += kv.Value.Disposed;
         }
 
         byType.Sort(static (a, b) => b.TotalCount.CompareTo(a.TotalCount));
 
         return new SqlCommandDomainResult(
-            CommandsFound:     totalCommands > 0,
-            TotalCommands:     totalCommands,
-            DisposedCount:     totalDisposed,
-            ActiveCount:       totalActive,
-            ByType:            byType,
-            TopActiveCommands: _sampler?.TopSamples ?? []);
+            CommandsFound: totalCommands > 0,
+            TotalCommands: totalCommands,
+            DisposedCount: totalDisposed,
+            ActiveCount: totalActive,
+            ByType: byType,
+            TopActiveCommands: topActive);
     }
 
-    private static SqlCommandDomainResult Empty() =>
-        new(false, 0, 0, 0, [], []);
+    private static int TryReadCommandState(IDumpObjectFieldQuery fields, ulong address)
+    {
+        foreach (string fieldName in ConnectionFieldNames)
+        {
+            if (!fields.TryReadField(address, fieldName, out FieldValue value))
+                continue; // field not declared on this type -- try the next name
+
+            return value.Kind == FieldValueKind.ObjectReference ? StateActive : StateDisposed;
+        }
+
+        return -1;
+    }
+
+    private static SqlCommandDomainResult Empty() => new(false, 0, 0, 0, [], []);
+
+    public void Dispose() { }
 }

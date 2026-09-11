@@ -79,8 +79,11 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         // 1 retyping) — see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("jit", "JIT Analysis", typeof(JitAnalyzerLegacyAdapter), typeof(JitFindingGenerator), typeof(JitTrendComparer), typeof(JitSectionBuilder), 410, ["runtime", "perf"]),
         Module("db-connection", "DbConnection Analysis", typeof(DbConnectionAnalyzer), typeof(DbConnectionFindingGenerator), typeof(DbConnectionTrendComparer), typeof(DbConnectionSectionBuilder), 420, ["infra", "network"]),
-        Module("sql-transaction", "SQL Transaction Analysis", typeof(SqlTransactionAnalyzer), typeof(SqlTransactionFindingGenerator), typeof(SqlTransactionTrendComparer), typeof(SqlTransactionSectionBuilder), 425, ["infra", "network"]),
-        Module("sql-command", "SQL Command Analysis", typeof(SqlCommandAnalyzer), typeof(SqlCommandFindingGenerator), typeof(SqlCommandTrendComparer), typeof(SqlCommandSectionBuilder), 426, ["infra", "network"]),
+        // SqlTransactionAnalyzerLegacyAdapter/SqlCommandAnalyzerLegacyAdapter, not the analyzers
+        // directly, since 2026-09-11 (Tier-2 wave batch 1) -- see
+        // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("sql-transaction", "SQL Transaction Analysis", typeof(SqlTransactionAnalyzerLegacyAdapter), typeof(SqlTransactionFindingGenerator), typeof(SqlTransactionTrendComparer), typeof(SqlTransactionSectionBuilder), 425, ["infra", "network"]),
+        Module("sql-command", "SQL Command Analysis", typeof(SqlCommandAnalyzerLegacyAdapter), typeof(SqlCommandFindingGenerator), typeof(SqlCommandTrendComparer), typeof(SqlCommandSectionBuilder), 426, ["infra", "network"]),
         // SqlConnectionPoolAnalyzerLegacyAdapter, not SqlConnectionPoolAnalyzer directly, since 2026-09-11
         // (Tier-2 pilot) -- SqlConnectionPoolAnalyzer now implements SDK IDumpObjectFieldQuery
         // capability, not Core.Abstractions.IAnalyzer directly. See

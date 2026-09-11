@@ -1,17 +1,17 @@
-using DumpDetective.Analysis.Analyzers;
-using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Analyzers.Infra;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.SdkBridge;
+using DumpDetective.Sdk.Analysis;
 
 using FluentAssertions;
 
 using Xunit;
-using DumpDetective.Analysis.Analyzers.Infra;
 
 // Test-only fixture type mirroring SqlCommandAnalyzer's expected SqlCommand field shape
 // (_activeConnection object reference) — declared under the real provider's namespace so
-// SqlCommandAnalyzer.IsCandidateType's namespace-prefix + "Command"-suffix match fires against
-// it, without depending on the actual Microsoft.Data.SqlClient package (not referenced by this
-// project — R10, hard-need basis: no new external dependency for this).
+// SqlCommandAnalyzerLegacyAdapter.IsCandidateType's namespace-prefix + "Command"-suffix match fires
+// against it, without depending on the actual Microsoft.Data.SqlClient package (not referenced by
+// this project — R10, hard-need basis: no new external dependency for this).
 namespace Microsoft.Data.SqlClient
 {
     // Distinct type per scenario (rather than one type reused across tests) so a static field
@@ -41,10 +41,13 @@ namespace Microsoft.Data.SqlClient
 namespace DumpDetective.Tests.Unit.Analysis
 {
     /// <summary>
-    /// R10 (docs/analysis/phase1/DbConnectionAnalyzer-audit.md): exercises
-    /// <see cref="SqlCommandAnalyzer"/>'s real ClrMD field-reading code
-    /// (<c>TrySample</c>) against a live self-process heap snapshot instead of only via the
-    /// real-dump discrepancy test.
+    /// R10 (docs/analysis/phase1/DbConnectionAnalyzer-audit.md), ported for the Tier-2 retyping
+    /// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md): exercises
+    /// <see cref="SqlCommandAnalyzer"/>'s real field-reading code path against a live self-process
+    /// heap snapshot through the real <see cref="DumpObjectFieldQuery"/> — not the dictionary-backed
+    /// fake <c>SqlCommandAnalyzerRetypingCharacterizationTests</c> uses — so this is the one place
+    /// short of the real-dump test that proves the Tier-2 hatch's <c>ClrElementType.Object</c> field
+    /// chase actually works against real ClrMD data, not just against a controlled fixture.
     /// </summary>
     public sealed class SqlCommandAnalyzerLiveHeapTests
     {
@@ -54,7 +57,7 @@ namespace DumpDetective.Tests.Unit.Analysis
         private static Microsoft.Data.SqlClient.FakeDetachedSqlCommand? s_detachedCommand;
 
         [Fact]
-        public void TrySample_ReadsActiveState_WhenConnectionFieldReferencesLiveObject()
+        public async Task AnalyzeAsync_ReadsActiveState_WhenConnectionFieldReferencesLiveObject()
         {
             s_activeCommandConnection = new object();
             s_activeCommand = new Microsoft.Data.SqlClient.FakeActiveSqlCommand(s_activeCommandConnection);
@@ -62,36 +65,44 @@ namespace DumpDetective.Tests.Unit.Analysis
             var (dataTarget, heap, methodTable, address) = LiveHeapSnapshotFixture.AttachAndFind("FakeActiveSqlCommand");
             using (dataTarget)
             {
-                var analyzer = new SqlCommandAnalyzer();
-                var entry = new HeapEntry(address, methodTable, 32);
+                SqlCommandDomainResult result = await Analyze(heap, address, methodTable, "Microsoft.Data.SqlClient.FakeActiveSqlCommand");
 
-                SqlCommandSnapshot? snap = ((ITypedResourceInstanceSampler<SqlCommandSnapshot>)analyzer)
-                    .TrySample(heap, in entry, "Microsoft.Data.SqlClient.FakeActiveSqlCommand");
-
-                snap.Should().NotBeNull();
-                snap!.StateLabel.Should().Be("Active");
-                snap.StateValue.Should().Be(1);
+                result.ActiveCount.Should().Be(1);
+                result.DisposedCount.Should().Be(0);
+                result.TopActiveCommands.Should().ContainSingle(s => s.Address == address);
             }
         }
 
         [Fact]
-        public void TrySample_ReadsDisposedState_WhenConnectionFieldIsNull()
+        public async Task AnalyzeAsync_ReadsDisposedState_WhenConnectionFieldIsNull()
         {
             s_detachedCommand = new Microsoft.Data.SqlClient.FakeDetachedSqlCommand(activeConnection: null);
 
             var (dataTarget, heap, methodTable, address) = LiveHeapSnapshotFixture.AttachAndFind("FakeDetachedSqlCommand");
             using (dataTarget)
             {
-                var analyzer = new SqlCommandAnalyzer();
-                var entry = new HeapEntry(address, methodTable, 32);
+                SqlCommandDomainResult result = await Analyze(heap, address, methodTable, "Microsoft.Data.SqlClient.FakeDetachedSqlCommand");
 
-                SqlCommandSnapshot? snap = ((ITypedResourceInstanceSampler<SqlCommandSnapshot>)analyzer)
-                    .TrySample(heap, in entry, "Microsoft.Data.SqlClient.FakeDetachedSqlCommand");
-
-                snap.Should().NotBeNull();
-                snap!.StateLabel.Should().Be("Disposed");
-                snap.StateValue.Should().Be(0);
+                result.ActiveCount.Should().Be(0);
+                result.DisposedCount.Should().Be(1);
+                result.TopActiveCommands.Should().BeEmpty();
             }
+        }
+
+        private static async Task<SqlCommandDomainResult> Analyze(
+            Microsoft.Diagnostics.Runtime.ClrHeap heap, ulong address, ulong methodTable, string typeName)
+        {
+            SqlCommandAnalyzer analyzer = new();
+            HeapObjectRef candidate = new(address, SdkTypeRefFactory.FromName(typeName, methodTable), Size: 32, TypeDisplayName: typeName);
+            AnalysisContext context = new()
+            {
+                Observations = NoOpObservationSink.Instance,
+                DumpObjectFields = new DumpObjectFieldQuery(heap),
+                HeapObjects = new PrecomputedHeapObjectStream([candidate]),
+            };
+
+            await analyzer.AnalyzeAsync(context, CancellationToken.None);
+            return (SqlCommandDomainResult)analyzer.LastResult!;
         }
     }
 }

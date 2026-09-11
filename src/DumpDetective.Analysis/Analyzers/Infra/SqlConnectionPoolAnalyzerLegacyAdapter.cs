@@ -27,5 +27,5 @@ public sealed class SqlConnectionPoolAnalyzerLegacyAdapter :
     {
     }
 
-    protected override IReadOnlySet<string> CandidateTypeNames => PoolTypeNames;
+    public override bool IsCandidateType(string typeName) => PoolTypeNames.Contains(typeName);
 }

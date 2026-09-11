@@ -20,7 +20,8 @@ public sealed class ThreadFindingGeneratorTests
         double blockedThreadRatio = 0.0,
         IReadOnlyList<NameCountEntry>? topActiveThreadHotspots = null,
         int maxAsyncChainDepth = 0,
-        int asyncChainThreadCount = 0) =>
+        int asyncChainThreadCount = 0,
+        int threadsWithActiveExceptionsCount = 0) =>
         new ThreadDomainResult(
             TotalThreadCount: aliveThreadCount,
             AliveThreadCount: aliveThreadCount,
@@ -28,7 +29,7 @@ public sealed class ThreadFindingGeneratorTests
             GcThreadCount: 0,
             BlockedThreadCount: blockedThreadCount,
             LockHoldingThreadCount: 0,
-            ThreadsWithActiveExceptionsCount: 0,
+            ThreadsWithActiveExceptionsCount: threadsWithActiveExceptionsCount,
             BackgroundThreadCount: 0,
             WaitPatternBreakdown: new Dictionary<string, int>(),
             TopActiveThreadHotspots: topActiveThreadHotspots ?? [new NameCountEntry("MyApp.Worker.Run()", aliveThreadCount)],
@@ -40,7 +41,7 @@ public sealed class ThreadFindingGeneratorTests
             AsyncChainThreadCount: asyncChainThreadCount);
 
     [Fact]
-    public void Generate_HealthyState_OnlyEmitsSummaryFinding()
+    public void Generate_HealthyState_OnlyEmitsInfoSummaryFinding()
     {
         var gen = new ThreadFindingGenerator();
         var result = BuildResult();
@@ -49,6 +50,31 @@ public sealed class ThreadFindingGeneratorTests
 
         findings.Should().ContainSingle();
         findings[0].Title.Should().Be("Thread-state triage summary");
+        findings[0].Severity.Should().Be(FindingSeverity.Info);
+    }
+
+    [Fact]
+    public void Generate_ManyBlockedThreads_SummaryIsWarning()
+    {
+        var gen = new ThreadFindingGenerator();
+        var result = BuildResult(aliveThreadCount: 20, blockedThreadCount: 10, blockedThreadRatio: 0.5);
+
+        var findings = gen.Generate(result);
+
+        findings.Should().ContainSingle(f => f.Title == "Thread-state triage summary")
+            .Which.Severity.Should().Be(FindingSeverity.Warning);
+    }
+
+    [Fact]
+    public void Generate_ThreadsWithActiveExceptions_SummaryIsWarning()
+    {
+        var gen = new ThreadFindingGenerator();
+        var result = BuildResult(threadsWithActiveExceptionsCount: 2);
+
+        var findings = gen.Generate(result);
+
+        findings.Should().ContainSingle(f => f.Title == "Thread-state triage summary")
+            .Which.Severity.Should().Be(FindingSeverity.Warning);
     }
 
     [Fact]

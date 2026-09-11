@@ -11,23 +11,72 @@ to become source-neutral.
 
 ## Work items
 
-1. **Contract surface audit.** For every `IAnalyzer` implementation, enumerate every type it
-   touches outside its own file: constructor params, `AnalysisContext` members read,
+1. **Contract surface audit. Done 2026-09-11.** For every `IAnalyzer` implementation, enumerate
+   every type it touches outside its own file: constructor params, `AnalysisContext` members read,
    `IHeapAnalysisCache` methods called, `internal` types reached via `InternalsVisibleTo`. Output a
    generated (scripted, not hand-maintained) table at
    `docs/refactor/modularity/contract-surface-inventory.md`. This defines exactly what Phase 1's
-   SDK must expose and nothing more.
-2. **De-dump-ification audit** *(new)*. Catalog everything that assumes a single ClrMD dump is the
-   only input. Expect at minimum: `DumpLoadContext`, `SingleDumpPipelineState`,
-   `SingleDumpOrchestrationService` / `TrendOrchestrationService`, `SingleDumpReportDocument` /
-   `TrendReportDocument`, `DumpIndexPaths`, `--baseline`/`--trend` CLI semantics, and every
-   analyzer that takes `RuntimeFacade` directly rather than going through the cache. Each entry
-   gets a disposition: *generalize* (becomes artifact-neutral), *becomes-a-dump-source-detail*
-   (moves behind `IArtifactSource`), or *deleted* (subsumed by the session model).
-3. **Capability mapping** *(new)*. For each analyzer, record which capabilities from
-   [source-model.md § 3](source-model.md) it actually needs — and, importantly, which it would
-   *optionally* benefit from once trace exists. This table is the direct input to Phase 3's
-   `[RequiresCapability]` attributes and to the graded-fidelity design; doing it now, while the
+   SDK must expose and nothing more. **Shipped**: `tools/ContractSurfaceAudit` (Roslyn
+   syntax-only, no MSBuild/semantic model — same grep-derived-not-exhaustive standard
+   [modularity-plan.md § 10 point 8](../modularity-plan.md#10-external-review-2026-09-08--where-this-can-be-questioned)
+   already used for the 35-analyzer Tier split) walks all 36 `IAnalyzer` implementations (35 plus
+   `LeakCandidateAnalyzer`, which implements the marker sub-interface `IDeferredAnalyzer :
+   IAnalyzer` — missed on the first pass, found and fixed while building item 3) and regenerates
+   the inventory on demand (`dotnet run --project tools/ContractSurfaceAudit`). Confirms the split
+   already found empirically during retyping: the 11 analyzers already ported onto
+   `Sdk.Analysis.IAnalyzer` touch only the new capability-scoped surfaces (`Heap*`/`Runtime*`
+   properties, no `Cache`/`Heap`/`Runtime` raw access), while the remaining 25 still read
+   `AnalysisContext.Cache`/`.Heap`/`.Runtime` directly and, between them, call 17 of
+   `IHeapAnalysisCache`'s 23 members — real evidence for what the Tier-1 surface table in
+   [phase-1-full-extraction-retyping-plan.md](phase-1-full-extraction-retyping-plan.md) already
+   claimed, not yet cross-checked against a full inventory until now.
+2. **De-dump-ification audit** *(new)*. **Done 2026-09-11.** Catalog everything that assumes a
+   single ClrMD dump is the only input. Expect at minimum: `DumpLoadContext`,
+   `SingleDumpPipelineState`, `SingleDumpOrchestrationService` / `TrendOrchestrationService`,
+   `SingleDumpReportDocument` / `TrendReportDocument`, `DumpIndexPaths`, `--baseline`/`--trend` CLI
+   semantics, and every analyzer that takes `RuntimeFacade` directly rather than going through the
+   cache. Each entry gets a disposition: *generalize* (becomes artifact-neutral),
+   *becomes-a-dump-source-detail* (moves behind `IArtifactSource`), or *deleted* (subsumed by the
+   session model). **Shipped**: hand-compiled (not scripted — assigning a disposition is judgment,
+   unlike item 1's mechanical extraction) at
+   [de-dump-ification-catalog.md](de-dump-ification-catalog.md), 13 entries — the 7 the doc named
+   plus 6 more found in the process (`IAnalysisStage`/`StagedPipelineRunner`, `PerDumpExecutionService`,
+   the CLI request/options' own `DumpPath`-shaped fields, `RuntimeAnalysisContext`, `DumpAnalysisService`,
+   `AnalysisSnapshot`). Two of the doc's named items turned out smaller than expected on inspection:
+   the storage/container layer (`DumpDetective.Platform`) is *already* source-neutral and shared with
+   trace, and zero analyzers touch `RuntimeFacade` directly (item 1's SDK retyping already intercepts
+   that path) — both reduce the estimated de-dump-ification effort rather than add to it. Every
+   "deleted" disposition found was already independently named in
+   [modularity-plan.md § 5](../modularity-plan.md#5-what-this-deletes)/§ 8; no new deletion
+   candidates surfaced at the orchestration/pipeline layer. The one gap not previously named
+   anywhere in the plan: the CLI's own `AnalysisCommandRequest`/`ResolvedExecutionOptions` records
+   have no artifact-list concept at all, only scalar `DumpPath`/`BaselineDumpPath`/`TrendDumpPaths`
+   fields — flagged for whichever phase ends up owning session construction from CLI args, not
+   assigned here.
+3. **Capability mapping** *(new)*. **Done 2026-09-11.** For each analyzer, record which
+   capabilities from [source-model.md § 3](source-model.md) it actually needs — and, importantly,
+   which it would *optionally* benefit from once trace exists. This table is the direct input to
+   Phase 3's `[RequiresCapability]` attributes and to the graded-fidelity design; doing it now,
+   while the dump-only behavior is the only behavior, avoids retrofitting guesses later.
+   **Shipped**: [capability-mapping.md](capability-mapping.md), built by `tools/CapabilityMappingAudit`.
+   Required capabilities are scripted (SDK analyzers: 1:1 from the `AnalysisContext` properties
+   they read; legacy analyzers: `IHeapAnalysisCache` members plus raw ClrMD calls, each mapped to
+   the capability its dump-side `*Query.cs` bridge actually exposes it through — ground-truthed
+   against `CapabilityVocabulary.cs`, not guessed); optional trace capabilities are a hand-curated
+   table embedded in the generator, since that's design judgment, not something derivable from
+   dump-only source. Found and fixed two bugs while building this: `AllocationPatternAnalyzer`
+   bypasses `IHeapAnalysisCache` entirely (casts `context.Cache` to the concrete `HeapAnalysisCache`
+   to read `TypeAggregates` directly) — traced to `heap.types` by checking what
+   `IHeapTypeStatisticsQuery` actually exposes, since it carries the identical fields; and
+   `LeakCandidateAnalyzer : IDeferredAnalyzer` was invisible to both this item's tool and item 1's
+   (base-list detection only matched `IAnalyzer` literally) — fixed in both tools, item 1's counts
+   corrected from 35/11/24 to 36/11/25. 6 of 36 analyzers have no optional trace capability today:
+   2 because their concern is inherently a snapshot (`ModuleAnalyzer`, `ObjectShapeAnalyzer`), 4
+   because no matching capability exists yet — all four DB/SQL analyzers
+   (`DbConnectionAnalyzer`, `SqlCommandAnalyzer`, `SqlConnectionPoolAnalyzer`,
+   `SqlTransactionAnalyzer`) want something like `trace.db-events`, not currently in the
+   vocabulary. Both are real inputs for Phase 3/6, not gaps in this audit. Item 3a (judgment-site
+   inventory) is a separate, larger item — not started here.
    dump-only behavior is the only behavior, avoids retrofitting guesses later.
 3a. **Judgment-site inventory** *(new — from the
    [analyzer-pipeline audit](../analyzer-pipeline-stages-and-leadfinding-dedup.md))*. That audit

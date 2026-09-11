@@ -97,5 +97,11 @@ public sealed class SqlTransactionAnalyzerRetypingCharacterizationTests
 
         public bool TryReadField(ulong address, string fieldName, out FieldValue value) =>
             _values.TryGetValue((address, fieldName), out value);
+
+        public bool TryGetStringValue(ulong address, out string? value)
+        {
+            value = null;
+            return false; // not exercised by this test file's scenarios
+        }
     }
 }

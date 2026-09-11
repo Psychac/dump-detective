@@ -19,7 +19,12 @@ public static class SdkVersion
 {
     public const int Major = 0;
 
-    /// <summary>6 as of 2026-09-11 (added <see cref="Analysis.IDumpArrayShapeQuery"/>,
+    /// <summary>7 as of 2026-09-11 (added <see cref="Analysis.IDumpObjectFieldQuery.TryGetStringValue"/>
+    /// — a second Tier-2 <c>dump.object-fields</c> primitive for "interpret this address as a string
+    /// directly," found necessary by <c>HttpObjectAnalyzer</c>'s retyping: several field-chase chains
+    /// call <c>ClrObject.AsString()</c> on a field's object-reference *result*, not on a named
+    /// string-typed field, which <c>TryReadField</c> alone can't express).
+    /// Before that, 6 as of 2026-09-11 (added <see cref="Analysis.IDumpArrayShapeQuery"/>,
     /// <c>CapabilityVocabulary.DumpArrayElements</c>, <c>Analysis.AnalysisContext.DumpArrayShapes</c>,
     /// and <see cref="Analysis.HeapTypeStatistics"/>'s <c>ArrayElementTypeName</c>/<c>ArrayRank</c>/
     /// <c>ArrayElementIsObjectReference</c>/<c>ArrayElementIsSupportedNumeric</c>/<c>ArrayElementSizeBytes</c>
@@ -39,7 +44,7 @@ public static class SdkVersion
     /// additions/splits, the `EntityRef`/`IHeapDominatorQuery`/positional-record/JSON-converter
     /// fixes) — not a precise per-change reconstruction, since nothing yet depends on intermediate
     /// values enough to make that worth simulating.</summary>
-    public const int Minor = 6;
+    public const int Minor = 7;
 
     public static string AsString => $"{Major}.{Minor}";
 }

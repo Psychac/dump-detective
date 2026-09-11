@@ -29,4 +29,18 @@ public interface IDumpObjectFieldQuery
     /// null string is not a failure: it returns <c>true</c> with <see cref="FieldValue.Null"/>.
     /// </summary>
     bool TryReadField(ulong address, string fieldName, out FieldValue value);
+
+    /// <summary>
+    /// Interprets the object at <paramref name="address"/> directly as a string, mirroring ClrMD's
+    /// own permissive <c>ClrObject.AsString()</c> (which several pre-retyping Tier-2 analyzers call
+    /// on a field's object-reference *result*, not a named string-typed field — e.g. reading an
+    /// HttpClient's <c>_baseAddress</c> field, an object-reference to a <c>System.Uri</c>, then
+    /// calling <c>.AsString()</c> on that <c>Uri</c> object directly). Added 2026-09-11 for
+    /// <c>HttpObjectAnalyzer</c>/<c>WcfChannelAnalyzer</c>'s retyping — a second, narrower primitive
+    /// alongside <see cref="TryReadField"/> rather than folding "chase to object then treat as
+    /// string" into that method, since the object being chased to isn't always reached by a single
+    /// named field (some call sites chase through two or three fields first via repeated
+    /// <see cref="TryReadField"/> calls, only the final hop needs this).
+    /// </summary>
+    bool TryGetStringValue(ulong address, out string? value);
 }

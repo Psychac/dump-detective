@@ -39,6 +39,7 @@ public abstract class TypedResourceCandidateStreamingLegacyAdapter<TSelf, TSdkAn
 {
     private Dictionary<ulong, (string TypeName, long Count, ulong Bytes)>? _candidateMts;
     private readonly List<HeapObjectRef> _candidates = new();
+    private bool _scanSucceeded = true;
 
     protected TypedResourceCandidateStreamingLegacyAdapter(TSdkAnalyzer inner) : base(inner)
     {
@@ -77,11 +78,26 @@ public abstract class TypedResourceCandidateStreamingLegacyAdapter<TSelf, TSdkAn
         foreach (IHeapIndexScanParticipant p in partials)
         {
             if (p is TypedResourceCandidateStreamingLegacyAdapter<TSelf, TSdkAnalyzer> other)
+            {
                 _candidates.AddRange(other._candidates);
+                if (!other._scanSucceeded)
+                    _scanSucceeded = false;
+            }
         }
     }
 
+    /// <summary>
+    /// Either the shared scan finished normally, or <see cref="IHeapIndexScanParticipant.BeforeHeapIndexScan"/>/
+    /// <see cref="IHeapIndexScanParticipant.OnHeapEntry"/> threw and the dispatcher isolated the
+    /// failure. Added 2026-09-11 for <c>HttpObjectAnalyzer</c>'s retyping, whose pre-retyping
+    /// analyzer explicitly gated on this rather than silently treating a failed scan's partial
+    /// candidate list as "found some candidates" — every future consumer of this base gets the same
+    /// graceful degrade now, not just this one.
+    /// </summary>
+    void IHeapIndexScanParticipant.OnHeapIndexScanCompleted(bool succeeded) => _scanSucceeded = succeeded;
+
     protected override Sdk.Analysis.AnalysisContext BuildSdkContext(Core.Abstractions.AnalysisContext context) =>
         LegacyAnalysisContextTranslator.Translate(
-            context, ResolveOptions(context.AnalysisOptions), heapObjectsOverride: new PrecomputedHeapObjectStream(_candidates));
+            context, ResolveOptions(context.AnalysisOptions),
+            heapObjectsOverride: new PrecomputedHeapObjectStream(_scanSucceeded ? _candidates : []));
 }

@@ -8,9 +8,9 @@ namespace DumpDetective.Analysis.SdkBridge;
 /// a <see cref="LegacyAnalyzerAdapter{TSdkAnalyzer}"/> receives from the existing pipeline. Only
 /// populates the capabilities a migrated analyzer actually needs (<c>HeapTypeStatistics</c>,
 /// <c>HeapSegments</c>, <c>HeapRoots</c>, <c>HeapObjectLookup</c>, <c>HeapReferences</c>,
-/// <c>HeapDominators</c>, <c>HeapRootPaths</c>, <c>HeapHandles</c>, <c>HeapSyncBlocks</c>,
-/// <c>HeapFinalizerQueue</c>, <c>RuntimeThreads</c>, <c>RuntimeJit</c>, <c>DumpObjectFields</c> —
-/// see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md).
+/// <c>HeapDominators</c>, <c>HeapReachability</c>, <c>HeapRootPaths</c>, <c>HeapHandles</c>,
+/// <c>HeapSyncBlocks</c>, <c>HeapFinalizerQueue</c>, <c>RuntimeThreads</c>, <c>RuntimeJit</c>,
+/// <c>DumpObjectFields</c> — see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md).
 /// Every other capability-scoped property on the built context is left null, which is correct here
 /// (not merely incomplete): no migrated analyzer needs them yet, and the SDK context's own contract
 /// already treats null as "not available for this session."
@@ -43,6 +43,10 @@ internal static class LegacyAnalysisContextTranslator
         // backed or left null; there's no partial/lazy state to preserve here.
         IDominatorTreeProvider? treeProvider = legacy.Cache.TryGetDominatorTreeProvider();
 
+        // Same shape as HeapDominators above -- resolved once, upfront; either fully backed or
+        // left null, no partial/lazy state to preserve.
+        IReachableAddressProvider? reachableProvider = legacy.Cache.TryGetReachableAddressProvider();
+
         return new()
         {
             Observations = NoOpObservationSink.Instance,
@@ -57,6 +61,9 @@ internal static class LegacyAnalysisContextTranslator
             HeapHandles = new HeapHandleQuery(legacy.Runtime, legacy.Heap, legacy.Cache),
             HeapSyncBlocks = new HeapSyncBlockQuery(legacy.Heap),
             HeapFinalizerQueue = new HeapFinalizerQueueQuery(legacy.Heap),
+            HeapReachability = reachableProvider is not null
+                ? new HeapReachabilityQuery(reachableProvider)
+                : null,
             HeapDominators = treeProvider is not null
                 ? new HeapDominatorQuery(treeProvider, legacy.Cache.TryGetThreadRetentionProvider())
                 : null,

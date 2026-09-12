@@ -81,7 +81,9 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         // 2026-09-11 (segment-capability retyping batch, alongside GCGenerationAnalyzer's pilot) —
         // see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("segment-reservation", "Segment Reservation Analysis", typeof(SegmentReservationAnalyzerLegacyAdapter), typeof(SegmentReservationFindingGenerator), typeof(SegmentReservationTrendComparer), typeof(SegmentReservationSectionBuilder), 380, ["gc", "segments"]),
-        Module("weak-reference", "Weak Reference Analysis", typeof(WeakReferenceAnalyzer), typeof(WeakReferenceFindingGenerator), typeof(WeakReferenceTrendComparer), typeof(WeakReferenceSectionBuilder), 390, ["gc"]),
+        // WeakReferenceAnalyzerLegacyAdapter, not WeakReferenceAnalyzer directly, since 2026-09-12 --
+        // see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("weak-reference", "Weak Reference Analysis", typeof(WeakReferenceAnalyzerLegacyAdapter), typeof(WeakReferenceFindingGenerator), typeof(WeakReferenceTrendComparer), typeof(WeakReferenceSectionBuilder), 390, ["gc"]),
         // BoxingAnalyzerLegacyAdapter, not BoxingAnalyzer directly, since 2026-09-12 (Tier-1 mop-up
         // batch, alongside ObjectShapeAnalyzer -- turned out Tier-1-only on inspection) — see
         // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.

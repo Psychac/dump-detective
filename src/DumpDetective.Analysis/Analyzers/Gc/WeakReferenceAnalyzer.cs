@@ -1,12 +1,8 @@
-using DumpDetective.Analysis.Cache;
-using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Indexing.Satellite;
-using DumpDetective.Analysis.Pipeline;
-using DumpDetective.Core.Abstractions;
+using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
-using DumpDetective.Core.Options;
-
-using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 
 namespace DumpDetective.Analysis.Analyzers.Gc
 {
@@ -14,65 +10,78 @@ namespace DumpDetective.Analysis.Analyzers.Gc
     /// Phase-2 analyzer covering §24.1–§24.3 (weak GC handle population, WeakReference&lt;T&gt;
     /// object analysis, and ConditionalWeakTable dead-key analysis).
     ///
-    /// Reads <c>HandleSnapshot.bin</c> when the disk index is available to avoid a second
-    /// <c>runtime.EnumerateHandles()</c> call. Falls back to live enumeration in memory mode.
-    /// Bounded by configured options to stay predictable on large dumps.
+    /// Phase A/C (weak + dependent handle enumeration) reads <c>heap.handles</c> directly — its
+    /// dump-side implementation already carries the pre-retyping analyzer's own three-tier handle
+    /// source (in-memory snapshot, disk/live reader, raw <c>runtime.EnumerateHandles()</c>) unchanged.
+    /// Phase B (WeakReference&lt;T&gt;/WeakReference object analysis) uses the same
+    /// candidate-streaming shape <c>TimerLeakAnalyzer</c>/<c>SqlCommandAnalyzer</c>/etc. already use —
+    /// <c>context.HeapObjects</c> gives every WeakReference-shaped instance directly from the
+    /// pipeline's one shared heap-index scan, exact regardless of storage mode.
     /// </summary>
-    public sealed class WeakReferenceAnalyzer : IAnalyzer, IRequiresReachableGraphIndex
+    /// <remarks>
+    /// Tier-1+Tier-2 batch (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
+    /// a real, deliberate behavior simplification found while retyping, not silently dropped —
+    /// <see cref="WeakReferenceDomainResult.PhaseBFallbackUsed"/>/<see cref="WeakReferenceDomainResult.PhaseBSkipped"/>
+    /// and the degraded (non-exact) branch of <see cref="WeakReferenceDomainResult.StaleWrapperCountIsExact"/>
+    /// existed to distinguish three pre-retyping data-source states (disk-index-backed exact scan,
+    /// live-heap-scan exact fallback, and a degraded one-sample-per-type extrapolation when
+    /// <c>TypeAggregates</c> existed but the disk object index didn't). The candidate-streaming
+    /// mechanism this retyping uses instead is backed by the pipeline's shared heap-index *scan*
+    /// itself (not a post-hoc read of its persisted output), so it produces the same exact
+    /// per-instance data regardless of whether the result gets stored to disk or kept in memory —
+    /// the degraded case can no longer occur by construction. All three fields are always reported
+    /// as their non-degraded value now; kept in the domain result (not removed) since the report/
+    /// finding-generator layer already branches on them and stays correct either way.
+    /// </remarks>
+    public sealed class WeakReferenceAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     {
-        // ── Constants ─────────────────────────────────────────────────────────
-        // ClrHandleKind enum values (Microsoft.Diagnostics.Runtime):
-        //   WeakShort = 0, WeakLong = 1, Strong = 2, Pinned = 3,
-        //   RefCounted = 5, Dependent = 6, AsyncPinned = 7, SizedRef = 8, WeakWinRT = 9
-        private const byte KindWeakShort = 0;
-        private const byte KindWeakLong = 1;
-        private const byte KindDependent = 6;
-        private const byte KindWeakWinRT = 9;
-
         private const string WeakRefGenericName = "System.WeakReference`1";
         private const string WeakRefNonGenericName = "System.WeakReference";
-
 
         public string Name => "Weak Reference Analysis";
         public string Category => "Memory";
 
-        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(
-            AnalysisContext context,
-            CancellationToken cancellationToken)
+        public AnalyzerDomainResult? LastResult { get; private set; }
+
+        internal static bool IsCandidateType(string typeName) =>
+            typeName.StartsWith(WeakRefGenericName, StringComparison.Ordinal)
+            || string.Equals(typeName, WeakRefNonGenericName, StringComparison.Ordinal);
+
+        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            WeakReferenceAnalysisOptions options = context.AnalysisOptions.WeakReferenceAnalysis;
-            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache, options, context.Progress, cancellationToken).Stamp(this));
+
+            IHeapHandleQuery handles = context.HeapHandles
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapHandles}' capability.");
+            IHeapSegmentQuery segments = context.HeapSegments
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapSegments}' capability.");
+            IHeapObjectLookup objectLookup = context.HeapObjectLookup
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapObjects}' capability.");
+            IDumpObjectFieldQuery dumpFields = context.DumpObjectFields
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.DumpObjectFields}' capability.");
+            IHeapObjectStream weakRefCandidates = context.HeapObjects
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapObjects}' capability.");
+            IHeapDominatorQuery? dominators = context.HeapDominators; // optional -- Stage B may not be built
+            IHeapReachabilityQuery? reachability = context.HeapReachability; // optional -- Stage A may not be built
+
+            LastResult = Analyze(handles, segments, objectLookup, dumpFields, weakRefCandidates, dominators, reachability, cancellationToken);
+            return ValueTask.CompletedTask;
         }
 
-        private static AnalyzerDomainResult Analyze(
-            ClrRuntime runtime,
-            ClrHeap heap,
-            IHeapAnalysisCache cache,
-            WeakReferenceAnalysisOptions options,
-            IProgress<AnalyzerProgressReport>? progress,
+        private static WeakReferenceDomainResult Analyze(
+            IHeapHandleQuery handles,
+            IHeapSegmentQuery segments,
+            IHeapObjectLookup objectLookup,
+            IDumpObjectFieldQuery dumpFields,
+            IHeapObjectStream weakRefCandidates,
+            IHeapDominatorQuery? dominators,
+            IHeapReachabilityQuery? reachability,
             CancellationToken cancellationToken)
         {
-            // ── Resolve index info ────────────────────────────────────────────
-            IReadOnlyDictionary<ulong, TypeAggregateIndexEntry>? typeAggregates = null;
-            HeapIndexBuildResult? heapIndex = null;
-
-            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out heapIndex))
-                typeAggregates = heapIndex.TypeAggregates;
-
             // ── Phases A & C: Weak handle liveness + Dependent handle dead-key count ──
-            // Merged into single pass over handle snapshot to halve disk I/O (P1-2)
-            progress?.Report(new(0, "scanning weak and dependent handles"));
-
             int totalWeakHandles = 0;
             int aliveWeakTargets = 0;
             int deadWeakTargets = 0;
-
-            // §9 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): a genuine
-            // enhancement, not a fix — WeakReferenceObjectBytes already honestly reports the
-            // wrapper objects' own shallow size. This adds "what does each alive weak target
-            // transitively retain?" alongside it, when the exact tree is available.
-            IDominatorTreeProvider? weakTreeProvider = cache.TryGetDominatorTreeProvider();
             ulong aliveWeakTargetsRetainedBytes = 0;
 
             var targetTypeHits = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -87,214 +96,63 @@ namespace DumpDetective.Analysis.Analyzers.Gc
             var aliveGenerationCounts = new Dictionary<string, int>(StringComparer.Ordinal);
             int aliveGenerationUnresolvedCount = 0;
 
-            // §24.1 P3-2: "held only via weak reference" detection. Uses the shared Stage A
-            // reachability walk (IReachableAddressProvider) rather than a raw
-            // IBackwardReferenceProvider.TryGetParents lookup as the audit's own note proposed:
-            // the reverse-edge index only records object-to-object edges, so an object rooted
-            // directly (e.g. a static field, with no other object pointing at it) would show zero
-            // recorded parents there too — a false positive. Stage A's walk starts from
-            // heap.EnumerateRoots() (which, like every ClrMD root enumeration, never includes weak
-            // or dependent handles) and follows only strong references, so IsReachable(addr) == false
-            // for a still-alive object means nothing but the weak handle itself currently points at
-            // it — exactly the signal dotMemory calls "held only via weak reference".
-            IReachableAddressProvider? reachableProvider = cache.TryGetReachableAddressProvider();
             var heldOnlyViaWeakReferenceTypeHits = new Dictionary<string, int>(StringComparer.Ordinal);
             int heldOnlyViaWeakReferenceCount = 0;
 
-            void TrackHeldOnlyViaWeakReference(ulong addr, string typeName)
+            foreach (HeapHandleRef h in handles.EnumerateHandles())
             {
-                if (reachableProvider is not null && !reachableProvider.IsReachable(addr))
-                {
-                    heldOnlyViaWeakReferenceCount++;
-                    IncrementDict(heldOnlyViaWeakReferenceTypeHits, typeName);
-                }
-            }
+                cancellationToken.ThrowIfCancellationRequested();
 
-            // §24.1 P3-3: GC generation distribution of alive weak targets, via the object's
-            // current segment (SegmentKindMapper.ResolveGeneration — same convention already
-            // used by GCHandleAnalyzer's P3-2 weak-handle-target generation breakdown). Scoped
-            // to alive targets only: a dead weak handle's address is either already cleared
-            // (0) by the GC when the target was collected, or — if still non-zero — points at
-            // memory that may since have been reused by an unrelated object, so resolving "its"
-            // generation would attribute a misleading value rather than the collected object's
-            // actual former generation.
-            void TrackAliveWeakTargetGeneration(ulong addr)
-            {
-                int generation = SegmentKindMapper.ResolveGeneration(heap, addr);
-                string? bucket = generation switch
+                if (h.Kind is HeapHandleKind.WeakShort or HeapHandleKind.WeakLong or HeapHandleKind.WeakWinRT)
                 {
-                    0 => "Gen0",
-                    1 => "Gen1",
-                    2 => "Gen2",
-                    >= 3 => "LOH",
-                    _ => null
-                };
-                if (bucket is null)
-                    aliveGenerationUnresolvedCount++;
-                else
-                    IncrementDict(aliveGenerationCounts, bucket);
-            }
+                    totalWeakHandles++;
+                    string kindName = h.Kind.ToString();
+                    IncrementDict(weakHandleKinds, kindName);
 
-            // §24.3 P3-1: for a dead-key dependent handle, resolve the secondary (value) object's
-            // type — reveals what data ConditionalWeakTable is orphaning, not just how many keys
-            // died. Scoped to dead keys only; distinct from GCHandleAnalyzer's P3-3 breakdown,
-            // which covers source->target type pairs for all dependent handles (alive and dead).
-            void TrackDependentDeadKeyValueType(ulong dependentTarget)
-            {
-                if (dependentTarget != 0 && cache.TryGetObjectMetadata(heap, dependentTarget, out ulong valueMt, out _))
-                {
-                    string valueTypeName = valueMt != 0 ? (heap.GetTypeByMethodTable(valueMt)?.Name ?? "Unknown") : "Unknown";
-                    IncrementDict(dependentDeadValueTypeHits, valueTypeName);
-                }
-                else
-                {
-                    dependentDeadValueUnresolvedCount++;
-                }
-            }
-
-            // Try to reuse any pre-enumerated in-memory handle snapshot (memory-index mode)
-            if (heapIndex is not null && heapIndex.InMemoryHandleSnapshot is { Length: > 0 } inMem)
-            {
-                foreach (var rec in inMem)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    // Phase A: Weak kind branch
-                    if (rec.Kind == KindWeakShort || rec.Kind == KindWeakLong || rec.Kind == KindWeakWinRT)
+                    if (h.TargetAddress != 0 && objectLookup.TryGetObject(h.TargetAddress, out HeapObjectRef target))
                     {
-                        totalWeakHandles++;
-                        string kindName = KindToName(rec.Kind);
-                        IncrementDict(weakHandleKinds, kindName);
+                        aliveWeakTargets++;
+                        IncrementDict(aliveByKind, kindName);
+                        IncrementDict(targetTypeHits, target.TypeDisplayName);
 
-                        ulong addr = rec.Addr;
-                        if (addr == 0)
-                        {
-                            deadWeakTargets++;
-                            IncrementDict(deadByKind, kindName);
-                        }
+                        // §24.1 P3-3: GC generation distribution of alive weak targets. Scoped to
+                        // alive targets only -- a dead weak handle's address is either already
+                        // cleared (0) or points at memory that may since have been reused by an
+                        // unrelated object, so resolving "its" generation would attribute a
+                        // misleading value rather than the collected object's actual former one.
+                        string? bucket = ToGenerationBucket(segments.GetGeneration(h.TargetAddress));
+                        if (bucket is null)
+                            aliveGenerationUnresolvedCount++;
                         else
+                            IncrementDict(aliveGenerationCounts, bucket);
+
+                        // §24.1 P3-2: "held only via weak reference" detection. Stage A's walk
+                        // starts from heap.EnumerateRoots() (which, like every ClrMD root
+                        // enumeration, never includes weak or dependent handles) and follows only
+                        // strong references, so IsReachableFromRoot == false for a still-alive
+                        // object means nothing but the weak handle itself currently points at it --
+                        // exactly the signal dotMemory calls "held only via weak reference".
+                        if (reachability is not null && !reachability.IsReachableFromRoot(h.TargetAddress))
                         {
-                            // OPT (docs/cache/cache-architecture.md Phase 6): resolve via
-                            // the disk-backed address index instead of heap.GetObject.
-                            if (cache.TryGetObjectMetadata(heap, addr, out ulong mt, out _))
-                            {
-                                aliveWeakTargets++;
-                                IncrementDict(aliveByKind, kindName);
-                                string typeName = mt != 0 ? (heap.GetTypeByMethodTable(mt)?.Name ?? "Unknown") : "Unknown";
-                                IncrementDict(targetTypeHits, typeName);
-                                TrackAliveWeakTargetGeneration(addr);
-                                TrackHeldOnlyViaWeakReference(addr, typeName);
-                                if (weakTreeProvider is not null && weakTreeProvider.TryGetRetainedBytes(addr, out ulong retained))
-                                    aliveWeakTargetsRetainedBytes += retained;
-                            }
-                            else
-                            {
-                                deadWeakTargets++;
-                                IncrementDict(deadByKind, kindName);
-                            }
+                            heldOnlyViaWeakReferenceCount++;
+                            IncrementDict(heldOnlyViaWeakReferenceTypeHits, target.TypeDisplayName);
                         }
+
+                        if (dominators is not null && dominators.TryGetRetainedSize(h.TargetAddress, out ulong retained))
+                            aliveWeakTargetsRetainedBytes += retained;
                     }
-
-                    // Phase C: Dependent kind branch
-                    else if (rec.Kind == KindDependent)
+                    else
                     {
-                        ulong addr = rec.Addr;
-                        if (addr == 0)
-                        {
-                            dependentHandleDeadKeyCount++;
-                            TrackDependentDeadKeyValueType(rec.DependentTarget);
-                        }
-                        else
-                        {
-                            // OPT (docs/cache/cache-architecture.md Phase 6): resolve via
-                            // the disk-backed address index instead of heap.GetObject.
-                            if (!cache.TryGetObjectMetadata(heap, addr, out _, out _))
-                            {
-                                dependentHandleDeadKeyCount++;
-                                TrackDependentDeadKeyValueType(rec.DependentTarget);
-                            }
-                        }
+                        deadWeakTargets++;
+                        IncrementDict(deadByKind, kindName);
                     }
                 }
-            }
-            else
-            {
-                // Otherwise try disk-backed snapshot, or enumerate live handles via a memory reader.
-                IHandleSnapshotReader? reader = null;
-                if (heapIndex is not null && heapIndex.StorageKind == HeapIndexStorageKind.Disk && heapIndex.IndexPath?.Length > 0)
+                else if (h.Kind == HeapHandleKind.Dependent)
                 {
-                    reader = HandleSnapshotProvider.CreateFromDiskIfExists(heapIndex.IndexPath);
-                }
-                reader ??= HandleSnapshotProvider.CreateMemoryReader(runtime, heap, int.MaxValue);
-
-                var scanCounter = new ObjectScanCounter("scanning weak and dependent handles", progress,
-                    reportEveryObjects: 1000, reportEveryElapsed: TimeSpan.FromSeconds(1));
-
-                if (reader is not null)
-                {
-                    using (reader)
+                    if (h.TargetAddress == 0)
                     {
-                        foreach (var rec in reader.EnumerateRecords(cancellationToken))
-                        {
-                            scanCounter.Tick();
-                            cancellationToken.ThrowIfCancellationRequested();
-
-                            // Phase A: Weak kind branch
-                            if (rec.Kind == KindWeakShort || rec.Kind == KindWeakLong || rec.Kind == KindWeakWinRT)
-                            {
-                                totalWeakHandles++;
-                                string kindName = KindToName(rec.Kind);
-                                IncrementDict(weakHandleKinds, kindName);
-
-                                ulong addr = rec.Address;
-                                if (addr == 0)
-                                {
-                                    deadWeakTargets++;
-                                    IncrementDict(deadByKind, kindName);
-                                }
-                                else
-                                {
-                                    // OPT (docs/cache/cache-architecture.md Phase 6): resolve
-                                    // via the disk-backed address index instead of heap.GetObject.
-                                    if (cache.TryGetObjectMetadata(heap, addr, out ulong mt, out _))
-                                    {
-                                        aliveWeakTargets++;
-                                        IncrementDict(aliveByKind, kindName);
-                                        string typeName = mt != 0 ? (heap.GetTypeByMethodTable(mt)?.Name ?? "Unknown") : "Unknown";
-                                        IncrementDict(targetTypeHits, typeName);
-                                        TrackAliveWeakTargetGeneration(addr);
-                                        TrackHeldOnlyViaWeakReference(addr, typeName);
-                                        if (weakTreeProvider is not null && weakTreeProvider.TryGetRetainedBytes(addr, out ulong retained))
-                                            aliveWeakTargetsRetainedBytes += retained;
-                                    }
-                                    else
-                                    {
-                                        deadWeakTargets++;
-                                        IncrementDict(deadByKind, kindName);
-                                    }
-                                }
-                            }
-
-                            // Phase C: Dependent kind branch
-                            else if (rec.Kind == KindDependent)
-                            {
-                                ulong addr = rec.Address;
-                                if (addr == 0)
-                                {
-                                    dependentHandleDeadKeyCount++;
-                                    TrackDependentDeadKeyValueType(rec.DependentTarget);
-                                }
-                                else
-                                {
-                                    if (!rec.IsAlive)
-                                    {
-                                        dependentHandleDeadKeyCount++;
-                                        TrackDependentDeadKeyValueType(rec.DependentTarget);
-                                    }
-                                }
-                            }
-                        }
-                        scanCounter.Complete();
+                        dependentHandleDeadKeyCount++;
+                        TrackDependentDeadKeyValueType(objectLookup, h.DependentTargetAddress ?? 0, dependentDeadValueTypeHits, ref dependentDeadValueUnresolvedCount);
                     }
                 }
             }
@@ -304,165 +162,20 @@ namespace DumpDetective.Analysis.Analyzers.Gc
             ulong weakRefObjBytes = 0;
             int staleWrapperCount = 0;
             var staleHolderTypeHits = new Dictionary<string, int>(StringComparer.Ordinal);
-            bool phaseBFallbackUsed = false;
-            bool phaseBSkipped = false;
-            bool staleWrapperCountIsExact = false;
 
-            if (typeAggregates is not null)
+            foreach (HeapObjectRef candidate in weakRefCandidates.EnumerateObjects())
             {
-                // Index path: use TypeAggregates
-                progress?.Report(new(0, "scanning WeakReference objects"));
+                cancellationToken.ThrowIfCancellationRequested();
+                weakRefObjCount++;
+                weakRefObjBytes += candidate.Size;
 
-                var weakRefTypesByMt = new Dictionary<ulong, TypeAggregateIndexEntry>();
-
-                foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in typeAggregates)
+                if (dumpFields.TryReadField(candidate.Address, "m_handle", out FieldValue value)
+                    && value.Kind == FieldValueKind.NativeInt
+                    && value.AsNativeInt() == 0)
                 {
-                    ClrType? clrType = heap.GetTypeByMethodTable(kv.Key);
-                    if (clrType is null) continue;
-
-                    string? name = clrType.Name;
-                    if (name is null) continue;
-
-                    bool isGenericWR = name.StartsWith(WeakRefGenericName, StringComparison.Ordinal);
-                    bool isNonGenericWR = string.Equals(name, WeakRefNonGenericName, StringComparison.Ordinal);
-
-                    if (isGenericWR || isNonGenericWR)
-                        weakRefTypesByMt[kv.Key] = kv.Value;
+                    staleWrapperCount++;
+                    IncrementDict(staleHolderTypeHits, candidate.TypeDisplayName);
                 }
-
-                foreach (TypeAggregateIndexEntry entry in weakRefTypesByMt.Values)
-                {
-                    weakRefObjCount += (int)Math.Min(entry.Count, int.MaxValue);
-                    weakRefObjBytes += entry.TotalSize;
-                }
-
-                // §24.2 P3-4: exact stale-wrapper count via a single streaming pass over the
-                // disk-backed object index, filtered to the small set of WeakReference<T>-shaped
-                // MethodTables found above — same convention already used by
-                // AsyncStateMachineAnalyzer's suspend-state histogram, TimerLeakAnalyzer, and
-                // EventLeak/PublisherRegistry. Replaces the former one-sample-per-type
-                // extrapolation (which could be up to 100% wrong per type group — see
-                // weak-reference-analyzer-audit.md Bug 4). Per-record cost of the streaming pass
-                // is cheap (an Address/MT/Size tuple); heap.GetObject and the field read only
-                // happen for entries whose MT is one of the handful of WeakReference-shaped types.
-                // Ask whether a heap index exists rather than enumerating to find out: `.Any()`
-                // opens the container, maps all four object columns and checksums every byte of
-                // them (~365 MB / ~69 ms on a 14.6M-object dump) to yield a single record.
-                if (weakRefTypesByMt.Count > 0 && cache is HeapAnalysisCache indexedCache && indexedCache.TryGetHeapIndex(out _))
-                {
-                    var mHandleFieldByMt = new Dictionary<ulong, ClrInstanceField?>(weakRefTypesByMt.Count);
-                    var wrScanCounter = new ObjectScanCounter("scanning WeakReference instances",
-                        progress, reportEveryObjects: 50_000, reportEveryElapsed: TimeSpan.FromSeconds(2));
-
-                    foreach ((ulong address, ulong mt, ulong _) in cache.EnumerateIndexedEntriesAsTuples())
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        wrScanCounter.Tick();
-
-                        if (!weakRefTypesByMt.ContainsKey(mt))
-                            continue;
-
-                        if (!mHandleFieldByMt.TryGetValue(mt, out ClrInstanceField? mHandleField))
-                        {
-                            mHandleField = heap.GetTypeByMethodTable(mt)?.GetFieldByName("m_handle");
-                            mHandleFieldByMt[mt] = mHandleField;
-                        }
-                        if (mHandleField is null) continue;
-
-                        ClrObject obj = heap.GetObject(address);
-                        if (!obj.IsValid || obj.Type is null) continue;
-
-                        nint handleValue;
-                        try { handleValue = mHandleField.Read<nint>(address, interior: false); }
-                        catch { continue; }
-
-                        if (handleValue == 0)
-                        {
-                            staleWrapperCount++;
-                            IncrementDict(staleHolderTypeHits, obj.Type.Name ?? "Unknown");
-                        }
-                    }
-
-                    wrScanCounter.Complete();
-                    staleWrapperCountIsExact = true;
-                }
-                else if (weakRefTypesByMt.Count > 0)
-                {
-                    // Degraded fallback: TypeAggregates present but the disk object index isn't
-                    // (e.g. a hand-built test fixture, or a partial/aborted index write) — should
-                    // not occur in production, since both come from the same
-                    // DiskBackedObjectIndexWriter.Build call. Extrapolate from one sample address
-                    // per type, same approximation the exact scan above replaces.
-                    // staleWrapperCountIsExact stays false.
-                    foreach (TypeAggregateIndexEntry entry in weakRefTypesByMt.Values)
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-
-                        if (entry.SampleAddress == 0) continue;
-
-                        ClrObject sample = heap.GetObject(entry.SampleAddress);
-                        if (!sample.IsValid || sample.Type is null) continue;
-
-                        ClrInstanceField? mHandleField = sample.Type.GetFieldByName("m_handle");
-                        if (mHandleField is null) continue;
-
-                        nint handleValue = mHandleField.Read<nint>(entry.SampleAddress, interior: false);
-                        if (handleValue == 0)
-                        {
-                            staleWrapperCount += (int)Math.Min(entry.Count, int.MaxValue);
-                            IncrementDict(staleHolderTypeHits, sample.Type.Name ?? "Unknown");
-                        }
-                    }
-                }
-            }
-            else
-            {
-                // Fallback path: scan heap when TypeAggregates unavailable (P1-3)
-                progress?.Report(new(0, "scanning WeakReference objects (fallback mode)"));
-
-                var scanCounter = new ObjectScanCounter("scanning WeakReference objects", progress,
-                    reportEveryObjects: 10000, reportEveryElapsed: TimeSpan.FromSeconds(2));
-
-                phaseBFallbackUsed = true;
-                staleWrapperCountIsExact = true;
-
-                foreach (var obj in heap.EnumerateObjects())
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    scanCounter.Tick();
-
-                    if (obj.Type is null) continue;
-
-                    string? name = obj.Type.Name;
-                    if (name is null) continue;
-
-                    bool isGenericWR = name.StartsWith(WeakRefGenericName, StringComparison.Ordinal);
-                    bool isNonGenericWR = string.Equals(name, WeakRefNonGenericName, StringComparison.Ordinal);
-
-                    if (!isGenericWR && !isNonGenericWR) continue;
-
-                    weakRefObjCount++;
-                    weakRefObjBytes += obj.Size;
-
-                    ClrInstanceField? mHandleField = obj.Type.GetFieldByName("m_handle");
-                    if (mHandleField is null) continue;
-
-                    try
-                    {
-                        nint handleValue = mHandleField.Read<nint>(obj.Address, interior: false);
-                        if (handleValue == 0)
-                        {
-                            staleWrapperCount++;
-                            string holderTypeName = obj.Type.Name ?? "Unknown";
-                            IncrementDict(staleHolderTypeHits, holderTypeName);
-                        }
-                    }
-                    catch
-                    {
-                    }
-                }
-
-                scanCounter.Complete();
             }
 
             // ── Build output ──────────────────────────────────────────────────
@@ -486,15 +199,14 @@ namespace DumpDetective.Analysis.Analyzers.Gc
                 WeakReferenceObjectCount: weakRefObjCount,
                 WeakReferenceObjectBytes: weakRefObjBytes,
                 StaleWrapperCount: staleWrapperCount,
-                StaleWrapperCountIsExact: staleWrapperCountIsExact,
                 TopWeakTargetTypes: topTargetTypes,
                 TopStaleWrapperHolderTypes: topStaleTypes,
                 DependentHandleDeadKeyCount: dependentHandleDeadKeyCount,
-                PhaseBFallbackUsed: phaseBFallbackUsed,
-                PhaseBSkipped: phaseBSkipped,
+                PhaseBFallbackUsed: false,
+                PhaseBSkipped: false,
                 Artifacts: null,
                 AliveWeakTargetsRetainedBytes: aliveWeakTargetsRetainedBytes,
-                AliveWeakTargetsRetainedBytesIsExact: weakTreeProvider is not null,
+                AliveWeakTargetsRetainedBytesIsExact: dominators is not null,
                 WeakHandleKindLiveness: kindLiveness,
                 DependentDeadKeyValueTypes: dependentDeadKeyValueTypes,
                 DependentDeadKeyValueTypesUnresolvedCount: dependentDeadValueUnresolvedCount,
@@ -502,9 +214,39 @@ namespace DumpDetective.Analysis.Analyzers.Gc
                 AliveWeakTargetGenerationUnresolvedCount: aliveGenerationUnresolvedCount,
                 HeldOnlyViaWeakReferenceCount: heldOnlyViaWeakReferenceCount,
                 HeldOnlyViaWeakReferenceTopTypes: heldOnlyViaWeakReferenceTopTypes,
-                HeldOnlyViaWeakReferenceDetectionAvailable: reachableProvider is not null);
+                HeldOnlyViaWeakReferenceDetectionAvailable: reachability is not null,
+                StaleWrapperCountIsExact: true);
         }
 
+        // §24.3 P3-1: resolves a dead-key dependent handle's secondary (value) object's type.
+        // Matches the pre-retyping analyzer's own TryGetObjectMetadata-based check exactly: a
+        // resolved address counts as a hit (reported as "(unknown)" when its method table is 0),
+        // and only a fully unresolvable address counts toward the "unresolved" bucket -- a
+        // deliberately looser bar than GCHandleAnalyzer's own TryResolveDependentTypeName helper,
+        // which treats a zero method table as unresolved too. The two pre-retyping analyzers had
+        // genuinely different semantics here; each retyping preserves its own.
+        private static void TrackDependentDeadKeyValueType(
+            IHeapObjectLookup objectLookup, ulong dependentTarget,
+            Dictionary<string, int> dependentDeadValueTypeHits, ref int dependentDeadValueUnresolvedCount)
+        {
+            if (dependentTarget != 0 && objectLookup.TryGetObject(dependentTarget, out HeapObjectRef value))
+                IncrementDict(dependentDeadValueTypeHits, value.TypeDisplayName);
+            else
+                dependentDeadValueUnresolvedCount++;
+        }
+
+        // Poh/Frozen/Unknown aren't one of the four buckets this report distinguishes -- same
+        // conservative exclusion FinalizableObjectAnalyzer's/GCRootAnalyzer's retyping already made
+        // for these two rare tags, rather than guessing which legacy raw ClrMD generation value they
+        // would have produced.
+        private static string? ToGenerationBucket(HeapGenerationTag tag) => tag switch
+        {
+            HeapGenerationTag.Gen0 => "Gen0",
+            HeapGenerationTag.Gen1 => "Gen1",
+            HeapGenerationTag.Gen2 => "Gen2",
+            HeapGenerationTag.Loh => "LOH",
+            _ => null,
+        };
 
         // ── Utility ───────────────────────────────────────────────────────────
 
@@ -514,18 +256,6 @@ namespace DumpDetective.Analysis.Analyzers.Gc
                 dict[key] = v + 1;
             else
                 dict[key] = 1;
-        }
-
-        private static string KindToName(byte kind)
-        {
-            return kind switch
-            {
-                KindWeakShort => "WeakShort",
-                KindWeakLong => "WeakLong",
-                KindDependent => "Dependent",
-                KindWeakWinRT => "WeakWinRT",
-                _ => $"Kind{kind}"
-            };
         }
 
         // §24.1 P2-1: per-kind alive/dead breakdown, descending by total handle count. Only
@@ -549,7 +279,7 @@ namespace DumpDetective.Analysis.Analyzers.Gc
         }
 
         // §24.1 P3-3: fixed Gen0 -> Gen1 -> Gen2 -> LOH ordering (generation progression), not
-        // sorted by count — reads more naturally than the descending-count convention used
+        // sorted by count -- reads more naturally than the descending-count convention used
         // elsewhere in this file for open-ended type breakdowns.
         private static readonly string[] GenerationBucketOrder = ["Gen0", "Gen1", "Gen2", "LOH"];
 
@@ -564,15 +294,14 @@ namespace DumpDetective.Analysis.Analyzers.Gc
             return list;
         }
 
-        // Complete population, descending by count — no Top-N cap (§11.2 D5); the render layer
+        // Complete population, descending by count -- no Top-N cap (§11.2 D5); the render layer
         // slices for display. Dictionaries here are O(distinct types), cheap to sort in full.
         private static List<NameCountEntry> BuildSorted(Dictionary<string, int> source)
         {
             var list = new List<NameCountEntry>(source.Count);
-            foreach (KeyValuePair<string, int> kv in source.OrderByDescending(static x => x.Value))
-            {
+            foreach (KeyValuePair<string, int> kv in source)
                 list.Add(new NameCountEntry(kv.Key, kv.Value));
-            }
+            list.Sort(static (a, b) => b.Count.CompareTo(a.Count));
             return list;
         }
 

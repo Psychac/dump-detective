@@ -14,6 +14,14 @@ public enum FieldValueKind
     /// every modern .NET version checked), whose <c>uint.MaxValue</c> "infinite" sentinel reinterprets
     /// incorrectly if forced through <see cref="Int32"/>'s signed semantics.</summary>
     UInt32,
+    /// <summary>Added 2026-09-12 for <c>WeakReferenceAnalyzer</c>'s retyping: <c>WeakReference</c>/
+    /// <c>WeakReference&lt;T&gt;</c>'s <c>m_handle</c> field is a genuine pointer-sized <c>IntPtr</c>
+    /// (ClrMD's <c>ClrElementType.NativeInt</c>, decompile-verified against the installed ClrMD
+    /// package) holding an opaque GC handle value — not a tracked object reference (<see cref="ObjectReference"/>
+    /// would imply the GC scans/relocates it, which a raw handle value is not), and not safely
+    /// representable as <see cref="Int64"/> without asserting a fixed width a native pointer doesn't
+    /// have on a 32-bit dump.</summary>
+    NativeInt,
 }
 
 /// <summary>
@@ -59,6 +67,7 @@ public readonly struct FieldValue
     public static FieldValue ForDouble(double value) => new(FieldValueKind.Double, @double: value);
     public static FieldValue ForString(string value) => new(FieldValueKind.String, @string: value);
     public static FieldValue ForObjectReference(ulong address) => new(FieldValueKind.ObjectReference, address: address);
+    public static FieldValue ForNativeInt(nint value) => new(FieldValueKind.NativeInt, numeric: value);
 
     public bool AsBool() => Kind == FieldValueKind.Bool
         ? _numeric != 0
@@ -89,4 +98,8 @@ public readonly struct FieldValue
     public ulong AsObjectAddress() => Kind == FieldValueKind.ObjectReference
         ? _address
         : throw new InvalidOperationException($"FieldValue is {Kind}, not {FieldValueKind.ObjectReference}.");
+
+    public nint AsNativeInt() => Kind == FieldValueKind.NativeInt
+        ? (nint)_numeric
+        : throw new InvalidOperationException($"FieldValue is {Kind}, not {FieldValueKind.NativeInt}.");
 }

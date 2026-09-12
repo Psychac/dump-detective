@@ -51,6 +51,10 @@ internal sealed class DumpObjectFieldQuery : IDumpObjectFieldQuery
                     value = FieldValue.ForUInt32(field.Read<uint>(address, interior: false));
                     return true;
 
+                case ClrElementType.NativeInt:
+                    value = FieldValue.ForNativeInt(field.Read<nint>(address, interior: false));
+                    return true;
+
                 case ClrElementType.Double:
                     value = FieldValue.ForDouble(field.Read<double>(address, interior: false));
                     return true;

@@ -19,7 +19,16 @@ public static class SdkVersion
 {
     public const int Major = 0;
 
-    /// <summary>10 as of 2026-09-12 (added <see cref="Analysis.HeapTypeStatistics"/>'s <c>IsEnum</c>/
+    /// <summary>11 as of 2026-09-12 (added <see cref="Analysis.IHeapReachabilityQuery"/>'s dump-side
+    /// implementation and <c>Analysis.AnalysisContext.HeapReachability</c> wiring, plus
+    /// <see cref="Analysis.FieldValueKind"/>'s <c>NativeInt</c> case and
+    /// <c>FieldValue.ForNativeInt</c>/<c>AsNativeInt</c> — found necessary by
+    /// <c>WeakReferenceAnalyzer</c>'s retyping. Also covers the untracked bump owed from
+    /// <c>FinalizableObjectAnalyzer</c>'s retyping the same day (<see cref="Analysis.IHeapFinalizerQueueQuery"/>'s
+    /// redesign from raw addresses to <c>FinalizerQueueObjectRef</c>) — missed at the time, folded in
+    /// here rather than issuing a separate bump for a change already shipped, same precedent
+    /// <c>ObjectShapeAnalyzer</c>'s retyping already set for this exact situation.
+    /// Before that, 10 as of 2026-09-12 (added <see cref="Analysis.HeapTypeStatistics"/>'s <c>IsEnum</c>/
     /// <c>StaticSize</c>/<c>BaseTypeName</c>/<c>HasIEquatableInterface</c>/<c>DeclaredFieldByteSize</c>
     /// — found necessary by <c>BoxingAnalyzer</c>'s retyping, which turned out Tier-1-only on
     /// inspection like <c>ObjectShapeAnalyzer</c> before it: no per-instance field *value* reads, only
@@ -58,7 +67,7 @@ public static class SdkVersion
     /// additions/splits, the `EntityRef`/`IHeapDominatorQuery`/positional-record/JSON-converter
     /// fixes) — not a precise per-change reconstruction, since nothing yet depends on intermediate
     /// values enough to make that worth simulating.</summary>
-    public const int Minor = 10;
+    public const int Minor = 11;
 
     public static string AsString => $"{Major}.{Minor}";
 }

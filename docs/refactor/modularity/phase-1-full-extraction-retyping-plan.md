@@ -2,7 +2,7 @@
 
 ## Status (as of 2026-09-12)
 
-**22 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
+**23 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
 in the tree, not just this doc's own narrative — this doc's original "35" count in the section below
 was an approximation from § 10 point 8's grep-based measurement; the real count is 36). The
 `dump.object-fields` Tier-2 escape hatch **is built** (see "Tier 2 wave" below) — the "still not
@@ -14,16 +14,16 @@ built" language later in this doc is stale as of the pilot, 2026-09-11.
 `HeapTopologyAnalyzer`, `HttpObjectAnalyzer`, `JitAnalyzer`, `LockGraphAnalyzer`,
 `LohFragmentationAnalyzer`, `MemoryAnalyzer`, `ObjectShapeAnalyzer`, `SegmentReservationAnalyzer`,
 `SqlCommandAnalyzer`, `SqlConnectionPoolAnalyzer`, `SqlTransactionAnalyzer`,
-`ThreadStackClusterAnalyzer`, `TimerLeakAnalyzer`, `WcfChannelAnalyzer`.
+`ThreadStackClusterAnalyzer`, `TimerLeakAnalyzer`, `WcfChannelAnalyzer`, `WeakReferenceAnalyzer`.
 
-**Remaining (14):**
+**Remaining (13):**
 `AsyncStateMachineAnalyzer`, `AsyncTaskAnalyzer`, `CollectionAnalyzer`,
 `CrashAnalyzer`, `DominatorAnalyzer`, `EventLeakAnalyzer`,
 `HangAnalyzer`, `ModuleAnalyzer`, `ReferenceChainAnalyzer`, `StaticRootLeakDetector`,
-`StringAnalyzer`, `ThreadAnalyzer`, `WeakReferenceAnalyzer`, and **`LeakCandidateAnalyzer`** —
+`StringAnalyzer`, `ThreadAnalyzer`, and **`LeakCandidateAnalyzer`** —
 explicit user direction: do `LeakCandidateAnalyzer` last of all, since it needs cross-analyzer
 result access (`context.CompletedRunResults`-equivalent) and deferred-execution-ordering modeling
-that don't exist in the SDK yet, on top of everything the other 13 need.
+that don't exist in the SDK yet, on top of everything the other 12 need.
 
 Detailed plan for the two items [phase-1-contracts-sdk.md](phase-1-contracts-sdk.md) leaves
 deferred (`Analysis/`, `Presentation/`) and the ownerless gap recorded at
@@ -853,7 +853,72 @@ Batch 5/7's `IRuntimeJitQuery`/`IHeapHandleQuery` redesigns hit.
   `IRequiresReachableGraphIndex`/`IRequiresDominatorTreeIndex` markers (same relocation
   `GCRootAnalyzerLegacyAdapter` needed in Batch 3). No benchmark referenced this analyzer directly.
 
-Remaining Tier-1+Tier-2 analyzers (14, see "Status" at the top) haven't been started yet.
+**`WeakReferenceAnalyzer`. Done 2026-09-12.** Bigger than `FinalizableObjectAnalyzer` — closer to
+`GCHandleAnalyzer`-scale — but almost everything it needed already existed: `heap.handles`
+(Phase A/C, weak + dependent handle enumeration) replaced ~150 lines of duplicated in-memory/disk-
+reader iteration logic entirely; `heap.dominators`/`heap.segments`/`heap.objects` (random-access)
+were all already built. Two genuinely new pieces:
+- **`heap.reachability` implemented for the first time** — declared in the SDK, zero dump-side
+  implementation before this. `HeapReachabilityQuery` is a pure pass-through over the already-
+  existing `IReachableAddressProvider` Stage A product, same shape `HeapDominatorQuery`/`HeapRootQuery`
+  already are — wired into `AnalysisContext.HeapReachability` as nullable/optional, same precedent
+  `HeapDominators` set for "Stage A/B might not be built this session."
+- **`FieldValueKind.NativeInt` added** — `WeakReference`/`WeakReference<T>`'s `m_handle` field is a
+  genuine pointer-sized `IntPtr` (`ClrElementType.NativeInt`, decompile-verified against the
+  installed ClrMD package rather than assumed), an opaque GC handle value distinct from
+  `ObjectReference` (the GC doesn't scan/relocate it) and not safely representable as `Int64` across
+  32-bit dumps.
+- **Phase B (WeakReference&lt;T&gt;/WeakReference object discovery) uses `TypedResourceCandidateStreamingLegacyAdapter`**,
+  the same shared base 7 other Tier-2 analyzers already use, rather than the raw `TypeAggregates`
+  name-matching loop the pre-retyping analyzer hand-rolled — `context.HeapObjects` gives every
+  WeakReference-shaped instance directly from the pipeline's one shared heap-index scan.
+- **A real, deliberate behavior simplification, not silently dropped**: the pre-retyping analyzer's
+  `PhaseBFallbackUsed`/`PhaseBSkipped`/degraded (non-exact) `StaleWrapperCountIsExact` branch existed
+  to distinguish three data-source states (disk-index-backed exact scan, live-heap-scan exact
+  fallback, and a degraded one-sample-per-type extrapolation when `TypeAggregates` existed but the
+  disk object index didn't). The candidate-streaming mechanism is backed by the pipeline's shared
+  heap-index *scan itself* (not a post-hoc read of its persisted output), so it produces the same
+  exact per-instance data regardless of storage mode — the degraded case can no longer occur by
+  construction. All three fields are always reported as their non-degraded value now (kept in the
+  domain result, not removed, since the report/finding-generator layer already branches on them and
+  stays correct either way).
+- **A real fidelity investigation, not an assumption**: the pre-retyping analyzer's disk-reader path
+  checked `HandleRecord.IsAlive` for dependent handles as an extra liveness signal beyond "address is
+  zero." Traced every construction site of `HandleRecord` in the codebase — no producer anywhere ever
+  sets `IsAlive` to `false`; it's declared `= true` and never overridden, making that branch dead
+  code today. Relying on `TargetAddress == 0` alone (all `IHeapHandleQuery` exposes) therefore loses
+  no real behavior.
+- **Two pre-retyping analyzers' genuinely different semantics, both preserved rather than merged**:
+  `TrackDependentDeadKeyValueType`'s dead-key value-type resolution counts a resolved address as a
+  hit (reporting `"(unknown)"` when its method table is 0) and only an unresolvable address as
+  "unresolved" — a deliberately looser bar than `GCHandleAnalyzer`'s own `TryResolveDependentTypeName`
+  helper, which treats a zero method table as unresolved too. Checked both pre-retyping
+  implementations directly rather than assuming they were interchangeable; each retyping keeps its
+  own analyzer's original behavior.
+- **Gate met**: new `WeakReferenceAnalyzerRetypingCharacterizationTests` (20 tests) — no pre-existing
+  test coverage existed. Uses fake, dictionary-backed capability implementations (the shape
+  `TimerLeakAnalyzerRetypingCharacterizationTests` established), not a live/real heap — this
+  analyzer's logic is purely capability-interface-driven, so every branch (alive/dead weak handles,
+  dependent dead-key resolution and its unresolved-count, generation bucketing including the
+  Poh/Frozen exclusion, held-only-via-weak-reference with and without a reachability provider,
+  dominator-backed retained bytes with and without a provider, stale-wrapper detection via the new
+  `NativeInt` field kind) is exactly controllable without ClrMD at all. New
+  `WeakReferenceAnalyzerRealDumpTests` (`[DiscrepancyFact]`, one dump, foreground, streamed to a file)
+  passed in 2s against the real 3.5 GB reference dump: 8,196 weak handles (all alive, 0 dead), 0
+  dependent dead-keys, 0 `WeakReference`/`WeakReference<T>` wrapper objects found (this dump's weak
+  handles come from framework/`ConditionalWeakTable` usage rather than explicit wrapper objects — an
+  internally consistent, plausible result, not a bug), 1,545 of 8,196 alive targets held only via
+  weak reference, both Stage A and Stage B data available. Full non-real-dump suite (1463 tests, up
+  from 1443) passes.
+- Call site updated: `DefaultAnalyzerFeatureModuleCatalog` now constructs
+  `WeakReferenceAnalyzerLegacyAdapter`, carrying the pre-retyping analyzer's own
+  `IRequiresReachableGraphIndex` marker only (never `IRequiresDominatorTreeIndex` — Stage B is
+  consumed opportunistically when already available, never required). No benchmark referenced this
+  analyzer directly.
+- **`SdkVersion` 11** — also folds in an untracked bump owed from `FinalizableObjectAnalyzer`'s
+  retyping the same day (`IHeapFinalizerQueueQuery`'s redesign), missed at the time.
+
+Remaining Tier-1+Tier-2 analyzers (13, see "Status" at the top) haven't been started yet.
 `LeakCandidateAnalyzer` stays last per explicit direction — it needs cross-analyzer result access
 and deferred-execution-ordering modeling neither this wave nor Tier 1 has built.
 

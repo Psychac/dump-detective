@@ -116,6 +116,27 @@ internal sealed class DumpObjectFieldQuery : IDumpObjectFieldQuery
         }
     }
 
+    public bool TryGetStringValue(ulong address, int maxLength, out string? value)
+    {
+        value = null;
+        if (address == 0)
+            return false;
+
+        try
+        {
+            ClrObject obj = _heap.GetObject(address);
+            if (!obj.IsValid)
+                return false;
+
+            value = obj.AsString(maxLength);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public bool TryGetFieldTypeName(ulong address, string fieldName, out string? typeName)
     {
         typeName = null;

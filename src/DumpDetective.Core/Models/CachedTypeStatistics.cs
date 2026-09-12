@@ -32,6 +32,14 @@ public sealed class CachedTypeStatistics
     public bool IsAsyncStateMachineType { get; set; }
 
     /// <summary>
+    /// Added 2026-09-13 for <c>StringAnalyzer</c>'s retyping, same reasoning as
+    /// <see cref="IsFinalizableType"/>: only populated by <see cref="StatisticsCache"/>'s
+    /// full-heap-walk branch, left <c>false</c> on the index-hydration branch (which sources this
+    /// flag from <c>TypeAggregateFlags.IsStringType</c> instead).
+    /// </summary>
+    public bool IsStringType { get; set; }
+
+    /// <summary>
     /// Added 2026-09-12 for <c>AsyncTaskAnalyzer</c>'s retyping, same reasoning as
     /// <see cref="IsAsyncStateMachineType"/>: only populated by <see cref="StatisticsCache"/>'s
     /// full-heap-walk branch, left <c>false</c> on the index-hydration branch (which sources this

@@ -2,7 +2,7 @@
 
 ## Status (as of 2026-09-13)
 
-**29 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
+**30 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
 in the tree, not just this doc's own narrative — this doc's original "35" count in the section below
 was an approximation from § 10 point 8's grep-based measurement; the real count is 36). The
 `dump.object-fields` Tier-2 escape hatch **is built** (see "Tier 2 wave" below) — the "still not
@@ -15,16 +15,16 @@ built" language later in this doc is stale as of the pilot, 2026-09-11.
 `GCRootAnalyzer`, `HangAnalyzer`, `HeapTopologyAnalyzer`, `HttpObjectAnalyzer`, `JitAnalyzer`,
 `LockGraphAnalyzer`, `LohFragmentationAnalyzer`, `MemoryAnalyzer`, `ObjectShapeAnalyzer`,
 `SegmentReservationAnalyzer`, `SqlCommandAnalyzer`, `SqlConnectionPoolAnalyzer`,
-`SqlTransactionAnalyzer`, `ThreadAnalyzer`, `ThreadStackClusterAnalyzer`, `TimerLeakAnalyzer`,
+`SqlTransactionAnalyzer`, `StringAnalyzer`, `ThreadAnalyzer`, `ThreadStackClusterAnalyzer`, `TimerLeakAnalyzer`,
 `WcfChannelAnalyzer`, `WeakReferenceAnalyzer`.
 
-**Remaining (7):**
+**Remaining (6):**
 `DominatorAnalyzer`, `EventLeakAnalyzer`,
 `ModuleAnalyzer`, `ReferenceChainAnalyzer`, `StaticRootLeakDetector`,
-`StringAnalyzer`, and **`LeakCandidateAnalyzer`** —
+and **`LeakCandidateAnalyzer`** —
 explicit user direction: do `LeakCandidateAnalyzer` last of all, since it needs cross-analyzer
 result access (`context.CompletedRunResults`-equivalent) and deferred-execution-ordering modeling
-that don't exist in the SDK yet, on top of everything the other 6 need.
+that don't exist in the SDK yet, on top of everything the other 5 need.
 
 Detailed plan for the two items [phase-1-contracts-sdk.md](phase-1-contracts-sdk.md) leaves
 deferred (`Analysis/`, `Presentation/`) and the ownerless gap recorded at
@@ -1295,7 +1295,79 @@ predicate.
   `capability-registry.json` bump — both extend already-registered capabilities (`runtime.threads`,
   `dump.object-fields`).
 
-Remaining Tier-1+Tier-2 analyzers (7, see "Status" at the top) haven't been started yet.
+**`StringAnalyzer`. Done 2026-09-13.** Unlike every prior Tier-2-wave member, its P1-3
+"string-field-ownership" feature needs to inspect *every* heap object's type (which types, across
+the whole heap, own string-typed fields), not just objects matching one name/structural candidate
+filter — so `TypedResourceCandidateStreamingLegacyAdapter` doesn't fit. `StringAnalyzerLegacyAdapter`
+is bespoke, following `CrashAnalyzer`/`HangAnalyzer`'s own precedent for full-population scan
+participants.
+- **Split responsibilities, not two heap walks**: the adapter streams every `System.String` instance
+  as a `HeapObjectRef` candidate (same `heapObjectsOverride` mechanism every Tier-2-wave member
+  uses) for the inner analyzer to fingerprint/dedup/bucket via
+  `IDumpObjectFieldQuery.TryGetStringValue`; P1-3's owner-type-byte accounting (reservoir-sampled,
+  Algorithm-R, ported near-verbatim from the pre-retyping analyzer's own
+  `AccumulateStringOwnerType`) is a whole-heap-population aggregate with no per-instance
+  SDK-capability expression, so it stays dump-side in the adapter and is handed to the inner
+  analyzer pre-aggregated through a new `StringAnalyzerOptions` wrapper — the same
+  "options wrapper carries adapter-precomputed data alongside real options" shape
+  `CrashAnalyzerOptions` already established. Deliberately *not* streamed as objects: materializing
+  a `HeapObjectRef` per heap object regardless of type (to inspect every type's field shape) would
+  be a real memory regression this design avoids up front rather than discovering mid-batch, the
+  way `BoxingAnalyzer`'s and `CollectionAnalyzer`'s batches each did for related reasons.
+- **`IHeapTypeStatisticsQuery`/`HeapTypeStatistics.IsStringType` added** — two-path like
+  `IsAsyncStateMachineType`/`IsTaskType` (index-backed via the already-existing
+  `TypeAggregateFlags.IsStringType` bit, no-index fallback via a plain name check on
+  `CachedTypeStatistics`/`StatisticsCache`). Covers every scalar aggregate stat (total strings/bytes,
+  Gen0/1/2, LOH bytes) with zero adapter dependency, available whether or not a disk index exists.
+- **`IDumpObjectFieldQuery.TryGetStringValue` extended with a bounded-length overload** — the
+  existing overload called ClrMD's unbounded `ClrObject.AsString()`, unlike the pre-retyping
+  analyzer's own `AsString(maxLength:)` calls, which deliberately avoid materializing full content
+  for huge strings just to hash a fingerprint or build a preview. A real, closable gap, not
+  speculative — every one of the 13 existing fake `IDumpObjectFieldQuery` implementations across
+  other analyzers' characterization tests needed the new member added (delegating to the existing
+  overload; none of them exercise string content).
+- **A real, deliberate simplification, confirmed with the user before implementing**: dropped the
+  pre-retyping analyzer's separate "prebuilt disk `StringDedupIndex`" fast path and its "index-only
+  estimation" fallback. Once the adapter's shared scan pass always streams every string instance
+  fresh (same cost it already pays today), those two paths only existed to skip a scan that now
+  always runs anyway — the same call `AsyncTaskAnalyzer`'s retyping made for its own now-redundant
+  fast path. `DedupSource` now only ever reports `"IndexScan"` (scan ran) or `null` (it didn't).
+- **Also dropped, matching universal Tier-2-wave precedent**: the pre-retyping analyzer's
+  independent live `heap.EnumerateObjects()` fallback for when no shared scan ran — no live default
+  `IHeapObjectStream` implementation exists outside a scan participant (confirmed by inspection, not
+  assumed), so an empty per-instance result when `context.HeapObjects` is null is accepted, same as
+  `TimerLeakAnalyzer`/`WeakReferenceAnalyzer`/`AsyncTaskAnalyzer`/`HangAnalyzer` already do.
+- **FOH/interned-string detection retargeted onto `IHeapSegmentQuery`** (`Kind == HeapSegmentKind.Frozen`
+  segment ranges), replacing the pre-retyping analyzer's own `BuildFohSegments`/`IsSegmentInFoh`.
+- **Retention-path search retargeted onto `IHeapRootPathQuery.TryFindRootPath`**, replacing the
+  pre-retyping analyzer's own `RootPathFinder`/`ReferenceGraph`/`cache.GetOrBuildValidRoots` usage —
+  same retarget `CrashAnalyzer`/`CollectionAnalyzer`/`DbConnectionAnalyzer` already made.
+- **`DuplicateStringSnapshot.DominantType` simplified to a constant** `"System.String"` instead of a
+  method-table-to-name dictionary lookup — every dedup candidate is a `System.String` instance by
+  construction (the adapter only streams string-typed candidates), so the pre-retyping analyzer's
+  more generic (but, for this analyzer, always-degenerate) `DominantMethodTable`-keyed resolution
+  added no real information.
+- **Pure, ClrMD-independent helpers kept as-is**: `SelectDuplicates`/`SelectRetentionPathCandidates`/
+  `StringFingerprint` preserved with identical names/signatures specifically so the pre-existing
+  `StringAnalyzerDuplicateSelectionTests`/`StringAnalyzerRetentionPathTests` (reflection-based)
+  keep passing unchanged — only `BuildRetentionPaths`'s signature genuinely changed (now takes
+  `IHeapRootPathQuery` instead of `ClrHeap`/`IHeapAnalysisCache`), so those three affected test
+  cases were updated to match, not deleted.
+- **Gate met**: new `StringAnalyzerRetypingCharacterizationTests` (7 tests, dictionary-backed fakes)
+  covering the no-candidate-stream empty-dedup gate, duplicate detection/ranking, distinct strings
+  correctly excluded, very-long-string capture, FOH/interned detection, owner-type-bytes pass-through,
+  and retention-path search. Old `StringAnalyzerHeapIndexScanTests`/`StringAnalyzerGenerationStatsTests`
+  (reflecting removed private internals — `OnHeapEntry`/`MergePartial`/`AggregateStringTypeStats` no
+  longer exist on the inner analyzer) deleted outright, same treatment `HangAnalyzerHeapIndexScanTests`/
+  `CollectionAnalyzerHeapIndexScanTests` got in their own batches. New `StringAnalyzerRealDumpTests`
+  (`[DiscrepancyFact]`, one dump, foreground) passed in 20s against the real 3.5 GB reference dump —
+  consistent with every other batch's sub-30s real-dump gate, not a `BoxingAnalyzer`-style stall.
+  Full non-real-dump suite (1517 tests) passes.
+- Call sites updated: `DefaultAnalyzerFeatureModuleCatalog`, `FullPipelineBenchmark`,
+  `SmallDumpLatencyBenchmark`, and `BenchmarkSuite1/Program.cs`'s standalone `RunSingleStringAnalyzer`
+  debug harness now construct `StringAnalyzerLegacyAdapter`.
+
+Remaining Tier-1+Tier-2 analyzers (6, see "Status" at the top) haven't been started yet.
 `LeakCandidateAnalyzer` stays last per explicit direction — it needs cross-analyzer result access
 and deferred-execution-ordering modeling neither this wave nor Tier 1 has built.
 

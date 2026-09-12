@@ -56,7 +56,9 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         Module("async-task", "Async Task Analysis", typeof(AsyncTaskAnalyzerLegacyAdapter), typeof(AsyncTaskFindingGenerator), typeof(AsyncTaskTrendComparer), typeof(AsyncAnalysisSectionBuilder), 190, ["async"]),
         Module("leak-candidate", "Leak Candidate Analysis", typeof(LeakCandidateAnalyzer), typeof(LeakCandidateFindingGenerator), typeof(LeakCandidateTrendComparer), typeof(LeakAnalysisSectionBuilder), 210, ["leaks"]),
         Module("dominator", "Dominator Analysis", typeof(DominatorAnalyzer), typeof(DominatorFindingGenerator), typeof(DominatorTrendComparer), typeof(DominatorSectionBuilder), 220, ["retention", "dominator"]),
-        Module("string", "String Analysis", typeof(StringAnalyzer), typeof(StringFindingGenerator), typeof(StringTrendComparer), typeof(StringSectionBuilder), 230, ["memory", "string"]),
+        // StringAnalyzerLegacyAdapter, not StringAnalyzer directly, since 2026-09-13 -- see
+        // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("string", "String Analysis", typeof(StringAnalyzerLegacyAdapter), typeof(StringFindingGenerator), typeof(StringTrendComparer), typeof(StringSectionBuilder), 230, ["memory", "string"]),
         // CollectionAnalyzerLegacyAdapter, not CollectionAnalyzer directly, since 2026-09-12
         // (Tier-2 wave) -- see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("collection", "Collection Analysis", typeof(CollectionAnalyzerLegacyAdapter), typeof(CollectionFindingGenerator), typeof(CollectionTrendComparer), typeof(CollectionSectionBuilder), 240, ["collections"]),

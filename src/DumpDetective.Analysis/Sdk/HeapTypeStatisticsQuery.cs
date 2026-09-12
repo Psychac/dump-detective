@@ -143,7 +143,8 @@ internal sealed class HeapTypeStatisticsQuery(ClrHeap heap, IHeapAnalysisCache c
                 IsTaskType: isTaskType,
                 IsTaskCompletionSourceType: isTcsType,
                 ImplementsValueTaskSource: implementsVts,
-                ValueTaskSourceCoreFieldName: vtsCoreFieldName);
+                ValueTaskSourceCoreFieldName: vtsCoreFieldName,
+                IsStringType: (e.Flags & TypeAggregateFlags.IsStringType) != 0);
         }
         return result;
     }
@@ -285,7 +286,8 @@ internal sealed class HeapTypeStatisticsQuery(ClrHeap heap, IHeapAnalysisCache c
                 IsTaskType: s.IsTaskType,
                 IsTaskCompletionSourceType: s.IsTaskCompletionSourceType,
                 ImplementsValueTaskSource: s.ImplementsValueTaskSource,
-                ValueTaskSourceCoreFieldName: s.ValueTaskSourceCoreFieldName);
+                ValueTaskSourceCoreFieldName: s.ValueTaskSourceCoreFieldName,
+                IsStringType: s.IsStringType);
         }
         return result;
     }

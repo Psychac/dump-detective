@@ -95,23 +95,12 @@ public sealed class StringAnalyzerRetentionPathTests
     }
 
     [Fact]
-    public void BuildRetentionPaths_ReturnsNull_WhenCacheIsNull()
-    {
-        var duplicates = new List<DuplicateStringSnapshot> { new("a", 10, 100, SampleAddresses: [0x1000]) };
-
-        object? result = BuildRetentionPathsMethod.Invoke(
-            null, [null!, null, duplicates, 5, CancellationToken.None]);
-
-        result.Should().BeNull();
-    }
-
-    [Fact]
     public void BuildRetentionPaths_ReturnsNull_WhenSampleCountIsZero()
     {
         var duplicates = new List<DuplicateStringSnapshot> { new("a", 10, 100, SampleAddresses: [0x1000]) };
 
         object? result = BuildRetentionPathsMethod.Invoke(
-            null, [null!, null, duplicates, 0, CancellationToken.None]);
+            null, [null!, duplicates, 0, CancellationToken.None]);
 
         result.Should().BeNull();
     }
@@ -120,7 +109,7 @@ public sealed class StringAnalyzerRetentionPathTests
     public void BuildRetentionPaths_ReturnsNull_WhenNoDuplicates()
     {
         object? result = BuildRetentionPathsMethod.Invoke(
-            null, [null!, null, Array.Empty<DuplicateStringSnapshot>(), 5, CancellationToken.None]);
+            null, [null!, Array.Empty<DuplicateStringSnapshot>(), 5, CancellationToken.None]);
 
         result.Should().BeNull();
     }

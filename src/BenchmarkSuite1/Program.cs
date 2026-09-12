@@ -126,7 +126,7 @@ namespace BenchmarkSuite1
             };
 
             var pipeline = new AnalysisPipeline(
-                new IAnalyzer[] { new StringAnalyzer() },
+                new IAnalyzer[] { new StringAnalyzerLegacyAdapter() },
                 new FindingGenerationPipeline(Array.Empty<IFindingGenerator>()));
 
             var sw = Stopwatch.StartNew();

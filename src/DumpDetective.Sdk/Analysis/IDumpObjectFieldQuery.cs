@@ -45,6 +45,18 @@ public interface IDumpObjectFieldQuery
     bool TryGetStringValue(ulong address, out string? value);
 
     /// <summary>
+    /// Same as <see cref="TryGetStringValue(ulong, out string?)"/>, but caps how much of the
+    /// string's content is materialized — mirrors ClrMD's own <c>ClrObject.AsString(int maxLength)</c>
+    /// overload, which several pre-retyping Tier-2 analyzers use specifically to avoid allocating a
+    /// multi-megabyte <see cref="string"/> just to hash a fingerprint or build a short preview off
+    /// it. Added 2026-09-13 for <c>StringAnalyzer</c>'s retyping — a real, closable perf gap: the
+    /// unbounded overload above was fine for every existing consumer (all read short, well-known
+    /// fields), but this is the first consumer that reads arbitrary, attacker/workload-sized string
+    /// content directly.
+    /// </summary>
+    bool TryGetStringValue(ulong address, int maxLength, out string? value);
+
+    /// <summary>
     /// Resolves the *declared* type name of a named instance field on the object at
     /// <paramref name="address"/>'s type — no value read at all, so this works even for a
     /// struct-typed field <see cref="TryReadField"/> can't represent a value for (e.g. detecting a

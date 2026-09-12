@@ -78,6 +78,10 @@ internal class StatisticsCache
                         localState.Samples[typeName] = obj.Address;
                         localState.NamesByMethodTable[obj.Type.MethodTable] = typeName;
 
+                        // Plain name check, computed once per distinct type (like Task/TCS below)
+                        // rather than per instance -- the type name never changes across instances.
+                        stats.IsStringType = string.Equals(typeName, "System.String", StringComparison.Ordinal);
+
                         // Task/TCS classification is a pure name check, cheap regardless of how
                         // often it runs; IValueTaskSource detection walks ClrType.EnumerateInterfaces(),
                         // which is not -- gated to run at most once per distinct type (here, on first
@@ -145,6 +149,8 @@ internal class StatisticsCache
                     stat.IsFinalizableType = true;
                 if (localStat.IsAsyncStateMachineType)
                     stat.IsAsyncStateMachineType = true;
+                if (localStat.IsStringType)
+                    stat.IsStringType = true;
                 if (localStat.IsTaskType)
                     stat.IsTaskType = true;
                 if (localStat.IsTaskCompletionSourceType)

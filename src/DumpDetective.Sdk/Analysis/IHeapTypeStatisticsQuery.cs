@@ -153,7 +153,15 @@ public readonly record struct HeapTypeStatistics(
     bool ImplementsValueTaskSource = false,
     /// <summary>Name of the embedded <c>ManualResetValueTaskSourceCore&lt;TResult&gt;</c> field when
     /// <see cref="ImplementsValueTaskSource"/> is <c>true</c>; <c>null</c> otherwise.</summary>
-    string? ValueTaskSourceCoreFieldName = null);
+    string? ValueTaskSourceCoreFieldName = null,
+    /// <summary>
+    /// <c>true</c> for <c>System.String</c> itself — mirrors <c>TypeAggregateFlags.IsStringType</c>.
+    /// Added 2026-09-13 for <c>StringAnalyzer</c>'s retyping. Two-path like
+    /// <see cref="IsAsyncStateMachineType"/>: index-backed via <c>TypeAggregateFlags.IsStringType</c>,
+    /// no-index fallback via a plain name check — a single exact-name comparison, no ClrMD
+    /// field/interface metadata walk, so there's no cost reason to gate it behind an index.
+    /// </summary>
+    bool IsStringType = false);
 
 /// <summary>The <c>heap.types</c> capability's aggregate-statistics surface (distinct
 /// <see cref="IHeapObjectStream"/>/<see cref="IHeapObjectLookup"/>, per-object).</summary>

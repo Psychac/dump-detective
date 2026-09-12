@@ -217,6 +217,8 @@ public sealed class CrashAnalyzerRetypingCharacterizationTests
 
         public bool TryGetStringValue(ulong address, out string? value) { value = null; return false; }
 
+        public bool TryGetStringValue(ulong address, int maxLength, out string? value) => TryGetStringValue(address, out value);
+
         public bool TryGetFieldTypeName(ulong address, string fieldName, out string? typeName) { typeName = null; return false; }
 
         public IReadOnlyList<(string Name, ulong TargetAddress)> EnumerateObjectReferenceFields(ulong address) => [];

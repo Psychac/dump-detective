@@ -119,6 +119,8 @@ public sealed class SqlCommandAnalyzerRetypingCharacterizationTests
             return false; // not exercised by this test file's scenarios
         }
 
+        public bool TryGetStringValue(ulong address, int maxLength, out string? value) => TryGetStringValue(address, out value);
+
         public bool TryGetFieldTypeName(ulong address, string fieldName, out string? typeName)
         {
             typeName = null;

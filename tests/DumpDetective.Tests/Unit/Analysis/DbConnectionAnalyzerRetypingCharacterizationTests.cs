@@ -217,6 +217,8 @@ public sealed class DbConnectionAnalyzerRetypingCharacterizationTests
             return false; // not exercised by this analyzer -- _connectionString resolves via TryReadField's own String case
         }
 
+        public bool TryGetStringValue(ulong address, int maxLength, out string? value) => TryGetStringValue(address, out value);
+
         public bool TryGetFieldTypeName(ulong address, string fieldName, out string? typeName)
         {
             typeName = null;

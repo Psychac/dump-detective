@@ -264,6 +264,8 @@ public sealed class AsyncStateMachineAnalyzerRetypingCharacterizationTests
             return false; // not exercised by this analyzer
         }
 
+        public bool TryGetStringValue(ulong address, int maxLength, out string? value) => TryGetStringValue(address, out value);
+
         public bool TryGetFieldTypeName(ulong address, string fieldName, out string? typeName) =>
             _fieldTypeNames.TryGetValue((address, fieldName), out typeName!);
 

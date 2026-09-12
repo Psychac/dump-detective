@@ -90,7 +90,7 @@ public class SmallDumpLatencyBenchmark
             new CrashAnalyzerLegacyAdapter(),
             new HangAnalyzerLegacyAdapter(),
             new DominatorAnalyzer(),
-            new StringAnalyzer(),
+            new StringAnalyzerLegacyAdapter(),
             new CollectionAnalyzerLegacyAdapter(),
             new StaticRootLeakDetector(),
             new ReferenceChainAnalyzer(),

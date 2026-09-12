@@ -286,6 +286,8 @@ public sealed class AsyncTaskAnalyzerRetypingCharacterizationTests
             return false; // not exercised by this analyzer
         }
 
+        public bool TryGetStringValue(ulong address, int maxLength, out string? value) => TryGetStringValue(address, out value);
+
         public bool TryGetFieldTypeName(ulong address, string fieldName, out string? typeName)
         {
             typeName = null;

@@ -1,401 +1,411 @@
-﻿using DumpDetective.Analysis.Cache;
-using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Traversal;
-using DumpDetective.Core.Abstractions;
+using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
-
-using Microsoft.Diagnostics.Runtime;
-using Microsoft.Extensions.Logging;
-
-using System.Collections.Concurrent;
+using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 
 namespace DumpDetective.Analysis.Analyzers.Runtime
 {
-    public class CrashAnalyzer : IAnalyzer, IParallelHeapIndexScanParticipant
+    /// <summary>
+    /// Tier-1+Tier-2 (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md). Reads
+    /// exception candidates from <see cref="AnalysisContext.HeapObjects"/> — populated by
+    /// <see cref="CrashAnalyzerLegacyAdapter"/>'s heap-index-scan participant role, which owns every
+    /// structural ClrType-level fact (is-exception, is-<c>AggregateException</c>) this analyzer has
+    /// no capability surface to ask for itself.
+    /// </summary>
+    /// <remarks>
+    /// Two real capability gaps closed: <see cref="IHeapSegmentQuery.GetGeneration"/> (per-object
+    /// generation, replacing the pre-retyping analyzer's own <c>seg.GetGeneration(address)</c>/
+    /// <c>HeapEntry.Generation</c> reads) and the thread-exception correlation this analyzer's
+    /// active-candidate tracking needs — closed by adding <see cref="RuntimeThreadRef.ExceptionAddress"/>
+    /// (<see cref="IRuntimeThreadQuery"/> already carried <c>HasCurrentException</c>/
+    /// <c>ExceptionTypeName</c>/<c>ExceptionMessage</c> from <c>ThreadAnalyzer</c>'s retyping, but
+    /// none of those can join a thread's live exception back to the specific heap-scanned
+    /// <see cref="ExceptionInstance"/> by address).
+    ///
+    /// <c>Message</c>/<c>HResult</c>/<c>InnerException</c> are read via raw
+    /// <c>_message</c>/<c>_HResult</c>/<c>_innerException</c> field names through
+    /// <see cref="IDumpObjectFieldQuery.TryReadField"/> rather than <c>ClrObject.AsException()</c>'s
+    /// convenience properties — confirmed, by decompiling the installed ClrMD package
+    /// (v4.0.732401), to be exactly equivalent: <c>ClrException.Message</c>/<c>.HResult</c>/
+    /// <c>.Inner</c> all resolve the same field by name (with a hardcoded-offset fallback for
+    /// stripped metadata this analyzer doesn't need) and read it directly, no extra defaulting
+    /// logic in between. <c>ClrException.StackTrace</c> is genuinely different — it walks the
+    /// exception's internal binary <c>_stackTrace</c> trace-info array, not a field ClrMD exposes as
+    /// a plain value — so <see cref="ExtractExceptionStackTrace"/> calls the new
+    /// <see cref="IDumpObjectFieldQuery.EnumerateExceptionStackTrace"/> Tier-2 primitive for that
+    /// tier specifically, restoring the pre-retyping analyzer's exact three-tier fallback
+    /// (<c>_stackTraceString</c> text → binary trace-array unwind → <c>_remoteStackTraceString</c>).
+    /// </remarks>
+    public sealed class CrashAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     {
-        private CrashAnalysisOptions _options = new CrashAnalysisOptions();
-        private ILogger<CrashAnalyzer>? _logger;
-
         public string Name => "Crash Analysis";
         public string Category => "Crash";
 
-        // Instance accumulator state for the IHeapIndexScanParticipant path. Populated by
-        // BeforeHeapIndexScan (called by the pipeline dispatcher) and mutated per-entry by
-        // OnHeapEntry; consumed by AnalyzeAsync once the shared index scan has completed.
-        private ClrHeap? _heap;
-        private Dictionary<ulong, ActiveExceptionContext>? _activeExceptions;
-        private Dictionary<string, List<ExceptionInstance>>? _exceptionsByType;
-        private Dictionary<string, int>? _exceptionTypeCounts;
-        private Dictionary<string, int>? _activeExceptionTypeCounts;
-        private Dictionary<ulong, bool>? _exceptionMethodTables;
-        private Dictionary<ulong, bool>? _aggregateExceptionMethodTables;
-        private Dictionary<ulong, string>? _methodTableNameCache;
-        private Dictionary<uint, CrashThreadCandidate>? _crashThreadCandidates;
-        private Dictionary<string, int>? _exceptionGen0Counts;
-        private Dictionary<string, int>? _exceptionGen1Counts;
-        private Dictionary<string, int>? _exceptionGen2Counts;
-        private Dictionary<string, int>? _exceptionLohCounts;
-        private Dictionary<string, int>? _aggregateInnerExceptionTypeCounts;
-        private Dictionary<string, ulong>? _exceptionHeapSizeByType;
-        private int _totalExceptions;
-        private int _activeExceptionsCount;
-        private int _aggregateExceptionCount;
-        private ObjectScanCounter? _scanCounter;
-        // Set by OnHeapIndexScanCompleted — the single source of truth for whether the
-        // participant-accumulated state above is trustworthy. Avoids re-deriving "did the
-        // shared scan run" from a second cache.TryGetHeapIndex call in AnalyzeAsync.
-        private bool _participantScanSucceeded;
+        public AnalyzerDomainResult? LastResult { get; private set; }
 
-        public CrashAnalyzer()
-        {
-        }
-
-        public CrashAnalyzer(CrashAnalysisOptions options)
-        {
-            _options = options ?? new CrashAnalysisOptions();
-        }
-
-        public CrashAnalyzer(CrashAnalysisOptions options, ILogger<CrashAnalyzer>? logger)
-        {
-            _options = options ?? new CrashAnalysisOptions();
-            _logger = logger;
-        }
-
-        /// <summary>
-        /// Builds the active-exception lookup from live thread state and resets the per-entry
-        /// accumulator fields ahead of the shared heap-index scan pass.
-        /// </summary>
-        public void BeforeHeapIndexScan(AnalysisContext context)
-        {
-            _options = context.AnalysisOptions.Crash;
-            _heap = context.Heap;
-            _activeExceptions = BuildActiveExceptionLookup(context.Runtime);
-
-            _exceptionsByType = new Dictionary<string, List<ExceptionInstance>>();
-            _exceptionTypeCounts = new Dictionary<string, int>();
-            _activeExceptionTypeCounts = new Dictionary<string, int>();
-            _exceptionMethodTables = new Dictionary<ulong, bool>(capacity: 64);
-            _aggregateExceptionMethodTables = new Dictionary<ulong, bool>(capacity: 64);
-            _methodTableNameCache = new Dictionary<ulong, string>(capacity: 64);
-            _crashThreadCandidates = new Dictionary<uint, CrashThreadCandidate>();
-            _exceptionGen0Counts = new Dictionary<string, int>();
-            _exceptionGen1Counts = new Dictionary<string, int>();
-            _exceptionGen2Counts = new Dictionary<string, int>();
-            _exceptionLohCounts = new Dictionary<string, int>();
-            _aggregateInnerExceptionTypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
-            _exceptionHeapSizeByType = new Dictionary<string, ulong>(StringComparer.Ordinal);
-            _totalExceptions = 0;
-            _activeExceptionsCount = 0;
-            _aggregateExceptionCount = 0;
-            _scanCounter = new ObjectScanCounter("scanning for exceptions", context.Progress);
-        }
-
-        /// <summary>
-        /// Called once per disk-backed index entry, in address order, during the shared heap-index
-        /// scan pass. Mirrors the historical <c>RunSequentialExceptionScan</c> loop body, operating
-        /// on instance fields. Explicit interface implementation because <see cref="HeapEntry"/> is
-        /// internal and this class is public — an implicit implementation would leak the internal
-        /// type as public API.
-        /// </summary>
-        void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => OnHeapEntry(in entry);
-
-        public void OnHeapIndexScanCompleted(bool succeeded) => _participantScanSucceeded = succeeded;
-
-        IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() => new CrashAnalyzer(_options, _logger);
-
-        // Workers cover disjoint, ascending-address record ranges (see HeapIndexScanDispatcher.
-        // RunParallelPass), and `partials` arrives in that same ascending order with `this`
-        // covering the lowest range. Merging in that order lets each per-type exception list be
-        // recapped exactly as the sequential pass would have: concatenate in address order, then
-        // replay the same "active always kept, non-active capped at MaxExceptionsPerType" rule.
-        void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
-        {
-            var others = new List<CrashAnalyzer>(partials.Count);
-            foreach (IHeapIndexScanParticipant p in partials)
-                others.Add((CrashAnalyzer)p);
-
-            _totalExceptions += others.Sum(o => o._totalExceptions);
-            _activeExceptionsCount += others.Sum(o => o._activeExceptionsCount);
-            _aggregateExceptionCount += others.Sum(o => o._aggregateExceptionCount);
-
-            foreach (CrashAnalyzer other in others)
-            {
-                MergeCounts(_exceptionTypeCounts!, other._exceptionTypeCounts!);
-                MergeCounts(_activeExceptionTypeCounts!, other._activeExceptionTypeCounts!);
-                // Gen0/Gen1/Gen2/LOH and aggregate-inner-type counts are computed unconditionally
-                // per entry (never sampled), so they must be summed across every worker too —
-                // previously missing here, which silently dropped all but the primary worker's
-                // generation distribution on parallel disk-index scans.
-                MergeCounts(_exceptionGen0Counts!, other._exceptionGen0Counts!);
-                MergeCounts(_exceptionGen1Counts!, other._exceptionGen1Counts!);
-                MergeCounts(_exceptionGen2Counts!, other._exceptionGen2Counts!);
-                MergeCounts(_exceptionLohCounts!, other._exceptionLohCounts!);
-                MergeCounts(_aggregateInnerExceptionTypeCounts!, other._aggregateInnerExceptionTypeCounts!);
-                MergeSizes(_exceptionHeapSizeByType!, other._exceptionHeapSizeByType!);
-            }
-
-            var typeKeys = new HashSet<string>(_exceptionsByType!.Keys, StringComparer.Ordinal);
-            foreach (CrashAnalyzer other in others)
-                typeKeys.UnionWith(other._exceptionsByType!.Keys);
-
-            foreach (string typeKey in typeKeys)
-            {
-                var merged = new List<ExceptionInstance>(capacity: _options.MaxExceptionsPerType);
-                int nonActiveKept = 0;
-
-                if (_exceptionsByType!.TryGetValue(typeKey, out var selfList))
-                    AppendCapped(selfList, merged, ref nonActiveKept, _options.MaxExceptionsPerType);
-
-                foreach (CrashAnalyzer other in others)
-                {
-                    if (other._exceptionsByType!.TryGetValue(typeKey, out var otherList))
-                        AppendCapped(otherList, merged, ref nonActiveKept, _options.MaxExceptionsPerType);
-                }
-
-                _exceptionsByType[typeKey] = merged;
-            }
-
-            // Re-sort keys by merged total count so BuildAnalysisFromParticipantState's ordering
-            // (which iterates _exceptionTypeCounts, not _exceptionsByType, for ordering) stays correct;
-            // _exceptionTypeCounts was already updated above, no further action needed there.
-
-            foreach (CrashAnalyzer other in others)
-            {
-                foreach (var kvp in other._crashThreadCandidates!)
-                {
-                    if (!_crashThreadCandidates!.TryGetValue(kvp.Key, out var existing))
-                    {
-                        _crashThreadCandidates[kvp.Key] = kvp.Value;
-                        continue;
-                    }
-
-                    CrashThreadCandidate incoming = kvp.Value;
-                    existing.ActiveExceptionCount += incoming.ActiveExceptionCount;
-                    if (incoming.OriginalExceptionStack != null)
-                    {
-                        existing.OriginalExceptionStack = incoming.OriginalExceptionStack;
-                        existing.OriginalExceptionStackIsRethrown = incoming.OriginalExceptionStackIsRethrown;
-                    }
-                    if (!string.IsNullOrWhiteSpace(incoming.SampleMessage))
-                        existing.SampleMessage = incoming.SampleMessage;
-                    if (incoming.SampleHResult != 0)
-                        existing.SampleHResult = incoming.SampleHResult;
-                    if (existing.SampleInnerExceptionType == null)
-                        existing.SampleInnerExceptionType = incoming.SampleInnerExceptionType;
-                }
-            }
-        }
-
-        private static void MergeCounts(Dictionary<string, int> target, Dictionary<string, int> source)
-        {
-            foreach (var kvp in source)
-            {
-                target.TryGetValue(kvp.Key, out int count);
-                target[kvp.Key] = count + kvp.Value;
-            }
-        }
-
-        private static void MergeSizes(Dictionary<string, ulong> target, Dictionary<string, ulong> source)
-        {
-            foreach (var kvp in source)
-            {
-                target.TryGetValue(kvp.Key, out ulong size);
-                target[kvp.Key] = size + kvp.Value;
-            }
-        }
-
-        // Appends entries from a worker-local (already Max-capped) instance list into the merged
-        // list, keeping active instances unconditionally and non-active ones until the shared
-        // running count reaches MaxExceptionsPerType — mirrors OnHeapEntry's per-entry admission rule.
-        private static void AppendCapped(List<ExceptionInstance> source, List<ExceptionInstance> destination, ref int nonActiveKept, int maxExceptionsPerType)
-        {
-            foreach (ExceptionInstance instance in source)
-            {
-                bool isActive = instance.ThreadId.HasValue;
-                if (isActive)
-                {
-                    destination.Add(instance);
-                    continue;
-                }
-
-                if (nonActiveKept < maxExceptionsPerType)
-                {
-                    destination.Add(instance);
-                    nonActiveKept++;
-                }
-            }
-        }
-
-        private void OnHeapEntry(in HeapEntry entry)
-        {
-            _scanCounter!.Tick();
-
-            ulong exceptionAddress = entry.Address;
-            if (exceptionAddress == 0)
-                return;
-
-            if (!IsExceptionEntry(_heap!, entry, _exceptionMethodTables!))
-                return;
-
-            ulong mt = entry.MethodTable;
-            var (isException, isAggregate, typeName) = ResolveExceptionType(_heap!, mt, _exceptionMethodTables!, _aggregateExceptionMethodTables!, _methodTableNameCache!);
-            if (!isException)
-                return;
-
-            string key = typeName ?? StringConstants.UnknownType;
-            _totalExceptions++;
-            _exceptionTypeCounts!.TryGetValue(key, out int typeCount);
-            _exceptionTypeCounts[key] = typeCount + 1;
-
-            _exceptionHeapSizeByType!.TryGetValue(key, out ulong heapSize);
-            _exceptionHeapSizeByType[key] = heapSize + entry.Size;
-
-            // AggregateException unwrapping: computed unconditionally (not gated by
-            // MaxExceptionsPerType) so AggregateInnerExceptionTypeCounts is an exact total, not a
-            // sample — same rationale as the Gen0/Gen1/Gen2/LOH counts below.
-            List<string>? aggregateInnerTypes = null;
-            if (isAggregate)
-            {
-                aggregateInnerTypes = ExtractAggregateInnerExceptionTypes(_heap!, exceptionAddress);
-                if (aggregateInnerTypes != null)
-                {
-                    _aggregateExceptionCount++;
-                    for (int i = 0; i < aggregateInnerTypes.Count; i++)
-                    {
-                        string innerKey = aggregateInnerTypes[i];
-                        _aggregateInnerExceptionTypeCounts!.TryGetValue(innerKey, out int innerCount);
-                        _aggregateInnerExceptionTypeCounts[innerKey] = innerCount + 1;
-                    }
-                }
-            }
-
-            int generation = entry.Generation;
-            switch (generation)
-            {
-                case 0:
-                    _exceptionGen0Counts!.TryGetValue(key, out int gen0);
-                    _exceptionGen0Counts[key] = gen0 + 1;
-                    break;
-                case 1:
-                    _exceptionGen1Counts!.TryGetValue(key, out int gen1);
-                    _exceptionGen1Counts[key] = gen1 + 1;
-                    break;
-                case 2:
-                    _exceptionGen2Counts!.TryGetValue(key, out int gen2);
-                    _exceptionGen2Counts[key] = gen2 + 1;
-                    break;
-                default:
-                    _exceptionLohCounts!.TryGetValue(key, out int loh);
-                    _exceptionLohCounts[key] = loh + 1;
-                    break;
-            }
-
-            bool isActive = _activeExceptions!.TryGetValue(exceptionAddress, out var activeExceptionContext);
-            if (isActive)
-            {
-                _activeExceptionsCount++;
-                _activeExceptionTypeCounts!.TryGetValue(key, out int activeTypeCount);
-                _activeExceptionTypeCounts[key] = activeTypeCount + 1;
-
-                if (!_crashThreadCandidates!.TryGetValue(activeExceptionContext.ThreadId, out var candidate))
-                {
-                    candidate = new CrashThreadCandidate
-                    {
-                        ThreadId = activeExceptionContext.ThreadId,
-                        OSThreadId = activeExceptionContext.OSThreadId,
-                        CurrentThreadStack = activeExceptionContext.CurrentThreadStack,
-                        PrimaryExceptionType = typeName
-                    };
-                    _crashThreadCandidates[activeExceptionContext.ThreadId] = candidate;
-                }
-                candidate.ActiveExceptionCount++;
-            }
-
-            if (!_exceptionsByType!.TryGetValue(key, out var list))
-            {
-                list = new List<ExceptionInstance>(capacity: _options.MaxExceptionsPerType);
-                _exceptionsByType[key] = list;
-            }
-            if (list.Count < _options.MaxExceptionsPerType || isActive)
-            {
-                var exceptionInstance = ExtractExceptionInfo(_heap!, exceptionAddress, isActive ? activeExceptionContext : null);
-                exceptionInstance.Generation = generation;
-                if (aggregateInnerTypes != null)
-                    exceptionInstance.AggregateInnerExceptionTypes = CapForDisplay(aggregateInnerTypes);
-                if (isActive && exceptionInstance.OriginalStackTrace != null && exceptionInstance.OriginalStackTrace.Count > 0)
-                {
-                    // store original stack on the candidate so UI can show the trace back to original call site
-                    var activeCandidate = _crashThreadCandidates![activeExceptionContext.ThreadId];
-                    activeCandidate.OriginalExceptionStack = exceptionInstance.OriginalStackTrace;
-                    activeCandidate.OriginalExceptionStackIsRethrown = exceptionInstance.IsRethrown;
-                }
-                if (isActive)
-                {
-                    var candidate = _crashThreadCandidates![activeExceptionContext.ThreadId];
-                    if (!string.IsNullOrWhiteSpace(exceptionInstance.Message))
-                        candidate.SampleMessage = exceptionInstance.Message;
-                    candidate.SampleHResult = exceptionInstance.HResult;
-                    if (candidate.SampleInnerExceptionType == null)
-                        candidate.SampleInnerExceptionType = exceptionInstance.InnerExceptionType;
-                }
-                list.Add(exceptionInstance);
-            }
-        }
-
-        // Relies on the pipeline dispatcher having already called BeforeHeapIndexScan/OnHeapEntry
-        // for this context before AnalyzeAsync runs (see AnalysisPipeline.ExecuteAsync).
-        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            ExceptionAnalysis exceptionInfo = _participantScanSucceeded
-                ? BuildAnalysisFromParticipantState()
-                : AnalyzeExceptions(context.Heap, context.Runtime, context.Progress);
+            IHeapObjectStream candidates = context.HeapObjects
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapObjects}' capability.");
+            IDumpObjectFieldQuery fields = context.DumpObjectFields
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.DumpObjectFields}' capability.");
+            IDumpArrayShapeQuery arrayShapes = context.DumpArrayShapes
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.DumpArrayElements}' capability.");
+            IHeapObjectLookup objectLookup = context.HeapObjectLookup
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapObjects}' capability.");
+            IHeapSegmentQuery segments = context.HeapSegments
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapSegments}' capability.");
+            IRuntimeThreadQuery threads = context.RuntimeThreads
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.RuntimeThreads}' capability.");
 
-            return ValueTask.FromResult(BuildDomainResult(exceptionInfo, context.Heap, context.Cache).Stamp(this));
+            CrashAnalyzerOptions crashOptions = context.AnalyzerOptions as CrashAnalyzerOptions
+                ?? new CrashAnalyzerOptions(new CrashAnalysisOptions(), new HashSet<ulong>());
+
+            ExceptionAnalysis analysis = Analyze(candidates, fields, arrayShapes, objectLookup, segments, threads, crashOptions, cancellationToken);
+            LastResult = BuildDomainResult(analysis, context.HeapRootPaths, crashOptions.Options);
+            return ValueTask.CompletedTask;
         }
 
-        public AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap)
+        private ExceptionAnalysis Analyze(
+            IHeapObjectStream candidates, IDumpObjectFieldQuery fields, IDumpArrayShapeQuery arrayShapes,
+            IHeapObjectLookup objectLookup, IHeapSegmentQuery segments, IRuntimeThreadQuery threads,
+            CrashAnalyzerOptions crashOptions, CancellationToken cancellationToken)
         {
-            return BuildDomainResult(AnalyzeExceptions(heap, runtime, progress: null), heap, cache: null);
-        }
+            CrashAnalysisOptions options = crashOptions.Options;
+            IReadOnlySet<ulong> aggregateAddresses = crashOptions.AggregateExceptionAddresses;
 
-        private ExceptionAnalysis BuildAnalysisFromParticipantState()
-        {
-            _scanCounter?.Complete();
+            Dictionary<ulong, ActiveExceptionContext> activeExceptions = BuildActiveExceptionLookup(threads);
 
-            var sortedTypeNames = _exceptionTypeCounts!.OrderByDescending(kvp => kvp.Value).Select(kvp => kvp.Key);
-            var sortedExceptionsByType = new Dictionary<string, List<ExceptionInstance>>(_exceptionsByType!.Count);
-            foreach (string typeName in sortedTypeNames)
+            var exceptionsByType = new Dictionary<string, List<ExceptionInstance>>(StringComparer.Ordinal);
+            var exceptionTypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+            var activeExceptionTypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+            var exceptionGen0Counts = new Dictionary<string, int>(StringComparer.Ordinal);
+            var exceptionGen1Counts = new Dictionary<string, int>(StringComparer.Ordinal);
+            var exceptionGen2Counts = new Dictionary<string, int>(StringComparer.Ordinal);
+            var exceptionLohCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+            var exceptionHeapSizeByType = new Dictionary<string, ulong>(StringComparer.Ordinal);
+            var aggregateInnerExceptionTypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+            var crashThreadCandidates = new Dictionary<uint, CrashThreadCandidate>();
+            int totalExceptions = 0;
+            int activeExceptionsCount = 0;
+            int aggregateExceptionCount = 0;
+
+            foreach (HeapObjectRef candidate in candidates.EnumerateObjects())
             {
-                if (_exceptionsByType.TryGetValue(typeName, out var list))
+                cancellationToken.ThrowIfCancellationRequested();
+
+                string key = candidate.TypeDisplayName.Length > 0 ? candidate.TypeDisplayName : StringConstants.UnknownType;
+                totalExceptions++;
+                Increment(exceptionTypeCounts, key);
+                AddSize(exceptionHeapSizeByType, key, candidate.Size);
+
+                // AggregateException unwrapping: computed unconditionally (not gated by
+                // MaxExceptionsPerType) so AggregateInnerExceptionTypeCounts is an exact total, not a
+                // sample — same rationale as the Gen0/Gen1/Gen2/LOH counts below.
+                List<string>? aggregateInnerTypes = null;
+                if (aggregateAddresses.Contains(candidate.Address))
+                {
+                    aggregateInnerTypes = ExtractAggregateInnerExceptionTypes(fields, arrayShapes, objectLookup, candidate.Address);
+                    if (aggregateInnerTypes != null)
+                    {
+                        aggregateExceptionCount++;
+                        for (int i = 0; i < aggregateInnerTypes.Count; i++)
+                            Increment(aggregateInnerExceptionTypeCounts, aggregateInnerTypes[i]);
+                    }
+                }
+
+                int generation = ToGenerationOrdinal(segments.GetGeneration(candidate.Address));
+                switch (generation)
+                {
+                    case 0: Increment(exceptionGen0Counts, key); break;
+                    case 1: Increment(exceptionGen1Counts, key); break;
+                    case 2: Increment(exceptionGen2Counts, key); break;
+                    default: Increment(exceptionLohCounts, key); break;
+                }
+
+                bool isActive = activeExceptions.TryGetValue(candidate.Address, out ActiveExceptionContext? activeContext);
+                if (isActive)
+                {
+                    activeExceptionsCount++;
+                    Increment(activeExceptionTypeCounts, key);
+
+                    if (!crashThreadCandidates.TryGetValue(activeContext!.ThreadId, out CrashThreadCandidate? candidateThread))
+                    {
+                        candidateThread = new CrashThreadCandidate
+                        {
+                            ThreadId = activeContext.ThreadId,
+                            OSThreadId = activeContext.OSThreadId,
+                            CurrentThreadStack = activeContext.CurrentThreadStack,
+                            PrimaryExceptionType = key,
+                        };
+                        crashThreadCandidates[activeContext.ThreadId] = candidateThread;
+                    }
+                    candidateThread.ActiveExceptionCount++;
+                }
+
+                if (!exceptionsByType.TryGetValue(key, out List<ExceptionInstance>? list))
+                {
+                    list = new List<ExceptionInstance>(capacity: options.MaxExceptionsPerType);
+                    exceptionsByType[key] = list;
+                }
+
+                if (list.Count < options.MaxExceptionsPerType || isActive)
+                {
+                    ExceptionInstance instance = ExtractExceptionInfo(fields, objectLookup, candidate.Address, key, activeContext);
+                    instance.Generation = generation;
+                    if (aggregateInnerTypes != null)
+                        instance.AggregateInnerExceptionTypes = CapForDisplay(aggregateInnerTypes);
+
+                    if (isActive)
+                    {
+                        CrashThreadCandidate candidateThread = crashThreadCandidates[activeContext!.ThreadId];
+                        if (instance.OriginalStackTrace.Count > 0)
+                        {
+                            candidateThread.OriginalExceptionStack = instance.OriginalStackTrace;
+                            candidateThread.OriginalExceptionStackIsRethrown = instance.IsRethrown;
+                        }
+                        if (!string.IsNullOrWhiteSpace(instance.Message))
+                            candidateThread.SampleMessage = instance.Message;
+                        candidateThread.SampleHResult = instance.HResult;
+                        candidateThread.SampleInnerExceptionType ??= instance.InnerExceptionType;
+                    }
+
+                    list.Add(instance);
+                }
+            }
+
+            var sortedExceptionsByType = new Dictionary<string, List<ExceptionInstance>>(exceptionsByType.Count, StringComparer.Ordinal);
+            foreach (string typeName in exceptionTypeCounts.OrderByDescending(kvp => kvp.Value).Select(kvp => kvp.Key))
+            {
+                if (exceptionsByType.TryGetValue(typeName, out List<ExceptionInstance>? list))
                     sortedExceptionsByType[typeName] = list;
             }
 
             return new ExceptionAnalysis
             {
-                TotalExceptions = _totalExceptions,
-                ActiveExceptions = _activeExceptionsCount,
-                ExceptionTypeCounts = _exceptionTypeCounts,
-                ActiveExceptionTypeCounts = _activeExceptionTypeCounts!,
+                TotalExceptions = totalExceptions,
+                ActiveExceptions = activeExceptionsCount,
+                ExceptionTypeCounts = exceptionTypeCounts,
+                ActiveExceptionTypeCounts = activeExceptionTypeCounts,
                 ExceptionsByType = sortedExceptionsByType,
-                CrashThreadCandidates = _crashThreadCandidates!.Values
-                    .OrderByDescending(c => c.ActiveExceptionCount)
-                    .ToList(),
-                ExceptionGen0Counts = _exceptionGen0Counts!,
-                ExceptionGen1Counts = _exceptionGen1Counts!,
-                ExceptionGen2Counts = _exceptionGen2Counts!,
-                ExceptionLohCounts = _exceptionLohCounts!,
-                AggregateExceptionCount = _aggregateExceptionCount,
-                AggregateInnerExceptionTypeCounts = _aggregateInnerExceptionTypeCounts!,
-                ExceptionHeapSizeByType = _exceptionHeapSizeByType!
+                CrashThreadCandidates = crashThreadCandidates.Values.OrderByDescending(c => c.ActiveExceptionCount).ToList(),
+                ExceptionGen0Counts = exceptionGen0Counts,
+                ExceptionGen1Counts = exceptionGen1Counts,
+                ExceptionGen2Counts = exceptionGen2Counts,
+                ExceptionLohCounts = exceptionLohCounts,
+                AggregateExceptionCount = aggregateExceptionCount,
+                AggregateInnerExceptionTypeCounts = aggregateInnerExceptionTypeCounts,
+                ExceptionHeapSizeByType = exceptionHeapSizeByType,
             };
         }
 
-        private AnalyzerDomainResult BuildDomainResult(ExceptionAnalysis exceptionInfo, ClrHeap heap, IHeapAnalysisCache? cache)
+        private static void Increment(Dictionary<string, int> counts, string key)
+        {
+            counts.TryGetValue(key, out int count);
+            counts[key] = count + 1;
+        }
+
+        private static void AddSize(Dictionary<string, ulong> sizes, string key, ulong size)
+        {
+            sizes.TryGetValue(key, out ulong total);
+            sizes[key] = total + size;
+        }
+
+        // Per-*object* generation, mirroring the pre-retyping analyzer's own 0/1/2/default(LOH+)
+        // bucketing exactly: Gen0/Gen1/Gen2 map directly, everything else (Loh/Poh/Frozen/Unknown)
+        // falls into the same "LOH" bucket ExceptionLohCounts already used pre-retyping.
+        private static int ToGenerationOrdinal(HeapGenerationTag tag) => tag switch
+        {
+            HeapGenerationTag.Gen0 => 0,
+            HeapGenerationTag.Gen1 => 1,
+            HeapGenerationTag.Gen2 => 2,
+            HeapGenerationTag.Loh => 3,
+            HeapGenerationTag.Poh => 4,
+            HeapGenerationTag.Frozen => 5,
+            _ => -1,
+        };
+
+        private static Dictionary<ulong, ActiveExceptionContext> BuildActiveExceptionLookup(IRuntimeThreadQuery threads)
+        {
+            var lookup = new Dictionary<ulong, ActiveExceptionContext>();
+
+            foreach (RuntimeThreadRef thread in threads.EnumerateThreads())
+            {
+                if (!thread.HasCurrentException || thread.ExceptionAddress == 0)
+                    continue;
+
+                // Full stack — no artificial per-thread frame cap (§9.26). Only threads with an
+                // active exception reach here, never heap-scale.
+                var frames = new List<ThreadStackFrameRef>();
+                foreach (ThreadStackFrameRef frame in threads.EnumerateStackFrames(thread))
+                    frames.Add(frame);
+
+                lookup[thread.ExceptionAddress] = new ActiveExceptionContext
+                {
+                    ThreadId = (uint)(thread.Thread.ManagedThreadId ?? 0),
+                    OSThreadId = thread.Thread.OsThreadId,
+                    CurrentThreadStack = frames,
+                };
+            }
+
+            return lookup;
+        }
+
+        private static ExceptionInstance ExtractExceptionInfo(
+            IDumpObjectFieldQuery fields, IHeapObjectLookup objectLookup, ulong exceptionAddress, string typeName, ActiveExceptionContext? activeContext)
+        {
+            var instance = new ExceptionInstance { Address = exceptionAddress, Type = typeName };
+
+            if (fields.TryReadField(exceptionAddress, "_message", out FieldValue messageValue) && messageValue.Kind == FieldValueKind.String)
+                instance.Message = messageValue.AsString();
+
+            if (fields.TryReadField(exceptionAddress, "_HResult", out FieldValue hresultValue) && hresultValue.Kind == FieldValueKind.Int32)
+                instance.HResult = hresultValue.AsInt32();
+
+            if (fields.TryReadField(exceptionAddress, "_innerException", out FieldValue innerValue) && innerValue.Kind == FieldValueKind.ObjectReference)
+            {
+                ulong innerAddress = innerValue.AsObjectAddress();
+                if (innerAddress != 0 && objectLookup.TryGetObject(innerAddress, out HeapObjectRef innerObj))
+                    instance.InnerExceptionType = innerObj.TypeDisplayName;
+            }
+
+            instance.ChainDepth = ComputeExceptionChainDepth(fields, exceptionAddress);
+            (instance.OriginalStackTrace, instance.IsRethrown) = ExtractExceptionStackTrace(fields, exceptionAddress);
+
+            if (activeContext != null)
+            {
+                instance.ThreadId = activeContext.ThreadId;
+                instance.OSThreadId = activeContext.OSThreadId;
+                instance.CurrentThreadStack = activeContext.CurrentThreadStack;
+            }
+
+            return instance;
+        }
+
+        private static int ComputeExceptionChainDepth(IDumpObjectFieldQuery fields, ulong exceptionAddress)
+        {
+            const int MaxDepth = 16;
+            int depth = 1;
+            var seen = new HashSet<ulong>();
+            ulong current = exceptionAddress;
+
+            while (current != 0 && depth < MaxDepth && seen.Add(current))
+            {
+                if (!fields.TryReadField(current, "_innerException", out FieldValue innerValue) || innerValue.Kind != FieldValueKind.ObjectReference)
+                    break;
+
+                ulong innerAddress = innerValue.AsObjectAddress();
+                if (innerAddress == 0)
+                    break;
+
+                depth++;
+                current = innerAddress;
+            }
+
+            return depth;
+        }
+
+        // Three-tier fallback, exactly mirroring the pre-retyping analyzer: (1) _stackTraceString
+        // text, (2) EnumerateExceptionStackTrace's binary trace-array unwind (covers an exception
+        // that has been thrown/unwound but never had .ToString()/.StackTrace called to materialize
+        // _stackTraceString as text), (3) the remote-stack text as a last resort.
+        private static (List<string> Frames, bool IsRethrown) ExtractExceptionStackTrace(IDumpObjectFieldQuery fields, ulong exceptionAddress)
+        {
+            var stackFrames = new List<string>();
+            bool isRethrown = false;
+            string? remoteStack = null;
+
+            // _remoteStackTraceString presence means the exception was rethrown via `throw;` or
+            // ExceptionDispatchInfo.Throw() — checked independent of whether it ends up supplying the
+            // frame text below, since _stackTraceString is often already populated even when the
+            // exception has been rethrown.
+            if (fields.TryReadField(exceptionAddress, "_remoteStackTraceString", out FieldValue remoteValue) && remoteValue.Kind == FieldValueKind.String)
+            {
+                remoteStack = remoteValue.AsString();
+                isRethrown = !string.IsNullOrEmpty(remoteStack);
+            }
+
+            if (fields.TryReadField(exceptionAddress, "_stackTraceString", out FieldValue stackValue) && stackValue.Kind == FieldValueKind.String)
+            {
+                string? stackTraceStr = stackValue.AsString();
+                if (!string.IsNullOrEmpty(stackTraceStr))
+                {
+                    var lines = stackTraceStr.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+                    foreach (string line in lines)
+                    {
+                        string trimmed = line.Trim();
+                        if (!string.IsNullOrEmpty(trimmed))
+                            stackFrames.Add(trimmed);
+                    }
+                    return (stackFrames, isRethrown);
+                }
+            }
+
+            IReadOnlyList<ThreadStackFrameRef> unwoundFrames = fields.EnumerateExceptionStackTrace(exceptionAddress, maxFrames: 50);
+            if (unwoundFrames.Count > 0)
+            {
+                foreach (ThreadStackFrameRef frame in unwoundFrames)
+                {
+                    if (frame.HasMethod)
+                        stackFrames.Add($"   at {frame.RawMethodSignature ?? frame.MethodDisplayName}");
+                }
+                if (stackFrames.Count > 0)
+                    return (stackFrames, isRethrown);
+            }
+
+            if (stackFrames.Count == 0 && !string.IsNullOrEmpty(remoteStack))
+                stackFrames.Add(remoteStack);
+
+            return (stackFrames, isRethrown);
+        }
+
+        // Unwraps AggregateException.InnerExceptions (backing field "_innerExceptions", a direct
+        // Exception[] on .NET Core/5+). Returns the full, uncapped set of inner exception type
+        // names — callers decide whether to cap for display; global tallies must stay exact.
+        private static List<string>? ExtractAggregateInnerExceptionTypes(
+            IDumpObjectFieldQuery fields, IDumpArrayShapeQuery arrayShapes, IHeapObjectLookup objectLookup, ulong exceptionAddress)
+        {
+            if (!fields.TryReadField(exceptionAddress, "_innerExceptions", out FieldValue value) || value.Kind != FieldValueKind.ObjectReference)
+                return null;
+
+            ulong arrayAddress = value.AsObjectAddress();
+            if (arrayAddress == 0)
+                return null;
+
+            if (!arrayShapes.TryGetArrayShape(arrayAddress, out int length, out int rank) || rank != 1 || length <= 0)
+                return null;
+
+            IReadOnlyList<ulong> elements = arrayShapes.EnumerateObjectReferenceElements(arrayAddress, length);
+            if (elements.Count == 0)
+                return null;
+
+            var types = new List<string>(elements.Count);
+            for (int i = 0; i < elements.Count; i++)
+            {
+                if (elements[i] != 0 && objectLookup.TryGetObject(elements[i], out HeapObjectRef elemObj))
+                    types.Add(elemObj.TypeDisplayName);
+            }
+
+            return types.Count > 0 ? types : null;
+        }
+
+        // Render-layer-only bound on the per-instance inner-type list embedded in one
+        // ExceptionInstance (§9.26 D5 does not apply — this caps a single field's payload size for
+        // report legibility, not the exact AggregateInnerExceptionTypeCounts totals).
+        private const int MaxDisplayedAggregateInnerExceptionTypes = 25;
+
+        private static List<string> CapForDisplay(List<string> types) =>
+            types.Count > MaxDisplayedAggregateInnerExceptionTypes
+                ? types.GetRange(0, MaxDisplayedAggregateInnerExceptionTypes)
+                : types;
+
+        private AnalyzerDomainResult BuildDomainResult(ExceptionAnalysis exceptionInfo, IHeapRootPathQuery? rootPaths, CrashAnalysisOptions options)
         {
             var candidateSnapshots = BuildCrashThreadSnapshotsImpl(exceptionInfo);
 
@@ -419,12 +429,12 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
                 BuildMessageDistributions(exceptionInfo),
                 BuildCrashBuckets(exceptionInfo),
                 payloadExceptionHeapSizeByType,
-                BuildGen2RetentionPaths(heap, cache, exceptionInfo));
+                BuildGen2RetentionPaths(rootPaths, exceptionInfo, options));
         }
 
-        // Pure candidate selection — Generation >= 2 covers Gen2 plus LOH/Pinned/Frozen/Unknown,
-        // the same bucket ExceptionLohCounts already uses. Extracted from BuildGen2RetentionPaths
-        // so the selection rule is testable without a live ClrHeap/cache.
+        // Pure candidate selection — Generation >= 2 covers Gen2 plus LOH/Pinned/Frozen/Unknown, the
+        // same bucket ExceptionLohCounts already uses. Extracted so the selection rule is testable
+        // without a live heap/capability set.
         internal static List<ExceptionInstance> SelectGen2RetentionCandidates(ExceptionAnalysis analysis)
         {
             var candidates = new List<ExceptionInstance>();
@@ -440,36 +450,25 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
             return candidates;
         }
 
-        // E-1: retention paths for Gen2/LOH exception instances via the shared
-        // RootPathFinder/reverse-edge-index infrastructure (EventLeakAnalyzer.PopulateEvidence is
-        // the template this mirrors). Only runs when a cache is available (AnalyzeAsync's
-        // pipeline path); the cache-less Analyze(runtime, heap) fallback has no reverse index or
-        // root-set cache to query, so it no-ops rather than paying for an unindexed BFS. Bounded
-        // by MaxRetentionPathEnrichmentMs — root-path search is real per-object work, unlike the
+        // E-1: retention paths for Gen2/LOH exception instances via the heap.root-paths capability
+        // (IHeapRootPathQuery). Only runs when the capability is available; the numeric bounds match
+        // the pre-retyping analyzer's own RootPathSearchLimits exactly. Bounded by
+        // MaxRetentionPathEnrichmentMs — root-path search is real per-object work, unlike the
         // unconditional totals/counts elsewhere in this analyzer.
-        internal IReadOnlyList<ExceptionRetentionPath> BuildGen2RetentionPaths(ClrHeap heap, IHeapAnalysisCache? cache, ExceptionAnalysis analysis)
+        internal static IReadOnlyList<ExceptionRetentionPath> BuildGen2RetentionPaths(IHeapRootPathQuery? rootPaths, ExceptionAnalysis analysis, CrashAnalysisOptions options)
         {
-            if (cache is null)
+            if (rootPaths is null)
                 return [];
 
             List<ExceptionInstance> candidates = SelectGen2RetentionCandidates(analysis);
             if (candidates.Count == 0)
                 return [];
 
-            IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
-            var provider = new ReferenceGraph(heap);
-            var limits = new RootPathSearchLimits
-            {
-                MaxCandidateNodes = 5_000,
-                MaxCandidateDepth = 8,
-                MaxRootExpansionDepth = 12,
-                LargeFanoutThreshold = 100,
-            };
-            var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry,
-                RootPathSearchSupport.IsNoisyType, static _ => false, cache.TryGetReverseIndexProvider(), cache);
+            var searchOptions = new RootPathSearchOptions(
+                MaxCandidateNodes: 5_000, MaxCandidateDepth: 8, MaxRootExpansionDepth: 12, LargeFanoutThreshold: 100);
 
             var budgetSw = System.Diagnostics.Stopwatch.StartNew();
-            long maxMs = Math.Max(0, _options.MaxRetentionPathEnrichmentMs);
+            long maxMs = Math.Max(0, options.MaxRetentionPathEnrichmentMs);
             var results = new List<ExceptionRetentionPath>(Math.Min(candidates.Count, 64));
 
             for (int i = 0; i < candidates.Count; i++)
@@ -478,17 +477,25 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
                     break;
 
                 ExceptionInstance instance = candidates[i];
-                bool found = finder.TryFindAnyRootPath(
-                    instance.Address, roots, out string? rootKind, out List<ulong>? path,
-                    out bool truncated, out _, out _);
-                if (!found)
+                if (!rootPaths.TryFindRootPath(instance.Address, searchOptions, out string? formattedPath, out bool truncated))
                     continue;
 
-                string formattedPath = RootPathSearchSupport.FormatPath(heap, rootKind!, path, cache);
-                results.Add(new ExceptionRetentionPath(instance.Type, instance.Address, rootKind!, formattedPath, truncated));
+                (string rootKind, string path) = SplitRootKind(formattedPath!);
+                results.Add(new ExceptionRetentionPath(instance.Type, instance.Address, rootKind, path, truncated));
             }
 
             return results;
+        }
+
+        // IHeapRootPathQuery.TryFindRootPath returns one already-formatted "RootKind: path" string
+        // (see its own remarks) — this splits it back into the two columns the report already shows
+        // separately, matching RootPathSearchSupport.FormatPath's exact "{rootKind}: {path}" shape.
+        private static (string RootKind, string Path) SplitRootKind(string formattedPath)
+        {
+            int separator = formattedPath.IndexOf(": ", StringComparison.Ordinal);
+            return separator >= 0
+                ? (formattedPath[..separator], formattedPath[(separator + 2)..])
+                : (string.Empty, formattedPath);
         }
 
         // Crash bucket / fault signature: (ExceptionType, TopUserFrame) dedup key, same sampled
@@ -711,24 +718,19 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
                 if (sourceIsRethrown)
                     confidence = DowngradeForRethrow(confidence);
 
-                // Build full frames list without LINQ — no report-width cap here (§9.26 D5). While
-                // we still hold the raw ClrStackFrame (not yet collapsed to text), resolve the
-                // owning module of the first user-code frame directly via
-                // Method.Type.Module — no ModuleDomainResult cross-reference needed, and more
-                // accurate than the string-prefix heuristic used for FrameworkCode/ThirdParty/
-                // UserCode classification elsewhere in this report.
+                // Build full frames list without LINQ — no report-width cap here (§9.26 D5).
                 var topFrames = new List<string>(c.CurrentThreadStack.Count);
                 string? topUserFrameModule = null;
                 bool foundUserFrame = false;
                 for (int f = 0; f < c.CurrentThreadStack.Count; f++)
                 {
-                    var frame = c.CurrentThreadStack[f];
-                    string normalizedFrame = NormalizeFrame(frame.Method?.Signature ?? frame.FrameName ?? frame.ToString() ?? StringConstants.UnknownType);
+                    ThreadStackFrameRef frame = c.CurrentThreadStack[f];
+                    string normalizedFrame = NormalizeFrame(FrameDisplayText(frame));
                     topFrames.Add(normalizedFrame);
 
                     if (!foundUserFrame && !IsFrameworkFrame(normalizedFrame))
                     {
-                        topUserFrameModule = frame.Method?.Type?.Module?.Name;
+                        topUserFrameModule = frame.HasMethod ? frame.ModuleName : null;
                         foundUserFrame = true;
                     }
                 }
@@ -750,6 +752,9 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
             analysis.InferredTraceCount = inferredCount;
             return snapshots;
         }
+
+        private static string FrameDisplayText(ThreadStackFrameRef frame) =>
+            frame.HasMethod ? (frame.RawMethodSignature ?? frame.MethodDisplayName) : (frame.FrameName ?? StringConstants.UnknownType);
 
         // Normalize every frame (strips "at " prefix, simplifies async names) — no report-width
         // cap here (§9.26 D5); the render layer slices for display.
@@ -813,7 +818,7 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
 
                         if (suffix.StartsWith(">c.<", StringComparison.Ordinal) || (rest.StartsWith("<>c.<", StringComparison.Ordinal)))
                         {
-                            // Lambda: TypeName.MethodName [lambda]  
+                            // Lambda: TypeName.MethodName [lambda]
                             string typePart = frame[..plus];
                             return $"{typePart}.{methodName} [lambda]";
                         }
@@ -834,111 +839,6 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
                 || frame.Contains("System.Runtime.", StringComparison.Ordinal)
                 || frame.Contains("System.Threading.", StringComparison.Ordinal);
         }
-
-        // Resolve whether a method-table corresponds to an exception type and return its resolved name.
-        //
-        // OPT (docs/cache/cache-architecture.md Phase 6): mt is already a parameter here,
-        // so both IsException and Name resolve directly via heap.GetTypeByMethodTable(mt) — no
-        // heap.GetObject/exceptionAddress re-read needed at all. This also removes the old
-        // sample-address fallback path, which required a HeapIndexBuildResult that both call sites
-        // below always pass as null (dead code), and the redundant re-resolution of exceptionAddress
-        // the audit flagged (previously re-read up to 3x per exception across the two branches).
-        private static (bool IsException, bool IsAggregateException, string? TypeName) ResolveExceptionType(
-            ClrHeap heap,
-            ulong mt,
-            IDictionary<ulong, bool> exceptionMethodTables,
-            IDictionary<ulong, bool> aggregateExceptionMethodTables,
-            IDictionary<ulong, string> methodTableNameCache)
-        {
-            if (mt == 0)
-                return (false, false, null);
-
-            if (!exceptionMethodTables.TryGetValue(mt, out bool isException))
-            {
-                isException = heap.GetTypeByMethodTable(mt)?.IsException == true;
-                exceptionMethodTables[mt] = isException;
-            }
-
-            if (!isException)
-                return (false, false, null);
-
-            if (!aggregateExceptionMethodTables.TryGetValue(mt, out bool isAggregate))
-            {
-                isAggregate = IsAggregateExceptionType(heap.GetTypeByMethodTable(mt));
-                aggregateExceptionMethodTables[mt] = isAggregate;
-            }
-
-            if (!methodTableNameCache.TryGetValue(mt, out string? typeName))
-            {
-                string resolved = heap.GetTypeByMethodTable(mt)?.Name ?? string.Empty;
-                methodTableNameCache[mt] = resolved;
-                typeName = resolved;
-            }
-
-            return (true, isAggregate, typeName);
-        }
-
-        // Walks the base-type chain so AggregateException subclasses (rare, but legal — e.g.
-        // custom wrapper exceptions) are still unwrapped, not just the sealed-in-practice BCL type.
-        private static bool IsAggregateExceptionType(ClrType? type)
-        {
-            while (type != null)
-            {
-                if (type.Name == "System.AggregateException")
-                    return true;
-                type = type.BaseType;
-            }
-            return false;
-        }
-
-        // Unwraps AggregateException.InnerExceptions (backing field "_innerExceptions", a direct
-        // Exception[] on .NET Core/5+). Returns the full, uncapped set of inner exception type
-        // names — callers decide whether to cap for display; global tallies must stay exact.
-        private List<string>? ExtractAggregateInnerExceptionTypes(ClrHeap heap, ulong exceptionAddress)
-        {
-            try
-            {
-                ClrObject exceptionObj = heap.GetObject(exceptionAddress);
-                if (!exceptionObj.IsValid || exceptionObj.Type is null)
-                    return null;
-
-                var innerExceptionsField = exceptionObj.Type.GetFieldByName("_innerExceptions");
-                if (innerExceptionsField is null)
-                    return null;
-
-                ClrObject arrayObj = innerExceptionsField.ReadObject(exceptionObj, interior: false);
-                if (!arrayObj.IsValid || !arrayObj.IsArray)
-                    return null;
-
-                ClrArray array = arrayObj.AsArray();
-                if (array.Length <= 0)
-                    return null;
-
-                var types = new List<string>(array.Length);
-                for (int i = 0; i < array.Length; i++)
-                {
-                    ClrObject inner = array.GetObjectValue(i);
-                    if (inner.IsValid && inner.Type != null)
-                        types.Add(inner.Type.Name ?? StringConstants.UnknownType);
-                }
-                return types.Count > 0 ? types : null;
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogDebug(ex, "Error extracting AggregateException inner exceptions from 0x{Address:X}", exceptionAddress);
-                return null;
-            }
-        }
-
-        // Render-layer-only bound on the per-instance inner-type list embedded in one
-        // ExceptionInstance (§9.26 D5 does not apply — this caps a single field's payload size for
-        // report legibility, not the exact AggregateInnerExceptionTypeCounts totals).
-        private const int MaxDisplayedAggregateInnerExceptionTypes = 25;
-
-        private static List<string> CapForDisplay(List<string> types) =>
-            types.Count > MaxDisplayedAggregateInnerExceptionTypes
-                ? types.GetRange(0, MaxDisplayedAggregateInnerExceptionTypes)
-                : types;
 
         private IReadOnlyList<ExceptionInstanceSnapshot> BuildExceptionInstanceSnapshots(ExceptionAnalysis analysis)
         {
@@ -973,10 +873,7 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
                 {
                     threadFrames = new List<string>(inst.CurrentThreadStack.Count);
                     for (int f = 0; f < inst.CurrentThreadStack.Count; f++)
-                    {
-                        var fr = inst.CurrentThreadStack[f];
-                        threadFrames.Add(NormalizeFrame(fr.Method?.Signature ?? fr.FrameName ?? fr.ToString() ?? StringConstants.UnknownType));
-                    }
+                        threadFrames.Add(NormalizeFrame(FrameDisplayText(inst.CurrentThreadStack[f])));
                 }
 
                 List<string>? origFrames = null;
@@ -1002,415 +899,6 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
             return snapshots;
         }
 
-        // No-index fallback path only: used when there's no on-disk/in-memory heap index to drive
-        // the shared IHeapIndexScanParticipant dispatcher pass (e.g. the public Analyze(runtime, heap)
-        // overload, or AnalyzeAsync when the context's cache has no prebuilt index).
-        private ExceptionAnalysis AnalyzeExceptions(ClrHeap heap, ClrRuntime runtime, IProgress<AnalyzerProgressReport>? progress)
-        {
-            var activeExceptions = BuildActiveExceptionLookup(runtime);
-            return RunParallelExceptionScan(heap, activeExceptions, progress);
-        }
-
-        // Parallel exception scanner over GC segments — the no-index fallback.
-        private ExceptionAnalysis RunParallelExceptionScan(
-            ClrHeap heap,
-            Dictionary<ulong, ActiveExceptionContext> activeExceptions,
-            IProgress<AnalyzerProgressReport>? progress)
-        {
-            var exceptionMethodTables = new ConcurrentDictionary<ulong, bool>();
-            var aggregateExceptionMethodTables = new ConcurrentDictionary<ulong, bool>();
-            var methodTableNameCache = new ConcurrentDictionary<ulong, string>();
-            var exceptionTypeCounts = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
-            var activeExceptionTypeCounts = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
-            var exceptionInstances = new ConcurrentBag<(string TypeName, ExceptionInstance Instance, bool IsActive)>();
-            var crashThreadCandidates = new ConcurrentDictionary<uint, CrashThreadCandidate>();
-            var exceptionGen0Counts = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
-            var exceptionGen1Counts = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
-            var exceptionGen2Counts = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
-            var exceptionLohCounts = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
-            var aggregateInnerExceptionTypeCounts = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
-            var exceptionHeapSizeByType = new ConcurrentDictionary<string, ulong>(StringComparer.Ordinal);
-            var candidateLock = new object();
-            int totalExceptions = 0, activeExceptionsCount = 0, aggregateExceptionCount = 0;
-            var scanCounter = new DumpDetective.Analysis.Cache.ObjectScanCounter("scanning for exceptions", progress, reportEveryObjects: 50_000, reportEveryElapsed: TimeSpan.FromSeconds(2));
-
-            void ProcessEntry(ulong exceptionAddress, ulong mt, ulong size)
-            {
-                scanCounter.Tick();
-
-                if (exceptionAddress == 0)
-                    return;
-                var (isException, isAggregate, typeName) = ResolveExceptionType(heap, mt, exceptionMethodTables, aggregateExceptionMethodTables, methodTableNameCache);
-                if (!isException)
-                    return;
-
-                string key = typeName ?? StringConstants.UnknownType;
-                Interlocked.Increment(ref totalExceptions);
-                exceptionTypeCounts.AddOrUpdate(key, 1, (_, c) => c + 1);
-                exceptionHeapSizeByType.AddOrUpdate(key, size, (_, existing) => existing + size);
-
-                List<string>? aggregateInnerTypes = null;
-                if (isAggregate)
-                {
-                    aggregateInnerTypes = ExtractAggregateInnerExceptionTypes(heap, exceptionAddress);
-                    if (aggregateInnerTypes != null)
-                    {
-                        Interlocked.Increment(ref aggregateExceptionCount);
-                        for (int i = 0; i < aggregateInnerTypes.Count; i++)
-                            aggregateInnerExceptionTypeCounts.AddOrUpdate(aggregateInnerTypes[i], 1, (_, c) => c + 1);
-                    }
-                }
-
-                int resolvedGeneration = -1;
-                try
-                {
-                    var seg = heap.GetSegmentByAddress(exceptionAddress);
-                    if (seg != null)
-                    {
-                        resolvedGeneration = (int)seg.GetGeneration(exceptionAddress);
-                        switch (resolvedGeneration)
-                        {
-                            case 0:
-                                exceptionGen0Counts.AddOrUpdate(key, 1, (_, c) => c + 1);
-                                break;
-                            case 1:
-                                exceptionGen1Counts.AddOrUpdate(key, 1, (_, c) => c + 1);
-                                break;
-                            case 2:
-                                exceptionGen2Counts.AddOrUpdate(key, 1, (_, c) => c + 1);
-                                break;
-                            default:
-                                exceptionLohCounts.AddOrUpdate(key, 1, (_, c) => c + 1);
-                                break;
-                        }
-                    }
-                }
-                catch { }
-
-                bool isActive = activeExceptions.TryGetValue(exceptionAddress, out var activeCtx);
-
-                // Extract exception info now so we can capture the ORIGINAL stack trace for crash candidates.
-                var exceptionInstance = ExtractExceptionInfo(heap, exceptionAddress, isActive ? activeCtx : null);
-                exceptionInstance.Generation = resolvedGeneration;
-                if (aggregateInnerTypes != null)
-                    exceptionInstance.AggregateInnerExceptionTypes = CapForDisplay(aggregateInnerTypes);
-
-                if (isActive)
-                {
-                    Interlocked.Increment(ref activeExceptionsCount);
-                    activeExceptionTypeCounts.AddOrUpdate(typeName, 1, (_, c) => c + 1);
-
-                    lock (candidateLock)
-                    {
-                        if (!crashThreadCandidates.TryGetValue(activeCtx.ThreadId, out var candidate))
-                        {
-                            candidate = new CrashThreadCandidate
-                            {
-                                ThreadId = activeCtx.ThreadId,
-                                OSThreadId = activeCtx.OSThreadId,
-                                CurrentThreadStack = activeCtx.CurrentThreadStack,
-                                PrimaryExceptionType = typeName
-                            };
-                            crashThreadCandidates[activeCtx.ThreadId] = candidate;
-                        }
-                        candidate.ActiveExceptionCount++;
-
-                        // Attach original exception stack (if any) so we can trace back to original call site.
-                        if (exceptionInstance.OriginalStackTrace != null && exceptionInstance.OriginalStackTrace.Count > 0)
-                        {
-                            candidate.OriginalExceptionStack = exceptionInstance.OriginalStackTrace;
-                            candidate.OriginalExceptionStackIsRethrown = exceptionInstance.IsRethrown;
-                        }
-                        // store sample metadata for heuristic matching later
-                        if (!string.IsNullOrWhiteSpace(exceptionInstance.Message))
-                            candidate.SampleMessage = exceptionInstance.Message;
-                        candidate.SampleHResult = exceptionInstance.HResult;
-                        if (candidate.SampleInnerExceptionType == null)
-                            candidate.SampleInnerExceptionType = exceptionInstance.InnerExceptionType;
-                    }
-                }
-
-                exceptionInstances.Add((key, exceptionInstance, isActive));
-            }
-
-            Parallel.ForEach(heap.Segments, segment =>
-            {
-                foreach (ClrObject obj in segment.EnumerateObjects())
-                {
-                    if (!obj.IsValid || obj.Type is null)
-                        continue;
-                    ulong mt = obj.Type.MethodTable;
-                    if (mt == 0)
-                        continue;
-                    ProcessEntry(obj.Address, mt, obj.Size);
-                }
-            });
-
-            // Sequential post-processing: build per-type exception list with cap enforcement.
-            // exceptionInstances came off a ConcurrentBag whose order depends on thread scheduling;
-            // sort by address first so the capped "first N per type" set is deterministic and agrees
-            // with the disk-backed scan (which enumerates entries in ascending address order).
-            long scanned = scanCounter.Scanned;
-            progress?.Report(new(scanned, "aggregating exceptions"));
-            var orderedInstances = exceptionInstances.ToArray();
-            Array.Sort(orderedInstances, static (a, b) => a.Instance.Address.CompareTo(b.Instance.Address));
-            var exceptionsByType = new Dictionary<string, List<ExceptionInstance>>(StringComparer.Ordinal);
-            foreach (var (typeName, instance, isActive) in orderedInstances)
-            {
-                if (!exceptionsByType.TryGetValue(typeName, out var list))
-                {
-                    list = new List<ExceptionInstance>(capacity: _options.MaxExceptionsPerType);
-                    exceptionsByType[typeName] = list;
-                }
-                if (list.Count < _options.MaxExceptionsPerType || isActive)
-                    list.Add(instance);
-            }
-
-            var sortedExceptionsByType = new Dictionary<string, List<ExceptionInstance>>(
-                exceptionsByType.Count, StringComparer.Ordinal);
-            foreach (string tn in exceptionTypeCounts.OrderByDescending(kvp => kvp.Value).Select(kvp => kvp.Key))
-            {
-                if (exceptionsByType.TryGetValue(tn, out var list))
-                    sortedExceptionsByType[tn] = list;
-            }
-
-            return new ExceptionAnalysis
-            {
-                TotalExceptions = totalExceptions,
-                ActiveExceptions = activeExceptionsCount,
-                ExceptionTypeCounts = new Dictionary<string, int>(exceptionTypeCounts, StringComparer.Ordinal),
-                ActiveExceptionTypeCounts = new Dictionary<string, int>(activeExceptionTypeCounts, StringComparer.Ordinal),
-                ExceptionsByType = sortedExceptionsByType,
-                CrashThreadCandidates = crashThreadCandidates.Values
-                    .OrderByDescending(c => c.ActiveExceptionCount)
-                    .ToList(),
-                ExceptionGen0Counts = new Dictionary<string, int>(exceptionGen0Counts, StringComparer.Ordinal),
-                ExceptionGen1Counts = new Dictionary<string, int>(exceptionGen1Counts, StringComparer.Ordinal),
-                ExceptionGen2Counts = new Dictionary<string, int>(exceptionGen2Counts, StringComparer.Ordinal),
-                ExceptionLohCounts = new Dictionary<string, int>(exceptionLohCounts, StringComparer.Ordinal),
-                AggregateExceptionCount = aggregateExceptionCount,
-                AggregateInnerExceptionTypeCounts = new Dictionary<string, int>(aggregateInnerExceptionTypeCounts, StringComparer.Ordinal),
-                ExceptionHeapSizeByType = new Dictionary<string, ulong>(exceptionHeapSizeByType, StringComparer.Ordinal)
-            };
-        }
-
-        private Dictionary<ulong, ActiveExceptionContext> BuildActiveExceptionLookup(ClrRuntime runtime)
-        {
-            var lookup = new Dictionary<ulong, ActiveExceptionContext>();
-            var scanCounter = new ObjectScanCounter("Crash thread scan", reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
-
-            foreach (var thread in runtime.Threads)
-            {
-                scanCounter.Tick();
-
-                if (thread.CurrentException == null)
-                    continue;
-
-                // Full stack — no artificial per-thread frame cap (§9.26). Only threads with an
-                // active exception reach here, never heap-scale.
-                lookup[thread.CurrentException.Address] = new ActiveExceptionContext
-                {
-                    ThreadId = (uint)thread.ManagedThreadId,
-                    OSThreadId = thread.OSThreadId,
-                    CurrentThreadStack = thread.EnumerateStackTrace().ToList()
-                };
-            }
-
-            scanCounter.Complete();
-
-            return lookup;
-        }
-
-        private static bool IsExceptionEntry(ClrHeap heap, in HeapEntry entry, Dictionary<ulong, bool> exceptionMethodTables)
-        {
-            if (entry.MethodTable == 0)
-                return false;
-
-            if (exceptionMethodTables.TryGetValue(entry.MethodTable, out bool isException))
-                return isException;
-
-            // OPT (docs/cache/cache-architecture.md Phase 6): entry.MethodTable is already
-            // known — resolve via the metadata cache instead of materializing a ClrObject.
-            isException = heap.GetTypeByMethodTable(entry.MethodTable)?.IsException == true;
-            exceptionMethodTables[entry.MethodTable] = isException;
-            return isException;
-        }
-
-        private ExceptionInstance ExtractExceptionInfo(ClrHeap heap, ulong exceptionAddress, ActiveExceptionContext? activeContext)
-        {
-            ClrObject exceptionObj = heap.GetObject(exceptionAddress);
-
-            var instance = new ExceptionInstance
-            {
-                Address = exceptionAddress,
-                Type = exceptionObj.Type?.Name ?? StringConstants.UnknownType
-            };
-
-            if (!exceptionObj.IsValid || exceptionObj.Type == null)
-                return instance;
-
-            try
-            {
-                var clrException = exceptionObj.AsException();
-                if (clrException != null)
-                {
-                    // Use ClrException wrapper for typed field access
-                    instance.Message = clrException.Message ?? "";
-                    instance.HResult = clrException.HResult;
-                }
-
-                // Get inner exception via field access (ClrException doesn't expose it)
-                var innerExceptionField = exceptionObj.Type?.GetFieldByName("_innerException");
-                if (innerExceptionField != null)
-                {
-                    var innerObj = innerExceptionField.ReadObject(exceptionObj, interior: false);
-                    if (innerObj.IsValid && innerObj.Type != null)
-                    {
-                        instance.InnerExceptionType = innerObj.Type.Name;
-                    }
-                }
-
-                instance.ChainDepth = ComputeExceptionChainDepth(heap, exceptionAddress);
-
-                // Get the ORIGINAL stack trace from exception object (not thread stack)
-                (instance.OriginalStackTrace, instance.IsRethrown) = ExtractExceptionStackTrace(heap, exceptionAddress);
-
-                if (activeContext != null)
-                {
-                    instance.ThreadId = activeContext.ThreadId;
-                    instance.OSThreadId = activeContext.OSThreadId;
-                    instance.CurrentThreadStack = activeContext.CurrentThreadStack;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogDebug(ex, "Error extracting exception info from 0x{Address:X}", exceptionAddress);
-            }
-
-            return instance;
-        }
-
-        private static int ComputeExceptionChainDepth(ClrHeap heap, ulong exceptionAddress)
-        {
-            const int MaxDepth = 16;
-            int depth = 1;
-            var seen = new HashSet<ulong>();
-            ulong currentAddress = exceptionAddress;
-
-            while (currentAddress != 0 && depth < MaxDepth && seen.Add(currentAddress))
-            {
-                ClrObject current = heap.GetObject(currentAddress);
-                if (!current.IsValid || current.Type is null)
-                    break;
-
-                var innerField = current.Type.GetFieldByName("_innerException");
-                if (innerField is null)
-                    break;
-
-                ClrObject inner = innerField.ReadObject(current, interior: false);
-                if (!inner.IsValid || inner.Type is null)
-                    break;
-
-                depth++;
-                currentAddress = inner.Address;
-            }
-
-            return depth;
-        }
-
-        private (List<string> Frames, bool IsRethrown) ExtractExceptionStackTrace(ClrHeap heap, ulong exceptionAddress)
-        {
-            var stackFrames = new List<string>();
-
-            ClrObject exceptionObj = heap.GetObject(exceptionAddress);
-            if (!exceptionObj.IsValid || exceptionObj.Type == null)
-                return (stackFrames, false);
-
-            bool isRethrown = false;
-            string? remoteStack = null;
-
-            try
-            {
-                // _remoteStackTraceString presence means the exception was rethrown via `throw;`
-                // or ExceptionDispatchInfo.Throw() — checked independent of whether it ends up
-                // supplying the frame text below, since _stackTraceString is often already
-                // populated even when the exception has been rethrown.
-                var remoteStackField = exceptionObj.Type?.GetFieldByName("_remoteStackTraceString");
-                if (remoteStackField != null)
-                {
-                    var remoteStackObj = remoteStackField.ReadObject(exceptionObj, interior: false);
-                    if (remoteStackObj.IsValid)
-                    {
-                        remoteStack = remoteStackObj.AsString();
-                        isRethrown = !string.IsNullOrEmpty(remoteStack);
-                    }
-                }
-
-                // Try to get _stackTraceString first (formatted string)
-                var stackTraceStringField = exceptionObj.Type?.GetFieldByName("_stackTraceString");
-                if (stackTraceStringField != null)
-                {
-                    var stackTraceObj = stackTraceStringField.ReadObject(exceptionObj, interior: false);
-                    if (stackTraceObj.IsValid)
-                    {
-                        string? stackTraceStr = stackTraceObj.AsString();
-                        if (!string.IsNullOrEmpty(stackTraceStr))
-                        {
-                            // Split by newlines and clean up
-                            var lines = stackTraceStr.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-                            foreach (var line in lines)
-                            {
-                                string trimmed = line.Trim();
-                                if (!string.IsNullOrEmpty(trimmed))
-                                {
-                                    stackFrames.Add(trimmed);
-                                }
-                            }
-                            return (stackFrames, isRethrown);
-                        }
-                    }
-                }
-
-                // Try ClrException.StackTrace (the correct API for stack frames)
-                var clrException = exceptionObj.AsException();
-                if (clrException?.StackTrace != null)
-                {
-                    var strace = clrException.StackTrace;
-                    if (strace.Count() > 0)
-                    {
-                        int count = strace.Count();
-                        for (int i = 0; i < Math.Min(count, 50); i++)
-                        {
-                            var frame = strace[i];
-                            if (frame?.Method != null)
-                            {
-                                stackFrames.Add($"   at {frame.Method.Signature}");
-                            }
-                        }
-                        if (stackFrames.Count > 0)
-                            return (stackFrames, isRethrown);
-                    }
-                }
-
-                // If still no stack, fall back to the remote stack text already read above
-                if (stackFrames.Count == 0 && !string.IsNullOrEmpty(remoteStack))
-                {
-                    stackFrames.Add(remoteStack);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogDebug(ex, "Error extracting stack trace from exception at 0x{Address:X}", exceptionAddress);
-            }
-
-            return (stackFrames, isRethrown);
-        }
-
         public void Dispose() { }
-
     }
-
 }
-
-
-

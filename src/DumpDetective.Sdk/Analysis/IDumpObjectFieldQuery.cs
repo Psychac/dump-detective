@@ -101,6 +101,27 @@ public interface IDumpObjectFieldQuery
     /// at all.
     /// </summary>
     IReadOnlyList<InstanceFieldDescriptor> EnumerateInstanceFields(ulong address);
+
+    /// <summary>
+    /// The runtime-computed managed stack trace captured on an exception object at
+    /// <paramref name="exceptionAddress"/> (mirrors <c>ClrObject.AsException()?.EnumerateExceptionStackTrace()</c>),
+    /// capped at <paramref name="maxFrames"/>, innermost frame first. Distinct from reading the
+    /// <c>"_stackTraceString"</c> field via <see cref="TryReadField"/>/<see cref="TryGetStringValue"/>:
+    /// this walks the exception's internal binary <c>_stackTrace</c> trace-info array (a native
+    /// array of instruction-pointer/stack-pointer/method-handle triples, resolved to
+    /// <c>ClrMethod</c>s), which is populated whenever a thread has actually unwound through the
+    /// throw site — including before <c>_stackTraceString</c> has ever been materialized as text
+    /// (e.g. an exception sitting in a field/collection that has never had <c>.ToString()</c>/
+    /// <c>.StackTrace</c> called on it). Added 2026-09-13 for <c>CrashAnalyzer</c>'s retyping, the
+    /// third of its three pre-retyping fallback tiers (<c>_stackTraceString</c> text, this raw
+    /// unwind, then <c>_remoteStackTraceString</c>) — the only one with no field-value equivalent,
+    /// since <c>ClrObject.AsException()</c>'s <c>Message</c>/<c>HResult</c>/<c>Inner</c> properties
+    /// were confirmed (by decompiling the installed ClrMD package) to already be plain
+    /// <c>"_message"</c>/<c>"_HResult"</c>/<c>"_innerException"</c> field reads under the hood, with
+    /// no equivalent gap to close. Returns an empty list for an invalid address, a type that isn't
+    /// an exception, or when no trace is captured.
+    /// </summary>
+    IReadOnlyList<ThreadStackFrameRef> EnumerateExceptionStackTrace(ulong exceptionAddress, int maxFrames);
 }
 
 /// <summary>One instance field's name and declared shape, from <see cref="IDumpObjectFieldQuery.EnumerateInstanceFields"/>.</summary>

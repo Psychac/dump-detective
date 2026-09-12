@@ -1,8 +1,8 @@
 # Phase 1 full SDK extraction — capability surfaces + the analyzer retyping step
 
-## Status (as of 2026-09-12)
+## Status (as of 2026-09-13)
 
-**27 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
+**29 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
 in the tree, not just this doc's own narrative — this doc's original "35" count in the section below
 was an approximation from § 10 point 8's grep-based measurement; the real count is 36). The
 `dump.object-fields` Tier-2 escape hatch **is built** (see "Tier 2 wave" below) — the "still not
@@ -10,21 +10,21 @@ built" language later in this doc is stale as of the pilot, 2026-09-11.
 
 **Done:**
 `AllocationPatternAnalyzer`, `ArrayAnalyzer`, `AsyncStateMachineAnalyzer`, `AsyncTaskAnalyzer`, `BoxingAnalyzer`,
-`DbConnectionAnalyzer`, `FinalizableObjectAnalyzer`, `GCGenerationAnalyzer`, `GCHandleAnalyzer`,
+`CollectionAnalyzer`, `CrashAnalyzer`, `DbConnectionAnalyzer`, `FinalizableObjectAnalyzer`,
+`GCGenerationAnalyzer`, `GCHandleAnalyzer`,
 `GCRootAnalyzer`, `HangAnalyzer`, `HeapTopologyAnalyzer`, `HttpObjectAnalyzer`, `JitAnalyzer`,
 `LockGraphAnalyzer`, `LohFragmentationAnalyzer`, `MemoryAnalyzer`, `ObjectShapeAnalyzer`,
 `SegmentReservationAnalyzer`, `SqlCommandAnalyzer`, `SqlConnectionPoolAnalyzer`,
 `SqlTransactionAnalyzer`, `ThreadAnalyzer`, `ThreadStackClusterAnalyzer`, `TimerLeakAnalyzer`,
 `WcfChannelAnalyzer`, `WeakReferenceAnalyzer`.
 
-**Remaining (9):**
-`CollectionAnalyzer`,
-`CrashAnalyzer`, `DominatorAnalyzer`, `EventLeakAnalyzer`,
+**Remaining (7):**
+`DominatorAnalyzer`, `EventLeakAnalyzer`,
 `ModuleAnalyzer`, `ReferenceChainAnalyzer`, `StaticRootLeakDetector`,
 `StringAnalyzer`, and **`LeakCandidateAnalyzer`** —
 explicit user direction: do `LeakCandidateAnalyzer` last of all, since it needs cross-analyzer
 result access (`context.CompletedRunResults`-equivalent) and deferred-execution-ordering modeling
-that don't exist in the SDK yet, on top of everything the other 8 need.
+that don't exist in the SDK yet, on top of everything the other 6 need.
 
 Detailed plan for the two items [phase-1-contracts-sdk.md](phase-1-contracts-sdk.md) leaves
 deferred (`Analysis/`, `Presentation/`) and the ownerless gap recorded at
@@ -1176,14 +1176,133 @@ genuinely new Tier-2 gaps found by reading the full 1226-line source before scop
   and shipped in, this same retyping). No `capability-registry.json` bump — both new primitives
   extend already-registered capabilities (`dump.object-fields`, `dump.array-elements`).
 
-Remaining Tier-1+Tier-2 analyzers (9, see "Status" at the top) haven't been started yet.
+**`CollectionAnalyzer`. Done 2026-09-12.** Built on `TypedResourceCandidateStreamingLegacyAdapter`
+like the rest of the Tier-2 wave — unlike `AsyncTaskAnalyzer`/`HangAnalyzer`, this analyzer's own
+pre-retyping `OnHeapEntry` already classified every heap object by name, exactly the discovery shape
+the shared adapter assumes, so no bespoke participant was needed. Closes two real capability gaps:
+- **`IDumpObjectFieldQuery.EnumerateInstanceFields`** — per-type field name+kind discovery without a
+  real `ClrType`/`ClrInstanceField`, needed because this analyzer resolves a *different* field name
+  per collection kind, per distinct type, via well-known names first, then a full-field
+  classify-and-guess fallback.
+- **`IHeapReverseReferenceQuery.TryGetReverseReferences`** — a new, truncation-aware overload for the
+  `OwnerTypeHint` cheap-alternative-to-full-BFS feature; the pre-existing `EnumerateReverseReferences`
+  stream can't carry the "did the index hit its fanout cap" signal this needed.
+- **A force-expand overload was built, then removed the same session**: the pre-retyping search
+  force-expanded types matching `ReferenceChainOptions.KnownLeakTypePatterns`, whose *defaults* are
+  `"...List"`/`"...Dictionary"` — this analyzer's own target family — so wiring that policy through
+  `IHeapRootPathQuery` hung a real 3.35 GB dump's root-path search indefinitely (force-expanding every
+  List/Dictionary-shaped node defeats the hub-fanout cap almost everywhere in a real graph). No prior
+  real-dump test exercised this analyzer's root-path search at all, so this was a latent, pre-existing
+  cost the real-dump gate caught for the first time, not a regression. Fixed by adopting the same
+  "never force-expand" policy `DbConnectionAnalyzer`/`TimerLeakAnalyzer` already use — see
+  `IHeapRootPathQuery`'s own remarks for the full account.
+- **A real, serious perf bug caught by the real-dump gate, not guessed at**:
+  `IHeapTypeStatisticsQuery.GetTypeStatistics()` rebuilds its whole per-type dictionary from the
+  index's full `TypeAggregates` on every call, no internal memoization — calling it once per wasteful
+  candidate (799,795 collections on the reference dump) was an O(candidates × distinct-types) blowup
+  that hung indefinitely. Fixed by fetching it once per analysis run, matching every other retyped
+  analyzer's own precedent.
+- **A real simplification, not a mechanical port**: four nearly-identical per-kind array-shaped probes
+  (`AnalyzeDictionary`/`AnalyzeList`/`AnalyzeHashSet`/`AnalyzeArrayBackedCollection`) collapsed into
+  one `AnalyzeArrayShapedCollection`, since the retyped field-layout/array-shape resolution is
+  identical across all four kinds; `AnalyzeQueue` stays separate (needs head/tail contiguous-free-
+  segment math no other kind has).
+- **A real fidelity improvement**: `IHeapRootPathQuery` returns an already-formatted root-to-target
+  path string, so `WastefulCollection.RootDescription` now carries the real path text instead of the
+  pre-retyping analyzer's generic `"{rootKind}: (reference path found)"` placeholder.
+- **One accepted, documented behavior drop**: `CollectionAnalysisOptions.MaxDegreeOfParallelism`/
+  `SerializeHeapAccess` no longer apply — the pre-retyping analyzer's own parallel-segment-walk
+  fallback (used only when no shared scan ran) no longer exists post-retyping, same "degraded case can
+  no longer occur by construction" simplification every other Tier-2-wave adapter's own fallback
+  removal already made.
+- **Gate met**: new `CollectionAnalyzerRetypingCharacterizationTests` (607 lines) replacing the deleted
+  `CollectionAnalyzerHeapIndexScanTests`/`CollectionScanPercentTests` (which reflected pre-retyping
+  internals that no longer exist). New `CollectionAnalyzerRealDumpTests` (`[DiscrepancyFact]`, one
+  dump, foreground) passed against the real 3.35 GB reference dump after the two bugs above were
+  fixed. Full non-real-dump suite passes. Also added a CLAUDE.md rule to kill any real-dump test run
+  against the reference dump that hasn't progressed past collection start within 5 minutes — the
+  force-expand hang above is exactly the failure mode that rule now catches early.
+- Call sites updated: `CollectionAnalyzerBenchmark`, `FullPipelineBenchmark`, `SmallDumpLatencyBenchmark`
+  now construct `CollectionAnalyzerLegacyAdapter`.
+- **`SdkVersion` 16** (`EnumerateInstanceFields`/`InstanceFieldDescriptor`,
+  `IHeapReverseReferenceQuery.TryGetReverseReferences`). No `capability-registry.json` bump — both
+  extend already-registered capabilities (`dump.object-fields`, `heap.reverse-references`).
+
+**`CrashAnalyzer`. Done 2026-09-13.** A full-heap exception scanner — `IParallelHeapIndexScanParticipant`
+with both a disk-index-scan participant path and (pre-retyping) an independent parallel no-index
+fallback — plus live field extraction on exception objects, Gen2/LOH root-retention paths, and
+active-per-thread-exception correlation against scanned heap instances. Bespoke adapter, not
+`TypedResourceCandidateStreamingLegacyAdapter`, for the same reason `AsyncTaskAnalyzer`/`HangAnalyzer`
+needed one: exception detection is `ClrType.IsException`, a structural type fact, not a name
+predicate.
+- **`CrashAnalyzerLegacyAdapter` owns every structural ClrType-level fact** the pre-retyping
+  analyzer's `OnHeapEntry`/`ResolveExceptionType` needed (is-exception, is-`AggregateException`,
+  resolved display name) — no Tier-1/Tier-2 surface exists for "is this type an exception" and
+  building one now, with a single consumer, would be speculative. The `IsAggregateException` fact is
+  handed to the retyped analyzer via a new `CrashAnalyzerOptions.AggregateExceptionAddresses` side-set
+  (`HeapObjectRef` has no slot for an arbitrary per-object flag), the same "wrapper record for one
+  slot" shape `CollectionAnalyzerOptions` already established.
+- **`RuntimeThreadRef.ExceptionAddress` added (Tier 1)** — `HasCurrentException`/`ExceptionTypeName`/
+  `ExceptionMessage` (from `ThreadAnalyzer`'s retyping) can't correlate a thread's live exception back
+  to the specific heap-scanned `ExceptionInstance` by address; this closes that gap.
+- **`IDumpObjectFieldQuery.EnumerateExceptionStackTrace` added (Tier 2)** — restores the pre-retyping
+  analyzer's third stack-trace-recovery tier (`_stackTraceString` text → this → `_remoteStackTraceString`),
+  needed for an exception that's been thrown/unwound but never had `.ToString()`/`.StackTrace` called
+  to materialize `_stackTraceString` as text. Implemented as a thin delegation to
+  `ClrObject.AsException()?.EnumerateExceptionStackTrace()` (already a public ClrMD API), not a
+  hand-rolled port of its binary trace-array walk. **`Message`/`HResult`/`Inner` need no equivalent
+  primitive** — confirmed by decompiling the installed ClrMD package (v4.0.732401) that
+  `ClrException`'s own properties are already exactly `"_message"`/`"_HResult"`/`"_innerException"`
+  field reads under the hood, so `TryReadField` alone is already equivalent, not a fidelity drop.
+- **Root-path search retargeted onto `IHeapRootPathQuery`**, replacing the pre-retyping analyzer's
+  direct `RootPathFinder`/`ReferenceGraph`/`cache.GetOrBuildValidRoots` usage — the returned
+  already-formatted `"RootKind: path"` string is split back into `ExceptionRetentionPath`'s separate
+  `RootKind`/`FormattedPath` columns (the report shows both), matching
+  `RootPathSearchSupport.FormatPath`'s exact shape.
+- **`AggregateException.InnerExceptions` unwrapping retargeted onto `IDumpArrayShapeQuery.EnumerateObjectReferenceElements`**
+  plus `IHeapObjectLookup`, replacing the pre-retyping analyzer's hand-rolled `ClrArray.GetObjectValue`
+  loop.
+- **Per-object generation now resolved via `IHeapSegmentQuery.GetGeneration`**, replacing the
+  pre-retyping analyzer's own `HeapEntry.Generation`/`seg.GetGeneration(address)` reads — same
+  0/1/2/3(LOH)/4(POH)/5(Frozen) ordinal scheme as before, `HeapGenerationTag`-mapped.
+- **One accepted simplification, same shape as every other Tier-2-wave adapter's own removal**: the
+  pre-retyping analyzer's independent parallel no-index fallback scan (`RunParallelExceptionScan`) and
+  its direct `Analyze(runtime, heap)` overload no longer exist post-retyping — every candidate now
+  always arrives via the pipeline's one shared scan.
+- **Internal model types retyped**: `CrashThreadCandidate`/`ActiveExceptionContext`/`ExceptionInstance`
+  (`src/DumpDetective.Analysis/Models/CrashAnalyzerHelpers.cs`) now hold
+  `IReadOnlyList<Sdk.Analysis.ThreadStackFrameRef>` instead of `List<ClrStackFrame>`.
+- **Gate met**: new `CrashAnalyzerRetypingCharacterizationTests` (fake, dictionary-backed capability
+  implementations) covering message/HResult/inner-exception reads, `AggregateException` unwrapping,
+  active-thread correlation, generation-gated retention-path search, rethrow detection, and the new
+  binary-trace-unwind fallback tier. The pre-retyping `CrashAnalyzerHeapIndexScanTests` reflected the
+  old analyzer's own per-type-count accumulation/merge internals directly via reflection — none of
+  that state exists post-retyping (the adapter's own merge is now just a flat candidate-list
+  concatenation plus an aggregate-address-set union), so it was rewritten against
+  `CrashAnalyzerLegacyAdapter`'s new, much simpler merge shape rather than adapted in place.
+  `CrashAnalyzerRetentionPathTests` updated for `BuildGen2RetentionPaths`'s new
+  `IHeapRootPathQuery`-based signature. New `CrashAnalyzerRealDumpTests` (`[DiscrepancyFact]`, one
+  dump, foreground) passed in 23s against the real 3.5 GB reference dump: 750 exceptions across 20
+  distinct types, 1 active exception correctly correlated via `ExceptionAddress` (original stack trace
+  recovered, no inference needed), 26 crash buckets, 7 Gen2/LOH retention paths with cleanly-split
+  root kinds, 0 `AggregateException` instances (a fact about this dump, not a gap — covered separately
+  by the fake-backed test). Full non-real-dump suite (1520 tests) passes.
+- Call sites updated: `DefaultAnalyzerFeatureModuleCatalog`, `FullPipelineBenchmark`,
+  `SmallDumpLatencyBenchmark` now construct `CrashAnalyzerLegacyAdapter`; `CrashAnalyzerBenchmark`
+  retargeted at `AnalyzerBenchmarkBase<CrashAnalyzerLegacyAdapter>`.
+- **`SdkVersion` 17** (`RuntimeThreadRef.ExceptionAddress`, `IDumpObjectFieldQuery.EnumerateExceptionStackTrace`,
+  bumped in one entry since both were found by, and shipped in, this same retyping). No
+  `capability-registry.json` bump — both extend already-registered capabilities (`runtime.threads`,
+  `dump.object-fields`).
+
+Remaining Tier-1+Tier-2 analyzers (7, see "Status" at the top) haven't been started yet.
 `LeakCandidateAnalyzer` stays last per explicit direction — it needs cross-analyzer result access
 and deferred-execution-ordering modeling neither this wave nor Tier 1 has built.
 
 5. **Real-dump verification stays one-at-a-time, in the foreground**, per this project's standing
    rule — run it once per batch on the reference dumps, not once per analyzer, to keep measurement
    cost proportional to what a mechanical retype-and-characterize change actually risks.
-6. **Cutover.** Once all 36 are on the new types (20 done as of 2026-09-12, see "Status" at the top),
+6. **Cutover.** Once all 36 are on the new types (29 done as of 2026-09-13, see "Status" at the top),
    delete the `LegacyAnalyzerAdapter`, delete `Core.Abstractions.IAnalyzer`/`Models.AnalysisContext`,
    update `DependencyDirectionTests`/`SdkProject_ShouldHaveZeroDependenciesBeyondTheBcl`-adjacent
    rules, and Phase 3's capability-attribute discovery and Phase 5's observation emission — both

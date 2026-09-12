@@ -19,7 +19,18 @@ public static class SdkVersion
 {
     public const int Major = 0;
 
-    /// <summary>16 as of 2026-09-12 (added <see cref="Analysis.IDumpObjectFieldQuery.EnumerateInstanceFields"/>/
+    /// <summary>17 as of 2026-09-13 (added <see cref="Analysis.RuntimeThreadRef.ExceptionAddress"/> —
+    /// correlates a thread's live current exception back to the specific heap-scanned instance by
+    /// address, which <c>HasCurrentException</c>/<c>ExceptionTypeName</c>/<c>ExceptionMessage</c>
+    /// alone can't do — and <see cref="Analysis.IDumpObjectFieldQuery.EnumerateExceptionStackTrace"/>,
+    /// a Tier-2 primitive delegating to <c>ClrObject.AsException()?.EnumerateExceptionStackTrace()</c>
+    /// for the one piece of <c>ClrException</c> genuinely not equivalent to a plain field read
+    /// (confirmed by decompiling the installed ClrMD package: <c>Message</c>/<c>HResult</c>/<c>Inner</c>
+    /// are exactly <c>"_message"</c>/<c>"_HResult"</c>/<c>"_innerException"</c> field reads under the
+    /// hood, but <c>StackTrace</c> walks the exception's internal binary trace-info array). Both found
+    /// necessary by <c>CrashAnalyzer</c>'s retyping. No <c>capability-registry.json</c> bump — both
+    /// extend already-registered capabilities (<c>runtime.threads</c>, <c>dump.object-fields</c>).
+    /// Before that, 16 as of 2026-09-12 (added <see cref="Analysis.IDumpObjectFieldQuery.EnumerateInstanceFields"/>/
     /// <see cref="Analysis.InstanceFieldDescriptor"/> — per-type field name+kind discovery, without a
     /// real <c>ClrType</c>; and <see cref="Analysis.IHeapReverseReferenceQuery.TryGetReverseReferences"/>
     /// — a truncation-aware parent lookup, <c>heap.reverse-references</c>'s first real dump-side
@@ -104,7 +115,7 @@ public static class SdkVersion
     /// additions/splits, the `EntityRef`/`IHeapDominatorQuery`/positional-record/JSON-converter
     /// fixes) — not a precise per-change reconstruction, since nothing yet depends on intermediate
     /// values enough to make that worth simulating.</summary>
-    public const int Minor = 16;
+    public const int Minor = 17;
 
     public static string AsString => $"{Major}.{Minor}";
 }

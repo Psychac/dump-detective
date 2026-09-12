@@ -8,7 +8,7 @@ using DumpDetective.Analysis.Analyzers.Runtime;
 namespace BenchmarkSuite1
 {
     [MemoryDiagnoser]
-    public class CrashAnalyzerBenchmark : AnalyzerBenchmarkBase<CrashAnalyzer>
+    public class CrashAnalyzerBenchmark : AnalyzerBenchmarkBase<CrashAnalyzerLegacyAdapter>
     {
         protected override IHeapAnalysisCache? CreateCache() => new DumpDetective.Analysis.Cache.HeapAnalysisCache();
 

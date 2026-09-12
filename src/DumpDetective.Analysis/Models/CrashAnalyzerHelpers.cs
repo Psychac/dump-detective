@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Sdk.Analysis;
 
 namespace DumpDetective.Analysis.Analyzers
 {
@@ -36,7 +36,7 @@ namespace DumpDetective.Analysis.Analyzers
         public uint OSThreadId { get; set; }
         public int ActiveExceptionCount { get; set; }
         public string PrimaryExceptionType { get; set; } = string.Empty;
-        public List<ClrStackFrame> CurrentThreadStack { get; set; } = new();
+        public IReadOnlyList<ThreadStackFrameRef> CurrentThreadStack { get; set; } = [];
         public List<string> OriginalExceptionStack { get; set; } = new();
         // Whether the instance that supplied OriginalExceptionStack had a non-null
         // _remoteStackTraceString — its top frames are the rethrow site, not the original throw.
@@ -51,7 +51,7 @@ namespace DumpDetective.Analysis.Analyzers
     {
         public uint ThreadId { get; set; }
         public uint OSThreadId { get; set; }
-        public List<ClrStackFrame> CurrentThreadStack { get; set; } = new();
+        public IReadOnlyList<ThreadStackFrameRef> CurrentThreadStack { get; set; } = [];
     }
 
     internal class ExceptionInstance
@@ -65,7 +65,7 @@ namespace DumpDetective.Analysis.Analyzers
         public uint? ThreadId { get; set; }
         public uint? OSThreadId { get; set; }
         public List<string> OriginalStackTrace { get; set; } = new();
-        public List<ClrStackFrame> CurrentThreadStack { get; set; } = new();
+        public IReadOnlyList<ThreadStackFrameRef> CurrentThreadStack { get; set; } = [];
         // Populated only for AggregateException instances; the types of its InnerExceptions
         // (capped at MaxDisplayedInnerExceptionTypes — display-only, the global
         // AggregateInnerExceptionTypeCounts tally on ExceptionAnalysis is always exact).

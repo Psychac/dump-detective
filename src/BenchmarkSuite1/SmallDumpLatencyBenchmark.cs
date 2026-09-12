@@ -87,7 +87,7 @@ public class SmallDumpLatencyBenchmark
             new GCGenerationAnalyzerLegacyAdapter(),
             new HeapTopologyAnalyzerLegacyAdapter(),
             new ModuleAnalyzer(),
-            new CrashAnalyzer(),
+            new CrashAnalyzerLegacyAdapter(),
             new HangAnalyzerLegacyAdapter(),
             new DominatorAnalyzer(),
             new StringAnalyzer(),

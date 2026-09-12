@@ -313,6 +313,7 @@ public sealed class HangAnalyzerRetypingCharacterizationTests
     private sealed class FakeDumpObjectFieldQuery : IDumpObjectFieldQuery
     {
         public IReadOnlyList<InstanceFieldDescriptor> EnumerateInstanceFields(ulong address) => [];
+        public IReadOnlyList<ThreadStackFrameRef> EnumerateExceptionStackTrace(ulong exceptionAddress, int maxFrames) => [];
 
         private readonly Dictionary<(ulong Address, string FieldName), FieldValue> _values = new();
 

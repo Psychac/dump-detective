@@ -450,6 +450,8 @@ public sealed class CollectionAnalyzerRetypingCharacterizationTests
                 ? fields
                 : [];
 
+        public IReadOnlyList<ThreadStackFrameRef> EnumerateExceptionStackTrace(ulong exceptionAddress, int maxFrames) => [];
+
         public bool TryReadField(ulong address, string fieldName, out FieldValue value) =>
             _values.TryGetValue((address, fieldName), out value);
 

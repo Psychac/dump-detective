@@ -52,7 +52,14 @@ public readonly record struct RuntimeThreadRef(
     bool HasCurrentException = false,
     string? ExceptionTypeName = null,
     string? ExceptionMessage = null,
-    ulong StackSizeBytes = 0);
+    ulong StackSizeBytes = 0,
+    /// <summary>
+    /// Mirrors <c>ClrThread.CurrentException.Address</c>, 0 when <see cref="HasCurrentException"/> is
+    /// <c>false</c>. Added 2026-09-12 for <c>CrashAnalyzer</c>'s retyping — <see cref="ExceptionTypeName"/>/
+    /// <see cref="ExceptionMessage"/> alone can't correlate a thread's active exception back to the
+    /// specific exception instance discovered during the heap scan; this address is that join key.
+    /// </summary>
+    ulong ExceptionAddress = 0);
 
 /// <summary>
 /// One stack frame, source-neutral. <see cref="HasMethod"/> distinguishes "not a managed-method

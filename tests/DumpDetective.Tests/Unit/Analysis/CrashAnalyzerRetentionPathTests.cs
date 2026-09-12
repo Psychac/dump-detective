@@ -1,6 +1,7 @@
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Analyzers.Runtime;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Core.Options;
 
 using FluentAssertions;
 
@@ -10,8 +11,6 @@ namespace DumpDetective.Tests.Unit.Analysis;
 
 public sealed class CrashAnalyzerRetentionPathTests
 {
-    private readonly CrashAnalyzer _analyzer = new();
-
     [Theory]
     [InlineData(0, false)]
     [InlineData(1, false)]
@@ -55,14 +54,14 @@ public sealed class CrashAnalyzerRetentionPathTests
     }
 
     [Fact]
-    public void BuildGen2RetentionPaths_NoCache_ReturnsEmptyWithoutTouchingHeap()
+    public void BuildGen2RetentionPaths_NoRootPathCapability_ReturnsEmptyWithoutTouchingIt()
     {
         var analysis = new ExceptionAnalysis
         {
             ExceptionsByType = new() { ["FooException"] = [new() { Address = 0x1000, Generation = 2 }] }
         };
 
-        var result = _analyzer.BuildGen2RetentionPaths(heap: null!, cache: null, analysis);
+        var result = CrashAnalyzer.BuildGen2RetentionPaths(rootPaths: null, analysis, new CrashAnalysisOptions());
 
         result.Should().BeEmpty();
     }

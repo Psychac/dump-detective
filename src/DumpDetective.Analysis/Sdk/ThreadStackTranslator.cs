@@ -39,7 +39,8 @@ internal static class ThreadStackTranslator
             HasCurrentException: currentException is not null,
             ExceptionTypeName: currentException?.Type?.Name,
             ExceptionMessage: currentException?.Message,
-            StackSizeBytes: stackSizeBytes);
+            StackSizeBytes: stackSizeBytes,
+            ExceptionAddress: currentException?.Address ?? 0);
     }
 
     // Ported unchanged from the pre-retyping ThreadAnalyzer's own FormatThreadState -- bit-flag

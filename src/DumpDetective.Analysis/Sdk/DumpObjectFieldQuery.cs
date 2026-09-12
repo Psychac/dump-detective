@@ -264,4 +264,35 @@ internal sealed class DumpObjectFieldQuery : IDumpObjectFieldQuery
 
         return result;
     }
+
+    public IReadOnlyList<ThreadStackFrameRef> EnumerateExceptionStackTrace(ulong exceptionAddress, int maxFrames)
+    {
+        if (exceptionAddress == 0)
+            return [];
+
+        try
+        {
+            ClrObject exceptionObj = _heap.GetObject(exceptionAddress);
+            if (!exceptionObj.IsValid)
+                return [];
+
+            ClrException? clrException = exceptionObj.AsException();
+            if (clrException is null)
+                return [];
+
+            var frames = new List<ThreadStackFrameRef>();
+            foreach (ClrStackFrame frame in clrException.EnumerateExceptionStackTrace())
+            {
+                if (frames.Count >= maxFrames)
+                    break;
+                frames.Add(ThreadStackTranslator.ToFrameRef(frame));
+            }
+            return frames;
+        }
+        catch
+        {
+            // Corrupt/unloaded object -- matches TryReadField's own catch above.
+            return [];
+        }
+    }
 }

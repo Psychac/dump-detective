@@ -2,28 +2,29 @@
 
 ## Status (as of 2026-09-12)
 
-**25 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
+**26 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
 in the tree, not just this doc's own narrative — this doc's original "35" count in the section below
 was an approximation from § 10 point 8's grep-based measurement; the real count is 36). The
 `dump.object-fields` Tier-2 escape hatch **is built** (see "Tier 2 wave" below) — the "still not
 built" language later in this doc is stale as of the pilot, 2026-09-11.
 
 **Done:**
-`AllocationPatternAnalyzer`, `ArrayAnalyzer`, `BoxingAnalyzer`, `DbConnectionAnalyzer`,
-`FinalizableObjectAnalyzer`, `GCGenerationAnalyzer`, `GCHandleAnalyzer`, `GCRootAnalyzer`,
-`HangAnalyzer`, `HeapTopologyAnalyzer`, `HttpObjectAnalyzer`, `JitAnalyzer`, `LockGraphAnalyzer`,
-`LohFragmentationAnalyzer`, `MemoryAnalyzer`, `ObjectShapeAnalyzer`, `SegmentReservationAnalyzer`,
-`SqlCommandAnalyzer`, `SqlConnectionPoolAnalyzer`, `SqlTransactionAnalyzer`, `ThreadAnalyzer`,
-`ThreadStackClusterAnalyzer`, `TimerLeakAnalyzer`, `WcfChannelAnalyzer`, `WeakReferenceAnalyzer`.
+`AllocationPatternAnalyzer`, `ArrayAnalyzer`, `AsyncStateMachineAnalyzer`, `BoxingAnalyzer`,
+`DbConnectionAnalyzer`, `FinalizableObjectAnalyzer`, `GCGenerationAnalyzer`, `GCHandleAnalyzer`,
+`GCRootAnalyzer`, `HangAnalyzer`, `HeapTopologyAnalyzer`, `HttpObjectAnalyzer`, `JitAnalyzer`,
+`LockGraphAnalyzer`, `LohFragmentationAnalyzer`, `MemoryAnalyzer`, `ObjectShapeAnalyzer`,
+`SegmentReservationAnalyzer`, `SqlCommandAnalyzer`, `SqlConnectionPoolAnalyzer`,
+`SqlTransactionAnalyzer`, `ThreadAnalyzer`, `ThreadStackClusterAnalyzer`, `TimerLeakAnalyzer`,
+`WcfChannelAnalyzer`, `WeakReferenceAnalyzer`.
 
-**Remaining (11):**
-`AsyncStateMachineAnalyzer`, `AsyncTaskAnalyzer`, `CollectionAnalyzer`,
+**Remaining (10):**
+`AsyncTaskAnalyzer`, `CollectionAnalyzer`,
 `CrashAnalyzer`, `DominatorAnalyzer`, `EventLeakAnalyzer`,
 `ModuleAnalyzer`, `ReferenceChainAnalyzer`, `StaticRootLeakDetector`,
 `StringAnalyzer`, and **`LeakCandidateAnalyzer`** —
 explicit user direction: do `LeakCandidateAnalyzer` last of all, since it needs cross-analyzer
 result access (`context.CompletedRunResults`-equivalent) and deferred-execution-ordering modeling
-that don't exist in the SDK yet, on top of everything the other 10 need.
+that don't exist in the SDK yet, on top of everything the other 9 need.
 
 Detailed plan for the two items [phase-1-contracts-sdk.md](phase-1-contracts-sdk.md) leaves
 deferred (`Analysis/`, `Presentation/`) and the ownerless gap recorded at
@@ -1033,7 +1034,72 @@ gap.
   retargeted at `AnalyzerBenchmarkBase<HangAnalyzerLegacyAdapter>`.
 - **`SdkVersion` 13**; `capability-registry.json` `1.7.0`.
 
-Remaining Tier-1+Tier-2 analyzers (11, see "Status" at the top) haven't been started yet.
+**`AsyncStateMachineAnalyzer`. Done 2026-09-12.** The one this doc's own "Batch 6" entry flagged as
+harder than the thread-domain quartet — a genuine "still-open field-enumeration gap," not just
+another discovery-shape variant. Closed by extending `IDumpObjectFieldQuery` (Tier 2) with two new,
+narrowly-scoped primitives rather than a general field-reflection surface:
+- **`TryGetFieldTypeName(address, fieldName)`** — a field's *declared* type name, no value read at
+  all. Needed because `<>t__builder` is a struct field (`AsyncVoidMethodBuilder`/
+  `AsyncTaskMethodBuilder`), which `TryReadField` cannot represent a value for at all (falls to its
+  `default: return false` case) — detecting fire-and-forget `async void` state machines needs the
+  field's *type*, not a runtime value.
+- **`EnumerateObjectReferenceFields(address)`** — every reference-typed instance field as
+  `(Name, TargetAddress)`. This is the gap itself: nothing shipped before this let a retyped analyzer
+  ask "what are this instance's reference fields called," only "read this *named* field's value."
+  Target size/type resolve through the existing `IHeapObjectLookup`, not duplicated here.
+- **`HeapTypeStatistics.IsAsyncStateMachineType` added**, mirroring `IsFinalizableType`'s existing
+  two-path precedent exactly (`FinalizableObjectAnalyzer`'s retyping) — populated on both the
+  index-backed path (`TypeAggregateFlags.IsAsyncStateMachineType`) and the no-index fallback path
+  (`CachedTypeStatistics.IsAsyncStateMachineType`, computed via the same
+  `AsyncStateMachineNamePattern.Regex` the Phase 1 flag and the shared adapter's `IsCandidateType`
+  already trust as ground truth — a plain name-pattern check, no ClrMD field/interface walk, so
+  there's no cost reason to gate it behind an index the way `HasIEquatableInterface`/
+  `DeclaredFieldByteSize` are).
+- **The pre-retyping analyzer's own second, hand-rolled full heap-index pass is gone** — its
+  suspend-state histogram (`DominantState`/`StateDistribution`) used to need every state-machine
+  instance's `<>1__state` value, gathered via a dedicated `EnumerateIndexedEntriesAsTuples`/
+  `LiveHeapEntries` pass separate from candidate discovery. Retyped onto
+  `TypedResourceCandidateStreamingLegacyAdapter` like the rest of the Tier-2 wave, `context.HeapObjects`
+  already streams every instance once during the pipeline's one shared Phase-1 scan — the histogram
+  is now built in the same pass as everything else. The single biggest win of this batch, not just a
+  mechanical retype.
+- **Captured-closure-byte reads stay bounded to one sample instance per type** — the first streamed
+  instance encountered — preserving the pre-retyping analyzer's own explicit "one object access per
+  type" cost bound exactly; only `<>1__state` gets read on every instance (needed for the histogram,
+  no more expensive than the pre-retyping analyzer's own second pass did per instance).
+- **One accepted, documented fidelity gap**: `StateMachineTypeProfile.ReferenceFieldCount` now comes
+  from `HeapTypeStatistics.ReferenceFields` (shipped for `ObjectShapeAnalyzer`), which reads 0
+  whenever `HasTypeShapeData` is `false` (no prebuilt per-type shape cache) — unlike the pre-retyping
+  analyzer's unconditional `ClrType.Fields` count. Accepted per hard-need-basis: no Tier-2 primitive
+  exists, or is needed elsewhere, for an unconditional per-type reference-field count outside the
+  shape cache.
+- **`AsyncStateMachineAnalyzerLegacyAdapter` overrides `ResolveOptions`** (`options.AsyncStateMachineAnalysis`)
+  — easy to miss on a streaming-adapter subclass since neither `HttpObjectAnalyzer` nor
+  `TimerLeakAnalyzer` (the two most recent adapters read for reference) needed an options record at
+  all; skipping it would have silently dropped `LargeCaptureThresholdBytes` back to its default on
+  every real pipeline run.
+- **Gate met**: new `AsyncStateMachineAnalyzerRetypingCharacterizationTests` (11 tests) — no
+  pre-existing per-analyzer test coverage existed. Fake, dictionary-backed
+  `IDumpObjectFieldQuery`/`IHeapObjectLookup`/`IHeapTypeStatisticsQuery` cover: histogram construction
+  across multiple streamed instances, the sample-only capture-byte bound (a second instance's
+  reference field is set up to fail the test if it's ever read), `IsAsyncVoid` detection via the new
+  `TryGetFieldTypeName`, the large-capture-threshold split, `SuspendedMethodMap` grouping across two
+  distinct compiler-generated types sharing one originating method, and the totals-vs-per-type-profile
+  split (a flagged-but-never-streamed type still contributes to grand totals). New
+  `AsyncStateMachineAnalyzerRealDumpTests` (`[DiscrepancyFact]`, one dump, foreground) passed in 9s
+  against the real 3.35 GB reference dump: 11 total state machines, 952 bytes, 1 Gen2, 7 distinct
+  types, 7 high-capture entries, 7 suspended-method-map entries. Full non-real-dump suite (1505 tests,
+  up from 1494) passes — one unrelated, pre-existing flaky self-attached-heap test
+  (`ArrayAnalyzerRetypingCharacterizationTests.AnalyzeAsync_RealSparseArray_ComputesExactNullOrZeroDensity`)
+  reproduced as a pass in isolation on immediate re-run, not a regression from this batch.
+- Call site updated: `DefaultAnalyzerFeatureModuleCatalog` now constructs
+  `AsyncStateMachineAnalyzerLegacyAdapter`. No benchmark referenced this analyzer directly.
+- **`SdkVersion` 14** (two `IDumpObjectFieldQuery` primitives plus `HeapTypeStatistics.IsAsyncStateMachineType`,
+  bumped in one entry since both were found by, and shipped in, this same retyping). No
+  `capability-registry.json` bump — both additions extend existing capabilities
+  (`dump.object-fields`, `heap.types`), no new vocabulary entry.
+
+Remaining Tier-1+Tier-2 analyzers (10, see "Status" at the top) haven't been started yet.
 `LeakCandidateAnalyzer` stays last per explicit direction — it needs cross-analyzer result access
 and deferred-execution-ordering modeling neither this wave nor Tier 1 has built.
 

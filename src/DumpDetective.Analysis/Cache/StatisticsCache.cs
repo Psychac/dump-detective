@@ -1,6 +1,7 @@
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Abstractions;
 
@@ -92,6 +93,9 @@ internal class StatisticsCache
                     if (obj.Type.IsFinalizable)
                         stats.IsFinalizableType = true;
 
+                    if (AsyncStateMachineNamePattern.Regex.IsMatch(typeName))
+                        stats.IsAsyncStateMachineType = true;
+
                     // Generation resolution is already a per-object cost every consumer of this
                     // walk pays for count/size -- one more resolve call here piggybacks on the
                     // walk that's already happening rather than adding a second one, mirroring
@@ -125,6 +129,8 @@ internal class StatisticsCache
                 stat.LohSize += localStat.LohSize;
                 if (localStat.IsFinalizableType)
                     stat.IsFinalizableType = true;
+                if (localStat.IsAsyncStateMachineType)
+                    stat.IsAsyncStateMachineType = true;
                 stat.Gen0Count += localStat.Gen0Count;
                 stat.Gen1Count += localStat.Gen1Count;
                 stat.Gen2Count += localStat.Gen2Count;

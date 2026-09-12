@@ -363,6 +363,14 @@ public sealed class WeakReferenceAnalyzerRetypingCharacterizationTests
             value = null;
             return false; // not exercised by this analyzer
         }
+
+        public bool TryGetFieldTypeName(ulong address, string fieldName, out string? typeName)
+        {
+            typeName = null;
+            return false; // not exercised by this analyzer
+        }
+
+        public IReadOnlyList<(string Name, ulong TargetAddress)> EnumerateObjectReferenceFields(ulong address) => [];
     }
 
     private sealed class FakeHeapDominatorQuery : IHeapDominatorQuery

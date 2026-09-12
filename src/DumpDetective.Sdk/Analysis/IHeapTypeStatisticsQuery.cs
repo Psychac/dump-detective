@@ -114,7 +114,17 @@ public readonly record struct HeapTypeStatistics(
     /// defensive catch), when field data is genuinely unavailable, or for a reference type — same
     /// value-types-only gate as <see cref="HasIEquatableInterface"/>, for the same measured reason.
     /// </summary>
-    int DeclaredFieldByteSize = 0);
+    int DeclaredFieldByteSize = 0,
+    /// <summary>
+    /// <c>true</c> when this type's name matches the compiler-generated async state machine
+    /// pattern (<c>&lt;MethodName&gt;d__N</c>) — mirrors <c>TypeAggregateFlags.IsAsyncStateMachineType</c>.
+    /// Added 2026-09-12 for <c>AsyncStateMachineAnalyzer</c>'s retyping. Unlike
+    /// <see cref="HasIEquatableInterface"/>/<see cref="DeclaredFieldByteSize"/>, this is populated on
+    /// <em>both</em> the index-backed and no-index-fallback paths (same treatment as
+    /// <see cref="IsFinalizableType"/>) — a plain name-pattern check, no ClrMD field/interface
+    /// metadata walk, so there's no cost reason to gate it behind an index.
+    /// </summary>
+    bool IsAsyncStateMachineType = false);
 
 /// <summary>The <c>heap.types</c> capability's aggregate-statistics surface (distinct
 /// <see cref="IHeapObjectStream"/>/<see cref="IHeapObjectLookup"/>, per-object).</summary>

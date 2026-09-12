@@ -43,4 +43,28 @@ public interface IDumpObjectFieldQuery
     /// <see cref="TryReadField"/> calls, only the final hop needs this).
     /// </summary>
     bool TryGetStringValue(ulong address, out string? value);
+
+    /// <summary>
+    /// Resolves the *declared* type name of a named instance field on the object at
+    /// <paramref name="address"/>'s type — no value read at all, so this works even for a
+    /// struct-typed field <see cref="TryReadField"/> can't represent a value for (e.g. detecting a
+    /// compiler-generated <c>AsyncVoidMethodBuilder</c>-typed builder field, a structural check with
+    /// no runtime value to inspect). Returns <c>false</c> when the object at that address is invalid
+    /// or the field doesn't exist on its type. Added 2026-09-12 for
+    /// <c>AsyncStateMachineAnalyzer</c>'s retyping.
+    /// </summary>
+    bool TryGetFieldTypeName(ulong address, string fieldName, out string? typeName);
+
+    /// <summary>
+    /// Every object-reference-typed instance field declared on the object at <paramref name="address"/>'s
+    /// type, as <c>(Name, TargetAddress)</c> — <c>TargetAddress</c> is 0 for a null reference. Resolve
+    /// each target's size/type via the existing <see cref="IHeapObjectLookup"/> rather than duplicating
+    /// that here. Returns an empty list when the object at that address is invalid, not when it simply
+    /// has no reference fields (both look the same to a caller). Added 2026-09-12 for
+    /// <c>AsyncStateMachineAnalyzer</c>'s retyping — the field-*name* enumeration gap
+    /// docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md called out as still open:
+    /// nothing shipped before this let a retyped analyzer ask "what are this instance's reference
+    /// fields called," only "read this *named* field's value."
+    /// </summary>
+    IReadOnlyList<(string Name, ulong TargetAddress)> EnumerateObjectReferenceFields(ulong address);
 }

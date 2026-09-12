@@ -1,358 +1,257 @@
-using DumpDetective.Analysis.Cache;
-using DumpDetective.Analysis.Indexing;
+using System.Text.RegularExpressions;
+
+using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Analysis.Utilities;
-using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
+using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 
-using Microsoft.Diagnostics.Runtime;
+namespace DumpDetective.Analysis.Analyzers.Async;
 
-using System.Text.RegularExpressions;
-
-namespace DumpDetective.Analysis.Analyzers.Async
+/// <summary>
+/// Phase-2 analyzer covering §23.1 (state machine population), §23.2 (captured closure
+/// analysis), and §23.3 (suspended method map).
+/// </summary>
+/// <remarks>
+/// Tier-1+Tier-2 batch (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md), built
+/// on <c>TypedResourceCandidateStreamingLegacyAdapter</c> like the rest of the Tier-2 wave — but
+/// unlike a typical wave member, this one's pre-retyping design ran an entirely separate,
+/// hand-rolled <em>second</em> full heap-index pass (<c>EnumerateIndexedEntriesAsTuples</c>/
+/// <c>LiveHeapEntries</c>) purely to build the suspend-state histogram, one field read per
+/// state-machine instance. That pass is gone: <c>context.HeapObjects</c> already streams every
+/// state-machine instance once, during the pipeline's one shared Phase-1 heap-index scan, so the
+/// histogram is now built in the same pass as everything else — the single biggest win of this
+/// retyping, not just a mechanical port.
+///
+/// Closes the two real capability gaps the retyping plan flagged as still open for this analyzer:
+/// <see cref="IDumpObjectFieldQuery.TryGetFieldTypeName"/> (a field's <em>declared</em> type name,
+/// needed for the <c>&lt;&gt;t__builder</c> struct field <see cref="TryReadField"/> can't represent
+/// a value for) and <see cref="IDumpObjectFieldQuery.EnumerateObjectReferenceFields"/> (a field
+/// *name*+target enumeration, needed to list captured closures by field name — nothing before this
+/// let a retyped analyzer ask "what are this instance's reference fields called").
+///
+/// Captured-closure-byte reads stay bounded to one sample instance per type — the first streamed
+/// instance encountered — preserving the pre-retyping analyzer's own explicit "one object access
+/// per type" cost bound; only <c>&lt;&gt;1__state</c> gets read on every instance (needed for the
+/// histogram, and no more expensive than the pre-retyping analyzer's own second pass did per
+/// instance).
+///
+/// <b>One accepted, documented fidelity gap</b>: <see cref="StateMachineTypeProfile.ReferenceFieldCount"/>
+/// now comes from <see cref="HeapTypeStatistics.ReferenceFields"/>, which is 0 whenever
+/// <see cref="IHeapTypeStatisticsQuery.HasTypeShapeData"/> is <c>false</c> (no prebuilt per-type
+/// shape cache) — unlike the pre-retyping analyzer's unconditional <c>ClrType.Fields</c> count.
+/// Accepted per hard-need-basis: no Tier-2 primitive exists (or is needed elsewhere) for an
+/// unconditional per-type reference-field count outside the shape cache.
+/// </remarks>
+public sealed class AsyncStateMachineAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
-    /// <summary>
-    /// Phase-2 analyzer covering §23.1 (state machine population), §23.2 (captured closure
-    /// analysis), and §23.3 (suspended method map).
-    ///
-    /// Detection uses <c>TypeAggregates</c> type names (O(types) string match) — no full heap
-    /// scan. Instance counts and sizes come from <c>TypeAggregates</c>. Field-level data
-    /// (reference fields) is read from each type's <c>SampleAddress</c>, bounding deep
-    /// analysis to one object access per type.
-    ///
-    /// The suspend-state histogram (<c>DominantState</c>/<c>StateDistribution</c>) needs more
-    /// than one sample per type, so it runs a second exact pass over
-    /// <c>IHeapAnalysisCache.EnumerateIndexedEntriesAsTuples</c> (the disk-backed object index —
-    /// falls back to a live heap walk only when no disk index exists), covering every detected
-    /// state-machine type and every instance.
-    /// </summary>
-    public sealed class AsyncStateMachineAnalyzer : IAnalyzer
-    {
-        public string Name => "Async State Machine Analysis";
-        public string Category => "Memory";
+    public string Name => "Async State Machine Analysis";
+    public string Category => "Memory";
 
-        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(
-            AnalysisContext context,
-            CancellationToken cancellationToken)
+    public AnalyzerDomainResult? LastResult { get; private set; }
+
+    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        IHeapTypeStatisticsQuery typeStatistics = context.HeapTypeStatistics
+            ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapTypes}' capability.");
+        IDumpObjectFieldQuery fields = context.DumpObjectFields
+            ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.DumpObjectFields}' capability.");
+        IHeapObjectLookup objectLookup = context.HeapObjectLookup
+            ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapObjects}' capability.");
+        AsyncStateMachineAnalysisOptions options = context.AnalyzerOptions as AsyncStateMachineAnalysisOptions ?? new AsyncStateMachineAnalysisOptions();
+
+        LastResult = Analyze(typeStatistics, fields, objectLookup, context.HeapObjects, options, cancellationToken);
+        return ValueTask.CompletedTask;
+    }
+
+    private static AsyncStateMachineDomainResult Analyze(
+        IHeapTypeStatisticsQuery typeStatistics,
+        IDumpObjectFieldQuery fields,
+        IHeapObjectLookup objectLookup,
+        IHeapObjectStream? candidates,
+        AsyncStateMachineAnalysisOptions options,
+        CancellationToken cancellationToken)
+    {
+        if (candidates is null)
+            return Empty();
+
+        IReadOnlyDictionary<string, HeapTypeStatistics> stats = typeStatistics.GetTypeStatistics();
+
+        // ── Single pass over every streamed state-machine instance ──────────────
+        var sampleAddressByType = new Dictionary<string, ulong>(StringComparer.Ordinal);
+        var histogramByType = new Dictionary<string, Dictionary<int, int>>(StringComparer.Ordinal);
+        var seenTypes = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (HeapObjectRef candidate in candidates.EnumerateObjects())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            AsyncStateMachineAnalysisOptions options = context.AnalysisOptions.AsyncStateMachineAnalysis;
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, context.Progress, cancellationToken).Stamp(this));
+
+            string typeName = candidate.TypeDisplayName;
+            if (!stats.TryGetValue(typeName, out HeapTypeStatistics entry) || !entry.IsAsyncStateMachineType)
+                continue;
+
+            seenTypes.Add(typeName);
+            if (!sampleAddressByType.ContainsKey(typeName))
+                sampleAddressByType[typeName] = candidate.Address;
+
+            if (fields.TryReadField(candidate.Address, "<>1__state", out FieldValue stateValue) && stateValue.Kind == FieldValueKind.Int32)
+            {
+                if (!histogramByType.TryGetValue(typeName, out Dictionary<int, int>? histogram))
+                {
+                    histogram = new Dictionary<int, int>(8);
+                    histogramByType[typeName] = histogram;
+                }
+                int state = stateValue.AsInt32();
+                histogram[state] = histogram.GetValueOrDefault(state) + 1;
+            }
         }
 
-        private static AnalyzerDomainResult Analyze(
-            ClrHeap heap,
-            IHeapAnalysisCache cache,
-            AsyncStateMachineAnalysisOptions options,
-            IProgress<AnalyzerProgressReport>? progress,
-            CancellationToken cancellationToken)
+        // ── Totals: every flagged type, independent of per-instance name parsing below ──
+        long totalCount = 0;
+        ulong totalBytes = 0;
+        long totalGen2Count = 0;
+        foreach (KeyValuePair<string, HeapTypeStatistics> kv in stats)
         {
-            IReadOnlyDictionary<ulong, TypeAggregateIndexEntry>? typeAggregates = null;
-            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? idx))
-                typeAggregates = idx.TypeAggregates;
-
-            if (typeAggregates is null)
-                return new AsyncStateMachineDomainResult(0, 0, [], [], []);
-
-            // ── Step 1: Identify async state machine types from TypeAggregates ─────
-            // Pattern: <MethodName>d__N in the type name (last component of full name)
-            var candidates = new List<(ulong Mt, TypeAggregateIndexEntry Entry)>(32);
-
-            foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in typeAggregates)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                // Phase 1 flag already verified pattern match; skip expensive ClrMD call here
-                if ((kv.Value.Flags & TypeAggregateFlags.IsAsyncStateMachineType) == 0)
-                    continue;
-
-                candidates.Add((kv.Key, kv.Value));
-            }
-
-            if (candidates.Count == 0)
-                return new AsyncStateMachineDomainResult(0, 0, [], [], []);
-
-            // Sort by count descending
-            candidates.Sort(static (a, b) => b.Entry.Count.CompareTo(a.Entry.Count));
-
-            // ── Step 2: Aggregate totals ──────────────────────────────────────────
-            long totalCount = 0;
-            ulong totalBytes = 0;
-            long totalGen2Count = 0;
-            for (int i = 0; i < candidates.Count; i++)
-            {
-                totalCount += candidates[i].Entry.Count;
-                totalBytes += candidates[i].Entry.TotalSize;
-                totalGen2Count += candidates[i].Entry.Gen2Count;
-            }
-
-            // ── Step 3: Field metadata + sample-based analysis ───────────────────
-            // Read ClrType.Fields and the SampleAddress for each candidate type.
-            var pendingProfiles = new List<(ulong Mt, string TypeName, string OriginatingMethod, string DeclaringType,
-                int Count, ulong TotalBytes, int SampleStateValue, int ReferenceFieldCount, long Gen2Count,
-                double Gen2Fraction, bool IsAsyncVoid)>(candidates.Count);
-            var highCaptures = new List<(ulong Address, string TypeName, ulong CapturedBytes, List<string> LargeCaptures)>(16);
-            var stateFieldByMt = new Dictionary<ulong, ClrInstanceField?>(candidates.Count);
-
-            for (int i = 0; i < candidates.Count; i++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                (ulong mt, TypeAggregateIndexEntry entry) = candidates[i];
-
-                ClrType? clrType = heap.GetTypeByMethodTable(mt);
-                if (clrType?.Name is not string fullName) continue;
-
-                // Extract method name from <MethodName>d__N pattern
-                int angleOpen = fullName.LastIndexOf('<');
-                if (angleOpen < 0) continue;
-
-                Match m;
-                try
-                {
-                    m = AsyncStateMachineNamePattern.Regex.Match(fullName, angleOpen);
-                }
-                catch (RegexMatchTimeoutException)
-                {
-                    // Regex timeout on this type name; skip it
-                    continue;
-                }
-
-                if (!m.Success) continue;
-
-                string methodName = m.Groups[1].Value;
-                string declaringType = angleOpen > 0 ? fullName[..(angleOpen - 1)] : string.Empty;
-
-                // Count reference fields and locate <>1__state
-                ClrInstanceField? stateField = null;
-                int refFieldCount = 0;
-                foreach (ClrInstanceField f in clrType.Fields)
-                {
-                    if (f.Name == "<>1__state")
-                        stateField = f;
-                    if (f.IsObjectReference)
-                        refFieldCount++;
-                }
-
-                // Read state value and captured ref bytes from the sample instance
-                int sampleStateValue = 0;
-                ulong capturedBytes = 0;
-                var largeCaptures = new List<string>(4);
-
-                if (entry.SampleAddress != 0)
-                {
-                    ClrObject sample = heap.GetObject(entry.SampleAddress);
-                    if (sample.IsValid && sample.Type is not null)
-                    {
-                        // State field value
-                        if (stateField is not null)
-                        {
-                            try { sampleStateValue = stateField.Read<int>(sample, interior: false); }
-                            catch { /* unreadable */ }
-                        }
-
-                        // Reference field sizes (captured closure estimate)
-                        foreach (ClrInstanceField f in clrType.Fields)
-                        {
-                            if (!f.IsObjectReference) continue;
-                            try
-                            {
-                                ClrObject refObj = f.ReadObject(sample.Address, interior: false);
-                                if (!refObj.IsValid || refObj.Address == 0) continue;
-                                ulong sz = refObj.Size;
-                                capturedBytes += sz;
-                                if (sz >= options.LargeCaptureThresholdBytes)
-                                    largeCaptures.Add($"{f.Name} ({refObj.Type?.Name ?? "?"}, {FormatHelper.FormatBytes(sz)})");
-                            }
-                            catch { /* field unreadable */ }
-                        }
-
-                        if (capturedBytes > 0)
-                            highCaptures.Add((entry.SampleAddress, clrType.Name ?? $"MT:0x{mt:X}", capturedBytes, largeCaptures));
-                    }
-                }
-
-                double gen2Fraction = entry.Count > 0 ? entry.Gen2Count / (double)entry.Count : 0.0;
-                bool isAsyncVoid = IsAsyncVoidStateMachine(clrType);
-                pendingProfiles.Add((
-                    Mt: mt,
-                    TypeName: clrType.Name ?? $"MT:0x{mt:X}",
-                    OriginatingMethod: methodName,
-                    DeclaringType: declaringType,
-                    Count: (int)Math.Min(entry.Count, int.MaxValue),
-                    TotalBytes: entry.TotalSize,
-                    SampleStateValue: sampleStateValue,
-                    ReferenceFieldCount: refFieldCount,
-                    Gen2Count: entry.Gen2Count,
-                    Gen2Fraction: gen2Fraction,
-                    IsAsyncVoid: isAsyncVoid));
-                stateFieldByMt[mt] = stateField;
-            }
-
-            // ── Step 3b: Suspend-state histogram ──────────────────────────────────
-            // TypeAggregates only retain one SampleAddress per type, so the state
-            // distribution requires a second exact heap pass, covering every detected
-            // state-machine type and every instance.
-            var histogramMts = new HashSet<ulong>(pendingProfiles.Count);
-            var histograms = new Dictionary<ulong, Dictionary<int, int>>(pendingProfiles.Count);
-            var histogramRemaining = new Dictionary<ulong, int>(pendingProfiles.Count);
-            foreach (var p in pendingProfiles)
-            {
-                if (stateFieldByMt.TryGetValue(p.Mt, out ClrInstanceField? sf) && sf is not null)
-                {
-                    histogramMts.Add(p.Mt);
-                    histograms[p.Mt] = new Dictionary<int, int>(8);
-                    histogramRemaining[p.Mt] = p.Count;
-                }
-            }
-
-            if (histogramMts.Count > 0)
-            {
-                // Prefer the disk-backed object index (sequential small-record reads via
-                // ObjectIndexReader) over a live ClrMD heap.EnumerateObjects() pass, which
-                // touches the mapped dump file per object. Only addresses matching a candidate
-                // MT ever get a live heap.GetObject() call, bounded by the per-type cap.
-                // Ask whether a heap index exists rather than enumerating to find out: `.Any()`
-                // opens the container, maps all four object columns and checksums every byte of
-                // them (~365 MB / ~69 ms on a 14.6M-object dump) to yield a single record.
-                bool hasDiskIndex = cache is HeapAnalysisCache indexedCache && indexedCache.TryGetHeapIndex(out _);
-                IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> entries = hasDiskIndex
-                    ? cache.EnumerateIndexedEntriesAsTuples()
-                    : LiveHeapEntries(heap);
-
-                var scanCounter = new ObjectScanCounter("scanning state machine instances for histogram",
-                    progress, reportEveryObjects: 50_000, reportEveryElapsed: TimeSpan.FromSeconds(2));
-
-                int typesStillOpen = histogramMts.Count;
-                foreach ((ulong address, ulong mt, ulong _) in entries)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    scanCounter.Tick();
-
-                    if (!histogramRemaining.TryGetValue(mt, out int remaining) || remaining <= 0) continue;
-
-                    ClrObject obj = heap.GetObject(address);
-                    if (!obj.IsValid) continue;
-
-                    ClrInstanceField? sf = stateFieldByMt[mt];
-                    int stateValue;
-                    try { stateValue = sf!.Read<int>(obj, interior: false); }
-                    catch { continue; }
-
-                    Dictionary<int, int> hist = histograms[mt];
-                    hist[stateValue] = hist.GetValueOrDefault(stateValue) + 1;
-
-                    remaining--;
-                    histogramRemaining[mt] = remaining;
-                    if (remaining == 0 && --typesStillOpen == 0)
-                        break;
-                }
-
-                scanCounter.Complete();
-            }
-
-            var topTypes = new List<StateMachineTypeProfile>(pendingProfiles.Count);
-            foreach (var p in pendingProfiles)
-            {
-                IReadOnlyList<(int State, int Count)> distribution = [];
-                int dominantState = p.SampleStateValue;
-
-                if (histograms.TryGetValue(p.Mt, out Dictionary<int, int>? hist) && hist.Count > 0)
-                {
-                    var sorted = new List<(int State, int Count)>(hist.Count);
-                    foreach (KeyValuePair<int, int> kv in hist)
-                        sorted.Add((kv.Key, kv.Value));
-                    sorted.Sort(static (a, b) => b.Count.CompareTo(a.Count));
-                    if (sorted.Count > 3)
-                        sorted.RemoveRange(3, sorted.Count - 3);
-                    distribution = sorted;
-                    dominantState = sorted[0].State;
-                }
-
-                topTypes.Add(new StateMachineTypeProfile(
-                    TypeName: p.TypeName,
-                    OriginatingMethod: p.OriginatingMethod,
-                    DeclaringType: p.DeclaringType,
-                    Count: p.Count,
-                    TotalBytes: p.TotalBytes,
-                    DominantState: dominantState,
-                    StateDistribution: distribution,
-                    ReferenceFieldCount: p.ReferenceFieldCount,
-                    Gen2Count: p.Gen2Count,
-                    Gen2Fraction: p.Gen2Fraction,
-                    IsAsyncVoid: p.IsAsyncVoid));
-            }
-
-            // ── Step 4: TopByCapturedSize ─────────────────────────────────────────
-            highCaptures.Sort(static (a, b) => b.CapturedBytes.CompareTo(a.CapturedBytes));
-            var topByCapturedSize = new List<HighCaptureStateMachine>(highCaptures.Count);
-            for (int i = 0; i < highCaptures.Count; i++)
-            {
-                (ulong addr, string typeName, ulong captured, List<string> captures) = highCaptures[i];
-                topByCapturedSize.Add(new HighCaptureStateMachine(
-                    Address: addr,
-                    TypeName: typeName,
-                    TotalCapturedRefBytes: captured,
-                    LargeCaptures: captures));
-            }
-
-            // ── Step 5: SuspendedMethodMap ────────────────────────────────────────
-            // Group by (DeclaringType, MethodName) — same method can produce multiple
-            // compiler-generated state machine types for different overloads or MoveNext versions.
-            var methodMap = new Dictionary<(string DeclaringType, string Method), (long Count, ulong Bytes)>(16);
-            
-            // Build from topTypes which have methodName and declaringType already extracted
-            foreach (StateMachineTypeProfile profile in topTypes)
-            {
-                var key = (profile.DeclaringType, profile.OriginatingMethod);
-                if (methodMap.TryGetValue(key, out (long Count, ulong Bytes) existing))
-                    methodMap[key] = (existing.Count + profile.Count, existing.Bytes + profile.TotalBytes);
-                else
-                    methodMap[key] = (profile.Count, profile.TotalBytes);
-            }
-
-            var suspendedMap = new List<SuspendedMethodEntry>(methodMap.Count);
-            foreach (KeyValuePair<(string, string), (long Count, ulong Bytes)> kv in methodMap)
-                suspendedMap.Add(new SuspendedMethodEntry(kv.Key.Item1, kv.Key.Item2, (int)Math.Min(kv.Value.Count, int.MaxValue), kv.Value.Bytes));
-
-            suspendedMap.Sort(static (a, b) => b.SuspendedCount.CompareTo(a.SuspendedCount));
-
-            return new AsyncStateMachineDomainResult(
-                TotalStateMachines: (int)Math.Min(totalCount, int.MaxValue),
-                TotalStateMachineBytes: totalBytes,
-                TopStateMachineTypes: topTypes,
-                TopByCapturedSize: topByCapturedSize,
-                SuspendedMethodMap: suspendedMap,
-                TotalGen2Count: totalGen2Count);
+            if (!kv.Value.IsAsyncStateMachineType) continue;
+            totalCount += kv.Value.InstanceCount;
+            totalBytes += kv.Value.TotalSize;
+            totalGen2Count += kv.Value.Gen2Count;
         }
 
-        public void Dispose() { }
+        if (totalCount == 0)
+            return Empty();
 
-        // ── Helpers ───────────────────────────────────────────────────────────────
+        var topTypes = new List<StateMachineTypeProfile>(seenTypes.Count);
+        var highCaptures = new List<HighCaptureStateMachine>(seenTypes.Count);
 
-        // Fallback for in-memory cache mode (no disk-backed object index available).
-        private static IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> LiveHeapEntries(ClrHeap heap)
+        foreach (string typeName in seenTypes)
         {
-            foreach (ClrObject obj in heap.EnumerateObjects())
-            {
-                if (!obj.IsValid || obj.Type is null) continue;
-                yield return (obj.Address, obj.Type.MethodTable, obj.Size);
-            }
-        }
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!stats.TryGetValue(typeName, out HeapTypeStatistics entry))
+                continue;
 
-        private static bool IsAsyncVoidStateMachine(ClrType type)
-        {
-            foreach (ClrInstanceField f in type.Fields)
+            (string methodName, string declaringType) = ParseMethodName(typeName);
+            ulong sampleAddress = sampleAddressByType.GetValueOrDefault(typeName);
+
+            bool isAsyncVoid = false;
+            ulong capturedBytes = 0;
+            var largeCaptures = new List<string>(4);
+
+            if (sampleAddress != 0)
             {
-                if (f.Name != "<>t__builder") continue;
-                ClrType? builderType = f.Type;
-                if (builderType?.Name is not null)
+                if (fields.TryGetFieldTypeName(sampleAddress, "<>t__builder", out string? builderTypeName) && builderTypeName is not null)
+                    isAsyncVoid = builderTypeName.Contains("AsyncVoidMethodBuilder");
+
+                foreach ((string fieldName, ulong targetAddress) in fields.EnumerateObjectReferenceFields(sampleAddress))
                 {
-                    return builderType.Name.Contains("AsyncVoidMethodBuilder");
+                    if (targetAddress == 0 || !objectLookup.TryGetObject(targetAddress, out HeapObjectRef target))
+                        continue;
+
+                    capturedBytes += target.Size;
+                    if (target.Size >= options.LargeCaptureThresholdBytes)
+                        largeCaptures.Add($"{fieldName} ({target.TypeDisplayName}, {FormatHelper.FormatBytes(target.Size)})");
                 }
+
+                if (capturedBytes > 0)
+                    highCaptures.Add(new HighCaptureStateMachine(sampleAddress, typeName, capturedBytes, largeCaptures));
             }
-            return false;
+
+            (int dominantState, IReadOnlyList<(int State, int Count)> distribution) = BuildStateDistribution(histogramByType, typeName);
+
+            double gen2Fraction = entry.InstanceCount > 0 ? entry.Gen2Count / (double)entry.InstanceCount : 0.0;
+
+            topTypes.Add(new StateMachineTypeProfile(
+                TypeName: typeName,
+                OriginatingMethod: methodName,
+                DeclaringType: declaringType,
+                Count: (int)Math.Min(entry.InstanceCount, int.MaxValue),
+                TotalBytes: entry.TotalSize,
+                DominantState: dominantState,
+                StateDistribution: distribution,
+                ReferenceFieldCount: entry.ReferenceFields,
+                Gen2Count: entry.Gen2Count,
+                Gen2Fraction: gen2Fraction,
+                IsAsyncVoid: isAsyncVoid));
         }
 
+        topTypes.Sort(static (a, b) => b.Count.CompareTo(a.Count));
+        highCaptures.Sort(static (a, b) => b.TotalCapturedRefBytes.CompareTo(a.TotalCapturedRefBytes));
+
+        // ── SuspendedMethodMap: group by (DeclaringType, MethodName) ─────────────
+        var methodMap = new Dictionary<(string DeclaringType, string Method), (long Count, ulong Bytes)>(16);
+        foreach (StateMachineTypeProfile profile in topTypes)
+        {
+            var key = (profile.DeclaringType, profile.OriginatingMethod);
+            if (methodMap.TryGetValue(key, out (long Count, ulong Bytes) existing))
+                methodMap[key] = (existing.Count + profile.Count, existing.Bytes + profile.TotalBytes);
+            else
+                methodMap[key] = (profile.Count, profile.TotalBytes);
+        }
+
+        var suspendedMap = new List<SuspendedMethodEntry>(methodMap.Count);
+        foreach (KeyValuePair<(string, string), (long Count, ulong Bytes)> kv in methodMap)
+            suspendedMap.Add(new SuspendedMethodEntry(kv.Key.Item1, kv.Key.Item2, (int)Math.Min(kv.Value.Count, int.MaxValue), kv.Value.Bytes));
+        suspendedMap.Sort(static (a, b) => b.SuspendedCount.CompareTo(a.SuspendedCount));
+
+        return new AsyncStateMachineDomainResult(
+            TotalStateMachines: (int)Math.Min(totalCount, int.MaxValue),
+            TotalStateMachineBytes: totalBytes,
+            TopStateMachineTypes: topTypes,
+            TopByCapturedSize: highCaptures,
+            SuspendedMethodMap: suspendedMap,
+            TotalGen2Count: totalGen2Count);
     }
+
+    // Extract <MethodName>d__N's method name/declaring type — same regex Phase 1's
+    // IsAsyncStateMachineType flag and the shared adapter's IsCandidateType already trust as
+    // ground truth (AsyncStateMachineNamePattern), so a type that reached this point already
+    // matched it once; this only re-runs it to pull the capture groups out.
+    private static (string MethodName, string DeclaringType) ParseMethodName(string typeName)
+    {
+        int angleOpen = typeName.LastIndexOf('<');
+        if (angleOpen < 0)
+            return (string.Empty, string.Empty);
+
+        Match m;
+        try
+        {
+            m = AsyncStateMachineNamePattern.Regex.Match(typeName, angleOpen);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return (string.Empty, string.Empty);
+        }
+
+        if (!m.Success)
+            return (string.Empty, string.Empty);
+
+        string methodName = m.Groups[1].Value;
+        string declaringType = angleOpen > 0 ? typeName[..(angleOpen - 1)] : string.Empty;
+        return (methodName, declaringType);
+    }
+
+    private static (int DominantState, IReadOnlyList<(int State, int Count)> Distribution) BuildStateDistribution(
+        Dictionary<string, Dictionary<int, int>> histogramByType, string typeName)
+    {
+        if (!histogramByType.TryGetValue(typeName, out Dictionary<int, int>? histogram) || histogram.Count == 0)
+            return (0, []);
+
+        var sorted = new List<(int State, int Count)>(histogram.Count);
+        foreach (KeyValuePair<int, int> kv in histogram)
+            sorted.Add((kv.Key, kv.Value));
+        sorted.Sort(static (a, b) => b.Count.CompareTo(a.Count));
+        if (sorted.Count > 3)
+            sorted.RemoveRange(3, sorted.Count - 3);
+
+        return (sorted[0].State, sorted);
+    }
+
+    private static AsyncStateMachineDomainResult Empty() => new(0, 0, [], [], []);
+
+    public void Dispose() { }
 }

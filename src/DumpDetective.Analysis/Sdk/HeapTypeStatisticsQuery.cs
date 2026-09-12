@@ -122,7 +122,8 @@ internal sealed class HeapTypeStatisticsQuery(ClrHeap heap, IHeapAnalysisCache c
                 StaticSize: type?.StaticSize ?? 0,
                 BaseTypeName: type?.BaseType?.Name ?? "",
                 HasIEquatableInterface: hasIEquatable,
-                DeclaredFieldByteSize: declaredFieldByteSize);
+                DeclaredFieldByteSize: declaredFieldByteSize,
+                IsAsyncStateMachineType: (e.Flags & TypeAggregateFlags.IsAsyncStateMachineType) != 0);
         }
         return result;
     }
@@ -236,7 +237,8 @@ internal sealed class HeapTypeStatisticsQuery(ClrHeap heap, IHeapAnalysisCache c
                 Gen2TotalSize: 0,
                 IsFinalizableType: s.IsFinalizableType,
                 SampleAddress: cache.GetSampleInstanceAddress(kv.Key) ?? 0,
-                ModuleName: s.ModuleName);
+                ModuleName: s.ModuleName,
+                IsAsyncStateMachineType: s.IsAsyncStateMachineType);
         }
         return result;
     }

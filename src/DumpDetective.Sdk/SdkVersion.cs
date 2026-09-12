@@ -19,7 +19,13 @@ public static class SdkVersion
 {
     public const int Major = 0;
 
-    /// <summary>13 as of 2026-09-12 (added <see cref="Analysis.IRuntimeThreadPoolQuery"/>,
+    /// <summary>14 as of 2026-09-12 (added <see cref="Analysis.IDumpObjectFieldQuery.TryGetFieldTypeName"/>
+    /// and <see cref="Analysis.IDumpObjectFieldQuery.EnumerateObjectReferenceFields"/> — two Tier-2
+    /// <c>dump.object-fields</c> primitives closing the field-*shape*-enumeration gap
+    /// docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md flagged as still open, plus
+    /// <see cref="Analysis.HeapTypeStatistics"/>'s <c>IsAsyncStateMachineType</c> — all found necessary
+    /// by <c>AsyncStateMachineAnalyzer</c>'s retyping.
+    /// Before that, 13 as of 2026-09-12 (added <see cref="Analysis.IRuntimeThreadPoolQuery"/>,
     /// <see cref="Analysis.RuntimeThreadPoolInfo"/>, <c>CapabilityVocabulary.RuntimeThreadPool</c>,
     /// and <c>Analysis.AnalysisContext.RuntimeThreadPool</c> — the <c>runtime.thread-pool</c>
     /// capability built for <c>HangAnalyzer</c>'s retyping, its first real consumer).
@@ -77,7 +83,7 @@ public static class SdkVersion
     /// additions/splits, the `EntityRef`/`IHeapDominatorQuery`/positional-record/JSON-converter
     /// fixes) — not a precise per-change reconstruction, since nothing yet depends on intermediate
     /// values enough to make that worth simulating.</summary>
-    public const int Minor = 13;
+    public const int Minor = 14;
 
     public static string AsString => $"{Major}.{Minor}";
 }

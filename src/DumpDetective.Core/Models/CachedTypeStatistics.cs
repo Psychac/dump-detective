@@ -22,4 +22,12 @@ public sealed class CachedTypeStatistics
     public long Gen0Count { get; set; }
     public long Gen1Count { get; set; }
     public long Gen2Count { get; set; }
+
+    /// <summary>
+    /// Added 2026-09-12 for <c>AsyncStateMachineAnalyzer</c>'s retyping, same reasoning as
+    /// <see cref="IsFinalizableType"/>: only populated by <see cref="StatisticsCache"/>'s
+    /// full-heap-walk branch, left <c>false</c> on the index-hydration branch (which sources this
+    /// flag from <c>TypeAggregateFlags.IsAsyncStateMachineType</c> instead).
+    /// </summary>
+    public bool IsAsyncStateMachineType { get; set; }
 }

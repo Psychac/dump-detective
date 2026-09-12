@@ -213,6 +213,14 @@ public sealed class DbConnectionAnalyzerRetypingCharacterizationTests
             value = null;
             return false; // not exercised by this analyzer -- _connectionString resolves via TryReadField's own String case
         }
+
+        public bool TryGetFieldTypeName(ulong address, string fieldName, out string? typeName)
+        {
+            typeName = null;
+            return false; // not exercised by this analyzer
+        }
+
+        public IReadOnlyList<(string Name, ulong TargetAddress)> EnumerateObjectReferenceFields(ulong address) => [];
     }
 
     private sealed class FakeHeapSegmentQuery : IHeapSegmentQuery

@@ -115,4 +115,55 @@ internal sealed class DumpObjectFieldQuery : IDumpObjectFieldQuery
             return false;
         }
     }
+
+    public bool TryGetFieldTypeName(ulong address, string fieldName, out string? typeName)
+    {
+        typeName = null;
+        if (address == 0)
+            return false;
+
+        ClrObject obj = _heap.GetObject(address);
+        if (!obj.IsValid || obj.Type is null)
+            return false;
+
+        ClrInstanceField? field = obj.Type.GetFieldByName(fieldName);
+        if (field is null)
+            return false;
+
+        typeName = field.Type?.Name;
+        return true;
+    }
+
+    public IReadOnlyList<(string Name, ulong TargetAddress)> EnumerateObjectReferenceFields(ulong address)
+    {
+        if (address == 0)
+            return [];
+
+        ClrObject obj = _heap.GetObject(address);
+        if (!obj.IsValid || obj.Type is null)
+            return [];
+
+        var result = new List<(string Name, ulong TargetAddress)>();
+        foreach (ClrInstanceField field in obj.Type.Fields)
+        {
+            if (!field.IsObjectReference)
+                continue;
+
+            ulong targetAddress = 0;
+            try
+            {
+                ClrObject target = field.ReadObject(address, interior: false);
+                if (target.IsValid)
+                    targetAddress = target.Address;
+            }
+            catch
+            {
+                // Corrupt/unloaded object — matches TryReadField's own catch above.
+            }
+
+            result.Add((field.Name ?? string.Empty, targetAddress));
+        }
+
+        return result;
+    }
 }

@@ -174,6 +174,14 @@ public sealed class HttpObjectAnalyzerRetypingCharacterizationTests
 
         public bool TryGetStringValue(ulong address, out string? value) =>
             _strings.TryGetValue(address, out value);
+
+        public bool TryGetFieldTypeName(ulong address, string fieldName, out string? typeName)
+        {
+            typeName = null;
+            return false; // not exercised by this analyzer
+        }
+
+        public IReadOnlyList<(string Name, ulong TargetAddress)> EnumerateObjectReferenceFields(ulong address) => [];
     }
 
     private sealed class FakeHeapSegmentQuery : IHeapSegmentQuery

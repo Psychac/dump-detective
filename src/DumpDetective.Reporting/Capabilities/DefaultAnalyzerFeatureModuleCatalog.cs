@@ -77,7 +77,9 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         // FinalizableObjectAnalyzerLegacyAdapter, not FinalizableObjectAnalyzer directly, since
         // 2026-09-12 -- see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("finalizable-object", "Finalizable Object Analysis", typeof(FinalizableObjectAnalyzerLegacyAdapter), typeof(FinalizableObjectFindingGenerator), typeof(FinalizableObjectTrendComparer), typeof(FinalizableObjectSectionBuilder), 340, ["gc"]),
-        Module("async-state-machine", "Async State Machine Analysis", typeof(AsyncStateMachineAnalyzer), typeof(AsyncStateMachineFindingGenerator), typeof(AsyncStateMachineTrendComparer), typeof(AsyncStateMachineSectionBuilder), 350, ["async"]),
+        // AsyncStateMachineAnalyzerLegacyAdapter, not AsyncStateMachineAnalyzer directly, since
+        // 2026-09-12 -- see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("async-state-machine", "Async State Machine Analysis", typeof(AsyncStateMachineAnalyzerLegacyAdapter), typeof(AsyncStateMachineFindingGenerator), typeof(AsyncStateMachineTrendComparer), typeof(AsyncStateMachineSectionBuilder), 350, ["async"]),
         // ArrayAnalyzerLegacyAdapter, not ArrayAnalyzer directly, since 2026-09-11 --
         // see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("array", "Array Analysis", typeof(ArrayAnalyzerLegacyAdapter), typeof(ArrayFindingGenerator), typeof(ArrayTrendComparer), typeof(ArraySectionBuilder), 360, ["types"]),

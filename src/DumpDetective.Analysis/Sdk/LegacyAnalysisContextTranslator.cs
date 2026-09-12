@@ -10,7 +10,8 @@ namespace DumpDetective.Analysis.SdkBridge;
 /// <c>HeapSegments</c>, <c>HeapRoots</c>, <c>HeapObjectLookup</c>, <c>HeapReferences</c>,
 /// <c>HeapDominators</c>, <c>HeapReachability</c>, <c>HeapRootPaths</c>, <c>HeapHandles</c>,
 /// <c>HeapSyncBlocks</c>, <c>HeapFinalizerQueue</c>, <c>RuntimeThreads</c>, <c>RuntimeJit</c>,
-/// <c>DumpObjectFields</c> — see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md).
+/// <c>RuntimeThreadPool</c>, <c>DumpObjectFields</c> — see
+/// docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md).
 /// Every other capability-scoped property on the built context is left null, which is correct here
 /// (not merely incomplete): no migrated analyzer needs them yet, and the SDK context's own contract
 /// already treats null as "not available for this session."
@@ -70,6 +71,7 @@ internal static class LegacyAnalysisContextTranslator
             HeapRootPaths = new HeapRootPathQuery(legacy.Heap, legacy.Cache),
             RuntimeThreads = runtimeThreadsOverride ?? new RuntimeThreadQuery(legacy.Runtime, legacy.Cache),
             RuntimeJit = new RuntimeJitQuery(legacy.Runtime),
+            RuntimeThreadPool = new RuntimeThreadPoolQuery(legacy.Runtime),
             DumpObjectFields = new DumpObjectFieldQuery(legacy.Heap),
             DumpArrayShapes = new DumpArrayShapeQuery(legacy.Heap),
         };

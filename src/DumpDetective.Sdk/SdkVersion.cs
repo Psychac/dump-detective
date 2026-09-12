@@ -19,7 +19,11 @@ public static class SdkVersion
 {
     public const int Major = 0;
 
-    /// <summary>12 as of 2026-09-12 (added <see cref="Analysis.RuntimeThreadRef"/>'s <c>IsBackground</c>/
+    /// <summary>13 as of 2026-09-12 (added <see cref="Analysis.IRuntimeThreadPoolQuery"/>,
+    /// <see cref="Analysis.RuntimeThreadPoolInfo"/>, <c>CapabilityVocabulary.RuntimeThreadPool</c>,
+    /// and <c>Analysis.AnalysisContext.RuntimeThreadPool</c> — the <c>runtime.thread-pool</c>
+    /// capability built for <c>HangAnalyzer</c>'s retyping, its first real consumer).
+    /// Before that, 12 as of 2026-09-12 (added <see cref="Analysis.RuntimeThreadRef"/>'s <c>IsBackground</c>/
     /// <c>ThreadStateDisplay</c>/<c>GcModeDisplay</c>/<c>AppDomainName</c>/<c>HasCurrentException</c>/
     /// <c>ExceptionTypeName</c>/<c>ExceptionMessage</c>/<c>StackSizeBytes</c> — found necessary by
     /// <c>ThreadAnalyzer</c>'s retyping; all Tier-1 despite the exception fields' name, since they
@@ -73,7 +77,7 @@ public static class SdkVersion
     /// additions/splits, the `EntityRef`/`IHeapDominatorQuery`/positional-record/JSON-converter
     /// fixes) — not a precise per-change reconstruction, since nothing yet depends on intermediate
     /// values enough to make that worth simulating.</summary>
-    public const int Minor = 12;
+    public const int Minor = 13;
 
     public static string AsString => $"{Major}.{Minor}";
 }

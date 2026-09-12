@@ -88,7 +88,7 @@ public class SmallDumpLatencyBenchmark
             new HeapTopologyAnalyzerLegacyAdapter(),
             new ModuleAnalyzer(),
             new CrashAnalyzer(),
-            new HangAnalyzer(),
+            new HangAnalyzerLegacyAdapter(),
             new DominatorAnalyzer(),
             new StringAnalyzer(),
             new CollectionAnalyzer(),

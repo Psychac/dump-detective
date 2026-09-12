@@ -46,7 +46,9 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         Module("heap-topology", "Heap Topology Analysis", typeof(HeapTopologyAnalyzerLegacyAdapter), typeof(HeapTopologyFindingGenerator), typeof(HeapTopologyTrendComparer), typeof(HeapTopologySectionBuilder), 150, ["heap"]),
         Module("module", "Module Analysis", typeof(ModuleAnalyzer), typeof(ModuleFindingGenerator), typeof(ModuleTrendComparer), typeof(ModuleSectionBuilder), 160, ["runtime"]),
         Module("crash", "Crash Analysis", typeof(CrashAnalyzer), typeof(CrashFindingGenerator), typeof(CrashTrendComparer), typeof(ExceptionAnalysisSectionBuilder), 170, ["exceptions"]),
-        Module("hang", "Hang Analysis", typeof(HangAnalyzer), typeof(HangFindingGenerator), typeof(HangTrendComparer), typeof(HangSectionBuilder), 180, ["threads"]),
+        // HangAnalyzerLegacyAdapter, not HangAnalyzer directly, since 2026-09-12 -- see
+        // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("hang", "Hang Analysis", typeof(HangAnalyzerLegacyAdapter), typeof(HangFindingGenerator), typeof(HangTrendComparer), typeof(HangSectionBuilder), 180, ["threads"]),
         Module("async-task", "Async Task Analysis", typeof(AsyncTaskAnalyzer), typeof(AsyncTaskFindingGenerator), typeof(AsyncTaskTrendComparer), typeof(AsyncAnalysisSectionBuilder), 190, ["async"]),
         Module("leak-candidate", "Leak Candidate Analysis", typeof(LeakCandidateAnalyzer), typeof(LeakCandidateFindingGenerator), typeof(LeakCandidateTrendComparer), typeof(LeakAnalysisSectionBuilder), 210, ["leaks"]),
         Module("dominator", "Dominator Analysis", typeof(DominatorAnalyzer), typeof(DominatorFindingGenerator), typeof(DominatorTrendComparer), typeof(DominatorSectionBuilder), 220, ["retention", "dominator"]),

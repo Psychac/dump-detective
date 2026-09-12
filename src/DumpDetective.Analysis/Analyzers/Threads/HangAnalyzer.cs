@@ -1,371 +1,221 @@
-﻿using DumpDetective.Analysis.Cache;
-using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Analysis.Utilities;
-using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
-
-using Microsoft.Diagnostics.Runtime;
-
-using System.Collections.Concurrent;
+using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 
 namespace DumpDetective.Analysis.Analyzers.Threads
 {
-    public class HangAnalyzer : IAnalyzer, IParallelHeapIndexScanParticipant, IThreadStackScanParticipant
+    /// <summary>
+    /// Detects likely hang/deadlock signatures: waiting threads (by top-frame classification),
+    /// thread-pool saturation/starvation, and async work backlog (pending/faulted/canceled tasks,
+    /// continuation counts).
+    /// </summary>
+    /// <remarks>
+    /// Retyped version consumes <c>heap.objects</c> (Task/QueuedWorkItem/continuation-shaped
+    /// candidates), <c>dump.object-fields</c> (<c>m_stateFlags</c>), <c>runtime.threads</c> (top
+    /// stack frame per alive thread), and <c>runtime.thread-pool</c> (<c>ClrThreadPool</c>) —
+    /// <see cref="HangAnalyzerLegacyAdapter"/> (not this class) implements both
+    /// <c>IParallelHeapIndexScanParticipant</c> and <c>IThreadStackScanParticipant</c>, mirroring the
+    /// pre-retyping analyzer's own dual participant role, just moved to the adapter layer.
+    ///
+    /// A real, deliberate behavior simplification: the pre-retyping analyzer's standalone fallback
+    /// (an independent parallel heap walk when no shared scan ran) has no equivalent here — same
+    /// accepted simplification every other candidate-streaming Tier-2 analyzer already made (e.g.
+    /// <c>TimerLeakAnalyzer</c>, <c>WeakReferenceAnalyzer</c>'s Phase B): a real analysis session
+    /// always goes through the pipeline's shared scan, so an empty candidate list when it didn't run
+    /// is accepted rather than re-implementing a second, independent scan path.
+    /// </remarks>
+    public sealed class HangAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     {
         public string Name => "Hang Analysis";
         public string Category => "Hang";
 
-        // Instance accumulator state for the IHeapIndexScanParticipant path. Populated by
-        // BeforeHeapIndexScan (called by the pipeline dispatcher) and mutated per-entry by
-        // OnHeapEntry; consumed by AnalyzeAsync once the shared index scan has completed.
-        private ClrHeap? _heap;
-        private HangAnalysisOptions? _options;
-        private Dictionary<ulong, AsyncTypeProfile>? _profileByMethodTable;
-        private Dictionary<string, int>? _taskContinuations;
-        private ThreadPoolAnalysis? _threadPoolInfo;
-        private int _tasksScanned;
-        private int _totalContinuations;
-        private ObjectScanCounter? _scanCounter;
-        // Set by OnHeapIndexScanCompleted — the single source of truth for whether the
-        // participant-accumulated state above is trustworthy. Avoids re-deriving "did the
-        // shared scan run" from a second cache.TryGetHeapIndex call in AnalyzeAsyncWork.
-        private bool _participantScanSucceeded;
+        public AnalyzerDomainResult? LastResult { get; private set; }
 
-        // Instance accumulator state for the IThreadStackScanParticipant path — only the top
-        // stack frame is needed here, so GetRequiredFrameCount is pinned to 1 regardless of what
-        // other quartet members (e.g. ThreadStackClusterAnalyzer) request; the dispatcher walks
-        // max(all participants) frames but each participant only reads what it asked for.
-        private int _threadScanTotalAliveThreads;
-        private int _threadScanThreadsHoldingLocks;
-        private List<WaitingThreadInfo>? _threadScanWaitingThreads;
-        private ObjectScanCounter? _threadScanCounter;
-        private bool _threadScanSucceeded;
-
-        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            HangAnalysisOptions options = context.AnalysisOptions.HangAnalysis;
-            return ValueTask.FromResult(Analyze(context.Runtime, context.Heap, context.Cache, options, context.Progress).Stamp(this));
+
+            IHeapObjectStream candidates = context.HeapObjects
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapObjects}' capability.");
+            IDumpObjectFieldQuery dumpFields = context.DumpObjectFields
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.DumpObjectFields}' capability.");
+            IRuntimeThreadQuery threads = context.RuntimeThreads
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.RuntimeThreads}' capability.");
+            IRuntimeThreadPoolQuery threadPool = context.RuntimeThreadPool
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.RuntimeThreadPool}' capability.");
+            HangAnalysisOptions options = context.AnalyzerOptions as HangAnalysisOptions ?? new HangAnalysisOptions();
+
+            LastResult = Analyze(candidates, dumpFields, threads, threadPool, options, cancellationToken);
+            return ValueTask.CompletedTask;
         }
 
-        // Resets per-entry accumulator fields ahead of the shared heap-index scan pass.
-        public void BeforeHeapIndexScan(AnalysisContext context)
+        private static HangDomainResult Analyze(
+            IHeapObjectStream candidates,
+            IDumpObjectFieldQuery dumpFields,
+            IRuntimeThreadQuery threads,
+            IRuntimeThreadPoolQuery threadPoolQuery,
+            HangAnalysisOptions options,
+            CancellationToken cancellationToken)
         {
-            _options = context.AnalysisOptions.HangAnalysis;
-            _heap = context.Heap;
-            _profileByMethodTable = new Dictionary<ulong, AsyncTypeProfile>(capacity: 64);
-            _taskContinuations = new Dictionary<string, int>();
-            _threadPoolInfo = new ThreadPoolAnalysis();
-            _tasksScanned = 0;
-            _totalContinuations = 0;
-            _scanCounter = new ObjectScanCounter("Hang async object scan");
-        }
+            var analysis = new HangAnalysis();
 
-        // Ports RunSequentialAsyncScan's loop body onto the disk-backed heap-index scan driven
-        // by HeapIndexScanDispatcher, so this analyzer shares one pass over the index instead of
-        // enumerating it independently via the ClrMD API.
-        void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => OnHeapEntry(in entry);
-
-        private void OnHeapEntry(in HeapEntry entry)
-        {
-            _scanCounter!.Tick();
-
-            if (entry.Address == 0)
-                return;
-
-            AsyncTypeProfile profile = ResolveAsyncTypeProfile(_heap!, entry, _profileByMethodTable!);
-            if (!profile.IsPotentiallyRelevant)
-                return;
-
-            AnalyzeHeapObjectByAddress(
-                _heap!,
-                entry.Address,
-                profile,
-                _threadPoolInfo!,
-                _taskContinuations!,
-                ref _tasksScanned,
-                ref _totalContinuations);
-        }
-
-        public void OnHeapIndexScanCompleted(bool succeeded) => _participantScanSucceeded = succeeded;
-
-        IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() => new HangAnalyzer();
-
-        // Merges heap-scan-accumulated counters from disjoint-range workers into this instance.
-        // Thread-pool Runtime* fields (set by ReadRuntimeThreadPool in AnalyzeForHang) are not
-        // populated on workers and do not need to be merged.
-        void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
-        {
-            foreach (IHeapIndexScanParticipant p in partials)
+            // ── Thread-stack side: waiting-thread detection (top frame only) ─────────────
+            foreach (RuntimeThreadRef thread in threads.EnumerateThreads())
             {
-                var other = (HangAnalyzer)p;
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!thread.IsAlive)
+                    continue;
 
-                // Profile cache: merge missing keys — same MT always resolves to the same profile.
-                if (other._profileByMethodTable != null)
+                analysis.TotalAliveThreads++;
+                if (thread.LockCount > 0)
+                    analysis.ThreadsHoldingLocks++;
+
+                ThreadStackFrameRef? topFrame = null;
+                foreach (ThreadStackFrameRef f in threads.EnumerateStackFrames(thread))
                 {
-                    foreach (var kvp in other._profileByMethodTable)
-                    {
-                        if (!_profileByMethodTable!.ContainsKey(kvp.Key))
-                            _profileByMethodTable[kvp.Key] = kvp.Value;
-                    }
+                    topFrame = f;
+                    break;
                 }
+                if (topFrame is null)
+                    continue;
 
-                // Continuation-type counts: sum per type name.
-                if (other._taskContinuations != null)
-                {
-                    foreach (var kvp in other._taskContinuations)
-                    {
-                        _taskContinuations!.TryGetValue(kvp.Key, out int count);
-                        _taskContinuations[kvp.Key] = count + kvp.Value;
-                    }
-                }
-
-                // ThreadPoolAnalysis heap-scan counters.
-                ThreadPoolAnalysis tp = _threadPoolInfo!;
-                ThreadPoolAnalysis otherTp = other._threadPoolInfo!;
-                tp.QueuedWorkItems += otherTp.QueuedWorkItems;
-                tp.TotalTasks += otherTp.TotalTasks;
-                tp.PendingTasks += otherTp.PendingTasks;
-                tp.FaultedTasks += otherTp.FaultedTasks;
-                tp.CanceledTasks += otherTp.CanceledTasks;
-
-                _tasksScanned += other._tasksScanned;
-                _totalContinuations += other._totalContinuations;
+                WaitingThreadInfo? waitInfo = DetectWaitPattern(thread, topFrame.Value);
+                if (waitInfo != null)
+                    analysis.WaitingThreads.Add(waitInfo);
             }
-        }
 
-        // IThreadStackScanParticipant — shares ThreadStackScanDispatcher's single
-        // EnumerateStackTrace() pass with ThreadAnalyzer/ThreadStackClusterAnalyzer/
-        // LockGraphAnalyzer instead of independently walking runtime.Threads.
-        public int GetRequiredFrameCount(AnalysisContext context) => 1;
+            // ── Heap-scan side: Task/QueuedWorkItem/continuation-shaped candidates ───────
+            var threadPoolInfo = new ThreadPoolAnalysis();
+            var taskContinuations = new Dictionary<string, int>(StringComparer.Ordinal);
+            int totalContinuations = 0;
 
-        public void BeforeThreadStackScan(AnalysisContext context)
-        {
-            _threadScanTotalAliveThreads = 0;
-            _threadScanThreadsHoldingLocks = 0;
-            _threadScanWaitingThreads = new List<WaitingThreadInfo>();
-            _threadScanCounter = new ObjectScanCounter("scanning threads for hang", context.Progress, reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
-        }
+            foreach (HeapObjectRef candidate in candidates.EnumerateObjects())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
 
-        void IThreadStackScanParticipant.OnThreadStack(in ThreadStackSnapshot snapshot) => OnThreadStack(in snapshot);
+                AsyncTypeProfile profile = AsyncTypeProfile.FromTypeName(candidate.TypeDisplayName);
 
-        private void OnThreadStack(in ThreadStackSnapshot snapshot)
-        {
-            _threadScanCounter!.Tick();
+                if (profile.IsQueuedWorkItem)
+                    threadPoolInfo.QueuedWorkItems++;
 
-            ClrThread thread = snapshot.Thread;
-            if (!thread.IsAlive)
-                return;
+                if (profile.IsTask)
+                {
+                    threadPoolInfo.TotalTasks++;
 
-            _threadScanTotalAliveThreads++;
+                    if (dumpFields.TryReadField(candidate.Address, "m_stateFlags", out FieldValue value) && value.Kind == FieldValueKind.Int32)
+                    {
+                        int stateFlags = value.AsInt32();
+                        bool isCompleted = (stateFlags & 0x1000000) != 0;
+                        bool isFaulted = (stateFlags & 0x200000) != 0;
+                        bool isCanceled = (stateFlags & 0x400000) != 0;
 
-            if (snapshot.TopFrames.Count == 0)
-                return;
+                        if (isFaulted)
+                            threadPoolInfo.FaultedTasks++;
+                        else if (isCanceled)
+                            threadPoolInfo.CanceledTasks++;
+                        else if (!isCompleted)
+                            threadPoolInfo.PendingTasks++;
+                    }
+                }
 
-            var waitInfo = DetectWaitPattern(thread, snapshot.TopFrames[0]);
-            if (waitInfo != null)
-                _threadScanWaitingThreads!.Add(waitInfo);
+                if (profile.IsContinuation)
+                {
+                    totalContinuations++;
+                    taskContinuations[candidate.TypeDisplayName] = taskContinuations.GetValueOrDefault(candidate.TypeDisplayName) + 1;
+                }
+            }
 
-            if (thread.LockCount > 0)
-                _threadScanThreadsHoldingLocks++;
-        }
+            analysis.ThreadPoolInfo = threadPoolInfo;
+            analysis.TaskContinuations = taskContinuations;
+            analysis.TotalContinuations = totalContinuations;
 
-        public void OnThreadStackScanCompleted(bool succeeded)
-        {
-            _threadScanSucceeded = succeeded;
-            if (succeeded)
-                _threadScanCounter?.Complete();
-        }
+            // ── Runtime-sourced thread-pool telemetry ────────────────────────────────────
+            if (threadPoolQuery.TryGetThreadPoolInfo(out RuntimeThreadPoolInfo info))
+            {
+                threadPoolInfo.RuntimeInitialized = true;
+                threadPoolInfo.RuntimeMinThreads = info.MinThreads;
+                threadPoolInfo.RuntimeMaxThreads = info.MaxThreads;
+                threadPoolInfo.RuntimeActiveWorkerThreads = info.ActiveWorkerThreads;
+                threadPoolInfo.RuntimeIdleWorkerThreads = info.IdleWorkerThreads;
+                threadPoolInfo.RuntimeRetiredWorkerThreads = info.RetiredWorkerThreads;
+                threadPoolInfo.RuntimeQueueLength = info.QueueLength;
+                threadPoolInfo.RuntimeCpuUtilization = info.CpuUtilization;
+            }
 
-        private void BuildAsyncAnalysisFromParticipantState(HangAnalysis analysis)
-        {
-            _scanCounter?.Complete();
+            analysis.HealthScore = ComputeHealthScore(analysis, options);
 
-            analysis.ThreadPoolInfo = _threadPoolInfo!;
-            analysis.TaskContinuations = _taskContinuations!;
-            analysis.TotalContinuations = _totalContinuations;
-        }
-
-        public AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap)
-        {
-            return Analyze(runtime, heap, cache: null, new HangAnalysisOptions(), progress: null);
-        }
-
-        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache, HangAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress)
-        {
-            var hangInfo = AnalyzeForHang(runtime, heap, cache, options, progress);
-
+            // ── Build output ──────────────────────────────────────────────────────────────
             var waitCategoryBreakdown = new Dictionary<string, int>(StringComparer.Ordinal);
-            foreach (var wt in hangInfo.WaitingThreads)
+            foreach (WaitingThreadInfo wt in analysis.WaitingThreads)
             {
                 string category = wt.WaitType.ToString();
                 waitCategoryBreakdown.TryGetValue(category, out int count);
                 waitCategoryBreakdown[category] = count + 1;
             }
 
-            double waitingPct = hangInfo.TotalAliveThreads == 0 ? 0
-                : hangInfo.WaitingThreads.Count * 100.0 / hangInfo.TotalAliveThreads;
+            double waitingPct = analysis.TotalAliveThreads == 0 ? 0
+                : analysis.WaitingThreads.Count * 100.0 / analysis.TotalAliveThreads;
+
+            // Complete ranked lists — no report-width cap in the analyzer (§9.25 D5); the render
+            // layer slices for display.
+            var topWaitingThreads = new List<WaitingThreadInfo>(analysis.WaitingThreads);
+            topWaitingThreads.Sort(static (a, b) =>
+            {
+                int byLock = b.LockCount.CompareTo(a.LockCount);
+                return byLock != 0 ? byLock : b.WaitType.CompareTo(a.WaitType);
+            });
+            var waitingThreadSnapshots = new List<WaitingThreadSnapshot>(topWaitingThreads.Count);
+            foreach (WaitingThreadInfo w in topWaitingThreads)
+                waitingThreadSnapshots.Add(new WaitingThreadSnapshot(w.ThreadId, w.OSThreadId, w.WaitType.ToString(), w.WaitReason, w.LockCount, w.TopStackFrame));
+
+            var continuationTypeCounts = new List<KeyValuePair<string, int>>(taskContinuations);
+            continuationTypeCounts.Sort(static (a, b) => b.Value.CompareTo(a.Value));
+            var continuationTypes = new List<NameCountEntry>(continuationTypeCounts.Count);
+            foreach (KeyValuePair<string, int> kv in continuationTypeCounts)
+                continuationTypes.Add(new NameCountEntry(kv.Key, kv.Value));
 
             return new HangDomainResult(
-                    hangInfo.TotalAliveThreads,
-                    hangInfo.WaitingThreads.Count,
-                    hangInfo.ThreadsHoldingLocks,
-                    waitingPct,
-                    waitCategoryBreakdown,
-                    hangInfo.TotalContinuations,
-                    hangInfo.ThreadPoolInfo.QueuedWorkItems,
-                    hangInfo.ThreadPoolInfo.TotalTasks,
-                    hangInfo.ThreadPoolInfo.PendingTasks,
-                    hangInfo.ThreadPoolInfo.FaultedTasks,
-                    hangInfo.ThreadPoolInfo.CanceledTasks,
-                    hangInfo.ThreadPoolInfo.RuntimeInitialized,
-                    hangInfo.ThreadPoolInfo.RuntimeMinThreads,
-                    hangInfo.ThreadPoolInfo.RuntimeMaxThreads,
-                    hangInfo.ThreadPoolInfo.RuntimeActiveWorkerThreads,
-                    hangInfo.ThreadPoolInfo.RuntimeIdleWorkerThreads,
-                    hangInfo.ThreadPoolInfo.RuntimeRetiredWorkerThreads,
-                    hangInfo.ThreadPoolInfo.RuntimeQueueLength,
-                    hangInfo.ThreadPoolInfo.RuntimeCpuUtilization,
-                    hangInfo.ThreadPoolInfo.RuntimeInitialized &&
-                        hangInfo.ThreadPoolInfo.RuntimeMaxThreads > 0 &&
-                        hangInfo.ThreadPoolInfo.RuntimeQueueLength.GetValueOrDefault() > 0 &&
-                        hangInfo.ThreadPoolInfo.RuntimeActiveWorkerThreads >= hangInfo.ThreadPoolInfo.RuntimeMaxThreads,
-                    hangInfo.HealthScore,
-                    // Complete ranked lists — no report-width cap in the analyzer (§9.25 D5); the
-                    // render layer slices for display.
-                    hangInfo.WaitingThreads
-                        .OrderByDescending(w => w.LockCount)
-                        .ThenByDescending(w => w.WaitType)
-                        .Select(w => new WaitingThreadSnapshot(
-                            w.ThreadId,
-                            w.OSThreadId,
-                            w.WaitType.ToString(),
-                            w.WaitReason,
-                            w.LockCount,
-                            w.TopStackFrame))
-                        .ToList(),
-                    hangInfo.TaskContinuations
-                        .OrderByDescending(k => k.Value)
-                        .Select(k => new NameCountEntry(k.Key, k.Value))
-                        .ToList());
-        }
-
-        private HangAnalysis AnalyzeForHang(ClrRuntime runtime, ClrHeap heap, IHeapAnalysisCache? cache, HangAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress)
-        {
-            var analysis = new HangAnalysis();
-
-            if (_threadScanSucceeded)
-            {
-                // BeforeThreadStackScan/OnThreadStack already ran via the pipeline's
-                // ThreadStackScanDispatcher — read back the accumulated state instead of a
-                // second independent walk of runtime.Threads.
-                analysis.TotalAliveThreads = _threadScanTotalAliveThreads;
-                analysis.ThreadsHoldingLocks = _threadScanThreadsHoldingLocks;
-                analysis.WaitingThreads = _threadScanWaitingThreads!;
-            }
-            else
-            {
-                // Fallback (non-participant) path: used when this analyzer is invoked directly
-                // (tests, benchmarks) instead of through AnalysisPipeline's dispatcher.
-                var waitingThreads = new List<WaitingThreadInfo>();
-                var threadScanCounter = new ObjectScanCounter("scanning threads for hang", progress, reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
-
-                foreach (var thread in runtime.Threads)
-                {
-                    threadScanCounter.Tick();
-
-                    if (!thread.IsAlive)
-                        continue;
-
-                    analysis.TotalAliveThreads++;
-
-                    // Analyze thread state (top frame only to reduce allocations)
-                    ClrStackFrame? topFrame = null;
-                    foreach (var frame in thread.EnumerateStackTrace())
-                    {
-                        topFrame = frame;
-                        break;
-                    }
-
-                    if (topFrame == null)
-                        continue;
-
-                    var waitInfo = DetectWaitPattern(thread, topFrame);
-                    if (waitInfo != null)
-                    {
-                        waitingThreads.Add(waitInfo);
-                    }
-
-                    // Check for lock ownership
-                    if (thread.LockCount > 0)
-                    {
-                        analysis.ThreadsHoldingLocks++;
-                    }
-                }
-
-                threadScanCounter.Complete();
-                analysis.WaitingThreads = waitingThreads;
-            }
-
-            ReadRuntimeThreadPool(runtime, analysis);
-            progress?.Report(new(analysis.TotalAliveThreads, "analyzing async work items"));
-            AnalyzeAsyncWork(heap, cache, analysis);
-
-            analysis.HealthScore = ComputeHealthScore(analysis, options);
-
-            return analysis;
-        }
-
-        private static void ReadRuntimeThreadPool(ClrRuntime runtime, HangAnalysis analysis)
-        {
-            ClrThreadPool? tp = runtime.ThreadPool;
-            if (tp == null)
-                return;
-
-            var info = analysis.ThreadPoolInfo;
-            info.RuntimeInitialized = true;
-            info.RuntimeMinThreads = tp.MinThreads;
-            info.RuntimeMaxThreads = tp.MaxThreads;
-            info.RuntimeActiveWorkerThreads = tp.ActiveWorkerThreads;
-            info.RuntimeIdleWorkerThreads = tp.IdleWorkerThreads;
-            info.RuntimeRetiredWorkerThreads = tp.RetiredWorkerThreads;
-            info.RuntimeQueueLength = GetIntProperty(tp, "QueueLength");
-            info.RuntimeCpuUtilization = tp.CpuUtilization;
-            info.UsingPortableThreadPool = tp.UsingPortableThreadPool;
-            info.UsingWindowsThreadPool = tp.UsingWindowsThreadPool;
-        }
-
-        private static int? GetIntProperty(object? instance, string propertyName)
-        {
-            if (instance is null)
-                return null;
-
-            try
-            {
-                object? value = instance.GetType().GetProperty(propertyName)?.GetValue(instance);
-                return value switch
-                {
-                    int intValue => intValue,
-                    long longValue when longValue is >= int.MinValue and <= int.MaxValue => (int)longValue,
-                    _ => null
-                };
-            }
-            catch
-            {
-                return null;
-            }
+                analysis.TotalAliveThreads,
+                analysis.WaitingThreads.Count,
+                analysis.ThreadsHoldingLocks,
+                waitingPct,
+                waitCategoryBreakdown,
+                analysis.TotalContinuations,
+                threadPoolInfo.QueuedWorkItems,
+                threadPoolInfo.TotalTasks,
+                threadPoolInfo.PendingTasks,
+                threadPoolInfo.FaultedTasks,
+                threadPoolInfo.CanceledTasks,
+                threadPoolInfo.RuntimeInitialized,
+                threadPoolInfo.RuntimeMinThreads,
+                threadPoolInfo.RuntimeMaxThreads,
+                threadPoolInfo.RuntimeActiveWorkerThreads,
+                threadPoolInfo.RuntimeIdleWorkerThreads,
+                threadPoolInfo.RuntimeRetiredWorkerThreads,
+                threadPoolInfo.RuntimeQueueLength,
+                threadPoolInfo.RuntimeCpuUtilization,
+                threadPoolInfo.RuntimeInitialized &&
+                    threadPoolInfo.RuntimeMaxThreads > 0 &&
+                    threadPoolInfo.RuntimeQueueLength.GetValueOrDefault() > 0 &&
+                    threadPoolInfo.RuntimeActiveWorkerThreads >= threadPoolInfo.RuntimeMaxThreads,
+                analysis.HealthScore,
+                waitingThreadSnapshots,
+                continuationTypes);
         }
 
         /// <summary>
         /// Produces a 0-100 composite score. Each penalty maps to a named, observable signal
-        /// so the score degrades predictably â€” not arbitrarily.
+        /// so the score degrades predictably — not arbitrarily.
         /// </summary>
         private static int ComputeHealthScore(HangAnalysis analysis, HangAnalysisOptions options)
         {
             int score = 100;
 
-            // â”€â”€ Waiting-thread pressure (up to -40) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // Waiting-thread pressure (up to -40)
             double waitingPct = analysis.TotalAliveThreads == 0 ? 0
                 : analysis.WaitingThreads.Count * 100.0 / analysis.TotalAliveThreads;
 
@@ -373,41 +223,40 @@ namespace DumpDetective.Analysis.Analyzers.Threads
             else if (waitingPct >= 50) score -= 25;
             else if (waitingPct >= 30) score -= 10;
 
-            // â”€â”€ Probable deadlock candidates: monitor-wait + holding a lock (up to -30) â”€â”€
+            // Probable deadlock candidates: monitor-wait + holding a lock (up to -30)
             int circularCandidates = 0;
-            foreach (var t in analysis.WaitingThreads)
+            foreach (WaitingThreadInfo t in analysis.WaitingThreads)
             {
                 if (t.WaitType == WaitType.MonitorWait && t.LockCount > 0)
                     circularCandidates++;
             }
             score -= Math.Min(circularCandidates * 15, 30);
 
-            // â”€â”€ Thread pool health (up to -15) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-            var tp = analysis.ThreadPoolInfo;
+            // Thread pool health (up to -15)
+            ThreadPoolAnalysis tp = analysis.ThreadPoolInfo;
             bool saturated = tp.RuntimeMaxThreads > 0 && tp.RuntimeActiveWorkerThreads >= tp.RuntimeMaxThreads;
             bool starvation = saturated && tp.RuntimeCpuUtilization < 20;
             if (starvation) score -= 15;
             else if (saturated) score -= 10;
 
-            // â”€â”€ Task backpressure (-5) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // Task backpressure (-5)
             if (tp.PendingTasks > options.HighThreadPoolThreshold) score -= 5;
 
-            // â”€â”€ Unobserved task faults (-5) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // Unobserved task faults (-5)
             if (tp.FaultedTasks > 0) score -= 5;
 
-            // â”€â”€ Async continuation backlog (-5) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // Async continuation backlog (-5)
             if (analysis.TotalContinuations > 1000) score -= 5;
 
             return Math.Max(0, Math.Min(100, score));
         }
 
-
-        private WaitingThreadInfo? DetectWaitPattern(ClrThread thread, ClrStackFrame topFrame)
+        private static WaitingThreadInfo? DetectWaitPattern(RuntimeThreadRef thread, ThreadStackFrameRef topFrame)
         {
-            if (topFrame.Method == null)
+            if (!topFrame.HasMethod)
                 return null;
 
-            string topMethod = topFrame.Method.Signature?.ToLowerInvariant() ?? "";
+            string topMethod = (topFrame.RawMethodSignature ?? topFrame.MethodDisplayName ?? "").ToLowerInvariant();
 
             WaitType? waitType = null;
             string? waitReason = null;
@@ -452,230 +301,47 @@ namespace DumpDetective.Analysis.Analyzers.Threads
             {
                 return new WaitingThreadInfo
                 {
-                    ThreadId = (uint)thread.ManagedThreadId,
-                    OSThreadId = thread.OSThreadId,
+                    ThreadId = (uint)(thread.Thread.ManagedThreadId ?? 0),
+                    OSThreadId = thread.Thread.OsThreadId,
                     WaitType = waitType.Value,
                     WaitReason = waitReason ?? "Unknown wait",
-                    LockCount = (int)thread.LockCount,
-                    TopStackFrame = topFrame.Method?.Signature ?? topFrame.ToString() ?? "Unknown"
+                    LockCount = thread.LockCount,
+                    TopStackFrame = topFrame.RawMethodSignature ?? topFrame.MethodDisplayName ?? "Unknown",
                 };
             }
 
             return null;
         }
 
-        private void AnalyzeAsyncWork(ClrHeap heap, IHeapAnalysisCache? cache, HangAnalysis analysis)
-        {
-            // BeforeHeapIndexScan/OnHeapEntry already ran via the pipeline's HeapIndexScanDispatcher
-            // before AnalyzeAsync executes when a heap index was available; read back the
-            // participant-accumulated state instead of re-scanning the index. If the shared scan
-            // failed partway (isolated by the dispatcher) or never ran, fall back to a full scan.
-            if (_participantScanSucceeded)
-            {
-                BuildAsyncAnalysisFromParticipantState(analysis);
-                return;
-            }
-
-            // No cache, or shared scan unavailable/failed: parallel over GC segments
-            RunParallelAsyncScan(heap, inMemoryEntries: null, analysis);
-        }
-
-        // Unified parallel async-work scanner — drives either a flat in-memory HeapEntry[]
-        // or a per-segment ClrObject walk. Every Task-typed object's state flags are read — no
-        // scan-limit cap (§9.25).
-        private void RunParallelAsyncScan(ClrHeap heap, HeapEntry[]? inMemoryEntries, HangAnalysis analysis)
-        {
-            var profileByMethodTable = new ConcurrentDictionary<ulong, AsyncTypeProfile>(
-                concurrencyLevel: Environment.ProcessorCount, capacity: 64);
-            var taskContinuations = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
-
-            int queuedWorkItems = 0, totalTasks = 0, pendingTasks = 0, faultedTasks = 0, canceledTasks = 0;
-            int totalContinuations = 0, tasksScanned = 0;
-
-            void ProcessEntry(ulong address, ulong mt)
-            {
-                if (address == 0 || mt == 0)
-                    return;
-
-                var entry = new HeapEntry(address, mt, 0);
-                // OPT (docs/cache/cache-architecture.md Phase 5): mt is already the
-                // GetOrAdd key — resolve via the metadata cache instead of materializing a
-                // ClrObject just for the type name.
-                AsyncTypeProfile profile = profileByMethodTable.GetOrAdd(mt, static (mt, heap) =>
-                {
-                    ClrType? type = heap.GetTypeByMethodTable(mt);
-                    return type is null
-                        ? AsyncTypeProfile.None
-                        : AsyncTypeProfile.FromTypeName(type.Name ?? string.Empty);
-                }, heap);
-
-                if (!profile.IsPotentiallyRelevant)
-                    return;
-
-                ClrObject obj = heap.GetObject(address);
-                if (!obj.IsValid || obj.Type == null)
-                    return;
-
-                if (profile.IsQueuedWorkItem)
-                    Interlocked.Increment(ref queuedWorkItems);
-
-                if (profile.IsTask)
-                {
-                    Interlocked.Increment(ref tasksScanned);
-                    Interlocked.Increment(ref totalTasks);
-
-                    var stateField = obj.Type.GetFieldByName("m_stateFlags");
-                    if (stateField != null)
-                    {
-                        int stateFlags = stateField.Read<int>(obj, interior: false);
-                        bool isCompleted = (stateFlags & 0x1000000) != 0;
-                        bool isFaulted = (stateFlags & 0x200000) != 0;
-                        bool isCanceled = (stateFlags & 0x400000) != 0;
-
-                        if (isFaulted) Interlocked.Increment(ref faultedTasks);
-                        else if (isCanceled) Interlocked.Increment(ref canceledTasks);
-                        else if (!isCompleted) Interlocked.Increment(ref pendingTasks);
-                    }
-                }
-
-                if (profile.IsContinuation)
-                {
-                    Interlocked.Increment(ref totalContinuations);
-                    taskContinuations.AddOrUpdate(profile.TypeName, 1, (_, c) => c + 1);
-                }
-            }
-
-            if (inMemoryEntries != null)
-            {
-                Parallel.ForEach(inMemoryEntries, entry =>
-                {
-                    if (entry.Address == 0 || entry.MethodTable == 0)
-                        return;
-                    ProcessEntry(entry.Address, entry.MethodTable);
-                });
-            }
-            else
-            {
-                Parallel.ForEach(heap.Segments, segment =>
-                {
-                    foreach (ClrObject obj in segment.EnumerateObjects())
-                    {
-                        if (!obj.IsValid || obj.Type is null)
-                            continue;
-                        ulong mt = obj.Type.MethodTable;
-                        if (mt == 0)
-                            continue;
-                        ProcessEntry(obj.Address, mt);
-                    }
-                });
-            }
-
-            analysis.ThreadPoolInfo = new ThreadPoolAnalysis
-            {
-                QueuedWorkItems = queuedWorkItems,
-                TotalTasks = totalTasks,
-                PendingTasks = pendingTasks,
-                FaultedTasks = faultedTasks,
-                CanceledTasks = canceledTasks
-            };
-            analysis.TaskContinuations = new Dictionary<string, int>(taskContinuations, StringComparer.Ordinal);
-            analysis.TotalContinuations = totalContinuations;
-        }
-
-        private static AsyncTypeProfile ResolveAsyncTypeProfile(ClrHeap heap, in HeapEntry entry, Dictionary<ulong, AsyncTypeProfile> profileByMethodTable)
-        {
-            if (entry.MethodTable == 0)
-                return AsyncTypeProfile.None;
-
-            if (profileByMethodTable.TryGetValue(entry.MethodTable, out AsyncTypeProfile existing))
-                return existing;
-
-            // OPT (docs/cache/cache-architecture.md Phase 5): entry.MethodTable is
-            // already known — resolve via the metadata cache instead of materializing a ClrObject.
-            ClrType? type = heap.GetTypeByMethodTable(entry.MethodTable);
-            if (type is null)
-            {
-                profileByMethodTable[entry.MethodTable] = AsyncTypeProfile.None;
-                return AsyncTypeProfile.None;
-            }
-
-            string typeName = type.Name ?? string.Empty;
-            AsyncTypeProfile profile = AsyncTypeProfile.FromTypeName(typeName);
-            profileByMethodTable[entry.MethodTable] = profile;
-            return profile;
-        }
-
-        private static void AnalyzeHeapObjectByAddress(
-            ClrHeap heap,
-            ulong objectAddress,
-            AsyncTypeProfile profile,
-            ThreadPoolAnalysis threadPool,
-            Dictionary<string, int> taskContinuations,
-            ref int tasksScanned,
-            ref int totalContinuations)
-        {
-            ClrObject obj = heap.GetObject(objectAddress);
-            if (!obj.IsValid || obj.Type == null)
-                return;
-
-            if (profile.IsQueuedWorkItem)
-            {
-                threadPool.QueuedWorkItems++;
-            }
-
-            if (profile.IsTask)
-            {
-                tasksScanned++;
-                threadPool.TotalTasks++;
-
-                var stateField = obj.Type.GetFieldByName("m_stateFlags");
-                if (stateField != null)
-                {
-                    int stateFlags = stateField.Read<int>(obj, interior: false);
-                    bool isCompleted = (stateFlags & 0x1000000) != 0;
-                    bool isFaulted = (stateFlags & 0x200000) != 0;
-                    bool isCanceled = (stateFlags & 0x400000) != 0;
-
-                    if (isFaulted)
-                        threadPool.FaultedTasks++;
-                    else if (isCanceled)
-                        threadPool.CanceledTasks++;
-                    else if (!isCompleted)
-                        threadPool.PendingTasks++;
-                }
-            }
-
-            if (profile.IsContinuation)
-            {
-                totalContinuations++;
-                string typeName = profile.TypeName;
-                taskContinuations.TryGetValue(typeName, out int count);
-                taskContinuations[typeName] = count + 1;
-            }
-        }
-
-        private readonly record struct AsyncTypeProfile(string TypeName, bool IsTask, bool IsQueuedWorkItem, bool IsContinuation)
-        {
-            public static AsyncTypeProfile None => new(string.Empty, false, false, false);
-
-            public bool IsPotentiallyRelevant => IsTask || IsQueuedWorkItem || IsContinuation;
-
-            public static AsyncTypeProfile FromTypeName(string typeName)
-            {
-                bool isQueuedWorkItem = typeName.Contains("QueueUserWorkItemCallback", StringComparison.Ordinal)
-                    || typeName.Contains("ThreadPoolWorkQueue", StringComparison.Ordinal);
-                bool isTask = TaskTypeNamePattern.IsTaskType(typeName);
-                bool isContinuation = typeName.Contains("ContinuationTask", StringComparison.Ordinal)
-                    || typeName.Contains("AwaitTaskContinuation", StringComparison.Ordinal);
-
-                return new AsyncTypeProfile(typeName, isTask, isQueuedWorkItem, isContinuation);
-            }
-        }
-
         public void Dispose() { }
     }
 
-    internal class HangAnalysis
+    /// <summary>
+    /// Structural classification of a candidate heap object's type name into the three shapes this
+    /// analyzer cares about. Pure string matching, no ClrMD dependency — shared between
+    /// <see cref="HangAnalyzerLegacyAdapter"/> (which uses <see cref="IsPotentiallyRelevant"/> to
+    /// decide whether to collect a candidate at all during the heap scan) and <see cref="HangAnalyzer"/>
+    /// itself (which re-derives the specific category from each collected candidate's type name).
+    /// </summary>
+    internal readonly record struct AsyncTypeProfile(string TypeName, bool IsTask, bool IsQueuedWorkItem, bool IsContinuation)
+    {
+        public static AsyncTypeProfile None => new(string.Empty, false, false, false);
+
+        public bool IsPotentiallyRelevant => IsTask || IsQueuedWorkItem || IsContinuation;
+
+        public static AsyncTypeProfile FromTypeName(string typeName)
+        {
+            bool isQueuedWorkItem = typeName.Contains("QueueUserWorkItemCallback", StringComparison.Ordinal)
+                || typeName.Contains("ThreadPoolWorkQueue", StringComparison.Ordinal);
+            bool isTask = TaskTypeNamePattern.IsTaskType(typeName);
+            bool isContinuation = typeName.Contains("ContinuationTask", StringComparison.Ordinal)
+                || typeName.Contains("AwaitTaskContinuation", StringComparison.Ordinal);
+
+            return new AsyncTypeProfile(typeName, isTask, isQueuedWorkItem, isContinuation);
+        }
+    }
+
+    internal sealed class HangAnalysis
     {
         public int TotalAliveThreads { get; set; }
         public int ThreadsHoldingLocks { get; set; }
@@ -686,7 +352,7 @@ namespace DumpDetective.Analysis.Analyzers.Threads
         public Dictionary<string, int> TaskContinuations { get; set; } = new();
     }
 
-    internal class WaitingThreadInfo
+    internal sealed class WaitingThreadInfo
     {
         public uint ThreadId { get; set; }
         public uint OSThreadId { get; set; }
@@ -696,7 +362,7 @@ namespace DumpDetective.Analysis.Analyzers.Threads
         public string TopStackFrame { get; set; } = string.Empty;
     }
 
-    internal class ThreadPoolAnalysis
+    internal sealed class ThreadPoolAnalysis
     {
         // Heap-scan counters
         public int QueuedWorkItems { get; set; }
@@ -705,7 +371,7 @@ namespace DumpDetective.Analysis.Analyzers.Threads
         public int FaultedTasks { get; set; }
         public int CanceledTasks { get; set; }
 
-        // Runtime-sourced counters (from ClrThreadPool)
+        // Runtime-sourced counters (from runtime.thread-pool)
         public bool RuntimeInitialized { get; set; }
         public int RuntimeMinThreads { get; set; }
         public int RuntimeMaxThreads { get; set; }
@@ -714,8 +380,6 @@ namespace DumpDetective.Analysis.Analyzers.Threads
         public int RuntimeRetiredWorkerThreads { get; set; }
         public int? RuntimeQueueLength { get; set; }
         public int RuntimeCpuUtilization { get; set; }
-        public bool UsingPortableThreadPool { get; set; }
-        public bool UsingWindowsThreadPool { get; set; }
     }
 
     internal enum WaitType
@@ -726,10 +390,6 @@ namespace DumpDetective.Analysis.Analyzers.Threads
         SemaphoreWait,
         EventWait,
         IOWait,
-        ThreadJoin
+        ThreadJoin,
     }
 }
-
-// removed stray partial Dispose wrapper (Dispose implemented inside class)
-
-

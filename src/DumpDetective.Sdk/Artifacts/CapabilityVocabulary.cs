@@ -50,6 +50,11 @@ public static class CapabilityVocabulary
     public const string RuntimeExceptions = "runtime.exceptions";
     public const string RuntimeJit = "runtime.jit";
 
+    /// <summary>Thread-pool state (min/max/active/idle worker threads, queue length, CPU
+    /// utilization) — added 2026-09-12 for <c>HangAnalyzer</c>'s retyping; see
+    /// <see cref="Analysis.IRuntimeThreadPoolQuery"/>'s own remarks.</summary>
+    public const string RuntimeThreadPool = "runtime.thread-pool";
+
     /// <summary>Live monitor locks (<c>lock</c>/<c>Monitor.Enter</c>). Was declared but unconsumed
     /// until 2026-09-09, when <see cref="Analysis.IHeapSyncBlockQuery"/> became its first real
     /// consumer, backing <c>LockGraphAnalyzer</c>'s <c>heap.EnumerateSyncBlocks()</c> usage — see

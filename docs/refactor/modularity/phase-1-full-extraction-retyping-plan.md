@@ -2,7 +2,7 @@
 
 ## Status (as of 2026-09-12)
 
-**24 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
+**25 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
 in the tree, not just this doc's own narrative — this doc's original "35" count in the section below
 was an approximation from § 10 point 8's grep-based measurement; the real count is 36). The
 `dump.object-fields` Tier-2 escape hatch **is built** (see "Tier 2 wave" below) — the "still not
@@ -11,19 +11,19 @@ built" language later in this doc is stale as of the pilot, 2026-09-11.
 **Done:**
 `AllocationPatternAnalyzer`, `ArrayAnalyzer`, `BoxingAnalyzer`, `DbConnectionAnalyzer`,
 `FinalizableObjectAnalyzer`, `GCGenerationAnalyzer`, `GCHandleAnalyzer`, `GCRootAnalyzer`,
-`HeapTopologyAnalyzer`, `HttpObjectAnalyzer`, `JitAnalyzer`, `LockGraphAnalyzer`,
+`HangAnalyzer`, `HeapTopologyAnalyzer`, `HttpObjectAnalyzer`, `JitAnalyzer`, `LockGraphAnalyzer`,
 `LohFragmentationAnalyzer`, `MemoryAnalyzer`, `ObjectShapeAnalyzer`, `SegmentReservationAnalyzer`,
 `SqlCommandAnalyzer`, `SqlConnectionPoolAnalyzer`, `SqlTransactionAnalyzer`, `ThreadAnalyzer`,
 `ThreadStackClusterAnalyzer`, `TimerLeakAnalyzer`, `WcfChannelAnalyzer`, `WeakReferenceAnalyzer`.
 
-**Remaining (12):**
+**Remaining (11):**
 `AsyncStateMachineAnalyzer`, `AsyncTaskAnalyzer`, `CollectionAnalyzer`,
 `CrashAnalyzer`, `DominatorAnalyzer`, `EventLeakAnalyzer`,
-`HangAnalyzer`, `ModuleAnalyzer`, `ReferenceChainAnalyzer`, `StaticRootLeakDetector`,
+`ModuleAnalyzer`, `ReferenceChainAnalyzer`, `StaticRootLeakDetector`,
 `StringAnalyzer`, and **`LeakCandidateAnalyzer`** —
 explicit user direction: do `LeakCandidateAnalyzer` last of all, since it needs cross-analyzer
 result access (`context.CompletedRunResults`-equivalent) and deferred-execution-ordering modeling
-that don't exist in the SDK yet, on top of everything the other 11 need.
+that don't exist in the SDK yet, on top of everything the other 10 need.
 
 Detailed plan for the two items [phase-1-contracts-sdk.md](phase-1-contracts-sdk.md) leaves
 deferred (`Analysis/`, `Presentation/`) and the ownerless gap recorded at
@@ -970,7 +970,70 @@ pattern, 2 of 4 quartet members already retyped) rather than inventing a new one
   grep sweep, caught by building `BenchmarkSuite1` before committing).
 - **`SdkVersion` 12**.
 
-Remaining Tier-1+Tier-2 analyzers (12, see "Status" at the top) haven't been started yet.
+**`HangAnalyzer`. Done 2026-09-12.** Completes the thread-domain quartet (all 4 of 4:
+`LockGraphAnalyzer`, `ThreadStackClusterAnalyzer`, `ThreadAnalyzer`, now `HangAnalyzer`). The
+biggest batch yet by volume (735 lines) but not by novel-capability difficulty — dual-scan
+complexity, not a new hard capability like `AsyncStateMachineAnalyzer`'s still-open field-enumeration
+gap.
+- **The one real architectural wrinkle**: this is the only analyzer needing to be *both* a
+  heap-index-scan participant (discovering Task/QueuedWorkItem/continuation-shaped objects) and a
+  thread-stack-scan participant (detecting waiting threads) at once. The shared
+  `TypedResourceCandidateStreamingLegacyAdapter` was built for heap-scan-only consumers and doesn't
+  compose with `IThreadStackScanParticipant` without duplicating its private state, so
+  `HangAnalyzerLegacyAdapter` is bespoke — implements both scan-participant interfaces directly,
+  mirroring what each role does individually elsewhere (candidate-list accumulation shaped like the
+  shared adapter's own internals; thread/frame accumulation shaped like
+  `ThreadAnalyzerLegacyAdapter`/`LockGraphAnalyzerLegacyAdapter`).
+- **`runtime.thread-pool` implemented for the first time** — `IRuntimeThreadPoolQuery` wraps
+  `ClrRuntime.ThreadPool`'s `ClrThreadPool`, another ClrMD convenience-property wrapper (like
+  `ClrException`), not a raw field read — entirely Tier-1 despite reading thread-pool internals.
+  `QueueLength` needed the same defensive reflection probe the pre-retyping analyzer's own
+  `GetIntProperty` used (not a public property on every ClrMD version), ported unchanged.
+- **`AsyncTypeProfile` promoted from a private nested type to a shared, namespace-level `internal`
+  type** — the pre-retyping analyzer's own pure, ClrMD-independent name classifier
+  (Task/QueuedWorkItem/continuation), now used by both `HangAnalyzerLegacyAdapter` (deciding whether
+  to collect a heap-scan candidate at all, via `IsPotentiallyRelevant`) and `HangAnalyzer` itself
+  (re-deriving which specific category a collected candidate belongs to from its type name — a pure
+  string operation needing no further ClrMD access once collected).
+- **The known-relevant field read** (`m_stateFlags` on `System.Threading.Tasks.Task`) goes through
+  `dump.object-fields` unchanged — `Int32`, already supported, no new `FieldValueKind` needed.
+- **A real, deliberate behavior simplification, documented not dropped**: the pre-retyping
+  analyzer's independent parallel-heap-walk fallback (when no shared scan ran) has no equivalent —
+  same accepted simplification `TimerLeakAnalyzer`/`WeakReferenceAnalyzer`'s Phase B already made:
+  a real analysis session always goes through the pipeline's shared scan, so an empty candidate list
+  when it didn't run is accepted rather than re-implementing a second, independent scan path.
+- **A capability-registry drift caught immediately, as designed**: `SdkRegistryConformanceTests`
+  failed the moment `runtime.thread-pool` was added to `CapabilityVocabulary` without a matching
+  `capability-registry.json` entry — fixed by bumping the registry to `1.7.0` and adding the entry,
+  exactly the mechanism this test exists for.
+- **Test fallout, not just a call-site swap**: the pre-retyping `HangAnalyzerHeapIndexScanTests`
+  exercised the old analyzer's own private accumulator fields (a per-method-table profile cache,
+  separate running counters) directly via reflection — none of that state exists post-retyping (the
+  adapter's own state is a flat candidate list, nothing else), so the old test file was deleted
+  outright rather than adapted, replaced by `HangAnalyzerRetypingCharacterizationTests`.
+- **Gate met**: new `HangAnalyzerRetypingCharacterizationTests` (15 tests) — fakes for the analyzer's
+  own classification/scoring logic (wait detection, task state-flag classification, health-score
+  arithmetic, runtime-thread-pool-unavailable handling), plus one live-self-attached-process test
+  exercising `HangAnalyzerLegacyAdapter`'s actual `BeforeHeapIndexScan`/`OnHeapEntry`/`MergePartial`
+  end to end (candidate data needs real ClrMD type resolution, same constraint every dump-side query
+  characterization test in this project hits). New `HangAnalyzerRealDumpTests`
+  (`[DiscrepancyFact]`, one dump, foreground, streamed to a file) — heap-index scan driven explicitly
+  via `HeapIndexScanDispatcher` (matching `TimerLeakAnalyzerRealDumpTests`'s own pattern; without it,
+  the adapter's "invoked outside the pipeline" default silently reports zero tasks regardless of what
+  the dump contains), thread-stack side left on its live fallback (matching
+  `LockGraphAnalyzerRealDumpTests`'s own precedent) — passed in 24s against the real 3.5 GB reference
+  dump: 38 alive threads, 5 lock-holding (both cross-check exactly against `ThreadAnalyzer`'s own
+  real-dump result on the same dump), 0 waiting (top-frame-only classification, unlike
+  `ThreadAnalyzer`'s whole-stack wait detection), health score 95 (100 − 5 for `FaultedTasks > 0`,
+  matching the scoring formula by hand), 12,071 tasks scanned, 39 pending, 1 faulted, 2 canceled, 203
+  queued work items, 147 continuations, runtime thread-pool data available, not starved. Full
+  non-real-dump suite (1494 tests, up from 1463) passes.
+- Call sites updated: `DefaultAnalyzerFeatureModuleCatalog`, `FullPipelineBenchmark`,
+  `SmallDumpLatencyBenchmark` now construct `HangAnalyzerLegacyAdapter`; `HangAnalyzerBenchmark`
+  retargeted at `AnalyzerBenchmarkBase<HangAnalyzerLegacyAdapter>`.
+- **`SdkVersion` 13**; `capability-registry.json` `1.7.0`.
+
+Remaining Tier-1+Tier-2 analyzers (11, see "Status" at the top) haven't been started yet.
 `LeakCandidateAnalyzer` stays last per explicit direction — it needs cross-analyzer result access
 and deferred-execution-ordering modeling neither this wave nor Tier 1 has built.
 

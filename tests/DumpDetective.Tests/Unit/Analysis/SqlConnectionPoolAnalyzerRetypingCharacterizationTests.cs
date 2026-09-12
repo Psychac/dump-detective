@@ -137,6 +137,8 @@ public sealed class SqlConnectionPoolAnalyzerRetypingCharacterizationTests
     /// contract for an object whose type doesn't declare that field.</summary>
     private sealed class FakeDumpObjectFieldQuery : IDumpObjectFieldQuery
     {
+        public IReadOnlyList<InstanceFieldDescriptor> EnumerateInstanceFields(ulong address) => [];
+
         private readonly Dictionary<(ulong Address, string FieldName), FieldValue> _values = new();
 
         public void SetInt32(ulong address, string fieldName, int value) => _values[(address, fieldName)] = FieldValue.ForInt32(value);

@@ -99,7 +99,7 @@ public class FullPipelineBenchmark
             new HangAnalyzerLegacyAdapter(),
             new DominatorAnalyzer(),
             new StringAnalyzer(),
-            new CollectionAnalyzer(),
+            new CollectionAnalyzerLegacyAdapter(),
             new StaticRootLeakDetector(),
             new ReferenceChainAnalyzer(),
             new GCHandleAnalyzerLegacyAdapter(),

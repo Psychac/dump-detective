@@ -234,6 +234,8 @@ public sealed class AsyncStateMachineAnalyzerRetypingCharacterizationTests
 
     private sealed class FakeDumpObjectFieldQuery : IDumpObjectFieldQuery
     {
+        public IReadOnlyList<InstanceFieldDescriptor> EnumerateInstanceFields(ulong address) => [];
+
         private readonly Dictionary<(ulong Address, string FieldName), FieldValue> _values = new();
         private readonly Dictionary<(ulong Address, string FieldName), string> _fieldTypeNames = new();
         private readonly Dictionary<ulong, List<(string Name, ulong TargetAddress)>> _referenceFields = new();

@@ -232,4 +232,36 @@ internal sealed class DumpObjectFieldQuery : IDumpObjectFieldQuery
             return false;
         }
     }
+
+    public IReadOnlyList<InstanceFieldDescriptor> EnumerateInstanceFields(ulong address)
+    {
+        if (address == 0)
+            return [];
+
+        ClrObject obj = _heap.GetObject(address);
+        if (!obj.IsValid || obj.Type is null)
+            return [];
+
+        var result = new List<InstanceFieldDescriptor>();
+        foreach (ClrInstanceField field in obj.Type.Fields)
+        {
+            bool isArrayTyped = field.ElementType is ClrElementType.SZArray or ClrElementType.Array;
+            FieldValueKind kind = field.ElementType switch
+            {
+                ClrElementType.Boolean => FieldValueKind.Bool,
+                ClrElementType.Int32 => FieldValueKind.Int32,
+                ClrElementType.Int64 => FieldValueKind.Int64,
+                ClrElementType.UInt32 => FieldValueKind.UInt32,
+                ClrElementType.NativeInt => FieldValueKind.NativeInt,
+                ClrElementType.Double => FieldValueKind.Double,
+                ClrElementType.String => FieldValueKind.String,
+                ClrElementType.Class or ClrElementType.Object or ClrElementType.SZArray or ClrElementType.Array => FieldValueKind.ObjectReference,
+                _ => FieldValueKind.Null,
+            };
+
+            result.Add(new InstanceFieldDescriptor(field.Name ?? string.Empty, kind, isArrayTyped));
+        }
+
+        return result;
+    }
 }

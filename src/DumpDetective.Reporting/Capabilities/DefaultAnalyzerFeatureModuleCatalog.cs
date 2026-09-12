@@ -55,7 +55,9 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         Module("leak-candidate", "Leak Candidate Analysis", typeof(LeakCandidateAnalyzer), typeof(LeakCandidateFindingGenerator), typeof(LeakCandidateTrendComparer), typeof(LeakAnalysisSectionBuilder), 210, ["leaks"]),
         Module("dominator", "Dominator Analysis", typeof(DominatorAnalyzer), typeof(DominatorFindingGenerator), typeof(DominatorTrendComparer), typeof(DominatorSectionBuilder), 220, ["retention", "dominator"]),
         Module("string", "String Analysis", typeof(StringAnalyzer), typeof(StringFindingGenerator), typeof(StringTrendComparer), typeof(StringSectionBuilder), 230, ["memory", "string"]),
-        Module("collection", "Collection Analysis", typeof(CollectionAnalyzer), typeof(CollectionFindingGenerator), typeof(CollectionTrendComparer), typeof(CollectionSectionBuilder), 240, ["collections"]),
+        // CollectionAnalyzerLegacyAdapter, not CollectionAnalyzer directly, since 2026-09-12
+        // (Tier-2 wave) -- see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("collection", "Collection Analysis", typeof(CollectionAnalyzerLegacyAdapter), typeof(CollectionFindingGenerator), typeof(CollectionTrendComparer), typeof(CollectionSectionBuilder), 240, ["collections"]),
         Module("static-root", "Static Root Leak Detection", typeof(StaticRootLeakDetector), typeof(StaticRootFindingGenerator), typeof(StaticRootTrendComparer), typeof(StaticRootSectionBuilder), 250, ["roots", "leaks"]),
         Module("reference-chain", "Reference Chain Analysis", typeof(ReferenceChainAnalyzer), typeof(ReferenceChainFindingGenerator), typeof(ReferenceChainTrendComparer), typeof(ReferenceChainSectionBuilder), 260, ["roots"]),
         // GCHandleAnalyzerLegacyAdapter, not GCHandleAnalyzer directly, since 2026-09-11 (Batch 7 of

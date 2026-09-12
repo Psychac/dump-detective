@@ -186,6 +186,8 @@ public sealed class WcfChannelAnalyzerRetypingCharacterizationTests
 
     private sealed class FakeDumpObjectFieldQuery : IDumpObjectFieldQuery
     {
+        public IReadOnlyList<InstanceFieldDescriptor> EnumerateInstanceFields(ulong address) => [];
+
         private readonly Dictionary<(ulong Address, string FieldName), FieldValue> _values = new();
         private readonly HashSet<ulong> _notDirectlyStringable = new();
 

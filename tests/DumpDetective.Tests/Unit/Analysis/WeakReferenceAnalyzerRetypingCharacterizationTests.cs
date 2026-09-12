@@ -351,6 +351,8 @@ public sealed class WeakReferenceAnalyzerRetypingCharacterizationTests
 
     private sealed class FakeDumpObjectFieldQuery : IDumpObjectFieldQuery
     {
+        public IReadOnlyList<InstanceFieldDescriptor> EnumerateInstanceFields(ulong address) => [];
+
         private readonly Dictionary<(ulong Address, string FieldName), FieldValue> _values = new();
 
         public void SetNativeInt(ulong address, string fieldName, nint value) => _values[(address, fieldName)] = FieldValue.ForNativeInt(value);

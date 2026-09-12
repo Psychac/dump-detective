@@ -29,4 +29,16 @@ public interface IHeapReferenceQuery
 public interface IHeapReverseReferenceQuery
 {
     IEnumerable<ulong> EnumerateReverseReferences(ulong address);
+
+    /// <summary>
+    /// Every recorded parent of <paramref name="address"/> plus whether the reverse index's own
+    /// fanout cap truncated that list — mirrors <c>IBackwardReferenceProvider.TryGetParents</c>
+    /// exactly. Added 2026-09-12 for <c>CollectionAnalyzer</c>'s retyping (first real consumer of
+    /// this interface): unlike <see cref="EnumerateReverseReferences"/>, a caller reporting "N+
+    /// referrers" when the index's answer is a lower bound, not the true count, needs to know that
+    /// up front rather than after silently under-counting. Returns <c>false</c> (with an empty list
+    /// and <paramref name="truncated"/> <c>false</c>) when no reverse index is available or
+    /// <paramref name="address"/> has no recorded parents.
+    /// </summary>
+    bool TryGetReverseReferences(ulong address, out IReadOnlyList<ulong> parents, out bool truncated);
 }

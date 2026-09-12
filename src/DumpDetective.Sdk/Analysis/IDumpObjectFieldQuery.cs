@@ -82,4 +82,26 @@ public interface IDumpObjectFieldQuery
     /// 2026-09-12 for <c>AsyncTaskAnalyzer</c>'s retyping.
     /// </summary>
     bool TryReadNestedStructField(ulong address, string outerFieldName, string innerFieldName, out FieldValue value);
+
+    /// <summary>
+    /// Every instance field declared on the object at <paramref name="address"/>'s type, as its
+    /// name plus enough runtime shape to classify it without a value read: <see cref="FieldValueKind"/>
+    /// (best-effort — a field whose runtime shape isn't one <see cref="FieldValue"/> represents
+    /// reads as <see cref="FieldValueKind.Null"/> here too, same "unavailable" convention as
+    /// <see cref="TryReadField"/>) and whether it's array-typed (<c>SZArray</c>/<c>Array</c> collapse
+    /// into <see cref="FieldValueKind.ObjectReference"/> like every other reference field, so this
+    /// flag is the only way to tell an array-typed field apart from a plain object reference).
+    /// Returns an empty list when the object at that address is invalid, not when the type simply
+    /// has no fields (both look the same to a caller). Added 2026-09-12 for <c>CollectionAnalyzer</c>'s
+    /// retyping — a genuinely different gap from <see cref="EnumerateObjectReferenceFields"/>: that
+    /// one only lists reference-typed fields by name; this one classifies *every* field (including
+    /// <see cref="FieldValueKind.Int32"/> ones) well enough to run the same "well-known field names
+    /// first, then classify-and-guess" heuristic <c>CollectionAnalyzer</c>'s pre-retyping
+    /// <c>GetOrBuildFieldLayout</c> used, without needing a real <c>ClrType</c>/<c>ClrInstanceField</c>
+    /// at all.
+    /// </summary>
+    IReadOnlyList<InstanceFieldDescriptor> EnumerateInstanceFields(ulong address);
 }
+
+/// <summary>One instance field's name and declared shape, from <see cref="IDumpObjectFieldQuery.EnumerateInstanceFields"/>.</summary>
+public readonly record struct InstanceFieldDescriptor(string Name, FieldValueKind Kind, bool IsArrayTyped);

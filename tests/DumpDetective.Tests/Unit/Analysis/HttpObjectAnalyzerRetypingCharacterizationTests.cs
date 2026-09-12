@@ -159,6 +159,8 @@ public sealed class HttpObjectAnalyzerRetypingCharacterizationTests
 
     private sealed class FakeDumpObjectFieldQuery : IDumpObjectFieldQuery
     {
+        public IReadOnlyList<InstanceFieldDescriptor> EnumerateInstanceFields(ulong address) => [];
+
         private readonly Dictionary<(ulong Address, string FieldName), FieldValue> _values = new();
         private readonly Dictionary<ulong, string?> _strings = new();
 

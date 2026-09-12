@@ -212,6 +212,8 @@ public sealed class TimerLeakAnalyzerRetypingCharacterizationTests
 
     private sealed class FakeDumpObjectFieldQuery : IDumpObjectFieldQuery
     {
+        public IReadOnlyList<InstanceFieldDescriptor> EnumerateInstanceFields(ulong address) => [];
+
         private readonly Dictionary<(ulong Address, string FieldName), FieldValue> _values = new();
 
         public void SetUInt32(ulong address, string fieldName, uint value) => _values[(address, fieldName)] = FieldValue.ForUInt32(value);

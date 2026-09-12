@@ -140,6 +140,12 @@ repeatedly OOM-crashed the development machine. Always run discrepancy/real-dump
 one-at-a-time, in the foreground, and wait for each to finish before starting the next — even if
 that means several sequential `dotnet test --filter` invocations instead of one combined run.
 
+**Every real-dump test in this project's own history completes in single-digit-to-low-double-digit
+seconds against the ~3.3GB reference dump (see the retyping plan's own per-batch timings). If a run
+against that dump hasn't produced output past `[xUnit.net] Starting:` within 5 minutes, it is hung,
+not "still loading" — kill the process (`Stop-Process`/`taskkill`) immediately rather than continuing
+to wait, then investigate the hang as a real bug before re-attempting.**
+
 ## Anti-patterns
 Don't load the entire heap; don't build full adjacency lists; avoid heavy reflection in hot paths.
 

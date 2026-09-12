@@ -19,7 +19,18 @@ public static class SdkVersion
 {
     public const int Major = 0;
 
-    /// <summary>15 as of 2026-09-12 (added <see cref="Analysis.IDumpObjectFieldQuery.TryReadNestedStructField"/>
+    /// <summary>16 as of 2026-09-12 (added <see cref="Analysis.IDumpObjectFieldQuery.EnumerateInstanceFields"/>/
+    /// <see cref="Analysis.InstanceFieldDescriptor"/> — per-type field name+kind discovery, without a
+    /// real <c>ClrType</c>; and <see cref="Analysis.IHeapReverseReferenceQuery.TryGetReverseReferences"/>
+    /// — a truncation-aware parent lookup, <c>heap.reverse-references</c>'s first real dump-side
+    /// implementation. Both found necessary by <c>CollectionAnalyzer</c>'s retyping. A third addition,
+    /// an <c>IHeapRootPathQuery.TryFindRootPath</c> overload accepting a caller-supplied force-expand
+    /// predicate, was built and then removed the same session once it hung a real-dump run
+    /// indefinitely — see that interface's own remarks; no version bump owed for a change that never
+    /// shipped. No <c>capability-registry.json</c> bump — both shipped primitives extend
+    /// already-registered capabilities (<c>dump.object-fields</c>, <c>heap.reverse-references</c>)
+    /// rather than introducing new vocabulary.
+    /// Before that, 15 as of 2026-09-12 (added <see cref="Analysis.IDumpObjectFieldQuery.TryReadNestedStructField"/>
     /// — one level of embedded-struct field read, needed for
     /// <c>ManualResetValueTaskSourceCore&lt;TResult&gt;._completed</c> — and
     /// <see cref="Analysis.IDumpArrayShapeQuery.EnumerateObjectReferenceElements"/> — array element
@@ -93,7 +104,7 @@ public static class SdkVersion
     /// additions/splits, the `EntityRef`/`IHeapDominatorQuery`/positional-record/JSON-converter
     /// fixes) — not a precise per-change reconstruction, since nothing yet depends on intermediate
     /// values enough to make that worth simulating.</summary>
-    public const int Minor = 15;
+    public const int Minor = 16;
 
     public static string AsString => $"{Major}.{Minor}";
 }

@@ -37,6 +37,21 @@ public readonly record struct RootPathSearchOptions(
 /// hop's <c>ClrType</c> for display requires the same dump-only type-resolution machinery the
 /// capability boundary already exists to hide, and no consumer has ever needed the raw addresses
 /// for anything beyond formatting them once.
+///
+/// <b>A caller-supplied force-expand predicate was added, then removed, the same session</b>
+/// (<c>CollectionAnalyzer</c>'s retyping, 2026-09-12): its pre-retyping search force-expanded types
+/// matching <c>ReferenceChainOptions.KnownLeakTypePatterns</c>, whose *defaults* are
+/// <c>"System.Collections.Generic.List"</c>/<c>"...Dictionary"</c> — i.e. exactly the type family
+/// this analyzer's own targets belong to. Wiring that predicate through
+/// (<c>IndexBackedBidirectionalSearch</c>'s <c>forceExpand</c> parameter bypasses
+/// <c>LargeFanoutThreshold</c> entirely for a matching type) hung a real 3.35 GB dump's root-path
+/// search indefinitely: on a real heap, force-expanding every List/Dictionary-shaped node defeats
+/// the hub-fanout cap this exact machinery exists to enforce, almost everywhere in the graph. No
+/// prior real-dump test exercised this analyzer's root-path search at all, so this was a latent,
+/// pre-existing cost the retyping's own real-dump gate caught for the first time — not a regression
+/// introduced by moving to this capability. Fixed by keeping this interface single-overload, "never
+/// force-expand" for every consumer, same policy <c>DbConnectionAnalyzer</c>/<c>TimerLeakAnalyzer</c>
+/// already use.
 /// </remarks>
 public interface IHeapRootPathQuery
 {

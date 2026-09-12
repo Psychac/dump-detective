@@ -25,7 +25,34 @@ public readonly record struct RuntimeThreadRef(
     bool IsGc = false,
     bool IsFinalizer = false,
     bool IsThreadpoolWorker = false,
-    bool IsCompletionPortThread = false);
+    bool IsCompletionPortThread = false,
+    /// <summary>
+    /// Added 2026-09-12 for <c>ThreadAnalyzer</c>'s retyping. <see cref="IsBackground"/> mirrors the
+    /// <c>TS_Background</c> state flag. <see cref="ThreadStateDisplay"/>/<see cref="GcModeDisplay"/>
+    /// are pre-formatted display strings (the pre-retyping analyzer's own bit-flag-formatting
+    /// <c>ClrThreadState</c> and <c>ClrThread.GCMode.ToString()</c>), computed dump-side rather than
+    /// exposing the raw ClrMD enums through the SDK — same reasoning <c>HeapObjectRef.TypeDisplayName</c>
+    /// carries a ready-to-render value instead of forcing every consumer to re-derive one.
+    /// <see cref="AppDomainName"/> mirrors <c>ClrThread.CurrentAppDomain?.Name</c>, <c>null</c> when
+    /// none. <see cref="HasCurrentException"/> mirrors <c>ClrThread.CurrentException is not null</c>
+    /// directly — kept separate from <see cref="ExceptionTypeName"/> being nullable, since a thread
+    /// can have a real, non-null current exception whose <c>Type</c> still fails to resolve (an
+    /// unresolvable type, not "no exception"); collapsing the two into one nullable string would
+    /// lose that distinction the pre-retyping analyzer's own <c>currentException != null</c> check
+    /// relies on. <see cref="ExceptionTypeName"/>/<see cref="ExceptionMessage"/> mirror
+    /// <c>ClrThread.CurrentException</c>'s own <c>Type.Name</c>/<c>Message</c> convenience
+    /// properties — ClrMD-provided helpers over the exception object's fields, not a raw Tier-2
+    /// field read, so this stays entirely Tier-1. <see cref="StackSizeBytes"/> mirrors
+    /// <c>StackBase - StackLimit</c> when positive, 0 otherwise.
+    /// </summary>
+    bool IsBackground = false,
+    string ThreadStateDisplay = "0",
+    string GcModeDisplay = "",
+    string? AppDomainName = null,
+    bool HasCurrentException = false,
+    string? ExceptionTypeName = null,
+    string? ExceptionMessage = null,
+    ulong StackSizeBytes = 0);
 
 /// <summary>
 /// One stack frame, source-neutral. <see cref="HasMethod"/> distinguishes "not a managed-method

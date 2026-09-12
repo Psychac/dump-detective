@@ -6,8 +6,13 @@ using DumpDetective.Analysis.Analyzers.Threads;
 
 namespace BenchmarkSuite1
 {
+    // Benchmarks ThreadAnalyzerLegacyAdapter, not ThreadAnalyzer directly, since 2026-09-12 --
+    // ThreadAnalyzer now implements the SDK's capability-scoped Sdk.Analysis.IAnalyzer, not
+    // Core.Abstractions.IAnalyzer, so it no longer satisfies AnalyzerBenchmarkBase<T>'s
+    // `where T : IAnalyzer, new()` constraint on its own. See
+    // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
     [MemoryDiagnoser]
-    public class ThreadAnalyzerBenchmark : AnalyzerBenchmarkBase<ThreadAnalyzer>
+    public class ThreadAnalyzerBenchmark : AnalyzerBenchmarkBase<ThreadAnalyzerLegacyAdapter>
     {
         protected override IHeapAnalysisCache? CreateCache() => new DumpDetective.Analysis.Cache.HeapAnalysisCache();
 

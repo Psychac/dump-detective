@@ -17,16 +17,64 @@ namespace DumpDetective.Analysis.SdkBridge;
 /// </summary>
 internal static class ThreadStackTranslator
 {
-    public static RuntimeThreadRef ToThreadRef(ClrThread thread, int stackRootCount) => new(
-        Thread: new ThreadRef { OsThreadId = thread.OSThreadId, ManagedThreadId = thread.ManagedThreadId, Fidelity = MatchFidelity.Exact },
-        IsGCSuspendPending: (thread.State & ClrThreadState.TS_GCSuspendPending) != 0,
-        StackRootCount: stackRootCount,
-        IsAlive: thread.IsAlive,
-        LockCount: (int)thread.LockCount,
-        IsGc: thread.IsGc,
-        IsFinalizer: thread.IsFinalizer,
-        IsThreadpoolWorker: (thread.State & ClrThreadState.TS_TPWorkerThread) != 0,
-        IsCompletionPortThread: (thread.State & ClrThreadState.TS_CompletionPortThread) != 0);
+    public static RuntimeThreadRef ToThreadRef(ClrThread thread, int stackRootCount)
+    {
+        ClrException? currentException = thread.CurrentException;
+        ulong stackSizeBytes = thread.StackBase > thread.StackLimit ? thread.StackBase - thread.StackLimit : 0;
+
+        return new(
+            Thread: new ThreadRef { OsThreadId = thread.OSThreadId, ManagedThreadId = thread.ManagedThreadId, Fidelity = MatchFidelity.Exact },
+            IsGCSuspendPending: (thread.State & ClrThreadState.TS_GCSuspendPending) != 0,
+            StackRootCount: stackRootCount,
+            IsAlive: thread.IsAlive,
+            LockCount: (int)thread.LockCount,
+            IsGc: thread.IsGc,
+            IsFinalizer: thread.IsFinalizer,
+            IsThreadpoolWorker: (thread.State & ClrThreadState.TS_TPWorkerThread) != 0,
+            IsCompletionPortThread: (thread.State & ClrThreadState.TS_CompletionPortThread) != 0,
+            IsBackground: (thread.State & ClrThreadState.TS_Background) != 0,
+            ThreadStateDisplay: FormatThreadState(thread.State),
+            GcModeDisplay: thread.GCMode.ToString(),
+            AppDomainName: thread.CurrentAppDomain?.Name,
+            HasCurrentException: currentException is not null,
+            ExceptionTypeName: currentException?.Type?.Name,
+            ExceptionMessage: currentException?.Message,
+            StackSizeBytes: stackSizeBytes);
+    }
+
+    // Ported unchanged from the pre-retyping ThreadAnalyzer's own FormatThreadState -- bit-flag
+    // decomposition of ClrThreadState into a readable "Flag1 | Flag2" string, with any unrecognized
+    // remaining bits rendered as a hex tail rather than silently dropped.
+    private static string FormatThreadState(ClrThreadState state)
+    {
+        ulong raw = Convert.ToUInt64(state);
+        if (raw == 0)
+            return "0";
+
+        var parts = new List<string>(capacity: 4);
+        ulong remaining = raw;
+
+        foreach (ClrThreadState flag in Enum.GetValues<ClrThreadState>())
+        {
+            ulong flagValue = Convert.ToUInt64(flag);
+            if (flagValue == 0)
+                continue;
+
+            if ((remaining & flagValue) == flagValue)
+            {
+                parts.Add(flag.ToString());
+                remaining &= ~flagValue;
+            }
+        }
+
+        if (parts.Count == 0)
+            return $"0x{raw:X}";
+
+        if (remaining != 0)
+            parts.Add($"0x{remaining:X}");
+
+        return string.Join(" | ", parts);
+    }
 
     public static ThreadStackFrameRef ToFrameRef(ClrStackFrame frame)
     {

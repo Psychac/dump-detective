@@ -1,29 +1,31 @@
-﻿using DumpDetective.Analysis.Cache;
-using DumpDetective.Core.Abstractions;
-using DumpDetective.Core.Enums;
+using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
-using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
-
-using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 
 using System.Runtime.InteropServices;
 
 namespace DumpDetective.Analysis.Analyzers.Threads
 {
-    // Canonical stack-walk provider for the thread-domain quartet (this analyzer, HangAnalyzer,
-    // ThreadStackClusterAnalyzer, LockGraphAnalyzer): registers as an IThreadStackScanParticipant
-    // so its per-thread categorization runs off ThreadStackScanDispatcher's single shared
-    // EnumerateStackTrace() pass instead of walking runtime.Threads independently. The standalone
-    // Analyze(...)/CategorizeThreads path below is kept as a fallback for callers that invoke this
-    // analyzer directly (tests, benchmarks) without going through AnalysisPipeline's dispatcher.
-    public class ThreadAnalyzer : IAnalyzer, IThreadStackScanParticipant
+    /// <summary>
+    /// Canonical stack-walk participant for the thread-domain quartet (this analyzer,
+    /// <c>HangAnalyzer</c>, <c>ThreadStackClusterAnalyzer</c>, <c>LockGraphAnalyzer</c>). Retyped
+    /// version consumes <c>runtime.threads</c> exclusively — <see cref="ThreadAnalyzerLegacyAdapter"/>
+    /// (not this class) implements <c>IThreadStackScanParticipant</c> and hands this analyzer a
+    /// <c>PrecomputedRuntimeThreadQuery</c> backed by the pipeline's one shared stack scan, mirroring
+    /// <c>LockGraphAnalyzerLegacyAdapter</c>'s already-proven shape
+    /// (docs/refactor/modularity/phase-1-thread-quartet-plan.md). Falls back to a live
+    /// <see cref="RuntimeThreadQuery"/> (which walks every thread independently) only when invoked
+    /// outside the pipeline (tests, benchmarks).
+    /// </summary>
+    public sealed class ThreadAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     {
         // No dump has a call stack anywhere near this deep — this is "walk the whole stack,
         // no artificial truncation" rather than a real bound. §11.4 M8 measured the identical
         // value on a real dump (135 threads) at 2 ms, so there's no cost concern in using a large
-        // sentinel here instead of the previous MaxFramesForThreadScan=8/MaxStackRootsToCount=256
-        // caps, which shallowly truncated wait-pattern/hotspot detection to the top of the stack.
+        // sentinel here.
         internal const int UnboundedFrameCount = 100_000;
 
         private static readonly WaitPattern[] WaitPatterns =
@@ -53,137 +55,188 @@ namespace DumpDetective.Analysis.Analyzers.Threads
         public string Name => "Thread Analysis";
         public string Category => "Threads";
 
-        // --- IThreadStackScanParticipant state: populated by BeforeThreadStackScan/OnThreadStack
-        // (called by AnalysisPipeline's ThreadStackScanDispatcher) and consumed by AnalyzeAsync once
-        // the shared stack-scan pass has completed. See OnThreadStackScanCompleted for the single
-        // source of truth on whether this state is trustworthy.
-        private ThreadAnalysisOptions? _participantOptions;
-        private IHeapAnalysisCache? _participantCache;
-        private IProgress<AnalyzerProgressReport>? _participantProgress;
-        private ThreadCategorization? _categorization;
-        private List<ThreadWithStackTrace>? _threadsWithLocks;
-        private List<ThreadWithStackTrace>? _blockedThreads;
-        private List<ThreadWithStackTrace>? _threadsWithExceptions;
-        private List<ThreadWithStackTrace>? _otherThreads;
-        private Dictionary<ulong, int>? _stackRootCountByThreadAddress;
-        private ObjectScanCounter? _scanCounter;
-        private bool _participantScanSucceeded;
+        public AnalyzerDomainResult? LastResult { get; private set; }
 
-        public int GetRequiredFrameCount(AnalysisContext context) => UnboundedFrameCount;
-
-        public void BeforeThreadStackScan(AnalysisContext context)
-        {
-            _participantOptions = context.AnalysisOptions.ThreadAnalysis;
-            _participantCache = context.Cache;
-            _participantProgress = context.Progress;
-
-            PrewarmStackRootCounts(context.Runtime, _participantCache, _participantOptions, _participantProgress);
-
-            _categorization = new ThreadCategorization();
-            _threadsWithLocks = new List<ThreadWithStackTrace>();
-            _blockedThreads = new List<ThreadWithStackTrace>();
-            _threadsWithExceptions = new List<ThreadWithStackTrace>();
-            _otherThreads = new List<ThreadWithStackTrace>();
-            _stackRootCountByThreadAddress = new Dictionary<ulong, int>();
-            _scanCounter = new ObjectScanCounter("Scanning threads", _participantProgress, reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
-
-            // Note: ThreadPool telemetry properties (QueueLength, ActiveWorkerThreads, etc.)
-            // are not available in ClrMD 4. These would require direct memory inspection or
-            // are not exposed by the current ClrMD API. Leaving as 0 for now.
-        }
-
-        void IThreadStackScanParticipant.OnThreadStack(in ThreadStackSnapshot snapshot) => OnThreadStack(in snapshot);
-
-        private void OnThreadStack(in ThreadStackSnapshot snapshot)
-        {
-            _scanCounter!.Tick();
-            ProcessThread(
-                snapshot.Thread,
-                snapshot.TopFrames,
-                _participantCache,
-                _categorization!,
-                _threadsWithLocks!,
-                _blockedThreads!,
-                _threadsWithExceptions!,
-                _otherThreads!,
-                _stackRootCountByThreadAddress!);
-        }
-
-        public void OnThreadStackScanCompleted(bool succeeded)
-        {
-            _participantScanSucceeded = succeeded;
-            if (succeeded && _categorization != null)
-            {
-                FinalizeCategorization(_categorization, _threadsWithLocks!, _blockedThreads!, _threadsWithExceptions!, _otherThreads!, _scanCounter!, _participantProgress);
-            }
-        }
-
-        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            ThreadAnalysisOptions options = context.AnalysisOptions.ThreadAnalysis;
 
-            AnalyzerDomainResult result = _participantScanSucceeded && _categorization != null
-                ? BuildDomainResult(_categorization, context.Progress)
-                : Analyze(context.Runtime, options, context.Progress, context.Cache);
+            IRuntimeThreadQuery threads = context.RuntimeThreads
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.RuntimeThreads}' capability.");
 
-            return ValueTask.FromResult(result.Stamp(this));
+            LastResult = Analyze(threads, cancellationToken);
+            return ValueTask.CompletedTask;
         }
 
-        public AnalyzerDomainResult Analyze(ClrRuntime runtime)
+        private static ThreadDomainResult Analyze(IRuntimeThreadQuery threads, CancellationToken cancellationToken)
         {
-            return Analyze(runtime, new ThreadAnalysisOptions(), progress: null, cache: null);
-        }
+            var categorization = new ThreadCategorization();
+            var threadsWithLocks = new List<ThreadWithStackTrace>();
+            var blockedThreads = new List<ThreadWithStackTrace>();
+            var threadsWithExceptions = new List<ThreadWithStackTrace>();
+            var otherThreads = new List<ThreadWithStackTrace>();
 
-        // Fallback path used when this analyzer is invoked directly (tests, benchmarks) instead of
-        // through AnalysisPipeline's ThreadStackScanDispatcher.
-        private AnalyzerDomainResult Analyze(ClrRuntime runtime, ThreadAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress, IHeapAnalysisCache? cache)
-        {
-            PrewarmStackRootCounts(runtime, cache, options, progress);
-            ThreadCategorization threadInfo = CategorizeThreads(runtime.Threads, progress, cache);
-            return BuildDomainResult(threadInfo, progress);
-        }
-
-        private static void PrewarmStackRootCounts(ClrRuntime runtime, IHeapAnalysisCache? cache, ThreadAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress)
-        {
-            // Prewarm stack-root counts either synchronously or in background depending on
-            // options. Every thread is prewarmed — no snapshot-count cap gates this anymore
-            // (§9.23); the size-tier check below is purely an execution-scheduling choice
-            // (skip the eager, blocking pass on Large dumps unless explicitly backgrounded), not
-            // an exactness knob.
-            if (cache is null)
-                return;
-
-            if (options.PrewarmCacheInBackground)
+            foreach (RuntimeThreadRef thread in threads.EnumerateThreads())
             {
-                progress?.Report(new(0, "Starting background prewarm of thread stack-root counts"));
-                _ = Task.Run(() =>
+                cancellationToken.ThrowIfCancellationRequested();
+
+                IReadOnlyList<ThreadStackFrameRef> frames = thread.IsAlive
+                    ? new List<ThreadStackFrameRef>(threads.EnumerateStackFrames(thread))
+                    : [];
+
+                ProcessThread(thread, frames, categorization, threadsWithLocks, blockedThreads, threadsWithExceptions, otherThreads);
+            }
+
+            FinalizeCategorization(categorization, threadsWithLocks, blockedThreads, threadsWithExceptions, otherThreads);
+            return BuildDomainResult(categorization);
+        }
+
+        // Shared per-thread categorization body.
+        private static void ProcessThread(
+            RuntimeThreadRef thread,
+            IReadOnlyList<ThreadStackFrameRef> availableFrames,
+            ThreadCategorization result,
+            List<ThreadWithStackTrace> threadsWithLocks,
+            List<ThreadWithStackTrace> blockedThreads,
+            List<ThreadWithStackTrace> threadsWithExceptions,
+            List<ThreadWithStackTrace> otherThreads)
+        {
+            result.TotalCount++;
+            IncrementCount(result.StateDistribution, thread.ThreadStateDisplay);
+            IncrementCount(result.GcModeDistribution, thread.GcModeDisplay);
+
+            string appDomain = thread.AppDomainName ?? "<No AppDomain>";
+            IncrementCount(result.AppDomainDistribution, appDomain);
+
+            if (thread.HasCurrentException)
+            {
+                result.ThreadsWithActiveExceptionsCount++;
+                string exceptionType = thread.ExceptionTypeName ?? StringConstants.UnknownType;
+                IncrementCount(result.ExceptionTypeDistribution, exceptionType);
+            }
+
+            if (thread.IsAlive)
+            {
+                result.AliveCount++;
+
+                TrackTopFrameHotspot(result.TopFrameHotspots, availableFrames);
+
+                if (thread.StackSizeBytes > 0)
+                    result.StackSizeByteSamples.Add(thread.StackSizeBytes);
+
+                if (thread.HasCurrentException)
                 {
-                    int idx = 0;
-                    foreach (var t in runtime.Threads)
+                    threadsWithExceptions.Add(new ThreadWithStackTrace
                     {
-                        cache.GetOrCountThreadStackRoots(t, UnboundedFrameCount);
-                        idx++;
-                        if ((idx & 0xF) == 0)
-                            progress?.Report(new(idx, $"Background prewarm: {idx} threads"));
-                    }
-                    progress?.Report(new(idx, $"Background prewarm complete: {idx} threads"));
-                });
-            }
-            else if (cache.SizeTier != DumpSizeTier.Large)
-            {
-                progress?.Report(new(0, "Prewarming thread stack-root counts"));
-                int idx = 0;
-                foreach (var t in runtime.Threads)
-                {
-                    cache.GetOrCountThreadStackRoots(t, UnboundedFrameCount);
-                    idx++;
+                        Thread = thread,
+                        TopFrames = availableFrames,
+                        ExceptionType = thread.ExceptionTypeName ?? StringConstants.UnknownType,
+                        ExceptionMessage = thread.ExceptionMessage,
+                        StackRootCount = thread.StackRootCount,
+                    });
                 }
-                progress?.Report(new(0, $"Prewarmed {idx} threads"));
+
+                // Check for locks
+                if (thread.LockCount > 0)
+                {
+                    threadsWithLocks.Add(new ThreadWithStackTrace
+                    {
+                        Thread = thread,
+                        TopFrames = availableFrames,
+                        ExceptionType = thread.HasCurrentException ? thread.ExceptionTypeName : null,
+                        StackRootCount = thread.StackRootCount,
+                    });
+                }
+
+                // Detect wait/block patterns across all alive threads
+                WaitClassification? waitClassification = ClassifyWait(availableFrames);
+                if (waitClassification != null)
+                {
+                    IncrementCount(result.WaitCategoryDistribution, waitClassification.Value.Category);
+                    blockedThreads.Add(new ThreadWithStackTrace
+                    {
+                        Thread = thread,
+                        TopFrames = availableFrames,
+                        WaitCategory = waitClassification.Value.Category,
+                        WaitReason = waitClassification.Value.Reason,
+                        ExceptionType = thread.HasCurrentException ? thread.ExceptionTypeName : null,
+                        StackRootCount = thread.StackRootCount,
+                    });
+                }
+                else if (!thread.IsGc && !thread.IsFinalizer)
+                {
+                    // Non-blocked user thread — track top frame for the Active Processing group
+                    TrackTopFrameHotspot(result.ActiveThreadHotspots, availableFrames);
+                }
+
+                // ThreadPool worker threads surface a recognisable dispatch frame;
+                // TS_TPWorkerThread is the authoritative flag for this version of ClrMD.
+                if (thread.IsThreadpoolWorker)
+                    result.ThreadPoolCount++;
+                else if (IsThreadPoolWorker(availableFrames))
+                    result.ThreadPoolCount++;
+
+                // Capture the finalizer thread's stack and blocked state once
+                if (thread.IsFinalizer)
+                {
+                    result.FinalizerThread = thread;
+                    result.FinalizerFrames = availableFrames;
+                    result.FinalizerIsBlocked = waitClassification != null;
+                }
+
+                // Count MoveNext frames to measure async state-machine chain depth
+                int moveNextDepth = CountMoveNextDepth(availableFrames);
+                if (moveNextDepth > 0)
+                {
+                    result.AsyncChainThreadCount++;
+                    if (moveNextDepth > result.MaxAsyncChainDepth)
+                        result.MaxAsyncChainDepth = moveNextDepth;
+                }
+
+                // Every alive thread not already recorded above — a deterministic complete list,
+                // not a reservoir sample (§9.23).
+                bool isAlreadyCaptured = thread.LockCount > 0 || waitClassification != null || thread.HasCurrentException;
+                if (!isAlreadyCaptured)
+                {
+                    otherThreads.Add(new ThreadWithStackTrace
+                    {
+                        Thread = thread,
+                        TopFrames = availableFrames,
+                        StackRootCount = thread.StackRootCount,
+                    });
+                }
             }
+
+            if (thread.IsGc)
+                result.GcCount++;
+
+            if (thread.IsFinalizer)
+                result.FinalizerCount++;
+
+            if (thread.IsBackground)
+                result.BackgroundCount++;
         }
 
-        private static AnalyzerDomainResult BuildDomainResult(ThreadCategorization threadInfo, IProgress<AnalyzerProgressReport>? progress)
+        private static void FinalizeCategorization(
+            ThreadCategorization result,
+            List<ThreadWithStackTrace> threadsWithLocks,
+            List<ThreadWithStackTrace> blockedThreads,
+            List<ThreadWithStackTrace> threadsWithExceptions,
+            List<ThreadWithStackTrace> otherThreads)
+        {
+            threadsWithLocks.Sort((a, b) => b.Thread.LockCount.CompareTo(a.Thread.LockCount));
+            result.ThreadsWithLocks = threadsWithLocks;
+
+            blockedThreads.Sort((a, b) => b.Thread.LockCount.CompareTo(a.Thread.LockCount));
+            result.PotentiallyBlockedThreads = blockedThreads;
+
+            threadsWithExceptions.Sort((a, b) => b.Thread.LockCount.CompareTo(a.Thread.LockCount));
+            result.ThreadsWithExceptions = threadsWithExceptions;
+
+            result.OtherThreads = otherThreads;
+        }
+
+        private static ThreadDomainResult BuildDomainResult(ThreadCategorization threadInfo)
         {
             // Materialize complete snapshots — no per-category cap. Report-width limiting is a
             // render-layer concern (§9.23 D5); the domain result carries the full ranked/complete
@@ -218,9 +271,7 @@ namespace DumpDetective.Analysis.Analyzers.Threads
                     activeThreadHotspots.Add(new NameCountEntry(kvpList[i].Key, kvpList[i].Value));
             }
 
-            progress?.Report(new(threadInfo.TotalCount, "Materializing snapshots"));
-
-            var otherThreadsSource = threadInfo.OtherThreads ?? new List<ThreadWithStackTrace>();
+            var otherThreadsSource = threadInfo.OtherThreads ?? [];
             var otherThreadSnapshots = new List<ThreadStateSnapshot>(otherThreadsSource.Count);
             for (int i = 0; i < otherThreadsSource.Count; i++)
                 otherThreadSnapshots.Add(ToThreadStateSnapshot(otherThreadsSource[i]));
@@ -229,11 +280,10 @@ namespace DumpDetective.Analysis.Analyzers.Threads
             if (threadInfo.FinalizerFrames != null)
             {
                 for (int i = 0; i < threadInfo.FinalizerFrames.Count; i++)
-                {
-                    var f = threadInfo.FinalizerFrames[i];
-                    finalizerFrameStrings.Add(f.Method?.Signature ?? f.FrameName ?? f.ToString() ?? StringConstants.UnknownType);
-                }
+                    finalizerFrameStrings.Add(GetFrameSignatureOrUnknown(threadInfo.FinalizerFrames[i]));
             }
+
+            RuntimeThreadRef? finalizerThread = threadInfo.FinalizerThread;
 
             return new ThreadDomainResult(
                     threadInfo.TotalCount,
@@ -263,9 +313,9 @@ namespace DumpDetective.Analysis.Analyzers.Threads
                     threadInfo.ThreadPoolMaxWorkers,
                     threadInfo.FinalizerCount,
                     threadInfo.FinalizerIsBlocked,
-                    threadInfo.FinalizerThread != null ? (uint?)threadInfo.FinalizerThread.ManagedThreadId : null,
-                    threadInfo.FinalizerThread?.OSThreadId,
-                    threadInfo.FinalizerThread != null ? (int)threadInfo.FinalizerThread.LockCount : 0,
+                    finalizerThread.HasValue ? (uint?)finalizerThread.Value.Thread.ManagedThreadId : null,
+                    finalizerThread?.Thread.OsThreadId,
+                    finalizerThread.HasValue ? finalizerThread.Value.LockCount : 0,
                     finalizerFrameStrings,
                     threadInfo.AsyncChainThreadCount,
                     threadInfo.MaxAsyncChainDepth,
@@ -294,286 +344,50 @@ namespace DumpDetective.Analysis.Analyzers.Threads
 
         private static ThreadStateSnapshot ToThreadStateSnapshot(ThreadWithStackTrace source)
         {
-            ulong stackSizeBytes = source.Thread.StackBase > source.Thread.StackLimit
-                ? source.Thread.StackBase - source.Thread.StackLimit
-                : 0;
-
             var frameStrings = new List<string>(source.TopFrames.Count);
             for (int i = 0; i < source.TopFrames.Count; i++)
-            {
-                var f = source.TopFrames[i];
-                frameStrings.Add(f.Method?.Signature ?? f.FrameName ?? f.ToString() ?? StringConstants.UnknownType);
-            }
+                frameStrings.Add(GetFrameSignatureOrUnknown(source.TopFrames[i]));
 
             return new ThreadStateSnapshot(
-                (uint)source.Thread.ManagedThreadId,
-                source.Thread.OSThreadId,
-                (int)source.Thread.LockCount,
-                FormatThreadState(source.Thread.State),
-                source.Thread.GCMode.ToString(),
+                (uint)(source.Thread.Thread.ManagedThreadId ?? 0),
+                source.Thread.Thread.OsThreadId,
+                source.Thread.LockCount,
+                source.Thread.ThreadStateDisplay,
+                source.Thread.GcModeDisplay,
                 source.WaitCategory,
                 source.WaitReason,
                 frameStrings,
                 source.StackRootCount,
-                stackSizeBytes);
+                source.Thread.StackSizeBytes);
         }
 
         private static ThreadExceptionSnapshot ToThreadExceptionSnapshot(ThreadWithStackTrace source)
         {
             var frameStrings = new List<string>(source.TopFrames.Count);
             for (int i = 0; i < source.TopFrames.Count; i++)
-            {
-                var f = source.TopFrames[i];
-                frameStrings.Add(f.Method?.Signature ?? f.FrameName ?? f.ToString() ?? StringConstants.UnknownType);
-            }
+                frameStrings.Add(GetFrameSignatureOrUnknown(source.TopFrames[i]));
 
             return new ThreadExceptionSnapshot(
-                (uint)source.Thread.ManagedThreadId,
-                source.Thread.OSThreadId,
+                (uint)(source.Thread.Thread.ManagedThreadId ?? 0),
+                source.Thread.Thread.OsThreadId,
                 source.ExceptionType ?? StringConstants.UnknownType,
                 source.ExceptionMessage,
-                FormatThreadState(source.Thread.State),
-                source.Thread.GCMode.ToString(),
-                (int)source.Thread.LockCount,
+                source.Thread.ThreadStateDisplay,
+                source.Thread.GcModeDisplay,
+                source.Thread.LockCount,
                 frameStrings,
                 source.StackRootCount);
         }
 
-        // Fallback (non-participant) path: walks each thread's whole stack once, then runs it
-        // through the same per-thread logic OnThreadStack uses.
-        private ThreadCategorization CategorizeThreads(IEnumerable<ClrThread> threads, IProgress<AnalyzerProgressReport>? progress, IHeapAnalysisCache? cache)
+        private static WaitClassification? ClassifyWait(IReadOnlyList<ThreadStackFrameRef> frames)
         {
-            IList<ClrThread> threadList = threads as IList<ClrThread> ?? threads.ToArray();
-
-            var result = new ThreadCategorization();
-            var threadsWithLocks = new List<ThreadWithStackTrace>();
-            var blockedThreads = new List<ThreadWithStackTrace>();
-            var threadsWithExceptions = new List<ThreadWithStackTrace>();
-            var otherThreads = new List<ThreadWithStackTrace>();
-            var stackRootCountByThreadAddress = new Dictionary<ulong, int>();
-            var scanCounter = new ObjectScanCounter("Scanning threads", progress, reportEveryObjects: 100, reportEveryElapsed: TimeSpan.FromSeconds(1));
-
-            foreach (var thread in threadList)
+            foreach (ThreadStackFrameRef frame in frames)
             {
-                scanCounter.Tick();
-
-                IReadOnlyList<ClrStackFrame> frames = Array.Empty<ClrStackFrame>();
-                if (thread.IsAlive)
-                {
-                    var buffer = new List<ClrStackFrame>();
-                    foreach (var f in thread.EnumerateStackTrace())
-                    {
-                        if (buffer.Count >= UnboundedFrameCount)
-                            break;
-                        buffer.Add(f);
-                    }
-                    frames = buffer;
-                }
-
-                ProcessThread(thread, frames, cache, result, threadsWithLocks, blockedThreads, threadsWithExceptions, otherThreads, stackRootCountByThreadAddress);
+                WaitClassification? match = ThreadWaitClassifier.ClassifySignature(GetFrameSignature(frame), WaitPatterns);
+                if (match != null)
+                    return match;
             }
-
-            FinalizeCategorization(result, threadsWithLocks, blockedThreads, threadsWithExceptions, otherThreads, scanCounter, progress);
-            return result;
-        }
-
-        // Shared per-thread categorization body for both the dispatcher-fed path (OnThreadStack)
-        // and the standalone fallback path (CategorizeThreads). `availableFrames` is the thread's
-        // whole captured stack — this method never re-enumerates it.
-        private static void ProcessThread(
-            ClrThread thread,
-            IReadOnlyList<ClrStackFrame> availableFrames,
-            IHeapAnalysisCache? cache,
-            ThreadCategorization result,
-            List<ThreadWithStackTrace> threadsWithLocks,
-            List<ThreadWithStackTrace> blockedThreads,
-            List<ThreadWithStackTrace> threadsWithExceptions,
-            List<ThreadWithStackTrace> otherThreads,
-            Dictionary<ulong, int> stackRootCountByThreadAddress)
-        {
-            result.TotalCount++;
-            IncrementCount(result.StateDistribution, FormatThreadState(thread.State));
-            IncrementCount(result.GcModeDistribution, thread.GCMode.ToString());
-
-            string appDomain = thread.CurrentAppDomain?.Name ?? "<No AppDomain>";
-            IncrementCount(result.AppDomainDistribution, appDomain);
-
-            // Cache the property — each access reads from CLRMD runtime structures
-            var currentException = thread.CurrentException;
-            if (currentException != null)
-            {
-                result.ThreadsWithActiveExceptionsCount++;
-                string exceptionType = currentException.Type?.Name ?? StringConstants.UnknownType;
-                IncrementCount(result.ExceptionTypeDistribution, exceptionType);
-            }
-
-            if (thread.IsAlive)
-            {
-                result.AliveCount++;
-
-                // The whole captured stack — no artificial per-thread frame cap (§9.23).
-                var stackFrames = new List<ClrStackFrame>(availableFrames.Count);
-                for (int i = 0; i < availableFrames.Count; i++)
-                    stackFrames.Add(availableFrames[i]);
-
-                TrackTopFrameHotspot(result.TopFrameHotspots, stackFrames);
-
-                ulong stackSizeBytes = thread.StackBase > thread.StackLimit
-                    ? thread.StackBase - thread.StackLimit
-                    : 0;
-                if (stackSizeBytes > 0)
-                    result.StackSizeByteSamples.Add(stackSizeBytes);
-
-                if (currentException != null)
-                {
-                    int exceptionStackRoots = GetOrCountStackRoots(thread, stackRootCountByThreadAddress, cache);
-                    threadsWithExceptions.Add(new ThreadWithStackTrace
-                    {
-                        Thread = thread,
-                        TopFrames = stackFrames,
-                        ExceptionType = currentException.Type?.Name ?? StringConstants.UnknownType,
-                        ExceptionMessage = currentException.Message,
-                        StackRootCount = exceptionStackRoots
-                    });
-                }
-
-                // Check for locks
-                if (thread.LockCount > 0)
-                {
-                    int lockStackRoots = GetOrCountStackRoots(thread, stackRootCountByThreadAddress, cache);
-                    threadsWithLocks.Add(new ThreadWithStackTrace
-                    {
-                        Thread = thread,
-                        TopFrames = stackFrames,
-                        ExceptionType = currentException?.Type?.Name,
-                        StackRootCount = lockStackRoots
-                    });
-                }
-
-                // Detect wait/block patterns across all alive threads — cheap since frames are already materialized
-                WaitClassification? waitClassification = ThreadWaitClassifier.Classify(stackFrames, WaitPatterns);
-                if (waitClassification != null)
-                {
-                    IncrementCount(result.WaitCategoryDistribution, waitClassification.Value.Category);
-                    int blockedStackRoots = GetOrCountStackRoots(thread, stackRootCountByThreadAddress, cache);
-                    blockedThreads.Add(new ThreadWithStackTrace
-                    {
-                        Thread = thread,
-                        TopFrames = stackFrames,
-                        WaitCategory = waitClassification.Value.Category,
-                        WaitReason = waitClassification.Value.Reason,
-                        ExceptionType = currentException?.Type?.Name,
-                        StackRootCount = blockedStackRoots
-                    });
-                }
-                else if (!thread.IsGc && !thread.IsFinalizer)
-                {
-                    // Non-blocked user thread — track top frame for the Active Processing group
-                    TrackTopFrameHotspot(result.ActiveThreadHotspots, stackFrames);
-                }
-
-                // ThreadPool worker threads surface a recognisable dispatch frame;
-                // TS_TPWorkerThread is the authoritative flag for this version of ClrMD.
-                if (thread.State.HasFlag(ClrThreadState.TS_TPWorkerThread))
-                    result.ThreadPoolCount++;
-                else if (IsThreadPoolWorker(stackFrames))
-                    result.ThreadPoolCount++;
-
-                // Capture the finalizer thread's stack and blocked state once
-                if (thread.IsFinalizer)
-                {
-                    result.FinalizerThread = thread;
-                    result.FinalizerFrames = stackFrames;
-                    result.FinalizerIsBlocked = waitClassification != null;
-                }
-
-                // Count MoveNext frames to measure async state-machine chain depth
-                int moveNextDepth = CountMoveNextDepth(stackFrames);
-                if (moveNextDepth > 0)
-                {
-                    result.AsyncChainThreadCount++;
-                    if (moveNextDepth > result.MaxAsyncChainDepth)
-                        result.MaxAsyncChainDepth = moveNextDepth;
-                }
-
-                // Every alive thread not already recorded above — a deterministic complete list,
-                // not a reservoir sample (§9.23).
-                bool isAlreadyCaptured = thread.LockCount > 0 || waitClassification != null || currentException != null;
-                if (!isAlreadyCaptured)
-                {
-                    otherThreads.Add(new ThreadWithStackTrace
-                    {
-                        Thread = thread,
-                        TopFrames = stackFrames,
-                        ExceptionType = currentException?.Type?.Name,
-                        StackRootCount = GetOrCountStackRoots(thread, stackRootCountByThreadAddress, cache)
-                    });
-                }
-            }
-
-            if (thread.IsGc)
-                result.GcCount++;
-
-            if (thread.IsFinalizer)
-                result.FinalizerCount++;
-
-            if (thread.State.HasFlag(ClrThreadState.TS_Background))
-                result.BackgroundCount++;
-        }
-
-        private static void FinalizeCategorization(
-            ThreadCategorization result,
-            List<ThreadWithStackTrace> threadsWithLocks,
-            List<ThreadWithStackTrace> blockedThreads,
-            List<ThreadWithStackTrace> threadsWithExceptions,
-            List<ThreadWithStackTrace> otherThreads,
-            ObjectScanCounter scanCounter,
-            IProgress<AnalyzerProgressReport>? progress)
-        {
-            // Sort threads with locks by lock count (descending)
-            threadsWithLocks.Sort((a, b) => b.Thread.LockCount.CompareTo(a.Thread.LockCount));
-            result.ThreadsWithLocks = threadsWithLocks;
-
-            blockedThreads.Sort((a, b) => b.Thread.LockCount.CompareTo(a.Thread.LockCount));
-            result.PotentiallyBlockedThreads = blockedThreads;
-
-            threadsWithExceptions.Sort((a, b) => b.Thread.LockCount.CompareTo(a.Thread.LockCount));
-            result.ThreadsWithExceptions = threadsWithExceptions;
-
-            result.OtherThreads = otherThreads;
-
-            scanCounter.Complete();
-
-            progress?.Report(new(scanCounter.Scanned, "Thread analysis complete"));
-        }
-
-        private static int GetOrCountStackRoots(ClrThread thread, Dictionary<ulong, int> cache, IHeapAnalysisCache? sharedCache)
-        {
-            if (thread.Address == 0)
-                return 0;
-
-            if (cache.TryGetValue(thread.Address, out int existing))
-                return existing;
-
-            int count = sharedCache is not null
-                ? sharedCache.GetOrCountThreadStackRoots(thread, UnboundedFrameCount)
-                : CountStackRoots(thread);
-
-            // Only populate local cache when there's no shared cache; the shared cache
-            // already deduplicates, so the local mirror is redundant when present.
-            if (sharedCache is null)
-                cache[thread.Address] = count;
-
-            return count;
-        }
-
-        private static int CountStackRoots(ClrThread thread)
-        {
-            int count = 0;
-            foreach (var _ in thread.EnumerateStackRoots())
-                count++;
-
-            return count;
+            return null;
         }
 
         // Internal test helper: count occurrences of MoveNext() in a list of frame signature strings.
@@ -588,11 +402,11 @@ namespace DumpDetective.Analysis.Analyzers.Threads
             return depth;
         }
 
-        private static bool IsThreadPoolWorker(List<ClrStackFrame> frames)
+        private static bool IsThreadPoolWorker(IReadOnlyList<ThreadStackFrameRef> frames)
         {
-            foreach (var frame in frames)
+            foreach (ThreadStackFrameRef frame in frames)
             {
-                string sig = ThreadWaitClassifier.GetFrameSignature(frame);
+                string sig = GetFrameSignature(frame);
                 if (sig.Contains("ThreadPoolWorkQueue", StringComparison.OrdinalIgnoreCase) ||
                     sig.Contains("ThreadPool.WorkQueue", StringComparison.OrdinalIgnoreCase) ||
                     sig.Contains("PortableThreadPool", StringComparison.OrdinalIgnoreCase))
@@ -601,49 +415,26 @@ namespace DumpDetective.Analysis.Analyzers.Threads
             return false;
         }
 
-        private static int CountMoveNextDepth(List<ClrStackFrame> frames)
+        private static int CountMoveNextDepth(IReadOnlyList<ThreadStackFrameRef> frames)
         {
             int depth = 0;
-            foreach (var frame in frames)
+            foreach (ThreadStackFrameRef frame in frames)
             {
-                if (ThreadWaitClassifier.GetFrameSignature(frame).Contains(".MoveNext()", StringComparison.OrdinalIgnoreCase))
+                if (GetFrameSignature(frame).Contains(".MoveNext()", StringComparison.OrdinalIgnoreCase))
                     depth++;
             }
             return depth;
         }
 
-        private static string FormatThreadState(ClrThreadState state)
-        {
-            ulong raw = Convert.ToUInt64(state);
-            if (raw == 0)
-                return "0";
+        // Mirrors the pre-retyping ThreadWaitClassifier.GetFrameSignature(ClrStackFrame) exactly,
+        // against the SDK-shaped frame instead.
+        private static string GetFrameSignature(ThreadStackFrameRef frame) =>
+            frame.RawMethodSignature ?? frame.FrameName ?? string.Empty;
 
-            var parts = new List<string>(capacity: 4);
-            ulong remaining = raw;
+        private static string GetFrameSignatureOrUnknown(ThreadStackFrameRef frame) =>
+            frame.RawMethodSignature ?? frame.FrameName ?? frame.MethodDisplayName ?? StringConstants.UnknownType;
 
-            foreach (ClrThreadState flag in Enum.GetValues<ClrThreadState>())
-            {
-                ulong flagValue = Convert.ToUInt64(flag);
-                if (flagValue == 0)
-                    continue;
-
-                if ((remaining & flagValue) == flagValue)
-                {
-                    parts.Add(flag.ToString());
-                    remaining &= ~flagValue;
-                }
-            }
-
-            if (parts.Count == 0)
-                return $"0x{raw:X}";
-
-            if (remaining != 0)
-                parts.Add($"0x{remaining:X}");
-
-            return string.Join(" | ", parts);
-        }
-
-        private static void TrackTopFrameHotspot(Dictionary<string, int> hotspots, List<ClrStackFrame> frames)
+        private static void TrackTopFrameHotspot(Dictionary<string, int> hotspots, IReadOnlyList<ThreadStackFrameRef> frames)
         {
             if (frames.Count == 0)
                 return;
@@ -651,7 +442,7 @@ namespace DumpDetective.Analysis.Analyzers.Threads
             // Find first non-framework frame for better hotspot signal
             for (int i = 0; i < frames.Count; i++)
             {
-                string sig = ThreadWaitClassifier.GetFrameSignature(frames[i]);
+                string sig = GetFrameSignature(frames[i]);
                 if (!IsFrameworkFrameSignature(sig))
                 {
                     IncrementCount(hotspots, sig);
@@ -660,7 +451,7 @@ namespace DumpDetective.Analysis.Analyzers.Threads
             }
 
             // Fall back to first frame if all are framework frames
-            string fallback = ThreadWaitClassifier.GetFrameSignature(frames[0]);
+            string fallback = GetFrameSignature(frames[0]);
             if (!string.IsNullOrWhiteSpace(fallback))
                 IncrementCount(hotspots, fallback);
         }
@@ -687,7 +478,7 @@ namespace DumpDetective.Analysis.Analyzers.Threads
         public void Dispose() { }
     }
 
-    internal class ThreadCategorization
+    internal sealed class ThreadCategorization
     {
         public int TotalCount { get; set; }
         public int AliveCount { get; set; }
@@ -698,9 +489,9 @@ namespace DumpDetective.Analysis.Analyzers.Threads
         public int ThreadsWithActiveExceptionsCount { get; set; }
 
         // Finalizer thread detail
-        public ClrThread? FinalizerThread { get; set; }
+        public RuntimeThreadRef? FinalizerThread { get; set; }
         public bool FinalizerIsBlocked { get; set; }
-        public List<ClrStackFrame> FinalizerFrames { get; set; } = new();
+        public IReadOnlyList<ThreadStackFrameRef>? FinalizerFrames { get; set; }
 
         // Async state-machine chain depth
         public int AsyncChainThreadCount { get; set; }
@@ -710,7 +501,8 @@ namespace DumpDetective.Analysis.Analyzers.Threads
         // the total/mean/max/p95 StackMemorySummary. Bounded by thread count, not heap size.
         public List<ulong> StackSizeByteSamples { get; } = new();
 
-        // ThreadPool telemetry (queried in BeforeThreadStackScan)
+        // ThreadPool telemetry — not available in ClrMD 4 (matches the pre-retyping analyzer's own
+        // remark), left at 0.
         public int ThreadPoolQueueDepth { get; set; }
         public int ThreadPoolActiveWorkers { get; set; }
         public int ThreadPoolIdleWorkers { get; set; }
@@ -723,7 +515,7 @@ namespace DumpDetective.Analysis.Analyzers.Threads
         public List<ThreadWithStackTrace> ThreadsWithLocks { get; set; } = new();
         public List<ThreadWithStackTrace> PotentiallyBlockedThreads { get; set; } = new();
         public List<ThreadWithStackTrace> ThreadsWithExceptions { get; set; } = new();
-        public List<ThreadWithStackTrace> OtherThreads { get; set; } = new();
+        public List<ThreadWithStackTrace>? OtherThreads { get; set; }
         public Dictionary<string, int> StateDistribution { get; set; } = new(StringComparer.Ordinal);
         public Dictionary<string, int> GcModeDistribution { get; set; } = new(StringComparer.Ordinal);
         public Dictionary<string, int> AppDomainDistribution { get; set; } = new(StringComparer.Ordinal);
@@ -732,10 +524,10 @@ namespace DumpDetective.Analysis.Analyzers.Threads
         public Dictionary<string, int> TopFrameHotspots { get; set; } = new(StringComparer.Ordinal);
     }
 
-    internal class ThreadWithStackTrace
+    internal sealed class ThreadWithStackTrace
     {
-        public required ClrThread Thread { get; set; }
-        public List<ClrStackFrame> TopFrames { get; set; } = new();
+        public required RuntimeThreadRef Thread { get; set; }
+        public IReadOnlyList<ThreadStackFrameRef> TopFrames { get; set; } = [];
         public int StackRootCount { get; set; }
         public string? WaitCategory { get; set; }
         public string? WaitReason { get; set; }

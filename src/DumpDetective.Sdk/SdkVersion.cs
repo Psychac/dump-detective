@@ -19,7 +19,13 @@ public static class SdkVersion
 {
     public const int Major = 0;
 
-    /// <summary>11 as of 2026-09-12 (added <see cref="Analysis.IHeapReachabilityQuery"/>'s dump-side
+    /// <summary>12 as of 2026-09-12 (added <see cref="Analysis.RuntimeThreadRef"/>'s <c>IsBackground</c>/
+    /// <c>ThreadStateDisplay</c>/<c>GcModeDisplay</c>/<c>AppDomainName</c>/<c>HasCurrentException</c>/
+    /// <c>ExceptionTypeName</c>/<c>ExceptionMessage</c>/<c>StackSizeBytes</c> — found necessary by
+    /// <c>ThreadAnalyzer</c>'s retyping; all Tier-1 despite the exception fields' name, since they
+    /// come from ClrMD's own <c>ClrException.Type</c>/<c>Message</c> convenience properties, not a
+    /// raw field read).
+    /// Before that, 11 as of 2026-09-12 (added <see cref="Analysis.IHeapReachabilityQuery"/>'s dump-side
     /// implementation and <c>Analysis.AnalysisContext.HeapReachability</c> wiring, plus
     /// <see cref="Analysis.FieldValueKind"/>'s <c>NativeInt</c> case and
     /// <c>FieldValue.ForNativeInt</c>/<c>AsNativeInt</c> — found necessary by
@@ -67,7 +73,7 @@ public static class SdkVersion
     /// additions/splits, the `EntityRef`/`IHeapDominatorQuery`/positional-record/JSON-converter
     /// fixes) — not a precise per-change reconstruction, since nothing yet depends on intermediate
     /// values enough to make that worth simulating.</summary>
-    public const int Minor = 11;
+    public const int Minor = 12;
 
     public static string AsString => $"{Major}.{Minor}";
 }

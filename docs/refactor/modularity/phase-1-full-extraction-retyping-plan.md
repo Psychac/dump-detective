@@ -2,7 +2,7 @@
 
 ## Status (as of 2026-09-12)
 
-**23 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
+**24 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
 in the tree, not just this doc's own narrative — this doc's original "35" count in the section below
 was an approximation from § 10 point 8's grep-based measurement; the real count is 36). The
 `dump.object-fields` Tier-2 escape hatch **is built** (see "Tier 2 wave" below) — the "still not
@@ -13,17 +13,17 @@ built" language later in this doc is stale as of the pilot, 2026-09-11.
 `FinalizableObjectAnalyzer`, `GCGenerationAnalyzer`, `GCHandleAnalyzer`, `GCRootAnalyzer`,
 `HeapTopologyAnalyzer`, `HttpObjectAnalyzer`, `JitAnalyzer`, `LockGraphAnalyzer`,
 `LohFragmentationAnalyzer`, `MemoryAnalyzer`, `ObjectShapeAnalyzer`, `SegmentReservationAnalyzer`,
-`SqlCommandAnalyzer`, `SqlConnectionPoolAnalyzer`, `SqlTransactionAnalyzer`,
+`SqlCommandAnalyzer`, `SqlConnectionPoolAnalyzer`, `SqlTransactionAnalyzer`, `ThreadAnalyzer`,
 `ThreadStackClusterAnalyzer`, `TimerLeakAnalyzer`, `WcfChannelAnalyzer`, `WeakReferenceAnalyzer`.
 
-**Remaining (13):**
+**Remaining (12):**
 `AsyncStateMachineAnalyzer`, `AsyncTaskAnalyzer`, `CollectionAnalyzer`,
 `CrashAnalyzer`, `DominatorAnalyzer`, `EventLeakAnalyzer`,
 `HangAnalyzer`, `ModuleAnalyzer`, `ReferenceChainAnalyzer`, `StaticRootLeakDetector`,
-`StringAnalyzer`, `ThreadAnalyzer`, and **`LeakCandidateAnalyzer`** —
+`StringAnalyzer`, and **`LeakCandidateAnalyzer`** —
 explicit user direction: do `LeakCandidateAnalyzer` last of all, since it needs cross-analyzer
 result access (`context.CompletedRunResults`-equivalent) and deferred-execution-ordering modeling
-that don't exist in the SDK yet, on top of everything the other 12 need.
+that don't exist in the SDK yet, on top of everything the other 11 need.
 
 Detailed plan for the two items [phase-1-contracts-sdk.md](phase-1-contracts-sdk.md) leaves
 deferred (`Analysis/`, `Presentation/`) and the ownerless gap recorded at
@@ -918,7 +918,59 @@ were all already built. Two genuinely new pieces:
 - **`SdkVersion` 11** — also folds in an untracked bump owed from `FinalizableObjectAnalyzer`'s
   retyping the same day (`IHeapFinalizerQueueQuery`'s redesign), missed at the time.
 
-Remaining Tier-1+Tier-2 analyzers (13, see "Status" at the top) haven't been started yet.
+**`ThreadAnalyzer`. Done 2026-09-12.** Another tier-split correction, same shape as `ObjectShapeAnalyzer`/
+`LockGraphAnalyzer`/`BoxingAnalyzer` before it — this doc's own earlier text classified it as
+genuinely Tier-2 (needing `ClrException.Message`), but that field is a ClrMD *convenience property*
+over the exception object's own fields (`ClrException.Type`/`.Message`), not a raw
+`ClrInstanceField.Read` — exactly as source-neutral as everything else `runtime.threads` already
+exposes. Retyped entirely Tier-1, no `dump.object-fields` dependency at all. Reused the
+thread-domain quartet's already-proven scan-participant shape wholesale (`LockGraphAnalyzerLegacyAdapter`'s
+pattern, 2 of 4 quartet members already retyped) rather than inventing a new one:
+- **`RuntimeThreadRef` extended with seven fields**: `IsBackground`, `ThreadStateDisplay`,
+  `GcModeDisplay`, `AppDomainName`, `HasCurrentException`, `ExceptionTypeName`, `ExceptionMessage`,
+  `StackSizeBytes` — all computed once per thread in the single shared choke point
+  (`ThreadStackTranslator.ToThreadRef`), all safe ClrMD convenience-property reads on a population
+  that's always small (thread count, never heap-object-count-scale), so none of this risks the
+  per-population cost mistake found in `BoxingAnalyzer` earlier this session.
+- **A real fidelity gap found and fixed during design, not shipped broken**: originally planned to
+  expose only a nullable `ExceptionTypeName`/`ExceptionMessage`, inferring "has an exception" from
+  non-null. Caught before writing the analyzer that this collapses two genuinely different
+  pre-retyping states — no exception at all, vs. a real non-null exception whose `Type` still fails
+  to resolve — that the pre-retyping analyzer's own `currentException != null` check distinguishes.
+  Added `HasCurrentException: bool` as an explicit, independent flag instead.
+- **`ThreadAnalyzerLegacyAdapter`** mirrors `LockGraphAnalyzerLegacyAdapter` exactly (accumulate
+  real `RuntimeThreadRef`/frame data during the pipeline's shared `ThreadStackScanDispatcher` pass,
+  hand the inner analyzer a `PrecomputedRuntimeThreadQuery`, fall back to a live query outside the
+  pipeline) with one difference: it computes a **real** per-thread stack-root count via
+  `IHeapAnalysisCache.GetOrCountThreadStackRoots` during `OnThreadStack`, where
+  `LockGraphAnalyzerLegacyAdapter` hardcodes `0` (a fact it never needed).
+- **Every pure, ClrMD-independent helper reused unchanged**: `ThreadWaitClassifier.ClassifySignature`
+  (frame-signature substring matching), `CountMoveNextDepth`/`IsThreadPoolWorker`/
+  `TrackTopFrameHotspot`/`IsFrameworkFrameSignature`/`BuildStackMemorySummary` all took only strings
+  or plain value lists to begin with — only their frame-signature *extraction* expression changed
+  (`ThreadStackFrameRef.RawMethodSignature ?? FrameName ?? ""` instead of a `ClrStackFrame`-typed
+  helper), the classification/counting logic itself is byte-for-byte identical.
+- **Gate met**: new `ThreadAnalyzerRetypingCharacterizationTests` (20 tests) — no pre-existing test
+  coverage existed. Fake, list-backed `IRuntimeThreadQuery` (same shape
+  `WeakReferenceAnalyzerRetypingCharacterizationTests` established), covering alive/dead counting,
+  lock tracking and sort order, exception tracking, wait classification, hotspot tracking (including
+  the framework-frame-skip rule), threadpool detection via both the state flag and the frame
+  heuristic, finalizer-thread capture, async-chain depth, background-thread counting, GC-thread
+  exclusion from hotspots, the "other threads" fallback bucket, and the stack-memory summary. New
+  `ThreadAnalyzerRealDumpTests` (`[DiscrepancyFact]`, one dump, foreground, streamed to a file) —
+  deliberately run standalone (outside the pipeline, exercising the live `RuntimeThreadQuery`
+  fallback path rather than the precomputed one) — passed in 18s against the real 3.5 GB reference
+  dump: 135 total threads, 38 alive, 0 GC threads, 3 blocked, 5 lock-holding, 1 with an active
+  exception, 38 background, 13 threadpool workers, exactly 1 finalizer thread, 0 async-chain
+  threads. Full non-real-dump suite (1483 tests, up from 1463) passes.
+- Call sites updated: `DefaultAnalyzerFeatureModuleCatalog`, `FullPipelineBenchmark`,
+  `SmallDumpLatencyBenchmark` now construct `ThreadAnalyzerLegacyAdapter`; `ThreadAnalyzerBenchmark`
+  retargeted at `AnalyzerBenchmarkBase<ThreadAnalyzerLegacyAdapter>` (a dedicated benchmark class
+  using the generic-constraint form, not a `new ThreadAnalyzer()` call site — missed by the initial
+  grep sweep, caught by building `BenchmarkSuite1` before committing).
+- **`SdkVersion` 12**.
+
+Remaining Tier-1+Tier-2 analyzers (12, see "Status" at the top) haven't been started yet.
 `LeakCandidateAnalyzer` stays last per explicit direction — it needs cross-analyzer result access
 and deferred-execution-ordering modeling neither this wave nor Tier 1 has built.
 

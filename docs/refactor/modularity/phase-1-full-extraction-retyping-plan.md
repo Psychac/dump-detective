@@ -2,7 +2,7 @@
 
 ## Status (as of 2026-09-12)
 
-**21 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
+**22 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
 in the tree, not just this doc's own narrative — this doc's original "35" count in the section below
 was an approximation from § 10 point 8's grep-based measurement; the real count is 36). The
 `dump.object-fields` Tier-2 escape hatch **is built** (see "Tier 2 wave" below) — the "still not
@@ -10,20 +10,20 @@ built" language later in this doc is stale as of the pilot, 2026-09-11.
 
 **Done:**
 `AllocationPatternAnalyzer`, `ArrayAnalyzer`, `BoxingAnalyzer`, `DbConnectionAnalyzer`,
-`GCGenerationAnalyzer`, `GCHandleAnalyzer`, `GCRootAnalyzer`, `HeapTopologyAnalyzer`,
-`HttpObjectAnalyzer`, `JitAnalyzer`, `LockGraphAnalyzer`, `LohFragmentationAnalyzer`,
-`MemoryAnalyzer`, `ObjectShapeAnalyzer`, `SegmentReservationAnalyzer`, `SqlCommandAnalyzer`,
-`SqlConnectionPoolAnalyzer`, `SqlTransactionAnalyzer`, `ThreadStackClusterAnalyzer`,
-`TimerLeakAnalyzer`, `WcfChannelAnalyzer`.
+`FinalizableObjectAnalyzer`, `GCGenerationAnalyzer`, `GCHandleAnalyzer`, `GCRootAnalyzer`,
+`HeapTopologyAnalyzer`, `HttpObjectAnalyzer`, `JitAnalyzer`, `LockGraphAnalyzer`,
+`LohFragmentationAnalyzer`, `MemoryAnalyzer`, `ObjectShapeAnalyzer`, `SegmentReservationAnalyzer`,
+`SqlCommandAnalyzer`, `SqlConnectionPoolAnalyzer`, `SqlTransactionAnalyzer`,
+`ThreadStackClusterAnalyzer`, `TimerLeakAnalyzer`, `WcfChannelAnalyzer`.
 
-**Remaining (15):**
+**Remaining (14):**
 `AsyncStateMachineAnalyzer`, `AsyncTaskAnalyzer`, `CollectionAnalyzer`,
-`CrashAnalyzer`, `DominatorAnalyzer`, `EventLeakAnalyzer`, `FinalizableObjectAnalyzer`,
+`CrashAnalyzer`, `DominatorAnalyzer`, `EventLeakAnalyzer`,
 `HangAnalyzer`, `ModuleAnalyzer`, `ReferenceChainAnalyzer`, `StaticRootLeakDetector`,
 `StringAnalyzer`, `ThreadAnalyzer`, `WeakReferenceAnalyzer`, and **`LeakCandidateAnalyzer`** —
 explicit user direction: do `LeakCandidateAnalyzer` last of all, since it needs cross-analyzer
 result access (`context.CompletedRunResults`-equivalent) and deferred-execution-ordering modeling
-that don't exist in the SDK yet, on top of everything the other 15 need.
+that don't exist in the SDK yet, on top of everything the other 13 need.
 
 Detailed plan for the two items [phase-1-contracts-sdk.md](phase-1-contracts-sdk.md) leaves
 deferred (`Analysis/`, `Presentation/`) and the ownerless gap recorded at
@@ -796,7 +796,64 @@ needed the `dump.object-fields` hatch this wave built.
 - Call site updated: `DefaultAnalyzerFeatureModuleCatalog` now constructs
   `BoxingAnalyzerLegacyAdapter`. No benchmark referenced this analyzer directly.
 
-Remaining Tier-1+Tier-2 analyzers (15, see "Status" at the top) haven't been started yet.
+**`FinalizableObjectAnalyzer`. Done 2026-09-12.** Ninth Tier-2 wave consumer, first real
+`heap.finalizer-queue` consumer — the capability was declared but had zero dump-side implementation
+and zero real consumers before this, same "declared but never checked against a real consumer" gap
+Batch 5/7's `IRuntimeJitQuery`/`IHeapHandleQuery` redesigns hit.
+- **`IHeapFinalizerQueueQuery` redesigned, not just implemented**: the shipped shape (raw `ulong`
+  addresses, zero consumers) carried no type identity at all. Redesigned to yield
+  `FinalizerQueueObjectRef(Address, IsValid, Type, TypeDisplayName, ShallowSize, IsDisposableType,
+  IsCriticalFinalizerType)` — `IsDisposableType`/`IsCriticalFinalizerType` are structural
+  (interface-implements / base-type-chain) facts, computed dump-side and cached per method table,
+  deliberately scoped to the finalizer queue's own bounded population rather than folded into
+  `heap.types`' whole-heap per-type dictionary — the exact shape of the mistake found and fixed in
+  `BoxingAnalyzer`'s retyping earlier this wave does not apply here by construction. The disposed
+  field's *value* stays a Tier-2 concern: the analyzer reads it directly via
+  `IDumpObjectFieldQuery.TryReadField`, trying each of five candidate field names once per method
+  table (cached), keeping the tier boundary honest rather than smuggling a field-value read into a
+  Tier-1 interface.
+- **A real, deliberate behavior extension, checked for blast radius before shipping**: the
+  pre-retyping analyzer's no-index fallback (a full heap walk when no prebuilt index exists) is now
+  handled by extending the *shared* `heap.types` no-index fallback
+  (`HeapTypeStatisticsQuery.BuildFromCachedStatistics`, backed by `StatisticsCache`'s full-heap-walk
+  branch that `DominatorAnalyzer`/`EventLeakAnalyzer`/`LeakCandidateAnalyzer`/`ReferenceChainAnalyzer`/
+  `QueryEngine` already share) with `IsFinalizableType`/`Gen0Count`/`Gen1Count`/`Gen2Count` on
+  `CachedTypeStatistics` — checked first, not assumed: the extension is purely additive (new
+  properties none of the 5 other consumers read) and adds marginal per-object cost to a walk that's
+  already happening (that branch already iterates every live object to compute count/size), not a
+  second full heap walk. Verified by running all 5 other consumers' tests (90 tests) unchanged after
+  the extension. This means the analyzer itself needs no fallback logic at all — one
+  `IHeapTypeStatisticsQuery.GetTypeStatistics()` call serves both the index-backed and no-index
+  paths.
+- **One accepted, documented fidelity gap**: per-entry `Generation` (an `int`, 0/1/2/3=LOH/-1=unknown,
+  feeding the report's `FormatGeneration` display) is derived from `IHeapSegmentQuery.GetGeneration`'s
+  `HeapGenerationTag` enum, which distinguishes Poh/Frozen from Loh — the pre-retyping analyzer's raw
+  `ClrSegment.GetGeneration()` int cast may or may not have. Poh/Frozen map to the same "-1 = Unknown"
+  sentinel an unresolvable address already used, rather than guessing which legacy int value ClrMD
+  would have produced for them — the same conservative exclusion `GCRootAnalyzer`'s retyping already
+  made for these two rare tags.
+- **Gate met**: new `FinalizableObjectAnalyzerRetypingCharacterizationTests` — no prior per-analyzer
+  unit test existed (only a finding-generator test, unaffected). Population-sweep filter/sort
+  arithmetic is fully synthetic-controllable (real method tables, injected `TypeAggregates`, same
+  shape prior batches used); queue-analysis correctness is deliberately *not* asserted against a
+  specific expected count on a live self-attached process — unlike the static type/segment/root data
+  earlier batches relied on, a live process's actual finalizer queue content is GC-timing-dependent
+  and transient, so only internal-consistency invariants are checked there (count/generation bounds,
+  sort order), with real behavioral verification left to the real-dump test. New
+  `FinalizableObjectAnalyzerRealDumpTests` (`[DiscrepancyFact]`, one dump, foreground, streamed to a
+  file per the user's request rather than blind-waited-on) passed in 7s against the real 3.5 GB
+  reference dump: 71,902 total finalizable objects, 68,576 in the finalizer queue, 2,038
+  critical-finalizer objects, no undisposed disposables found, 147 distinct finalizable types by
+  Gen2 count, 0 of the top 10 retained-size entries got a sampled root path — expected and correct,
+  not a bug: objects sitting in the finalizer queue are by definition unreachable from ordinary GC
+  roots (that's why they're eligible for finalization at all), matching the pre-retyping analyzer's
+  own behavior exactly. Full non-real-dump suite (1443 tests, up from 1440) passes.
+- Call sites updated: `DefaultAnalyzerFeatureModuleCatalog` now constructs
+  `FinalizableObjectAnalyzerLegacyAdapter`, carrying the pre-retyping analyzer's own
+  `IRequiresReachableGraphIndex`/`IRequiresDominatorTreeIndex` markers (same relocation
+  `GCRootAnalyzerLegacyAdapter` needed in Batch 3). No benchmark referenced this analyzer directly.
+
+Remaining Tier-1+Tier-2 analyzers (14, see "Status" at the top) haven't been started yet.
 `LeakCandidateAnalyzer` stays last per explicit direction — it needs cross-analyzer result access
 and deferred-execution-ordering modeling neither this wave nor Tier 1 has built.
 

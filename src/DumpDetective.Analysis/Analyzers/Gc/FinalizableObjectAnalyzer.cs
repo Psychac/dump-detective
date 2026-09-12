@@ -1,10 +1,8 @@
-using DumpDetective.Analysis.Cache;
-using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Traversal;
-using DumpDetective.Core.Abstractions;
+using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
-
-using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 
 namespace DumpDetective.Analysis.Analyzers.Gc
 {
@@ -12,260 +10,224 @@ namespace DumpDetective.Analysis.Analyzers.Gc
     /// Phase-2 analyzer covering §21.1 (finalizable object population) and §21.2
     /// (finalizer queue sub-graph retention and undisposed detection).
     ///
-    /// Population sweep (§21.1) uses <c>TypeAggregates</c> from Phase 1 filtered by
-    /// <see cref="TypeAggregateFlags.IsFinalizableType"/> — no full heap re-scan.
+    /// Population sweep (§21.1) reads <c>heap.types</c>' per-type aggregates filtered by
+    /// <see cref="HeapTypeStatistics.IsFinalizableType"/> — no full heap re-scan.
     ///
-    /// Queue analysis (§21.2) calls <c>heap.EnumerateFinalizableObjects()</c> exhaustively (no
-    /// row cap); per-entry retained bytes come from the exact dominator tree
-    /// (<see cref="IDominatorTreeProvider.TryGetRetainedBytes"/>) when available, falling back
-    /// to shallow size otherwise — no bounded BFS estimator remains in this analyzer.
+    /// Queue analysis (§21.2) reads <c>heap.finalizer-queue</c> exhaustively (no row cap); per-entry
+    /// retained bytes come from the exact dominator tree (<see cref="IHeapDominatorQuery.TryGetRetainedSize"/>)
+    /// when available, falling back to shallow size otherwise — no bounded BFS estimator here.
     /// </summary>
-    public sealed class FinalizableObjectAnalyzer : IAnalyzer, IRequiresReachableGraphIndex, IRequiresDominatorTreeIndex
+    /// <remarks>
+    /// Tier-1+Tier-2 batch (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
+    /// <see cref="IHeapFinalizerQueueQuery"/>'s <c>IsDisposableType</c>/<c>IsCriticalFinalizerType</c>
+    /// are structural (interface/base-type-chain) facts, computed dump-side scoped to the finalizer
+    /// queue's own bounded population — deliberately not folded into <c>heap.types</c>' whole-heap
+    /// per-type dictionary, the exact mistake found and fixed in <c>BoxingAnalyzer</c>'s retyping
+    /// earlier this wave. Only the disposed-field *value* read goes through <c>dump.object-fields</c>
+    /// (Tier 2) directly, cached per method table the same way the pre-retyping analyzer's own
+    /// <c>disposedFieldCache</c> avoided re-resolving which field name exists on a repeated type.
+    ///
+    /// A real, deliberate behavior extension found while retyping: the pre-retyping analyzer's
+    /// no-index fallback (a full heap walk when no prebuilt index exists) is now handled by
+    /// <c>heap.types</c>' own no-index fallback (<c>HeapTypeStatisticsQuery.BuildFromCachedStatistics</c>,
+    /// backed by the shared <c>StatisticsCache</c> walk 5 other analyzers already use) — extended,
+    /// not bypassed, to also carry <see cref="HeapTypeStatistics.IsFinalizableType"/>/per-generation
+    /// counts, so this analyzer needs no fallback logic of its own at all: a single
+    /// <see cref="IHeapTypeStatisticsQuery.GetTypeStatistics"/> call now serves both paths.
+    /// </remarks>
+    public sealed class FinalizableObjectAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     {
+        private static readonly string[] DisposedFieldCandidates =
+            ["_disposed", "disposed", "m_disposed", "_isDisposed", "isDisposed"];
+
+        private const int RootPathSampleLimit = 10;
+
+        private static readonly RootPathSearchOptions RootPathOptions = new(
+            MaxCandidateNodes: 5_000, MaxCandidateDepth: 8, MaxRootExpansionDepth: 12, LargeFanoutThreshold: 100);
+
         public string Name => "Finalizable Object Analysis";
         public string Category => "Memory";
 
-        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(
-            AnalysisContext context,
-            CancellationToken cancellationToken)
+        public AnalyzerDomainResult? LastResult { get; private set; }
+
+        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, cancellationToken).Stamp(this));
+
+            IHeapTypeStatisticsQuery statsQuery = context.HeapTypeStatistics
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapTypes}' capability.");
+            IHeapFinalizerQueueQuery finalizerQueue = context.HeapFinalizerQueue
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapFinalizerQueue}' capability.");
+            IHeapSegmentQuery segments = context.HeapSegments
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapSegments}' capability.");
+            IDumpObjectFieldQuery dumpFields = context.DumpObjectFields
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.DumpObjectFields}' capability.");
+            IHeapRootPathQuery rootPaths = context.HeapRootPaths
+                ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapRootPaths}' capability.");
+            IHeapDominatorQuery? dominators = context.HeapDominators; // optional -- Stage B may not be built
+
+            LastResult = Analyze(statsQuery, finalizerQueue, segments, dumpFields, rootPaths, dominators, cancellationToken);
+            return ValueTask.CompletedTask;
         }
 
-        private static AnalyzerDomainResult Analyze(
-            ClrHeap heap,
-            IHeapAnalysisCache cache,
+        private static FinalizableObjectDomainResult Analyze(
+            IHeapTypeStatisticsQuery statsQuery,
+            IHeapFinalizerQueueQuery finalizerQueue,
+            IHeapSegmentQuery segments,
+            IDumpObjectFieldQuery dumpFields,
+            IHeapRootPathQuery rootPaths,
+            IHeapDominatorQuery? dominators,
             CancellationToken cancellationToken)
         {
-            // ── Step 1: Population from TypeAggregates (Phase 1 index) ────────
-            IReadOnlyDictionary<ulong, TypeAggregateIndexEntry>? typeAggregates = null;
-            if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? idx))
-                typeAggregates = idx.TypeAggregates;
+            // ── Step 1: Population from heap.types, filtered by IsFinalizableType ────────
+            IReadOnlyDictionary<string, HeapTypeStatistics> stats = statsQuery.GetTypeStatistics();
 
             long totalObjects = 0;
             ulong totalBytes = 0;
             long gen0 = 0, gen1 = 0, gen2 = 0, loh = 0;
+            var finalizableTypes = new List<(string Name, HeapTypeStatistics Stat)>();
 
-            var finalizableTypes = new List<(ulong Mt, TypeAggregateIndexEntry Entry)>();
-            var fallbackTypeNames = new Dictionary<ulong, string>();  // For fallback path type name caching
-
-            if (typeAggregates is not null)
+            foreach (KeyValuePair<string, HeapTypeStatistics> kv in stats)
             {
-                foreach (KeyValuePair<ulong, TypeAggregateIndexEntry> kv in typeAggregates)
-                {
-                    TypeAggregateIndexEntry e = kv.Value;
-                    if ((e.Flags & TypeAggregateFlags.IsFinalizableType) == 0)
-                        continue;
+                if (!kv.Value.IsFinalizableType)
+                    continue;
 
-                    finalizableTypes.Add((kv.Key, e));
-                    totalObjects += e.Count;
-                    totalBytes += e.TotalSize;
-                    gen0 += e.Gen0Count;
-                    gen1 += e.Gen1Count;
-                    gen2 += e.Gen2Count;
-                    loh += e.LohCount;
-                }
-            }
-            else
-            {
-                // Fallback: scan heap directly (only used when no Phase 1 index is available)
-                // Build per-type statistics to match the Phase 1 index path output.
-                var typeStats = new Dictionary<ulong, (string Name, ulong Mt, long Count, ulong Bytes, long Gen0, long Gen1, long Gen2, long Loh)>();
-
-                foreach (ClrObject obj in heap.EnumerateObjects())
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (!obj.IsValid || obj.Type is null || !obj.Type.IsFinalizable)
-                        continue;
-
-                    totalObjects++;
-                    totalBytes += obj.Size;
-
-                    int g = SegmentKindMapper.ResolveGeneration(heap, obj.Address);
-                    if (g == 0) gen0++;
-                    else if (g == 1) gen1++;
-                    else if (g == 2) gen2++;
-                    else if (g >= 3) loh++;  // LOH is typically reported as Gen3 or higher
-
-                    // Accumulate per-type stats
-                    ulong mt = obj.Type.MethodTable;
-                    string typeName = obj.Type.Name ?? "<unknown>";
-                    if (!typeStats.TryGetValue(mt, out var stat))
-                    {
-                        stat = (typeName, mt, 0, 0, 0, 0, 0, 0);
-                        fallbackTypeNames[mt] = typeName;
-                    }
-
-                    stat.Count++;
-                    stat.Bytes += obj.Size;
-                    if (g == 0) stat.Gen0++;
-                    else if (g == 1) stat.Gen1++;
-                    else if (g == 2) stat.Gen2++;
-                    else if (g >= 3) stat.Loh++;
-
-                    typeStats[mt] = stat;
-                }
-
-                // Convert per-type stats to TypeAggregateIndexEntry equivalents
-                foreach (var (mt, (typeName, _, count, bytes, g0, g1, g2, lohCount)) in typeStats)
-                {
-                    var entry = new TypeAggregateIndexEntry(
-                        MethodTable: mt,
-                        ModuleId: 0,  // Module ID not available in fallback path
-                        Count: count,
-                        TotalSize: bytes,
-                        LohCount: lohCount,
-                        LohSize: lohCount > 0 ? bytes : 0,  // Assume LOH objects contribute to TotalSize
-                        SampleAddress: 0,  // No sample address available in fallback path
-                        Gen0Count: g0,
-                        Gen1Count: g1,
-                        Gen2Count: g2,
-                        Flags: TypeAggregateFlags.IsFinalizableType);
-                    finalizableTypes.Add((mt, entry));
-                }
+                finalizableTypes.Add((kv.Key, kv.Value));
+                totalObjects += kv.Value.InstanceCount;
+                totalBytes += kv.Value.TotalSize;
+                gen0 += kv.Value.Gen0Count;
+                gen1 += kv.Value.Gen1Count;
+                gen2 += kv.Value.Gen2Count;
+                loh += kv.Value.LohCount;
             }
 
-            // ── Step 2: Top finalizable types by Gen2Count ─────────────────────
-            finalizableTypes.Sort(static (a, b) => b.Entry.Gen2Count.CompareTo(a.Entry.Gen2Count));
+            finalizableTypes.Sort(static (a, b) => b.Stat.Gen2Count.CompareTo(a.Stat.Gen2Count));
             var topTypesByGen2 = new List<TypeGenerationProfile>(finalizableTypes.Count);
-            for (int i = 0; i < finalizableTypes.Count; i++)
+            foreach ((string name, HeapTypeStatistics s) in finalizableTypes)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                (ulong mt, TypeAggregateIndexEntry e) = finalizableTypes[i];
-                // Use cached type name from fallback path if available; otherwise resolve from sample address
-                string typeName = fallbackTypeNames.TryGetValue(mt, out var cached)
-                    ? cached
-                    : TypeAggregateNameResolver.ResolveTypeName(heap, mt, e.SampleAddress);
                 topTypesByGen2.Add(new TypeGenerationProfile(
-                    TypeName: typeName,
-                    Gen0Count: e.Gen0Count,
-                    Gen1Count: e.Gen1Count,
-                    Gen2Count: e.Gen2Count,
-                    LohCount: (int)Math.Min(e.LohCount, int.MaxValue),
-                    TotalBytes: e.TotalSize,
-                    Gen2Bytes: e.Gen2TotalSize,
+                    TypeName: name,
+                    Gen0Count: s.Gen0Count,
+                    Gen1Count: s.Gen1Count,
+                    Gen2Count: s.Gen2Count,
+                    LohCount: (int)Math.Min(s.LohCount, int.MaxValue),
+                    TotalBytes: s.TotalSize,
+                    Gen2Bytes: s.Gen2TotalSize,
                     IsFinalizable: true));
             }
 
-            // ── Step 3: Finalizer queue analysis ─────────────────────────────
-            // §12.1 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): null
-            // when Stage B wasn't built for this run — retained-bytes below degrades to shallow
-            // size in that case (IsRetainedBytesExact = false on the affected entries).
-            IDominatorTreeProvider? treeProvider = cache.TryGetDominatorTreeProvider();
-
+            // ── Step 2: Finalizer queue analysis ─────────────────────────────────────────
             int queueCount = 0;
-            var queueSamples = new List<(ClrObject Obj, string TypeName)>(128);
-            var queueTypeCountMap = new Dictionary<string, int>();
-            var criticalFinalizerTypeCountMap = new Dictionary<string, int>();
-            var criticalFinalizerCache = new Dictionary<ulong, bool>();
+            var queueTypeCountMap = new Dictionary<string, int>(StringComparer.Ordinal);
+            var criticalFinalizerTypeCountMap = new Dictionary<string, int>(StringComparer.Ordinal);
             int criticalFinalizerQueueCount = 0;
             ulong criticalFinalizerQueueBytes = 0;
+            var queueSamples = new List<FinalizerQueueObjectRef>(128);
 
-            foreach (ClrObject obj in heap.EnumerateFinalizableObjects())
+            foreach (FinalizerQueueObjectRef entry in finalizerQueue.EnumerateFinalizerQueue())
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 queueCount++;
 
-                string typeName = obj.IsValid && obj.Type is not null ? (obj.Type.Name ?? "<unknown>") : "<unknown>";
-                if (!queueTypeCountMap.ContainsKey(typeName))
-                    queueTypeCountMap[typeName] = 0;
-                queueTypeCountMap[typeName]++;
+                string typeName = entry.IsValid ? entry.TypeDisplayName : "<unknown>";
+                queueTypeCountMap[typeName] = queueTypeCountMap.GetValueOrDefault(typeName) + 1;
 
-                if (obj.IsValid && obj.Type is not null)
+                if (!entry.IsValid)
+                    continue;
+
+                queueSamples.Add(entry);
+
+                if (entry.IsCriticalFinalizerType)
                 {
-                    queueSamples.Add((obj, typeName));
-
-                    if (IsCriticalFinalizerType(obj.Type, criticalFinalizerCache, obj.Type.MethodTable))
-                    {
-                        criticalFinalizerQueueCount++;
-                        criticalFinalizerQueueBytes += obj.Size;
-                        if (!criticalFinalizerTypeCountMap.ContainsKey(typeName))
-                            criticalFinalizerTypeCountMap[typeName] = 0;
-                        criticalFinalizerTypeCountMap[typeName]++;
-                    }
+                    criticalFinalizerQueueCount++;
+                    criticalFinalizerQueueBytes += entry.ShallowSize;
+                    criticalFinalizerTypeCountMap[typeName] = criticalFinalizerTypeCountMap.GetValueOrDefault(typeName) + 1;
                 }
             }
 
-            // Build queue types by count, full list — no LINQ, manual sort
-            var topQueueTypes = new List<QueueTypeStatistic>(queueTypeCountMap.Count);
+            var topQueueTypesByCount = new List<QueueTypeStatistic>(queueTypeCountMap.Count);
             foreach (KeyValuePair<string, int> kv in queueTypeCountMap)
-                topQueueTypes.Add(new QueueTypeStatistic(kv.Key, kv.Value));
-            topQueueTypes.Sort(static (a, b) => b.QueueCount.CompareTo(a.QueueCount));
+                topQueueTypesByCount.Add(new QueueTypeStatistic(kv.Key, kv.Value));
+            topQueueTypesByCount.Sort(static (a, b) => b.QueueCount.CompareTo(a.QueueCount));
 
-            // CriticalFinalizerObject / SafeHandle types accumulating in the queue — each entry
-            // implies an unreleased OS resource handle (socket, file descriptor, registry key, etc.)
-            // since guaranteed-finalization types are not expected to back up under normal load.
-            var topCriticalFinalizerTypes = new List<QueueTypeStatistic>(criticalFinalizerTypeCountMap.Count);
+            // CriticalFinalizerObject (SafeHandle, CriticalHandle, OS-handle wrappers): guaranteed
+            // finalization even under partial/aborted finalization scenarios.
+            var topCriticalFinalizerTypesByCount = new List<QueueTypeStatistic>(criticalFinalizerTypeCountMap.Count);
             foreach (KeyValuePair<string, int> kv in criticalFinalizerTypeCountMap)
-                topCriticalFinalizerTypes.Add(new QueueTypeStatistic(kv.Key, kv.Value));
-            topCriticalFinalizerTypes.Sort(static (a, b) => b.QueueCount.CompareTo(a.QueueCount));
+                topCriticalFinalizerTypesByCount.Add(new QueueTypeStatistic(kv.Key, kv.Value));
+            topCriticalFinalizerTypesByCount.Sort(static (a, b) => b.QueueCount.CompareTo(a.QueueCount));
 
-            // Sort by shallow size descending
-            queueSamples.Sort(static (a, b) => b.Obj.Size.CompareTo(a.Obj.Size));
+            queueSamples.Sort(static (a, b) => b.ShallowSize.CompareTo(a.ShallowSize));
 
             var topEntries = new List<FinalizerQueueEntry>(queueSamples.Count);
             ulong totalQueueRetained = 0;
             bool hasUndisposedDisposable = false;
             bool isRetainedEstimatePartial = false;
 
-            var isDisposableCache = new Dictionary<ulong, bool>();
-            var disposedFieldCache = new Dictionary<ulong, ClrInstanceField?>();
+            // Caches which disposed-field name (if any) exists on a given method table, so a
+            // repeated type (e.g. a thousand leaked Timer objects) only pays for the name-guessing
+            // once -- mirrors the pre-retyping analyzer's own disposedFieldCache exactly.
+            var resolvedDisposedFieldNameCache = new Dictionary<ulong, string?>();
 
             for (int i = 0; i < queueSamples.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                (ClrObject obj, string typeName) = queueSamples[i];
+                FinalizerQueueObjectRef entry = queueSamples[i];
 
-                if (!obj.IsValid || obj.Type is null)
-                    continue;
-
-                ulong mt = obj.Type.MethodTable;
-                bool isDisposable = IsDisposableType(obj.Type, isDisposableCache, mt);
                 bool disposedFound = false;
                 bool disposedValue = false;
-
-                ClrInstanceField? disposedField = FindDisposedField(obj.Type, disposedFieldCache, mt);
-                if (disposedField is not null)
+                ulong mtKey = entry.Type.MethodTable ?? 0;
+                if (!resolvedDisposedFieldNameCache.TryGetValue(mtKey, out string? fieldName))
                 {
-                    disposedFound = true;
-                    try { disposedValue = disposedField.Read<bool>(obj, interior: false); }
-                    catch { /* field unreadable */ }
+                    fieldName = null;
+                    foreach (string candidate in DisposedFieldCandidates)
+                    {
+                        if (dumpFields.TryReadField(entry.Address, candidate, out FieldValue probe) && probe.Kind == FieldValueKind.Bool)
+                        {
+                            fieldName = candidate;
+                            break;
+                        }
+                    }
+                    resolvedDisposedFieldNameCache[mtKey] = fieldName;
                 }
 
-                if (isDisposable && disposedFound && !disposedValue)
+                if (fieldName is not null && dumpFields.TryReadField(entry.Address, fieldName, out FieldValue value) && value.Kind == FieldValueKind.Bool)
+                {
+                    disposedFound = true;
+                    disposedValue = value.AsBool();
+                }
+
+                if (entry.IsDisposableType && disposedFound && !disposedValue)
                     hasUndisposedDisposable = true;
 
-                bool isCriticalFinalizer = IsCriticalFinalizerType(obj.Type, criticalFinalizerCache, mt);
-
                 ulong retained = 0;
-                bool retainedIsExact = treeProvider is not null && treeProvider.TryGetRetainedBytes(obj.Address, out retained);
+                bool retainedIsExact = dominators is not null && dominators.TryGetRetainedSize(entry.Address, out retained);
                 if (!retainedIsExact)
                 {
-                    retained = obj.Size;
+                    retained = entry.ShallowSize;
                     isRetainedEstimatePartial = true;
                 }
                 totalQueueRetained += retained;
 
-                int generation = SegmentKindMapper.ResolveGeneration(heap, obj.Address);
+                int generation = ToLegacyGeneration(segments.GetGeneration(entry.Address));
 
                 topEntries.Add(new FinalizerQueueEntry(
-                    Address: obj.Address,
-                    TypeName: typeName,
-                    ShallowSize: obj.Size,
+                    Address: entry.Address,
+                    TypeName: entry.TypeDisplayName,
+                    ShallowSize: entry.ShallowSize,
                     EstimatedRetainedBytes: retained,
-                    IsDisposableType: isDisposable,
+                    IsDisposableType: entry.IsDisposableType,
                     DisposedFieldFound: disposedFound,
                     DisposedFieldValue: disposedValue,
                     RetainedBytesIsExact: retainedIsExact,
-                    IsCriticalFinalizer: isCriticalFinalizer,
+                    IsCriticalFinalizer: entry.IsCriticalFinalizerType,
                     Generation: generation));
             }
 
-            // Sort by estimated retained size descending
             topEntries.Sort(static (a, b) => b.EstimatedRetainedBytes.CompareTo(a.EstimatedRetainedBytes));
 
-            PopulateRootPaths(heap, cache, topEntries, cancellationToken);
+            PopulateRootPaths(rootPaths, topEntries, cancellationToken);
 
             return new FinalizableObjectDomainResult(
                 TotalFinalizableObjects: (int)Math.Min(totalObjects, int.MaxValue),
@@ -281,123 +243,48 @@ namespace DumpDetective.Analysis.Analyzers.Gc
                 CriticalFinalizerQueueCount: criticalFinalizerQueueCount,
                 CriticalFinalizerQueueBytes: criticalFinalizerQueueBytes,
                 TopFinalizableTypesByGen2Count: topTypesByGen2,
-                TopQueueTypesByCount: topQueueTypes,
-                TopCriticalFinalizerTypesByCount: topCriticalFinalizerTypes,
+                TopQueueTypesByCount: topQueueTypesByCount,
+                TopCriticalFinalizerTypesByCount: topCriticalFinalizerTypesByCount,
                 TopQueueEntriesByRetainedSize: topEntries);
         }
 
-        // ── Helpers ───────────────────────────────────────────────────────────
-
-        // Root path search is a bounded bidirectional BFS (up to a few thousand candidate
-        // nodes) per target — genuinely expensive, unlike the exhaustive-but-cheap counting
-        // above. Only the highest-impact entries (already sorted by retained size) get a
-        // "why is this alive" path; every entry still keeps its exact count/bytes/generation.
-        private const int RootPathSampleLimit = 10;
-
+        // BFS/dominator-chain root-path search is exhaustive-but-cheap only up to a point -- capped
+        // to the highest-impact "top N by retained bytes" entries, same as pre-retyping. Every entry
+        // still keeps its exact count/bytes/generation regardless of whether it got a sampled path.
         private static void PopulateRootPaths(
-            ClrHeap heap,
-            IHeapAnalysisCache cache,
+            IHeapRootPathQuery rootPaths,
             List<FinalizerQueueEntry> topEntries,
             CancellationToken cancellationToken)
         {
-            if (topEntries.Count == 0)
-                return;
-
-            IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
-            if (roots.Count == 0)
-                return;
-
-            var provider = new ReferenceGraph(heap);
-            var limits = new RootPathSearchLimits
-            {
-                MaxCandidateNodes = 5_000,
-                MaxCandidateDepth = 8,
-                MaxRootExpansionDepth = 12,
-                LargeFanoutThreshold = 100,
-            };
-            var finder = new RootPathFinder(
-                heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType,
-                static _ => false, cache.TryGetReverseIndexProvider(), cache);
-
             int sampleCount = Math.Min(topEntries.Count, RootPathSampleLimit);
             for (int i = 0; i < sampleCount; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 FinalizerQueueEntry entry = topEntries[i];
 
-                bool found = finder.TryFindAnyRootPath(
-                    entry.Address, roots, out string? rootKind, out List<ulong>? addresses,
-                    out bool searchTruncated, out _, out _, cancellationToken);
+                bool found = rootPaths.TryFindRootPath(entry.Address, RootPathOptions, out string? formattedPath, out bool searchTruncated);
 
                 topEntries[i] = entry with
                 {
-                    SampleRootPath = found ? RootPathSearchSupport.FormatPath(heap, rootKind!, addresses, cache) : null,
+                    SampleRootPath = found ? formattedPath : null,
                     RootPathSearchTruncated = searchTruncated,
                 };
             }
         }
 
-        private static bool IsDisposableType(ClrType type, Dictionary<ulong, bool> cache, ulong methodTable)
+        // Poh/Frozen/Unknown aren't one of the four buckets FormatGeneration's report table
+        // distinguishes -- mapped to the same "-1 = Unknown" sentinel the pre-retyping analyzer's
+        // own SegmentKindMapper.ResolveGeneration used for an unresolvable address, rather than
+        // guessing which legacy raw ClrMD generation value they would have produced (GCRootAnalyzer's
+        // retyping made the same conservative exclusion for these two rare tags).
+        private static int ToLegacyGeneration(HeapGenerationTag tag) => tag switch
         {
-            if (cache.TryGetValue(methodTable, out bool result))
-                return result;
-
-            bool isDisposable = false;
-            foreach (ClrInterface iface in type.EnumerateInterfaces())
-            {
-                if (iface.Name is "System.IDisposable")
-                {
-                    isDisposable = true;
-                    break;
-                }
-            }
-
-            cache[methodTable] = isDisposable;
-            return isDisposable;
-        }
-
-        // Walks the BaseType chain looking for CriticalFinalizerObject. Guaranteed-finalization
-        // types (SafeHandle, CriticalHandle, and their subclasses) wrap OS resource handles —
-        // sockets, file descriptors, registry keys — so a backlog of these in the finalizer
-        // queue is a stronger leak signal than an ordinary finalizable object backlog.
-        private static bool IsCriticalFinalizerType(ClrType? type, Dictionary<ulong, bool> cache, ulong methodTable)
-        {
-            if (cache.TryGetValue(methodTable, out bool result))
-                return result;
-
-            bool isCriticalFinalizer = false;
-            for (ClrType? cur = type; cur is not null; cur = cur.BaseType)
-            {
-                if (cur.Name is "System.Runtime.ConstrainedExecution.CriticalFinalizerObject")
-                {
-                    isCriticalFinalizer = true;
-                    break;
-                }
-            }
-
-            cache[methodTable] = isCriticalFinalizer;
-            return isCriticalFinalizer;
-        }
-
-        private static ClrInstanceField? FindDisposedField(ClrType type, Dictionary<ulong, ClrInstanceField?> cache, ulong methodTable)
-        {
-            if (cache.TryGetValue(methodTable, out ClrInstanceField? cached))
-                return cached;
-
-            ClrInstanceField? field = null;
-            foreach (ClrInstanceField f in type.Fields)
-            {
-                string? name = f.Name;
-                if (name is "_disposed" or "disposed" or "m_disposed" or "_isDisposed" or "isDisposed")
-                {
-                    field = f;
-                    break;
-                }
-            }
-
-            cache[methodTable] = field;
-            return field;
-        }
+            HeapGenerationTag.Gen0 => 0,
+            HeapGenerationTag.Gen1 => 1,
+            HeapGenerationTag.Gen2 => 2,
+            HeapGenerationTag.Loh => 3,
+            _ => -1,
+        };
 
         public void Dispose() { }
     }

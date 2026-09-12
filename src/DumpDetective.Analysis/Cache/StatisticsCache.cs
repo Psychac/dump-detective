@@ -1,4 +1,5 @@
 using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Abstractions;
@@ -88,6 +89,18 @@ internal class StatisticsCache
                         stats.LohSize += size;
                     }
 
+                    if (obj.Type.IsFinalizable)
+                        stats.IsFinalizableType = true;
+
+                    // Generation resolution is already a per-object cost every consumer of this
+                    // walk pays for count/size -- one more resolve call here piggybacks on the
+                    // walk that's already happening rather than adding a second one, mirroring
+                    // FinalizableObjectAnalyzer's own pre-retyping fallback exactly.
+                    int generation = SegmentKindMapper.ResolveGeneration(heap, obj.Address);
+                    if (generation == 0) stats.Gen0Count++;
+                    else if (generation == 1) stats.Gen1Count++;
+                    else if (generation == 2) stats.Gen2Count++;
+
                     Interlocked.Increment(ref totalScanned);
                 }
                 return localState;
@@ -110,6 +123,11 @@ internal class StatisticsCache
                 stat.TotalSize += localStat.TotalSize;
                 stat.LohCount = AddClamped(stat.LohCount, localStat.LohCount);
                 stat.LohSize += localStat.LohSize;
+                if (localStat.IsFinalizableType)
+                    stat.IsFinalizableType = true;
+                stat.Gen0Count += localStat.Gen0Count;
+                stat.Gen1Count += localStat.Gen1Count;
+                stat.Gen2Count += localStat.Gen2Count;
             }
 
             foreach ((ulong methodTable, string typeName) in localNamesByMethodTable)

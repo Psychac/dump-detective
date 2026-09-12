@@ -226,11 +226,15 @@ internal sealed class HeapTypeStatisticsQuery(ClrHeap heap, IHeapAnalysisCache c
                 TotalSize: s.TotalSize,
                 LohCount: s.LohCount,
                 LohSize: s.LohSize,
-                Gen0Count: 0,
-                Gen1Count: 0,
-                Gen2Count: 0,
+                Gen0Count: s.Gen0Count,
+                Gen1Count: s.Gen1Count,
+                Gen2Count: s.Gen2Count,
+                // Gen2TotalSize (exact per-generation *bytes*) has no equivalent in this fallback
+                // walk -- CachedTypeStatistics tracks per-generation object counts, not per-object
+                // sizes bucketed by generation, matching the pre-retyping analyzer's own fallback
+                // (which likewise never populated Gen2Bytes on this path).
                 Gen2TotalSize: 0,
-                IsFinalizableType: false,
+                IsFinalizableType: s.IsFinalizableType,
                 SampleAddress: cache.GetSampleInstanceAddress(kv.Key) ?? 0,
                 ModuleName: s.ModuleName);
         }

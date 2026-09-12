@@ -70,7 +70,9 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         // domain quartet Batch 1) — see docs/refactor/modularity/phase-1-thread-quartet-plan.md.
         Module("lock-graph", "Lock Graph Analysis", typeof(LockGraphAnalyzerLegacyAdapter), typeof(LockGraphFindingGenerator), typeof(LockGraphTrendComparer), typeof(LockGraphSectionBuilder), 320, ["threads", "locks"]),
         Module("event-leak", "Event Leak Analysis", typeof(EventLeakAnalyzer), typeof(EventLeakFindingGenerator), typeof(EventLeakTrendComparer), typeof(EventLeakSectionBuilder), 330, ["events", "leaks"]),
-        Module("finalizable-object", "Finalizable Object Analysis", typeof(FinalizableObjectAnalyzer), typeof(FinalizableObjectFindingGenerator), typeof(FinalizableObjectTrendComparer), typeof(FinalizableObjectSectionBuilder), 340, ["gc"]),
+        // FinalizableObjectAnalyzerLegacyAdapter, not FinalizableObjectAnalyzer directly, since
+        // 2026-09-12 -- see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("finalizable-object", "Finalizable Object Analysis", typeof(FinalizableObjectAnalyzerLegacyAdapter), typeof(FinalizableObjectFindingGenerator), typeof(FinalizableObjectTrendComparer), typeof(FinalizableObjectSectionBuilder), 340, ["gc"]),
         Module("async-state-machine", "Async State Machine Analysis", typeof(AsyncStateMachineAnalyzer), typeof(AsyncStateMachineFindingGenerator), typeof(AsyncStateMachineTrendComparer), typeof(AsyncStateMachineSectionBuilder), 350, ["async"]),
         // ArrayAnalyzerLegacyAdapter, not ArrayAnalyzer directly, since 2026-09-11 --
         // see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.

@@ -124,7 +124,36 @@ public readonly record struct HeapTypeStatistics(
     /// <see cref="IsFinalizableType"/>) — a plain name-pattern check, no ClrMD field/interface
     /// metadata walk, so there's no cost reason to gate it behind an index.
     /// </summary>
-    bool IsAsyncStateMachineType = false);
+    bool IsAsyncStateMachineType = false,
+    /// <summary>
+    /// <c>true</c> when the type's name matches <c>TypeAggregateFlags.IsTaskType</c>'s pattern (a
+    /// genuine <c>System.Threading.Tasks.Task</c>/<c>Task&lt;T&gt;</c>/internal promise type, not a
+    /// <c>TaskCompletionSource</c> that merely shares the name prefix). Two-path like
+    /// <see cref="IsAsyncStateMachineType"/>: index-backed via <c>TypeAggregateFlags.IsTaskType</c>,
+    /// no-index fallback via <c>TaskTypeNamePattern.IsTaskType</c>. Added 2026-09-12 for
+    /// <c>AsyncTaskAnalyzer</c>'s retyping.
+    /// </summary>
+    bool IsTaskType = false,
+    /// <summary>
+    /// <c>true</c> for <c>TaskCompletionSource</c>/<c>TaskCompletionSource&lt;T&gt;</c>. No
+    /// <c>TypeAggregateFlags</c> bit exists for this — always computed from the type name (pure
+    /// string check via <c>TaskTypeNamePattern.IsTaskCompletionSource</c>), so unlike
+    /// <see cref="IsTaskType"/> this is populated identically on both the index-backed and
+    /// no-index-fallback paths. Added 2026-09-12 for <c>AsyncTaskAnalyzer</c>'s retyping.
+    /// </summary>
+    bool IsTaskCompletionSourceType = false,
+    /// <summary>
+    /// <c>true</c> when the type implements <c>IValueTaskSource</c>/<c>IValueTaskSource&lt;T&gt;</c>
+    /// via an embedded <c>ManualResetValueTaskSourceCore&lt;TResult&gt;</c> field. Structural (needs
+    /// a real <c>ClrType</c>, not a name check), so — unlike <see cref="IsTaskType"/>/
+    /// <see cref="IsTaskCompletionSourceType"/> — computed once per distinct type only, mirroring
+    /// this record's own <see cref="HasIEquatableInterface"/> cost shape. Added 2026-09-12 for
+    /// <c>AsyncTaskAnalyzer</c>'s retyping (ported from <c>ValueTaskSourcePattern</c>).
+    /// </summary>
+    bool ImplementsValueTaskSource = false,
+    /// <summary>Name of the embedded <c>ManualResetValueTaskSourceCore&lt;TResult&gt;</c> field when
+    /// <see cref="ImplementsValueTaskSource"/> is <c>true</c>; <c>null</c> otherwise.</summary>
+    string? ValueTaskSourceCoreFieldName = null);
 
 /// <summary>The <c>heap.types</c> capability's aggregate-statistics surface (distinct
 /// <see cref="IHeapObjectStream"/>/<see cref="IHeapObjectLookup"/>, per-object).</summary>

@@ -67,4 +67,19 @@ public interface IDumpObjectFieldQuery
     /// fields called," only "read this *named* field's value."
     /// </summary>
     IReadOnlyList<(string Name, ulong TargetAddress)> EnumerateObjectReferenceFields(ulong address);
+
+    /// <summary>
+    /// Reads <paramref name="innerFieldName"/> off the embedded struct held in
+    /// <paramref name="address"/>'s <paramref name="outerFieldName"/> field — one level of
+    /// struct nesting, e.g. reading <c>ManualResetValueTaskSourceCore&lt;TResult&gt;._completed</c>
+    /// off a class's embedded core field. Returns <c>false</c> when the object address is invalid,
+    /// <paramref name="outerFieldName"/> doesn't exist or isn't a struct-typed field,
+    /// <paramref name="innerFieldName"/> doesn't exist on that struct, or the inner field's runtime
+    /// shape isn't one <see cref="FieldValue"/> represents (same "unavailable" semantics as
+    /// <see cref="TryReadField"/>). Deliberately not a general N-level field-chase API — exactly the
+    /// one level of nesting a real Tier-2 consumer needs today; a deeper chase can compose two calls
+    /// once the first one lands on another struct-typed field, but nothing needs that yet. Added
+    /// 2026-09-12 for <c>AsyncTaskAnalyzer</c>'s retyping.
+    /// </summary>
+    bool TryReadNestedStructField(ulong address, string outerFieldName, string innerFieldName, out FieldValue value);
 }

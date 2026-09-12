@@ -266,6 +266,12 @@ public sealed class AsyncStateMachineAnalyzerRetypingCharacterizationTests
 
         public IReadOnlyList<(string Name, ulong TargetAddress)> EnumerateObjectReferenceFields(ulong address) =>
             _referenceFields.TryGetValue(address, out List<(string, ulong)>? list) ? list : [];
+
+        public bool TryReadNestedStructField(ulong address, string outerFieldName, string innerFieldName, out FieldValue value)
+        {
+            value = FieldValue.Null;
+            return false; // not exercised by this analyzer
+        }
     }
 
     private sealed class FakeHeapObjectLookup : IHeapObjectLookup

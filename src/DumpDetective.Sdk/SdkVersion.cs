@@ -19,7 +19,17 @@ public static class SdkVersion
 {
     public const int Major = 0;
 
-    /// <summary>14 as of 2026-09-12 (added <see cref="Analysis.IDumpObjectFieldQuery.TryGetFieldTypeName"/>
+    /// <summary>15 as of 2026-09-12 (added <see cref="Analysis.IDumpObjectFieldQuery.TryReadNestedStructField"/>
+    /// — one level of embedded-struct field read, needed for
+    /// <c>ManualResetValueTaskSourceCore&lt;TResult&gt;._completed</c> — and
+    /// <see cref="Analysis.IDumpArrayShapeQuery.EnumerateObjectReferenceElements"/> — array element
+    /// *address* enumeration, replacing a hand-rolled <c>List&lt;T&gt;._items</c>/<c>_size</c> walk —
+    /// plus <see cref="Analysis.HeapTypeStatistics"/>'s <c>IsTaskType</c>/<c>IsTaskCompletionSourceType</c>/
+    /// <c>ImplementsValueTaskSource</c>/<c>ValueTaskSourceCoreFieldName</c>. All found necessary by
+    /// <c>AsyncTaskAnalyzer</c>'s retyping. No <c>capability-registry.json</c> bump — both new
+    /// primitives extend already-registered capabilities (<c>dump.object-fields</c>,
+    /// <c>dump.array-elements</c>) rather than introducing new vocabulary.
+    /// Before that, 14 as of 2026-09-12 (added <see cref="Analysis.IDumpObjectFieldQuery.TryGetFieldTypeName"/>
     /// and <see cref="Analysis.IDumpObjectFieldQuery.EnumerateObjectReferenceFields"/> — two Tier-2
     /// <c>dump.object-fields</c> primitives closing the field-*shape*-enumeration gap
     /// docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md flagged as still open, plus
@@ -83,7 +93,7 @@ public static class SdkVersion
     /// additions/splits, the `EntityRef`/`IHeapDominatorQuery`/positional-record/JSON-converter
     /// fixes) — not a precise per-change reconstruction, since nothing yet depends on intermediate
     /// values enough to make that worth simulating.</summary>
-    public const int Minor = 14;
+    public const int Minor = 15;
 
     public static string AsString => $"{Major}.{Minor}";
 }

@@ -1,6 +1,7 @@
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
@@ -93,6 +94,21 @@ internal sealed class HeapTypeStatisticsQuery(ClrHeap heap, IHeapAnalysisCache c
             bool hasIEquatable = type is { IsValueType: true } && SafeHasIEquatableInterface(type);
             int declaredFieldByteSize = type is { IsValueType: true } ? SafeComputeFieldByteSize(type) : 0;
 
+            // TCS/VTS have no TypeAggregateFlags bit (no precomputed signal exists for either) --
+            // resolved here once per distinct method table, same as HasIEquatableInterface above.
+            // The IValueTaskSource interface/field walk only runs for types not already classified
+            // as Task/TCS by the cheaper checks first, matching the pre-retyping AsyncTaskAnalyzer's
+            // own BeforeHeapIndexScan control flow exactly.
+            bool isTaskType = (e.Flags & TypeAggregateFlags.IsTaskType) != 0;
+            bool isTcsType = !isTaskType && name is not null && TaskTypeNamePattern.IsTaskCompletionSource(name);
+            bool implementsVts = false;
+            string? vtsCoreFieldName = null;
+            if (!isTaskType && !isTcsType && type is not null && SafeImplementsValueTaskSource(type, out string? coreFieldName))
+            {
+                implementsVts = true;
+                vtsCoreFieldName = coreFieldName;
+            }
+
             result[name] = new HeapTypeStatistics(
                 Type: ToTypeRef(name, methodTable),
                 InstanceCount: e.Count,
@@ -123,7 +139,11 @@ internal sealed class HeapTypeStatisticsQuery(ClrHeap heap, IHeapAnalysisCache c
                 BaseTypeName: type?.BaseType?.Name ?? "",
                 HasIEquatableInterface: hasIEquatable,
                 DeclaredFieldByteSize: declaredFieldByteSize,
-                IsAsyncStateMachineType: (e.Flags & TypeAggregateFlags.IsAsyncStateMachineType) != 0);
+                IsAsyncStateMachineType: (e.Flags & TypeAggregateFlags.IsAsyncStateMachineType) != 0,
+                IsTaskType: isTaskType,
+                IsTaskCompletionSourceType: isTcsType,
+                ImplementsValueTaskSource: implementsVts,
+                ValueTaskSourceCoreFieldName: vtsCoreFieldName);
         }
         return result;
     }
@@ -185,6 +205,29 @@ internal sealed class HeapTypeStatisticsQuery(ClrHeap heap, IHeapAnalysisCache c
         }
     }
 
+    // Matches StatisticsCache's own SafeImplementsValueTaskSource -- defensive since ClrMD
+    // interface/field enumeration can fail on corrupt dumps or partially-loaded types.
+    private static bool SafeImplementsValueTaskSource(ClrType type, out string? coreFieldName)
+    {
+        coreFieldName = null;
+        try
+        {
+            if (!ValueTaskSourcePattern.ImplementsValueTaskSource(type))
+                return false;
+
+            ClrInstanceField? coreField = ValueTaskSourcePattern.FindCoreField(type);
+            if (coreField is null)
+                return false;
+
+            coreFieldName = coreField.Name;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     // Matches the pre-retyping BoxingAnalyzer's own ComputeTotalFieldBytes exactly -- returns 0 on
     // any exception (defensive -- ClrMD field APIs can fail on corrupt dumps).
     private static int SafeComputeFieldByteSize(ClrType type)
@@ -238,7 +281,11 @@ internal sealed class HeapTypeStatisticsQuery(ClrHeap heap, IHeapAnalysisCache c
                 IsFinalizableType: s.IsFinalizableType,
                 SampleAddress: cache.GetSampleInstanceAddress(kv.Key) ?? 0,
                 ModuleName: s.ModuleName,
-                IsAsyncStateMachineType: s.IsAsyncStateMachineType);
+                IsAsyncStateMachineType: s.IsAsyncStateMachineType,
+                IsTaskType: s.IsTaskType,
+                IsTaskCompletionSourceType: s.IsTaskCompletionSourceType,
+                ImplementsValueTaskSource: s.ImplementsValueTaskSource,
+                ValueTaskSourceCoreFieldName: s.ValueTaskSourceCoreFieldName);
         }
         return result;
     }

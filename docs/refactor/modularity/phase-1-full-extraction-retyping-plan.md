@@ -2,14 +2,14 @@
 
 ## Status (as of 2026-09-12)
 
-**26 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
+**27 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
 in the tree, not just this doc's own narrative — this doc's original "35" count in the section below
 was an approximation from § 10 point 8's grep-based measurement; the real count is 36). The
 `dump.object-fields` Tier-2 escape hatch **is built** (see "Tier 2 wave" below) — the "still not
 built" language later in this doc is stale as of the pilot, 2026-09-11.
 
 **Done:**
-`AllocationPatternAnalyzer`, `ArrayAnalyzer`, `AsyncStateMachineAnalyzer`, `BoxingAnalyzer`,
+`AllocationPatternAnalyzer`, `ArrayAnalyzer`, `AsyncStateMachineAnalyzer`, `AsyncTaskAnalyzer`, `BoxingAnalyzer`,
 `DbConnectionAnalyzer`, `FinalizableObjectAnalyzer`, `GCGenerationAnalyzer`, `GCHandleAnalyzer`,
 `GCRootAnalyzer`, `HangAnalyzer`, `HeapTopologyAnalyzer`, `HttpObjectAnalyzer`, `JitAnalyzer`,
 `LockGraphAnalyzer`, `LohFragmentationAnalyzer`, `MemoryAnalyzer`, `ObjectShapeAnalyzer`,
@@ -17,14 +17,14 @@ built" language later in this doc is stale as of the pilot, 2026-09-11.
 `SqlTransactionAnalyzer`, `ThreadAnalyzer`, `ThreadStackClusterAnalyzer`, `TimerLeakAnalyzer`,
 `WcfChannelAnalyzer`, `WeakReferenceAnalyzer`.
 
-**Remaining (10):**
-`AsyncTaskAnalyzer`, `CollectionAnalyzer`,
+**Remaining (9):**
+`CollectionAnalyzer`,
 `CrashAnalyzer`, `DominatorAnalyzer`, `EventLeakAnalyzer`,
 `ModuleAnalyzer`, `ReferenceChainAnalyzer`, `StaticRootLeakDetector`,
 `StringAnalyzer`, and **`LeakCandidateAnalyzer`** —
 explicit user direction: do `LeakCandidateAnalyzer` last of all, since it needs cross-analyzer
 result access (`context.CompletedRunResults`-equivalent) and deferred-execution-ordering modeling
-that don't exist in the SDK yet, on top of everything the other 9 need.
+that don't exist in the SDK yet, on top of everything the other 8 need.
 
 Detailed plan for the two items [phase-1-contracts-sdk.md](phase-1-contracts-sdk.md) leaves
 deferred (`Analysis/`, `Presentation/`) and the ownerless gap recorded at
@@ -1099,7 +1099,84 @@ narrowly-scoped primitives rather than a general field-reflection surface:
   `capability-registry.json` bump — both additions extend existing capabilities
   (`dump.object-fields`, `heap.types`), no new vocabulary entry.
 
-Remaining Tier-1+Tier-2 analyzers (10, see "Status" at the top) haven't been started yet.
+**`AsyncTaskAnalyzer`. Done 2026-09-12.** Largest and structurally different from every prior wave
+member — three object shapes (`Task`, `TaskCompletionSource`, `IValueTaskSource`) discovered off one
+shared heap-index scan, a bounded BFS over each task's continuation graph (including `List<object>`
+multi-continuation fan-out), and a field-priority search for faulted-task exception objects. Two
+genuinely new Tier-2 gaps found by reading the full 1226-line source before scoping, not grepping it:
+- **`IDumpArrayShapeQuery.EnumerateObjectReferenceElements(address, maxElements)`** — array element
+  *address* enumeration, replacing the pre-retyping analyzer's own `List<object>._items`/`_size`
+  field read plus a hand-rolled `ClrArray.GetObjectValue` loop. Reports a null slot as address 0
+  rather than omitting it (the retyped analyzer filters those, matching the pre-retyping helper's
+  own "skip null/invalid elements" behavior exactly).
+- **`IDumpObjectFieldQuery.TryReadNestedStructField`** — one level of embedded-struct field read
+  (`ClrObject.ReadValueTypeField` + `ClrValueType.ReadField<T>`, decompile-verified against the
+  installed ClrMD package before implementing), needed for
+  `ManualResetValueTaskSourceCore<TResult>._completed`, which plain `TryReadField` can't reach
+  (falls into its `default: return false` struct case). Deliberately one level only, not a general
+  field-chase API — exactly what this one real consumer needs.
+- **`HeapTypeStatistics.IsTaskType`/`IsTaskCompletionSourceType`/`ImplementsValueTaskSource`/
+  `ValueTaskSourceCoreFieldName`** — `IsTaskType` is two-path like `IsAsyncStateMachineType`
+  (index-backed via the already-reserved `TypeAggregateFlags.IsTaskType` bit, no-index fallback via
+  `TaskTypeNamePattern.IsTaskType`); the other three have no `TypeAggregateFlags` bit at all (same
+  gap the pre-retyping analyzer already lived with) and are always computed — `IsTaskCompletionSourceType`
+  a pure name check, `ImplementsValueTaskSource` a real `ClrType.EnumerateInterfaces()`/field-type
+  walk. The interface walk is **not** a new cost the way `BoxingAnalyzer`'s first cut was — it
+  replaces an *existing* per-distinct-type walk the pre-retyping analyzer's own `BeforeHeapIndexScan`
+  already did at the same scope (`TypeAggregates`, once per distinct method table), just moved into
+  the shared `heap.types` surface. Verified, not assumed: the real-dump run below completed in 10s,
+  no `BoxingAnalyzer`-style stall.
+- **Candidate discovery is bespoke, not `TypedResourceCandidateStreamingLegacyAdapter`** — that
+  base's `IsCandidateType(string)` is pure name-based, but `IValueTaskSource` detection is structural
+  (interface + embedded-field-type match). `AsyncTaskAnalyzerLegacyAdapter` implements
+  `IParallelHeapIndexScanParticipant` directly, reproducing the pre-retyping analyzer's own three-MT-set
+  `BeforeHeapIndexScan`/`OnHeapEntry` shape verbatim for discovery, then unions all three candidate
+  categories into **one** `HeapObjectRef` list (dropping the pre-retyping analyzer's separate
+  `_participantEntries`/`_participantTcsEntries`/`_participantVtsEntries` three-way `MergePartial`
+  entirely) — the SDK analyzer re-classifies each candidate via `HeapTypeStatistics.IsTaskType`/etc.,
+  the same "classify from the shared per-type stats map" pattern `AsyncStateMachineAnalyzer`
+  established for `IsAsyncStateMachineType`.
+- **One preserved fast path found by reading `LoadTaskEntries` closely**: the pre-retyping analyzer's
+  Task discovery preferred a dedicated `TaskIndex.bin` satellite index (or
+  `HeapIndexBuildResult.InMemoryTaskCandidates` in memory-backed mode) over the shared scan's
+  participant-collected list — `TaskCompletionSource`/`IValueTaskSource` never had an equivalent disk
+  fast path. The adapter reproduces this exact three-way priority for Task candidates specifically,
+  dropping only the pre-retyping analyzer's fourth tier (an independent raw `heap.EnumerateObjects()`
+  fallback when the shared scan itself never ran) — the same accepted simplification
+  `TimerLeakAnalyzer`/`WeakReferenceAnalyzer`/`HangAnalyzer`'s own Phase-B-fallback removals already
+  made. One accepted, documented trade: `TaskIndex.bin` records carry each task's `m_stateFlags` for
+  free (read once at index-build time); `HeapObjectRef` has no slot for that extra field, so the
+  retyped analyzer always re-reads `m_stateFlags` fresh via `TryReadField` regardless of which
+  candidate source won — the same per-task cost three of the pre-retyping analyzer's four load paths
+  already paid, just no longer skipped on the one path that happened to have it for free.
+- **Type-name resolution simplification**: dropped the pre-retyping analyzer's own MT-to-name cache
+  (`ResolveTypeName`) entirely — every candidate arrives as a `HeapObjectRef`, which already carries
+  `TypeDisplayName` resolved once by the adapter.
+- **Exception-object search ported onto existing capabilities, no new one needed**: new
+  `CapabilityObjectFieldTraversal` (mirrors `ObjectGraphTraversal.TryFindByPredicate`) built entirely
+  from already-shipped `IDumpObjectFieldQuery.TryReadField` (prioritized named fields) and
+  `IHeapReferenceQuery.EnumerateReferences` (generic fallback walk) — the `heap.references`
+  capability's first Tier-2-adjacent consumer.
+- **One accepted, documented fidelity gap**: pending/unresolved generation bucketing kept the
+  pre-retyping analyzer's own 0/1/2/3(LOH) scheme, which has no POH/Frozen bucket;
+  `IHeapSegmentQuery.GetGeneration`'s `HeapGenerationTag` distinguishes them, and both fold into the
+  legacy LOH bucket (`ToLegacyGeneration`), matching `GCRootAnalyzer`'s own prior treatment of the
+  same gap.
+- **Gate met**: new `AsyncTaskAnalyzerRetypingCharacterizationTests` (11 tests, dictionary-backed
+  fakes) — no pre-existing per-analyzer test coverage existed for the classification/BFS/exception
+  logic itself; the old `AsyncTaskAnalyzerHeapIndexScanTests.cs` reflected the pre-retyping analyzer's
+  own three-list/three-`HashSet` internals directly and was deleted outright rather than adapted
+  (same treatment `HangAnalyzerHeapIndexScanTests` got), since none of that state exists post-retyping.
+  New `AsyncTaskAnalyzerRealDumpTests` (`[DiscrepancyFact]`, one dump, foreground) passed in 10s
+  against the real 3.5 GB reference dump. Full non-real-dump suite (1510 tests, up from 1505) passes.
+- Call site updated: `DefaultAnalyzerFeatureModuleCatalog` now constructs
+  `AsyncTaskAnalyzerLegacyAdapter`. No benchmark referenced this analyzer directly.
+- **`SdkVersion` 15** (`TryReadNestedStructField`, `EnumerateObjectReferenceElements`, and
+  `HeapTypeStatistics`'s four new Task/TCS/VTS fields, bumped in one entry since all were found by,
+  and shipped in, this same retyping). No `capability-registry.json` bump — both new primitives
+  extend already-registered capabilities (`dump.object-fields`, `dump.array-elements`).
+
+Remaining Tier-1+Tier-2 analyzers (9, see "Status" at the top) haven't been started yet.
 `LeakCandidateAnalyzer` stays last per explicit direction — it needs cross-analyzer result access
 and deferred-execution-ordering modeling neither this wave nor Tier 1 has built.
 

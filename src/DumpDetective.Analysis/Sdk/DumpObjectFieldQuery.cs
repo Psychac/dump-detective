@@ -166,4 +166,70 @@ internal sealed class DumpObjectFieldQuery : IDumpObjectFieldQuery
 
         return result;
     }
+
+    public bool TryReadNestedStructField(ulong address, string outerFieldName, string innerFieldName, out FieldValue value)
+    {
+        value = FieldValue.Null;
+        if (address == 0)
+            return false;
+
+        ClrObject obj = _heap.GetObject(address);
+        if (!obj.IsValid || obj.Type is null)
+            return false;
+
+        ClrInstanceField? outerField = obj.Type.GetFieldByName(outerFieldName);
+        if (outerField is null || !outerField.IsValueType || outerField.Type is null)
+            return false;
+
+        try
+        {
+            ClrValueType inner = obj.ReadValueTypeField(outerField);
+            if (!inner.IsValid || inner.Type is null)
+                return false;
+
+            ClrInstanceField? innerField = inner.Type.GetFieldByName(innerFieldName);
+            if (innerField is null)
+                return false;
+
+            // Same primitive shapes as TryReadField's own switch, read via ClrValueType's
+            // interior-address form (ReadValueTypeField always yields an embedded/interior struct)
+            // instead of the object-header form TryReadField uses.
+            switch (innerField.ElementType)
+            {
+                case ClrElementType.Boolean:
+                    value = FieldValue.ForBool(innerField.Read<bool>(inner.Address, interior: true));
+                    return true;
+
+                case ClrElementType.Int32:
+                    value = FieldValue.ForInt32(innerField.Read<int>(inner.Address, interior: true));
+                    return true;
+
+                case ClrElementType.Int64:
+                    value = FieldValue.ForInt64(innerField.Read<long>(inner.Address, interior: true));
+                    return true;
+
+                case ClrElementType.UInt32:
+                    value = FieldValue.ForUInt32(innerField.Read<uint>(inner.Address, interior: true));
+                    return true;
+
+                case ClrElementType.NativeInt:
+                    value = FieldValue.ForNativeInt(innerField.Read<nint>(inner.Address, interior: true));
+                    return true;
+
+                case ClrElementType.Double:
+                    value = FieldValue.ForDouble(innerField.Read<double>(inner.Address, interior: true));
+                    return true;
+
+                default:
+                    // No Tier-2 consumer has needed a nested string/object-reference/struct field
+                    // yet (hard-need-basis) -- surface as unreadable rather than guess a representation.
+                    return false;
+            }
+        }
+        catch
+        {
+            // Corrupt/unloaded object -- matches TryReadField's own catch above.
+            return false;
+        }
+    }
 }

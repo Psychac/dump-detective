@@ -123,5 +123,11 @@ public sealed class SqlCommandAnalyzerRetypingCharacterizationTests
         }
 
         public IReadOnlyList<(string Name, ulong TargetAddress)> EnumerateObjectReferenceFields(ulong address) => [];
+
+        public bool TryReadNestedStructField(ulong address, string outerFieldName, string innerFieldName, out FieldValue value)
+        {
+            value = FieldValue.Null;
+            return false; // not exercised by this analyzer
+        }
     }
 }

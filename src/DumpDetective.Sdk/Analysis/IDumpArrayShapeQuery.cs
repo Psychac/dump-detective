@@ -30,4 +30,17 @@ public interface IDumpArrayShapeQuery
     /// candidate," not as zero.
     /// </summary>
     int? CountNullOrZeroElements(ulong address);
+
+    /// <summary>
+    /// Up to <paramref name="maxElements"/> element addresses from an object-reference-typed array
+    /// (0 for a null reference at that slot) — replaces the pattern of reading a
+    /// <c>List&lt;T&gt;</c>'s backing <c>_items</c>/<c>_size</c> fields and walking
+    /// <c>ClrArray.GetObjectValue(i)</c> by hand. Returns an empty list for an invalid address, rank
+    /// != 1, or a non-reference element type (matches <see cref="CountNullOrZeroElements"/>'s own
+    /// single-dimension-only scope). The caller supplies the cap — this deliberately mirrors
+    /// <c>List&lt;T&gt;</c>'s own <c>_size</c> rather than the backing array's (possibly larger)
+    /// capacity, and lets callers apply their own sanity bound on adversarial/corrupted size fields.
+    /// Added 2026-09-12 for <c>AsyncTaskAnalyzer</c>'s retyping (multi-continuation fan-out).
+    /// </summary>
+    IReadOnlyList<ulong> EnumerateObjectReferenceElements(ulong address, int maxElements);
 }

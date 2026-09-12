@@ -48,6 +48,29 @@ internal sealed class DumpArrayShapeQuery : IDumpArrayShapeQuery
         return result < 0 ? null : result;
     }
 
+    public IReadOnlyList<ulong> EnumerateObjectReferenceElements(ulong address, int maxElements)
+    {
+        ClrObject obj = _heap.GetObject(address);
+        if (!obj.IsValid || obj.Type is null)
+            return [];
+
+        ClrArray arr = obj.AsArray();
+        if (arr.Rank != 1)
+            return [];
+
+        if (obj.Type.ComponentType?.IsObjectReference != true)
+            return [];
+
+        int count = Math.Min(arr.Length, maxElements);
+        var result = new List<ulong>(count);
+        for (int i = 0; i < count; i++)
+        {
+            ClrObject elem = arr.GetObjectValue(i);
+            result.Add(elem.IsValid ? elem.Address : 0);
+        }
+        return result;
+    }
+
     private static int CountNullReferences(ClrArray arr)
     {
         int nullCount = 0;

@@ -1,264 +1,158 @@
-using DumpDetective.Analysis.Cache;
-using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
-using DumpDetective.Analysis.Traversal;
-using DumpDetective.Analysis.Utilities;
-using DumpDetective.Core.Abstractions;
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
-using DumpDetective.Core.Options;
-
-using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 
 namespace DumpDetective.Analysis.Analyzers.Async;
 
-internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParticipant
+/// <summary>
+/// Phase-2 analyzer covering task/continuation-graph health, orphaned tasks,
+/// <c>TaskCompletionSource</c>, and <c>IValueTaskSource</c> population health.
+/// </summary>
+/// <remarks>
+/// Tier-1+Tier-2 batch (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md). Three
+/// object shapes (Task, TaskCompletionSource, IValueTaskSource) are discovered off one unified
+/// <c>heap.objects</c> candidate stream <see cref="AsyncTaskAnalyzerLegacyAdapter"/> assembles, then
+/// classified here via <see cref="HeapTypeStatistics.IsTaskType"/>/<c>IsTaskCompletionSourceType</c>/
+/// <c>ImplementsValueTaskSource</c> — the same "classify from the shared per-type stats map, not a
+/// separate scan-participant MT set" pattern <c>AsyncStateMachineAnalyzer</c> established for
+/// <c>IsAsyncStateMachineType</c>. Dropping the pre-retyping analyzer's own separate
+/// <c>_taskMts</c>/<c>_tcsMts</c>/<c>_vtsMts</c> tracking and three-way <c>MergePartial</c> (moved to
+/// the adapter, which still needs cache/ClrMD access the SDK analyzer itself must not have) is a real
+/// simplification, not just a mechanical port.
+///
+/// <b>Two genuinely new Tier-2 primitives, closed here</b>: <see cref="IDumpArrayShapeQuery.EnumerateObjectReferenceElements"/>
+/// (array element *address* enumeration — nothing before this let a retyped analyzer walk a
+/// <c>List&lt;object&gt;</c>'s backing array by index) and <see cref="IDumpObjectFieldQuery.TryReadNestedStructField"/>
+/// (one level of embedded-struct field read — needed for
+/// <c>ManualResetValueTaskSourceCore&lt;TResult&gt;._completed</c>, which <c>TryReadField</c> alone
+/// can't reach). <see cref="IHeapReferenceQuery.EnumerateReferences"/> plus a ported
+/// <see cref="CapabilityObjectFieldTraversal"/> close the faulted-task exception-object search
+/// without needing any new capability at all.
+///
+/// <b>Type-name resolution simplification</b>: the pre-retyping analyzer maintained its own
+/// MT-to-name cache (<c>ResolveTypeName</c>) because raw <see cref="Microsoft.Diagnostics.Runtime.HeapEntry"/>
+/// records only carry a <c>MethodTable</c>. Every candidate here arrives as a <see cref="HeapObjectRef"/>,
+/// which already carries <see cref="HeapObjectRef.TypeDisplayName"/> resolved once by the adapter —
+/// that cache has no reason to exist anymore.
+///
+/// <b>One accepted, documented fidelity gap</b>: pending/unresolved-population generation bucketing
+/// used the pre-retyping analyzer's own 0/1/2/3(LOH) scheme, with no POH/Frozen bucket.
+/// <see cref="IHeapSegmentQuery.GetGeneration"/>'s <see cref="HeapGenerationTag"/> distinguishes them
+/// — both fold into the legacy LOH bucket (<see cref="ToLegacyGeneration"/>), matching
+/// <c>GCRootAnalyzer</c>'s own prior treatment of the same gap.
+///
+/// <b>One accepted perf/fidelity trade, documented in <see cref="AsyncTaskAnalyzerLegacyAdapter"/></b>:
+/// the pre-retyping analyzer's fastest Task-discovery path (a dedicated <c>TaskIndex.bin</c> satellite
+/// index) carried each task's <c>m_stateFlags</c> for free, skipping a ClrMD re-read on that one path.
+/// <see cref="HeapObjectRef"/> has no slot for that extra field, so <c>m_stateFlags</c> is always
+/// re-read here via <see cref="IDumpObjectFieldQuery.TryReadField"/> regardless of which candidate
+/// source won — the same per-task cost three of the pre-retyping analyzer's four load paths already
+/// paid.
+/// </remarks>
+public sealed class AsyncTaskAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
-    // Instance accumulator state for the IHeapIndexScanParticipant path. Populated by
-    // BeforeHeapIndexScan (called by the pipeline dispatcher) and mutated per-entry by
-    // OnHeapEntry; consumed by LoadTaskEntries once the shared index scan has completed.
-    private HashSet<ulong>? _taskMts;
-    private List<(ulong Address, ulong Mt, int StateFlags)>? _participantEntries;
-    // Set by OnHeapIndexScanCompleted — the single source of truth for whether
-    // _participantEntries is trustworthy. Avoids re-deriving "did the shared scan run"
-    // from a second cache.TryGetHeapIndex call in LoadTaskEntries.
-    private bool _participantScanSucceeded;
-
-    // TaskCompletionSource candidate collection — rides the same shared heap-index scan
-    // pass as _taskMts/_participantEntries above (no extra heap/disk pass). Unlike task MTs,
-    // there's no precomputed TypeAggregateFlags bit for this (see TaskTypeNamePattern), so
-    // the candidate set is built by resolving each distinct TypeAggregates MT's name once in
-    // BeforeHeapIndexScan — bounded by distinct type count, not object count.
-    private HashSet<ulong>? _tcsMts;
-    private List<(ulong Address, ulong Mt)>? _participantTcsEntries;
-
-    // IValueTaskSource candidate collection — same rides-the-shared-scan approach as _tcsMts
-    // above. Unlike TCS (a name-prefix check), detection here requires per-type interface
-    // enumeration (see ValueTaskSourcePattern) plus locating the embedded
-    // ManualResetValueTaskSourceCore<T> field, so the resolved ClrInstanceField is cached here
-    // during BeforeHeapIndexScan (once per distinct type) for direct reuse in Phase 2.
-    private HashSet<ulong>? _vtsMts;
-    private List<(ulong Address, ulong Mt)>? _participantVtsEntries;
-    private Dictionary<ulong, ClrInstanceField>? _vtsCoreFieldByMt;
-
-    // Field cache by MethodTable to avoid repeated ClrMD lookups per type
-    // Maps (MethodTable, fieldName) to ClrInstanceField? (null if field not found on that type)
-    private Dictionary<(ulong MethodTable, string FieldName), ClrInstanceField?>? _fieldCacheByMt;
-
-    // Pool of reusable buffers for enumerating List<object> multi-continuation elements,
-    // indexed by recursion depth level. A single shared buffer isn't safe here because a
-    // nested List<object> (fan-out below fan-out) would recurse into TryReadListElements
-    // again and clear the buffer the outer frame is still iterating. Grows on demand (bounded
-    // by MaxContinuationNodesToVisitPerTask, the true traversal budget) and is reused across
-    // the whole task scan — no steady-state per-node allocation once warmed up.
-    private List<List<ClrObject>>? _continuationListBufferPool;
-
-    // Per-task record of which immediate child was chosen as the deepest branch at each
-    // visited node address — populated during ExploreContinuation, consumed once afterward
-    // to reconstruct the winning chain's type names for the top-5 deepest chains display.
-    // Cleared and reused per task.
-    private Dictionary<ulong, ClrObject>? _bestHopSelections;
-
-
     // m_stateFlags bit masks (matches HangAnalyzer)
     private const int MaskCompleted = 0x1000000;
     private const int MaskFaulted = 0x200000;
     private const int MaskCanceled = 0x400000;
     private const int MaskRunning = 0x10000; // TASK_STATE_DELEGATE_INVOKED
 
-    // Sentinel continuation type — no-op callback; indicates orphan
+    // Sentinel continuation type -- no-op callback; indicates an orphan.
     private const string NoOpContinuationType = "System.Threading.Tasks.Task+<>c";
     // When >1 continuation is attached to a Task, the runtime replaces the scalar
     // m_continuationObject with a List<object> holding all attached continuations.
     private const string MultiContinuationListTypePrefix = "System.Collections.Generic.List<";
-    // Sanity cap on fan-out enumeration — protects against corrupted/adversarial size fields.
+    // Sanity cap on fan-out enumeration -- protects against corrupted/adversarial size fields.
     private const int MaxFanOutElementsToEnumerate = 10_000;
-    // Global per-task cap on total nodes visited during continuation-tree exploration.
-    // Bounds worst-case cost for pathological/adversarial fan-out trees (wide-and-deep
-    // multi-continuation graphs) independent of MaxContinuationDepth, which only bounds
-    // the depth of any single branch, not the total size of the reachable subgraph.
+    // Global per-task cap on total nodes visited during continuation-tree exploration. Bounds
+    // worst-case cost for pathological/adversarial fan-out trees (wide-and-deep multi-continuation
+    // graphs), independent of MaxContinuationDepth, which only bounds depth of a single branch, not
+    // the total size of the reachable subgraph.
     private const int MaxContinuationNodesToVisitPerTask = 2_000;
+    private const int MaxExceptionSearchDepth = 4;
+
     private static readonly string[] ExceptionRelatedFields =
     [
         "m_exceptionsHolder",
         "_exceptionsHolder",
         "m_contingentProperties",
         "_contingentProperties",
-        "m_faultExceptions",
-        "_faultExceptions",
-        "_exception",
-        "m_exception",
     ];
 
     public string Name => "Async Task Analysis";
-    public string Category => "Async";
+    public string Category => "Memory";
 
-    public ValueTask<AnalyzerDomainResult> AnalyzeAsync(
-        AnalysisContext context, CancellationToken cancellationToken)
+    public AnalyzerDomainResult? LastResult { get; private set; }
+
+    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Analyze(context.Heap, context.Cache, context.Progress, cancellationToken).Stamp(this));
+
+        IHeapTypeStatisticsQuery typeStatistics = context.HeapTypeStatistics
+            ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapTypes}' capability.");
+        IDumpObjectFieldQuery fields = context.DumpObjectFields
+            ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.DumpObjectFields}' capability.");
+        IHeapObjectLookup objectLookup = context.HeapObjectLookup
+            ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapObjects}' capability.");
+        IHeapReferenceQuery references = context.HeapReferences
+            ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapReferences}' capability.");
+        IHeapSegmentQuery segments = context.HeapSegments
+            ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapSegments}' capability.");
+        IDumpArrayShapeQuery arrayShapes = context.DumpArrayShapes
+            ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.DumpArrayElements}' capability.");
+
+        LastResult = Analyze(typeStatistics, fields, objectLookup, references, segments, arrayShapes, context.HeapObjects, context.Progress, cancellationToken);
+        return ValueTask.CompletedTask;
     }
 
-    // Resets per-entry accumulator fields ahead of the shared heap-index scan pass.
-    public void BeforeHeapIndexScan(AnalysisContext context)
-    {
-        _participantEntries = new List<(ulong, ulong, int)>(capacity: 1024);
-        _participantTcsEntries = new List<(ulong, ulong)>(capacity: 64);
-        _participantVtsEntries = new List<(ulong, ulong)>(capacity: 64);
-        _taskMts = null;
-        _tcsMts = null;
-        _vtsMts = null;
-        _vtsCoreFieldByMt = null;
-        _fieldCacheByMt = new Dictionary<(ulong, string), ClrInstanceField?>(capacity: 32);
-
-        if (context.Cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
-        {
-            _taskMts = new HashSet<ulong>(capacity: 32);
-            _tcsMts = new HashSet<ulong>(capacity: 8);
-            _vtsMts = new HashSet<ulong>(capacity: 8);
-            _vtsCoreFieldByMt = new Dictionary<ulong, ClrInstanceField>(capacity: 8);
-            foreach (var kvp in heapIndex.TypeAggregates)
-            {
-                if ((kvp.Value.Flags & TypeAggregateFlags.IsTaskType) != 0)
-                {
-                    _taskMts.Add(kvp.Key);
-                    continue;
-                }
-
-                // No precomputed TypeAggregateFlags bit for TaskCompletionSource or
-                // IValueTaskSource — resolve the type once per distinct MT here (bounded by
-                // type count, not object count) and check both.
-                ClrType? type = context.Heap.GetTypeByMethodTable(kvp.Key);
-                if (type is null)
-                    continue;
-
-                if (type.Name != null && TaskTypeNamePattern.IsTaskCompletionSource(type.Name))
-                {
-                    _tcsMts.Add(kvp.Key);
-                    continue;
-                }
-
-                if (ValueTaskSourcePattern.ImplementsValueTaskSource(type))
-                {
-                    ClrInstanceField? coreField = ValueTaskSourcePattern.FindCoreField(type);
-                    if (coreField != null)
-                    {
-                        _vtsMts.Add(kvp.Key);
-                        _vtsCoreFieldByMt[kvp.Key] = coreField;
-                    }
-                }
-            }
-        }
-    }
-
-    public void OnHeapEntry(in HeapEntry entry)
-    {
-        if (_taskMts is not null && _taskMts.Contains(entry.MethodTable))
-        {
-            _participantEntries!.Add((entry.Address, entry.MethodTable, 0)); // StateFlags resolved in Phase 2
-            return;
-        }
-
-        if (_tcsMts is not null && _tcsMts.Contains(entry.MethodTable))
-        {
-            _participantTcsEntries!.Add((entry.Address, entry.MethodTable));
-            return;
-        }
-
-        if (_vtsMts is not null && _vtsMts.Contains(entry.MethodTable))
-        {
-            _participantVtsEntries!.Add((entry.Address, entry.MethodTable));
-        }
-    }
-
-    public void OnHeapIndexScanCompleted(bool succeeded) => _participantScanSucceeded = succeeded;
-
-    public IHeapIndexScanParticipant CreateWorkerInstance() => new AsyncTaskAnalyzer();
-
-    // Each worker (including this instance, which owns range 0) scans its own address range —
-    // matches from every worker are unioned here, then re-sorted by address once, after every
-    // worker has finished, so downstream consumption sees index order regardless of which
-    // worker found which entry.
-    public void MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
-    {
-        foreach (IHeapIndexScanParticipant p in partials)
-        {
-            var other = (AsyncTaskAnalyzer)p;
-            if (other._participantEntries is not null)
-                _participantEntries!.AddRange(other._participantEntries);
-            if (other._participantTcsEntries is not null)
-                _participantTcsEntries!.AddRange(other._participantTcsEntries);
-            if (other._participantVtsEntries is not null)
-                _participantVtsEntries!.AddRange(other._participantVtsEntries);
-        }
-
-        _participantEntries = _participantEntries!.OrderBy(e => e.Address).ToList();
-        _participantTcsEntries = _participantTcsEntries!.OrderBy(e => e.Address).ToList();
-        _participantVtsEntries = _participantVtsEntries!.OrderBy(e => e.Address).ToList();
-    }
-
-    private AnalyzerDomainResult Analyze(
-        ClrHeap heap,
-        IHeapAnalysisCache? cache,
+    private static AsyncTaskDomainResult Analyze(
+        IHeapTypeStatisticsQuery typeStatistics,
+        IDumpObjectFieldQuery fields,
+        IHeapObjectLookup objectLookup,
+        IHeapReferenceQuery references,
+        IHeapSegmentQuery segments,
+        IDumpArrayShapeQuery arrayShapes,
+        IHeapObjectStream? candidates,
         IProgress<AnalyzerProgressReport>? progress,
         CancellationToken ct)
     {
-        // ── Step 1: Resolve task entries (TaskIndex.bin fast path or heap fallback) ──────
-        progress?.Report(new(0, "loading task index"));
+        var taskEntries = new List<HeapObjectRef>();
+        var tcsEntries = new List<HeapObjectRef>();
+        var vtsEntries = new List<(HeapObjectRef Object, string CoreFieldName)>();
 
-        var taskEntries = LoadTaskEntries(heap, cache, progress, ct);
-        int total = taskEntries.Count;
-
-        // TaskCompletionSource and IValueTaskSource entries are independent of task-scan results
-        // (a heap could in principle have TCS/VTS instances even when the task scan finds none),
-        // so both run regardless of the early-return below.
-        var tcsEntries = LoadTcsEntries(heap, cache, progress, ct);
-        var tcsResult = AnalyzeTaskCompletionSources(heap, tcsEntries, ct);
-
-        var vtsEntries = LoadVtsEntries(heap, cache, progress, ct);
-        var vtsResult = AnalyzeValueTaskSources(heap, vtsEntries, ct);
-
-        if (total == 0)
+        if (candidates is not null)
         {
-            return new AsyncTaskDomainResult(
-                TotalTasks: 0,
-                PendingTasks: 0,
-                RunningTasks: 0,
-                FaultedTasks: 0,
-                CanceledTasks: 0,
-                CompletedTasks: 0,
-                OrphanedTasks: 0,
-                TotalTaskContinuations: 0,
-                MaxContinuationDepth: 0,
-                AvgContinuationDepth: 0.0,
-                TopPendingTaskTypes: [],
-                TopFaultedTaskTypes: [],
-                TopContinuationTypes: [],
-                TopOrphanedTasks: [],
-                TopDeepestChains: [],
-                FaultedTaskExceptionHistograms: [],
-                MultiContinuationNodeCount: 0,
-                MaxContinuationFanOut: 0,
-                TopContinuationFanoutTypes: [],
-                DepthSampleCount: 0,
-                CycleDetected: false,
-                PendingGen0: 0,
-                PendingGen1: 0,
-                PendingGen2: 0,
-                PendingLOH: 0,
-                TopPendingTaskTypesByBytes: [],
-                TotalTaskCompletionSources: tcsResult.TotalTcs,
-                UnresolvedTaskCompletionSources: tcsResult.UnresolvedTcs,
-                UnresolvedTcsGen2Count: tcsResult.UnresolvedTcsGen2Count,
-                TopUnresolvedTaskCompletionSources: tcsResult.TopUnresolved,
-                TotalValueTaskSources: vtsResult.TotalVts,
-                PendingValueTaskSources: vtsResult.PendingVts,
-                PendingVtsGen2Count: vtsResult.PendingVtsGen2Count,
-                TopPendingValueTaskSources: vtsResult.TopPending);
+            IReadOnlyDictionary<string, HeapTypeStatistics> stats = typeStatistics.GetTypeStatistics();
+            foreach (HeapObjectRef candidate in candidates.EnumerateObjects())
+            {
+                ct.ThrowIfCancellationRequested();
+                if (!stats.TryGetValue(candidate.TypeDisplayName, out HeapTypeStatistics entry))
+                    continue;
+
+                if (entry.IsTaskType)
+                    taskEntries.Add(candidate);
+                else if (entry.IsTaskCompletionSourceType)
+                    tcsEntries.Add(candidate);
+                else if (entry.ImplementsValueTaskSource && entry.ValueTaskSourceCoreFieldName is not null)
+                    vtsEntries.Add((candidate, entry.ValueTaskSourceCoreFieldName));
+            }
         }
 
-        // ── Step 2: Classify task states ─────────────────────────────────────────────────
-        progress?.Report(new(0, "classifying task states", $"0 / {total:N0} tasks"));
+        int total = taskEntries.Count;
+
+        // TaskCompletionSource and IValueTaskSource results are independent of the task-scan
+        // results (a heap could in principle have TCS/VTS instances even if the task scan finds
+        // none), so both run regardless of the early-return below.
+        TcsAnalysisResult tcsResult = AnalyzeTaskCompletionSources(fields, segments, tcsEntries, ct);
+        VtsAnalysisResult vtsResult = AnalyzeValueTaskSources(fields, segments, vtsEntries, ct);
+
+        if (total == 0)
+            return EmptyWith(tcsResult, vtsResult);
+
+        // ── Classify task states ─────────────────────────────────────────────────
+        progress?.Report(new AnalyzerProgressReport(0, "classifying task states", $"0 / {total:N0} tasks"));
 
         int pending = 0;
         int running = 0;
@@ -288,32 +182,20 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         int pendingGen2 = 0;
         int pendingLOH = 0;
 
-        // MT → type-name cache to avoid repeated ClrMD lookups
-        var typeNameByMt = new Dictionary<ulong, string>(capacity: 64);
-
         int classifyScanCount = 0;
         for (int i = 0; i < taskEntries.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
-            var (address, mt, stateFlags) = taskEntries[i];
+            HeapObjectRef task = taskEntries[i];
+            ulong address = task.Address;
+            string typeName = task.TypeDisplayName;
 
             classifyScanCount++;
             if (classifyScanCount % 5000 == 0)
-                progress?.Report(new(classifyScanCount, "classifying task states",
+                progress?.Report(new AnalyzerProgressReport(classifyScanCount, "classifying task states",
                     $"{classifyScanCount:N0} / {total:N0} tasks"));
 
-            // Single heap.GetObject call per task, reused below for stateFlags re-read,
-            // faulted-exception extraction, and BFS continuation traversal — previously
-            // three separate lookups of the same address.
-            ClrObject taskObj = heap.GetObject(address);
-
-            // Re-read stateFlags from ClrMD if written as 0 during Phase 1
-            if (stateFlags == 0 && taskObj.IsValid && taskObj.Type != null)
-            {
-                var stateField = TryGetCachedField(taskObj.Type, mt, "m_stateFlags", "_stateFlags");
-                if (stateField != null)
-                    stateFlags = stateField.Read<int>(taskObj, interior: false);
-            }
+            int stateFlags = TryReadStateFlags(fields, address) ?? 0;
 
             bool isCompleted = (stateFlags & MaskCompleted) != 0;
             bool isFaulted = (stateFlags & MaskFaulted) != 0;
@@ -329,15 +211,12 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             // Track GC generation for pending tasks
             if (!isCompleted && !isCanceled && !isFaulted && !isRunning)
             {
-                int gen = SegmentKindMapper.ResolveGeneration(heap, address);
+                int gen = ToLegacyGeneration(segments.GetGeneration(address));
                 if (gen == 0) pendingGen0++;
                 else if (gen == 1) pendingGen1++;
                 else if (gen == 2) pendingGen2++;
-                else if (gen == 3) pendingLOH++;
+                if (gen == 3) pendingLOH++;
             }
-
-            // Resolve type name
-            string typeName = ResolveTypeName(heap, mt, typeNameByMt);
 
             // Track top type counts
             if (!isCompleted && !isCanceled)
@@ -345,123 +224,116 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                 if (isFaulted)
                 {
                     IncrementCount(faultedTypeCount, typeName);
-                    // Extract exception type for histogram
-                    if (taskObj.IsValid && taskObj.Type != null)
+                    (string? exceptionType, _) = ExtractFaultedTaskException(fields, objectLookup, references, address);
+                    if (exceptionType != null)
                     {
-                        (string? exceptionType, _) = ExtractFaultedTaskException(taskObj);
-                        if (exceptionType != null)
+                        if (!faultedTypeExceptions.TryGetValue(typeName, out Dictionary<string, int>? exceptionHistogram))
                         {
-                            if (!faultedTypeExceptions.TryGetValue(typeName, out var exceptionHistogram))
-                            {
-                                exceptionHistogram = new Dictionary<string, int>(StringComparer.Ordinal);
-                                faultedTypeExceptions[typeName] = exceptionHistogram;
-                            }
-                            IncrementCount(exceptionHistogram, exceptionType);
+                            exceptionHistogram = new Dictionary<string, int>(StringComparer.Ordinal);
+                            faultedTypeExceptions[typeName] = exceptionHistogram;
                         }
+                        IncrementCount(exceptionHistogram, exceptionType);
                     }
                 }
                 else
                 {
                     IncrementCount(pendingTypeCount, typeName);
-                    if (taskObj.IsValid)
-                    {
-                        pendingTypeBytes.TryGetValue(typeName, out var byteEntry);
-                        pendingTypeBytes[typeName] = (byteEntry.TotalBytes + (long)taskObj.Size, byteEntry.Count + 1);
-                    }
+                    pendingTypeBytes.TryGetValue(typeName, out (long TotalBytes, int Count) byteEntry);
+                    pendingTypeBytes[typeName] = (byteEntry.TotalBytes + (long)task.Size, byteEntry.Count + 1);
                 }
             }
 
             // ── Orphan detection + continuation chain BFS ─────────────────────
-            // taskEntries is already capped at MaxTasksToScan by all load paths;
-            // BFS runs for every task with a valid continuation.
-            if (taskObj.IsValid && taskObj.Type != null)
+            bool hasContinuationField = fields.TryReadField(address, "m_continuationObject", out FieldValue continuationValue)
+                || fields.TryReadField(address, "_continuationObject", out continuationValue);
+
+            if (hasContinuationField)
             {
-                var continuationField = TryGetCachedField(taskObj.Type, mt, "m_continuationObject", "_continuationObject");
-                if (continuationField != null)
+                ulong continuationAddress = continuationValue.Kind == FieldValueKind.ObjectReference
+                    ? continuationValue.AsObjectAddress()
+                    : 0;
+
+                string? continuationTypeName = continuationAddress != 0 && objectLookup.TryGetObject(continuationAddress, out HeapObjectRef continuationObj)
+                    ? continuationObj.TypeDisplayName
+                    : null;
+
+                bool isOrphan = continuationAddress == 0
+                    || string.Equals(continuationTypeName, NoOpContinuationType, StringComparison.Ordinal);
+
+                var chainTypes = new List<string>(capacity: 8) { typeName };
+
+                if (isOrphan && !isCompleted && !isCanceled)
                 {
-                    ClrObject continuationObj = continuationField.ReadObject(taskObj, interior: false);
+                    orphaned++;
+                    string? resultType = ExtractResultType(typeName);
+                    (string? exceptionType, string? exceptionMessage) = ExtractFaultedTaskException(fields, objectLookup, references, address);
+                    orphanedSnapshots.Add(new OrphanedTaskSnapshot(address, typeName, resultType, task.Size, exceptionType, exceptionMessage));
+                }
 
-                    bool isOrphan = !continuationObj.IsValid
-                        || continuationObj.Address == 0
-                        || string.Equals(continuationObj.Type?.Name, NoOpContinuationType, StringComparison.Ordinal);
+                // BFS chain depth -- true branching traversal. If m_continuationObject holds a
+                // List<object> (2+ continuations attached), every branch is explored to find the
+                // true maximum depth and fully populate fan-out stats (not just whichever branch
+                // happens to be walked first). See ExploreContinuation's own remarks for the
+                // node-budget and diamond-convergence caveats.
+                if (continuationAddress != 0)
+                {
+                    var visited = new HashSet<ulong>(capacity: 16) { address };
+                    var bestHopSelections = new Dictionary<ulong, ulong>(capacity: 32);
+                    int nodeBudget = MaxContinuationNodesToVisitPerTask;
 
-                        var chainTypes = new List<string>(capacity: 8);
-                        chainTypes.Add(typeName);
+                    int depth = ExploreContinuation(
+                        continuationAddress, visited, address, ref nodeBudget, depthLevel: 0,
+                        fields, objectLookup, arrayShapes,
+                        continuationCount, fanoutTypeCount, ref totalContinuations, ref multiContinuationNodes, ref maxFanOut,
+                        ref cycleDetected, bestHopSelections);
 
-                    if (isOrphan && !isCompleted && !isCanceled)
+                    // Reconstruct the winning branch's type-name sequence for display by replaying
+                    // the per-node decisions recorded during exploration. Bounded by the same
+                    // node-visit budget as a defensive guard -- the recorded selections form a DAG
+                    // (visited-set enforced during construction) so this terminates naturally once
+                    // no further hop was recorded.
+                    ulong hop = continuationAddress;
+                    int reconstructSteps = 0;
+                    while (hop != 0 && reconstructSteps++ < MaxContinuationNodesToVisitPerTask)
                     {
-                        orphaned++;
-                        string? resultType = ExtractResultType(typeName);
-                        ulong size = taskObj.Size;
-                        (string? exceptionType, string? exceptionMessage) = ExtractFaultedTaskException(taskObj);
-                        orphanedSnapshots.Add(new OrphanedTaskSnapshot(address, typeName, resultType, size, exceptionType, exceptionMessage));
+                        if (objectLookup.TryGetObject(hop, out HeapObjectRef hopObj) && !IsMultiContinuationList(hopObj.TypeDisplayName))
+                            chainTypes.Add(hopObj.TypeDisplayName);
+
+                        if (!bestHopSelections.TryGetValue(hop, out ulong nextHop))
+                            break;
+                        hop = nextHop;
                     }
 
-                    // BFS chain depth — true branching traversal. When m_continuationObject
-                    // holds a List<object> (2+ continuations attached), every branch is
-                    // explored to find the true maximum depth and to fully capture fan-out
-                    // stats (not just the branch that happens to be walked first). See
-                    // ExploreContinuation for the node-budget and diamond-convergence caveats.
-                    if (continuationObj.IsValid && continuationObj.Address != 0)
+                    totalDepthSum += depth;
+                    if (depth > maxDepth) maxDepth = depth;
+                    depthSampleCount++;
+
+                    if (deepestChains.Count < 5)
                     {
-                        var visited = new HashSet<ulong>(capacity: 16) { address };
-                        _bestHopSelections ??= new Dictionary<ulong, ClrObject>(capacity: 32);
-                        _bestHopSelections.Clear();
-                        int nodeBudget = MaxContinuationNodesToVisitPerTask;
-
-                        int depth = ExploreContinuation(
-                            continuationObj, visited, address, ref nodeBudget, depthLevel: 0,
-                            continuationCount, fanoutTypeCount, ref totalContinuations, ref multiContinuationNodes, ref maxFanOut,
-                            ref cycleDetected, _bestHopSelections);
-
-                        // Reconstruct the winning branch's type-name sequence for display by
-                        // replaying the per-node decisions recorded during exploration. Bounded
-                        // by the node-visit budget as a defensive guard — the recorded
-                        // selections form a DAG (visited-set enforced during construction) so
-                        // this terminates naturally once no further hop was recorded.
-                        ClrObject hop = continuationObj;
-                        int reconstructSteps = 0;
-                        while (hop.IsValid && hop.Address != 0 && reconstructSteps++ < MaxContinuationNodesToVisitPerTask)
+                        deepestChains.Add(new ContinuationChainSnapshot(address, typeName, depth, chainTypes));
+                    }
+                    else
+                    {
+                        int shallowestIndex = 0;
+                        for (int chainIndex = 1; chainIndex < deepestChains.Count; chainIndex++)
                         {
-                            if (!IsMultiContinuationList(hop.Type) && hop.Type != null)
-                                chainTypes.Add(hop.Type.Name ?? string.Empty);
-
-                            if (!_bestHopSelections.TryGetValue(hop.Address, out ClrObject nextHop))
-                                break;
-                            hop = nextHop;
+                            if (deepestChains[chainIndex].Depth < deepestChains[shallowestIndex].Depth)
+                                shallowestIndex = chainIndex;
                         }
 
-                        totalDepthSum += depth;
-                        if (depth > maxDepth) maxDepth = depth;
-                        depthSampleCount++;
-
-                            if (deepestChains.Count < 5)
-                            {
-                                deepestChains.Add(new ContinuationChainSnapshot(address, typeName, depth, chainTypes));
-                            }
-                            else
-                            {
-                                int shallowestIndex = 0;
-                                for (int chainIndex = 1; chainIndex < deepestChains.Count; chainIndex++)
-                                {
-                                    if (deepestChains[chainIndex].Depth < deepestChains[shallowestIndex].Depth)
-                                        shallowestIndex = chainIndex;
-                                }
-
-                                if (depth > deepestChains[shallowestIndex].Depth)
-                                    deepestChains[shallowestIndex] = new ContinuationChainSnapshot(address, typeName, depth, chainTypes);
-                            }
+                        if (depth > deepestChains[shallowestIndex].Depth)
+                            deepestChains[shallowestIndex] = new ContinuationChainSnapshot(address, typeName, depth, chainTypes);
                     }
                 }
             }
         }
 
-        progress?.Report(new(classifyScanCount, "aggregating results",
+        progress?.Report(new AnalyzerProgressReport(classifyScanCount, "aggregating results",
             $"{total:N0} tasks classified, {orphaned:N0} orphaned"));
 
         double avgDepth = depthSampleCount > 0 ? (double)totalDepthSum / depthSampleCount : 0.0;
 
-        var faultedProfiles = BuildFaultedTaskTypeProfiles(faultedTypeCount, faultedTypeExceptions);
+        IReadOnlyList<FaultedTaskTypeProfile> faultedProfiles = BuildFaultedTaskTypeProfiles(faultedTypeCount, faultedTypeExceptions);
 
         return new AsyncTaskDomainResult(
             TotalTasks: total,
@@ -500,289 +372,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
             TopPendingValueTaskSources: vtsResult.TopPending);
     }
 
-    // ── TaskIndex.bin reader ──────────────────────────────────────────────────
-
-    /// <summary>
-    /// Loads task entries from <c>TaskIndex.bin</c> if available, otherwise falls back to
-    /// a filtered heap scan using <see cref="TypeAggregateFlags.IsTaskType"/>. Returns the
-    /// complete population — no scan cap.
-    /// </summary>
-    private List<(ulong Address, ulong Mt, int StateFlags)> LoadTaskEntries(
-        ClrHeap heap,
-        IHeapAnalysisCache? cache,
-        IProgress<AnalyzerProgressReport>? progress,
-        CancellationToken ct)
-    {
-        // Fast path: TaskIndex.bin exists
-        if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
-        {
-            // Memory-backed mode: InMemoryTaskCandidates was collected during Phase 1 at zero
-            // extra scanning cost — use it directly to avoid an O(N_total) scan of InMemoryEntries.
-            if (heapIndex.InMemoryTaskCandidates is { Length: > 0 } inMemCandidates)
-                return ConvertInMemoryTaskCandidates(inMemCandidates);
-
-            var entries = TaskIndexReader.ReadTaskIndexFile(heapIndex.IndexPath, ct);
-            if (entries != null)
-            {
-                if (entries.Count > 0)
-                    progress?.Report(new(entries.Count, "task index loaded",
-                        $"{entries.Count:N0} task records read"));
-                return entries;
-            }
-
-            // BeforeHeapIndexScan/OnHeapEntry already ran via the pipeline's
-            // HeapIndexScanDispatcher before AnalyzeAsync executes; read back
-            // participant-accumulated state instead of re-scanning the index. If the shared
-            // scan failed partway (isolated by the dispatcher), _participantEntries may be
-            // incomplete, so fall back to a raw heap scan instead of trusting it.
-            return _participantScanSucceeded ? (_participantEntries ?? []) : ScanRawHeapForTasks(heap, progress, ct);
-        }
-
-        // No cache — full heap scan
-        return ScanRawHeapForTasks(heap, progress, ct);
-    }
-
-    private static List<(ulong, ulong, int)> ConvertInMemoryTaskCandidates((ulong Addr, ulong Mt)[] candidates)
-    {
-        var result = new List<(ulong, ulong, int)>(candidates.Length);
-        for (int i = 0; i < candidates.Length; i++)
-            result.Add((candidates[i].Addr, candidates[i].Mt, 0)); // StateFlags resolved in Phase 2
-        return result;
-    }
-
-    private static List<(ulong, ulong, int)> ScanRawHeapForTasks(
-        ClrHeap heap,
-        IProgress<AnalyzerProgressReport>? progress,
-        CancellationToken ct)
-    {
-        var result = new List<(ulong, ulong, int)>(capacity: 512);
-        var scanCounter = new ObjectScanCounter("scanning task objects", progress);
-        var stateFieldCache = new Dictionary<ulong, ClrInstanceField?>(capacity: 8);
-
-        foreach (ClrObject obj in heap.EnumerateObjects())
-        {
-            ct.ThrowIfCancellationRequested();
-            scanCounter.Tick();
-
-            if (!obj.IsValid || obj.Type is null)
-                continue;
-
-            string? typeName = obj.Type.Name;
-            if (typeName is null || !TaskTypeNamePattern.IsTaskType(typeName))
-                continue;
-
-            // obj.Type is already resolved here, so reading m_stateFlags now is free
-            // relative to the Phase 2 re-read it would otherwise trigger.
-            ulong mt = obj.Type.MethodTable;
-            if (!stateFieldCache.TryGetValue(mt, out ClrInstanceField? stateField))
-            {
-                stateField = obj.Type.GetFieldByName("m_stateFlags") ?? obj.Type.GetFieldByName("_stateFlags");
-                stateFieldCache[mt] = stateField;
-            }
-            int stateFlags = stateField != null ? stateField.Read<int>(obj, interior: false) : 0;
-
-            result.Add((obj.Address, mt, stateFlags));
-        }
-
-        scanCounter.Complete();
-        return result;
-    }
-
-    // ── TaskCompletionSource entry loading ──────────────────────────────────────
-
-    /// <summary>
-    /// Loads TaskCompletionSource candidate entries. No disk satellite index exists for these
-    /// (unlike TaskIndex.bin) — TCS instance counts are a bounded resource (created explicitly
-    /// per pending external operation, not per compiler-generated async call like Task), so the
-    /// participant-collected list from the shared heap-index scan (or a raw heap scan fallback
-    /// when no index exists) is sufficient without a dedicated fast-path file.
-    /// </summary>
-    private List<(ulong Address, ulong Mt)> LoadTcsEntries(
-        ClrHeap heap,
-        IHeapAnalysisCache? cache,
-        IProgress<AnalyzerProgressReport>? progress,
-        CancellationToken ct)
-    {
-        if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out _))
-        {
-            return _participantScanSucceeded
-                ? (_participantTcsEntries ?? [])
-                : ScanRawHeapForTcs(heap, progress, ct);
-        }
-
-        return ScanRawHeapForTcs(heap, progress, ct);
-    }
-
-    private static List<(ulong, ulong)> ScanRawHeapForTcs(
-        ClrHeap heap,
-        IProgress<AnalyzerProgressReport>? progress,
-        CancellationToken ct)
-    {
-        var result = new List<(ulong, ulong)>(capacity: 64);
-        var scanCounter = new ObjectScanCounter("scanning TaskCompletionSource objects", progress);
-
-        foreach (ClrObject obj in heap.EnumerateObjects())
-        {
-            ct.ThrowIfCancellationRequested();
-            scanCounter.Tick();
-
-            if (!obj.IsValid || obj.Type is null)
-                continue;
-
-            string? typeName = obj.Type.Name;
-            if (typeName is null || !TaskTypeNamePattern.IsTaskCompletionSource(typeName))
-                continue;
-
-            result.Add((obj.Address, obj.Type.MethodTable));
-        }
-
-        scanCounter.Complete();
-        return result;
-    }
-
-    // ── IValueTaskSource entry loading ──────────────────────────────────────────
-
-    /// <summary>
-    /// Loads IValueTaskSource candidate entries. Same rationale as <see cref="LoadTcsEntries"/>
-    /// for skipping a dedicated disk satellite index — these are a bounded resource, not created
-    /// per compiler-generated async call.
-    /// </summary>
-    private List<(ulong Address, ulong Mt)> LoadVtsEntries(
-        ClrHeap heap,
-        IHeapAnalysisCache? cache,
-        IProgress<AnalyzerProgressReport>? progress,
-        CancellationToken ct)
-    {
-        if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out _))
-        {
-            return _participantScanSucceeded
-                ? (_participantVtsEntries ?? [])
-                : ScanRawHeapForVts(heap, progress, ct);
-        }
-
-        return ScanRawHeapForVts(heap, progress, ct);
-    }
-
-    private static List<(ulong, ulong)> ScanRawHeapForVts(
-        ClrHeap heap,
-        IProgress<AnalyzerProgressReport>? progress,
-        CancellationToken ct)
-    {
-        var result = new List<(ulong, ulong)>(capacity: 64);
-        var scanCounter = new ObjectScanCounter("scanning IValueTaskSource objects", progress);
-        // Interface enumeration is more expensive than a name check, so cache the negative
-        // result per-MT to avoid re-checking every instance of a non-matching type.
-        var checkedNonMatchMts = new HashSet<ulong>(capacity: 64);
-
-        foreach (ClrObject obj in heap.EnumerateObjects())
-        {
-            ct.ThrowIfCancellationRequested();
-            scanCounter.Tick();
-
-            if (!obj.IsValid || obj.Type is null)
-                continue;
-
-            ulong mt = obj.Type.MethodTable;
-            if (checkedNonMatchMts.Contains(mt))
-                continue;
-
-            if (!ValueTaskSourcePattern.ImplementsValueTaskSource(obj.Type) || ValueTaskSourcePattern.FindCoreField(obj.Type) is null)
-            {
-                checkedNonMatchMts.Add(mt);
-                continue;
-            }
-
-            result.Add((obj.Address, mt));
-        }
-
-        scanCounter.Complete();
-        return result;
-    }
-
-    private readonly record struct VtsAnalysisResult(
-        int TotalVts,
-        int PendingVts,
-        int PendingVtsGen2Count,
-        IReadOnlyList<PendingValueTaskSourceSnapshot> TopPending);
-
-    /// <summary>
-    /// Classifies each IValueTaskSource candidate by reading its embedded
-    /// ManualResetValueTaskSourceCore&lt;T&gt; field (resolved during BeforeHeapIndexScan, or
-    /// lazily here for the raw-heap-scan fallback path) and checking its <c>_completed</c> flag.
-    /// A false value means the source hasn't signaled completion — either a normal in-flight
-    /// operation, or (if it has survived into Gen2/LOH) a stuck one. See
-    /// <see cref="PendingValueTaskSourceSnapshot"/>.
-    /// </summary>
-    private VtsAnalysisResult AnalyzeValueTaskSources(
-        ClrHeap heap,
-        List<(ulong Address, ulong Mt)> vtsEntries,
-        CancellationToken ct)
-    {
-        if (vtsEntries.Count == 0)
-            return new VtsAnalysisResult(0, 0, 0, []);
-
-        int pendingVts = 0;
-        int pendingVtsGen2 = 0;
-        var pendingSnapshots = new List<PendingValueTaskSourceSnapshot>(capacity: 32);
-        _vtsCoreFieldByMt ??= new Dictionary<ulong, ClrInstanceField>(capacity: 8);
-
-        for (int i = 0; i < vtsEntries.Count; i++)
-        {
-            ct.ThrowIfCancellationRequested();
-            var (address, mt) = vtsEntries[i];
-
-            if (!_vtsCoreFieldByMt.TryGetValue(mt, out ClrInstanceField? coreField))
-            {
-                ClrType? type = heap.GetTypeByMethodTable(mt);
-                coreField = type != null ? ValueTaskSourcePattern.FindCoreField(type) : null;
-                if (coreField != null)
-                    _vtsCoreFieldByMt[mt] = coreField;
-            }
-
-            if (coreField is null)
-                continue;
-
-            ClrObject vtsObj = heap.GetObject(address);
-            if (!vtsObj.IsValid || vtsObj.Type is null)
-                continue;
-
-            ClrValueType core = vtsObj.ReadValueTypeField(coreField);
-            if (!core.IsValid || core.Type is null)
-                continue;
-
-            var completedField = TryGetCachedField(core.Type, core.Type.MethodTable, "_completed", "m_completed");
-            if (completedField is null)
-                continue;
-
-            bool completed = core.ReadField<bool>(completedField);
-            if (completed)
-                continue;
-
-            pendingVts++;
-
-            int generation = SegmentKindMapper.ResolveGeneration(heap, address);
-            if (generation is 2 or 3)
-                pendingVtsGen2++;
-
-            pendingSnapshots.Add(new PendingValueTaskSourceSnapshot(
-                Address: address,
-                TypeName: vtsObj.Type.Name ?? $"MT:0x{mt:X}",
-                Size: vtsObj.Size,
-                Generation: generation));
-        }
-
-        // Same bounded-population rationale as AnalyzeTaskCompletionSources: a full sort of the
-        // pending subset is cheap here. Strongest leak signal first: old-generation residency,
-        // then size within that tier. Complete population, no Top-N cap — the render layer
-        // slices for display.
-        pendingSnapshots.Sort((a, b) =>
-        {
-            int genCompare = b.Generation.CompareTo(a.Generation);
-            return genCompare != 0 ? genCompare : b.Size.CompareTo(a.Size);
-        });
-
-        return new VtsAnalysisResult(vtsEntries.Count, pendingVts, pendingVtsGen2, pendingSnapshots);
-    }
+    // ── TaskCompletionSource analysis ────────────────────────────────────────────
 
     private readonly record struct TcsAnalysisResult(
         int TotalTcs,
@@ -791,15 +381,16 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         IReadOnlyList<UnresolvedTcsSnapshot> TopUnresolved);
 
     /// <summary>
-    /// Classifies each TaskCompletionSource candidate by reading its inner Task (field
-    /// <c>_task</c>/<c>m_task</c>, fallback for the .NET Core 3 field-rename convention) and
-    /// checking whether that inner task is terminal. A non-terminal inner task means nobody has
-    /// called SetResult/SetException/SetCanceled — either a normal in-flight promise, or (if the
-    /// TCS has survived into Gen2/LOH) a leaked one. See <see cref="UnresolvedTcsSnapshot"/>.
+    /// Classifies each TaskCompletionSource candidate by reading its inner Task field (<c>m_task</c>/
+    /// <c>_task</c>, the .NET Core 3+ field-rename fallback) and checking whether the inner task is
+    /// terminal. A non-terminal inner task means nobody called SetResult/SetException/SetCanceled --
+    /// either a normal in-flight promise, or (if the TCS has survived into Gen2/LOH) a leaked one.
+    /// See <see cref="UnresolvedTcsSnapshot"/>.
     /// </summary>
-    private TcsAnalysisResult AnalyzeTaskCompletionSources(
-        ClrHeap heap,
-        List<(ulong Address, ulong Mt)> tcsEntries,
+    private static TcsAnalysisResult AnalyzeTaskCompletionSources(
+        IDumpObjectFieldQuery fields,
+        IHeapSegmentQuery segments,
+        List<HeapObjectRef> tcsEntries,
         CancellationToken ct)
     {
         if (tcsEntries.Count == 0)
@@ -812,47 +403,36 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         for (int i = 0; i < tcsEntries.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
-            var (address, mt) = tcsEntries[i];
+            HeapObjectRef tcs = tcsEntries[i];
 
-            ClrObject tcsObj = heap.GetObject(address);
-            if (!tcsObj.IsValid || tcsObj.Type is null)
+            if (!TryReadObjectReferenceField(fields, tcs.Address, "m_task", "_task", out ulong innerTaskAddress) || innerTaskAddress == 0)
                 continue;
 
-            var innerTaskField = TryGetCachedField(tcsObj.Type, mt, "m_task", "_task");
-            if (innerTaskField is null)
+            int? stateFlags = TryReadStateFlags(fields, innerTaskAddress);
+            if (stateFlags is null)
                 continue;
 
-            ClrObject innerTask = innerTaskField.ReadObject(tcsObj, interior: false);
-            if (!innerTask.IsValid || innerTask.Type is null)
-                continue;
-
-            var stateField = TryGetCachedField(innerTask.Type, innerTask.Type.MethodTable, "m_stateFlags", "_stateFlags");
-            if (stateField is null)
-                continue;
-
-            int stateFlags = stateField.Read<int>(innerTask, interior: false);
-            bool isTerminal = (stateFlags & (MaskCompleted | MaskFaulted | MaskCanceled)) != 0;
+            bool isTerminal = (stateFlags.Value & (MaskCompleted | MaskFaulted | MaskCanceled)) != 0;
             if (isTerminal)
                 continue;
 
             unresolvedTcs++;
 
-            int generation = SegmentKindMapper.ResolveGeneration(heap, address);
+            int generation = ToLegacyGeneration(segments.GetGeneration(tcs.Address));
             if (generation is 2 or 3)
                 unresolvedTcsGen2++;
 
             unresolvedSnapshots.Add(new UnresolvedTcsSnapshot(
-                Address: address,
-                TypeName: tcsObj.Type.Name ?? $"MT:0x{mt:X}",
-                Size: tcsObj.Size,
+                Address: tcs.Address,
+                TypeName: tcs.TypeDisplayName,
+                Size: tcs.Size,
                 Generation: generation));
         }
 
-        // Bounded population (TCS instance counts are a bounded resource) — a full sort of the
-        // unresolved subset is cheap, no need for the maintained-threshold partial-sort pattern
-        // used elsewhere for large populations. Strongest leak signal first: old-generation
-        // residency, then size within that tier. Complete population, no Top-N cap — the render
-        // layer slices for display.
+        // Bounded population (TCS instance counts are a bounded resource) -- a full sort of the
+        // unresolved subset is cheap, no need for a maintained-threshold partial-sort pattern.
+        // Strongest leak signal first: old-generation residency, then size within that tier.
+        // Complete population, no Top-N cap -- the render layer slices for display.
         unresolvedSnapshots.Sort((a, b) =>
         {
             int genCompare = b.Generation.CompareTo(a.Generation);
@@ -862,146 +442,210 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         return new TcsAnalysisResult(tcsEntries.Count, unresolvedTcs, unresolvedTcsGen2, unresolvedSnapshots);
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
+    // ── IValueTaskSource analysis ─────────────────────────────────────────────────
+
+    private readonly record struct VtsAnalysisResult(
+        int TotalVts,
+        int PendingVts,
+        int PendingVtsGen2Count,
+        IReadOnlyList<PendingValueTaskSourceSnapshot> TopPending);
 
     /// <summary>
-    /// Retrieves a field by trying multiple names with fallback (e.g., "m_fieldName" then "_fieldName").
-    /// Caches results by (MethodTable, fieldName) to avoid redundant ClrMD lookups.
+    /// Classifies each IValueTaskSource candidate by reading its embedded
+    /// ManualResetValueTaskSourceCore&lt;T&gt; field and checking its <c>_completed</c>/<c>m_completed</c>
+    /// flag. A false value means the source hasn't signaled completion -- either a normal in-flight
+    /// operation, or (if it has survived into Gen2/LOH) a stuck one. See
+    /// <see cref="PendingValueTaskSourceSnapshot"/>.
     /// </summary>
-    private ClrInstanceField? TryGetCachedField(ClrType type, ulong methodTable, params string[] fieldNames)
+    private static VtsAnalysisResult AnalyzeValueTaskSources(
+        IDumpObjectFieldQuery fields,
+        IHeapSegmentQuery segments,
+        List<(HeapObjectRef Object, string CoreFieldName)> vtsEntries,
+        CancellationToken ct)
     {
-        if (type is null || fieldNames.Length == 0)
-            return null;
+        if (vtsEntries.Count == 0)
+            return new VtsAnalysisResult(0, 0, 0, []);
 
-        _fieldCacheByMt ??= new Dictionary<(ulong, string), ClrInstanceField?>(capacity: 32);
+        int pendingVts = 0;
+        int pendingVtsGen2 = 0;
+        var pendingSnapshots = new List<PendingValueTaskSourceSnapshot>(capacity: 32);
 
-        foreach (string fieldName in fieldNames)
+        for (int i = 0; i < vtsEntries.Count; i++)
         {
-            var cacheKey = (methodTable, fieldName);
-            if (_fieldCacheByMt.TryGetValue(cacheKey, out var cached))
-                return cached;
+            ct.ThrowIfCancellationRequested();
+            (HeapObjectRef vts, string coreFieldName) = vtsEntries[i];
 
-            var field = type.GetFieldByName(fieldName);
-            _fieldCacheByMt[cacheKey] = field;
+            if (!fields.TryReadNestedStructField(vts.Address, coreFieldName, "_completed", out FieldValue completedValue)
+                && !fields.TryReadNestedStructField(vts.Address, coreFieldName, "m_completed", out completedValue))
+                continue;
 
-            if (field != null)
-                return field;
+            if (completedValue.Kind != FieldValueKind.Bool || completedValue.AsBool())
+                continue;
+
+            pendingVts++;
+
+            int generation = ToLegacyGeneration(segments.GetGeneration(vts.Address));
+            if (generation is 2 or 3)
+                pendingVtsGen2++;
+
+            pendingSnapshots.Add(new PendingValueTaskSourceSnapshot(
+                Address: vts.Address,
+                TypeName: vts.TypeDisplayName,
+                Size: vts.Size,
+                Generation: generation));
         }
 
+        // Same bounded-population rationale as AnalyzeTaskCompletionSources: a full sort of the
+        // pending subset is cheap here too. Strongest leak signal first: old-generation residency,
+        // then size within that tier. Complete population, no Top-N cap.
+        pendingSnapshots.Sort((a, b) =>
+        {
+            int genCompare = b.Generation.CompareTo(a.Generation);
+            return genCompare != 0 ? genCompare : b.Size.CompareTo(a.Size);
+        });
+
+        return new VtsAnalysisResult(vtsEntries.Count, pendingVts, pendingVtsGen2, pendingSnapshots);
+    }
+
+    // ── Helpers ────────────────────────────────────────────────────────────────
+
+    /// <summary>Maps <see cref="HeapGenerationTag"/> onto the pre-retyping analyzer's own
+    /// 0/1/2/3(LOH) scheme. Accepted, documented gap: Poh/Frozen have no bucket of their own in that
+    /// scheme and fold into 3 (LOH), matching <c>GCRootAnalyzer</c>'s own prior treatment of the same
+    /// gap. Unknown (address not on any live segment) maps to -1, matching neither bucket.</summary>
+    private static int ToLegacyGeneration(HeapGenerationTag tag) => tag switch
+    {
+        HeapGenerationTag.Gen0 => 0,
+        HeapGenerationTag.Gen1 => 1,
+        HeapGenerationTag.Gen2 => 2,
+        HeapGenerationTag.Loh or HeapGenerationTag.Poh or HeapGenerationTag.Frozen => 3,
+        _ => -1,
+    };
+
+    /// <summary>Reads <c>m_stateFlags</c>/<c>_stateFlags</c>, trying both field names in order.
+    /// Returns <c>null</c> when neither field resolves to a readable Int32 value -- distinct from a
+    /// resolved value of 0, since <see cref="AnalyzeTaskCompletionSources"/> treats "field genuinely
+    /// absent" as "skip this candidate" rather than "classify as pending" (matching the pre-retyping
+    /// analyzer's own <c>stateField is null =&gt; continue</c> gate there). The main task-classification
+    /// loop above collapses <c>null</c> to 0 instead, matching that loop's own pre-retyping behavior of
+    /// never skipping a task for a missing state field.</summary>
+    private static int? TryReadStateFlags(IDumpObjectFieldQuery fields, ulong address)
+    {
+        if (fields.TryReadField(address, "m_stateFlags", out FieldValue value) && value.Kind == FieldValueKind.Int32)
+            return value.AsInt32();
+        if (fields.TryReadField(address, "_stateFlags", out value) && value.Kind == FieldValueKind.Int32)
+            return value.AsInt32();
         return null;
     }
 
-    private static bool IsMultiContinuationList(ClrType? type)
+    private static bool TryReadObjectReferenceField(IDumpObjectFieldQuery fields, ulong address, string primaryName, string fallbackName, out ulong targetAddress)
     {
-        string? name = type?.Name;
-        return name != null && name.StartsWith(MultiContinuationListTypePrefix, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// Reads the elements of a List&lt;object&gt; multi-continuation node into <paramref name="buffer"/>
-    /// via its backing <c>_items</c> array and <c>_size</c> fields. Returns false if the field
-    /// layout couldn't be resolved (e.g. unexpected list-like type).
-    /// </summary>
-    private bool TryReadListElements(ClrObject listObj, List<ClrObject> buffer, int maxElements)
-    {
-        buffer.Clear();
-
-        if (listObj.Type is null)
-            return false;
-
-        ulong mt = listObj.Type.MethodTable;
-        var itemsField = TryGetCachedField(listObj.Type, mt, "_items");
-        var sizeField = TryGetCachedField(listObj.Type, mt, "_size");
-        if (itemsField is null || sizeField is null)
-            return false;
-
-        ClrObject itemsObj = itemsField.ReadObject(listObj, interior: false);
-        if (!itemsObj.IsValid || !itemsObj.IsArray)
-            return false;
-
-        int size = sizeField.Read<int>(listObj, interior: false);
-        if (size <= 0)
-            return true;
-
-        ClrArray arr = itemsObj.AsArray();
-        int count = Math.Min(Math.Min(size, arr.Length), maxElements);
-
-        for (int i = 0; i < count; i++)
+        if ((fields.TryReadField(address, primaryName, out FieldValue value) || fields.TryReadField(address, fallbackName, out value))
+            && value.Kind == FieldValueKind.ObjectReference)
         {
-            ClrObject elem = arr.GetObjectValue(i);
-            if (elem.IsValid && elem.Address != 0)
-                buffer.Add(elem);
+            targetAddress = value.AsObjectAddress();
+            return true;
         }
 
-        return true;
+        targetAddress = 0;
+        return false;
     }
 
+    private static bool IsMultiContinuationList(string typeName) =>
+        typeName.StartsWith(MultiContinuationListTypePrefix, StringComparison.Ordinal);
+
     /// <summary>
-    /// Returns the reusable element buffer for a given recursion depth level. A single shared
-    /// buffer isn't safe across recursive <see cref="ExploreContinuation"/> calls because a
-    /// nested List&lt;object&gt; would clear the buffer an outer frame is still iterating —
-    /// pooling by depth (bounded by MaxContinuationDepth) avoids that while staying
-    /// allocation-free after the pool warms up.
+    /// Reads the elements of a List&lt;object&gt; multi-continuation node via its backing
+    /// <c>_items</c> array and <c>_size</c> fields. Returns <c>null</c> if the field layout couldn't
+    /// be resolved (e.g. an unexpected list-like type) -- distinct from an empty, non-null list
+    /// (a genuinely empty List&lt;object&gt;), matching the pre-retyping analyzer's own
+    /// <c>TryReadListElements</c> true/false-with-cleared-buffer distinction. Null/zero elements are
+    /// filtered out, matching that method's own "only add valid, non-zero elements" behavior --
+    /// <see cref="IDumpArrayShapeQuery.EnumerateObjectReferenceElements"/> reports a null slot as
+    /// address 0 rather than omitting it.
     /// </summary>
-    private List<ClrObject> GetContinuationListBuffer(int depthLevel)
+    private static List<ulong>? ReadListElements(ulong listAddress, IDumpObjectFieldQuery fields, IDumpArrayShapeQuery arrayShapes, int maxElements)
     {
-        _continuationListBufferPool ??= new List<List<ClrObject>>(capacity: 16);
-        while (_continuationListBufferPool.Count <= depthLevel)
-            _continuationListBufferPool.Add(new List<ClrObject>(capacity: 32));
-        return _continuationListBufferPool[depthLevel];
+        if (!fields.TryReadField(listAddress, "_items", out FieldValue itemsValue) || itemsValue.Kind != FieldValueKind.ObjectReference)
+            return null;
+        if (!fields.TryReadField(listAddress, "_size", out FieldValue sizeValue) || sizeValue.Kind != FieldValueKind.Int32)
+            return null;
+
+        ulong itemsAddress = itemsValue.AsObjectAddress();
+        if (itemsAddress == 0)
+            return null;
+
+        int size = sizeValue.AsInt32();
+        if (size <= 0)
+            return [];
+
+        IReadOnlyList<ulong> raw = arrayShapes.EnumerateObjectReferenceElements(itemsAddress, Math.Min(size, maxElements));
+        var result = new List<ulong>(raw.Count);
+        foreach (ulong elementAddress in raw)
+        {
+            if (elementAddress != 0)
+                result.Add(elementAddress);
+        }
+        return result;
     }
 
     /// <summary>
-    /// True branching exploration of a task's continuation graph. Returns the maximum depth
-    /// (in genuine continuation hops — List&lt;object&gt; wrapper nodes don't count) reachable
-    /// from <paramref name="node"/>. For every List&lt;object&gt; multi-continuation node
-    /// encountered anywhere in the reachable subgraph, all elements are enumerated for fan-out
-    /// stats and recursed into, so nested fan-out (a branch whose own continuation is itself
-    /// another List&lt;object&gt;) is fully discovered rather than only the first branch walked.
+    /// True branching exploration of a task's continuation graph. Returns the maximum depth (in
+    /// genuine continuation hops -- List&lt;object&gt; wrapper nodes don't count) reachable from
+    /// <paramref name="nodeAddress"/>. For every List&lt;object&gt; multi-continuation node
+    /// encountered anywhere in the reachable subgraph, all elements are enumerated for fan-out stats
+    /// and recursed into, so nested fan-out (a branch whose own continuation is itself another
+    /// List&lt;object&gt;) is fully discovered rather than only the first branch walked.
     ///
     /// Caveats:
-    /// - <paramref name="visited"/> is shared across the whole exploration to prevent
-    ///   re-expanding cycles; if two branches converge on the same downstream node (a
-    ///   "diamond"), whichever branch reaches it first claims it and the other branch is
-    ///   truncated there — an accepted approximation, not an exact max-depth guarantee.
-    /// - <paramref name="nodeBudget"/> bounds total nodes visited per task, independent of
-    ///   depth, to keep worst-case cost bounded for wide-and-deep fan-out trees.
+    /// - <paramref name="visited"/> is shared across the whole exploration to prevent re-expanding
+    ///   cycles; if two branches converge on the same downstream node (a "diamond"), whichever
+    ///   branch reaches it first claims it and the other branch is truncated there -- an accepted
+    ///   approximation, not an exact max-depth guarantee.
+    /// - <paramref name="nodeBudget"/> bounds total nodes visited per task, independent of depth, to
+    ///   keep worst-case cost bounded for wide-and-deep fan-out trees.
     /// - The winning branch at each node is recorded into <paramref name="bestHopSelections"/>
-    ///   (keyed by node address) so the caller can replay it afterward to build a display
-    ///   chain without allocating per-branch lists during exploration.
-    /// - <paramref name="rootCycleDetected"/> is set to true if a cycle leads back to the
-    ///   root task (indicating a hard deadlock).
+    ///   (keyed by node address) so the caller can replay it afterward to build a display chain
+    ///   without allocating per-branch lists during exploration.
+    /// - <paramref name="rootCycleDetected"/> is set to true if a cycle leads back to the root task
+    ///   (indicating a hard deadlock).
     /// </summary>
-    private int ExploreContinuation(
-        ClrObject node,
+    private static int ExploreContinuation(
+        ulong nodeAddress,
         HashSet<ulong> visited,
         ulong rootTaskAddress,
         ref int nodeBudget,
         int depthLevel,
+        IDumpObjectFieldQuery fields,
+        IHeapObjectLookup objectLookup,
+        IDumpArrayShapeQuery arrayShapes,
         Dictionary<string, int> continuationCount,
         Dictionary<string, int> fanoutTypeCount,
         ref int totalContinuations,
         ref int multiContinuationNodes,
         ref int maxFanOut,
         ref bool rootCycleDetected,
-        Dictionary<ulong, ClrObject> bestHopSelections)
+        Dictionary<ulong, ulong> bestHopSelections)
     {
-        if (!node.IsValid || node.Address == 0 || nodeBudget <= 0)
+        if (nodeAddress == 0 || nodeBudget <= 0)
             return 0;
 
-        if (!visited.Add(node.Address))
+        if (!objectLookup.TryGetObject(nodeAddress, out HeapObjectRef node))
+            return 0;
+
+        if (!visited.Add(nodeAddress))
         {
-            if (node.Address == rootTaskAddress)
+            if (nodeAddress == rootTaskAddress)
                 rootCycleDetected = true;
             return 0;
         }
 
         nodeBudget--;
 
-        if (IsMultiContinuationList(node.Type))
+        if (IsMultiContinuationList(node.TypeDisplayName))
         {
-            List<ClrObject> buffer = GetContinuationListBuffer(depthLevel);
-            if (!TryReadListElements(node, buffer, MaxFanOutElementsToEnumerate))
+            List<ulong>? buffer = ReadListElements(nodeAddress, fields, arrayShapes, MaxFanOutElementsToEnumerate);
+            if (buffer is null)
                 return 0;
 
             multiContinuationNodes++;
@@ -1009,72 +653,51 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
                 maxFanOut = buffer.Count;
 
             int bestDepth = 0;
-            ClrObject bestElem = default;
-            foreach (ClrObject elem in buffer)
+            ulong bestElemAddress = 0;
+            foreach (ulong elemAddress in buffer)
             {
-                if (elem.Type != null)
-                    IncrementCount(fanoutTypeCount, elem.Type.Name ?? string.Empty);
+                if (objectLookup.TryGetObject(elemAddress, out HeapObjectRef elemObj))
+                    IncrementCount(fanoutTypeCount, elemObj.TypeDisplayName);
 
                 int elemDepth = ExploreContinuation(
-                    elem, visited, rootTaskAddress, ref nodeBudget, depthLevel + 1,
+                    elemAddress, visited, rootTaskAddress, ref nodeBudget, depthLevel + 1,
+                    fields, objectLookup, arrayShapes,
                     continuationCount, fanoutTypeCount, ref totalContinuations, ref multiContinuationNodes, ref maxFanOut,
                     ref rootCycleDetected, bestHopSelections);
 
                 if (elemDepth > bestDepth)
                 {
                     bestDepth = elemDepth;
-                    bestElem = elem;
+                    bestElemAddress = elemAddress;
                 }
             }
 
-            if (bestElem.IsValid && bestElem.Address != 0)
-                bestHopSelections[node.Address] = bestElem;
+            if (bestElemAddress != 0)
+                bestHopSelections[nodeAddress] = bestElemAddress;
 
             return bestDepth;
         }
 
         totalContinuations++;
-        if (node.Type != null)
-            IncrementCount(continuationCount, node.Type.Name ?? string.Empty);
+        IncrementCount(continuationCount, node.TypeDisplayName);
 
-        var nextField = node.Type != null
-            ? TryGetCachedField(node.Type, node.Type.MethodTable, "m_continuationObject", "_continuationObject")
-            : null;
-        if (nextField == null)
+        if (!TryReadObjectReferenceField(fields, nodeAddress, "m_continuationObject", "_continuationObject", out ulong nextAddress) || nextAddress == 0)
             return 1;
 
-        ClrObject next = nextField.ReadObject(node, interior: false);
-        if (!next.IsValid || next.Address == 0)
-            return 1;
-
-        bestHopSelections[node.Address] = next;
+        bestHopSelections[nodeAddress] = nextAddress;
 
         int childDepth = ExploreContinuation(
-            next, visited, rootTaskAddress, ref nodeBudget, depthLevel + 1,
+            nextAddress, visited, rootTaskAddress, ref nodeBudget, depthLevel + 1,
+            fields, objectLookup, arrayShapes,
             continuationCount, fanoutTypeCount, ref totalContinuations, ref multiContinuationNodes, ref maxFanOut,
             ref rootCycleDetected, bestHopSelections);
 
         return 1 + childDepth;
     }
 
-    private static string ResolveTypeName(ClrHeap heap, ulong mt,
-        Dictionary<ulong, string> cache)
-    {
-        if (cache.TryGetValue(mt, out string? name))
-            return name;
-
-        // OPT (docs/cache/cache-architecture.md Phase 5): mt is already known —
-        // resolve via the metadata cache instead of materializing a ClrObject.
-        string resolved = heap.GetTypeByMethodTable(mt)?.Name
-            ?? "System.Threading.Tasks.Task";
-
-        cache[mt] = resolved;
-        return resolved;
-    }
-
     private static string? ExtractResultType(string typeName)
     {
-        // "System.Threading.Tasks.Task`1[[System.String, ...]]" → "System.String"
+        // "System.Threading.Tasks.Task`1[[System.String, ...]]" -> "System.String"
         int start = typeName.IndexOf("[[", StringComparison.Ordinal);
         if (start < 0) return null;
         start += 2;
@@ -1084,85 +707,78 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         return typeName[start..end];
     }
 
-    private (string? ExceptionType, string? ExceptionMessage) ExtractFaultedTaskException(ClrObject taskObj)
+    private static (string? ExceptionType, string? ExceptionMessage) ExtractFaultedTaskException(
+        IDumpObjectFieldQuery fields, IHeapObjectLookup objectLookup, IHeapReferenceQuery references, ulong taskAddress)
     {
-        if (!taskObj.IsValid || taskObj.Type is null)
-            return (null, null);
-
         var visited = new HashSet<ulong>(capacity: 16);
 
         foreach (string fieldName in new[] { "m_contingentProperties", "_contingentProperties" })
         {
-            ClrObject contingent = ReadObjectField(taskObj, fieldName);
-            if (!contingent.IsValid)
+            if (!fields.TryReadField(taskAddress, fieldName, out FieldValue contingentValue) || contingentValue.Kind != FieldValueKind.ObjectReference)
                 continue;
 
-            if (TryFindExceptionLikeObject(contingent, visited, 0, out ClrObject exceptionObj) && TryReadExceptionSummary(exceptionObj, out string? exceptionType, out string? message))
+            ulong contingentAddress = contingentValue.AsObjectAddress();
+            if (contingentAddress == 0)
+                continue;
+
+            if (TryFindExceptionLikeObject(contingentAddress, visited, 0, fields, objectLookup, references, out HeapObjectRef exceptionObj)
+                && TryReadExceptionSummary(exceptionObj, fields, objectLookup, out string? exceptionType, out string? message))
                 return (exceptionType, message);
         }
 
-        if (TryFindExceptionLikeObject(taskObj, visited, 0, out ClrObject fallbackExceptionObj) && TryReadExceptionSummary(fallbackExceptionObj, out string? fallbackType, out string? fallbackMessage))
+        if (TryFindExceptionLikeObject(taskAddress, visited, 0, fields, objectLookup, references, out HeapObjectRef fallbackExceptionObj)
+            && TryReadExceptionSummary(fallbackExceptionObj, fields, objectLookup, out string? fallbackType, out string? fallbackMessage))
             return (fallbackType, fallbackMessage);
 
         return (null, null);
     }
 
-    private ClrObject ReadObjectField(ClrObject source, string fieldName)
+    private static bool TryFindExceptionLikeObject(
+        ulong sourceAddress, HashSet<ulong> visited, int depth,
+        IDumpObjectFieldQuery fields, IHeapObjectLookup objectLookup, IHeapReferenceQuery references,
+        out HeapObjectRef exceptionObj)
     {
-        if (source.Type is null)
-            return default;
-
-        var field = TryGetCachedField(source.Type, source.Type.MethodTable, fieldName);
-        return field is null ? default : field.ReadObject(source, interior: false);
-    }
-
-    private bool TryFindExceptionLikeObject(ClrObject source, HashSet<ulong> visited, int depth, out ClrObject exceptionObj)
-    {
-        return ObjectGraphTraversal.TryFindByPredicate(
-            source,
-            visited,
-            depth,
-            maxDepth: 4,
-            prioritizedFieldNames: ExceptionRelatedFields,
+        return CapabilityObjectFieldTraversal.TryFindByPredicate(
+            sourceAddress, visited, depth, MaxExceptionSearchDepth, ExceptionRelatedFields,
+            fields, objectLookup, references,
             isMatch: candidate =>
             {
-                string? typeName = candidate.Type?.Name;
+                string typeName = candidate.TypeDisplayName;
                 return !string.IsNullOrWhiteSpace(typeName)
                     && typeName.Contains("Exception", StringComparison.Ordinal)
                     && !typeName.Contains("ExceptionDispatchInfo", StringComparison.Ordinal)
-                    && TryReadExceptionSummary(candidate, out _, out _);
+                    && TryReadExceptionSummary(candidate, fields, objectLookup, out _, out _);
             },
-            readObjectField: (obj, fieldName) => ReadObjectField(obj, fieldName),
             out exceptionObj);
     }
 
-    private bool TryReadExceptionSummary(ClrObject exceptionObj, out string? exceptionType, out string? message)
+    private static bool TryReadExceptionSummary(
+        HeapObjectRef exceptionObj, IDumpObjectFieldQuery fields, IHeapObjectLookup objectLookup,
+        out string? exceptionType, out string? message)
     {
-        exceptionType = exceptionObj.Type?.Name;
+        exceptionType = exceptionObj.TypeDisplayName;
         message = null;
 
-        if (!exceptionObj.IsValid || exceptionObj.Type is null)
-            return false;
-
-        if (exceptionType is not null && exceptionType.Contains("ExceptionDispatchInfo", StringComparison.Ordinal))
+        if (exceptionType.Contains("ExceptionDispatchInfo", StringComparison.Ordinal))
         {
             foreach (string fieldName in new[] { "_exception", "m_exception" })
             {
-                ClrObject inner = ReadObjectField(exceptionObj, fieldName);
-                if (TryReadExceptionSummary(inner, out exceptionType, out message))
+                if (!fields.TryReadField(exceptionObj.Address, fieldName, out FieldValue innerValue) || innerValue.Kind != FieldValueKind.ObjectReference)
+                    continue;
+
+                ulong innerAddress = innerValue.AsObjectAddress();
+                if (innerAddress == 0 || !objectLookup.TryGetObject(innerAddress, out HeapObjectRef inner))
+                    continue;
+
+                if (TryReadExceptionSummary(inner, fields, objectLookup, out exceptionType, out message))
                     return true;
             }
 
             return false;
         }
 
-        var messageField = exceptionObj.Type.GetFieldByName("_message");
-        if (messageField != null)
-        {
-            ClrObject messageObj = messageField.ReadObject(exceptionObj, interior: false);
-            if (messageObj.IsValid)
-                message = messageObj.AsString();
-        }
+        if (fields.TryReadField(exceptionObj.Address, "_message", out FieldValue messageValue) && messageValue.Kind == FieldValueKind.String)
+            message = messageValue.AsString();
 
         if (string.IsNullOrWhiteSpace(message))
             message = null;
@@ -1181,14 +797,14 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         Dictionary<string, int> faultedCounts,
         Dictionary<string, Dictionary<string, int>> faultedExceptions)
     {
-        var topFaulted = BuildSorted(faultedCounts);
+        IReadOnlyList<NameCountEntry> topFaulted = BuildSorted(faultedCounts);
         var profiles = new List<FaultedTaskTypeProfile>(capacity: topFaulted.Count);
 
-        foreach (var entry in topFaulted)
+        foreach (NameCountEntry entry in topFaulted)
         {
-            var exceptionHistogram = faultedExceptions.TryGetValue(entry.Name, out var exceptionCounts)
+            IReadOnlyList<NameCountEntry> exceptionHistogram = faultedExceptions.TryGetValue(entry.Name, out Dictionary<string, int>? exceptionCounts)
                 ? BuildSorted(exceptionCounts)
-                : (IReadOnlyList<NameCountEntry>)[];
+                : [];
 
             profiles.Add(new FaultedTaskTypeProfile(entry.Name, entry.Count, exceptionHistogram));
         }
@@ -1196,7 +812,7 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         return profiles;
     }
 
-    // Complete population, descending by count — no Top-N cap. Per-type dictionaries are bounded
+    // Complete population, descending by count -- no Top-N cap. Per-type dictionaries are bounded
     // by distinct type count (small relative to instance count), so a full sort is cheap; the
     // render layer slices for display.
     private static IReadOnlyList<NameCountEntry> BuildSorted(Dictionary<string, int> counts)
@@ -1204,8 +820,8 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         if (counts.Count == 0) return [];
 
         var result = new List<NameCountEntry>(counts.Count);
-        foreach (var kvp in counts)
-            result.Add(new(kvp.Key, kvp.Value));
+        foreach (KeyValuePair<string, int> kvp in counts)
+            result.Add(new NameCountEntry(kvp.Key, kvp.Value));
         result.Sort((a, b) => b.Count.CompareTo(a.Count));
         return result;
     }
@@ -1216,11 +832,47 @@ internal sealed class AsyncTaskAnalyzer : IAnalyzer, IParallelHeapIndexScanParti
         if (byteCounts.Count == 0) return [];
 
         var result = new List<NameSizeCountEntry>(byteCounts.Count);
-        foreach (var kvp in byteCounts)
-            result.Add(new(kvp.Key, kvp.Value.TotalBytes, kvp.Value.Count));
+        foreach (KeyValuePair<string, (long TotalBytes, int Count)> kvp in byteCounts)
+            result.Add(new NameSizeCountEntry(kvp.Key, kvp.Value.TotalBytes, kvp.Value.Count));
         result.Sort((a, b) => b.TotalBytes.CompareTo(a.TotalBytes));
         return result;
     }
+
+    private static AsyncTaskDomainResult EmptyWith(TcsAnalysisResult tcsResult, VtsAnalysisResult vtsResult) => new(
+        TotalTasks: 0,
+        PendingTasks: 0,
+        RunningTasks: 0,
+        FaultedTasks: 0,
+        CanceledTasks: 0,
+        CompletedTasks: 0,
+        OrphanedTasks: 0,
+        TotalTaskContinuations: 0,
+        MaxContinuationDepth: 0,
+        AvgContinuationDepth: 0.0,
+        TopPendingTaskTypes: [],
+        TopFaultedTaskTypes: [],
+        TopContinuationTypes: [],
+        TopOrphanedTasks: [],
+        TopDeepestChains: [],
+        FaultedTaskExceptionHistograms: [],
+        MultiContinuationNodeCount: 0,
+        MaxContinuationFanOut: 0,
+        TopContinuationFanoutTypes: [],
+        DepthSampleCount: 0,
+        CycleDetected: false,
+        PendingGen0: 0,
+        PendingGen1: 0,
+        PendingGen2: 0,
+        PendingLOH: 0,
+        TopPendingTaskTypesByBytes: [],
+        TotalTaskCompletionSources: tcsResult.TotalTcs,
+        UnresolvedTaskCompletionSources: tcsResult.UnresolvedTcs,
+        UnresolvedTcsGen2Count: tcsResult.UnresolvedTcsGen2Count,
+        TopUnresolvedTaskCompletionSources: tcsResult.TopUnresolved,
+        TotalValueTaskSources: vtsResult.TotalVts,
+        PendingValueTaskSources: vtsResult.PendingVts,
+        PendingVtsGen2Count: vtsResult.PendingVtsGen2Count,
+        TopPendingValueTaskSources: vtsResult.TopPending);
 
     public void Dispose() { }
 }

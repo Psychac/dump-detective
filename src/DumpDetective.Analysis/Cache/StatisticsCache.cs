@@ -77,6 +77,20 @@ internal class StatisticsCache
                         localState.Stats[typeName] = stats;
                         localState.Samples[typeName] = obj.Address;
                         localState.NamesByMethodTable[obj.Type.MethodTable] = typeName;
+
+                        // Task/TCS classification is a pure name check, cheap regardless of how
+                        // often it runs; IValueTaskSource detection walks ClrType.EnumerateInterfaces(),
+                        // which is not -- gated to run at most once per distinct type (here, on first
+                        // encounter), never per instance, same cost shape the pre-retyping
+                        // AsyncTaskAnalyzer's own BeforeHeapIndexScan already accepted.
+                        stats.IsTaskType = TaskTypeNamePattern.IsTaskType(typeName);
+                        stats.IsTaskCompletionSourceType = !stats.IsTaskType && TaskTypeNamePattern.IsTaskCompletionSource(typeName);
+                        if (!stats.IsTaskType && !stats.IsTaskCompletionSourceType
+                            && SafeImplementsValueTaskSource(obj.Type, out string? coreFieldName))
+                        {
+                            stats.ImplementsValueTaskSource = true;
+                            stats.ValueTaskSourceCoreFieldName = coreFieldName;
+                        }
                     }
 
                     if (string.IsNullOrEmpty(stats.ModuleName) && obj.Type.Module?.Name is string moduleName)
@@ -131,6 +145,15 @@ internal class StatisticsCache
                     stat.IsFinalizableType = true;
                 if (localStat.IsAsyncStateMachineType)
                     stat.IsAsyncStateMachineType = true;
+                if (localStat.IsTaskType)
+                    stat.IsTaskType = true;
+                if (localStat.IsTaskCompletionSourceType)
+                    stat.IsTaskCompletionSourceType = true;
+                if (localStat.ImplementsValueTaskSource)
+                {
+                    stat.ImplementsValueTaskSource = true;
+                    stat.ValueTaskSourceCoreFieldName = localStat.ValueTaskSourceCoreFieldName;
+                }
                 stat.Gen0Count += localStat.Gen0Count;
                 stat.Gen1Count += localStat.Gen1Count;
                 stat.Gen2Count += localStat.Gen2Count;
@@ -237,6 +260,29 @@ internal class StatisticsCache
 
     private static string ResolveModuleNameFromSample(ClrHeap heap, ulong sampleAddress, ulong methodTable) =>
         TypeAggregateNameResolver.ResolveModuleName(heap, methodTable, sampleAddress);
+
+    // Matches HeapTypeStatisticsQuery's own SafeHasIEquatableInterface defensive-catch shape --
+    // ClrMD interface/field enumeration can fail on corrupt dumps or partially-loaded types.
+    private static bool SafeImplementsValueTaskSource(ClrType type, out string? coreFieldName)
+    {
+        coreFieldName = null;
+        try
+        {
+            if (!ValueTaskSourcePattern.ImplementsValueTaskSource(type))
+                return false;
+
+            ClrInstanceField? coreField = ValueTaskSourcePattern.FindCoreField(type);
+            if (coreField is null)
+                return false;
+
+            coreFieldName = coreField.Name;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     private static int AddClamped(int existing, long delta)
     {

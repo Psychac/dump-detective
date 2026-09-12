@@ -83,7 +83,38 @@ public readonly record struct HeapTypeStatistics(
     int ArrayRank = 0,
     bool ArrayElementIsObjectReference = false,
     bool ArrayElementIsSupportedNumeric = false,
-    int ArrayElementSizeBytes = 0);
+    int ArrayElementSizeBytes = 0,
+    /// <summary>
+    /// Mirrors <c>ClrType.IsEnum</c>/<c>StaticSize</c>/<c>BaseType.Name</c> — added 2026-09-12 for
+    /// <c>BoxingAnalyzer</c>'s retyping. Always available regardless of
+    /// <see cref="IHeapTypeStatisticsQuery.HasTypeShapeData"/>, same as <see cref="IsValueType"/>/
+    /// <see cref="IsArray"/> — all three come from the type itself, not the shape cache.
+    /// <see cref="BaseTypeName"/> is an empty string when the type has no base type (e.g. <c>object</c>
+    /// itself), preserving the pre-retyping analyzer's own defensive
+    /// <c>BaseType?.Name == "System.ValueType"/"System.Enum"</c> boxing-detection fallback exactly.
+    /// </summary>
+    bool IsEnum = false,
+    int StaticSize = 0,
+    string BaseTypeName = "",
+    /// <summary>
+    /// <c>true</c> when <c>ClrType.EnumerateInterfaces()</c> contains an <c>IEquatable&lt;T&gt;</c>
+    /// implementation; <c>false</c> on enumeration failure, same defensive fallback as
+    /// <see cref="InterfaceCount"/> — but computed independently of
+    /// <see cref="IHeapTypeStatisticsQuery.HasTypeShapeData"/>, since the pre-retyping
+    /// <c>BoxingAnalyzer</c> always computed this from <c>TypeAggregates</c> alone, with no shape-cache
+    /// dependency at all. <c>false</c> for reference types (never computed for them at all) — this
+    /// field is only ever meaningful for a boxed value type, and walking interface metadata for every
+    /// reference type in a large dump's full type population measurably cost minutes for zero benefit.
+    /// </summary>
+    bool HasIEquatableInterface = false,
+    /// <summary>
+    /// Sum of <c>ClrInstanceField.Size</c> across the type's own declared instance fields — used to
+    /// detect struct padding waste (<c>StaticSize - DeclaredFieldByteSize</c>). 0 on any field-read
+    /// failure (ClrMD field APIs can fail on corrupt dumps, mirroring the pre-retyping analyzer's own
+    /// defensive catch), when field data is genuinely unavailable, or for a reference type — same
+    /// value-types-only gate as <see cref="HasIEquatableInterface"/>, for the same measured reason.
+    /// </summary>
+    int DeclaredFieldByteSize = 0);
 
 /// <summary>The <c>heap.types</c> capability's aggregate-statistics surface (distinct
 /// <see cref="IHeapObjectStream"/>/<see cref="IHeapObjectLookup"/>, per-object).</summary>

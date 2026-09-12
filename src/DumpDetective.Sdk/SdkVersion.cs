@@ -19,7 +19,12 @@ public static class SdkVersion
 {
     public const int Major = 0;
 
-    /// <summary>9 as of 2026-09-12 (added <see cref="Analysis.FieldValueKind"/>'s <c>UInt32</c> case
+    /// <summary>10 as of 2026-09-12 (added <see cref="Analysis.HeapTypeStatistics"/>'s <c>IsEnum</c>/
+    /// <c>StaticSize</c>/<c>BaseTypeName</c>/<c>HasIEquatableInterface</c>/<c>DeclaredFieldByteSize</c>
+    /// — found necessary by <c>BoxingAnalyzer</c>'s retyping, which turned out Tier-1-only on
+    /// inspection like <c>ObjectShapeAnalyzer</c> before it: no per-instance field *value* reads, only
+    /// per-type structural metadata already isomorphic to what <c>IHeapTypeStatisticsQuery</c> exposes).
+    /// Before that, 9 as of 2026-09-12 (added <see cref="Analysis.FieldValueKind"/>'s <c>UInt32</c> case
     /// and <c>FieldValue.ForUInt32</c>/<c>AsUInt32</c> — found necessary by <c>TimerLeakAnalyzer</c>'s
     /// retyping: <c>TimerQueueTimer._period</c>/<c>m_period</c> is a genuine <c>uint</c> field whose
     /// <c>uint.MaxValue</c> "infinite" sentinel reinterprets incorrectly through <c>Int32</c>'s signed
@@ -53,7 +58,7 @@ public static class SdkVersion
     /// additions/splits, the `EntityRef`/`IHeapDominatorQuery`/positional-record/JSON-converter
     /// fixes) — not a precise per-change reconstruction, since nothing yet depends on intermediate
     /// values enough to make that worth simulating.</summary>
-    public const int Minor = 9;
+    public const int Minor = 10;
 
     public static string AsString => $"{Major}.{Minor}";
 }

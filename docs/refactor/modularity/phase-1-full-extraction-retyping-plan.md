@@ -1,5 +1,30 @@
 # Phase 1 full SDK extraction — capability surfaces + the analyzer retyping step
 
+## Status (as of 2026-09-12)
+
+**21 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
+in the tree, not just this doc's own narrative — this doc's original "35" count in the section below
+was an approximation from § 10 point 8's grep-based measurement; the real count is 36). The
+`dump.object-fields` Tier-2 escape hatch **is built** (see "Tier 2 wave" below) — the "still not
+built" language later in this doc is stale as of the pilot, 2026-09-11.
+
+**Done:**
+`AllocationPatternAnalyzer`, `ArrayAnalyzer`, `BoxingAnalyzer`, `DbConnectionAnalyzer`,
+`GCGenerationAnalyzer`, `GCHandleAnalyzer`, `GCRootAnalyzer`, `HeapTopologyAnalyzer`,
+`HttpObjectAnalyzer`, `JitAnalyzer`, `LockGraphAnalyzer`, `LohFragmentationAnalyzer`,
+`MemoryAnalyzer`, `ObjectShapeAnalyzer`, `SegmentReservationAnalyzer`, `SqlCommandAnalyzer`,
+`SqlConnectionPoolAnalyzer`, `SqlTransactionAnalyzer`, `ThreadStackClusterAnalyzer`,
+`TimerLeakAnalyzer`, `WcfChannelAnalyzer`.
+
+**Remaining (15):**
+`AsyncStateMachineAnalyzer`, `AsyncTaskAnalyzer`, `CollectionAnalyzer`,
+`CrashAnalyzer`, `DominatorAnalyzer`, `EventLeakAnalyzer`, `FinalizableObjectAnalyzer`,
+`HangAnalyzer`, `ModuleAnalyzer`, `ReferenceChainAnalyzer`, `StaticRootLeakDetector`,
+`StringAnalyzer`, `ThreadAnalyzer`, `WeakReferenceAnalyzer`, and **`LeakCandidateAnalyzer`** —
+explicit user direction: do `LeakCandidateAnalyzer` last of all, since it needs cross-analyzer
+result access (`context.CompletedRunResults`-equivalent) and deferred-execution-ordering modeling
+that don't exist in the SDK yet, on top of everything the other 15 need.
+
 Detailed plan for the two items [phase-1-contracts-sdk.md](phase-1-contracts-sdk.md) leaves
 deferred (`Analysis/`, `Presentation/`) and the ownerless gap recorded at
 [modularity-plan.md § 10 point 8](../modularity-plan.md#10-external-review-2026-09-08--where-this-can-be-questioned).
@@ -98,8 +123,9 @@ confirm per-analyzer during actual migration):
   reads a live `AssemblyLoadContext` object's `"_name"` field via `ClrObject.TryReadStringField` to
   resolve its display name. Both are unambiguous field-*value* extraction, not the coarse/structural
   queries a Tier-1 surface covers — both moved from Tier-1-only into Tier-1+Tier-2 above, and both
-  wait on the `dump.object-fields` escape hatch (still not built, per this plan's own hard-need-basis
-  convention) rather than being force-fit into Tier-1-only surfaces that don't actually cover them.
+  wait on the `dump.object-fields` escape hatch, which **is now built** (see "Tier 2 wave" below,
+  first shipped 2026-09-11 for the pilot, `SqlConnectionPoolAnalyzer`) — neither has been migrated
+  yet, but the hatch itself is no longer the blocker for either.
   Conversely, `LockGraphAnalyzer` and `ThreadStackClusterAnalyzer` (found while planning the
   thread-domain quartet — see
   [phase-1-thread-quartet-plan.md](phase-1-thread-quartet-plan.md)) were originally bucketed into
@@ -648,14 +674,140 @@ found no phase owns. Concrete sequencing:
    **Tier 1 is now fully finished**: every originally-Tier-1-only analyzer, plus both quartet members
    that turned out to be Tier-1-only on re-inspection, are retyped.
 
+## Tier 2 wave — `dump.object-fields` hatch built, seven analyzers migrated so far
+
+With Tier 1 finished, this wave opened the `dump.object-fields` escape hatch (§ "New SDK types"
+above) and started migrating the Tier-1+Tier-2 list. Unlike the Tier-1 batches, most of these
+analyzers share one discovery shape — "match candidate type names against a known set, read a few
+fields per instance" — so a shared adapter base was extracted early (`SqlConnectionPoolAnalyzer`,
+the pilot) and reused by every consumer after it, rather than each batch re-deriving its own
+scan-participant plumbing the way several Tier-1 batches had to.
+
+- **Pilot: `SqlConnectionPoolAnalyzer`. Done 2026-09-11.** Shipped `IDumpObjectFieldQuery`
+  (`dump.object-fields`) and `FieldValue`/`FieldValueKind` (private-ctor + named-factory, not a
+  positional record, to avoid the adjacent-same-typed-parameter transposition risk found elsewhere
+  in the SDK). Two design smells found during review and fixed same-session: candidates were
+  originally threaded through `AnalyzerOptions` (its own documented contract reserves that slot for
+  analyzer *configuration*) — fixed via `PrecomputedHeapObjectStream` over `context.HeapObjects`
+  instead, mirroring `LockGraphAnalyzerLegacyAdapter`'s existing `PrecomputedRuntimeThreadQuery`
+  precedent. The scan-participant plumbing itself was un-abstracted — extracted into
+  `TypedResourceCandidateStreamingLegacyAdapter<TSelf, TSdkAnalyzer>` once a second consumer was
+  confirmed coming, not speculatively ahead of one.
+- **`SqlCommandAnalyzer` + `SqlTransactionAnalyzer`. Done 2026-09-11.** Second/third consumers of the
+  shared adapter; found its `CandidateTypeNames: IReadOnlySet<string>` shape too narrow (these two
+  classify by namespace-prefix + suffix pattern, not exact-name-set membership) — changed to an
+  abstract `IsCandidateType(string)` method.
+- **`HttpObjectAnalyzer`. Done 2026-09-11.** Fourth adapter consumer; added
+  `IDumpObjectFieldQuery.TryGetStringValue` (a second `dump.object-fields` primitive for chasing an
+  object-reference field's *result* into a string, e.g. a `Uri`, which `TryReadField` alone can't
+  express) and a `_scanSucceeded` tracking fix to the shared adapter base so a failed shared scan
+  degrades to an empty candidate list instead of silently looking like "found candidates." Verified
+  against the 3.35 GB reference dump: 102 HTTP-shaped objects.
+- **`heap.root-paths` capability. Done 2026-09-11.** Built to unblock `DbConnectionAnalyzer`. Turned
+  out to be a thin wrapper over the pre-existing `RootPathFinder`/`ReferenceGraph` machinery, not a
+  reimplementation — both real consumers (`DbConnectionAnalyzer`, `TimerLeakAnalyzer`) already agreed
+  on every search policy except numeric bounds, so `IHeapRootPathQuery` bakes in the shared policy
+  and exposes only `RootPathSearchOptions`' bounds per call, returning an already-formatted path
+  string rather than raw addresses.
+- **`WcfChannelAnalyzer`. Done 2026-09-11.** Fifth adapter consumer. Found and fixed three real bugs
+  by decompiling the real .NET Framework `System.ServiceModel.dll`/`System.dll` (GAC) rather than
+  guessing: the pre-retyping `ClrElementType.Object` branch for a hypothetical boxed
+  `CommunicationState` was dead code (the real field is a plain `Int32`-backed enum) and was
+  implemented incorrectly besides; remote-address extraction's `ClrObject.ToString()` fallback never
+  actually returned a real URL (fixed by chasing into `System.Uri`'s own internal string field, whose
+  name differs by runtime — `m_String` vs. `_string`); and `IsFactoryType` matched nearly every
+  *nested channel* instance, not just real factories, silently dropping real (including Faulted)
+  channels from every count — found by writing the first-ever unit test for that method.
+- **`DbConnectionAnalyzer`. Done 2026-09-12.** Sixth adapter consumer, first real `heap.root-paths`
+  consumer. Real-dump run surfaced a pre-existing (not introduced by retyping) limitation, decompile-
+  verified: `Microsoft.Data.SqlClient.SqlConnection` v5.2.2 has no `_connectionState`/`_state`/
+  `m_connectionState` field of its own — `State` delegates to a separate `_innerConnection` object,
+  which this analyzer was never written to chase into. Documented, left unfixed pending its own
+  verification pass across the provider matrix this analyzer targets.
+- **`TimerLeakAnalyzer`. Done 2026-09-12.** Seventh adapter consumer and the last of the
+  "typed-resource quartet" (`DbConnectionAnalyzer`/`WcfChannelAnalyzer`/`HttpObjectAnalyzer`/
+  `TimerLeakAnalyzer`). The only member whose pre-retyping design used a different discovery shape —
+  type-aggregate counts for the main tally plus an entirely separate second full-heap pass just to
+  read `TimerQueueTimer._period` per instance — collapsed onto the same single shared scan the rest
+  of the quartet uses. Decompiling `TimerQueueTimer` across .NET Framework and .NET 7–10 found two
+  more pre-existing gaps (missing `.NET Framework` field names; `_period` is genuinely `uint`, not
+  the `long` the old dual-width fallback defensively but incorrectly guessed at) — fixed by adding a
+  real `FieldValueKind.UInt32` case to `dump.object-fields` (`SdkVersion` 8→9).
+
+Along the way, `HeapTypeStatistics`/`IHeapTypeStatisticsQuery` picked up several more fields reused
+across this wave (`SampleAddress`, `ModuleName`, array-shape fields for `ArrayAnalyzer`, shape
+fields for `ObjectShapeAnalyzer`) — same "extend the existing surface to exactly what a real
+consumer needs" pattern the Tier-1 batches established, not new capabilities each time.
+
+**`BoxingAnalyzer`. Done 2026-09-12.** Picked next after the typed-resource quartet closed —
+smallest remaining Tier-1+Tier-2 candidate (303 lines) and, on inspection, a second tier-split
+correction of the same shape `ObjectShapeAnalyzer`/`LockGraphAnalyzer`/`ThreadStackClusterAnalyzer`
+already were: it reads no per-instance field *value* at all, only per-type structural metadata
+(`ClrType.IsEnum`/`StaticSize`/`BaseType.Name`/`EnumerateInterfaces()`/`Fields`), every bit of it
+already isomorphic to what `IHeapTypeStatisticsQuery` exposes for other Tier-1-only analyzers. Never
+needed the `dump.object-fields` hatch this wave built.
+- **`IHeapTypeStatisticsQuery`/`HeapTypeStatistics` extended, not a new capability**: added
+  `IsEnum`/`StaticSize`/`BaseTypeName` (always available, same as `IsValueType`/`IsArray` — come from
+  the type itself, not the shape cache) and `HasIEquatableInterface`/`DeclaredFieldByteSize`
+  (independent of `HasTypeShapeData`, since the pre-retyping analyzer always computed these from
+  `TypeAggregates` alone, with no shape-cache dependency at all — bundling them behind the same gate
+  as `InterfaceCount` would have been a real behavior change, not just plumbing). `SdkVersion` 9→10.
+- **Dump-side `HeapTypeStatisticsQuery` extended**, not a new type — same file every prior batch in
+  this wave touched. `EnumerateInterfaces()`/`Fields` walks wrapped in the same defensive try/catch
+  shape the pre-retyping analyzer's own `EnumerateInterfacesSafe`/`ComputeTotalFieldBytes` used
+  (ClrMD can fail on corrupt dumps or partially-loaded metadata).
+- **A real perf regression found and fixed before the real-dump run, not after**: the first cut
+  computed `HasIEquatableInterface`/`DeclaredFieldByteSize` for *every* entry in `TypeAggregates` —
+  i.e. every distinct type on the heap, reference types included — not just value types. On the 3.5 GB
+  reference dump this stalled the real-dump test for 10+ minutes (never crashed, never finished either
+  run before being stopped) walking full interface/field metadata for a type population BoxingAnalyzer
+  was always going to discard immediately (only value types ever pass its `isBoxed` check). Fixed by
+  gating both computations to `type is { IsValueType: true }` inside `HeapTypeStatisticsQuery`, matching
+  exactly what the pre-retyping analyzer's own `EnumerateInterfacesSafe`/`ComputeTotalFieldBytes` calls
+  were already scoped to (they only ran after `isBoxed` was confirmed true). A concrete instance of this
+  wave's own stated risk — "extend the surface to exactly what a real consumer needs," where "needs"
+  includes *which subset of the type population* needs it, not just which fields.
+- **A helper relocation, not a behavior change**: `HasIEquatableInterface(IEnumerable<ClrInterface>)`
+  moved from `BoxingAnalyzer` (a public/internal API surface a ClrMD-typed SDK analyzer can no longer
+  expose) into `HeapTypeStatisticsQuery` as a private, dump-side-only helper — same treatment as
+  `HeapTypeStatisticsQuery`'s own `ComputeArrayRank`/`ComputeBaseTypeDepth`, neither unit-tested
+  directly either. The three direct unit tests exercising it were removed from `BoxingAnalyzerTests`;
+  coverage moves to the new characterization test below. `IsNullableTypeName`/`SafeInstanceCount`/
+  `ComputePaddingWaste` stayed on `BoxingAnalyzer` unchanged (pure, no ClrMD dependency) — their
+  existing unit tests pass unmodified.
+- **Inherited, not introduced**: the method-table-name-collision gap every other `GetTypeStatistics()`
+  consumer already documents (two distinct method tables resolving to the same display name collapse
+  to one dictionary entry, last write wins) now also applies here — not a new gap this batch created,
+  just inherited from the shared surface.
+- **Gate met**: new `BoxingAnalyzerRetypingCharacterizationTests` — type-shape data (`IsEnum`/
+  `StaticSize`/`HasIEquatableInterface`) can't be hand-crafted via reflection injection any more than
+  segment/root/shape data in earlier batches could, so it cross-checks against real boxed value-type
+  method tables found on a self-attached live process heap (three tests: classification arithmetic,
+  oversized-threshold detection, and the `!HasExactGenerationData` empty-result gate). New
+  `BoxingAnalyzerRealDumpTests` (`[DiscrepancyFact]`, one dump, foreground, real prebuilt index)
+  written against the same 3.5 GB reference dump pattern every prior batch uses. Two attempts against
+  the real dump this session were stopped mid-run (10+ minutes, no completion) before the perf
+  regression above was found and fixed — not the analyzer hanging, the pre-fix
+  `HeapTypeStatisticsQuery` walking every reference type's interface/field metadata needlessly. Third
+  attempt, post-fix, passed in 4s (6.5s total including build/discovery) — confirms the gating fix was
+  the actual cost driver, not a real hang: 3,052,736 boxed objects, ~75.5 MB boxed bytes, 393 top
+  boxed types, 266 padding-waste types, 13 oversized types. Full non-real-dump suite (1440 tests, up
+  from 1238 at the last count in this doc) passes.
+- Call site updated: `DefaultAnalyzerFeatureModuleCatalog` now constructs
+  `BoxingAnalyzerLegacyAdapter`. No benchmark referenced this analyzer directly.
+
+Remaining Tier-1+Tier-2 analyzers (15, see "Status" at the top) haven't been started yet.
+`LeakCandidateAnalyzer` stays last per explicit direction — it needs cross-analyzer result access
+and deferred-execution-ordering modeling neither this wave nor Tier 1 has built.
+
 5. **Real-dump verification stays one-at-a-time, in the foreground**, per this project's standing
    rule — run it once per batch on the reference dumps, not once per analyzer, to keep measurement
    cost proportional to what a mechanical retype-and-characterize change actually risks.
-6. **Cutover.** Once all 35 are on the new types, delete the `LegacyAnalyzerAdapter`, delete
-   `Core.Abstractions.IAnalyzer`/`Models.AnalysisContext`, update
-   `DependencyDirectionTests`/`SdkProject_ShouldHaveZeroDependenciesBeyondTheBcl`-adjacent rules,
-   and Phase 3's capability-attribute discovery and Phase 5's observation emission — both already
-   written assuming this exists — finally have real ground to build on.
+6. **Cutover.** Once all 36 are on the new types (20 done as of 2026-09-12, see "Status" at the top),
+   delete the `LegacyAnalyzerAdapter`, delete `Core.Abstractions.IAnalyzer`/`Models.AnalysisContext`,
+   update `DependencyDirectionTests`/`SdkProject_ShouldHaveZeroDependenciesBeyondTheBcl`-adjacent
+   rules, and Phase 3's capability-attribute discovery and Phase 5's observation emission — both
+   already written assuming this exists — finally have real ground to build on.
 
 ## Explicitly out of scope for this plan
 

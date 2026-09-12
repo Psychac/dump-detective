@@ -83,6 +83,16 @@ internal sealed class HeapTypeStatisticsQuery(ClrHeap heap, IHeapAnalysisCache c
                 arrayElementSizeBytes = ElementSizeBytes(componentElementType);
             }
 
+            // Value types only -- these two are only ever meaningful for a boxed value type (the
+            // pre-retyping BoxingAnalyzer only ever called its equivalent helpers once its own
+            // isBoxed check passed). A 3.5 GB dump's TypeAggregates spans hundreds of thousands of
+            // *reference* types too; walking full interface/field metadata for every one of those
+            // (this loop's only consumer, BoxingAnalyzer, would discard the result immediately) was
+            // measured to add minutes to a real-dump run for zero benefit -- gating here, not in the
+            // analyzer, keeps the cost proportional to the population that actually needs it.
+            bool hasIEquatable = type is { IsValueType: true } && SafeHasIEquatableInterface(type);
+            int declaredFieldByteSize = type is { IsValueType: true } ? SafeComputeFieldByteSize(type) : 0;
+
             result[name] = new HeapTypeStatistics(
                 Type: ToTypeRef(name, methodTable),
                 InstanceCount: e.Count,
@@ -107,7 +117,12 @@ internal sealed class HeapTypeStatisticsQuery(ClrHeap heap, IHeapAnalysisCache c
                 ArrayRank: arrayRank,
                 ArrayElementIsObjectReference: arrayElementIsObjectReference,
                 ArrayElementIsSupportedNumeric: arrayElementIsSupportedNumeric,
-                ArrayElementSizeBytes: arrayElementSizeBytes);
+                ArrayElementSizeBytes: arrayElementSizeBytes,
+                IsEnum: type?.IsEnum ?? false,
+                StaticSize: type?.StaticSize ?? 0,
+                BaseTypeName: type?.BaseType?.Name ?? "",
+                HasIEquatableInterface: hasIEquatable,
+                DeclaredFieldByteSize: declaredFieldByteSize);
         }
         return result;
     }
@@ -148,6 +163,43 @@ internal sealed class HeapTypeStatisticsQuery(ClrHeap heap, IHeapAnalysisCache c
         ClrElementType.Int64 or ClrElementType.UInt64 or ClrElementType.Double => sizeof(long),
         _ => 0,
     };
+
+    // Matches the pre-retyping BoxingAnalyzer's own EnumerateInterfacesSafe/HasIEquatableInterface
+    // exactly -- defensive try/catch since ClrMD interface enumeration can fail on corrupt dumps or
+    // partially-loaded types.
+    private static bool SafeHasIEquatableInterface(ClrType type)
+    {
+        try
+        {
+            foreach (ClrInterface iface in type.EnumerateInterfaces())
+            {
+                if (iface.Name is not null && iface.Name.StartsWith("IEquatable", StringComparison.Ordinal))
+                    return true;
+            }
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    // Matches the pre-retyping BoxingAnalyzer's own ComputeTotalFieldBytes exactly -- returns 0 on
+    // any exception (defensive -- ClrMD field APIs can fail on corrupt dumps).
+    private static int SafeComputeFieldByteSize(ClrType type)
+    {
+        try
+        {
+            int total = 0;
+            foreach (ClrInstanceField f in type.Fields)
+                total += f.Size;
+            return total;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
 
     // Matches the pre-retyping ObjectShapeAnalyzer's own cap exactly.
     private static int ComputeBaseTypeDepth(ClrType type)

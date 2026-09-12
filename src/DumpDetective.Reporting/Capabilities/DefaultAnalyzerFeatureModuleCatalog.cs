@@ -80,7 +80,10 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         // see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("segment-reservation", "Segment Reservation Analysis", typeof(SegmentReservationAnalyzerLegacyAdapter), typeof(SegmentReservationFindingGenerator), typeof(SegmentReservationTrendComparer), typeof(SegmentReservationSectionBuilder), 380, ["gc", "segments"]),
         Module("weak-reference", "Weak Reference Analysis", typeof(WeakReferenceAnalyzer), typeof(WeakReferenceFindingGenerator), typeof(WeakReferenceTrendComparer), typeof(WeakReferenceSectionBuilder), 390, ["gc"]),
-        Module("boxing", "Boxing Analysis", typeof(BoxingAnalyzer), typeof(BoxingFindingGenerator), typeof(BoxingTrendComparer), typeof(BoxingSectionBuilder), 400, ["types", "perf"]),
+        // BoxingAnalyzerLegacyAdapter, not BoxingAnalyzer directly, since 2026-09-12 (Tier-1 mop-up
+        // batch, alongside ObjectShapeAnalyzer -- turned out Tier-1-only on inspection) — see
+        // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("boxing", "Boxing Analysis", typeof(BoxingAnalyzerLegacyAdapter), typeof(BoxingFindingGenerator), typeof(BoxingTrendComparer), typeof(BoxingSectionBuilder), 400, ["types", "perf"]),
         // JitAnalyzerLegacyAdapter, not JitAnalyzer directly, since 2026-09-11 (Batch 5 of the Phase
         // 1 retyping) — see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("jit", "JIT Analysis", typeof(JitAnalyzerLegacyAdapter), typeof(JitFindingGenerator), typeof(JitTrendComparer), typeof(JitSectionBuilder), 410, ["runtime", "perf"]),

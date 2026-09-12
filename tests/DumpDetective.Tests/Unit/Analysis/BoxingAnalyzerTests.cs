@@ -1,8 +1,4 @@
-using DumpDetective.Analysis.Analyzers;
-
 using FluentAssertions;
-
-using Microsoft.Diagnostics.Runtime;
 
 using Xunit;
 using DumpDetective.Analysis.Analyzers.Types;
@@ -42,33 +38,10 @@ public sealed class BoxingAnalyzerTests
         BoxingAnalyzer.ComputePaddingWaste(structSize, fieldBytes).Should().Be(expected);
     }
 
-    [Fact]
-    public void HasIEquatableInterface_ReturnsTrue_WhenIEquatableIsPresent()
-    {
-        var interfaces = new[]
-        {
-            new ClrInterface("IComparable", null),
-            new ClrInterface("IEquatable`1", null),
-        };
-
-        BoxingAnalyzer.HasIEquatableInterface(interfaces).Should().BeTrue();
-    }
-
-    [Fact]
-    public void HasIEquatableInterface_ReturnsFalse_WhenIEquatableIsAbsent()
-    {
-        var interfaces = new[]
-        {
-            new ClrInterface("IComparable", null),
-            new ClrInterface("IDisposable", null),
-        };
-
-        BoxingAnalyzer.HasIEquatableInterface(interfaces).Should().BeFalse();
-    }
-
-    [Fact]
-    public void HasIEquatableInterface_ReturnsFalse_WhenNoInterfaces()
-    {
-        BoxingAnalyzer.HasIEquatableInterface([]).Should().BeFalse();
-    }
+    // HasIEquatableInterface/EnumerateInterfacesSafe moved to HeapTypeStatisticsQuery as part of the
+    // 2026-09-12 Tier-1 retyping (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md)
+    // -- no longer public API on BoxingAnalyzer. Coverage moves to
+    // BoxingAnalyzerRetypingCharacterizationTests, the same shape as every other Tier-1 batch's
+    // dump-side-only helpers (e.g. HeapTypeStatisticsQuery.ComputeArrayRank/ComputeBaseTypeDepth,
+    // never unit-tested directly either).
 }

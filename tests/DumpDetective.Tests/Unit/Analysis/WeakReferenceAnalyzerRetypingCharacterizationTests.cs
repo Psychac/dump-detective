@@ -2,6 +2,7 @@ using DumpDetective.Analysis.Analyzers.Gc;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Identity;
 
 using FluentAssertions;
 
@@ -395,6 +396,7 @@ public sealed class WeakReferenceAnalyzerRetypingCharacterizationTests
         public bool TryGetImmediateDominator(ulong address, out ulong dominatorAddress) { dominatorAddress = 0; return false; }
         public bool TryGetThreadRetainedSize(uint osThreadId, out ulong retainedBytes) { retainedBytes = 0; return false; }
         public IEnumerable<HeapObjectRef> EnumerateRetainedObjects(ulong rootAddress) => [];
+        public bool TryGetRetainedBytesByType(TypeRef type, out ulong retainedBytes) { retainedBytes = 0; return false; }
     }
 
     private sealed class FakeHeapReachabilityQuery : IHeapReachabilityQuery

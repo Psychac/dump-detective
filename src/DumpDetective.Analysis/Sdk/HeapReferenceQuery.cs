@@ -27,4 +27,24 @@ internal sealed class HeapReferenceQuery(ClrHeap heap) : IHeapReferenceQuery
                 yield return child.Address;
         }
     }
+
+    public bool TryGetReferenceFieldName(ulong parentAddress, ulong childAddress, out string? fieldName)
+    {
+        fieldName = null;
+
+        ClrObject parent = heap.GetObject(parentAddress);
+        if (!parent.IsValid)
+            return false;
+
+        foreach (ClrReference reference in parent.EnumerateReferencesWithFields(carefully: true))
+        {
+            if (reference.Object.Address == childAddress && reference.IsField && reference.Field is not null)
+            {
+                fieldName = reference.Field.Name;
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

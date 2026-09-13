@@ -1,3 +1,5 @@
+using DumpDetective.Sdk.Identity;
+
 namespace DumpDetective.Sdk.Analysis;
 
 /// <summary>
@@ -34,4 +36,18 @@ public interface IHeapDominatorQuery
     /// walk cap at their own call site, the same way every other uncapped Tier-1 stream works.
     /// </summary>
     IEnumerable<HeapObjectRef> EnumerateRetainedObjects(ulong rootAddress);
+
+    /// <summary>
+    /// Aggregate retained bytes across every live instance of <paramref name="type"/> — mirrors
+    /// <c>IDominatorTreeProvider.TryGetRetainedBytesByMethodTable</c>. Added 2026-09-13 for
+    /// <c>DominatorAnalyzer</c>'s retyping: distinct in shape from <see cref="TryGetRetainedSize"/>,
+    /// which is per-*address*, not per-*type* — this sums the dominator subtree of every instance
+    /// sharing <paramref name="type"/>'s identity, computed once during the Lengauer-Tarjan build,
+    /// not derived by calling <see cref="TryGetRetainedSize"/> per instance here. Keyed by
+    /// <see cref="TypeRef"/> rather than a raw method table, matching this interface's other
+    /// members — the dump-side implementation reads <see cref="TypeRef.MethodTable"/> internally.
+    /// Returns <c>false</c> when <paramref name="type"/> has no dump-local method table or the tree
+    /// has no record for it.
+    /// </summary>
+    bool TryGetRetainedBytesByType(TypeRef type, out ulong retainedBytes);
 }

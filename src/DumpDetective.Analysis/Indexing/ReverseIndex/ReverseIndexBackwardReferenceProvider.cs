@@ -14,4 +14,7 @@ internal sealed class ReverseIndexBackwardReferenceProvider(ReverseEdgeIndexRead
 
     public void EnumerateChildCounts(Action<ulong, int, bool> onChild) =>
         reader.EnumerateChildCounts(onChild);
+
+    public IEnumerable<(ulong Address, int Count)> EnumerateChildAddressesAndCounts() =>
+        reader.EnumerateChildAddressesAndCounts();
 }

@@ -2,6 +2,7 @@ using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Traversal;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Utilities;
 using DumpDetective.Sdk.Analysis;
 
 namespace DumpDetective.Analysis.SdkBridge;
@@ -47,9 +48,10 @@ internal sealed class HeapRootPathQuery : IHeapRootPathQuery
         _cache = cache;
     }
 
-    public bool TryFindRootPath(ulong targetAddress, RootPathSearchOptions options, out string? formattedPath, out bool searchTruncated)
+    private bool TryFindRaw(ulong targetAddress, RootPathSearchOptions options, out string? rootKind, out List<ulong>? path, out bool searchTruncated)
     {
-        formattedPath = null;
+        rootKind = null;
+        path = null;
         searchTruncated = false;
 
         _roots ??= _cache.GetOrBuildValidRoots(_heap);
@@ -68,10 +70,44 @@ internal sealed class HeapRootPathQuery : IHeapRootPathQuery
             RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType, static _ => false,
             _cache.TryGetReverseIndexProvider(), _cache);
 
-        bool found = _finder.TryFindAnyRootPath(
-            targetAddress, _roots, out string? rootKind, out List<ulong>? path, out searchTruncated, out _, out _);
+        return _finder.TryFindAnyRootPath(targetAddress, _roots, out rootKind, out path, out searchTruncated, out _, out _);
+    }
 
+    public bool TryFindRootPath(ulong targetAddress, RootPathSearchOptions options, out string? formattedPath, out bool searchTruncated)
+    {
+        bool found = TryFindRaw(targetAddress, options, out string? rootKind, out List<ulong>? path, out searchTruncated);
         formattedPath = found ? RootPathSearchSupport.FormatPath(_heap, rootKind!, path, _cache) : null;
         return found;
+    }
+
+    public bool TryFindRootPathHops(ulong targetAddress, RootPathSearchOptions options, out string? rootKind, out IReadOnlyList<string>? hopTypeNames, out bool searchTruncated)
+    {
+        hopTypeNames = null;
+
+        bool found = TryFindRaw(targetAddress, options, out rootKind, out List<ulong>? path, out searchTruncated);
+        if (!found || rootKind is null || path is null || path.Count == 0)
+            return false;
+
+        var names = new List<string>(path.Count);
+        foreach (ulong address in path)
+        {
+            ClrType? type = RootPathSearchSupport.ResolveType(_heap, _cache, address);
+            names.Add(type?.Name ?? StringConstants.UnknownType);
+        }
+
+        hopTypeNames = names;
+        return true;
+    }
+
+    public bool TryFindRootPathAddresses(ulong targetAddress, RootPathSearchOptions options, out string? rootKind, out IReadOnlyList<ulong>? hopAddresses, out bool searchTruncated)
+    {
+        hopAddresses = null;
+
+        bool found = TryFindRaw(targetAddress, options, out rootKind, out List<ulong>? path, out searchTruncated);
+        if (!found || rootKind is null || path is null || path.Count == 0)
+            return false;
+
+        hopAddresses = path;
+        return true;
     }
 }

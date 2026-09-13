@@ -2,7 +2,7 @@
 
 ## Status (as of 2026-09-13)
 
-**33 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
+**35 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
 in the tree, not just this doc's own narrative — this doc's original "35" count in the section below
 was an approximation from § 10 point 8's grep-based measurement; the real count is 36). The
 `dump.object-fields` Tier-2 escape hatch **is built** (see "Tier 2 wave" below) — the "still not
@@ -17,15 +17,117 @@ built" language later in this doc is stale as of the pilot, 2026-09-11.
 `SegmentReservationAnalyzer`, `SqlCommandAnalyzer`, `SqlConnectionPoolAnalyzer`,
 `SqlTransactionAnalyzer`, `StringAnalyzer`, `ThreadAnalyzer`, `ThreadStackClusterAnalyzer`, `TimerLeakAnalyzer`,
 `WcfChannelAnalyzer`, `WeakReferenceAnalyzer`, `ModuleAnalyzer`, `StaticRootLeakDetector`,
-`EventLeakAnalyzer`.
+`EventLeakAnalyzer`, `DominatorAnalyzer`, `ReferenceChainAnalyzer`.
 
-**Remaining (3):**
-`DominatorAnalyzer`,
-`ReferenceChainAnalyzer`,
-and **`LeakCandidateAnalyzer`** —
-explicit user direction: do `LeakCandidateAnalyzer` last of all, since it needs cross-analyzer
-result access (`context.CompletedRunResults`-equivalent) and deferred-execution-ordering modeling
-that don't exist in the SDK yet, on top of everything the other 2 need.
+**Remaining (1): `LeakCandidateAnalyzer`** — explicit user direction: do it last of all, since it
+needs cross-analyzer result access (`context.CompletedRunResults`-equivalent) and
+deferred-execution-ordering modeling that don't exist in the SDK yet, on top of everything every
+other analyzer needed. It's also the sole remaining consumer of `ReferenceChainAnalyzer`'s
+pre-retyping `TelemetryCounters`/`IsNoisyType`/`IsKnownLeakType` statics — those were ported
+in-place into `LeakCandidateAnalyzer.cs` itself (unchanged behavior) when `ReferenceChainAnalyzer`'s
+retyped form stopped having any ClrMD types to define them against; `IsNoisyType` was redirected to
+the already-identical shared `RootPathSearchSupport.IsNoisyType` instead of duplicating it again.
+
+**`ReferenceChainAnalyzer`. Done 2026-09-13.** Same Tier-1-only re-classification as
+`DominatorAnalyzer`'s batch — every ClrMD touch point here is coarse/structural too.
+- **Reused, no new capability**: `IHeapTypeStatisticsQuery.GetTypeStatistics` (top types, sample
+  address already included — no separate `GetSampleInstanceAddress` call needed);
+  `IHeapDominatorQuery.TryGetRetainedSize` (E-2's per-sample exact retained bytes — already existed,
+  no aggregate-by-type variant needed here); `IHeapRootQuery.EnumerateRoots` (already carrying
+  resolved `OwnerTypeName`/`FieldName`/`AppDomainId` from `GCRootAnalyzer`'s batch) replaces E-3's
+  `cache.GetOrBuildRootTriples`/`GetStaticFieldsByRootAddress` outright — a filter over already-
+  resolved roots, no per-storage-address lookup; `IHeapObjectStream` (added for `DominatorAnalyzer`)
+  reused as-is for E-7's multi-sample streaming collection, its second real consumer.
+- **Two narrow SDK additions**: `IHeapRootPathQuery.TryFindRootPathAddresses` (raw hop addresses —
+  this analyzer is the first consumer needing them for anything beyond formatting: E-6's
+  `RootAddress` grouping, and as input to the field-name lookup below; the two existing
+  formatted-string/type-name-list overloads stay untouched) and
+  `IHeapReferenceQuery.TryGetReferenceFieldName` (E-3's "last hop field name," a narrow single-pair
+  lookup mirroring `ClrObject.EnumerateReferencesWithFields`, not a general enumerate-with-field-
+  names surface — resolving one already-found path's last edge is the only real need so far).
+- **Two behavior changes, both discussed and confirmed with the user before implementing, both
+  documented in full on `IHeapRootPathQuery`'s own remarks** (see its class-level doc comment, not
+  repeated here): the force-expand ("known leak type") predicate is dropped — not a new decision,
+  re-confirming one this codebase already made and documented on the same interface during
+  `CollectionAnalyzer`'s retyping (wiring it hung a real 3.35 GB dump's root-path search
+  indefinitely). Root-priority ordering (tried stack roots before static/handle roots) is also
+  dropped — traced into `BidirectionalGraphSearch`/`IndexBackedBidirectionalSearch` before dropping:
+  on the common, reverse-index-backed path (nearly all real-dump analysis), every root seeds the
+  search simultaneously and the *shortest* path wins, so list order has zero effect there; it only
+  ever mattered on the uncommon no-reverse-index fallback, which tries roots one at a time and
+  returns the first hit.
+- **Dropped, verified zero observable-contract impact**: internal-only `TelemetryCounters`
+  (pruned/large-fanout/candidate-set/reverse-index-entry counts) — confirmed never surfaced in
+  `ReferenceChainDomainResult` or any report/section builder before dropping. Application-wide
+  telemetry is a real, separately-tracked future direction the user raised while reviewing this
+  drop, not something this batch improvised a one-off replacement for.
+- **Gate met**: no pre-existing test coverage existed for this analyzer at all (unusual for this
+  codebase) — new `ReferenceChainAnalyzerRetypingCharacterizationTests` (13 tests, dictionary-backed
+  fakes) covers top-type selection, retention counting, E-2 exact retained bytes, E-3 root/last-hop
+  field-name resolution (including the AppDomain-suffix and Stack-frame-owner branches), E-6
+  shared-root grouping, and E-7 multi-sample root-consistency scoring — carrying essentially all the
+  real behavioral coverage for this batch. New `ReferenceChainAnalyzerRealDumpTests`
+  (`[DiscrepancyFact]`, one dump, foreground) passed against the real 3.3 GB reference dump in 13s,
+  with real field-name resolution confirmed end-to-end (a real `LastHopFieldName` resolved on live
+  data). Full non-real-dump suite (1560 tests) passes.
+- Call sites updated: `DefaultAnalyzerFeatureModuleCatalog`, `FullPipelineBenchmark`,
+  `SmallDumpLatencyBenchmark`, `ReferenceChainAnalyzerBenchmark` now construct/target
+  `ReferenceChainAnalyzerLegacyAdapter`.
+
+**`DominatorAnalyzer`. Done 2026-09-13.** Originally grep-bucketed Tier-1+Tier-2 alongside
+`StaticRootLeakDetector`, but re-classified Tier-1-only on inspection — same correction
+`LockGraphAnalyzer`/`ThreadStackClusterAnalyzer` got in their own batch: every ClrMD touch point
+(reference enumeration, dominator-tree lookups, type statistics, root-path search) is
+coarse/structural, never a live field *value* read.
+- **`IHeapReferenceQuery.EnumerateReferences`** replaces the pre-retyping analyzer's own hand-inlined
+  array/instance-field walk (`FIX-1`/`FIX-2`) outright — it already mirrors
+  `ClrObject.EnumerateReferences(carefully: true)`, used at 18+ other call sites.
+  `IHeapTypeStatisticsQuery.GetTypeStatistics` (already carrying `SampleAddress`/`Gen2Count`/etc.
+  from `GCGenerationAnalyzer`'s batch) replaced the candidate-selection loop's own
+  `TypeAggregateIndexEntry`-vs-`CachedTypeStatistics` fork entirely.
+  `CapabilityBoundedGraphWalk.ComputeExclusiveRetained` (extracted during `MemoryAnalyzer`'s batch)
+  replaced `RetainedSizeCandidateSelector.SelectAndCompute` for both the heuristic top-K walk and
+  `PopulateRetainedBytes`.
+- **Three narrow SDK additions**, same "extend once a real need exists" pattern as every prior
+  batch: `IHeapDominatorQuery.TryGetRetainedBytesByType` (aggregate-by-type, keyed by `TypeRef`
+  rather than a raw method table); `IHeapReferenceQuery.EnumerateIncomingReferenceCounts` (a bulk
+  per-row iterator over the whole reverse index's fan-in counts, backed by a new true lazy
+  `ReverseEdgeIndexReader.EnumerateChildAddressesAndCounts`/`IBackwardReferenceProvider.EnumerateChildAddressesAndCounts`
+  rather than buffering the index into a list — this project's no-full-materialization rule applies
+  to disk-backed structures, not just the heap walk itself); `IHeapRootPathQuery.TryFindRootPathHops`
+  (a hop-type-name-list sibling to the existing single-formatted-string `TryFindRootPath`, needed for
+  `RootChainSummary.HopTypeNames`, which the formatted string can't be reconstructed into).
+- **`IHeapObjectStream` gained its first live, non-scan-participant default implementation**
+  (`HeapObjectStream`, wired into `LegacyAnalysisContextTranslator`'s `heapObjectsOverride ??` default)
+  — this analyzer's no-index fallback needs to stream the whole heap only when no disk index exists
+  for the session, a different shape from every prior `heap.objects` consumer (a heap-index scan
+  participant, only invoked during the pipeline's shared scan pass). Verified safe: every existing
+  scan-participant adapter always passes an explicit non-null override, so the new default only ever
+  applies to this analyzer.
+- **Accepted simplifications**, same reasoning as `GCRootAnalyzer`/`MemoryAnalyzer`/
+  `StaticRootLeakDetector`'s own batches: dropped the live-scan fallback's
+  `cache.MethodTableHasOutgoingRefs` shape pre-filter (costs at most one trivial iteration for a true
+  leaf); `ComputeCrossTypeOverlap`'s disk-index stream became a filtered `IHeapObjectStream`
+  pass, keyed by `HeapObjectRef.TypeDisplayName` instead of a raw method table (no method-table
+  lookup needed at all here, since this analyzer's candidates are already keyed by display name).
+- **Dropped, not ported**: the `ILogger<DominatorAnalyzer>`-based diagnostic logging (exact-vs-heuristic
+  retained-bytes comparison, memory-usage checkpoints) — no already-retyped analyzer's inner SDK type
+  receives a logger or diagnostics options through the `LegacyAnalyzerAdapter` chain, so this follows
+  the same precedent rather than inventing new plumbing for a single consumer.
+- **Gate met**: `DominatorAnalyzerChainTests` rewritten against plain dictionary-backed fakes for the
+  new SDK interfaces (no real or live-attached heap needed at all anymore, unlike the pre-retyping
+  version, which needed one purely to resolve type names). `DominatorAnalyzerExactTreeRealDumpTests`
+  and `DominatorStageBPerfMeasurementTests`/`DominatorChildIndexRealDumpTests` updated to construct
+  `DominatorAnalyzerLegacyAdapter`; all three re-ran `[DiscrepancyFact]`, one at a time, foreground,
+  against the real ~3.3 GB reference dump — passed (exact retained bytes resolved for 14/15 top
+  dominator types, dominator chains, cross-type overlap, and root chains all populated; child-index
+  round-trip and Stage B 3.3 GB perf sub-test both passed). The same class's 25.6 GB sub-test failed
+  only on `DD_SCRATCH_DIR` disk space on this machine's `C:` drive — a pre-existing environment
+  constraint the test's own doc comment already calls out, not a regression from this batch. Full
+  non-real-dump suite (1547 tests) passes.
+- Call sites updated: `DefaultAnalyzerFeatureModuleCatalog`, `FullPipelineBenchmark`,
+  `SmallDumpLatencyBenchmark`, `DominatorAnalyzerBenchmark` now construct/target
+  `DominatorAnalyzerLegacyAdapter`.
 
 Detailed plan for the two items [phase-1-contracts-sdk.md](phase-1-contracts-sdk.md) leaves
 deferred (`Analysis/`, `Presentation/`) and the ownerless gap recorded at

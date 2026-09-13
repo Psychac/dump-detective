@@ -50,4 +50,16 @@ internal sealed class HeapReverseReferenceQuery : IHeapReverseReferenceQuery
         truncated = false;
         return Provider is not null && Provider.TryGetParents(address, out parents, out truncated);
     }
+
+    public IEnumerable<(ulong Address, int IncomingCount)> EnumerateIncomingReferenceCounts()
+    {
+        if (Provider is null)
+            yield break;
+
+        // IBackwardReferenceProvider.EnumerateChildAddressesAndCounts is a true per-row iterator
+        // (see ReverseEdgeIndexReader's own remarks) — no full-index materialization here, matching
+        // this project's no-full-materialization rule for large disk-backed structures.
+        foreach ((ulong address, int count) in Provider.EnumerateChildAddressesAndCounts())
+            yield return (address, count);
+    }
 }

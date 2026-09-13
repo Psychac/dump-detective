@@ -264,17 +264,54 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
         };
 
         var provider = new ReferenceGraph(heap);
-        var telemetry = new ReferenceChainAnalyzer.TelemetryCounters();
+        var telemetry = new TelemetryCounters();
 
         return new RootPathFinder(
             heap,
             provider,
             limits,
             telemetry.AsProxy(),
-            ReferenceChainAnalyzer.IsNoisyType,
-            type => ReferenceChainAnalyzer.IsKnownLeakType(type, options.KnownLeakTypePatterns),
+            RootPathSearchSupport.IsNoisyType,
+            type => IsKnownLeakType(type, options.KnownLeakTypePatterns),
             cache.TryGetReverseIndexProvider(),
             cache);
+    }
+
+    // Ported in-place from ReferenceChainAnalyzer.cs's own pre-retyping copy (2026-09-13) — that
+    // analyzer's retyped form has no ClrMD dependency left to define these against, and
+    // LeakCandidateAnalyzer (deliberately last in the retyping order — see
+    // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md) still needs them as-is.
+    private static bool IsKnownLeakType(ClrType? type, IReadOnlyList<string> knownLeakPatterns)
+    {
+        if (type is null)
+            return false;
+
+        string? name = type.Name;
+        if (string.IsNullOrEmpty(name))
+            return false;
+
+        foreach (var pattern in knownLeakPatterns)
+        {
+            if (name.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    // Simple telemetry counters used during a single BuildRootPathFinder-backed search.
+    private sealed class TelemetryCounters
+    {
+        public long PrunedNodes { get; set; }
+        public long LargeFanoutNodesSkipped { get; set; }
+
+        public TelemetryProxy AsProxy() => new(this);
+    }
+
+    private sealed class TelemetryProxy(TelemetryCounters inner) : IPathSearchTelemetry
+    {
+        public void IncrementPruned() => inner.PrunedNodes++;
+        public void IncrementLargeFanout() => inner.LargeFanoutNodesSkipped++;
     }
 
     private static string FormatChain(ClrHeap heap, string rootKind, IReadOnlyList<ulong> addresses)

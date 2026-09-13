@@ -30,10 +30,11 @@ internal static class LegacyAnalysisContextTranslator
     /// Same shape as <paramref name="runtimeThreadsOverride"/>, for <c>heap.objects</c> — used by
     /// <see cref="TypedResourceCandidateStreamingLegacyAdapter{TSelf, TSdkAnalyzer}"/> to hand its
     /// inner analyzer the candidate objects the pipeline's shared heap-index scan already
-    /// discovered, instead of the inner analyzer re-deriving them. Null (the default) means "no
-    /// live default exists yet" — unlike <c>RuntimeThreads</c>, no dump-side always-on
-    /// <c>IHeapObjectStream</c> implementation has been built, since no non-scan-participant
-    /// consumer has needed one so far.
+    /// discovered, instead of the inner analyzer re-deriving them. Null (the default) means "build
+    /// the normal live <see cref="HeapObjectStream"/>" — added 2026-09-13 for
+    /// <c>DominatorAnalyzer</c>'s retyping, the first non-scan-participant consumer needing a live
+    /// default <c>IHeapObjectStream</c> (see that type's own remarks for why no such default
+    /// existed before).
     /// </param>
     public static Sdk.Analysis.AnalysisContext Translate(
         Core.Abstractions.AnalysisContext legacy, object? analyzerOptions,
@@ -55,7 +56,7 @@ internal static class LegacyAnalysisContextTranslator
             Observations = NoOpObservationSink.Instance,
             Progress = WrapProgress(legacy.Progress),
             AnalyzerOptions = analyzerOptions,
-            HeapObjects = heapObjectsOverride,
+            HeapObjects = heapObjectsOverride ?? new HeapObjectStream(legacy.Heap, legacy.Cache),
             HeapTypeStatistics = new HeapTypeStatisticsQuery(legacy.Heap, legacy.Cache),
             HeapSegments = new HeapSegmentQuery(legacy.Heap, legacy.Runtime, legacy.Cache),
             HeapRoots = new HeapRootQuery(legacy.Heap, legacy.Cache),

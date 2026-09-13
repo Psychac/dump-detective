@@ -35,8 +35,8 @@ public readonly record struct RootPathSearchOptions(
 /// mirroring <c>RootPathSearchSupport.FormatPath</c>'s output, which every real consumer's own
 /// domain-result field already stores as a plain string), not a raw address list — resolving each
 /// hop's <c>ClrType</c> for display requires the same dump-only type-resolution machinery the
-/// capability boundary already exists to hide, and no consumer has ever needed the raw addresses
-/// for anything beyond formatting them once.
+/// capability boundary already exists to hide. <see cref="TryFindRootPathAddresses"/> below is the
+/// first consumer that genuinely needs the raw addresses for something beyond formatting.
 ///
 /// <b>A caller-supplied force-expand predicate was added, then removed, the same session</b>
 /// (<c>CollectionAnalyzer</c>'s retyping, 2026-09-12): its pre-retyping search force-expanded types
@@ -52,6 +52,25 @@ public readonly record struct RootPathSearchOptions(
 /// introduced by moving to this capability. Fixed by keeping this interface single-overload, "never
 /// force-expand" for every consumer, same policy <c>DbConnectionAnalyzer</c>/<c>TimerLeakAnalyzer</c>
 /// already use.
+///
+/// <b>Re-confirmed, not re-attempted, during <c>ReferenceChainAnalyzer</c>'s own retyping
+/// (2026-09-13)</b> — that analyzer is the actual owner of <c>KnownLeakTypePatterns</c>/force-expand
+/// (<c>CollectionAnalyzer</c> above only shared the same option type). Its retyping confirmed, user
+/// sign-off included, that force-expand is dropped for the same already-documented reason, not
+/// reinvented: nothing here re-litigates the 2026-09-12 finding. The same batch also dropped
+/// <c>ReferenceChainAnalyzer</c>'s own pre-retyping root-priority ordering (tried
+/// stack-then-static-then-handle roots first, to report a "faster to resolve" root when an object
+/// had several) — traced into <c>BidirectionalGraphSearch</c>/<c>IndexBackedBidirectionalSearch</c>
+/// to confirm the real impact before dropping it: on the common, reverse-index-backed path (nearly
+/// all real-dump analysis), every root seeds the search simultaneously and the *shortest* path wins
+/// — root list order has no effect on the outcome there at all. It only ever mattered on the
+/// uncommon no-reverse-index fallback (<c>RootPathFinder.TryFindAnyRootPath</c>'s non-index branch),
+/// which tries roots one at a time in list order and returns the first hit — there, dropping the
+/// order means a different, equally-valid root can be reported instead of the old "stack first"
+/// pick, which itself was a hand-picked "fastest to resolve" guess, not a measured "most useful"
+/// one. This capability has no per-call ordering knob and none was added for this — a real, if
+/// narrow, behavior difference confined to that one uncommon path, accepted rather than adding a
+/// speculative ordering parameter no other consumer needs.
 /// </remarks>
 public interface IHeapRootPathQuery
 {
@@ -63,4 +82,26 @@ public interface IHeapRootPathQuery
     /// "inconclusive".
     /// </summary>
     bool TryFindRootPath(ulong targetAddress, RootPathSearchOptions options, out string? formattedPath, out bool searchTruncated);
+
+    /// <summary>
+    /// Same search as <see cref="TryFindRootPath"/>, but returns the per-hop type-name list instead
+    /// of a single formatted string. Added 2026-09-13 for <c>DominatorAnalyzer</c>'s retyping: its
+    /// root-chain summary (<c>RootChainSummary.HopTypeNames</c>) renders each hop as a list entry,
+    /// which <see cref="TryFindRootPath"/>'s pre-joined string can't be reconstructed into. The two
+    /// overloads deliberately coexist rather than one replacing the other — every other consumer
+    /// only ever needed the formatted string for direct display.
+    /// </summary>
+    bool TryFindRootPathHops(ulong targetAddress, RootPathSearchOptions options, out string? rootKind, out IReadOnlyList<string>? hopTypeNames, out bool searchTruncated);
+
+    /// <summary>
+    /// Same search as <see cref="TryFindRootPath"/>, but returns the raw per-hop address list
+    /// (root-most first, target last) instead of a formatted string or type-name list. Added
+    /// 2026-09-13 for <c>ReferenceChainAnalyzer</c>'s retyping: it needs the root object's own
+    /// address (the first hop) for its shared-root grouping, and the last two hops' addresses to
+    /// resolve the field name connecting them via <see cref="IHeapReferenceQuery.TryGetReferenceFieldName"/>
+    /// — neither existing overload exposes addresses. Callers needing display text build it
+    /// themselves from these addresses plus <see cref="IHeapObjectLookup"/>, the same way the
+    /// pre-retyping analyzers that only needed a string already did internally.
+    /// </summary>
+    bool TryFindRootPathAddresses(ulong targetAddress, RootPathSearchOptions options, out string? rootKind, out IReadOnlyList<ulong>? hopAddresses, out bool searchTruncated);
 }

@@ -1,35 +1,94 @@
-using System.Diagnostics;
-
 using DumpDetective.Analysis.Algorithms;
-using DumpDetective.Analysis.Cache;
-using DumpDetective.Analysis.Diagnostics;
-using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Traversal;
-using DumpDetective.Analysis.Traversal.Dominator;
-using DumpDetective.Core.Abstractions;
+using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
-
-using Microsoft.Diagnostics.Runtime;
-using Microsoft.Extensions.Logging;
+using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 
 namespace DumpDetective.Analysis.Analyzers.Leaks;
 
-public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex, IRequiresDominatorTreeIndex
+/// <summary>
+/// Detects heuristic "dominator suspect" types by combined size/fan-in/Gen2 scoring, with an
+/// optional exact Lengauer-Tarjan overlay (per-type retained bytes, dominance chains, cross-type
+/// overlap, root chains) when a prebuilt dominator tree is available for this session.
+/// </summary>
+/// <remarks>
+/// Tier-1-only batch (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md) — despite
+/// the plan's original grep-derived Tier-1+Tier-2 bucketing, this analyzer never reads a live object
+/// field *value*; every ClrMD touch point (reference enumeration, dominator-tree lookups, type
+/// statistics, root-path search) is coarse/structural, already covered by an existing Tier-1
+/// surface. Same re-classification <c>LockGraphAnalyzer</c>/<c>ThreadStackClusterAnalyzer</c> got
+/// during their own batch, for the same reason.
+///
+/// <para>
+/// <see cref="IHeapReferenceQuery.EnumerateReferences"/> (<c>heap.references</c>) replaces the
+/// pre-retyping analyzer's own hand-inlined array/instance-field walk in
+/// <c>CountIncomingReferencesByAddress</c> (its <c>FIX-1</c>/<c>FIX-2</c> allocation-avoidance
+/// comments) outright — it already mirrors <c>ClrObject.EnumerateReferences(carefully: true)</c>,
+/// the same ClrMD API used at 18+ other call sites across the dump-side codebase.
+/// <see cref="IHeapTypeStatisticsQuery.GetTypeStatistics"/> (<c>heap.types</c>) already carries
+/// <c>SampleAddress</c>/<c>TotalSize</c>/<c>LohSize</c>/<c>InstanceCount</c>/<c>Gen2Count</c> per
+/// type (the last built for <c>GCGenerationAnalyzer</c>'s pilot, zero/false when
+/// <see cref="IHeapTypeStatisticsQuery.HasExactGenerationData"/> is <c>false</c> — the same
+/// fast/fallback duality the pre-retyping analyzer's own <c>TypeAggregateIndexEntry</c>-vs-
+/// <c>CachedTypeStatistics</c> fork encoded by hand), removing the need for this analyzer to ever
+/// resolve a <c>ClrObject</c>/<c>MethodTable</c> itself for candidate selection.
+/// <see cref="CapabilityBoundedGraphWalk.ComputeExclusiveRetained"/> (extracted during
+/// <c>MemoryAnalyzer</c>'s batch) replaces <c>RetainedSizeCandidateSelector.SelectAndCompute</c> for
+/// both the heuristic top-K walk and <c>PopulateRetainedBytes</c>, called once per candidate against
+/// a shared <c>visited</c> set to preserve the same exclusive (non-overlapping) retained-size
+/// semantics the pre-retyping analyzer's own comment on that shared set called out.
+/// </para>
+/// <para>
+/// Three narrow SDK additions, same "extend once a real need exists" pattern as every prior batch:
+/// <see cref="IHeapDominatorQuery.TryGetRetainedBytesByType"/> (aggregate-by-type, distinct in shape
+/// from the existing per-address <see cref="IHeapDominatorQuery.TryGetRetainedSize"/>) replaces
+/// <c>IDominatorTreeProvider.TryGetRetainedBytesByMethodTable</c> for the exact per-type Gen2/LOH
+/// sub-table lookup; <see cref="IHeapReferenceQuery.EnumerateIncomingReferenceCounts"/> (a genuinely
+/// different shape from every prior <c>heap.reverse-references</c> consumer's per-address lookups)
+/// replaces <c>IBackwardReferenceProvider.EnumerateChildCounts</c> for the primary (index-backed)
+/// leak-signal pass, backed by a true per-row iterator
+/// (<c>ReverseEdgeIndexReader.EnumerateChildAddressesAndCounts</c>) rather than buffering the whole
+/// index into a list; <see cref="IHeapRootPathQuery.TryFindRootPathHops"/> (a hop-type-name-list
+/// sibling to the existing single-formatted-string <see cref="IHeapRootPathQuery.TryFindRootPath"/>)
+/// replaces the audit P2 root-chain search's need for <see cref="RootChainSummary.HopTypeNames"/>,
+/// which the formatted string can't be reconstructed into. <see cref="IHeapObjectStream"/> also
+/// gained its first live, non-scan-participant default implementation
+/// (<see cref="HeapObjectStream"/>) for this batch — this analyzer's no-index fallback needs to
+/// stream the whole heap only when no disk index exists, a different shape from every prior
+/// <c>heap.objects</c> consumer (a heap-index scan participant, only invoked during the pipeline's
+/// shared scan pass).
+/// </para>
+/// <para>
+/// <b>Accepted simplifications</b> (same reasoning already applied in
+/// <c>GCRootAnalyzer</c>/<c>MemoryAnalyzer</c>/<c>StaticRootLeakDetector</c>'s own batches): the
+/// live-scan fallback's <c>cache.MethodTableHasOutgoingRefs</c> shape pre-filter is dropped — it
+/// costs at most one trivial single-object iteration for a true leaf and changes no output value.
+/// <c>ComputeCrossTypeOverlap</c>'s <c>cache.EnumerateIndexedEntriesAsTuples</c> disk-index stream
+/// becomes a filtered <see cref="IHeapObjectStream.EnumerateObjects"/> pass — same data, an
+/// already-existing Tier-1 surface, keyed by <see cref="HeapObjectRef.TypeDisplayName"/> instead of
+/// a raw method table (this analyzer's candidate set is already keyed by display name via
+/// <see cref="IHeapTypeStatisticsQuery.GetTypeStatistics"/>'s dictionary, so no method-table lookup
+/// is needed at all here, unlike the pre-retyping version's own <c>MethodTable</c>-keyed dictionary).
+/// </para>
+/// <para>
+/// <b>Dropped, not ported</b>: the <c>ILogger&lt;DominatorAnalyzer&gt;</c>-based diagnostic logging
+/// (exact-vs-heuristic retained-bytes comparison, memory-usage checkpoints gated on
+/// <c>Diagnostics.EnableMemoryDiagnostics</c>) — no already-retyped analyzer's inner SDK type
+/// receives a logger or diagnostics options through the <c>LegacyAnalyzerAdapter</c> chain (neither
+/// is carried by <see cref="AnalysisContext"/> by design; see its own remarks), so this follows the
+/// same precedent rather than inventing new plumbing for a single consumer.
+/// </para>
+/// </remarks>
+public sealed class DominatorAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "Dominator Analysis";
     public string Category => "Memory";
     public int Order => 110;
 
-    private readonly ILogger<DominatorAnalyzer>? _logger;
-
-    public DominatorAnalyzer() { }
-
-    public DominatorAnalyzer(ILogger<DominatorAnalyzer>? logger)
-    {
-        _logger = logger;
-    }
+    public AnalyzerDomainResult? LastResult { get; private set; }
 
     // Only used by AnalyzeObjectsPass's live-heap fallback (no disk-backed reverse index
     // available) — the primary reverse-index path (BuildLeakSignalsFromReverseIndex) is
@@ -38,6 +97,8 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
     // dump must always produce the same findings.
     private const int FallbackMaxLeakScanObjects = 2_000_000;
     private const int FallbackMaxReferenceAddresses = 1_000_000;
+
+    private const int MaxDepth = 20;
 
     // Fan-in (incoming-reference-count) histogram bucket boundaries (minCount inclusive, maxCount exclusive).
     private static readonly (int Min, int Max, string Label)[] s_fanInBuckets =
@@ -48,71 +109,55 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
         (200, int.MaxValue, "≥ 200"),
     ];
 
-    private static void AddToFanInHistogram(int[] fanInCounts, int incomingReferences)
-    {
-        for (int b = 0; b < s_fanInBuckets.Length; b++)
-        {
-            if (incomingReferences >= s_fanInBuckets[b].Min && incomingReferences < s_fanInBuckets[b].Max)
-            {
-                fanInCounts[b]++;
-                return;
-            }
-        }
-    }
-
-    private static List<FanInBucket> BuildFanInHistogram(int[] fanInCounts)
-    {
-        var result = new List<FanInBucket>(s_fanInBuckets.Length);
-        for (int b = 0; b < s_fanInBuckets.Length; b++)
-            if (fanInCounts[b] > 0)
-                result.Add(new FanInBucket(s_fanInBuckets[b].Label, fanInCounts[b]));
-        return result;
-    }
-
-    /// <summary>
-    /// Builds the "highly referenced object" leak signal, preferring the disk-backed
-    /// reverse-edge index (built during Phase 1 — see
-    /// docs/analysis/phase1-redesigns/full-reverse-index-plan.md) over a live per-object
-    /// reference count. The index already recorded every object's incoming-reference count as
-    /// part of the one-time Phase 1 edge extraction, so reading it here is a single sequential,
-    /// allocation-light pass with no ClrMD field walks — this analyzer no longer needs to
-    /// participate in <see cref="Pipeline.HeapIndexScanDispatcher"/>'s shared heap-index scan
-    /// for this signal at all (it previously did, as an <c>IParallelHeapIndexScanParticipant</c>,
-    /// live-counting incoming references by walking every referencing object's fields — see git
-    /// history for that implementation). Falls back to <see cref="AnalyzeObjectsPass"/>'s live
-    /// scan only when no reverse index is available (in-memory mode, disabled via
-    /// a failed reverse-index build, or a pre-v4 cache.bin).
-    /// </summary>
-    public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        RetentionOptions options = context.AnalysisOptions.MemoryLeak;
-        bool diag = context.Diagnostics.EnableMemoryDiagnostics && context.Diagnostics.EnablePerformanceDiagnostics;
+        IHeapObjectStream heapObjects = context.HeapObjects
+            ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.HeapObjects}' capability.");
+        IHeapObjectLookup objectLookup = context.HeapObjectLookup
+            ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.HeapObjects}' capability.");
+        IHeapReferenceQuery references = context.HeapReferences
+            ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.HeapReferences}' capability.");
+        IHeapTypeStatisticsQuery typeStatistics = context.HeapTypeStatistics
+            ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.HeapTypes}' capability.");
+        IHeapRootPathQuery rootPaths = context.HeapRootPaths
+            ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.HeapRootPaths}' capability.");
+        IHeapReverseReferenceQuery? reverseReferences = context.HeapReverseReferences;
+        IHeapDominatorQuery? dominators = context.HeapDominators;
 
-        if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: entry", Console.Out);
+        var options = context.AnalyzerOptions as RetentionOptions ?? new RetentionOptions();
 
-        IBackwardReferenceProvider? reverseIndex = context.Cache.TryGetReverseIndexProvider();
-        LeakSignals signals = reverseIndex is not null
-            ? BuildLeakSignalsFromReverseIndex(context.Heap, context.Cache, reverseIndex, options, context.Progress)
-            : AnalyzeObjectsPass(context.Heap, context.Cache, options, context.Progress);
+        LastResult = Analyze(heapObjects, objectLookup, references, reverseReferences, typeStatistics, dominators, rootPaths, options, cancellationToken);
+        return ValueTask.CompletedTask;
+    }
 
-        if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: leak signals built", Console.Out);
+    private static DominatorDomainResult Analyze(
+        IHeapObjectStream heapObjects,
+        IHeapObjectLookup objectLookup,
+        IHeapReferenceQuery references,
+        IHeapReverseReferenceQuery? reverseReferences,
+        IHeapTypeStatisticsQuery typeStatistics,
+        IHeapDominatorQuery? dominators,
+        IHeapRootPathQuery rootPaths,
+        RetentionOptions options,
+        CancellationToken cancellationToken)
+    {
+        LeakSignals signals = reverseReferences is not null
+            ? BuildLeakSignalsFromReverseIndex(reverseReferences, objectLookup, options)
+            : AnalyzeObjectsPass(heapObjects, objectLookup, references, options);
 
-        AnalyzerDomainResult result = Analyze(context.Heap, context.Cache, options, signals, cancellationToken).Stamp(this);
+        DominatorDomainResult result = BuildHeuristicResult(objectLookup, references, rootPaths, typeStatistics, options, signals, cancellationToken);
 
-        if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: heuristic pass done", Console.Out);
-
-        // §D9-gated exact Lengauer-Tarjan computation. Always logs a comparison against the
-        // heuristic above; on success also attaches an exact per-type retained-bytes lookup that
-        // §Report integration (DominatorSectionBuilder) uses to replace the Gen2/LOH sub-table's
-        // heuristic column — everything else about `result` (including the main dominator-suspects
-        // and highly-referenced-objects tables) is untouched, matching the design doc's stated
-        // report-integration scope. A cap-exceeded or exception outcome leaves `result` exactly as
-        // the heuristic built it, same safety property "ship dark" (Phase 5) established.
-        if (options.EnableExactDominatorTree && result is DominatorDomainResult heuristicResult)
+        // §D9-gated exact Lengauer-Tarjan overlay. On success, attaches an exact per-type
+        // retained-bytes lookup that §Report integration (DominatorSectionBuilder) uses to replace
+        // the Gen2/LOH sub-table's heuristic column — everything else about `result` (including the
+        // main dominator-suspects and highly-referenced-objects tables) is untouched. A cap-exceeded
+        // or exception outcome leaves `result` exactly as the heuristic built it, same "ship dark"
+        // safety property established for the pre-retyping analyzer.
+        if (options.EnableExactDominatorTree && dominators is not null && result is DominatorDomainResult heuristicResult)
         {
-            ExactDominatorData exact = TryReadExactDominatorTree(context.Heap, context.Cache, heuristicResult, options, diag, cancellationToken);
+            ExactDominatorData exact = TryReadExactDominatorTree(dominators, objectLookup, heapObjects, rootPaths, heuristicResult, options, cancellationToken);
             if (exact.RetainedBytesByTypeName is not null || exact.ChainsByTypeName is not null)
             {
                 result = heuristicResult with
@@ -127,21 +172,9 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
             }
         }
 
-        if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: exact path done", Console.Out);
-
-        return ValueTask.FromResult(result);
+        return result;
     }
 
-    /// <summary>
-    /// §10.4/§10.7 (Batch 3, docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md):
-    /// reads the exact dominator tree <c>DiskBackedObjectIndexWriter.Build</c> already computed and
-    /// persisted during Phase 1, instead of recomputing it live here. Formerly ran its own
-    /// walk/fold/Lengauer-Tarjan pass every time this analyzer ran — this is now a handful of
-    /// mmap'd binary searches (<see cref="IDominatorTreeProvider.TryGetRetainedBytesByMethodTable"/>)
-    /// against data Phase 1 already built. A missing provider (legacy pre-Stage-B cache.bin, Stage B
-    /// not gated on for this run, or Stage B failed to persist) degrades exactly like the old
-    /// cap-exceeded/exception outcomes did: `result` stays exactly as the heuristic built it.
-    /// </summary>
     private readonly record struct ExactDominatorData(
         IReadOnlyDictionary<string, ulong>? RetainedBytesByTypeName,
         IReadOnlyDictionary<string, IReadOnlyList<DominatorChainHop>>? ChainsByTypeName,
@@ -150,27 +183,20 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
         bool CrossTypeOverlapInstanceScanCapped = false,
         IReadOnlyDictionary<string, RootChainSummary>? RootChainsByTypeName = null);
 
-    private ExactDominatorData TryReadExactDominatorTree(
-        ClrHeap heap,
-        IHeapAnalysisCache cache,
+    private static ExactDominatorData TryReadExactDominatorTree(
+        IHeapDominatorQuery dominators,
+        IHeapObjectLookup objectLookup,
+        IHeapObjectStream heapObjects,
+        IHeapRootPathQuery rootPaths,
         DominatorDomainResult heuristicResult,
         RetentionOptions options,
-        bool diag,
         CancellationToken cancellationToken)
     {
-        var stopwatch = Stopwatch.StartNew();
         try
         {
-            IDominatorTreeProvider? provider = cache.TryGetDominatorTreeProvider();
-            if (provider is null)
-            {
-                if (diag) _logger?.LogInformation("Exact dominator tree unavailable for this run; heuristic result is unaffected.");
-                return default;
-            }
-
             // Only resolve type names the report will actually display (the Gen2/LOH sub-table's
             // candidates, already computed by the heuristic pass above) — resolving every unique
-            // MethodTable's name would be wasted work for types the report never shows.
+            // type's name would be wasted work for types the report never shows.
             //
             // §8 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): recognizing
             // another candidate's sample address as an ancestor needs every candidate's address known
@@ -183,20 +209,21 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
             Dictionary<string, ulong>? exactByTypeName = null;
             Dictionary<string, IReadOnlyList<DominatorChainHop>>? chainsByTypeName = null;
             Dictionary<string, string>? containingTypeNameByTypeName = null;
-            // §8b needs every candidate's MethodTable (not just its one sample address) to recognize
-            // *any* instance of a candidate type while streaming the heap index below.
-            var candidateTypeNamesByMethodTable = new Dictionary<ulong, string>(heuristicResult.TopDominatorTypes.Count);
+            // §8b needs every instance of every candidate type to be recognizable while streaming
+            // the heap below — a plain display-name set, since this analyzer's candidates are
+            // already keyed by display name (IHeapTypeStatisticsQuery.GetTypeStatistics).
+            var candidateTypeNames = new HashSet<string>(StringComparer.Ordinal);
+
             foreach (TypeSnapshot candidate in heuristicResult.TopDominatorTypes)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                ClrObject sample = heap.GetObject(candidate.SampleAddress);
-                if (!sample.IsValid || sample.Type is null)
+                if (!objectLookup.TryGetObject(candidate.SampleAddress, out HeapObjectRef sample))
                     continue;
 
-                candidateTypeNamesByMethodTable[sample.Type.MethodTable] = candidate.TypeName;
+                candidateTypeNames.Add(candidate.TypeName);
 
-                if (provider.TryGetRetainedBytesByMethodTable(sample.Type.MethodTable, out ulong exactRetained))
+                if (dominators.TryGetRetainedBytesByType(sample.Type, out ulong exactRetained))
                 {
                     exactByTypeName ??= new Dictionary<string, ulong>(StringComparer.Ordinal);
                     exactByTypeName[candidate.TypeName] = exactRetained;
@@ -204,7 +231,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
 
                 // P3-3: dominance chain (A dominates B dominates ... dominates this type's sample
                 // object) — walks the same disk-backed tree, no extra data structure needed.
-                IReadOnlyList<DominatorChainHop> chain = BuildDominatorChain(heap, provider, sample.Address, options.MaxDominatorChainDepth);
+                IReadOnlyList<DominatorChainHop> chain = BuildDominatorChain(objectLookup, dominators, sample.Address, options.MaxDominatorChainDepth);
                 if (chain.Count > 0)
                 {
                     chainsByTypeName ??= new Dictionary<string, IReadOnlyList<DominatorChainHop>>(StringComparer.Ordinal);
@@ -222,23 +249,11 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
                 }
             }
 
-            if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: exact rollup read from disk", Console.Out);
-
-            if (diag)
-            {
-                _logger?.LogInformation(
-                    "Exact dominator tree read from disk in {ElapsedMs:N0} ms: total retained bytes at GC roots " +
-                    "{ExactTotalRetainedBytes:N0} vs. heuristic top-K estimate {HeuristicTotalRetainedBytes:N0}.",
-                    stopwatch.ElapsedMilliseconds, provider.TotalRetainedBytes, heuristicResult.TotalEstimatedRetainedBytes);
-            }
-
             (IReadOnlyList<CrossTypeOverlapPair>? overlapPairs, bool overlapCapped) = ComputeCrossTypeOverlap(
-                cache, provider, candidateTypeNamesByMethodTable, options, cancellationToken);
-
-            if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: cross-type overlap scan done", Console.Out);
+                heapObjects, dominators, candidateTypeNames, options, cancellationToken);
 
             // Audit P2: root chains are scoped to the Gen2/LOH sub-table only, same candidate
-            // filter DominatorSectionBuilder uses for rendering — a RootPathFinder search is a real
+            // filter DominatorSectionBuilder uses for rendering — a root-path search is a real
             // bidirectional BFS per candidate, not a free point lookup like every other per-type
             // field above, so this deliberately doesn't run over the full TopDominatorTypes set.
             var gen2LohCandidates = new List<TypeSnapshot>();
@@ -256,9 +271,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
                 gen2LohCandidates.RemoveRange(heuristicResult.MaxTopDominatorTypesToShow, gen2LohCandidates.Count - heuristicResult.MaxTopDominatorTypesToShow);
 
             IReadOnlyDictionary<string, RootChainSummary>? rootChainsByTypeName = ComputeRootChains(
-                heap, cache, gen2LohCandidates, options, cancellationToken);
-
-            if (diag) MemoryDiagnostic.PrintMemoryUsage("Dominator: root chain search done", Console.Out);
+                rootPaths, gen2LohCandidates, options, cancellationToken);
 
             return new ExactDominatorData(exactByTypeName, chainsByTypeName, containingTypeNameByTypeName, overlapPairs, overlapCapped, rootChainsByTypeName);
         }
@@ -266,24 +279,21 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            _logger?.LogWarning(ex,
-                "Reading the exact dominator tree failed after {ElapsedMs:N0} ms; heuristic result is unaffected.",
-                stopwatch.ElapsedMilliseconds);
             return default;
         }
     }
 
-    // P3-3: walks IDominatorTreeProvider.TryGetImmediateDominator from `sampleAddress` up toward
+    // P3-3: walks IHeapDominatorQuery.TryGetImmediateDominator from `sampleAddress` up toward
     // the virtual root (dominatorAddress == 0), collecting one hop per ancestor. Ordered root-most
     // first, sample leaf last — the natural "A holds B holds ... holds your object" reading order.
     // `maxDepth` is a safety bound, not a display truncation (see RetentionOptions.MaxDominatorChainDepth's
     // remarks): a real dominator tree's depth is bounded only by the longest single-parent chain in
-    // the heap (e.g. a linked list), and each hop costs one heap.GetObject() dump-file read.
+    // the heap (e.g. a linked list).
     internal static IReadOnlyList<DominatorChainHop> BuildDominatorChain(
-        ClrHeap heap,
-        IDominatorTreeProvider provider,
+        IHeapObjectLookup objectLookup,
+        IHeapDominatorQuery dominators,
         ulong sampleAddress,
         int maxDepth)
     {
@@ -292,12 +302,11 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
 
         for (int depth = 0; depth < maxDepth; depth++)
         {
-            ClrObject obj = heap.GetObject(current);
-            string typeName = obj.IsValid && obj.Type?.Name is string name ? name : StringConstants.UnknownType;
-            provider.TryGetRetainedBytes(current, out ulong retainedBytes);
+            string typeName = objectLookup.TryGetObject(current, out HeapObjectRef obj) ? obj.TypeDisplayName : StringConstants.UnknownType;
+            dominators.TryGetRetainedSize(current, out ulong retainedBytes);
             ascending.Add(new DominatorChainHop(typeName, current, retainedBytes));
 
-            if (!provider.TryGetImmediateDominator(current, out ulong parent) || parent == 0)
+            if (!dominators.TryGetImmediateDominator(current, out ulong parent) || parent == 0)
             {
                 ascending.Reverse();
                 return ascending;
@@ -337,29 +346,29 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
 
     /// <summary>
     /// §8b (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): unlike §8a's
-    /// single-sample check, this needs every instance of every candidate type. Streams the
-    /// disk-backed heap index once (<see cref="IHeapAnalysisCache.EnumerateIndexedEntriesAsTuples"/>,
-    /// no ClrMD field walks) collecting instance addresses whose <c>MethodTable</c> matches a
-    /// candidate, bounded by <see cref="RetentionOptions.MaxCrossTypeOverlapInstancesScanned"/>, then
-    /// walks each collected instance's ancestor chain looking for the nearest *different* candidate
-    /// type — same primitive as <see cref="FindContainingCandidateTypeName"/>, generalized to a live
-    /// walk over an instance population instead of one precomputed chain.
+    /// single-sample check, this needs every instance of every candidate type. Streams the whole
+    /// heap once (<see cref="IHeapObjectStream.EnumerateObjects"/>, no ClrMD field walks) collecting
+    /// instance addresses whose display name matches a candidate, bounded by
+    /// <see cref="RetentionOptions.MaxCrossTypeOverlapInstancesScanned"/>, then walks each collected
+    /// instance's ancestor chain looking for the nearest *different* candidate type — same primitive
+    /// as <see cref="FindContainingCandidateTypeName"/>, generalized to a live walk over an instance
+    /// population instead of one precomputed chain.
     /// </summary>
     internal static (IReadOnlyList<CrossTypeOverlapPair>? Pairs, bool Capped) ComputeCrossTypeOverlap(
-        IHeapAnalysisCache cache,
-        IDominatorTreeProvider provider,
-        IReadOnlyDictionary<ulong, string> candidateTypeNamesByMethodTable,
+        IHeapObjectStream heapObjects,
+        IHeapDominatorQuery dominators,
+        IReadOnlySet<string> candidateTypeNames,
         RetentionOptions options,
         CancellationToken cancellationToken)
     {
-        if (candidateTypeNamesByMethodTable.Count < 2)
+        if (candidateTypeNames.Count < 2)
             return (null, false); // nothing to overlap with
 
         var instanceTypeNamesByAddress = new Dictionary<ulong, string>();
         bool capped = false;
-        foreach ((ulong address, ulong methodTable, ulong _) in cache.EnumerateIndexedEntriesAsTuples())
+        foreach (HeapObjectRef obj in heapObjects.EnumerateObjects())
         {
-            if (!candidateTypeNamesByMethodTable.TryGetValue(methodTable, out string? typeName))
+            if (!candidateTypeNames.Contains(obj.TypeDisplayName))
                 continue;
 
             if (instanceTypeNamesByAddress.Count >= options.MaxCrossTypeOverlapInstancesScanned)
@@ -368,7 +377,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
                 break;
             }
 
-            instanceTypeNamesByAddress[address] = typeName;
+            instanceTypeNamesByAddress[obj.Address] = obj.TypeDisplayName;
         }
 
         if (instanceTypeNamesByAddress.Count == 0)
@@ -381,7 +390,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
             cancellationToken.ThrowIfCancellationRequested();
 
             (string? containingTypeName, bool hasSameTypeAncestor) = WalkInstanceAncestry(
-                provider, address, typeName, instanceTypeNamesByAddress, options.MaxDominatorChainDepth);
+                dominators, address, typeName, instanceTypeNamesByAddress, options.MaxDominatorChainDepth);
             if (containingTypeName is null)
                 continue;
 
@@ -391,7 +400,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
             // §8c: only "topmost" instances (no ancestor also of this instance's own type) are
             // exact-byte-summable — see CrossTypeOverlapPair's own doc comment for why a
             // non-topmost instance's bytes are already counted inside another instance's total.
-            if (!hasSameTypeAncestor && provider.TryGetRetainedBytes(address, out ulong retainedBytes))
+            if (!hasSameTypeAncestor && dominators.TryGetRetainedSize(address, out ulong retainedBytes))
                 bytesByPair[key] = bytesByPair.GetValueOrDefault(key) + retainedBytes;
         }
 
@@ -408,16 +417,15 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
     /// <summary>
     /// Walks the *entire* ancestor chain from <paramref name="address"/> up to the virtual root (or
     /// <paramref name="maxDepth"/>, same safety bound as <see cref="BuildDominatorChain"/>) via
-    /// <see cref="IDominatorTreeProvider.TryGetImmediateDominator"/>, recording two independent
+    /// <see cref="IHeapDominatorQuery.TryGetImmediateDominator"/>, recording two independent
     /// facts needed by §8b/§8c: the nearest ancestor of a *different* candidate type (§8b's count —
     /// same-type ancestors are skipped when looking for this, since same-type nesting isn't
     /// cross-type overlap), and whether *any* ancestor anywhere in the chain — not just the nearest
-    /// one — is also <paramref name="ownTypeName"/> (§8c's "topmost" exclusion; a same-type ancestor
-    /// can sit *beyond* the nearest different-type one, so this can't stop at the first match the
-    /// way the former does). Exits early once both are resolved and nothing further can change.
+    /// one — is also <paramref name="ownTypeName"/> (§8c's "topmost" exclusion). Exits early once
+    /// both are resolved and nothing further can change.
     /// </summary>
     internal static (string? ContainingTypeName, bool HasSameTypeAncestor) WalkInstanceAncestry(
-        IDominatorTreeProvider provider,
+        IHeapDominatorQuery dominators,
         ulong address,
         string ownTypeName,
         IReadOnlyDictionary<ulong, string> instanceTypeNamesByAddress,
@@ -429,7 +437,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
 
         for (int depth = 0; depth < maxDepth; depth++)
         {
-            if (!provider.TryGetImmediateDominator(current, out ulong parent) || parent == 0)
+            if (!dominators.TryGetImmediateDominator(current, out ulong parent) || parent == 0)
                 break;
 
             if (instanceTypeNamesByAddress.TryGetValue(parent, out string? parentTypeName))
@@ -451,16 +459,12 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
 
     /// <summary>
     /// Audit P2 (docs/analysis/phase1/dominator-analyzer-audit.md): "why is this alive," one
-    /// <c>RootPathFinder</c> search per <paramref name="candidates"/> entry — same construction
-    /// pattern as <see cref="PopulateEvidence"/>'s existing "highly referenced objects" evidence
-    /// search (<c>ReferenceGraph</c> + <c>RootPathSearchSupport</c>'s shared no-op telemetry/noise
-    /// predicate + the same <see cref="RetentionOptions.MaxRootPathCandidateNodes"/>-family limits),
-    /// just resolved into a hop-type-name list instead of <see cref="RootPathSearchSupport.FormatPath"/>'s
-    /// single joined string, to match <see cref="DominatorChainHop"/>'s list shape for rendering.
+    /// root-path search per <paramref name="candidates"/> entry, resolved into a hop-type-name list
+    /// (<see cref="IHeapRootPathQuery.TryFindRootPathHops"/>) to match
+    /// <see cref="DominatorChainHop"/>'s list shape for rendering.
     /// </summary>
     internal static IReadOnlyDictionary<string, RootChainSummary>? ComputeRootChains(
-        ClrHeap heap,
-        IHeapAnalysisCache cache,
+        IHeapRootPathQuery rootPaths,
         IReadOnlyList<TypeSnapshot> candidates,
         RetentionOptions options,
         CancellationToken cancellationToken)
@@ -468,36 +472,19 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
         if (candidates.Count == 0)
             return null;
 
-        IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
-        var provider = new ReferenceGraph(heap);
-        var limits = new RootPathSearchLimits
-        {
-            MaxCandidateNodes = options.MaxRootPathCandidateNodes,
-            MaxCandidateDepth = options.MaxRootPathCandidateDepth,
-            MaxRootExpansionDepth = options.MaxRootPathExpansionDepth,
-            LargeFanoutThreshold = options.RootPathLargeFanoutThreshold,
-        };
-        var finder = new RootPathFinder(
-            heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType,
-            static _ => false, cache.TryGetReverseIndexProvider(), cache);
+        var searchOptions = new RootPathSearchOptions(
+            options.MaxRootPathCandidateNodes, options.MaxRootPathCandidateDepth,
+            options.MaxRootPathExpansionDepth, options.RootPathLargeFanoutThreshold);
 
         Dictionary<string, RootChainSummary>? rootChainsByTypeName = null;
         foreach (TypeSnapshot candidate in candidates)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            bool found = finder.TryFindAnyRootPath(
-                candidate.SampleAddress, roots, out string? rootKind, out List<ulong>? addresses,
-                out bool searchTruncated, out _, out _, cancellationToken);
-            if (!found || rootKind is null || addresses is null || addresses.Count == 0)
+            bool found = rootPaths.TryFindRootPathHops(
+                candidate.SampleAddress, searchOptions, out string? rootKind, out IReadOnlyList<string>? hopTypeNames, out bool searchTruncated);
+            if (!found || rootKind is null || hopTypeNames is null || hopTypeNames.Count == 0)
                 continue;
-
-            var hopTypeNames = new List<string>(addresses.Count);
-            foreach (ulong address in addresses)
-            {
-                ClrType? type = RootPathSearchSupport.ResolveType(heap, cache, address);
-                hopTypeNames.Add(type?.Name ?? StringConstants.UnknownType);
-            }
 
             rootChainsByTypeName ??= new Dictionary<string, RootChainSummary>(StringComparer.Ordinal);
             rootChainsByTypeName[candidate.TypeName] = new RootChainSummary(rootKind, hopTypeNames, searchTruncated);
@@ -507,37 +494,30 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
     }
 
     private static LeakSignals BuildLeakSignalsFromReverseIndex(
-        ClrHeap heap,
-        IHeapAnalysisCache cache,
-        IBackwardReferenceProvider reverseIndex,
-        RetentionOptions options,
-        IProgress<AnalyzerProgressReport>? progress)
+        IHeapReverseReferenceQuery reverseReferences,
+        IHeapObjectLookup objectLookup,
+        RetentionOptions options)
     {
         int threshold = options.HighReferenceThreshold;
         int topN = Math.Max(1, options.TopHighlyReferencedObjectsToShow);
 
-        var scanCounter = new ObjectScanCounter("scanning reverse index", progress);
         int highlyReferencedCount = 0;
         var topHeap = new PriorityQueue<(ulong Address, int Count), int>(topN + 1);
         int[] fanInCounts = new int[s_fanInBuckets.Length];
 
-        reverseIndex.EnumerateChildCounts((child, count, _) =>
+        foreach ((ulong address, int count) in reverseReferences.EnumerateIncomingReferenceCounts())
         {
-            scanCounter.Tick();
             AddToFanInHistogram(fanInCounts, count);
 
             if (count <= threshold)
-                return;
+                continue;
 
             highlyReferencedCount++;
 
-            topHeap.Enqueue((child, count), count);
+            topHeap.Enqueue((address, count), count);
             if (topHeap.Count > topN)
                 topHeap.Dequeue(); // evict smallest
-        });
-
-        scanCounter.Complete();
-        progress?.Report(new(scanCounter.Scanned, "building leak signals"));
+        }
 
         // Ascending by count out of the min-heap; reverse below for descending display order.
         var buffer = new List<(ulong Address, int Count)>(topHeap.Count);
@@ -547,7 +527,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
         var results = new List<HighlyReferencedObjectSnapshot>(buffer.Count);
         for (int i = buffer.Count - 1; i >= 0; i--)
         {
-            HighlyReferencedObjectSnapshot? snapshot = CreateHighlyReferencedObjectSnapshot(heap, cache, buffer[i].Address, buffer[i].Count);
+            HighlyReferencedObjectSnapshot? snapshot = CreateHighlyReferencedObjectSnapshot(objectLookup, buffer[i].Address, buffer[i].Count);
             if (snapshot is not null)
                 results.Add(snapshot);
         }
@@ -560,68 +540,51 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
         return new LeakSignals(highlyReferencedCount, ApproximatedReferenceAddresses: 0, results, ObjectScanCapped: false, FanInHistogram: BuildFanInHistogram(fanInCounts));
     }
 
-    private static DominatorDomainResult Analyze(
-        ClrHeap heap,
-        IHeapAnalysisCache cache,
+    private static DominatorDomainResult BuildHeuristicResult(
+        IHeapObjectLookup objectLookup,
+        IHeapReferenceQuery references,
+        IHeapRootPathQuery rootPaths,
+        IHeapTypeStatisticsQuery typeStatistics,
         RetentionOptions options,
         LeakSignals signals,
         CancellationToken cancellationToken)
     {
-        Dictionary<string, CachedTypeStatistics> typeStats = cache.GetOrBuildTypeStatistics(heap);
+        IReadOnlyDictionary<string, HeapTypeStatistics> typeStats = typeStatistics.GetTypeStatistics();
 
-        // Calculate total heap size from all types
         ulong totalHeapBytes = 0;
-        foreach (var stat in typeStats.Values)
-        {
+        foreach (HeapTypeStatistics stat in typeStats.Values)
             totalHeapBytes += stat.TotalSize;
-        }
 
         if (typeStats.Count == 0)
             return new DominatorDomainResult(0, 0, 0, Array.Empty<TypeSnapshot>(), MaxTopDominatorTypesToShow: options.TopHighlyReferencedObjectsToShow, TotalHeapBytes: totalHeapBytes, FanInHistogram: signals.FanInHistogram);
 
-        IReadOnlyDictionary<ulong, TypeAggregateIndexEntry>? aggregates = null;
-        if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
-            aggregates = heapIndex.TypeAggregates;
-
         var candidates = new List<(string TypeName, ulong SampleAddress, int Count, ulong TotalSize, ulong LohSize, long Gen2Count, ulong Score)>(capacity: Math.Min(32, typeStats.Count));
 
-        foreach (KeyValuePair<string, CachedTypeStatistics> kv in typeStats)
+        foreach (KeyValuePair<string, HeapTypeStatistics> kv in typeStats)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            ulong sampleAddress = cache.GetSampleInstanceAddress(kv.Key) ?? 0;
-            if (sampleAddress == 0)
+            HeapTypeStatistics stat = kv.Value;
+            if (stat.SampleAddress == 0)
                 continue;
 
-            ulong totalSize = kv.Value.TotalSize;
-            ulong lohSize = kv.Value.LohSize;
-            int count = kv.Value.Count;
-            long gen2Count = 0;
-
-            if (aggregates is not null)
-            {
-                ClrObject sample = heap.GetObject(sampleAddress);
-                if (sample.IsValid && sample.Type is not null && aggregates.TryGetValue(sample.Type.MethodTable, out TypeAggregateIndexEntry aggregate))
-                {
-                    gen2Count = aggregate.Gen2Count;
-                    totalSize = aggregate.TotalSize;
-                    lohSize = aggregate.LohSize;
-                    count = (int)Math.Min(int.MaxValue, aggregate.Count);
-                }
-            }
+            ulong totalSize = stat.TotalSize;
+            ulong lohSize = stat.LohSize;
+            int count = (int)Math.Min(int.MaxValue, stat.InstanceCount);
+            long gen2Count = stat.Gen2Count;
 
             ulong averageSize = count > 0 ? Math.Max(1UL, totalSize / (ulong)count) : 1;
             ulong score = totalSize + lohSize + (ulong)Math.Max(0, gen2Count) * averageSize;
             if (count >= 1_000)
                 score += totalSize / 4;
 
-            candidates.Add((kv.Key, sampleAddress, count, totalSize, lohSize, gen2Count, score));
+            candidates.Add((kv.Key, stat.SampleAddress, count, totalSize, lohSize, gen2Count, score));
         }
 
         List<HighlyReferencedObjectSnapshot> topHighlyReferencedObjects = signals.TopHighlyReferencedObjects as List<HighlyReferencedObjectSnapshot>
             ?? new List<HighlyReferencedObjectSnapshot>(signals.TopHighlyReferencedObjects);
-        PopulateRetainedBytes(heap, cache, topHighlyReferencedObjects, options);
-        PopulateEvidence(heap, cache, topHighlyReferencedObjects, options);
+        PopulateRetainedBytes(objectLookup, references, topHighlyReferencedObjects, options, cancellationToken);
+        PopulateEvidence(rootPaths, topHighlyReferencedObjects, options);
         IReadOnlyList<RetentionTypeSnapshot> topRetentionTypes = BuildTopRetentionTypes(topHighlyReferencedObjects);
         ulong topHighlyReferencedTotalBytes = SumTopHighlyReferencedBytes(topHighlyReferencedObjects);
 
@@ -630,7 +593,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
             return new DominatorDomainResult(0, 0, 0, Array.Empty<TypeSnapshot>())
             {
                 MaxBreadth = options.MaxLeakScanObjects,
-                MaxDepth = 20,
+                MaxDepth = MaxDepth,
                 HighlyReferencedObjectCount = signals.HighlyReferencedObjectCount,
                 ApproximatedReferenceAddresses = signals.ApproximatedReferenceAddresses,
                 TopHighlyReferencedObjects = topHighlyReferencedObjects,
@@ -660,32 +623,26 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
         var topTypes = new List<TypeSnapshot>(topCount);
 
         int maxBreadth = options.MaxLeakScanObjects > 0 ? options.MaxLeakScanObjects : 10_000;
-        const int MaxDepth = 20;
 
         // Use a shared visited set for all top-K types to produce exclusive (non-overlapping) retained-size semantics,
         // matching the semantics of PopulateRetainedBytes. This ensures the two retained-byte metrics are comparable.
         var visited = new HashSet<ulong>(capacity: Math.Min(topCount * 256, 4096));
 
-        var walkCandidates = new List<(ulong Address, ulong MethodTable, ulong ShallowSize)>(topCount);
+        var retainedByAddress = new Dictionary<ulong, ulong>(topCount);
         for (int i = 0; i < topCount; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             ulong sampleAddress = candidates[i].SampleAddress;
-            ClrObject root = heap.GetObject(sampleAddress);
-            if (!root.IsValid || root.Type is null)
+            if (!objectLookup.TryGetObject(sampleAddress, out _))
                 continue;
 
-            // ShallowSize here is the single sample object's own size (what a skipped-walk result
-            // would fall back to), not the type-aggregate TotalSize — this walk estimates one
-            // sample instance's reachable graph, not the whole type's footprint.
-            walkCandidates.Add((sampleAddress, root.Type.MethodTable, root.Size));
+            // Always recorded, even when the walk itself finds nothing new (e.g. a sample already
+            // absorbed into an earlier candidate's shared subgraph) — matches the pre-retyping
+            // selector's "every valid candidate gets an entry" contract exactly.
+            ulong retained = CapabilityBoundedGraphWalk.ComputeExclusiveRetained(sampleAddress, objectLookup, references, visited, maxBreadth, MaxDepth, cancellationToken);
+            retainedByAddress[sampleAddress] = retained;
         }
-
-        IReadOnlyList<RetainedSizeResult> retainedResults = RetainedSizeCandidateSelector.SelectAndCompute(
-            walkCandidates, heap, cache, visited, maxCandidatesToWalk: topCount, maxBreadth, MaxDepth, cancellationToken);
-
-        var retainedByAddress = new Dictionary<ulong, ulong>(retainedResults.Count);
-        foreach (RetainedSizeResult r in retainedResults)
-            retainedByAddress[r.Address] = r.RetainedSize;
 
         ulong totalEstimatedRetainedBytes = 0;
         for (int i = 0; i < topCount; i++)
@@ -699,7 +656,7 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
             totalEstimatedRetainedBytes += retainedBytes;
 
             ulong averageSize = count > 0 ? totalSize / (ulong)count : 0;
-            // TODO: Track WasCapped from RetainedSizeCandidateSelector when it exceeds breadth/depth limits.
+            // TODO: Track WasCapped from CapabilityBoundedGraphWalk when it exceeds breadth/depth limits.
             // For now, always false — future enhancement to propagate cap indicator from BFS traversal.
             topTypes.Add(new TypeSnapshot(
                 typeName,
@@ -734,31 +691,26 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
     }
 
     // No-index fallback: the pipeline dispatcher only calls BeforeHeapIndexScan/OnHeapEntry when
-    // an on-disk heap index exists (see HeapIndexScanDispatcher.Run). When it doesn't, this method
-    // runs the same reference-counting pass directly over the live heap (or an in-memory index).
-    private static LeakSignals AnalyzeObjectsPass(ClrHeap heap, IHeapAnalysisCache? cache, RetentionOptions options, IProgress<AnalyzerProgressReport>? progress)
+    // an on-disk heap index exists. When it doesn't, this method runs the same reference-counting
+    // pass directly over the live heap (or an in-memory index) via IHeapObjectStream, whose dump-side
+    // implementation already prefers the disk index internally when one exists.
+    private static LeakSignals AnalyzeObjectsPass(
+        IHeapObjectStream heapObjects, IHeapObjectLookup objectLookup, IHeapReferenceQuery references, RetentionOptions options)
     {
         var referenceCount = new SpaceSavingCounter<ulong>(FallbackMaxReferenceAddresses);
         long approximatedReferenceAddresses = 0;
         bool objectScanCapped = false;
 
-        // FallbackMaxLeakScanObjects caps the number of heap.GetObject() + field-walk calls, which
-        // are the primary bottleneck on multi-GB dumps (each call reads object data from the dump
-        // file). 0 = unlimited. The cap applies to both disk and memory index paths.
+        // FallbackMaxLeakScanObjects caps the number of reference-enumeration calls, the primary
+        // bottleneck on multi-GB dumps. 0 = unlimited. The cap applies to both disk and memory
+        // index paths.
         int maxScan = FallbackMaxLeakScanObjects;
         long objectsTraced = 0;
 
-        var scanCounter = new ObjectScanCounter("scanning heap objects", progress);
-
-        foreach (HeapEntry entry in EnumerateLeakEntries(heap, cache))
+        foreach (HeapObjectRef entry in heapObjects.EnumerateObjects())
         {
-            scanCounter.Tick();
-
             ulong objectAddress = entry.Address;
             if (objectAddress == 0) continue;
-
-            if (cache is not null && !cache.MethodTableHasOutgoingRefs(heap, entry.MethodTable))
-                continue;
 
             if (maxScan > 0 && objectsTraced >= maxScan)
             {
@@ -766,14 +718,11 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
                 break;
             }
 
-            CountIncomingReferencesByAddress(heap, objectAddress, referenceCount, ref approximatedReferenceAddresses);
+            CountIncomingReferencesByAddress(references, objectAddress, referenceCount, ref approximatedReferenceAddresses);
             objectsTraced++;
         }
 
-        scanCounter.Complete();
-        progress?.Report(new(scanCounter.Scanned, "building leak signals"));
-
-        IReadOnlyList<HighlyReferencedObjectSnapshot> topHighlyReferencedObjects = ExtractHighlyReferencedObjects(heap, cache, referenceCount, options);
+        IReadOnlyList<HighlyReferencedObjectSnapshot> topHighlyReferencedObjects = ExtractHighlyReferencedObjects(objectLookup, referenceCount, options);
         int highlyReferencedCount = CountHighlyReferencedObjects(referenceCount, options, out List<FanInBucket> fanInHistogram);
 
         return new LeakSignals(
@@ -782,29 +731,6 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
             topHighlyReferencedObjects,
             objectScanCapped,
             FanInHistogram: fanInHistogram);
-    }
-
-    private static IEnumerable<HeapEntry> EnumerateLeakEntries(ClrHeap heap, IHeapAnalysisCache? cache)
-    {
-        if (cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out _))
-        {
-            foreach (HeapEntry entry in heapCache.EnumerateIndexedEntries())
-                yield return entry;
-
-            yield break;
-        }
-
-        foreach (ClrObject obj in heap.EnumerateObjects())
-        {
-            if (!obj.IsValid || obj.Type is null)
-                continue;
-
-            ulong methodTable = obj.Type.MethodTable;
-            if (methodTable == 0)
-                continue;
-
-            yield return new HeapEntry(obj.Address, methodTable, obj.Size);
-        }
     }
 
     private static int CountHighlyReferencedObjects(SpaceSavingCounter<ulong> referenceCount, RetentionOptions options, out List<FanInBucket> fanInHistogram)
@@ -826,10 +752,10 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
 
     // Admission into `referenceCount` (a SpaceSavingCounter) is order-independent by
     // construction — see docs/analysis/phase1/dominator-analyzer-audit.md Area 6 item 3 and
-    // SpaceSavingCounter's own doc comment — so unlike the fixed-capacity dictionary this
-    // replaced, no address's increments are ever silently dropped based on scan position.
+    // SpaceSavingCounter's own doc comment — so no address's increments are ever silently dropped
+    // based on scan position.
     private static void CountIncomingReferencesByAddress(
-        ClrHeap heap,
+        IHeapReferenceQuery references,
         ulong sourceAddress,
         SpaceSavingCounter<ulong> referenceCount,
         ref long approximatedReferenceAddresses)
@@ -837,52 +763,15 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
         if (sourceAddress == 0)
             return;
 
-        ClrObject sourceObject = heap.GetObject(sourceAddress);
-        if (!sourceObject.IsValid)
-            return;
-
-        // FIX-1: iterator state-machine eliminated — EnumerateOutgoingReferenceAddresses was a
-        // yield-based IEnumerable<ulong> that heap-allocated a new state-machine object on every
-        // call (4.4 M allocations / 494 MB per pipeline run).  Logic is inlined below.
-        ClrType? type = sourceObject.Type;
-        if (type is null)
-            return;
-
-        if (type.IsArray)
+        foreach (ulong childAddress in references.EnumerateReferences(sourceAddress))
         {
-            if (type.ComponentType?.IsObjectReference == true && sourceObject.AsArray().Rank == 1)
-            {
-                ClrArray arr = sourceObject.AsArray();
-                int len = arr.Length;
-                for (int i = 0; i < len; i++)
-                {
-                    ClrObject element = arr.GetObjectValue(i);
-                    if (element.IsValid && element.Address != 0 && referenceCount.Offer(element.Address))
-                        approximatedReferenceAddresses++;
-                }
-            }
-            return;
-        }
-
-        // FIX-2: indexed for loop over IReadOnlyList<ClrInstanceField> instead of foreach.
-        // foreach on an interface-typed variable calls IEnumerable<T>.GetEnumerator() which routes
-        // through SZArrayHelper.GetEnumerator<T>() and heap-allocates a boxed SZGenericArrayEnumerator
-        // (13.7 M allocations / 439 MB per pipeline run for type.Fields alone).
-        IReadOnlyList<ClrInstanceField> fields = type.Fields;
-        int fieldCount = fields.Count;
-        for (int fi = 0; fi < fieldCount; fi++)
-        {
-            ClrInstanceField field = fields[fi];
-            if (!field.IsObjectReference)
-                continue;
-
-            ClrObject value = field.ReadObject(sourceObject.Address, interior: false);
-            if (value.IsValid && value.Address != 0 && referenceCount.Offer(value.Address))
+            if (childAddress != 0 && referenceCount.Offer(childAddress))
                 approximatedReferenceAddresses++;
         }
     }
 
-    private static IReadOnlyList<HighlyReferencedObjectSnapshot> ExtractHighlyReferencedObjects(ClrHeap heap, IHeapAnalysisCache? cache, SpaceSavingCounter<ulong> referenceCount, RetentionOptions options)
+    private static IReadOnlyList<HighlyReferencedObjectSnapshot> ExtractHighlyReferencedObjects(
+        IHeapObjectLookup objectLookup, SpaceSavingCounter<ulong> referenceCount, RetentionOptions options)
     {
         int threshold = options.HighReferenceThreshold;
         // Heuristic: for small tables the LINQ-based path is faster (no heap overhead).
@@ -901,17 +790,15 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
             var results = new List<HighlyReferencedObjectSnapshot>(topAddresses.Length);
             foreach (var top in topAddresses)
             {
-                HighlyReferencedObjectSnapshot? snapshot = CreateHighlyReferencedObjectSnapshot(heap, cache, top.Key, top.Count);
-                if (snapshot is null)
-                    continue;
-
-                results.Add(snapshot);
+                HighlyReferencedObjectSnapshot? snapshot = CreateHighlyReferencedObjectSnapshot(objectLookup, top.Key, top.Count);
+                if (snapshot is not null)
+                    results.Add(snapshot);
             }
 
             return results;
         }
 
-        // Use a fixed-size min-heap (PriorityQueue) to track top K addresses by incoming reference count for large inputs.
+        // Use a fixed-size min-heap (PriorityQueue) to track the top K addresses by incoming reference count for large inputs.
         var pq = new PriorityQueue<(ulong Address, int Count), int>(options.TopHighlyReferencedObjectsToShow + 1);
 
         foreach ((ulong address, int entryCount, int _) in referenceCount.Entries)
@@ -921,119 +808,79 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
 
             pq.Enqueue((address, entryCount), entryCount);
             if (pq.Count > options.TopHighlyReferencedObjectsToShow)
-                pq.Dequeue(); // evict smallest
+                pq.Dequeue();
         }
 
         if (pq.Count == 0)
             return Array.Empty<HighlyReferencedObjectSnapshot>();
 
-        // Drain pq into a list (ascending), then build snapshots and reverse to descending.
         var buffer = new List<(ulong Address, int Count)>(pq.Count);
         while (pq.Count > 0)
             buffer.Add(pq.Dequeue());
 
-        // buffer currently ascending by count; iterate reverse to produce descending order.
         var final = new List<HighlyReferencedObjectSnapshot>(buffer.Count);
         for (int i = buffer.Count - 1; i >= 0; i--)
         {
-            var entry = buffer[i];
-            HighlyReferencedObjectSnapshot? snapshot = CreateHighlyReferencedObjectSnapshot(heap, cache, entry.Address, entry.Count);
-            if (snapshot is null)
-                continue;
-
-            final.Add(snapshot);
+            HighlyReferencedObjectSnapshot? snapshot = CreateHighlyReferencedObjectSnapshot(objectLookup, buffer[i].Address, buffer[i].Count);
+            if (snapshot is not null)
+                final.Add(snapshot);
         }
 
         return final;
     }
 
-    private static HighlyReferencedObjectSnapshot? CreateHighlyReferencedObjectSnapshot(ClrHeap heap, IHeapAnalysisCache? cache, ulong objectAddress, int incomingReferences)
+    private static HighlyReferencedObjectSnapshot? CreateHighlyReferencedObjectSnapshot(IHeapObjectLookup objectLookup, ulong objectAddress, int incomingReferences)
     {
         if (objectAddress == 0)
             return null;
 
-        // OPT (docs/cache/cache-architecture.md Phase 6): objectAddress comes from the
-        // reverse-index-driven incoming-reference count, not a live traversal — when a cache is
-        // available, delegate to it fully (it already handles disk-vs-in-memory internally per its
-        // own contract) rather than adding a second heap.GetObject fallback here, which would
-        // reintroduce the redundant-resolution pattern this index exists to remove.
-        if (cache is not null)
-        {
-            if (!cache.TryGetObjectMetadata(heap, objectAddress, out ulong methodTable, out ulong size))
-                return null;
-
-            string typeName = heap.GetTypeByMethodTable(methodTable)?.Name ?? StringConstants.UnknownType;
-            return new HighlyReferencedObjectSnapshot(objectAddress, typeName, size, incomingReferences);
-        }
-
-        ClrObject obj = heap.GetObject(objectAddress);
-        if (!obj.IsValid)
+        if (!objectLookup.TryGetObject(objectAddress, out HeapObjectRef obj))
             return null;
 
-        return new HighlyReferencedObjectSnapshot(
-            objectAddress,
-            obj.Type?.Name ?? StringConstants.UnknownType,
-            obj.Size,
-            incomingReferences);
+        return new HighlyReferencedObjectSnapshot(obj.Address, obj.TypeDisplayName, obj.Size, incomingReferences);
     }
 
-    private static void PopulateRetainedBytes(ClrHeap heap, IHeapAnalysisCache cache, List<HighlyReferencedObjectSnapshot> objects, RetentionOptions options)
+    private static void PopulateRetainedBytes(
+        IHeapObjectLookup objectLookup, IHeapReferenceQuery references, List<HighlyReferencedObjectSnapshot> objects, RetentionOptions options, CancellationToken cancellationToken)
     {
         if (objects.Count == 0)
             return;
-
-        var candidates = new List<(ulong Address, ulong MethodTable, ulong ShallowSize)>(objects.Count);
-        foreach (HighlyReferencedObjectSnapshot snapshot in objects)
-        {
-            ClrObject root = heap.GetObject(snapshot.Address);
-            if (root.IsValid && root.Type is not null)
-                candidates.Add((snapshot.Address, root.Type.MethodTable, snapshot.Size));
-        }
 
         var visited = new HashSet<ulong>(capacity: Math.Min(objects.Count * 4, 256));
         int maxBreadth = options.MaxLeakScanObjects > 0 ? options.MaxLeakScanObjects : 10_000;
-        IReadOnlyList<RetainedSizeResult> results = RetainedSizeCandidateSelector.SelectAndCompute(
-            candidates, heap, cache, visited, maxCandidatesToWalk: candidates.Count, maxBreadth, maxDepth: 20);
-
-        var retainedByAddress = new Dictionary<ulong, ulong>(results.Count);
-        foreach (RetainedSizeResult r in results)
-            retainedByAddress[r.Address] = r.RetainedSize;
 
         for (int i = 0; i < objects.Count; i++)
         {
-            if (retainedByAddress.TryGetValue(objects[i].Address, out ulong retained))
-                objects[i] = objects[i] with { EstimatedRetainedBytes = retained };
+            cancellationToken.ThrowIfCancellationRequested();
+
+            HighlyReferencedObjectSnapshot snapshot = objects[i];
+            if (!objectLookup.TryGetObject(snapshot.Address, out _))
+                continue;
+
+            ulong retained = CapabilityBoundedGraphWalk.ComputeExclusiveRetained(snapshot.Address, objectLookup, references, visited, maxBreadth, MaxDepth, cancellationToken);
+            objects[i] = snapshot with { EstimatedRetainedBytes = retained };
         }
     }
 
-    private static void PopulateEvidence(ClrHeap heap, IHeapAnalysisCache cache, List<HighlyReferencedObjectSnapshot> objects, RetentionOptions options)
+    private static void PopulateEvidence(IHeapRootPathQuery rootPaths, List<HighlyReferencedObjectSnapshot> objects, RetentionOptions options)
     {
         if (objects.Count == 0)
             return;
 
-        IReadOnlyList<(string RootKind, ulong Address)> roots = cache.GetOrBuildValidRoots(heap);
-
-        var provider = new ReferenceGraph(heap);
-        var limits = new RootPathSearchLimits
-        {
-            MaxCandidateNodes = options.MaxRootPathCandidateNodes,
-            MaxCandidateDepth = options.MaxRootPathCandidateDepth,
-            MaxRootExpansionDepth = options.MaxRootPathExpansionDepth,
-            LargeFanoutThreshold = options.RootPathLargeFanoutThreshold,
-        };
-        var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType, static _ => false, cache.TryGetReverseIndexProvider(), cache);
+        var searchOptions = new RootPathSearchOptions(
+            options.MaxRootPathCandidateNodes, options.MaxRootPathCandidateDepth,
+            options.MaxRootPathExpansionDepth, options.RootPathLargeFanoutThreshold);
 
         for (int i = 0; i < objects.Count; i++)
         {
             HighlyReferencedObjectSnapshot snapshot = objects[i];
-            bool found = finder.TryFindAnyRootPath(snapshot.Address, roots, out string? rootKind, out List<ulong>? addresses, out bool searchTruncated, out _, out _);
-            string? rootPath = found ? RootPathSearchSupport.FormatPath(heap, rootKind!, addresses, cache) : null;
+            bool found = rootPaths.TryFindRootPath(snapshot.Address, searchOptions, out string? rootPath, out bool searchTruncated);
 
             objects[i] = snapshot with
             {
                 Evidence = new Evidence(
                     snapshot.EstimatedRetainedBytes,
-                    rootPath,
+                    found ? rootPath : null,
                     searchTruncated,
                     [new EvidenceSignal("IncomingReferences", "Incoming reference count", snapshot.IncomingReferences)])
             };
@@ -1080,8 +927,8 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
                 };
             }
         }
-        return byType
-            .Select(static kvp => new RetentionTypeSnapshot(
+
+        return byType.Select(kvp => new RetentionTypeSnapshot(
                 TypeName: kvp.Key,
                 ObjectCount: kvp.Value.ObjectCount,
                 TotalBytes: kvp.Value.TotalBytes,
@@ -1094,11 +941,32 @@ public sealed class DominatorAnalyzer : IAnalyzer, IRequiresReachableGraphIndex,
             .ToArray();
     }
 
+    private static void AddToFanInHistogram(int[] fanInCounts, int incomingReferences)
+    {
+        for (int b = 0; b < s_fanInBuckets.Length; b++)
+        {
+            if (incomingReferences >= s_fanInBuckets[b].Min && incomingReferences < s_fanInBuckets[b].Max)
+            {
+                fanInCounts[b]++;
+                return;
+            }
+        }
+    }
+
+    private static List<FanInBucket> BuildFanInHistogram(int[] fanInCounts)
+    {
+        var result = new List<FanInBucket>(s_fanInBuckets.Length);
+        for (int b = 0; b < s_fanInBuckets.Length; b++)
+            if (fanInCounts[b] > 0)
+                result.Add(new FanInBucket(s_fanInBuckets[b].Label, fanInCounts[b]));
+        return result;
+    }
+
     private readonly record struct LeakSignals(
         int HighlyReferencedObjectCount,
         long ApproximatedReferenceAddresses,
         IReadOnlyList<HighlyReferencedObjectSnapshot> TopHighlyReferencedObjects,
-        bool ObjectScanCapped = false,
+        bool ObjectScanCapped,
         bool ReferenceCountingSkipped = false,
         IReadOnlyList<FanInBucket>? FanInHistogram = null);
 

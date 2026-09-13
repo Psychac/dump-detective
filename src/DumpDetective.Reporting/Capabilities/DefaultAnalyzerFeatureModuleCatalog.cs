@@ -57,7 +57,7 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         // (Tier-2 wave) -- see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("async-task", "Async Task Analysis", typeof(AsyncTaskAnalyzerLegacyAdapter), typeof(AsyncTaskFindingGenerator), typeof(AsyncTaskTrendComparer), typeof(AsyncAnalysisSectionBuilder), 190, ["async"]),
         Module("leak-candidate", "Leak Candidate Analysis", typeof(LeakCandidateAnalyzer), typeof(LeakCandidateFindingGenerator), typeof(LeakCandidateTrendComparer), typeof(LeakAnalysisSectionBuilder), 210, ["leaks"]),
-        Module("dominator", "Dominator Analysis", typeof(DominatorAnalyzer), typeof(DominatorFindingGenerator), typeof(DominatorTrendComparer), typeof(DominatorSectionBuilder), 220, ["retention", "dominator"]),
+        Module("dominator", "Dominator Analysis", typeof(DominatorAnalyzerLegacyAdapter), typeof(DominatorFindingGenerator), typeof(DominatorTrendComparer), typeof(DominatorSectionBuilder), 220, ["retention", "dominator"]),
         // StringAnalyzerLegacyAdapter, not StringAnalyzer directly, since 2026-09-13 -- see
         // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("string", "String Analysis", typeof(StringAnalyzerLegacyAdapter), typeof(StringFindingGenerator), typeof(StringTrendComparer), typeof(StringSectionBuilder), 230, ["memory", "string"]),
@@ -67,7 +67,7 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         // StaticRootLeakDetectorLegacyAdapter, not StaticRootLeakDetector directly, since 2026-09-13
         // -- see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("static-root", "Static Root Leak Detection", typeof(StaticRootLeakDetectorLegacyAdapter), typeof(StaticRootFindingGenerator), typeof(StaticRootTrendComparer), typeof(StaticRootSectionBuilder), 250, ["roots", "leaks"]),
-        Module("reference-chain", "Reference Chain Analysis", typeof(ReferenceChainAnalyzer), typeof(ReferenceChainFindingGenerator), typeof(ReferenceChainTrendComparer), typeof(ReferenceChainSectionBuilder), 260, ["roots"]),
+        Module("reference-chain", "Reference Chain Analysis", typeof(ReferenceChainAnalyzerLegacyAdapter), typeof(ReferenceChainFindingGenerator), typeof(ReferenceChainTrendComparer), typeof(ReferenceChainSectionBuilder), 260, ["roots"]),
         // GCHandleAnalyzerLegacyAdapter, not GCHandleAnalyzer directly, since 2026-09-11 (Batch 7 of
         // the Phase 1 retyping) — see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("gc-handle", "GC Handle Analysis", typeof(GCHandleAnalyzerLegacyAdapter), typeof(GCHandleFindingGenerator), typeof(GCHandleTrendComparer), typeof(GCHandleSectionBuilder), 270, ["handles"]),

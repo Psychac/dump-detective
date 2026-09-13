@@ -1,7 +1,6 @@
 using System.Diagnostics;
 
 using Microsoft.Diagnostics.Runtime;
-using Microsoft.Extensions.Logging;
 
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
@@ -61,8 +60,10 @@ public sealed class DominatorAnalyzerExactTreeRealDumpTests(ITestOutputHelper ou
             // enableExactDominatorTree: true + a IRequiresDominatorTreeIndex analyzer in
             // activeAnalyzers is what flips buildStageB on (§10.3) — without both, this run would
             // silently skip Stage B entirely and every "exact" comparison below would be
-            // heuristic-vs-heuristic, not exact-vs-heuristic.
-            var dominatorAnalyzer = new DominatorAnalyzer(new TestOutputLogger<DominatorAnalyzer>(output));
+            // heuristic-vs-heuristic, not exact-vs-heuristic. The marker lives on the adapter, not
+            // the retyped inner DominatorAnalyzer, which the pipeline never sees directly — see
+            // DominatorAnalyzerLegacyAdapter's own remarks.
+            using var dominatorAnalyzer = new DominatorAnalyzerLegacyAdapter();
             IReadOnlyList<IAnalyzer> activeAnalyzers = new IAnalyzer[] { dominatorAnalyzer };
 
             var indexStopwatch = Stopwatch.StartNew();
@@ -70,7 +71,7 @@ public sealed class DominatorAnalyzerExactTreeRealDumpTests(ITestOutputHelper ou
             indexStopwatch.Stop();
             output.WriteLine($"Phase 1 index build (incl. §D5 forward index, Stage B): {indexStopwatch.ElapsedMilliseconds:N0} ms");
 
-            DominatorAnalyzer analyzer = dominatorAnalyzer;
+            DominatorAnalyzerLegacyAdapter analyzer = dominatorAnalyzer;
 
             var context = new AnalysisContext
             {
@@ -160,19 +161,6 @@ public sealed class DominatorAnalyzerExactTreeRealDumpTests(ITestOutputHelper ou
         {
             if (Directory.Exists(scratchCacheDir))
                 Directory.Delete(scratchCacheDir, recursive: true);
-        }
-    }
-
-    /// <summary>Minimal <see cref="ILogger{T}"/> that forwards every log line to xunit's test output.</summary>
-    private sealed class TestOutputLogger<T>(ITestOutputHelper output) : ILogger<T>
-    {
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-        {
-            output.WriteLine($"[{logLevel}] {formatter(state, exception)}" + (exception is null ? "" : $"\n{exception}"));
         }
     }
 }

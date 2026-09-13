@@ -264,6 +264,7 @@ public sealed class DbConnectionAnalyzerRetypingCharacterizationTests
         public bool TryGetImmediateDominator(ulong address, out ulong dominatorAddress) { dominatorAddress = 0; return false; }
         public bool TryGetThreadRetainedSize(uint osThreadId, out ulong retainedBytes) { retainedBytes = 0; return false; }
         public IEnumerable<HeapObjectRef> EnumerateRetainedObjects(ulong rootAddress) => [];
+        public bool TryGetRetainedBytesByType(TypeRef type, out ulong retainedBytes) { retainedBytes = 0; return false; }
     }
 
     private sealed class FakeHeapRootPathQuery : IHeapRootPathQuery
@@ -275,6 +276,22 @@ public sealed class DbConnectionAnalyzerRetypingCharacterizationTests
         {
             searchTruncated = false;
             return _paths.TryGetValue(targetAddress, out formattedPath);
+        }
+
+        public bool TryFindRootPathHops(ulong targetAddress, RootPathSearchOptions options, out string? rootKind, out IReadOnlyList<string>? hopTypeNames, out bool searchTruncated)
+        {
+            rootKind = null;
+            hopTypeNames = null;
+            searchTruncated = false;
+            return false;
+        }
+
+        public bool TryFindRootPathAddresses(ulong targetAddress, RootPathSearchOptions options, out string? rootKind, out IReadOnlyList<ulong>? hopAddresses, out bool searchTruncated)
+        {
+            rootKind = null;
+            hopAddresses = null;
+            searchTruncated = false;
+            return false;
         }
     }
 }

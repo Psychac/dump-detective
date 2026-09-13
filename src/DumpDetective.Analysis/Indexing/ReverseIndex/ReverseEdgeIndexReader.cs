@@ -130,6 +130,28 @@ internal sealed unsafe class ReverseEdgeIndexReader : IDisposable
         });
     }
 
+    /// <summary>
+    /// Lazy per-row counterpart to <see cref="EnumerateChildCounts"/> — same "zero-degree rows are
+    /// skipped" contract, but a true <c>yield return</c> iterator over <see cref="_rows"/>'s row
+    /// range instead of a callback, so a caller needing an <see cref="IEnumerable{T}"/> shape (the
+    /// SDK <c>heap.reverse-references</c> bridge) never has to buffer the whole pass into a list
+    /// first. <see cref="ReverseEdgeDegreeColumn.GetDegree"/> and <see cref="DominatorRowIndex.ReadAddress"/>
+    /// are both direct-indexed reads (no shared enumerator state), so this and
+    /// <see cref="EnumerateChildCounts"/> can coexist as two independent traversal shapes over the
+    /// same underlying columns.
+    /// </summary>
+    public IEnumerable<(ulong Address, int Count)> EnumerateChildAddressesAndCounts()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        for (long row = 0; row < _rows.RowCount; row++)
+        {
+            int count = _rowDirectory.GetDegree(row);
+            if (count > 0)
+                yield return (_rows.ReadAddress(row), count);
+        }
+    }
+
     private static int ReadInt32(byte* basePtr, long offset) => Unsafe.ReadUnaligned<int>(basePtr + offset);
 
     public void Dispose()

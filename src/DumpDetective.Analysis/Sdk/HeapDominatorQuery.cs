@@ -1,5 +1,6 @@
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Identity;
 
 namespace DumpDetective.Analysis.SdkBridge;
 
@@ -38,5 +39,16 @@ internal sealed class HeapDominatorQuery(IDominatorTreeProvider treeProvider, IT
         foreach (ulong address in treeProvider.EnumerateRetainedSet(rootAddress))
             if (objectLookup.TryGetObject(address, out HeapObjectRef obj))
                 yield return obj;
+    }
+
+    public bool TryGetRetainedBytesByType(TypeRef type, out ulong retainedBytes)
+    {
+        if (type.MethodTable is not ulong methodTable)
+        {
+            retainedBytes = 0;
+            return false;
+        }
+
+        return treeProvider.TryGetRetainedBytesByMethodTable(methodTable, out retainedBytes);
     }
 }

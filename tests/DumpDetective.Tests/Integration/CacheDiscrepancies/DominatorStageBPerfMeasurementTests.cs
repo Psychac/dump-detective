@@ -86,12 +86,12 @@ public sealed class DominatorStageBPerfMeasurementTests(ITestOutputHelper output
 
             var cache = new HeapAnalysisCache();
 
-            // DominatorAnalyzer implements both IRequiresReachableGraphIndex and
+            // DominatorAnalyzerLegacyAdapter carries both IRequiresReachableGraphIndex and
             // IRequiresDominatorTreeIndex — its mere presence in activeAnalyzers, combined with
             // enableExactDominatorTree: true, is what flips buildStageB on in
             // DiskBackedObjectIndexWriter.Build's gating (§10.3). Never AnalyzeAsync'd here — only
             // used as a marker-interface flag for the index build.
-            IReadOnlyList<IAnalyzer> activeAnalyzers = new IAnalyzer[] { new DominatorAnalyzer() };
+            IReadOnlyList<IAnalyzer> activeAnalyzers = new IAnalyzer[] { new DominatorAnalyzerLegacyAdapter() };
 
             var indexStopwatch = Stopwatch.StartNew();
             HeapIndexBuildResult result = cache.PrebuildHeapIndex(

@@ -59,7 +59,7 @@ public sealed class DominatorChildIndexRealDumpTests(ITestOutputHelper output)
             // enableExactDominatorTree: true + an IRequiresDominatorTreeIndex analyzer in
             // activeAnalyzers is what flips Stage B on — same requirement
             // DominatorAnalyzerExactTreeRealDumpTests documents.
-            IReadOnlyList<IAnalyzer> activeAnalyzers = [new DominatorAnalyzer()];
+            IReadOnlyList<IAnalyzer> activeAnalyzers = [new DominatorAnalyzerLegacyAdapter()];
             cache.PrebuildHeapIndex(heap, freshDumpPath, CancellationToken.None, progress: null, activeAnalyzers, enableExactDominatorTree: true);
 
             string containerPath = DumpIndexPaths.CacheContainer(freshDumpPath);

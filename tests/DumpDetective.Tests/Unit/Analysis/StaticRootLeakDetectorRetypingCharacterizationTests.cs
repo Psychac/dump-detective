@@ -327,6 +327,8 @@ public sealed class StaticRootLeakDetectorRetypingCharacterizationTests
 
         public IEnumerable<HeapObjectRef> EnumerateRetainedObjects(ulong rootAddress) =>
             _retainedSets.TryGetValue(rootAddress, out List<HeapObjectRef>? objects) ? objects : [];
+
+        public bool TryGetRetainedBytesByType(TypeRef type, out ulong retainedBytes) { retainedBytes = 0; return false; }
     }
 
     private sealed class FakeHeapObjectLookup : IHeapObjectLookup
@@ -376,6 +378,22 @@ public sealed class StaticRootLeakDetectorRetypingCharacterizationTests
         {
             searchTruncated = false;
             return _paths.TryGetValue(targetAddress, out formattedPath);
+        }
+
+        public bool TryFindRootPathHops(ulong targetAddress, RootPathSearchOptions options, out string? rootKind, out IReadOnlyList<string>? hopTypeNames, out bool searchTruncated)
+        {
+            rootKind = null;
+            hopTypeNames = null;
+            searchTruncated = false;
+            return false;
+        }
+
+        public bool TryFindRootPathAddresses(ulong targetAddress, RootPathSearchOptions options, out string? rootKind, out IReadOnlyList<ulong>? hopAddresses, out bool searchTruncated)
+        {
+            rootKind = null;
+            hopAddresses = null;
+            searchTruncated = false;
+            return false;
         }
     }
 

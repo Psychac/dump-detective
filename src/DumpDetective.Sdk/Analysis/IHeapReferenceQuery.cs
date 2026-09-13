@@ -9,6 +9,19 @@ namespace DumpDetective.Sdk.Analysis;
 public interface IHeapReferenceQuery
 {
     IEnumerable<ulong> EnumerateReferences(ulong address);
+
+    /// <summary>
+    /// The name of the instance field on <paramref name="parentAddress"/> that holds a reference to
+    /// <paramref name="childAddress"/>, mirroring <c>ClrObject.EnumerateReferencesWithFields</c> —
+    /// the same ClrMD API SOS's <c>!gcroot</c> draws field names from. Added 2026-09-13 for
+    /// <c>ReferenceChainAnalyzer</c>'s retyping: a narrow, single-pair lookup (not a general
+    /// "enumerate every reference with its field name" surface) because that's the only real need
+    /// so far — resolving the field connecting the last two hops of an already-found root path.
+    /// Returns <c>false</c> (with a <c>null</c> <paramref name="fieldName"/>) when
+    /// <paramref name="parentAddress"/> isn't a valid object, the edge isn't present, or the edge is
+    /// via an array element or dependent handle rather than a named instance field.
+    /// </summary>
+    bool TryGetReferenceFieldName(ulong parentAddress, ulong childAddress, out string? fieldName);
 }
 
 /// <summary>The <c>heap.reverse-references</c> capability — "who points at this object?", mirroring
@@ -41,4 +54,16 @@ public interface IHeapReverseReferenceQuery
     /// <paramref name="address"/> has no recorded parents.
     /// </summary>
     bool TryGetReverseReferences(ulong address, out IReadOnlyList<ulong> parents, out bool truncated);
+
+    /// <summary>
+    /// Every object the reverse index recorded at least one incoming reference for, paired with its
+    /// total incoming-reference count — mirrors <c>IBackwardReferenceProvider.EnumerateChildCounts</c>.
+    /// Added 2026-09-13 for <c>DominatorAnalyzer</c>'s retyping: its primary (index-backed) leak-signal
+    /// pass needs one full sequential scan of the whole reverse index's fan-in counts, a genuinely
+    /// different shape from every prior consumer's per-address lookups
+    /// (<see cref="EnumerateReverseReferences"/>/<see cref="TryGetReverseReferences"/>). Yields nothing
+    /// when no reverse index is available for this session — same "unavailable" convention as the rest
+    /// of this interface.
+    /// </summary>
+    IEnumerable<(ulong Address, int IncomingCount)> EnumerateIncomingReferenceCounts();
 }

@@ -112,5 +112,21 @@ public sealed class TimerLeakAnalyzerLiveHeapTests
             searchTruncated = false;
             return false;
         }
+
+        public bool TryFindRootPathHops(ulong targetAddress, RootPathSearchOptions options, out string? rootKind, out IReadOnlyList<string>? hopTypeNames, out bool searchTruncated)
+        {
+            rootKind = null;
+            hopTypeNames = null;
+            searchTruncated = false;
+            return false;
+        }
+
+        public bool TryFindRootPathAddresses(ulong targetAddress, RootPathSearchOptions options, out string? rootKind, out IReadOnlyList<ulong>? hopAddresses, out bool searchTruncated)
+        {
+            rootKind = null;
+            hopAddresses = null;
+            searchTruncated = false;
+            return false;
+        }
     }
 }

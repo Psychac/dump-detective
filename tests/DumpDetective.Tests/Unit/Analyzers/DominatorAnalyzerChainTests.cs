@@ -1,173 +1,128 @@
-using DumpDetective.Analysis.Analyzers;
+using DumpDetective.Analysis.Analyzers.Leaks;
 using DumpDetective.Analysis.Models;
-using DumpDetective.Core.Abstractions;
-using DumpDetective.Core.Enums;
-using DumpDetective.Core.Models;
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Options;
+using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Identity;
 
 using FluentAssertions;
 
-using Microsoft.Diagnostics.Runtime;
-
 using Xunit;
-using DumpDetective.Analysis.Analyzers.Leaks;
 
 namespace DumpDetective.Tests.Unit.Analyzers;
 
 /// <summary>
 /// P3-3 (docs/analysis/phase1/dominator-analyzer-audit.md): <see cref="DominatorAnalyzer.BuildDominatorChain"/>
-/// walks a fake <see cref="IDominatorTreeProvider"/> exactly like
-/// <see cref="DumpDetective.Tests.Unit.Traversal.Dominator.DominatorRetainedSetAggregatorTests"/> does — it
-/// only ever calls <c>TryGetImmediateDominator</c>/<c>TryGetRetainedBytes</c>, so a plain
-/// address-keyed fixture is enough. <c>heap.GetObject</c> still needs a real <see cref="ClrHeap"/>,
-/// so these attach to the test process's own live heap (same low-cost pattern as
-/// <c>BoundedGraphWalkTests</c>) rather than requiring a real dump.
+/// and its siblings only ever call the SDK <c>heap.dominators</c>/<c>heap.objects</c>/
+/// <c>heap.root-paths</c> capability surfaces, so plain dictionary-backed fakes are enough — no real
+/// or live-attached heap needed, unlike the pre-retyping version of this test file which required a
+/// self-attached live process heap purely to resolve type names.
 /// </summary>
 public sealed class DominatorAnalyzerChainTests
 {
-    private sealed class FakeDominatorTreeProvider(
-        Dictionary<ulong, ulong> idomByAddress, Dictionary<ulong, ulong> retainedByAddress) : IDominatorTreeProvider
+    private sealed class FakeHeapDominatorQuery(
+        Dictionary<ulong, ulong> idomByAddress, Dictionary<ulong, ulong> retainedByAddress) : IHeapDominatorQuery
     {
+        public bool TryGetRetainedSize(ulong address, out ulong retainedBytes) =>
+            retainedByAddress.TryGetValue(address, out retainedBytes);
+
         public bool TryGetImmediateDominator(ulong address, out ulong dominatorAddress) =>
             idomByAddress.TryGetValue(address, out dominatorAddress);
 
-        public bool TryGetRetainedBytes(ulong address, out ulong retainedBytes) =>
-            retainedByAddress.TryGetValue(address, out retainedBytes);
+        public bool TryGetThreadRetainedSize(uint osThreadId, out ulong retainedBytes) => throw new NotSupportedException();
 
-        public IEnumerable<ulong> EnumerateRetainedSet(ulong address) => throw new NotSupportedException();
+        public IEnumerable<HeapObjectRef> EnumerateRetainedObjects(ulong rootAddress) => throw new NotSupportedException();
 
-        public ulong TotalRetainedBytes => throw new NotSupportedException();
+        public bool TryGetRetainedBytesByType(TypeRef type, out ulong retainedBytes) => throw new NotSupportedException();
+    }
 
-        public bool TryGetRetainedBytesByMethodTable(ulong methodTable, out ulong retainedBytes) =>
-            throw new NotSupportedException();
+    private sealed class FakeHeapObjectLookup(Dictionary<ulong, string> typeNamesByAddress) : IHeapObjectLookup
+    {
+        public bool TryGetObject(ulong address, out HeapObjectRef heapObject)
+        {
+            if (!typeNamesByAddress.TryGetValue(address, out string? name))
+            {
+                heapObject = default;
+                return false;
+            }
+
+            heapObject = MakeObject(address, name);
+            return true;
+        }
     }
 
     /// <summary>
     /// Minimal fake for §8b (<see cref="DominatorAnalyzer.ComputeCrossTypeOverlap"/>) — only
-    /// <see cref="EnumerateIndexedEntriesAsTuples"/> is exercised by that method; everything else
-    /// throws, matching <see cref="FakeDominatorTreeProvider"/>'s convention.
+    /// <see cref="EnumerateObjects"/> is exercised by that method.
     /// </summary>
-    private sealed class FakeHeapAnalysisCache(IReadOnlyList<(ulong Address, ulong MethodTable, ulong Size)> entries) : IHeapAnalysisCache
+    private sealed class FakeHeapObjectStream(IReadOnlyList<HeapObjectRef> objects) : IHeapObjectStream
     {
-        public long ObjectScanCount => throw new NotSupportedException();
-        public long CacheHits => throw new NotSupportedException();
-        public long CacheMisses => throw new NotSupportedException();
-        public DumpSizeTier SizeTier => throw new NotSupportedException();
-
-        public HashSet<ulong> GetStaticRootedAddresses(ClrHeap heap) => throw new NotSupportedException();
-        public HashSet<ulong> GetPinnedRootedAddresses(ClrHeap heap) => throw new NotSupportedException();
-        public Dictionary<ulong, (string TypeName, string FieldName, int AppDomainId)> GetStaticFieldsByRootAddress(ClrHeap heap) => throw new NotSupportedException();
-        public bool TryResolveStackFrameOwner(ClrHeap heap, ulong rootAddr, out string ownerType, out string methodName) => throw new NotSupportedException();
-        public Dictionary<string, CachedTypeStatistics> GetOrBuildTypeStatistics(ClrHeap heap) => throw new NotSupportedException();
-        public ulong? GetSampleInstanceAddress(string typeName) => throw new NotSupportedException();
-        public IReadOnlyList<(string RootKind, ulong Address)> GetOrBuildValidRoots(ClrHeap heap) => throw new NotSupportedException();
-        public IReadOnlyList<(string RootKind, ulong TargetAddr, ulong RootAddr)> GetOrBuildRootTriples(ClrHeap heap) => throw new NotSupportedException();
-        public int GetOrCountThreadStackRoots(ClrThread thread, int maxStackRootsToCount) => throw new NotSupportedException();
-        public bool MethodTableHasOutgoingRefs(ClrHeap heap, ulong methodTable) => throw new NotSupportedException();
-        public bool TryGetObjectMetadata(ClrHeap heap, ulong address, out ulong methodTable, out ulong size) => throw new NotSupportedException();
-        public IBackwardReferenceProvider? TryGetReverseIndexProvider() => throw new NotSupportedException();
-        public IForwardReferenceProvider? TryGetForwardIndexProvider() => throw new NotSupportedException();
-        public IReachableAddressProvider? TryGetReachableAddressProvider() => throw new NotSupportedException();
-        public IDominatorTreeProvider? TryGetDominatorTreeProvider() => throw new NotSupportedException();
-        public IThreadRetentionProvider? TryGetThreadRetentionProvider() => throw new NotSupportedException();
-        public long[]? TryGetGlobalSizeBuckets() => throw new NotSupportedException();
-
-        public IReadOnlyList<ulong>? TryGetDistinctMethodTables() => throw new NotSupportedException();
-
-        public IEnumerable<(ulong Address, ulong MethodTable, ulong Size)> EnumerateIndexedEntriesAsTuples() => entries;
+        public IEnumerable<HeapObjectRef> EnumerateObjects() => objects;
     }
 
-    private static ClrHeap GetLiveHeap(out IDisposable dataTarget)
-    {
-        DataTarget target = DataTarget.CreateSnapshotAndAttach(Environment.ProcessId);
-        dataTarget = target;
-        ClrRuntime runtime = target.ClrVersions[0].CreateRuntime();
-        return runtime.Heap;
-    }
-
-    private static ulong FirstValidAddress(ClrHeap heap)
-    {
-        foreach (ClrObject obj in heap.EnumerateObjects())
-        {
-            if (obj.IsValid && obj.Address != 0)
-                return obj.Address;
-        }
-
-        throw new InvalidOperationException("No valid heap object found to anchor the fake dominator tree.");
-    }
+    private static HeapObjectRef MakeObject(ulong address, string typeName) =>
+        new(address, SdkTypeRefFactory.FromName(typeName, null), 0, typeName);
 
     [Fact]
     public void BuildDominatorChain_StopsAtVirtualRoot_OrdersRootFirstLeafLast()
     {
-        ClrHeap heap = GetLiveHeap(out IDisposable dataTarget);
-        using (dataTarget)
-        {
-            ulong leaf = FirstValidAddress(heap);
-            ulong middle = leaf + 8; // synthetic address, never dereferenced as a real object
-            ulong top = leaf + 16;
+        const ulong leaf = 0x1000, middle = 0x1008, top = 0x1010;
+        var idom = new Dictionary<ulong, ulong> { [leaf] = middle, [middle] = top, [top] = 0 };
+        var retained = new Dictionary<ulong, ulong> { [leaf] = 100, [middle] = 500, [top] = 1_000 };
+        var dominators = new FakeHeapDominatorQuery(idom, retained);
+        var objectLookup = new FakeHeapObjectLookup(new Dictionary<ulong, string> { [leaf] = "Leaf", [middle] = "Middle", [top] = "Top" });
 
-            var idom = new Dictionary<ulong, ulong> { [leaf] = middle, [middle] = top, [top] = 0 };
-            var retained = new Dictionary<ulong, ulong> { [leaf] = 100, [middle] = 500, [top] = 1_000 };
-            var provider = new FakeDominatorTreeProvider(idom, retained);
+        IReadOnlyList<DominatorChainHop> chain = DominatorAnalyzer.BuildDominatorChain(objectLookup, dominators, leaf, maxDepth: 64);
 
-            IReadOnlyList<DominatorChainHop> chain = DominatorAnalyzer.BuildDominatorChain(heap, provider, leaf, maxDepth: 64);
-
-            chain.Should().HaveCount(3);
-            chain[0].Address.Should().Be(top);
-            chain[0].RetainedBytes.Should().Be(1_000);
-            chain[1].Address.Should().Be(middle);
-            chain[2].Address.Should().Be(leaf);
-            chain[2].RetainedBytes.Should().Be(100);
-        }
+        chain.Should().HaveCount(3);
+        chain[0].Address.Should().Be(top);
+        chain[0].RetainedBytes.Should().Be(1_000);
+        chain[1].Address.Should().Be(middle);
+        chain[2].Address.Should().Be(leaf);
+        chain[2].RetainedBytes.Should().Be(100);
     }
 
     [Fact]
     public void BuildDominatorChain_UnknownAddress_ReturnsSingleHopChain()
     {
-        ClrHeap heap = GetLiveHeap(out IDisposable dataTarget);
-        using (dataTarget)
-        {
-            ulong leaf = FirstValidAddress(heap);
-            var provider = new FakeDominatorTreeProvider(new(), new());
+        const ulong leaf = 0x1000;
+        var dominators = new FakeHeapDominatorQuery(new(), new());
+        var objectLookup = new FakeHeapObjectLookup(new());
 
-            IReadOnlyList<DominatorChainHop> chain = DominatorAnalyzer.BuildDominatorChain(heap, provider, leaf, maxDepth: 64);
+        IReadOnlyList<DominatorChainHop> chain = DominatorAnalyzer.BuildDominatorChain(objectLookup, dominators, leaf, maxDepth: 64);
 
-            chain.Should().HaveCount(1);
-            chain[0].Address.Should().Be(leaf);
-        }
+        chain.Should().HaveCount(1);
+        chain[0].Address.Should().Be(leaf);
     }
 
     [Fact]
     public void BuildDominatorChain_ExceedsMaxDepth_AppendsSentinelInsteadOfLoopingForever()
     {
-        ClrHeap heap = GetLiveHeap(out IDisposable dataTarget);
-        using (dataTarget)
+        const ulong leaf = 0x1000;
+
+        // Every address dominates the next one indefinitely — an unbounded chain, the exact
+        // pathological shape (e.g. a long linked list) the depth cap exists to guard against.
+        var idom = new Dictionary<ulong, ulong>();
+        var retained = new Dictionary<ulong, ulong>();
+        ulong current = leaf;
+        for (int i = 0; i < 200; i++)
         {
-            ulong leaf = FirstValidAddress(heap);
-
-            // Every address dominates the next one indefinitely — an unbounded chain, the exact
-            // pathological shape (e.g. a long linked list) the depth cap exists to guard against.
-            var idom = new Dictionary<ulong, ulong>();
-            var retained = new Dictionary<ulong, ulong>();
-            ulong current = leaf;
-            for (int i = 0; i < 200; i++)
-            {
-                ulong next = leaf + (ulong)((i + 1) * 8);
-                idom[current] = next;
-                retained[current] = (ulong)i;
-                current = next;
-            }
-
-            var provider = new FakeDominatorTreeProvider(idom, retained);
-
-            const int maxDepth = 10;
-            IReadOnlyList<DominatorChainHop> chain = DominatorAnalyzer.BuildDominatorChain(heap, provider, leaf, maxDepth);
-
-            chain.Should().HaveCount(maxDepth + 1); // maxDepth real hops + one sentinel
-            chain[0].Address.Should().Be(0); // sentinel is root-most after Reverse()
-            chain[0].TypeName.Should().Contain("chain continues");
-            chain[^1].Address.Should().Be(leaf);
+            ulong next = leaf + (ulong)((i + 1) * 8);
+            idom[current] = next;
+            retained[current] = (ulong)i;
+            current = next;
         }
+
+        var dominators = new FakeHeapDominatorQuery(idom, retained);
+        var objectLookup = new FakeHeapObjectLookup(new());
+
+        const int maxDepth = 10;
+        IReadOnlyList<DominatorChainHop> chain = DominatorAnalyzer.BuildDominatorChain(objectLookup, dominators, leaf, maxDepth);
+
+        chain.Should().HaveCount(maxDepth + 1); // maxDepth real hops + one sentinel
+        chain[0].Address.Should().Be(0); // sentinel is root-most after Reverse()
+        chain[0].TypeName.Should().Contain("chain continues");
+        chain[^1].Address.Should().Be(leaf);
     }
 
     [Fact]
@@ -246,11 +201,11 @@ public sealed class DominatorAnalyzerChainTests
     public void WalkInstanceAncestry_ImmediateParentIsDifferentType_ReturnsItAndNoSameTypeAncestor()
     {
         var idom = new Dictionary<ulong, ulong> { [0x300] = 0x100, [0x100] = 0 };
-        var provider = new FakeDominatorTreeProvider(idom, new());
+        var dominators = new FakeHeapDominatorQuery(idom, new());
         var instances = new Dictionary<ulong, string> { [0x100] = "TypeA", [0x300] = "TypeB" };
 
         var (containingTypeName, hasSameTypeAncestor) = DominatorAnalyzer.WalkInstanceAncestry(
-            provider, 0x300, "TypeB", instances, maxDepth: 64);
+            dominators, 0x300, "TypeB", instances, maxDepth: 64);
 
         containingTypeName.Should().Be("TypeA");
         hasSameTypeAncestor.Should().BeFalse();
@@ -262,11 +217,11 @@ public sealed class DominatorAnalyzerChainTests
         // 0x300(TypeB) -> 0x200(TypeB, same type — must be skipped for "containing type", but
         // still marks HasSameTypeAncestor) -> 0x100(TypeA) -> root.
         var idom = new Dictionary<ulong, ulong> { [0x300] = 0x200, [0x200] = 0x100, [0x100] = 0 };
-        var provider = new FakeDominatorTreeProvider(idom, new());
+        var dominators = new FakeHeapDominatorQuery(idom, new());
         var instances = new Dictionary<ulong, string> { [0x200] = "TypeB", [0x100] = "TypeA", [0x300] = "TypeB" };
 
         var (containingTypeName, hasSameTypeAncestor) = DominatorAnalyzer.WalkInstanceAncestry(
-            provider, 0x300, "TypeB", instances, maxDepth: 64);
+            dominators, 0x300, "TypeB", instances, maxDepth: 64);
 
         containingTypeName.Should().Be("TypeA");
         hasSameTypeAncestor.Should().BeTrue();
@@ -279,11 +234,11 @@ public sealed class DominatorAnalyzerChainTests
         // up) -> root. The same-type ancestor sits *beyond* the nearest different-type one — a
         // walk that stopped at the first different-type match would miss it.
         var idom = new Dictionary<ulong, ulong> { [0x300] = 0x200, [0x200] = 0x150, [0x150] = 0 };
-        var provider = new FakeDominatorTreeProvider(idom, new());
+        var dominators = new FakeHeapDominatorQuery(idom, new());
         var instances = new Dictionary<ulong, string> { [0x200] = "TypeA", [0x150] = "TypeB", [0x300] = "TypeB" };
 
         var (containingTypeName, hasSameTypeAncestor) = DominatorAnalyzer.WalkInstanceAncestry(
-            provider, 0x300, "TypeB", instances, maxDepth: 64);
+            dominators, 0x300, "TypeB", instances, maxDepth: 64);
 
         containingTypeName.Should().Be("TypeA");
         hasSameTypeAncestor.Should().BeTrue();
@@ -293,11 +248,11 @@ public sealed class DominatorAnalyzerChainTests
     public void WalkInstanceAncestry_OnlySameTypeAncestorsAllTheWayUp_NoContainingTypeButFlagsSameType()
     {
         var idom = new Dictionary<ulong, ulong> { [0x300] = 0x200, [0x200] = 0 };
-        var provider = new FakeDominatorTreeProvider(idom, new());
+        var dominators = new FakeHeapDominatorQuery(idom, new());
         var instances = new Dictionary<ulong, string> { [0x200] = "TypeB", [0x300] = "TypeB" };
 
         var (containingTypeName, hasSameTypeAncestor) = DominatorAnalyzer.WalkInstanceAncestry(
-            provider, 0x300, "TypeB", instances, maxDepth: 64);
+            dominators, 0x300, "TypeB", instances, maxDepth: 64);
 
         containingTypeName.Should().BeNull();
         hasSameTypeAncestor.Should().BeTrue();
@@ -307,11 +262,11 @@ public sealed class DominatorAnalyzerChainTests
     public void WalkInstanceAncestry_NoInstanceAncestor_ReturnsNullAndFalse()
     {
         var idom = new Dictionary<ulong, ulong> { [0x300] = 0x900, [0x900] = 0 };
-        var provider = new FakeDominatorTreeProvider(idom, new());
+        var dominators = new FakeHeapDominatorQuery(idom, new());
         var instances = new Dictionary<ulong, string> { [0x300] = "TypeB" };
 
         var (containingTypeName, hasSameTypeAncestor) = DominatorAnalyzer.WalkInstanceAncestry(
-            provider, 0x300, "TypeB", instances, maxDepth: 64);
+            dominators, 0x300, "TypeB", instances, maxDepth: 64);
 
         containingTypeName.Should().BeNull();
         hasSameTypeAncestor.Should().BeFalse();
@@ -328,11 +283,11 @@ public sealed class DominatorAnalyzerChainTests
             idom[current] = next;
             current = next;
         }
-        var provider = new FakeDominatorTreeProvider(idom, new());
+        var dominators = new FakeHeapDominatorQuery(idom, new());
         var instances = new Dictionary<ulong, string> { [0x1000] = "TypeB" };
 
         var (containingTypeName, hasSameTypeAncestor) = DominatorAnalyzer.WalkInstanceAncestry(
-            provider, 0x1000, "TypeB", instances, maxDepth: 10);
+            dominators, 0x1000, "TypeB", instances, maxDepth: 10);
 
         containingTypeName.Should().BeNull();
         hasSameTypeAncestor.Should().BeFalse();
@@ -341,12 +296,12 @@ public sealed class DominatorAnalyzerChainTests
     [Fact]
     public void ComputeCrossTypeOverlap_FewerThanTwoCandidates_ReturnsNullWithoutScanning()
     {
-        var provider = new FakeDominatorTreeProvider(new(), new());
-        var cache = new FakeHeapAnalysisCache(Array.Empty<(ulong, ulong, ulong)>());
-        var candidates = new Dictionary<ulong, string> { [0xA1] = "TypeA" };
+        var dominators = new FakeHeapDominatorQuery(new(), new());
+        var heapObjects = new FakeHeapObjectStream(Array.Empty<HeapObjectRef>());
+        var candidateTypeNames = new HashSet<string> { "TypeA" };
 
         (var pairs, bool capped) = DominatorAnalyzer.ComputeCrossTypeOverlap(
-            cache, provider, candidates, new RetentionOptions(), CancellationToken.None);
+            heapObjects, dominators, candidateTypeNames, new RetentionOptions(), CancellationToken.None);
 
         pairs.Should().BeNull();
         capped.Should().BeFalse();
@@ -360,16 +315,12 @@ public sealed class DominatorAnalyzerChainTests
         // contained within the single TypeA instance, and §8c must sum both their retained bytes.
         var idom = new Dictionary<ulong, ulong> { [0x200] = 0x100, [0x300] = 0x100, [0x100] = 0 };
         var retained = new Dictionary<ulong, ulong> { [0x200] = 10, [0x300] = 15 };
-        var provider = new FakeDominatorTreeProvider(idom, retained);
-        var entries = new (ulong, ulong, ulong)[]
-        {
-            (0x100, 0xA1, 20), (0x200, 0xB1, 10), (0x300, 0xB1, 10),
-        };
-        var cache = new FakeHeapAnalysisCache(entries);
-        var candidates = new Dictionary<ulong, string> { [0xA1] = "TypeA", [0xB1] = "TypeB" };
+        var dominators = new FakeHeapDominatorQuery(idom, retained);
+        var heapObjects = new FakeHeapObjectStream([MakeObject(0x100, "TypeA"), MakeObject(0x200, "TypeB"), MakeObject(0x300, "TypeB")]);
+        var candidateTypeNames = new HashSet<string> { "TypeA", "TypeB" };
 
         (var pairs, bool capped) = DominatorAnalyzer.ComputeCrossTypeOverlap(
-            cache, provider, candidates, new RetentionOptions(), CancellationToken.None);
+            heapObjects, dominators, candidateTypeNames, new RetentionOptions(), CancellationToken.None);
 
         capped.Should().BeFalse();
         pairs.Should().ContainSingle();
@@ -388,16 +339,12 @@ public sealed class DominatorAnalyzerChainTests
         // count toward the instance count.
         var idom = new Dictionary<ulong, ulong> { [0x200] = 0x100, [0x300] = 0x200, [0x100] = 0 };
         var retained = new Dictionary<ulong, ulong> { [0x200] = 25, [0x300] = 15 }; // b1's 25 already includes b2's 15
-        var provider = new FakeDominatorTreeProvider(idom, retained);
-        var entries = new (ulong, ulong, ulong)[]
-        {
-            (0x100, 0xA1, 10), (0x200, 0xB1, 10), (0x300, 0xB1, 15),
-        };
-        var cache = new FakeHeapAnalysisCache(entries);
-        var candidates = new Dictionary<ulong, string> { [0xA1] = "TypeA", [0xB1] = "TypeB" };
+        var dominators = new FakeHeapDominatorQuery(idom, retained);
+        var heapObjects = new FakeHeapObjectStream([MakeObject(0x100, "TypeA"), MakeObject(0x200, "TypeB"), MakeObject(0x300, "TypeB")]);
+        var candidateTypeNames = new HashSet<string> { "TypeA", "TypeB" };
 
         (var pairs, _) = DominatorAnalyzer.ComputeCrossTypeOverlap(
-            cache, provider, candidates, new RetentionOptions(), CancellationToken.None);
+            heapObjects, dominators, candidateTypeNames, new RetentionOptions(), CancellationToken.None);
 
         pairs.Should().ContainSingle();
         pairs![0].ContainedInstanceCount.Should().Be(2, "both b1 and b2 are contained within TypeA");
@@ -408,16 +355,12 @@ public sealed class DominatorAnalyzerChainTests
     public void ComputeCrossTypeOverlap_NonCandidateEntriesAreIgnored()
     {
         var idom = new Dictionary<ulong, ulong> { [0x200] = 0x100, [0x100] = 0 };
-        var provider = new FakeDominatorTreeProvider(idom, new());
-        var entries = new (ulong, ulong, ulong)[]
-        {
-            (0x100, 0xA1, 20), (0x200, 0xB1, 10), (0x999, 0xFFFF, 5), // 0xFFFF is not a candidate
-        };
-        var cache = new FakeHeapAnalysisCache(entries);
-        var candidates = new Dictionary<ulong, string> { [0xA1] = "TypeA", [0xB1] = "TypeB" };
+        var dominators = new FakeHeapDominatorQuery(idom, new());
+        var heapObjects = new FakeHeapObjectStream([MakeObject(0x100, "TypeA"), MakeObject(0x200, "TypeB"), MakeObject(0x999, "NotACandidate")]);
+        var candidateTypeNames = new HashSet<string> { "TypeA", "TypeB" };
 
         (var pairs, _) = DominatorAnalyzer.ComputeCrossTypeOverlap(
-            cache, provider, candidates, new RetentionOptions(), CancellationToken.None);
+            heapObjects, dominators, candidateTypeNames, new RetentionOptions(), CancellationToken.None);
 
         pairs.Should().ContainSingle();
         pairs![0].ContainedInstanceCount.Should().Be(1);
@@ -426,28 +369,24 @@ public sealed class DominatorAnalyzerChainTests
     [Fact]
     public void ComputeCrossTypeOverlap_ScanExceedsCap_ReturnsCappedTrue()
     {
-        var provider = new FakeDominatorTreeProvider(new Dictionary<ulong, ulong> { [0] = 0 }, new());
-        var entries = new (ulong, ulong, ulong)[]
-        {
-            (0x100, 0xA1, 20), (0x200, 0xB1, 10), (0x300, 0xB1, 10),
-        };
-        var cache = new FakeHeapAnalysisCache(entries);
-        var candidates = new Dictionary<ulong, string> { [0xA1] = "TypeA", [0xB1] = "TypeB" };
+        var dominators = new FakeHeapDominatorQuery(new(), new());
+        var heapObjects = new FakeHeapObjectStream([MakeObject(0x100, "TypeA"), MakeObject(0x200, "TypeB"), MakeObject(0x300, "TypeB")]);
+        var candidateTypeNames = new HashSet<string> { "TypeA", "TypeB" };
         var options = new RetentionOptions { MaxCrossTypeOverlapInstancesScanned = 2 };
 
         (_, bool capped) = DominatorAnalyzer.ComputeCrossTypeOverlap(
-            cache, provider, candidates, options, CancellationToken.None);
+            heapObjects, dominators, candidateTypeNames, options, CancellationToken.None);
 
         capped.Should().BeTrue();
     }
 
     [Fact]
-    public void ComputeRootChains_NoCandidates_ReturnsNullWithoutTouchingHeapOrCache()
+    public void ComputeRootChains_NoCandidates_ReturnsNullWithoutTouchingRootPaths()
     {
-        // No ClrHeap/IHeapAnalysisCache passed at all — must return before dereferencing either,
-        // same "nothing to do" fast path as ComputeCrossTypeOverlap's fewer-than-two-candidates case.
+        // No IHeapRootPathQuery passed at all — must return before dereferencing it, same
+        // "nothing to do" fast path as ComputeCrossTypeOverlap's fewer-than-two-candidates case.
         IReadOnlyDictionary<string, RootChainSummary>? result = DominatorAnalyzer.ComputeRootChains(
-            heap: null!, cache: null!, candidates: [], new RetentionOptions(), CancellationToken.None);
+            rootPaths: null!, candidates: [], new RetentionOptions(), CancellationToken.None);
 
         result.Should().BeNull();
     }

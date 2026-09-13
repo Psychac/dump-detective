@@ -29,4 +29,15 @@ public interface IBackwardReferenceProvider
     /// one hashed point-lookup per candidate address.
     /// </summary>
     void EnumerateChildCounts(Action<ulong, int, bool> onChild);
+
+    /// <summary>
+    /// Same data as <see cref="EnumerateChildCounts"/>, as a lazy pull sequence instead of a
+    /// callback — added for the SDK <c>heap.reverse-references</c> bridge
+    /// (<c>DumpDetective.Sdk.Analysis.IHeapReferenceQuery.EnumerateIncomingReferenceCounts</c>,
+    /// docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md), which needs an
+    /// <see cref="IEnumerable{T}"/> shape and must not materialize the whole index into memory to
+    /// get one. A true per-row iterator, not <see cref="EnumerateChildCounts"/> buffered into a
+    /// list — see the implementation's own remarks.
+    /// </summary>
+    IEnumerable<(ulong Address, int Count)> EnumerateChildAddressesAndCounts();
 }

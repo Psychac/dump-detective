@@ -326,6 +326,12 @@ public sealed class AsyncTaskAnalyzerRetypingCharacterizationTests
 
         public IEnumerable<ulong> EnumerateReferences(ulong address) =>
             _references.TryGetValue(address, out List<ulong>? targets) ? targets : [];
+
+        public bool TryGetReferenceFieldName(ulong parentAddress, ulong childAddress, out string? fieldName)
+        {
+            fieldName = null;
+            return false;
+        }
     }
 
     private sealed class FakeHeapSegmentQuery : IHeapSegmentQuery

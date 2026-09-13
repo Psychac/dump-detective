@@ -14,7 +14,11 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 /// <summary>
 /// Validates P3-2 of docs/analysis/phase1/module-analyzer-audit.md: heavy modules
 /// (>= HeavyModuleWarningThresholdBytes) carry a bounded, correctly-ordered top-10 type
-/// breakdown resolved against the real dump's ClrMD type names.
+/// breakdown resolved against the real dump's ClrMD type names. Updated 2026-09-13 to construct
+/// <see cref="ModuleAnalyzerLegacyAdapter"/> for the Tier-1+Tier-2 retyping
+/// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md) — this test now exercises
+/// the retyped analyzer's <c>ModuleName</c>-grouped heap-footprint aggregation, which replaced the
+/// pre-retyping <c>ModuleAggregator</c>/<c>ModuleId</c> join.
 /// </summary>
 public sealed class ModuleAnalyzerTopTypesRealDumpTests
 {
@@ -55,7 +59,7 @@ public sealed class ModuleAnalyzerTopTypesRealDumpTests
             AnalysisOptions = options
         };
 
-        using ModuleAnalyzer analyzer = new();
+        using ModuleAnalyzerLegacyAdapter analyzer = new();
         var result = (ModuleDomainResult)await analyzer.AnalyzeAsync(context, CancellationToken.None);
 
         result.TopModulesByHeapMemory.Should().NotBeNull();

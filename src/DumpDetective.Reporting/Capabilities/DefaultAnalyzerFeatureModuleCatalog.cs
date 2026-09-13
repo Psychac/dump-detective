@@ -44,7 +44,9 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         // (segment-capability retyping batch, alongside SegmentReservationAnalyzer) — see
         // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("heap-topology", "Heap Topology Analysis", typeof(HeapTopologyAnalyzerLegacyAdapter), typeof(HeapTopologyFindingGenerator), typeof(HeapTopologyTrendComparer), typeof(HeapTopologySectionBuilder), 150, ["heap"]),
-        Module("module", "Module Analysis", typeof(ModuleAnalyzer), typeof(ModuleFindingGenerator), typeof(ModuleTrendComparer), typeof(ModuleSectionBuilder), 160, ["runtime"]),
+        // ModuleAnalyzerLegacyAdapter, not ModuleAnalyzer directly, since 2026-09-13 -- see
+        // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("module", "Module Analysis", typeof(ModuleAnalyzerLegacyAdapter), typeof(ModuleFindingGenerator), typeof(ModuleTrendComparer), typeof(ModuleSectionBuilder), 160, ["runtime"]),
         // CrashAnalyzerLegacyAdapter, not CrashAnalyzer directly, since 2026-09-12 -- see
         // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("crash", "Crash Analysis", typeof(CrashAnalyzerLegacyAdapter), typeof(CrashFindingGenerator), typeof(CrashTrendComparer), typeof(ExceptionAnalysisSectionBuilder), 170, ["exceptions"]),

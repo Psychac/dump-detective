@@ -2,7 +2,7 @@
 
 ## Status (as of 2026-09-13)
 
-**30 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
+**31 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
 in the tree, not just this doc's own narrative — this doc's original "35" count in the section below
 was an approximation from § 10 point 8's grep-based measurement; the real count is 36). The
 `dump.object-fields` Tier-2 escape hatch **is built** (see "Tier 2 wave" below) — the "still not
@@ -16,15 +16,15 @@ built" language later in this doc is stale as of the pilot, 2026-09-11.
 `LockGraphAnalyzer`, `LohFragmentationAnalyzer`, `MemoryAnalyzer`, `ObjectShapeAnalyzer`,
 `SegmentReservationAnalyzer`, `SqlCommandAnalyzer`, `SqlConnectionPoolAnalyzer`,
 `SqlTransactionAnalyzer`, `StringAnalyzer`, `ThreadAnalyzer`, `ThreadStackClusterAnalyzer`, `TimerLeakAnalyzer`,
-`WcfChannelAnalyzer`, `WeakReferenceAnalyzer`.
+`WcfChannelAnalyzer`, `WeakReferenceAnalyzer`, `ModuleAnalyzer`.
 
-**Remaining (6):**
+**Remaining (5):**
 `DominatorAnalyzer`, `EventLeakAnalyzer`,
-`ModuleAnalyzer`, `ReferenceChainAnalyzer`, `StaticRootLeakDetector`,
+`ReferenceChainAnalyzer`, `StaticRootLeakDetector`,
 and **`LeakCandidateAnalyzer`** —
 explicit user direction: do `LeakCandidateAnalyzer` last of all, since it needs cross-analyzer
 result access (`context.CompletedRunResults`-equivalent) and deferred-execution-ordering modeling
-that don't exist in the SDK yet, on top of everything the other 5 need.
+that don't exist in the SDK yet, on top of everything the other 4 need.
 
 Detailed plan for the two items [phase-1-contracts-sdk.md](phase-1-contracts-sdk.md) leaves
 deferred (`Analysis/`, `Presentation/`) and the ownerless gap recorded at
@@ -1367,7 +1367,69 @@ participants.
   `SmallDumpLatencyBenchmark`, and `BenchmarkSuite1/Program.cs`'s standalone `RunSingleStringAnalyzer`
   debug harness now construct `StringAnalyzerLegacyAdapter`.
 
-Remaining Tier-1+Tier-2 analyzers (6, see "Status" at the top) haven't been started yet.
+**`ModuleAnalyzer`. Done 2026-09-13.** Previously scoped for Batch 8 (2026-09-11) then deferred —
+`dump.object-fields` didn't exist yet, and the doc's own assessment was that this analyzer needs a
+brand-new AppDomain capability domain ("nothing today models AppDomains"). Both blockers resolved
+here: the ALC-name read goes through the now-existing `IDumpObjectFieldQuery.TryReadField` (no new
+Tier-2 primitive needed), and the AppDomain/module surface is folded into `IRuntimeModuleQuery`
+(declared 2026-09-09, zero real consumers until now) rather than a wholly separate capability.
+- **No bespoke scan participant needed at all** — the only analyzer in this wave that doesn't need
+  one. Unlike `StringAnalyzer`/`CrashAnalyzer`/`HangAnalyzer`, nothing here needs data accumulated
+  during a shared heap-index or thread-stack scan pass; every fact comes from `IRuntimeModuleQuery`
+  or the already-available `IHeapTypeStatisticsQuery`. `ModuleAnalyzerLegacyAdapter` is a plain
+  `LegacyAnalyzerAdapter<ModuleAnalyzer>`.
+- **`IRuntimeModuleQuery` redesigned, not just implemented** — same story every zero-consumer
+  stub's first real batch has hit (`IRuntimeJitQuery`/`IHeapHandleQuery`). The shipped shape
+  (`EnumerateModules() -> IEnumerable<ModuleRef>`, an identity-only join key) carried none of the
+  facts a module-inventory report needs. Redesigned around a new `RuntimeModuleInfo` (identity +
+  facts combined in one shape, same as `HeapSegmentRef`/`RuntimeThreadRef` — deliberately not reusing
+  `ModuleRef`, the same `HeapObjectRef.TypeDisplayName`-vs-`TypeRef.CanonicalName` split already
+  established) and a new `AppDomainInfo`. Extended with: `EnumerateAppDomains()`,
+  `EnumerateModules(AppDomainInfo)` (a deliberately separate, non-deduplicated per-domain walk —
+  collapsing it into the address-deduplicated `EnumerateModules()` would silently drop the
+  cross-domain-load signal), `EnumerateDeclaredTypeNames(ulong)` (mirrors
+  `ClrModule.EnumerateTypeDefToMethodTableMap()`, resolved to names — covers types with zero live
+  heap instances, which `IHeapTypeStatisticsQuery` can't enumerate), `TryResolveAssemblyLoadContext`
+  (structural per-module fact: `ClrType.AssemblyLoadContextAddress`/`IsCollectible`, decompile-verified
+  against the installed ClrMD package), and `GetAssemblyReferences` (the one genuinely new dump-only
+  primitive — parses a module's raw ECMA-335 AssemblyRef table via the existing, unchanged
+  `AssemblyRefProbe.TryEnumerateAssemblyRefs`, called dump-side so the SDK layer never sees
+  `IMemoryReader`). New dump-side `RuntimeModuleQuery` (`DumpDetective.Analysis/Sdk/`), wired into
+  `LegacyAnalysisContextTranslator.Translate`'s previously-always-null `RuntimeModules` property.
+- **A real, evidence-backed simplification, not assumed**: the pre-retyping analyzer's per-module
+  heap footprint (`ModuleAggregator`, now deleted) joined a Phase-1 disk-index module registry
+  (`HeapIndexBuildResult.Modules`) against `TypeAggregateIndexEntry` by `ModuleId`. Replaced by
+  grouping `IHeapTypeStatisticsQuery.GetTypeStatistics()` by `HeapTypeStatistics.ModuleName` —
+  confirmed, by reading `TypeAggregateNameResolver.ResolveModuleName` directly, to already resolve
+  to the exact same `Path.GetFileName(ClrType.Module.Name)` normalization the old join produced.
+  This also means the heavy-module top-types breakdown no longer needs a separate
+  method-table-to-name resolution pass: the per-type dictionary's key already *is* the resolved name.
+- **A real bug caught by the real-dump gate, not guessed at**: the first cut gated the heavy-module
+  top-types breakdown on a single type's own `TotalSize` meeting `HeavyModuleWarningThresholdBytes`,
+  instead of the module's own aggregate total across all its types — silently dropping the
+  breakdown for any module whose heaviness comes from many small types rather than one big one
+  (`System.Runtime.Serialization.dll` on the real reference dump). Fixed with a genuine two-pass
+  design (module aggregate totals first, then a second pass collecting per-type entries only for
+  modules that cleared the aggregate threshold), matching the pre-retyping `ModuleAggregator`'s own
+  two-pass shape exactly — caught by the pre-existing `ModuleAnalyzerTopTypesRealDumpTests` (updated
+  to construct `ModuleAnalyzerLegacyAdapter`, not deleted, since it already exercised exactly this
+  feature), not a newly-written test.
+- **Gate met**: new `ModuleAnalyzerRetypingCharacterizationTests` (13 tests, dictionary-backed fakes)
+  — module inventory/dedup, version-conflict vs. unknown-identity-duplicate classification,
+  AssemblyRef mismatch detection, ALC-name resolution via `TryReadField`, AppDomain/cross-domain
+  analysis (including the framework-module exclusion), per-module live-type-count cross-referencing,
+  and a regression test for the two-pass heavy-module gate fix. Pre-existing
+  `ModuleAnalyzerTopTypesRealDumpTests` updated (not deleted) to construct
+  `ModuleAnalyzerLegacyAdapter` — passed in 9s against the real 3.5 GB reference dump after the
+  two-pass fix. New `ModuleAnalyzerRealDumpTests` (`[DiscrepancyFact]`, one dump, foreground)
+  covering module inventory/AppDomains/AssemblyRef audit passed in 8s against the same dump. Full
+  non-real-dump suite (1530 tests) passes.
+- Call sites updated: `DefaultAnalyzerFeatureModuleCatalog`, `FullPipelineBenchmark`,
+  `SmallDumpLatencyBenchmark` now construct `ModuleAnalyzerLegacyAdapter`; `ModuleAnalyzerBenchmark`
+  retargeted at `AnalyzerBenchmarkBase<ModuleAnalyzerLegacyAdapter>` and its `ModuleAggregator.Aggregate`-only
+  benchmark removed along with `ModuleAggregator` itself (dead code once nothing called it).
+
+Remaining Tier-1+Tier-2 analyzers (5, see "Status" at the top) haven't been started yet.
 `LeakCandidateAnalyzer` stays last per explicit direction — it needs cross-analyzer result access
 and deferred-execution-ordering modeling neither this wave nor Tier 1 has built.
 

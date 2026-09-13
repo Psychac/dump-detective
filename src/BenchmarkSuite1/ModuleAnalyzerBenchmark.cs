@@ -1,10 +1,7 @@
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Diagnosers;
-using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
-using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Abstractions;
-using DumpDetective.Core.Options;
 using Microsoft.Diagnostics.Runtime;
 using System;
 using DumpDetective.Analysis.Analyzers.Runtime;
@@ -12,10 +9,17 @@ using DumpDetective.Analysis.Analyzers.Runtime;
 namespace BenchmarkSuite1
 {
     /// <summary>
-    /// Benchmarks for ModuleAnalyzer covering:
-    ///   A) Runtime-only path  — AnalyzeModules without a heap index (no aggregation)
-    ///   B) Full cache path    — AnalyzeAsync with a prebuilt heap index (includes ModuleAggregator)
-    ///   C) Aggregation only   — ModuleAggregator.Aggregate in isolation (no module enumeration)
+    /// Benchmarks for ModuleAnalyzer (retyped to the Tier-1+Tier-2 SDK contract, 2026-09-13 --
+    /// see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md) covering:
+    ///   A) Runtime-only path  — module inventory/AppDomain analysis without a heap index
+    ///   B) Full cache path    — AnalyzeAsync with a prebuilt heap index (includes the
+    ///                           ModuleName-grouped heap-footprint aggregation)
+    ///
+    /// The pre-retyping "ModuleAggregator.Aggregate in isolation" benchmark was removed along with
+    /// ModuleAggregator itself -- the retyped analyzer replaced that ModuleId-joined aggregation with
+    /// grouping IHeapTypeStatisticsQuery.GetTypeStatistics() by ModuleName (see ModuleAnalyzer's own
+    /// remarks), so there's no longer an isolated aggregation step to benchmark separately from
+    /// AnalyzeAsyncFull.
     ///
     /// [MemoryDiagnoser]              — tracks Gen0/1/2 GC collections and managed byte allocations.
     /// [EventPipeProfiler(GcVerbose)] — captures GC events at high fidelity via EventPipe for
@@ -28,7 +32,7 @@ namespace BenchmarkSuite1
     /// </summary>
     [MemoryDiagnoser]
     [EventPipeProfiler(EventPipeProfile.GcVerbose)]
-    public class ModuleAnalyzerBenchmark : AnalyzerBenchmarkBase<ModuleAnalyzer>
+    public class ModuleAnalyzerBenchmark : AnalyzerBenchmarkBase<ModuleAnalyzerLegacyAdapter>
     {
         protected override IHeapAnalysisCache? CreateCache() => new HeapAnalysisCache();
 
@@ -42,8 +46,7 @@ namespace BenchmarkSuite1
         }
 
         /// <summary>
-        /// Runtime-only path: module enumeration + string pooling + conflict detection.
-        /// No heap index involved. Measures the cost of AnalyzeModules in isolation.
+        /// Runtime-only path: module inventory + AppDomain analysis, no heap index involved.
         /// </summary>
         [Benchmark(Baseline = true, Description = "Enumerate modules only (no index)")]
         public object AnalyzeModulesOnly()
@@ -55,9 +58,8 @@ namespace BenchmarkSuite1
         }
 
         /// <summary>
-        /// Full path: AnalyzeAsync with prebuilt heap index.
-        /// Covers module enumeration + ModuleAggregator.Aggregate over TypeAggregateIndexEntry.
-        /// Baseline = false so BDN computes the ratio vs AnalyzeModulesOnly.
+        /// Full path: AnalyzeAsync with a prebuilt heap index, including the ModuleName-grouped
+        /// heap-footprint aggregation. Baseline = false so BDN computes the ratio vs AnalyzeModulesOnly.
         /// </summary>
         [Benchmark(Description = "Full AnalyzeAsync (with heap index + aggregation)")]
         public object AnalyzeAsyncFull()
@@ -67,24 +69,9 @@ namespace BenchmarkSuite1
             return Analyzer.AnalyzeAsync(AnalysisContext, default).GetAwaiter().GetResult();
         }
 
-        /// <summary>
-        /// ModuleAggregator.Aggregate in isolation — measures the cost of folding
-        /// TypeAggregateIndexEntry data into per-module stats (no module enumeration).
-        /// </summary>
-        [Benchmark(Description = "ModuleAggregator.Aggregate only")]
-        public object AggregateOnly()
-        {
-            if (Cache is not HeapAnalysisCache hc || !hc.TryGetHeapIndex(out var index))
-                throw new InvalidOperationException("No heap index available.");
-            if (index.Modules is null)
-                throw new InvalidOperationException("No module registry in index.");
-            return ModuleAggregator.Aggregate(index.TypeAggregates, index.Modules, new ModuleAnalysisOptions());
-        }
-
         protected override void OnCleanup()
         {
             _runtimeNoCacheRef = null;
         }
     }
 }
-

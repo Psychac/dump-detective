@@ -85,7 +85,9 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         // LockGraphAnalyzerLegacyAdapter, not LockGraphAnalyzer directly, since 2026-09-11 (thread-
         // domain quartet Batch 1) — see docs/refactor/modularity/phase-1-thread-quartet-plan.md.
         Module("lock-graph", "Lock Graph Analysis", typeof(LockGraphAnalyzerLegacyAdapter), typeof(LockGraphFindingGenerator), typeof(LockGraphTrendComparer), typeof(LockGraphSectionBuilder), 320, ["threads", "locks"]),
-        Module("event-leak", "Event Leak Analysis", typeof(EventLeakAnalyzer), typeof(EventLeakFindingGenerator), typeof(EventLeakTrendComparer), typeof(EventLeakSectionBuilder), 330, ["events", "leaks"]),
+        // EventLeakAnalyzerLegacyAdapter, not EventLeakAnalyzer directly, since 2026-09-13 -- see
+        // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("event-leak", "Event Leak Analysis", typeof(EventLeakAnalyzerLegacyAdapter), typeof(EventLeakFindingGenerator), typeof(EventLeakTrendComparer), typeof(EventLeakSectionBuilder), 330, ["events", "leaks"]),
         // FinalizableObjectAnalyzerLegacyAdapter, not FinalizableObjectAnalyzer directly, since
         // 2026-09-12 -- see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("finalizable-object", "Finalizable Object Analysis", typeof(FinalizableObjectAnalyzerLegacyAdapter), typeof(FinalizableObjectFindingGenerator), typeof(FinalizableObjectTrendComparer), typeof(FinalizableObjectSectionBuilder), 340, ["gc"]),

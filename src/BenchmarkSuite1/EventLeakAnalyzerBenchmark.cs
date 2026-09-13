@@ -7,7 +7,7 @@ using DumpDetective.Analysis.Analyzers.Leaks;
 namespace BenchmarkSuite1
 {
     [MemoryDiagnoser]
-    public class EventLeakAnalyzerBenchmark : AnalyzerBenchmarkBase<EventLeakAnalyzer>
+    public class EventLeakAnalyzerBenchmark : AnalyzerBenchmarkBase<EventLeakAnalyzerLegacyAdapter>
     {
         protected override IHeapAnalysisCache? CreateCache() => new DumpDetective.Analysis.Cache.HeapAnalysisCache();
 

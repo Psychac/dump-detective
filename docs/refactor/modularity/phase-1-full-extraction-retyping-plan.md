@@ -2,7 +2,7 @@
 
 ## Status (as of 2026-09-13)
 
-**32 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
+**33 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
 in the tree, not just this doc's own narrative — this doc's original "35" count in the section below
 was an approximation from § 10 point 8's grep-based measurement; the real count is 36). The
 `dump.object-fields` Tier-2 escape hatch **is built** (see "Tier 2 wave" below) — the "still not
@@ -16,15 +16,16 @@ built" language later in this doc is stale as of the pilot, 2026-09-11.
 `LockGraphAnalyzer`, `LohFragmentationAnalyzer`, `MemoryAnalyzer`, `ObjectShapeAnalyzer`,
 `SegmentReservationAnalyzer`, `SqlCommandAnalyzer`, `SqlConnectionPoolAnalyzer`,
 `SqlTransactionAnalyzer`, `StringAnalyzer`, `ThreadAnalyzer`, `ThreadStackClusterAnalyzer`, `TimerLeakAnalyzer`,
-`WcfChannelAnalyzer`, `WeakReferenceAnalyzer`, `ModuleAnalyzer`, `StaticRootLeakDetector`.
+`WcfChannelAnalyzer`, `WeakReferenceAnalyzer`, `ModuleAnalyzer`, `StaticRootLeakDetector`,
+`EventLeakAnalyzer`.
 
-**Remaining (4):**
-`DominatorAnalyzer`, `EventLeakAnalyzer`,
+**Remaining (3):**
+`DominatorAnalyzer`,
 `ReferenceChainAnalyzer`,
 and **`LeakCandidateAnalyzer`** —
 explicit user direction: do `LeakCandidateAnalyzer` last of all, since it needs cross-analyzer
 result access (`context.CompletedRunResults`-equivalent) and deferred-execution-ordering modeling
-that don't exist in the SDK yet, on top of everything the other 3 need.
+that don't exist in the SDK yet, on top of everything the other 2 need.
 
 Detailed plan for the two items [phase-1-contracts-sdk.md](phase-1-contracts-sdk.md) leaves
 deferred (`Analysis/`, `Presentation/`) and the ownerless gap recorded at
@@ -1486,6 +1487,68 @@ retyping regression — it does not fix the bug or its perf prerequisite.
   `SmallDumpLatencyBenchmark` now construct `StaticRootLeakDetectorLegacyAdapter`;
   `StaticRootLeakDetectorBenchmark` retargeted at
   `AnalyzerBenchmarkBase<StaticRootLeakDetectorLegacyAdapter>`.
+
+**`EventLeakAnalyzer`. Done 2026-09-13.** By far the largest batch in the wave (~3,000 lines
+pre-retyping across `EventLeakAnalyzer.cs`, `EventLeakFastScanner.cs`, and six
+`Analyzers/Leaks/EventLeak/*.cs` helpers) — its hot scan path deliberately reads delegate
+`_target`/`_invocationList` fields via raw `IMemoryReader.ReadPointer(address + precomputedOffset, ...)`
+rather than named-field lookups, specifically to avoid ClrMD overhead the source's own history
+documents as a real, measured regression (a scope-widening mistake once pushed
+`PublisherRegistry.Build` from ~22.8s to ~48s on the 3.3GB reference dump; that build is documented
+as ~57% of wall time on a 25.6GB dump).
+- **Everything scan-and-detail-building stays dump-side, unchanged, in a bespoke serial
+  `IHeapIndexScanParticipant`** (`EventLeakAnalyzerLegacyAdapter` — not
+  `IParallelHeapIndexScanParticipant`; the pre-retyping analyzer never parallelized this scan
+  either, genuinely simpler to port than `StringAnalyzer`/`CrashAnalyzer`/`HangAnalyzer` in that one
+  respect). `PublisherRegistry`, `EventLeakFastScanner`, `DelegateChainWalker`,
+  `FieldBackedDelegateShape`, `EventNameResolver`, `DelegateLayoutDiscovery`, `BuildRootHintMap`,
+  `SweepRegistryStatics`, `CreateLeakInfo`, and every delegate-chain/subscriber-resolution helper
+  ported essentially verbatim. Retargeting this path onto the Tier-2
+  `IDumpObjectFieldQuery.TryReadField` (named-field, per-call `ClrType.GetFieldByName` resolution)
+  would very likely have reintroduced exactly the class of regression this project already hit and
+  fixed twice (`BoxingAnalyzer`, `CollectionAnalyzer`) — deliberately not attempted.
+- **The retyped inner `Sdk.Analysis.EventLeakAnalyzer` needed zero brand-new Tier-2 primitives** —
+  the adapter hands it a finished `List<EventGroupInfo>` (already-resolved subscriber type/method
+  names, disposal state, root hints — Core.Models POCOs with no ClrMD dependency, the natural
+  hand-off boundary) plus scalar scan counts via a new `EventLeakAnalyzerOptions` wrapper (mirrors
+  `CrashAnalyzerOptions`/`StringAnalyzerOptions`). The inner analyzer does only the capability-light
+  tail: retained-bytes backfill via the already-existing `IHeapDominatorQuery.TryGetRetainedSize`,
+  average-size-per-type via `IHeapTypeStatisticsQuery.GetTypeStatistics()` (replacing
+  `IHeapAnalysisCache.GetOrBuildTypeStatistics`/`BuildTypeSizeMap` directly), root-path evidence via
+  `IHeapRootPathQuery.TryFindRootPath` (replacing `RootPathFinder`/`ReferenceGraph`/
+  `cache.GetOrBuildValidRoots` — same retarget every prior batch's evidence search made), severity
+  scoring, correlation folds, and `EventLeakDomainResult` assembly — the same "adapter accumulates
+  real data, hands its inner analyzer the finished result" shape `HangAnalyzer`'s own retyping
+  established, applied at a larger scale here since more of this analyzer's own logic (not just
+  field reads) is genuinely dump-side-shaped.
+- **Dropped, confirmed dead by search, not assumed**: `HasDelegateFields(ClrType)`,
+  `MergeAccumulatorEntry`, and `IsFieldBackedDelegate` — zero callers anywhere in the codebase even
+  before this retyping. `AddFindings` (an `InsightFinding` builder) was likewise dead — defined but
+  never invoked from `AnalyzeAsync` or anywhere else.
+- **Mechanical port verified by re-running every pre-existing test unchanged in place, not just
+  compiling**: `EventLeakAnalyzerAccuracyTests` (90 EventLeak-area tests total, including
+  `PublisherRegistryTests`/`EventLeakTrendComparerTests`/`EventLeakFindingGeneratorTests`/
+  `EventLeakSectionBuilderTests`) reference dozens of static helpers by name
+  (`CalculateSeverity`/`GroupAccumulator`/`AddToAccumulator`/`LooksLikeEventFieldName`/
+  `GetSubscriberCountBucketIndex`/`SubscriberCountHistogramBuckets`/`ParseRootPublisher`/
+  `BuildEventNameSet` moved to the adapter; `BuildSubscriberCountHistogram`/
+  `BuildTopHandlerMethodsAcrossGroups`/`BuildTopSubscriberTypesAcrossGroups`/
+  `EstimateGroupRetainedBytes`/`IsTimerEvent`/`IsPropertyChangedEvent` stayed on the inner analyzer)
+  — updating each test call site to its new home, all 90 passed unchanged, giving real confidence
+  the mechanical split preserved behavior exactly, not just compiled.
+- **Gate met**: new `EventLeakAnalyzerRetypingCharacterizationTests` (5 tests) covering only what's
+  genuinely new (the capability-driven entry point, the dominator-vs-type-size-map backfill, the
+  root-path evidence retarget) — the pre-existing accuracy-test suite already covers the pure logic
+  exhaustively. New `EventLeakAnalyzerRealDumpTests` (`[DiscrepancyFact]`, one dump, foreground) —
+  the single highest-value real-dump gate in this batch given the documented perf history — passed
+  in 21s against the real 3.5 GB reference dump, well within every other batch's sub-30s baseline,
+  confirming the hot-path-stays-dump-side design didn't reintroduce the historical regression.
+  Pre-existing `PublisherRegistryTests` (6 tests, real-dump) re-ran standalone afterward, still
+  passing (~1m26s total — unchanged from its own historical cost, since `PublisherRegistry.cs`
+  itself was untouched). Full non-real-dump suite (1547 tests) passes.
+- Call sites updated: `DefaultAnalyzerFeatureModuleCatalog`, `FullPipelineBenchmark`,
+  `SmallDumpLatencyBenchmark` now construct `EventLeakAnalyzerLegacyAdapter`;
+  `EventLeakAnalyzerBenchmark` retargeted at `AnalyzerBenchmarkBase<EventLeakAnalyzerLegacyAdapter>`.
 
 Remaining Tier-1+Tier-2 analyzers (3, see "Status" at the top) haven't been started yet.
 `LeakCandidateAnalyzer` stays last per explicit direction — it needs cross-analyzer result access

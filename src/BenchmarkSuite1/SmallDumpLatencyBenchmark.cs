@@ -99,7 +99,7 @@ public class SmallDumpLatencyBenchmark
             new ThreadStackClusterAnalyzerLegacyAdapter(),
             new ThreadAnalyzerLegacyAdapter(),
             new LockGraphAnalyzerLegacyAdapter(),
-            new EventLeakAnalyzer(),
+            new EventLeakAnalyzerLegacyAdapter(),
         }, new FindingGenerationPipeline(Array.Empty<IFindingGenerator>()));
 
         IReadOnlyList<AnalyzerRunResult> results =

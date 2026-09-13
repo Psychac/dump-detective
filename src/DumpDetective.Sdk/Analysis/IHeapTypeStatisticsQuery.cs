@@ -161,7 +161,20 @@ public readonly record struct HeapTypeStatistics(
     /// no-index fallback via a plain name check — a single exact-name comparison, no ClrMD
     /// field/interface metadata walk, so there's no cost reason to gate it behind an index.
     /// </summary>
-    bool IsStringType = false);
+    bool IsStringType = false,
+    /// <summary>
+    /// <c>true</c> for a type deriving from <c>System.MulticastDelegate</c> — mirrors
+    /// <c>TypeAggregateFlags.IsDelegateType</c>. Added 2026-09-13 for <c>LeakCandidateAnalyzer</c>'s
+    /// retyping. Index-backed only, unlike <see cref="IsAsyncStateMachineType"/>/<see cref="IsTaskType"/>'s
+    /// two-path (exact-flag-or-name-pattern) treatment — delegate type names carry no reliable
+    /// lexical signal (an event handler delegate can be named anything), so there's no honest
+    /// no-index fallback to fall back to; this reads as <c>false</c> when
+    /// <see cref="IHeapTypeStatisticsQuery.HasExactGenerationData"/> is <c>false</c>. Its only real
+    /// consumer already hard-gates on that same flag for an unrelated reason (no on-disk index means
+    /// no <c>TypeShapeCache</c> either, which it also needs), so this is never silently wrong in
+    /// practice.
+    /// </summary>
+    bool IsDelegateType = false);
 
 /// <summary>The <c>heap.types</c> capability's aggregate-statistics surface (distinct
 /// <see cref="IHeapObjectStream"/>/<see cref="IHeapObjectLookup"/>, per-object).</summary>

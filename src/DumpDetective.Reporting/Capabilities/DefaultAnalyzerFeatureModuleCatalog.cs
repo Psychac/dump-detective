@@ -56,7 +56,7 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         // AsyncTaskAnalyzerLegacyAdapter, not AsyncTaskAnalyzer directly, since 2026-09-12
         // (Tier-2 wave) -- see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("async-task", "Async Task Analysis", typeof(AsyncTaskAnalyzerLegacyAdapter), typeof(AsyncTaskFindingGenerator), typeof(AsyncTaskTrendComparer), typeof(AsyncAnalysisSectionBuilder), 190, ["async"]),
-        Module("leak-candidate", "Leak Candidate Analysis", typeof(LeakCandidateAnalyzer), typeof(LeakCandidateFindingGenerator), typeof(LeakCandidateTrendComparer), typeof(LeakAnalysisSectionBuilder), 210, ["leaks"]),
+        Module("leak-candidate", "Leak Candidate Analysis", typeof(LeakCandidateAnalyzerLegacyAdapter), typeof(LeakCandidateFindingGenerator), typeof(LeakCandidateTrendComparer), typeof(LeakAnalysisSectionBuilder), 210, ["leaks"]),
         Module("dominator", "Dominator Analysis", typeof(DominatorAnalyzerLegacyAdapter), typeof(DominatorFindingGenerator), typeof(DominatorTrendComparer), typeof(DominatorSectionBuilder), 220, ["retention", "dominator"]),
         // StringAnalyzerLegacyAdapter, not StringAnalyzer directly, since 2026-09-13 -- see
         // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.

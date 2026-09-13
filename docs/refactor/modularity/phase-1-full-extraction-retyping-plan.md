@@ -2,11 +2,12 @@
 
 ## Status (as of 2026-09-13)
 
-**35 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
-in the tree, not just this doc's own narrative — this doc's original "35" count in the section below
-was an approximation from § 10 point 8's grep-based measurement; the real count is 36). The
-`dump.object-fields` Tier-2 escape hatch **is built** (see "Tier 2 wave" below) — the "still not
-built" language later in this doc is stale as of the pilot, 2026-09-11.
+**36 of 36 analyzers retyped — Phase 1's analyzer retyping step is complete** (verified against
+`src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs` in the tree, not just this doc's own
+narrative — this doc's original "35" count in the section below was an approximation from § 10
+point 8's grep-based measurement; the real count is 36). The `dump.object-fields` Tier-2 escape
+hatch **is built** (see "Tier 2 wave" below) — the "still not built" language later in this doc is
+stale as of the pilot, 2026-09-11.
 
 **Done:**
 `AllocationPatternAnalyzer`, `ArrayAnalyzer`, `AsyncStateMachineAnalyzer`, `AsyncTaskAnalyzer`, `BoxingAnalyzer`,
@@ -17,16 +18,62 @@ built" language later in this doc is stale as of the pilot, 2026-09-11.
 `SegmentReservationAnalyzer`, `SqlCommandAnalyzer`, `SqlConnectionPoolAnalyzer`,
 `SqlTransactionAnalyzer`, `StringAnalyzer`, `ThreadAnalyzer`, `ThreadStackClusterAnalyzer`, `TimerLeakAnalyzer`,
 `WcfChannelAnalyzer`, `WeakReferenceAnalyzer`, `ModuleAnalyzer`, `StaticRootLeakDetector`,
-`EventLeakAnalyzer`, `DominatorAnalyzer`, `ReferenceChainAnalyzer`.
+`EventLeakAnalyzer`, `DominatorAnalyzer`, `ReferenceChainAnalyzer`, `LeakCandidateAnalyzer`.
 
-**Remaining (1): `LeakCandidateAnalyzer`** — explicit user direction: do it last of all, since it
-needs cross-analyzer result access (`context.CompletedRunResults`-equivalent) and
-deferred-execution-ordering modeling that don't exist in the SDK yet, on top of everything every
-other analyzer needed. It's also the sole remaining consumer of `ReferenceChainAnalyzer`'s
-pre-retyping `TelemetryCounters`/`IsNoisyType`/`IsKnownLeakType` statics — those were ported
-in-place into `LeakCandidateAnalyzer.cs` itself (unchanged behavior) when `ReferenceChainAnalyzer`'s
-retyped form stopped having any ClrMD types to define them against; `IsNoisyType` was redirected to
-the already-identical shared `RootPathSearchSupport.IsNoisyType` instead of duplicating it again.
+**`LeakCandidateAnalyzer`. Done 2026-09-13 — last analyzer in the plan.** The sole remaining
+consumer of `ReferenceChainAnalyzer`'s pre-retyping `TelemetryCounters`/`IsNoisyType`/
+`IsKnownLeakType` statics — those were ported in-place into `LeakCandidateAnalyzer.cs` itself
+(unchanged behavior) when `ReferenceChainAnalyzer`'s retyped form stopped having any ClrMD types to
+define them against; `IsNoisyType` was redirected to the already-identical shared
+`RootPathSearchSupport.IsNoisyType` instead of duplicating it again.
+
+The only analyzer in the whole plan whose defining behavior is cross-*analyzer* correlation, not
+cross-*object* traversal — it detects nothing itself, it re-ranks candidates by combining three
+other analyzers' already-completed results (`GCHandleDomainResult`'s pinned/dependent target types,
+`TimerLeakDomainResult`'s logical timer count, `GCRootDomainResult`'s direct-root lookup). This is
+why it was saved for last: `Sdk.Analysis.AnalysisContext` has no slot for "other analyzers' finished
+results," deliberately — `AnalyzerRunResult`/`AnalyzerDomainResult` live in `Core.Models`, which the
+SDK cannot reference. The real, principled fix
+([phase-4-session-orchestration.md](phase-4-session-orchestration.md)'s dependency-graph
+orchestrator, where nodes declare `Produces`/`Consumes` instead of one "run me last" bucket) is
+Phase 4 and hasn't started (its own risk section calls it "highest behavioral risk in the plan").
+Discussed with the user rather than assumed: proceeded with a stopgap now, explicitly treated as
+forward-compatible with Phase 4 rather than competing with it.
+- **The stopgap**: `LeakCandidateAnalyzerLegacyAdapter` still implements `IDeferredAnalyzer` and
+  still reads `context.CompletedRunResults` exactly as the pre-retyping analyzer did — but does so
+  in an overridden `BuildSdkContext` (same override point `LockGraphAnalyzerLegacyAdapter` uses),
+  extracting only the three specific signals actually consumed into a new
+  `LeakCandidateAnalyzerOptions` record, handed through the existing `AnalyzerOptions` slot. The
+  inner SDK-shaped analyzer has zero knowledge that `CompletedRunResults`/`AnalyzerRunResult` exist.
+  When Phase 4 lands, this adapter-side extraction is replaced by real graph edges, not reworked
+  from scratch.
+- **Reused, no new capability**: `IHeapTypeStatisticsQuery.GetTypeStatistics` replaces the raw
+  `TypeAggregateIndexEntry`/`TypeShapeEntry` dictionary reads (`TotalFields`/`ReferenceFields` from
+  `ObjectShapeAnalyzer`'s batch cover the reference-field-ratio signal); `IHeapRootQuery.EnumerateRoots`
+  replaces `cache.GetStaticRootedAddresses`; `IHeapRootPathQuery.TryFindRootPath` replaces the
+  pre-retyping analyzer's own hand-built `RootPathFinder` for the root-chain fallback search — its
+  formatted-string output already matches this analyzer's own `FormatChain` output exactly, so
+  (unlike `ReferenceChainAnalyzer`) no raw-address overload was needed here.
+- **One narrow SDK addition**: `HeapTypeStatistics.IsDelegateType`, the one `TypeAggregateFlags` bit
+  no prior batch had a real consumer for yet — index-backed only (unlike the two-path exact-flag-or-
+  name-pattern treatment `IsAsyncStateMachineType`/`IsTaskType` get), since delegate type names carry
+  no reliable lexical signal for an honest no-index fallback. Its only real consumer already
+  hard-gates on `HasExactGenerationData` for an unrelated reason, so this is never silently wrong.
+- **Gate met**: new `LeakCandidateAnalyzerRetypingCharacterizationTests` (16 tests, dictionary-backed
+  fakes) covers classification-priority ordering (all 8 `LeakClass` branches), scoring, the
+  exact-index gate, and both root-chain enrichment paths (direct-root shortcut, root-path-search
+  fallback). New `LeakCandidateAnalyzerRealDumpTests` (`[DiscrepancyFact]`, one dump, foreground) is
+  the one real-dump test in this whole plan whose point isn't the analyzer's own logic — it manually
+  reproduces `AnalysisPipeline`'s two-phase execution (runs `GCHandleAnalyzerLegacyAdapter`/
+  `TimerLeakAnalyzerLegacyAdapter`/`GCRootAnalyzerLegacyAdapter` first, snapshots their results into
+  `CompletedRunResults`, then runs the deferred analyzer) specifically to prove the cross-analyzer
+  extraction works end-to-end, not just against fakes. Passed: 13,884 candidates, real `TimerLeak`
+  classification and real `PinnedHandle`-rooted chains confirmed in the output. Full non-real-dump
+  suite (1576 tests) passes (one unrelated, pre-existing flaky self-attached-heap test reproduced
+  pass in isolation on immediate re-run, not a regression from this batch).
+- Call sites updated: `DefaultAnalyzerFeatureModuleCatalog` now constructs
+  `LeakCandidateAnalyzerLegacyAdapter`. No benchmark referenced this analyzer directly (it was
+  `internal`, so no external benchmark project could construct it either way).
 
 **`ReferenceChainAnalyzer`. Done 2026-09-13.** Same Tier-1-only re-classification as
 `DominatorAnalyzer`'s batch — every ClrMD touch point here is coarse/structural too.

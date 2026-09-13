@@ -1,131 +1,181 @@
 using DumpDetective.Analysis.Analyzers.Infra;
-using DumpDetective.Analysis.Cache;
-using DumpDetective.Analysis.Indexing;
-using DumpDetective.Analysis.Traversal;
-using DumpDetective.Core.Abstractions;
+using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
-using DumpDetective.Core.Options;
-
-using Microsoft.Diagnostics.Runtime;
+using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 
 namespace DumpDetective.Analysis.Analyzers.Leaks;
 
-internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
+/// <summary>
+/// Cross-references per-type heap facts against three other analyzers' already-completed results
+/// (pinned/dependent-handle targets, timer counts, direct GC roots) to score and classify leak
+/// candidates. Unlike every other analyzer in this retyping wave, this one's defining behavior is
+/// cross-*analyzer* correlation, not cross-*object* graph traversal — it detects nothing itself,
+/// it re-ranks what others already found.
+/// </summary>
+/// <remarks>
+/// Tier-1-only, same re-classification as `DominatorAnalyzer`/`ReferenceChainAnalyzer`'s own
+/// batches — every ClrMD touch point here is coarse/structural.
+/// <para>
+/// <b>The cross-analyzer dependency</b> (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md)
+/// is why this was saved for last: <c>Sdk.Analysis.AnalysisContext</c> has no slot for "other
+/// analyzers' finished results" — deliberately, since <c>AnalyzerRunResult</c>/<c>AnalyzerDomainResult</c>
+/// live in <c>Core.Models</c>, which the SDK cannot reference. The real, principled fix
+/// (docs/refactor/modularity/phase-4-session-orchestration.md's dependency-graph orchestrator,
+/// where nodes declare <c>Produces</c>/<c>Consumes</c> instead of a single "run me last" bucket) is
+/// Phase 4 and hasn't started. This retyping doesn't wait for it: <see cref="LeakCandidateAnalyzerLegacyAdapter"/>
+/// still implements <c>IDeferredAnalyzer</c> and still reads <c>context.CompletedRunResults</c> —
+/// exactly as the pre-retyping analyzer did — but does so in <c>BuildSdkContext</c>, extracting only
+/// the three specific signals actually consumed (<c>GCHandleDomainResult</c>'s pinned/dependent
+/// target types, <c>TimerLeakDomainResult</c>'s logical timer count, <c>GCRootDomainResult</c>'s
+/// direct-root lookup) into <see cref="LeakCandidateAnalyzerOptions"/>, handed through the existing
+/// <c>AnalyzerOptions</c> slot. This inner analyzer has zero knowledge that <c>CompletedRunResults</c>
+/// exists — it just reads three plain fields. When Phase 4 lands, this adapter-side extraction is
+/// replaced by real graph edges, not reworked from scratch.
+/// </para>
+/// <para>
+/// <see cref="IHeapTypeStatisticsQuery.GetTypeStatistics"/> replaces the pre-retyping analyzer's own
+/// raw <c>TypeAggregateIndexEntry</c>/<c>TypeShapeEntry</c> dictionary reads — <c>TotalFields</c>/
+/// <c>ReferenceFields</c> (from <c>ObjectShapeAnalyzer</c>'s batch) cover the reference-field-ratio
+/// signal, and <c>IsDelegateType</c> (new — see its own remarks) covers the one
+/// <c>TypeAggregateFlags</c> bit no prior batch had a consumer for yet.
+/// <see cref="IHeapRootQuery.EnumerateRoots"/> replaces <c>cache.GetStaticRootedAddresses</c> — a
+/// filter over already-resolved roots. <see cref="IHeapRootPathQuery.TryFindRootPath"/> replaces
+/// the pre-retyping analyzer's own hand-built <c>RootPathFinder</c> for the root-chain fallback
+/// search — its output shape (<c>"RootKind: Type@0xAddr -&gt; ... -&gt; Type@0xAddr"</c>) already
+/// matches this analyzer's own <c>FormatChain</c> exactly, so no raw-address overload is needed here
+/// the way <c>ReferenceChainAnalyzer</c> needed one.
+/// </para>
+/// <para>
+/// <b>Dropped, not ported</b>: the force-expand predicate this analyzer's own pre-retyping
+/// <c>BuildRootPathFinder</c> wired through <c>ReferenceChainOptions.KnownLeakTypePatterns</c> — same
+/// already-documented hang risk <see cref="IHeapRootPathQuery"/>'s own remarks describe, re-confirmed
+/// (not re-attempted) a third time now. Internal-only telemetry counters dropped too, same as
+/// `ReferenceChainAnalyzer`'s batch — never surfaced in <see cref="LeakCandidateDomainResult"/>.
+/// </para>
+/// </remarks>
+public sealed class LeakCandidateAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
+    public string Name => "Leak Candidate Analysis";
+    public string Category => "Memory";
+    public int Order => 100;
+
+    public AnalyzerDomainResult? LastResult { get; private set; }
+
     // Bounds root-chain enrichment (P3-1/P3-2), not the returned candidate population — matches
     // GCRootAnalyzer.StackOwnerAttributionLimit's precedent: purely cosmetic per-candidate lookup
     // that's too costly to run for every candidate, so scoped to the highest-suspicion ones only.
     private const int RootChainTopN = 20;
 
-    public string Name => "Leak Candidate Analysis";
-    public string Category => "Memory";
-    public int Order => 100;
+    // Same Warning/Critical thresholds TimerLeakFindingGenerator uses, so a candidate only earns
+    // the TimerLeak classification/score boost once the timer analyzer itself considers the count
+    // leak-worthy.
+    private const int TimerLeakWarningThreshold = 100;
+    private const int TimerLeakCriticalThreshold = 250;
 
-    public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Analyze(context.Heap, context.CompletedRunResults, context.Cache, context.AnalysisOptions.ReferenceChain, context.Progress, cancellationToken).Stamp(this));
+
+        IHeapTypeStatisticsQuery typeStatistics = context.HeapTypeStatistics
+            ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.HeapTypes}' capability.");
+        IHeapRootQuery heapRoots = context.HeapRoots
+            ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.HeapRoots}' capability.");
+        IHeapObjectLookup objectLookup = context.HeapObjectLookup
+            ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.HeapObjects}' capability.");
+        IHeapRootPathQuery rootPaths = context.HeapRootPaths
+            ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.HeapRootPaths}' capability.");
+
+        var options = context.AnalyzerOptions as LeakCandidateAnalyzerOptions ?? LeakCandidateAnalyzerOptions.Empty;
+
+        LastResult = Analyze(typeStatistics, heapRoots, objectLookup, rootPaths, options, cancellationToken);
+        return ValueTask.CompletedTask;
     }
 
-    private static AnalyzerDomainResult Analyze(
-        ClrHeap heap,
-        IReadOnlyList<AnalyzerRunResult>? completedRunResults,
-        IHeapAnalysisCache cache,
-        ReferenceChainOptions referenceChainOptions,
-        IProgress<AnalyzerProgressReport>? progress,
+    private static LeakCandidateDomainResult Analyze(
+        IHeapTypeStatisticsQuery typeStatistics,
+        IHeapRootQuery heapRoots,
+        IHeapObjectLookup objectLookup,
+        IHeapRootPathQuery rootPaths,
+        LeakCandidateAnalyzerOptions options,
         CancellationToken cancellationToken)
     {
-        if (cache is not HeapAnalysisCache heapCache || !heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex) || heapIndex is null)
-        {
+        // This analyzer needs the exact per-type index (Gen2 counts, type shape data) and never had
+        // a live-heap fallback pre-retyping — HasExactGenerationData is the same "is a disk index
+        // present" gate the old TryGetHeapIndex check was.
+        if (!typeStatistics.HasExactGenerationData)
             return new LeakCandidateDomainResult(0, [], new Dictionary<LeakClass, int>(), true);
-        }
 
-        Dictionary<string, CachedTypeStatistics> typeStats = cache.GetOrBuildTypeStatistics(heap);
+        IReadOnlyDictionary<string, HeapTypeStatistics> typeStats = typeStatistics.GetTypeStatistics();
         if (typeStats.Count == 0)
             return new LeakCandidateDomainResult(0, [], new Dictionary<LeakClass, int>(), true);
 
-        IReadOnlyDictionary<ulong, TypeAggregateIndexEntry> aggregates = heapIndex.TypeAggregates;
-        IReadOnlyDictionary<ulong, TypeShapeEntry>? shapes = heapIndex.TypeShapeCache;
-
-        HashSet<ulong> staticRoots = cache.GetStaticRootedAddresses(heap);
-
-        // Sourced from the already-completed gc-handle analyzer run rather than re-walking
-        // runtime.EnumerateHandles() here — avoids a second full handle scan for the same signal.
-        GCHandleDomainResult? gcHandleResult = completedRunResults?.GetResult<GCHandleDomainResult>();
-        HashSet<string> pinnedTargetTypes = new(StringComparer.Ordinal);
-        HashSet<string> dependentTargetTypes = new(StringComparer.Ordinal);
-        if (gcHandleResult is not null)
+        var staticRoots = new HashSet<ulong>();
+        foreach (HeapRootRef root in heapRoots.EnumerateRoots())
         {
-            foreach (NameCountEntry entry in gcHandleResult.TopPinnedTargetTypes ?? [])
-                pinnedTargetTypes.Add(entry.Name);
-            foreach (NameCountEntry entry in gcHandleResult.DependentTopTargetTypes ?? [])
-                dependentTargetTypes.Add(entry.Name);
+            if (root.Kind is HeapRootKind.StaticVar or HeapRootKind.ThreadStaticVar)
+                staticRoots.Add(root.TargetAddress);
         }
 
-        // Sourced from the already-completed timer-leak analyzer run — LogicalTimerCount is its
-        // de-duplicated count (TimerQueueTimerCount), not the raw double-counted TotalTimers, so
-        // it's the right magnitude signal to correlate against each timer wrapper type's row here.
-        TimerLeakDomainResult? timerLeakResult = completedRunResults?.GetResult<TimerLeakDomainResult>();
-        int logicalTimerCount = timerLeakResult?.LogicalTimerCount ?? 0;
+        var candidates = new List<LeakCandidateRecord>(Math.Min(typeStats.Count, 128));
+        var byClass = new Dictionary<LeakClass, int>();
+        var sampleAddressByTypeName = new Dictionary<string, ulong>(StringComparer.Ordinal);
 
-        var candidates = new List<LeakCandidateRecord>(Math.Min(aggregates.Count, 128));
-        Dictionary<LeakClass, int> byClass = new();
-
-        foreach ((ulong methodTable, TypeAggregateIndexEntry aggregate) in aggregates)
+        foreach (KeyValuePair<string, HeapTypeStatistics> kv in typeStats)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            ClrType? type = heap.GetTypeByMethodTable(methodTable);
-            if (type?.Name is not string typeName || !typeStats.ContainsKey(typeName))
+            string typeName = kv.Key;
+            HeapTypeStatistics stat = kv.Value;
+            if (stat.SampleAddress == 0)
                 continue;
 
-            ulong sampleAddress = aggregate.SampleAddress;
-            if (sampleAddress == 0)
-                continue;
+            sampleAddressByTypeName[typeName] = stat.SampleAddress;
 
-            TypeShapeEntry shape = shapes is not null && shapes.TryGetValue(methodTable, out TypeShapeEntry foundShape)
-                ? foundShape
-                : default;
-
-            double gen2Pct = aggregate.Count > 0 ? aggregate.Gen2Count * 100.0 / aggregate.Count : 0.0;
-            bool isFinalizable = aggregate.Flags.HasFlag(TypeAggregateFlags.IsFinalizableType);
-            bool isArray = aggregate.Flags.HasFlag(TypeAggregateFlags.IsArrayType);
-            bool isDelegate = aggregate.Flags.HasFlag(TypeAggregateFlags.IsDelegateType);
-            bool isContainer = isArray
+            double gen2Pct = stat.InstanceCount > 0 ? stat.Gen2Count * 100.0 / stat.InstanceCount : 0.0;
+            bool isFinalizable = stat.IsFinalizableType;
+            bool isContainer = stat.IsArray
                 || typeName.Contains("Dictionary", StringComparison.OrdinalIgnoreCase)
                 || typeName.Contains("ConcurrentDictionary", StringComparison.OrdinalIgnoreCase)
                 || typeName.Contains("Cache", StringComparison.OrdinalIgnoreCase)
                 || typeName.Contains("List<", StringComparison.OrdinalIgnoreCase)
                 || typeName.Contains("Queue", StringComparison.OrdinalIgnoreCase);
 
-            double referenceFieldRatio = shape.TotalFields > 0
-                ? shape.RefFields / (double)shape.TotalFields
+            double referenceFieldRatio = stat.TotalFields > 0
+                ? stat.ReferenceFields / (double)stat.TotalFields
                 : 0.0;
+
+            bool isStaticRooted = staticRoots.Contains(stat.SampleAddress);
+            bool isPinned = options.PinnedTargetTypes.Contains(typeName);
+            bool isDependent = options.DependentTargetTypes.Contains(typeName);
 
             LeakClass classification = Classify(
                 typeName,
-                sampleAddress,
-                staticRoots,
-                pinnedTargetTypes,
-                dependentTargetTypes,
+                isStaticRooted,
+                isPinned,
+                isDependent,
                 isFinalizable,
-                isDelegate,
+                stat.IsDelegateType,
                 isContainer,
                 gen2Pct,
-                logicalTimerCount);
+                options.LogicalTimerCount);
 
             int score = Score(
-                aggregate,
+                stat.TotalSize,
+                stat.Gen2Count,
                 gen2Pct,
                 isFinalizable,
-                staticRoots.Contains(sampleAddress),
-                pinnedTargetTypes.Contains(typeName),
-                dependentTargetTypes.Contains(typeName),
+                isStaticRooted,
+                isPinned,
+                isDependent,
                 isContainer,
                 referenceFieldRatio,
                 typeName,
-                logicalTimerCount);
+                stat.IsDelegateType,
+                options.LogicalTimerCount);
+
             FindingSeverity severity = GetSeverity(score);
 
             string? rootKind = classification switch
@@ -143,8 +193,8 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
 
             candidates.Add(new LeakCandidateRecord(
                 TypeName: typeName,
-                TotalSize: aggregate.TotalSize,
-                InstanceCount: aggregate.Count,
+                TotalSize: stat.TotalSize,
+                InstanceCount: stat.InstanceCount,
                 Gen2Pct: gen2Pct,
                 SuspicionScore: score,
                 Severity: severity,
@@ -170,7 +220,7 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
             return StringComparer.Ordinal.Compare(a.TypeName, b.TypeName);
         });
 
-        EnrichTopCandidatesWithRootChains(candidates, heap, cache, completedRunResults, referenceChainOptions, cancellationToken);
+        EnrichTopCandidatesWithRootChains(candidates, objectLookup, rootPaths, sampleAddressByTypeName, options, cancellationToken);
 
         // Complete ranked population, no Top-N cap (§11.2 D5) — the render layer paginates.
         return new LeakCandidateDomainResult(candidates.Count, candidates, byClass, true);
@@ -178,170 +228,60 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
 
     // P3-1/P3-2 (docs/analysis/phase1/gcroot-analyzer-audit.md): genuine root chains for the
     // top-scored candidates, cross-referencing GCRootAnalyzer's already-recorded direct root
-    // targets first (cheap, exact) and falling back to a bounded RootPathFinder BFS — the same
-    // reverse-index-backed search CollectionAnalyzer/DominatorAnalyzer/EventLeakAnalyzer/
-    // ReferenceChainAnalyzer/StaticRootLeakDetector/TimerLeakAnalyzer already use — for candidates
-    // that aren't themselves a direct root target but are reachable from one.
+    // targets first (cheap, exact) and falling back to IHeapRootPathQuery's bounded, reverse-index-
+    // backed search for candidates that aren't themselves a direct root target but are reachable
+    // from one.
     private static void EnrichTopCandidatesWithRootChains(
         List<LeakCandidateRecord> candidates,
-        ClrHeap heap,
-        IHeapAnalysisCache cache,
-        IReadOnlyList<AnalyzerRunResult>? completedRunResults,
-        ReferenceChainOptions referenceChainOptions,
+        IHeapObjectLookup objectLookup,
+        IHeapRootPathQuery rootPaths,
+        Dictionary<string, ulong> sampleAddressByTypeName,
+        LeakCandidateAnalyzerOptions options,
         CancellationToken cancellationToken)
     {
         int topN = Math.Min(candidates.Count, RootChainTopN);
         if (topN == 0)
             return;
 
-        GCRootDomainResult? gcRoot = completedRunResults?.GetResult<GCRootDomainResult>();
-        Dictionary<ulong, RootFinding>? directRootsByTargetAddress = null;
-        if (gcRoot is not null && gcRoot.TopRootsBySeverity.Count > 0)
-        {
-            directRootsByTargetAddress = new Dictionary<ulong, RootFinding>(gcRoot.TopRootsBySeverity.Count);
-            foreach (RootFinding root in gcRoot.TopRootsBySeverity)
-                directRootsByTargetAddress[root.TargetAddress] = root;
-        }
-
-        RootPathFinder? finder = null;
-        IReadOnlyList<(string RootKind, ulong Address)>? roots = null;
+        var searchOptions = new RootPathSearchOptions(
+            options.ReferenceChainOptions.MaxCandidateNodes, options.ReferenceChainOptions.MaxCandidateDepth,
+            options.ReferenceChainOptions.MaxRootExpansionDepth, options.ReferenceChainOptions.LargeFanoutThreshold);
 
         for (int i = 0; i < topN; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             LeakCandidateRecord candidate = candidates[i];
 
-            ulong sampleAddress = default;
-            if (!TryGetSampleAddress(cache, candidate.TypeName, out sampleAddress))
+            if (!sampleAddressByTypeName.TryGetValue(candidate.TypeName, out ulong sampleAddress))
                 continue;
 
-            if (directRootsByTargetAddress is not null && directRootsByTargetAddress.TryGetValue(sampleAddress, out RootFinding? directRoot) && directRoot is not null)
+            if (options.DirectRootsByTargetAddress is not null
+                && options.DirectRootsByTargetAddress.TryGetValue(sampleAddress, out RootFinding? directRoot))
             {
                 string fieldSuffix = directRoot.FieldDescription is not null ? $" {directRoot.FieldDescription}" : string.Empty;
                 candidates[i] = candidate with
                 {
-                    RootChain = $"{directRoot.RootKind}{fieldSuffix} -> {FormatNodeByAddress(heap, sampleAddress)}"
+                    RootChain = $"{directRoot.RootKind}{fieldSuffix} -> {FormatNodeByAddress(objectLookup, sampleAddress)}"
                 };
                 continue;
             }
 
-            finder ??= BuildRootPathFinder(heap, cache, referenceChainOptions, out roots);
-            if (finder is null || roots is null || roots.Count == 0)
-                continue;
-
-            bool found = finder.TryFindAnyRootPath(
-                sampleAddress, roots, out string? rootKind, out List<ulong>? path, out _, out _, out _, cancellationToken);
-
-            if (found && rootKind is not null && path is not null)
-            {
-                candidates[i] = candidate with { RootChain = FormatChain(heap, rootKind, path) };
-            }
+            if (rootPaths.TryFindRootPath(sampleAddress, searchOptions, out string? formattedPath, out _) && formattedPath is not null)
+                candidates[i] = candidate with { RootChain = formattedPath };
         }
     }
 
-    private static bool TryGetSampleAddress(IHeapAnalysisCache cache, string typeName, out ulong sampleAddress)
+    private static string FormatNodeByAddress(IHeapObjectLookup objectLookup, ulong address)
     {
-        sampleAddress = cache.GetSampleInstanceAddress(typeName) ?? 0;
-        return sampleAddress != 0;
-    }
-
-    private static RootPathFinder? BuildRootPathFinder(
-        ClrHeap heap,
-        IHeapAnalysisCache cache,
-        ReferenceChainOptions options,
-        out IReadOnlyList<(string RootKind, ulong Address)> roots)
-    {
-        roots = cache.GetOrBuildValidRoots(heap);
-        if (roots.Count == 0)
-            return null;
-
-        var limits = new RootPathSearchLimits
-        {
-            MaxCandidateNodes = options.MaxCandidateNodes,
-            MaxCandidateDepth = options.MaxCandidateDepth,
-            MaxRootExpansionDepth = options.MaxRootExpansionDepth,
-            LargeFanoutThreshold = options.LargeFanoutThreshold,
-        };
-
-        var provider = new ReferenceGraph(heap);
-        var telemetry = new TelemetryCounters();
-
-        return new RootPathFinder(
-            heap,
-            provider,
-            limits,
-            telemetry.AsProxy(),
-            RootPathSearchSupport.IsNoisyType,
-            type => IsKnownLeakType(type, options.KnownLeakTypePatterns),
-            cache.TryGetReverseIndexProvider(),
-            cache);
-    }
-
-    // Ported in-place from ReferenceChainAnalyzer.cs's own pre-retyping copy (2026-09-13) — that
-    // analyzer's retyped form has no ClrMD dependency left to define these against, and
-    // LeakCandidateAnalyzer (deliberately last in the retyping order — see
-    // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md) still needs them as-is.
-    private static bool IsKnownLeakType(ClrType? type, IReadOnlyList<string> knownLeakPatterns)
-    {
-        if (type is null)
-            return false;
-
-        string? name = type.Name;
-        if (string.IsNullOrEmpty(name))
-            return false;
-
-        foreach (var pattern in knownLeakPatterns)
-        {
-            if (name.Contains(pattern, StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
-
-        return false;
-    }
-
-    // Simple telemetry counters used during a single BuildRootPathFinder-backed search.
-    private sealed class TelemetryCounters
-    {
-        public long PrunedNodes { get; set; }
-        public long LargeFanoutNodesSkipped { get; set; }
-
-        public TelemetryProxy AsProxy() => new(this);
-    }
-
-    private sealed class TelemetryProxy(TelemetryCounters inner) : IPathSearchTelemetry
-    {
-        public void IncrementPruned() => inner.PrunedNodes++;
-        public void IncrementLargeFanout() => inner.LargeFanoutNodesSkipped++;
-    }
-
-    private static string FormatChain(ClrHeap heap, string rootKind, IReadOnlyList<ulong> addresses)
-    {
-        var parts = new List<string>(addresses.Count);
-        for (int i = 0; i < addresses.Count; i++)
-            parts.Add(FormatNodeByAddress(heap, addresses[i]));
-
-        return $"{rootKind}: {string.Join(" -> ", parts)}";
-    }
-
-    private static string FormatNodeByAddress(ClrHeap heap, ulong address)
-    {
-        ClrObject obj = heap.GetObject(address);
-        string typeName = obj.IsValid ? (obj.Type?.Name ?? "?") : "<invalid>";
+        string typeName = objectLookup.TryGetObject(address, out HeapObjectRef obj) ? obj.TypeDisplayName : "<invalid>";
         return $"{typeName}@0x{address:X}";
     }
 
-    // Same Warning/Critical thresholds TimerLeakFindingGenerator uses, so a candidate only earns
-    // the TimerLeak classification/score boost once the timer analyzer itself considers the count
-    // leak-worthy.
-    private const int TimerLeakWarningThreshold = 100;
-    private const int TimerLeakCriticalThreshold = 250;
-
     private static LeakClass Classify(
         string typeName,
-        ulong sampleAddress,
-        HashSet<ulong> staticRoots,
-        HashSet<string> pinnedTargetTypes,
-        HashSet<string> dependentTargetTypes,
+        bool isStaticRooted,
+        bool isPinned,
+        bool isDependent,
         bool isFinalizable,
         bool isDelegate,
         bool isContainer,
@@ -351,13 +291,13 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
         if (typeName.Contains("ThreadLocal", StringComparison.OrdinalIgnoreCase))
             return LeakClass.ThreadLocalLeak;
 
-        if (dependentTargetTypes.Contains(typeName))
+        if (isDependent)
             return LeakClass.DependentHandleLeak;
 
-        if (pinnedTargetTypes.Contains(typeName))
+        if (isPinned)
             return LeakClass.GCHandleRetention;
 
-        if (staticRoots.Contains(sampleAddress))
+        if (isStaticRooted)
             return LeakClass.StaticRetention;
 
         if (logicalTimerCount >= TimerLeakWarningThreshold && TimerLeakAnalyzer.NamedTimerWrapperTypeNames.Contains(typeName))
@@ -376,7 +316,8 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
     }
 
     private static int Score(
-        TypeAggregateIndexEntry aggregate,
+        ulong totalSize,
+        long gen2Count,
         double gen2Pct,
         bool isFinalizable,
         bool isStaticRooted,
@@ -385,15 +326,16 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
         bool isContainer,
         double referenceFieldRatio,
         string typeName,
+        bool isDelegate,
         int logicalTimerCount)
     {
         int score = 0;
 
         if (gen2Pct > 80.0)
             score += 30;
-        if (aggregate.TotalSize > 100UL * 1024 * 1024)
+        if (totalSize > 100UL * 1024 * 1024)
             score += 20;
-        if (isFinalizable && aggregate.Gen2Count > 1000)
+        if (isFinalizable && gen2Count > 1000)
             score += 15;
         if (isStaticRooted)
             score += 10;
@@ -405,7 +347,7 @@ internal sealed class LeakCandidateAnalyzer : IDeferredAnalyzer
             score += 5;
         if (referenceFieldRatio > 0.5)
             score += 5;
-        if (aggregate.Flags.HasFlag(TypeAggregateFlags.IsDelegateType))
+        if (isDelegate)
             score += 5;
         if (TimerLeakAnalyzer.NamedTimerWrapperTypeNames.Contains(typeName))
         {

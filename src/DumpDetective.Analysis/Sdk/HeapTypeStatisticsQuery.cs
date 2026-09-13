@@ -144,7 +144,8 @@ internal sealed class HeapTypeStatisticsQuery(ClrHeap heap, IHeapAnalysisCache c
                 IsTaskCompletionSourceType: isTcsType,
                 ImplementsValueTaskSource: implementsVts,
                 ValueTaskSourceCoreFieldName: vtsCoreFieldName,
-                IsStringType: (e.Flags & TypeAggregateFlags.IsStringType) != 0);
+                IsStringType: (e.Flags & TypeAggregateFlags.IsStringType) != 0,
+                IsDelegateType: (e.Flags & TypeAggregateFlags.IsDelegateType) != 0);
         }
         return result;
     }

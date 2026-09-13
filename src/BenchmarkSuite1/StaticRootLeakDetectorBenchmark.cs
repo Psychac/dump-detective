@@ -7,7 +7,7 @@ using DumpDetective.Analysis.Analyzers.Leaks;
 namespace BenchmarkSuite1
 {
     [MemoryDiagnoser]
-    public class StaticRootLeakDetectorBenchmark : AnalyzerBenchmarkBase<StaticRootLeakDetector>
+    public class StaticRootLeakDetectorBenchmark : AnalyzerBenchmarkBase<StaticRootLeakDetectorLegacyAdapter>
     {
         protected override IHeapAnalysisCache? CreateCache() => new DumpDetective.Analysis.Cache.HeapAnalysisCache();
 

@@ -305,6 +305,8 @@ public sealed class ModuleAnalyzerRetypingCharacterizationTests
         public IReadOnlyList<InstanceFieldDescriptor> EnumerateInstanceFields(ulong address) => [];
         public IReadOnlyList<ThreadStackFrameRef> EnumerateExceptionStackTrace(ulong exceptionAddress, int maxFrames) => [];
 
+        public bool HasDelegateField(ulong address) => false;
+
         public bool TryReadNestedStructField(ulong address, string outerFieldName, string innerFieldName, out FieldValue value)
         {
             value = FieldValue.Null;

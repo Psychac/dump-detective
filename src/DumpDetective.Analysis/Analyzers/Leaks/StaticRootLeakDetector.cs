@@ -1,502 +1,315 @@
-﻿using DumpDetective.Analysis.Cache;
-using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
-using DumpDetective.Analysis.Traversal;
-using DumpDetective.Core.Abstractions;
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
+using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 
-using Microsoft.Diagnostics.Runtime;
+namespace DumpDetective.Analysis.Analyzers.Leaks;
 
-namespace DumpDetective.Analysis.Analyzers.Leaks
+/// <summary>
+/// Detects long-lived objects reachable only through a static field, ranked by exclusive retained
+/// bytes.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>⚠ KNOWN, PRE-EXISTING ACCURACY BUG — this analyzer currently produces zero findings on every
+/// real dump, and this retyping does not fix that.</b> The root cause lives upstream, in
+/// <c>RootIndexWriter</c>/<c>IHeapAnalysisCache.GetStaticRootedAddresses</c> (which
+/// <see cref="Sdk.Analysis.IHeapRootQuery"/>'s dump-side implementation still delegates to): it
+/// filters for <c>ClrRootKind</c> values 9/10, which don't exist in ClrMD 4.0.722401 or 3.1.512801
+/// — statics aren't reported as GC roots at all in ClrMD 3+, only reachable by walking
+/// <c>ClrType.StaticFields</c> per AppDomain. A verified fix exists on branch
+/// <c>fix/static-root-detection</c> (commit <c>4d7e267b</c>) but is deliberately unmerged: switching
+/// this analyzer on for the first time costs ~453s / 63.7 GB allocated on a 3.3 GB dump (uncapped,
+/// per this project's own "no sampling" convention), and that cost needs to be addressed before
+/// merging, not after — see <c>docs/cache/backlog.md</c>'s first entry. This retyping mechanically
+/// ports the analyzer's *consumption* logic onto the SDK capability surface, preserving today's real
+/// (broken) behavior exactly, so it is unblocked and ready the moment the upstream fix lands — it
+/// does not attempt the fix or its prerequisite perf work itself.
+/// </para>
+/// <para>
+/// Tier-1+Tier-2 batch (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md). No
+/// bespoke scan participant needed — like <c>ModuleAnalyzer</c>, this analyzer iterates a bounded
+/// root population (<see cref="IHeapRootQuery.EnumerateRoots"/>), not a heap-index scan.
+/// <see cref="IHeapRootQuery.EnumerateRoots"/>'s <c>HeapRootKind.StaticVar</c> entries, with their
+/// already-resolved <c>OwnerTypeName</c>/<c>FieldName</c>/<c>AppDomainId</c> (built for
+/// <c>GCRootAnalyzer</c>'s Batch 3 retyping), replace the pre-retyping analyzer's own
+/// <c>GetOrBuildRootTriples</c>/<c>GetStaticRootedAddresses</c>/<c>GetStaticFieldsByRootAddress</c>
+/// combined — this analyzer is that surface's second real consumer.
+/// </para>
+/// <para>
+/// <see cref="IHeapDominatorQuery.EnumerateRetainedObjects"/> (new, uncapped — first real consumer)
+/// replaces <c>IDominatorTreeProvider.EnumerateRetainedSet</c> directly for the per-type/namespace
+/// breakdown; <see cref="IHeapDominatorQuery.TryGetRetainedSize"/> (already existed) replaces
+/// <c>TryGetRetainedBytes</c> for the exact total. <see cref="IDumpObjectFieldQuery.HasDelegateField"/>
+/// (new Tier-2 primitive) replaces the pre-retyping analyzer's own <c>HasDelegateFields</c> field
+/// walk. <b>Dropped, not ported</b>: <c>RetainedSizeCandidateSelector.RequiresWalk</c>'s shape
+/// pre-check — the same accepted simplification <c>GCRootAnalyzer</c>'s and <c>MemoryAnalyzer</c>'s
+/// own batches already made for the identical <c>MethodTableHasOutgoingRefs</c> pre-filter: since
+/// <see cref="IHeapDominatorQuery.EnumerateRetainedObjects"/> must stay uncapped anyway, skipping the
+/// pre-check costs at most one trivial single-object iteration for a true leaf root and changes no
+/// output value.
+/// </para>
+/// </remarks>
+public sealed class StaticRootLeakDetector : IAnalyzer, IProducesAnalyzerDomainResult
 {
-    public class StaticRootLeakDetector : IAnalyzer, IRequiresReachableGraphIndex, IRequiresDominatorTreeIndex
+    public string Name => "Static Root Leak Detection";
+    public string Category => "Memory";
+
+    public AnalyzerDomainResult? LastResult { get; private set; }
+
+    private static readonly RootPathSearchOptions RootPathOptions = new(
+        MaxCandidateNodes: 5_000, MaxCandidateDepth: 8, MaxRootExpansionDepth: 12, LargeFanoutThreshold: 100);
+
+    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
-        private readonly record struct ObjectMetadata(bool IsValid, string TypeName, ulong Size, ulong MethodTable);
+        cancellationToken.ThrowIfCancellationRequested();
 
-        // ── Measurement scaffolding: open question in docs/cache/cache-format-clean-slate-redesign.md
-        // §4 — how many times a run actually calls IDominatorTreeProvider.EnumerateRetainedSet, which
-        // is the only production consumer of the persisted dominator child list. That count (not "how
-        // often is a UI opened") is what the aggressive child-list-removal option is gated on: if an
-        // on-demand idom[] inversion replaced the persisted list, it would be built once per run and
-        // reused, so what matters is whether the call ever happens and how large a subtree it walks,
-        // not the count on its own. Recording only — no behaviour change. Set
-        // DD_PERF_RETAINED_SET=1 to print a summary line on Dispose.
-        internal static readonly bool PerfLogRetainedSet =
-            Environment.GetEnvironmentVariable("DD_PERF_RETAINED_SET") == "1";
-        private static long s_shapePreCheckSkips;
-        private static long s_enumerateRetainedSetCalls;
-        private static long s_enumerateRetainedSetObjectsTotal;
-        private static long s_enumerateRetainedSetObjectsMax;
-        private static long s_noTreeProviderFallbacks;
-        private static long s_rootsScanned;
-        private static long s_staticRootedAddressCount;
-        private static long s_allRootsCount;
+        IHeapRootQuery heapRoots = context.HeapRoots
+            ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.HeapRoots}' capability.");
+        IHeapDominatorQuery? dominators = context.HeapDominators;
+        IHeapObjectLookup objectLookup = context.HeapObjectLookup
+            ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.HeapObjects}' capability.");
+        IHeapSegmentQuery segments = context.HeapSegments
+            ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.HeapSegments}' capability.");
+        IHeapRootPathQuery rootPaths = context.HeapRootPaths
+            ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.HeapRootPaths}' capability.");
+        IDumpObjectFieldQuery fields = context.DumpObjectFields
+            ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.DumpObjectFields}' capability.");
+        IHeapTypeStatisticsQuery typeStatistics = context.HeapTypeStatistics
+            ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.HeapTypes}' capability.");
 
-        /// <summary>Writes the recorded call counts as a one-line summary; returns it for tests to assert on.</summary>
-        internal static string DumpRetainedSetTrace()
+        var options = context.AnalyzerOptions as StaticRootLeakAnalysisOptions ?? new StaticRootLeakAnalysisOptions();
+
+        LastResult = Analyze(heapRoots, dominators, objectLookup, segments, rootPaths, fields, typeStatistics, options, cancellationToken);
+        return ValueTask.CompletedTask;
+    }
+
+    private static StaticRootDomainResult Analyze(
+        IHeapRootQuery heapRoots, IHeapDominatorQuery? dominators, IHeapObjectLookup objectLookup, IHeapSegmentQuery segments,
+        IHeapRootPathQuery rootPaths, IDumpObjectFieldQuery fields, IHeapTypeStatisticsQuery typeStatistics,
+        StaticRootLeakAnalysisOptions options, CancellationToken cancellationToken)
+    {
+        List<StaticRootAnalysis> allStaticRootAnalysis = AnalyzeStaticRoots(heapRoots, dominators, objectLookup, segments, fields, cancellationToken);
+
+        StaticRootAnalysis[] significantStaticRoots = allStaticRootAnalysis.Where(a => IsSignificant(a, options)).ToArray();
+
+        StaticRootSnapshot[] topRoots = allStaticRootAnalysis
+            .OrderByDescending(r => r.TotalMemoryImpact)
+            .Select(r => BuildSnapshot(rootPaths, r, cancellationToken))
+            .ToArray();
+
+        ulong totalManagedHeapBytes = GetTotalManagedBytes(typeStatistics);
+
+        if (significantStaticRoots.Length == 0)
+            return new StaticRootDomainResult(0, 0, topRoots, totalManagedHeapBytes);
+
+        ulong totalImpact = 0;
+        foreach (StaticRootAnalysis item in significantStaticRoots)
+            totalImpact += item.TotalMemoryImpact;
+
+        return new StaticRootDomainResult(significantStaticRoots.Length, totalImpact, topRoots, totalManagedHeapBytes);
+    }
+
+    /// <summary>Sum of every type's <c>TotalSize</c> across the whole heap — does not depend on the
+    /// broken static-root-detection path, so it stays a real, verifiable figure even while
+    /// <see cref="RootCount"/>-adjacent fields read zero.</summary>
+    private static ulong GetTotalManagedBytes(IHeapTypeStatisticsQuery typeStatistics)
+    {
+        ulong total = 0;
+        foreach (HeapTypeStatistics entry in typeStatistics.GetTypeStatistics().Values)
+            total += entry.TotalSize;
+        return total;
+    }
+
+    private static StaticRootSnapshot BuildSnapshot(IHeapRootPathQuery rootPaths, StaticRootAnalysis analysis, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        bool found = rootPaths.TryFindRootPath(analysis.DirectObjectAddress, RootPathOptions, out string? formattedPath, out bool searchTruncated);
+        var evidence = new Evidence(
+            analysis.TotalMemoryImpact,
+            found ? formattedPath : null,
+            searchTruncated,
+            [new EvidenceSignal("ObjectsKeptAlive", "Objects kept alive by this root", analysis.ObjectsKeptAlive)]);
+
+        return new StaticRootSnapshot(
+            FormatHelper.TruncateString(analysis.RootDescription, 90),
+            analysis.TotalMemoryImpact,
+            analysis.ObjectsKeptAlive,
+            analysis.DirectObjectType,
+            evidence,
+            analysis.TopRetainedTypes,
+            analysis.ScanWasCapped,
+            analysis.ContainsCollections,
+            analysis.ContainsEventHandlers,
+            analysis.AssemblyLoadContextInfo,
+            analysis.Gen2OrLohRetainedFraction,
+            analysis.TopRetainedNamespaces,
+            analysis.DirectObjectSize);
+    }
+
+    // ClrMD treats Large, Pinned, Frozen segments as gen2-equivalent for collection purposes;
+    // anything at or above Gen2 counts as long-lived retention here.
+    private static bool IsGen2OrLarger(HeapGenerationTag tag) =>
+        tag is HeapGenerationTag.Gen2 or HeapGenerationTag.Loh or HeapGenerationTag.Poh or HeapGenerationTag.Frozen;
+
+    private static bool IsSignificant(StaticRootAnalysis analysis, StaticRootLeakAnalysisOptions options) =>
+        analysis.TotalMemoryImpact >= options.SignificantMemoryThresholdBytes
+        || analysis.ObjectsKeptAlive >= options.SignificantObjectCountThreshold;
+
+    private static List<StaticRootAnalysis> AnalyzeStaticRoots(
+        IHeapRootQuery heapRoots, IHeapDominatorQuery? dominators, IHeapObjectLookup objectLookup, IHeapSegmentQuery segments,
+        IDumpObjectFieldQuery fields, CancellationToken cancellationToken)
+    {
+        var results = new List<StaticRootAnalysis>();
+        var processedRoots = new HashSet<ulong>();
+
+        foreach (HeapRootRef root in heapRoots.EnumerateRoots())
         {
-            long calls = Interlocked.Read(ref s_enumerateRetainedSetCalls);
-            long total = Interlocked.Read(ref s_enumerateRetainedSetObjectsTotal);
-            double avg = calls > 0 ? total / (double)calls : 0.0;
-            return $"[PERF] RetainedSet: allRoots={Interlocked.Read(ref s_allRootsCount):N0}, " +
-                $"staticRootedAddresses={Interlocked.Read(ref s_staticRootedAddressCount):N0}, " +
-                $"rootsScanned={Interlocked.Read(ref s_rootsScanned):N0}, " +
-                $"EnumerateRetainedSet called {calls:N0} times, " +
-                $"{total:N0} objects visited total (avg {avg:N1}/call, max {Interlocked.Read(ref s_enumerateRetainedSetObjectsMax):N0}), " +
-                $"{Interlocked.Read(ref s_shapePreCheckSkips):N0} roots skipped by the shape pre-check, " +
-                $"{Interlocked.Read(ref s_noTreeProviderFallbacks):N0} roots fell back (no tree provider or no retained bytes)";
-        }
+            if (root.Kind != HeapRootKind.StaticVar)
+                continue;
 
-        public string Name => "Static Root Leak Detection";
-        public string Category => "Memory";
+            ulong rootAddress = root.TargetAddress;
+            if (rootAddress == 0 || !processedRoots.Add(rootAddress))
+                continue;
 
-        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
-        {
             cancellationToken.ThrowIfCancellationRequested();
-            StaticRootLeakAnalysisOptions options = context.AnalysisOptions.StaticRootLeakAnalysis;
-            return ValueTask.FromResult(Analyze(context.Heap, context.Cache, options, context.Progress, cancellationToken).Stamp(this));
-        }
 
-        private AnalyzerDomainResult Analyze(ClrHeap heap, IHeapAnalysisCache cache, StaticRootLeakAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
-        {
-            var allStaticRootAnalysis = AnalyzeStaticRoots(heap, cache, options, progress, cancellationToken);
-            var significantStaticRoots = allStaticRootAnalysis
-                .Where(a => IsSignificant(a, options))
-                .ToArray();
+            if (!objectLookup.TryGetObject(rootAddress, out HeapObjectRef rootObj))
+                continue;
 
-            IReadOnlyList<(string RootKind, ulong Address)> validRoots = cache.GetOrBuildValidRoots(heap);
+            int objectsKeptAlive;
+            ulong totalSize;
+            List<RetainedTypeInfo> topRetainedTypes;
+            List<RetainedNamespaceInfo> topRetainedNamespaces;
+            bool containsCollections = false;
+            bool containsEventHandlers = false;
+            double gen2OrLohRetainedFraction;
 
-            var provider = new ReferenceGraph(heap);
-            var limits = new RootPathSearchLimits
+            if (dominators is null || !dominators.TryGetRetainedSize(rootAddress, out totalSize))
             {
-                MaxCandidateNodes = 5_000,
-                MaxCandidateDepth = 8,
-                MaxRootExpansionDepth = 12,
-                LargeFanoutThreshold = 100,
-            };
-            var finder = new RootPathFinder(heap, provider, limits, RootPathSearchSupport.NoOpTelemetry, RootPathSearchSupport.IsNoisyType, static _ => false, cache.TryGetReverseIndexProvider(), cache);
-
-            var topRoots = allStaticRootAnalysis
-                .OrderByDescending(r => r.TotalMemoryImpact)
-                .Select(r => BuildSnapshot(heap, cache, validRoots, finder, r))
-                .ToArray();
-
-            ulong totalManagedHeapBytes = GetTotalManagedBytes(heap, cache);
-
-            if (significantStaticRoots.Length == 0)
-            {
-                return new StaticRootDomainResult(0, 0, topRoots, totalManagedHeapBytes);
+                // No Stage B dominator tree for this session -- shallow size is the only figure
+                // available, matching the pre-retyping analyzer's own no-tree-provider fallback.
+                objectsKeptAlive = 1;
+                totalSize = rootObj.Size;
+                topRetainedTypes = [new RetainedTypeInfo { TypeName = rootObj.TypeDisplayName, Count = 1, TotalSize = rootObj.Size }];
+                topRetainedNamespaces = [new RetainedNamespaceInfo { Namespace = TypeFilterHelper.GetNamespace(rootObj.TypeDisplayName), Count = 1, TotalSize = rootObj.Size }];
+                gen2OrLohRetainedFraction = IsGen2OrLarger(segments.GetGeneration(rootAddress)) ? 1.0 : 0.0;
             }
-
-            ulong totalImpact = 0;
-            foreach (var item in significantStaticRoots)
-                totalImpact += item.TotalMemoryImpact;
-
-            return new StaticRootDomainResult(significantStaticRoots.Length, totalImpact, topRoots, totalManagedHeapBytes);
-        }
-
-        // P2-4 (docs/analysis/phase1/static-root-leak-detector-audit.md): total live managed
-        // bytes, used by the section builder to express static-root retention as a percentage
-        // of the live heap rather than an unanchored absolute byte count.
-        private static ulong GetTotalManagedBytes(ClrHeap heap, IHeapAnalysisCache cache)
-        {
-            if (cache is HeapAnalysisCache concreteCache && concreteCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
+            else
             {
-                ulong total = 0;
-                foreach (var entry in heapIndex.TypeAggregates.Values)
-                    total += entry.TotalSize;
-                return total;
-            }
+                var typeStats = new Dictionary<string, RetainedTypeInfo>(StringComparer.Ordinal);
+                var namespaceStats = new Dictionary<string, RetainedNamespaceInfo>(StringComparer.Ordinal);
+                var namespaceByTypeName = new Dictionary<string, string>(StringComparer.Ordinal);
 
-            ulong totalBytes = 0;
-            foreach (ClrSegment segment in heap.Segments)
-                totalBytes += SegmentKindMapper.GetCommittedBytes(segment);
-            return totalBytes;
-        }
+                int count = 0;
+                ulong gen2OrLohBytes = 0;
 
-        private static StaticRootSnapshot BuildSnapshot(ClrHeap heap, IHeapAnalysisCache cache, IReadOnlyList<(string RootKind, ulong Address)> validRoots, RootPathFinder finder, StaticRootAnalysis analysis)
-        {
-            bool found = finder.TryFindAnyRootPath(analysis.DirectObjectAddress, validRoots, out string? rootKind, out List<ulong>? addresses, out bool searchTruncated, out _, out _);
-            string? rootPath = found ? RootPathSearchSupport.FormatPath(heap, rootKind!, addresses, cache) : null;
-            var evidence = new Evidence(
-                analysis.TotalMemoryImpact,
-                rootPath,
-                searchTruncated,
-                [new EvidenceSignal("ObjectsKeptAlive", "Objects kept alive by this root", analysis.ObjectsKeptAlive)]);
-
-            // P3-4 (docs/analysis/phase1/static-root-leak-detector-audit.md): TotalMemoryImpact is
-            // the inclusive dominator-subtree retained size; DirectObjectSize (the root object's
-            // own shallow size) was already computed but previously dropped here — surfacing both
-            // lets the report show exclusive-vs-inclusive size instead of only the inclusive one.
-            return new StaticRootSnapshot(
-                FormatHelper.TruncateString(analysis.RootDescription, 90),
-                analysis.TotalMemoryImpact,
-                analysis.ObjectsKeptAlive,
-                analysis.DirectObjectType,
-                evidence,
-                analysis.TopRetainedTypes,
-                analysis.ScanWasCapped,
-                analysis.ContainsCollections,
-                analysis.ContainsEventHandlers,
-                analysis.AssemblyLoadContextInfo,
-                analysis.Gen2OrLohRetainedFraction,
-                analysis.TopRetainedNamespaces,
-                analysis.DirectObjectSize);
-        }
-
-        // P2-2 (docs/analysis/phase1/static-root-leak-detector-audit.md): ClrMD treats Large,
-        // Pinned, and Frozen segments as gen2-equivalent for collection purposes, so anything
-        // at or above Generation2 counts as long-lived retention here.
-        private static bool IsGen2OrLarger(ClrHeap heap, ulong address)
-            => SegmentKindMapper.ResolveGeneration(heap, address) >= (int)Generation.Generation2;
-
-        private static bool IsSignificant(StaticRootAnalysis analysis, StaticRootLeakAnalysisOptions options)
-        {
-            return analysis.TotalMemoryImpact > options.SignificantMemoryThresholdBytes
-                || analysis.ObjectsKeptAlive > options.SignificantObjectCountThreshold;
-        }
-
-        private List<StaticRootAnalysis> AnalyzeStaticRoots(ClrHeap heap, IHeapAnalysisCache cache, StaticRootLeakAnalysisOptions options, IProgress<AnalyzerProgressReport>? progress, CancellationToken cancellationToken)
-        {
-            var results = new List<StaticRootAnalysis>();
-            var processedRoots = new HashSet<ulong>();
-            int rootsScanned = 0;
-
-            // OPT-#2: Consume the cached root list instead of calling heap.EnumerateRoots() directly,
-            // which would be a third independent full-dump root walk (cache already performs two:
-            // GetStaticRootedAddresses and GetOrBuildValidRoots). Filter to static roots inline.
-            progress?.Report(new(0, "resolving static roots"));
-            IReadOnlyList<(string RootKind, ulong TargetAddr, ulong RootAddr)> allRoots = cache.GetOrBuildRootTriples(heap);
-            HashSet<ulong> staticRootedAddresses = cache.GetStaticRootedAddresses(heap);
-
-            if (PerfLogRetainedSet)
-            {
-                Interlocked.Add(ref s_allRootsCount, allRoots.Count);
-                Interlocked.Add(ref s_staticRootedAddressCount, staticRootedAddresses.Count);
-            }
-            var staticFieldsByRootAddress = cache.GetStaticFieldsByRootAddress(heap);
-
-            // §12.1 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): null
-            // when Stage B wasn't built for this run — retained-set analysis below degrades to
-            // direct-object-only (ScanWasCapped = true) in that case.
-            IDominatorTreeProvider? treeProvider = cache.TryGetDominatorTreeProvider();
-            var typeNameByMethodTable = new Dictionary<ulong, string>(capacity: 64);
-            var delegateFieldByMethodTable = new Dictionary<ulong, bool>(capacity: 64);
-            var namespaceByTypeName = new Dictionary<string, string>(capacity: 64);
-
-            foreach ((string rootKind, ulong rootAddress, ulong rootStorageAddress) in allRoots)
-            {
-                if (!staticRootedAddresses.Contains(rootAddress))
-                    continue;
-
-                if (rootAddress == 0 || !processedRoots.Add(rootAddress))
-                    continue;
-
-                rootsScanned++;
-                if (PerfLogRetainedSet)
-                    Interlocked.Increment(ref s_rootsScanned);
-                if (rootsScanned % 50 == 0)
-                    progress?.Report(new(rootsScanned, "scanning static roots", $"{results.Count} significant"));
-
-                ObjectMetadata rootMetadata = GetObjectMetadata(heap, rootAddress);
-                if (!rootMetadata.IsValid)
-                    continue;
-
-                int objectsKeptAlive;
-                ulong totalSize;
-                List<RetainedTypeInfo> topRetainedTypes;
-                List<RetainedNamespaceInfo> topRetainedNamespaces;
-                bool scanWasCapped;
-                bool containsCollections;
-                bool containsEventHandlers;
-                double gen2OrLohRetainedFraction;
-
-                // Shape pre-check (docs/analysis/retained-size-candidate-selection.md Phase 4):
-                // a root whose direct object has no reference-typed field anywhere in its field
-                // tree can't reach anything beyond itself, so walking its retained set would only
-                // ever discover the root itself. Skip building it and synthesize the equivalent
-                // single-entry result directly from already-resolved rootMetadata.
-                if (!RetainedSizeCandidateSelector.RequiresWalk(cache, heap, rootMetadata.MethodTable))
+                foreach (HeapObjectRef obj in dominators.EnumerateRetainedObjects(rootAddress))
                 {
-                    if (PerfLogRetainedSet)
-                        Interlocked.Increment(ref s_shapePreCheckSkips);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    count++;
 
-                    objectsKeptAlive = 1;
-                    totalSize = rootMetadata.Size;
-                    topRetainedTypes = new List<RetainedTypeInfo>(1)
-                    {
-                        new RetainedTypeInfo { TypeName = rootMetadata.TypeName, Count = 1, TotalSize = rootMetadata.Size }
-                    };
-                    topRetainedNamespaces = new List<RetainedNamespaceInfo>(1)
-                    {
-                        new RetainedNamespaceInfo { Namespace = TypeFilterHelper.GetNamespace(rootMetadata.TypeName), Count = 1, TotalSize = rootMetadata.Size }
-                    };
-                    scanWasCapped = false;
-                    containsCollections = false;
-                    containsEventHandlers = false;
-                    gen2OrLohRetainedFraction = IsGen2OrLarger(heap, rootAddress) ? 1.0 : 0.0;
-                }
-                else if (treeProvider is not null && treeProvider.TryGetRetainedBytes(rootAddress, out ulong exactTotalSize))
-                {
-                    // §12.1 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md):
-                    // exact retained bytes in O(1); the per-type breakdown below streams the
-                    // dominator subtree's member addresses (no resident Dictionary, unlike the old
-                    // BoundedGraphWalk.CollectRetainedObjects) — every retained object is counted,
-                    // not just the first MaxRetainedObjectsToScan of them.
-                    var typeStats = new Dictionary<string, RetainedTypeInfo>();
-                    var namespaceStats = new Dictionary<string, RetainedNamespaceInfo>();
-                    totalSize = exactTotalSize;
-                    containsCollections = false;
-                    containsEventHandlers = false;
-                    int count = 0;
-                    ulong gen2OrLohBytes = 0;
+                    if (!typeStats.TryGetValue(obj.TypeDisplayName, out RetainedTypeInfo? info))
+                        typeStats[obj.TypeDisplayName] = info = new RetainedTypeInfo { TypeName = obj.TypeDisplayName };
+                    info.Count++;
+                    info.TotalSize += obj.Size;
 
-                    if (PerfLogRetainedSet)
-                        Interlocked.Increment(ref s_enumerateRetainedSetCalls);
+                    if (!namespaceByTypeName.TryGetValue(obj.TypeDisplayName, out string? ns))
+                        namespaceByTypeName[obj.TypeDisplayName] = ns = TypeFilterHelper.GetNamespace(obj.TypeDisplayName);
 
-                    foreach (ulong address in treeProvider.EnumerateRetainedSet(rootAddress))
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        count++;
+                    if (!namespaceStats.TryGetValue(ns, out RetainedNamespaceInfo? nsInfo))
+                        namespaceStats[ns] = nsInfo = new RetainedNamespaceInfo { Namespace = ns };
+                    nsInfo.Count++;
+                    nsInfo.TotalSize += obj.Size;
 
-                        if (!cache.TryGetObjectMetadata(heap, address, out ulong methodTable, out ulong size) || methodTable == 0)
-                            continue;
+                    if (!containsCollections && TypeFilterHelper.IsCollectionType(obj.TypeDisplayName))
+                        containsCollections = true;
 
-                        if (!typeNameByMethodTable.TryGetValue(methodTable, out string? typeName))
-                        {
-                            typeName = heap.GetTypeByMethodTable(methodTable)?.Name ?? StringConstants.UnknownType;
-                            typeNameByMethodTable[methodTable] = typeName;
-                        }
+                    if (!containsEventHandlers && fields.HasDelegateField(obj.Address))
+                        containsEventHandlers = true;
 
-                        if (!typeStats.TryGetValue(typeName, out var info))
-                        {
-                            info = new RetainedTypeInfo { TypeName = typeName };
-                            typeStats[typeName] = info;
-                        }
-
-                        info.Count++;
-                        info.TotalSize += size;
-
-                        // P3-2 (docs/analysis/phase1/static-root-leak-detector-audit.md): namespace
-                        // resolved once per distinct type name (via typeNameByMethodTable above),
-                        // not once per object, so this adds no extra per-object heap/string cost.
-                        if (!namespaceByTypeName.TryGetValue(typeName, out string? ns))
-                        {
-                            ns = TypeFilterHelper.GetNamespace(typeName);
-                            namespaceByTypeName[typeName] = ns;
-                        }
-
-                        if (!namespaceStats.TryGetValue(ns, out var nsInfo))
-                        {
-                            nsInfo = new RetainedNamespaceInfo { Namespace = ns };
-                            namespaceStats[ns] = nsInfo;
-                        }
-
-                        nsInfo.Count++;
-                        nsInfo.TotalSize += size;
-
-                        if (!containsCollections && TypeFilterHelper.IsCollectionType(typeName))
-                            containsCollections = true;
-
-                        if (!containsEventHandlers)
-                            containsEventHandlers = HasDelegateFields(heap, address, methodTable, delegateFieldByMethodTable);
-
-                        if (IsGen2OrLarger(heap, address))
-                            gen2OrLohBytes += size;
-                    }
-
-                    if (PerfLogRetainedSet)
-                    {
-                        Interlocked.Add(ref s_enumerateRetainedSetObjectsTotal, count);
-                        InterlockedMax(ref s_enumerateRetainedSetObjectsMax, count);
-                    }
-
-                    objectsKeptAlive = count;
-                    scanWasCapped = false;
-                    topRetainedTypes = GetTopRetainedTypes(typeStats);
-                    topRetainedNamespaces = GetTopRetainedNamespaces(namespaceStats);
-                    gen2OrLohRetainedFraction = totalSize > 0 ? gen2OrLohBytes / (double)totalSize : 0.0;
-                }
-                else
-                {
-                    if (PerfLogRetainedSet)
-                        Interlocked.Increment(ref s_noTreeProviderFallbacks);
-
-                    // Dominator tree unavailable for this run (Stage B not built, or this root
-                    // wasn't reachable when the tree was built) — no exact retained-set analysis
-                    // possible; report the direct object only rather than guess.
-                    objectsKeptAlive = 1;
-                    totalSize = rootMetadata.Size;
-                    topRetainedTypes = new List<RetainedTypeInfo>(1)
-                    {
-                        new RetainedTypeInfo { TypeName = rootMetadata.TypeName, Count = 1, TotalSize = rootMetadata.Size }
-                    };
-                    topRetainedNamespaces = new List<RetainedNamespaceInfo>(1)
-                    {
-                        new RetainedNamespaceInfo { Namespace = TypeFilterHelper.GetNamespace(rootMetadata.TypeName), Count = 1, TotalSize = rootMetadata.Size }
-                    };
-                    scanWasCapped = true;
-                    containsCollections = false;
-                    containsEventHandlers = false;
-                    gen2OrLohRetainedFraction = IsGen2OrLarger(heap, rootAddress) ? 1.0 : 0.0;
+                    if (IsGen2OrLarger(segments.GetGeneration(obj.Address)))
+                        gen2OrLohBytes += obj.Size;
                 }
 
-                string? alcInfo = null;
-                string rootDescription;
-
-                // P3-1 (docs/analysis/phase1/static-root-leak-detector-audit.md): rootKind already
-                // distinguishes ClrRootKind.ThreadStaticVar from ClrRootKind.StaticVar (see
-                // RootIndexReader.KindToString) — no extra ThreadStaticFields walk needed to flag it.
-                bool isThreadStatic = string.Equals(rootKind, "ThreadStaticVar", StringComparison.Ordinal);
-
-                if (staticFieldsByRootAddress.TryGetValue(rootStorageAddress, out (string FieldOwnerType, string FieldName, int AppDomainId) fieldInfo))
-                {
-                    rootDescription = $"{fieldInfo.FieldOwnerType}.{fieldInfo.FieldName}";
-                    if (fieldInfo.AppDomainId != 1)
-                    {
-                        alcInfo = $"AppDomain#{fieldInfo.AppDomainId}";
-                        rootDescription += $" [{alcInfo}]";
-                    }
-                    if (isThreadStatic)
-                        rootDescription += " [ThreadStatic]";
-                }
-                else
-                {
-                    rootDescription = isThreadStatic
-                        ? $"[ThreadStatic] @ 0x{rootAddress:X}"
-                        : $"{rootKind} @ 0x{rootAddress:X}";
-                }
-
-                var analysis = new StaticRootAnalysis
-                {
-                    RootDescription = rootDescription,
-                    DirectObjectAddress = rootAddress,
-                    DirectObjectType = rootMetadata.TypeName,
-                    DirectObjectSize = rootMetadata.Size,
-                    TotalMemoryImpact = totalSize,
-                    ObjectsKeptAlive = objectsKeptAlive,
-                    TopRetainedTypes = topRetainedTypes,
-                    TopRetainedNamespaces = topRetainedNamespaces,
-                    ContainsCollections = containsCollections,
-                    ContainsEventHandlers = containsEventHandlers,
-                    ScanWasCapped = scanWasCapped,
-                    AssemblyLoadContextInfo = alcInfo,
-                    Gen2OrLohRetainedFraction = gen2OrLohRetainedFraction
-                };
-
-                results.Add(analysis);
+                objectsKeptAlive = count;
+                topRetainedTypes = GetTopRetainedTypes(typeStats);
+                topRetainedNamespaces = GetTopRetainedNamespaces(namespaceStats);
+                gen2OrLohRetainedFraction = totalSize > 0 ? gen2OrLohBytes / (double)totalSize : 0.0;
             }
 
-            if (PerfLogRetainedSet)
-                Console.Error.WriteLine(DumpRetainedSetTrace());
+            string? alcInfo = null;
+            string rootDescription;
 
-            return results;
-        }
-
-        /// <summary>Interlocked running-max — there is no built-in for this shape.</summary>
-        private static void InterlockedMax(ref long location, long candidate)
-        {
-            long observed = Interlocked.Read(ref location);
-            while (candidate > observed)
+            if (root.OwnerTypeName is not null && root.FieldName is not null)
             {
-                long prior = Interlocked.CompareExchange(ref location, candidate, observed);
-                if (prior == observed)
-                    return;
-                observed = prior;
-            }
-        }
-
-        private List<RetainedTypeInfo> GetTopRetainedTypes(Dictionary<string, RetainedTypeInfo> typeStats)
-        {
-            // Manual sorting - no LINQ allocations. Full list — the section builder paginates.
-            var result = new List<RetainedTypeInfo>(typeStats.Values);
-            result.Sort((a, b) => b.TotalSize.CompareTo(a.TotalSize));
-            return result;
-        }
-
-        private List<RetainedNamespaceInfo> GetTopRetainedNamespaces(Dictionary<string, RetainedNamespaceInfo> namespaceStats)
-        {
-            // Manual sorting - no LINQ allocations. Full list — the section builder paginates.
-            var result = new List<RetainedNamespaceInfo>(namespaceStats.Values);
-            result.Sort((a, b) => b.TotalSize.CompareTo(a.TotalSize));
-            return result;
-        }
-
-        private static ObjectMetadata GetObjectMetadata(ClrHeap heap, ulong address)
-        {
-            if (address == 0)
-                return new ObjectMetadata(false, StringConstants.UnknownType, 0, 0);
-
-            ClrObject obj = heap.GetObject(address);
-            if (!obj.IsValid)
-                return new ObjectMetadata(false, StringConstants.UnknownType, 0, 0);
-
-            return new ObjectMetadata(true, obj.Type?.Name ?? StringConstants.UnknownType, obj.Size, obj.Type?.MethodTable ?? 0);
-        }
-
-        private static bool HasDelegateFields(ClrHeap heap, ulong address, ulong methodTable, Dictionary<ulong, bool> delegateFieldByMethodTable)
-        {
-            if (address == 0)
-                return false;
-
-            if (methodTable != 0 && delegateFieldByMethodTable.TryGetValue(methodTable, out bool cached))
-                return cached;
-
-            ClrObject obj = heap.GetObject(address);
-            if (!obj.IsValid || obj.Type == null)
-                return false;
-
-            foreach (var field in obj.Type.Fields)
-            {
-                if (TypeFilterHelper.IsDelegateType(field.Type))
+                rootDescription = $"{root.OwnerTypeName}.{root.FieldName}";
+                if (root.AppDomainId is int domainId && domainId != 1)
                 {
-                    if (methodTable != 0)
-                        delegateFieldByMethodTable[methodTable] = true;
-
-                    return true;
+                    alcInfo = $"AppDomain#{domainId}";
+                    rootDescription += $" [{alcInfo}]";
                 }
             }
-
-            // P2-1 (docs/analysis/phase1/static-root-leak-detector-audit.md): a field-like event
-            // (`public static event EventHandler Foo;`) compiles to a static backing delegate
-            // field, not an instance field — instance-only Fields scan above misses it entirely.
-            foreach (var staticField in obj.Type.StaticFields)
+            else
             {
-                if (TypeFilterHelper.IsDelegateType(staticField.Type))
-                {
-                    if (methodTable != 0)
-                        delegateFieldByMethodTable[methodTable] = true;
-
-                    return true;
-                }
+                rootDescription = $"StaticVar @ 0x{rootAddress:X}";
             }
 
-            if (methodTable != 0)
-                delegateFieldByMethodTable[methodTable] = false;
-
-            return false;
+            results.Add(new StaticRootAnalysis
+            {
+                RootDescription = rootDescription,
+                DirectObjectAddress = rootAddress,
+                DirectObjectType = rootObj.TypeDisplayName,
+                DirectObjectSize = rootObj.Size,
+                TotalMemoryImpact = totalSize,
+                ObjectsKeptAlive = objectsKeptAlive,
+                TopRetainedTypes = topRetainedTypes,
+                TopRetainedNamespaces = topRetainedNamespaces,
+                ContainsCollections = containsCollections,
+                ContainsEventHandlers = containsEventHandlers,
+                ScanWasCapped = false,
+                AssemblyLoadContextInfo = alcInfo,
+                Gen2OrLohRetainedFraction = gen2OrLohRetainedFraction,
+            });
         }
 
+        return results;
     }
 
-    internal class StaticRootAnalysis
+    private static List<RetainedTypeInfo> GetTopRetainedTypes(Dictionary<string, RetainedTypeInfo> typeStats)
     {
-        public string RootDescription { get; set; } = string.Empty;
-        public ulong DirectObjectAddress { get; set; }
-        public string DirectObjectType { get; set; } = string.Empty;
-        public ulong DirectObjectSize { get; set; }
-        public ulong TotalMemoryImpact { get; set; }
-        public int ObjectsKeptAlive { get; set; }
-        public List<RetainedTypeInfo> TopRetainedTypes { get; set; } = new();
-        public List<RetainedNamespaceInfo> TopRetainedNamespaces { get; set; } = new();
-        public bool ContainsCollections { get; set; }
-        public bool ContainsEventHandlers { get; set; }
-        public bool ScanWasCapped { get; set; }
-        public string? AssemblyLoadContextInfo { get; set; }
-        public double Gen2OrLohRetainedFraction { get; set; }
+        var list = new List<RetainedTypeInfo>(typeStats.Values);
+        list.Sort(static (a, b) => b.TotalSize.CompareTo(a.TotalSize));
+        return list;
     }
+
+    private static List<RetainedNamespaceInfo> GetTopRetainedNamespaces(Dictionary<string, RetainedNamespaceInfo> namespaceStats)
+    {
+        var list = new List<RetainedNamespaceInfo>(namespaceStats.Values);
+        list.Sort(static (a, b) => b.TotalSize.CompareTo(a.TotalSize));
+        return list;
+    }
+
+    public void Dispose() { }
 }
 
-
+internal sealed class StaticRootAnalysis
+{
+    public string RootDescription { get; set; } = string.Empty;
+    public ulong DirectObjectAddress { get; set; }
+    public string DirectObjectType { get; set; } = string.Empty;
+    public ulong DirectObjectSize { get; set; }
+    public ulong TotalMemoryImpact { get; set; }
+    public int ObjectsKeptAlive { get; set; }
+    public List<RetainedTypeInfo> TopRetainedTypes { get; set; } = new();
+    public List<RetainedNamespaceInfo> TopRetainedNamespaces { get; set; } = new();
+    public bool ContainsCollections { get; set; }
+    public bool ContainsEventHandlers { get; set; }
+    public bool ScanWasCapped { get; set; }
+    public string? AssemblyLoadContextInfo { get; set; }
+    public double Gen2OrLohRetainedFraction { get; set; }
+}

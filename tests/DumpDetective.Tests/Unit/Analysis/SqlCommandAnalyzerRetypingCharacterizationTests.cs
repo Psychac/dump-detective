@@ -105,6 +105,8 @@ public sealed class SqlCommandAnalyzerRetypingCharacterizationTests
         public IReadOnlyList<InstanceFieldDescriptor> EnumerateInstanceFields(ulong address) => [];
         public IReadOnlyList<ThreadStackFrameRef> EnumerateExceptionStackTrace(ulong exceptionAddress, int maxFrames) => [];
 
+        public bool HasDelegateField(ulong address) => false;
+
         private readonly Dictionary<(ulong Address, string FieldName), FieldValue> _values = new();
 
         public void SetObjectReference(ulong address, string fieldName, ulong target) => _values[(address, fieldName)] = FieldValue.ForObjectReference(target);

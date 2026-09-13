@@ -215,6 +215,8 @@ public sealed class TimerLeakAnalyzerRetypingCharacterizationTests
         public IReadOnlyList<InstanceFieldDescriptor> EnumerateInstanceFields(ulong address) => [];
         public IReadOnlyList<ThreadStackFrameRef> EnumerateExceptionStackTrace(ulong exceptionAddress, int maxFrames) => [];
 
+        public bool HasDelegateField(ulong address) => false;
+
         private readonly Dictionary<(ulong Address, string FieldName), FieldValue> _values = new();
 
         public void SetUInt32(ulong address, string fieldName, uint value) => _values[(address, fieldName)] = FieldValue.ForUInt32(value);

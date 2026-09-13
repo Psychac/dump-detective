@@ -22,4 +22,16 @@ public interface IHeapDominatorQuery
     /// <summary>Mirrors <c>IThreadRetentionProvider</c> — "how much would become collectible if this
     /// thread exited?", keyed by the thread's OS id.</summary>
     bool TryGetThreadRetainedSize(uint osThreadId, out ulong retainedBytes);
+
+    /// <summary>
+    /// Every object in <paramref name="rootAddress"/>'s dominator subtree (mirrors
+    /// <c>IDominatorTreeProvider.EnumerateRetainedSet</c>) — the per-object companion to
+    /// <see cref="TryGetRetainedSize"/>'s aggregate byte total. Added 2026-09-13 for
+    /// <c>StaticRootLeakDetector</c>'s retyping — its first real consumer; every prior
+    /// <see cref="IHeapDominatorQuery"/> consumer only needed the aggregate. Deliberately uncapped
+    /// (no <c>maxNodes</c>/<c>maxDepth</c> parameter), matching this project's "no sampling"
+    /// convention and the pre-retyping analyzer's own unbounded walk — callers needing a bounded
+    /// walk cap at their own call site, the same way every other uncapped Tier-1 stream works.
+    /// </summary>
+    IEnumerable<HeapObjectRef> EnumerateRetainedObjects(ulong rootAddress);
 }

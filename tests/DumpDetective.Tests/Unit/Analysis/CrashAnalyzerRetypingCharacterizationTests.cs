@@ -233,6 +233,8 @@ public sealed class CrashAnalyzerRetypingCharacterizationTests
 
         public IReadOnlyList<ThreadStackFrameRef> EnumerateExceptionStackTrace(ulong exceptionAddress, int maxFrames) =>
             _unwoundTraces.TryGetValue(exceptionAddress, out List<ThreadStackFrameRef>? frames) ? frames.Take(maxFrames).ToList() : [];
+
+        public bool HasDelegateField(ulong address) => false;
     }
 
     private sealed class FakeDumpArrayShapeQuery : IDumpArrayShapeQuery

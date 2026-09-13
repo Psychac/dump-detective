@@ -1,5 +1,6 @@
 using Microsoft.Diagnostics.Runtime;
 
+using DumpDetective.Core.Utilities;
 using DumpDetective.Sdk.Analysis;
 
 namespace DumpDetective.Analysis.SdkBridge;
@@ -14,6 +15,7 @@ namespace DumpDetective.Analysis.SdkBridge;
 internal sealed class DumpObjectFieldQuery : IDumpObjectFieldQuery
 {
     private readonly ClrHeap _heap;
+    private readonly Dictionary<ulong, bool> _delegateFieldByMethodTable = new();
 
     public DumpObjectFieldQuery(ClrHeap heap) => _heap = heap;
 
@@ -284,6 +286,52 @@ internal sealed class DumpObjectFieldQuery : IDumpObjectFieldQuery
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Ported near-verbatim from the pre-retyping <c>StaticRootLeakDetector</c>'s own
+    /// <c>HasDelegateFields</c> — checks both instance and static fields (a field-like event
+    /// compiles to a static backing delegate field, not an instance one), cached per method table.
+    /// </summary>
+    public bool HasDelegateField(ulong address)
+    {
+        if (address == 0)
+            return false;
+
+        ClrObject obj = _heap.GetObject(address);
+        if (!obj.IsValid || obj.Type is null)
+            return false;
+
+        ulong methodTable = obj.Type.MethodTable;
+        if (methodTable != 0 && _delegateFieldByMethodTable.TryGetValue(methodTable, out bool cached))
+            return cached;
+
+        bool hasDelegateField = false;
+        foreach (ClrInstanceField field in obj.Type.Fields)
+        {
+            if (TypeFilterHelper.IsDelegateType(field.Type))
+            {
+                hasDelegateField = true;
+                break;
+            }
+        }
+
+        if (!hasDelegateField)
+        {
+            foreach (ClrStaticField staticField in obj.Type.StaticFields)
+            {
+                if (TypeFilterHelper.IsDelegateType(staticField.Type))
+                {
+                    hasDelegateField = true;
+                    break;
+                }
+            }
+        }
+
+        if (methodTable != 0)
+            _delegateFieldByMethodTable[methodTable] = hasDelegateField;
+
+        return hasDelegateField;
     }
 
     public IReadOnlyList<ThreadStackFrameRef> EnumerateExceptionStackTrace(ulong exceptionAddress, int maxFrames)

@@ -64,7 +64,9 @@ internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModu
         // CollectionAnalyzerLegacyAdapter, not CollectionAnalyzer directly, since 2026-09-12
         // (Tier-2 wave) -- see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         Module("collection", "Collection Analysis", typeof(CollectionAnalyzerLegacyAdapter), typeof(CollectionFindingGenerator), typeof(CollectionTrendComparer), typeof(CollectionSectionBuilder), 240, ["collections"]),
-        Module("static-root", "Static Root Leak Detection", typeof(StaticRootLeakDetector), typeof(StaticRootFindingGenerator), typeof(StaticRootTrendComparer), typeof(StaticRootSectionBuilder), 250, ["roots", "leaks"]),
+        // StaticRootLeakDetectorLegacyAdapter, not StaticRootLeakDetector directly, since 2026-09-13
+        // -- see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        Module("static-root", "Static Root Leak Detection", typeof(StaticRootLeakDetectorLegacyAdapter), typeof(StaticRootFindingGenerator), typeof(StaticRootTrendComparer), typeof(StaticRootSectionBuilder), 250, ["roots", "leaks"]),
         Module("reference-chain", "Reference Chain Analysis", typeof(ReferenceChainAnalyzer), typeof(ReferenceChainFindingGenerator), typeof(ReferenceChainTrendComparer), typeof(ReferenceChainSectionBuilder), 260, ["roots"]),
         // GCHandleAnalyzerLegacyAdapter, not GCHandleAnalyzer directly, since 2026-09-11 (Batch 7 of
         // the Phase 1 retyping) — see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.

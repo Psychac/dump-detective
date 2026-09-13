@@ -237,6 +237,8 @@ public sealed class AsyncStateMachineAnalyzerRetypingCharacterizationTests
         public IReadOnlyList<InstanceFieldDescriptor> EnumerateInstanceFields(ulong address) => [];
         public IReadOnlyList<ThreadStackFrameRef> EnumerateExceptionStackTrace(ulong exceptionAddress, int maxFrames) => [];
 
+        public bool HasDelegateField(ulong address) => false;
+
         private readonly Dictionary<(ulong Address, string FieldName), FieldValue> _values = new();
         private readonly Dictionary<(ulong Address, string FieldName), string> _fieldTypeNames = new();
         private readonly Dictionary<ulong, List<(string Name, ulong TargetAddress)>> _referenceFields = new();

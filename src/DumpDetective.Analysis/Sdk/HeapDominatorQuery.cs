@@ -14,7 +14,7 @@ namespace DumpDetective.Analysis.SdkBridge;
 /// <c>GCRootAnalyzer</c>'s own single upfront "is Stage B available at all" gate rather than
 /// re-deriving it per call.
 /// </summary>
-internal sealed class HeapDominatorQuery(IDominatorTreeProvider treeProvider, IThreadRetentionProvider? threadRetentionProvider) : IHeapDominatorQuery
+internal sealed class HeapDominatorQuery(IDominatorTreeProvider treeProvider, IThreadRetentionProvider? threadRetentionProvider, IHeapObjectLookup objectLookup) : IHeapDominatorQuery
 {
     public bool TryGetRetainedSize(ulong address, out ulong retainedBytes) =>
         treeProvider.TryGetRetainedBytes(address, out retainedBytes);
@@ -31,5 +31,12 @@ internal sealed class HeapDominatorQuery(IDominatorTreeProvider treeProvider, IT
         }
 
         return threadRetentionProvider.TryGetRetainedBytesForThread(osThreadId, out retainedBytes);
+    }
+
+    public IEnumerable<HeapObjectRef> EnumerateRetainedObjects(ulong rootAddress)
+    {
+        foreach (ulong address in treeProvider.EnumerateRetainedSet(rootAddress))
+            if (objectLookup.TryGetObject(address, out HeapObjectRef obj))
+                yield return obj;
     }
 }

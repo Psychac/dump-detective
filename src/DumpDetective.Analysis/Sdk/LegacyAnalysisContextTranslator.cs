@@ -48,6 +48,8 @@ internal static class LegacyAnalysisContextTranslator
         // left null, no partial/lazy state to preserve.
         IReachableAddressProvider? reachableProvider = legacy.Cache.TryGetReachableAddressProvider();
 
+        var objectLookup = new HeapObjectLookup(legacy.Heap, legacy.Cache);
+
         return new()
         {
             Observations = NoOpObservationSink.Instance,
@@ -57,7 +59,7 @@ internal static class LegacyAnalysisContextTranslator
             HeapTypeStatistics = new HeapTypeStatisticsQuery(legacy.Heap, legacy.Cache),
             HeapSegments = new HeapSegmentQuery(legacy.Heap, legacy.Runtime, legacy.Cache),
             HeapRoots = new HeapRootQuery(legacy.Heap, legacy.Cache),
-            HeapObjectLookup = new HeapObjectLookup(legacy.Heap, legacy.Cache),
+            HeapObjectLookup = objectLookup,
             HeapReferences = new HeapReferenceQuery(legacy.Heap),
             HeapReverseReferences = new HeapReverseReferenceQuery(legacy.Cache),
             HeapHandles = new HeapHandleQuery(legacy.Runtime, legacy.Heap, legacy.Cache),
@@ -67,7 +69,7 @@ internal static class LegacyAnalysisContextTranslator
                 ? new HeapReachabilityQuery(reachableProvider)
                 : null,
             HeapDominators = treeProvider is not null
-                ? new HeapDominatorQuery(treeProvider, legacy.Cache.TryGetThreadRetentionProvider())
+                ? new HeapDominatorQuery(treeProvider, legacy.Cache.TryGetThreadRetentionProvider(), objectLookup)
                 : null,
             HeapRootPaths = new HeapRootPathQuery(legacy.Heap, legacy.Cache),
             RuntimeThreads = runtimeThreadsOverride ?? new RuntimeThreadQuery(legacy.Runtime, legacy.Cache),

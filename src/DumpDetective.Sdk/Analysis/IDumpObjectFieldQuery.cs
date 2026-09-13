@@ -134,6 +134,19 @@ public interface IDumpObjectFieldQuery
     /// an exception, or when no trace is captured.
     /// </summary>
     IReadOnlyList<ThreadStackFrameRef> EnumerateExceptionStackTrace(ulong exceptionAddress, int maxFrames);
+
+    /// <summary>
+    /// Whether the object at <paramref name="address"/>'s type declares any delegate-typed field —
+    /// instance (<c>ClrType.Fields</c>) or static (<c>ClrType.StaticFields</c>; a field-like event
+    /// such as <c>public static event EventHandler Foo;</c> compiles to a static backing delegate
+    /// field, not an instance one, so both must be checked). A structural fact about the *declared
+    /// type*, not a per-field value read — a field's <c>ElementType</c> alone (see
+    /// <see cref="InstanceFieldDescriptor.Kind"/>) can't distinguish a delegate field from any other
+    /// object-reference field; this walks the field's own declared type's base-type chain for
+    /// <c>System.MulticastDelegate</c>. Returns <c>false</c> for an invalid address. Added
+    /// 2026-09-13 for <c>StaticRootLeakDetector</c>'s retyping.
+    /// </summary>
+    bool HasDelegateField(ulong address);
 }
 
 /// <summary>One instance field's name and declared shape, from <see cref="IDumpObjectFieldQuery.EnumerateInstanceFields"/>.</summary>

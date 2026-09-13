@@ -452,6 +452,8 @@ public sealed class CollectionAnalyzerRetypingCharacterizationTests
 
         public IReadOnlyList<ThreadStackFrameRef> EnumerateExceptionStackTrace(ulong exceptionAddress, int maxFrames) => [];
 
+        public bool HasDelegateField(ulong address) => false;
+
         public bool TryReadField(ulong address, string fieldName, out FieldValue value) =>
             _values.TryGetValue((address, fieldName), out value);
 
@@ -572,6 +574,7 @@ public sealed class CollectionAnalyzerRetypingCharacterizationTests
         public bool TryGetRetainedSize(ulong address, out ulong retainedBytes) => _retained.TryGetValue(address, out retainedBytes);
         public bool TryGetImmediateDominator(ulong address, out ulong dominatorAddress) { dominatorAddress = 0; return false; }
         public bool TryGetThreadRetainedSize(uint osThreadId, out ulong retainedBytes) { retainedBytes = 0; return false; }
+        public IEnumerable<HeapObjectRef> EnumerateRetainedObjects(ulong rootAddress) => [];
     }
 
     private sealed class FakeHeapReverseReferenceQuery : IHeapReverseReferenceQuery

@@ -2,7 +2,7 @@
 
 ## Status (as of 2026-09-13)
 
-**31 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
+**32 of 36 analyzers retyped** (verified against `src/DumpDetective.Analysis/Analyzers/**/*LegacyAdapter.cs`
 in the tree, not just this doc's own narrative — this doc's original "35" count in the section below
 was an approximation from § 10 point 8's grep-based measurement; the real count is 36). The
 `dump.object-fields` Tier-2 escape hatch **is built** (see "Tier 2 wave" below) — the "still not
@@ -16,15 +16,15 @@ built" language later in this doc is stale as of the pilot, 2026-09-11.
 `LockGraphAnalyzer`, `LohFragmentationAnalyzer`, `MemoryAnalyzer`, `ObjectShapeAnalyzer`,
 `SegmentReservationAnalyzer`, `SqlCommandAnalyzer`, `SqlConnectionPoolAnalyzer`,
 `SqlTransactionAnalyzer`, `StringAnalyzer`, `ThreadAnalyzer`, `ThreadStackClusterAnalyzer`, `TimerLeakAnalyzer`,
-`WcfChannelAnalyzer`, `WeakReferenceAnalyzer`, `ModuleAnalyzer`.
+`WcfChannelAnalyzer`, `WeakReferenceAnalyzer`, `ModuleAnalyzer`, `StaticRootLeakDetector`.
 
-**Remaining (5):**
+**Remaining (4):**
 `DominatorAnalyzer`, `EventLeakAnalyzer`,
-`ReferenceChainAnalyzer`, `StaticRootLeakDetector`,
+`ReferenceChainAnalyzer`,
 and **`LeakCandidateAnalyzer`** —
 explicit user direction: do `LeakCandidateAnalyzer` last of all, since it needs cross-analyzer
 result access (`context.CompletedRunResults`-equivalent) and deferred-execution-ordering modeling
-that don't exist in the SDK yet, on top of everything the other 4 need.
+that don't exist in the SDK yet, on top of everything the other 3 need.
 
 Detailed plan for the two items [phase-1-contracts-sdk.md](phase-1-contracts-sdk.md) leaves
 deferred (`Analysis/`, `Presentation/`) and the ownerless gap recorded at
@@ -1429,7 +1429,65 @@ Tier-2 primitive needed), and the AppDomain/module surface is folded into `IRunt
   retargeted at `AnalyzerBenchmarkBase<ModuleAnalyzerLegacyAdapter>` and its `ModuleAggregator.Aggregate`-only
   benchmark removed along with `ModuleAggregator` itself (dead code once nothing called it).
 
-Remaining Tier-1+Tier-2 analyzers (5, see "Status" at the top) haven't been started yet.
+**`StaticRootLeakDetector`. Done 2026-09-13.** Unusual batch: exploration surfaced a critical,
+pre-existing, unrelated bug — this analyzer has never produced a single real finding on any dump.
+The root cause lives upstream in `RootIndexWriter`/`IHeapAnalysisCache.GetStaticRootedAddresses`
+(filters for `ClrRootKind` values 9/10, which don't exist in ClrMD 3+ — statics aren't reported as
+GC roots at all there, only reachable by walking `ClrType.StaticFields` per AppDomain). A verified
+fix exists on branch `fix/static-root-detection` (commit `4d7e267b`) but is deliberately unmerged —
+switching this analyzer on for the first time costs ~453s/63.7 GB allocated on a 3.3 GB dump
+(uncapped, per this project's "no sampling" convention), a cost that needs addressing before
+merging. **Confirmed with the user before implementing**: this batch retypes the analyzer's
+consumption logic only, preserving today's real (broken, zero-output) behavior exactly, with a
+prominent doc comment on the retyped class documenting the bug so nobody mistakes zero output for a
+retyping regression — it does not fix the bug or its perf prerequisite.
+- **No bespoke scan participant needed** — like `ModuleAnalyzer`, this analyzer iterates a bounded
+  root population (`IHeapRootQuery.EnumerateRoots()`), not a heap-index scan.
+  `StaticRootLeakDetectorLegacyAdapter` is a plain `LegacyAnalyzerAdapter<StaticRootLeakDetector>`.
+- **`IHeapRootQuery`'s second real consumer** — `HeapRootRef`'s `OwnerTypeName`/`FieldName`/
+  `AppDomainId` (built for `GCRootAnalyzer`'s Batch 3 retyping) already cover exactly what the
+  pre-retyping analyzer's own `GetOrBuildRootTriples`/`GetStaticRootedAddresses`/
+  `GetStaticFieldsByRootAddress` combined provided — no gap to close there.
+- **`IHeapDominatorQuery.EnumerateRetainedObjects` added** (new, uncapped — first real consumer of
+  a per-object dominator-subtree enumeration; every prior `IHeapDominatorQuery` consumer only
+  needed the aggregate byte total via the already-existing `TryGetRetainedSize`). Mirrors
+  `IDominatorTreeProvider.EnumerateRetainedSet` exactly, deliberately with no `maxNodes`/`maxDepth`
+  parameter — matching this project's "no sampling" convention and the pre-retyping analyzer's own
+  unbounded walk. The ~453s cost this incurs once real data exists is a known, already-discussed
+  cost of correct behavior, not something this batch quietly capped.
+- **`IDumpObjectFieldQuery.HasDelegateField` added** (new Tier-2 primitive) — ports the pre-retyping
+  analyzer's own `HasDelegateFields` (checks both `ClrType.Fields` and `ClrType.StaticFields`, since
+  a field-like event compiles to a static backing delegate field, not an instance one) verbatim,
+  cached per method table dump-side.
+- **Dropped, matching established precedent**: `RetainedSizeCandidateSelector.RequiresWalk`'s shape
+  pre-check — the same accepted simplification `GCRootAnalyzer`'s and `MemoryAnalyzer`'s own
+  batches already made for the identical `MethodTableHasOutgoingRefs` pre-filter, for the same
+  reason (the walk must stay uncapped anyway, so skipping the pre-check costs at most one trivial
+  single-object iteration for a true leaf root).
+- **A real, pre-existing test-setup gap found and fixed, not introduced**: the pre-existing
+  `StaticRootLeakDetectorDominatorTreeDiscrepancyTests` never built a heap index (the pre-retyping
+  analyzer's own `GetTotalManagedBytes` had a cheap segment-byte-sum fallback for that case). The
+  retyped version reuses the shared `IHeapTypeStatisticsQuery` surface for this figure, whose own
+  no-index fallback (`StatisticsCache`'s live parallel type-classification walk) hit a real,
+  pre-existing regex-timeout on the reference dump under parallel load. Fixed by building the index
+  up front in the test, matching every other real-dump test's own setup — not a production
+  behavior change, since the real pipeline always builds an index before running analyzers anyway.
+- **Gate met**: new `StaticRootLeakDetectorRetypingCharacterizationTests` (12 tests, dictionary-backed
+  fakes) — carrying essentially all the real behavioral coverage for this batch, since the upstream
+  bug means the real-dump gate can't exercise positive data: significant-root filtering, root
+  description (owner type/field name, non-default-AppDomain suffix), per-type/namespace retained-set
+  breakdown, collection/event-handler (instance and static field) detection, Gen2-or-larger fraction,
+  root-path evidence, and the no-dominator-tree fallback. Pre-existing
+  `StaticRootLeakDetectorDominatorTreeDiscrepancyTests` updated (not deleted) to construct
+  `StaticRootLeakDetectorLegacyAdapter`, assert `TotalManagedHeapBytes` is real and non-zero (since
+  it doesn't depend on the broken path) while `RootCount == 0` is documented as the expected value —
+  passed in 6s against the real 3.5 GB reference dump. Full non-real-dump suite (1542 tests) passes.
+- Call sites updated: `DefaultAnalyzerFeatureModuleCatalog`, `FullPipelineBenchmark`,
+  `SmallDumpLatencyBenchmark` now construct `StaticRootLeakDetectorLegacyAdapter`;
+  `StaticRootLeakDetectorBenchmark` retargeted at
+  `AnalyzerBenchmarkBase<StaticRootLeakDetectorLegacyAdapter>`.
+
+Remaining Tier-1+Tier-2 analyzers (3, see "Status" at the top) haven't been started yet.
 `LeakCandidateAnalyzer` stays last per explicit direction — it needs cross-analyzer result access
 and deferred-execution-ordering modeling neither this wave nor Tier 1 has built.
 

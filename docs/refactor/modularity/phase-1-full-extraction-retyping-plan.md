@@ -171,5 +171,7 @@ Next steps item 1 (below), fully executed:
 ## Next steps
 
 1. ~~Delete `LegacyAnalyzerAdapter` and old `Core.Abstractions.IAnalyzer`/`Models.AnalysisContext`~~ — done 2026-09-14, see above.
-2. Update `DependencyDirectionTests`, SDK project rules
+2. ~~Update `DependencyDirectionTests`, SDK project rules~~ — done 2026-09-15: stale
+   "legacy bridge adapter" comment removed; assertions themselves were already correct
+   and unchanged.
 3. Phase 3's capability-attribute discovery and Phase 5's observation emission now have real ground to build on

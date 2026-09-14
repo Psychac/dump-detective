@@ -20,9 +20,8 @@ public sealed class DependencyDirectionTests
 
         coreRefs.Should().BeEmpty();
         // DumpDetective.Sdk added 2026-09-10: the Phase 1 retyping pilot's dump-side Tier-1
-        // capability-surface implementations (Sdk/HeapTypeStatisticsQuery.cs) and the legacy
-        // bridge adapter live in this project — see
-        // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
+        // capability-surface implementations (Sdk/HeapTypeStatisticsQuery.cs) live in this
+        // project — see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
         analysisRefs.Should().Equal(["DumpDetective.Core", "DumpDetective.Platform", "DumpDetective.Sdk"]);
         // DumpDetective.Sdk added 2026-09-09: TraceSessionReport (the trace-only report.json
         // shape) belongs here, not in Cli — this project is the one that owns report-shape

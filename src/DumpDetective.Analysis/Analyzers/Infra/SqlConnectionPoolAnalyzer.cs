@@ -1,4 +1,6 @@
+using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
@@ -32,14 +34,51 @@ namespace DumpDetective.Analysis.Analyzers.Infra;
 /// the pilot's original design, which reused <c>AnalyzerOptions</c> for this and was recognized as
 /// overloading one slot for two unrelated purposes.
 /// </remarks>
-public sealed class SqlConnectionPoolAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
+public sealed class SqlConnectionPoolAnalyzer :
+    IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
+    IParallelHeapIndexScanParticipant, ICustomizesAnalysisContext
 {
+    /// <summary>
+    /// Both legacy and current SqlClient packages share the exact same pool-manager implementation
+    /// (copied internal type, same field names) under
+    /// <c>System.Data.ProviderBase.DbConnectionPool</c> / <c>Microsoft.Data.ProviderBase.DbConnectionPool</c>
+    /// respectively — no per-provider pool subclass, matched by namespace prefix; other providers
+    /// (Npgsql, MySql, Oracle, Sqlite) use unrelated internal pooling designs, out of scope.
+    /// </summary>
+    private static readonly HashSet<string> PoolTypeNames = new(StringComparer.Ordinal)
+    {
+        "System.Data.ProviderBase.DbConnectionPool",
+        "Microsoft.Data.ProviderBase.DbConnectionPool",
+    };
+
+    private readonly TypedResourceHeapIndexScanState _scanState = new();
+
     public string Name => "SQL Connection Pool Analysis";
     public string Category => "Infrastructure";
 
     private const double NearCapacityUtilizationPct = 80.0;
 
-    public AnalyzerDomainResult? LastResult { get; private set; }
+    public bool IsCandidateType(string typeName) => PoolTypeNames.Contains(typeName);
+
+    void IHeapIndexScanParticipant.BeforeHeapIndexScan(RuntimeAnalysisContext context) => _scanState.BeforeHeapIndexScan(this, context);
+    void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => _scanState.OnHeapEntry(in entry);
+    void IHeapIndexScanParticipant.OnHeapIndexScanCompleted(bool succeeded) => _scanState.OnHeapIndexScanCompleted(succeeded);
+    IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() => new SqlConnectionPoolAnalyzer();
+    void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials) =>
+        _scanState.MergeFrom(partials.OfType<SqlConnectionPoolAnalyzer>().Select(a => a._scanState));
+
+    Sdk.Analysis.AnalysisContext ICustomizesAnalysisContext.BuildAnalysisContext(RuntimeAnalysisContext context) =>
+        AnalysisContextBuilder.Build(context, analyzerOptions: null, heapObjectsOverride: new PrecomputedHeapObjectStream(_scanState.Candidates));
+
+    public AnalyzerDomainResult? LastResult
+    {
+        get => _lastResult;
+        // Stamps AnalyzerName/Category here (not left to a bridging adapter, which no
+        // longer exists) so every LastResult consumer — pipeline or direct caller — sees
+        // them populated the same way.
+        private set => _lastResult = value is null ? null : value with { AnalyzerName = Name, Category = Category };
+    }
+    private AnalyzerDomainResult? _lastResult;
 
     public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {

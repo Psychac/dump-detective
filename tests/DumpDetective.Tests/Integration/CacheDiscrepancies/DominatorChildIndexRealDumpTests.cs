@@ -6,6 +6,7 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Platform.Storage.Container;
 using DumpDetective.Analysis.Indexing.Dominator;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Sdk.Analysis;
 
 using FluentAssertions;
 
@@ -59,7 +60,7 @@ public sealed class DominatorChildIndexRealDumpTests(ITestOutputHelper output)
             // enableExactDominatorTree: true + an IRequiresDominatorTreeIndex analyzer in
             // activeAnalyzers is what flips Stage B on — same requirement
             // DominatorAnalyzerExactTreeRealDumpTests documents.
-            IReadOnlyList<IAnalyzer> activeAnalyzers = [new DominatorAnalyzerLegacyAdapter()];
+            IReadOnlyList<IAnalyzer> activeAnalyzers = [new DominatorAnalyzer()];
             cache.PrebuildHeapIndex(heap, freshDumpPath, CancellationToken.None, progress: null, activeAnalyzers, enableExactDominatorTree: true);
 
             string containerPath = DumpIndexPaths.CacheContainer(freshDumpPath);

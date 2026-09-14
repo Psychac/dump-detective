@@ -2,6 +2,7 @@ using DumpDetective.Analysis.Insight;
 using DumpDetective.Cli.Console;
 using DumpDetective.Cli.Pipeline;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Sdk.Analysis;
 using DumpDetective.Core.Models;
 using DumpDetective.Cli.Models;
 using DumpDetective.Cli.Output;

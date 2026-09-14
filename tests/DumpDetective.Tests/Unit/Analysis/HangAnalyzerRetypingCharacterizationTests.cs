@@ -18,7 +18,7 @@ namespace DumpDetective.Tests.Unit.Analysis;
 /// Characterization test for the Tier-1+Tier-2 batch (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
 /// <see cref="HangAnalyzer"/>'s old test coverage (<c>HangAnalyzerHeapIndexScanTests</c>) exercised
 /// the pre-retyping analyzer's own private accumulator fields directly via reflection -- that state
-/// no longer exists post-retyping (moved to <see cref="HangAnalyzerLegacyAdapter"/> in a much
+/// no longer exists post-retyping (moved to <see cref="HangAnalyzer"/> in a much
 /// simpler shape: a flat candidate list, not a per-method-table profile cache plus separate
 /// counters), so this replaces it rather than adapting it. Fake, dictionary/list-backed capability
 /// implementations, same shape established for the rest of the thread-domain quartet.
@@ -186,18 +186,18 @@ public sealed class HangAnalyzerRetypingCharacterizationTests
     }
 
     [Fact]
-    public void HangAnalyzerLegacyAdapter_CreateWorkerInstance_ReturnsFreshInstance()
+    public void HangAnalyzer_CreateWorkerInstance_ReturnsFreshInstance()
     {
-        HangAnalyzerLegacyAdapter primary = new();
+        HangAnalyzer primary = new();
         IHeapIndexScanParticipant worker = ((IParallelHeapIndexScanParticipant)primary).CreateWorkerInstance();
 
         worker.Should().NotBeNull();
         worker.Should().NotBeSameAs(primary);
-        worker.Should().BeOfType<HangAnalyzerLegacyAdapter>();
+        worker.Should().BeOfType<HangAnalyzer>();
     }
 
     [Fact]
-    public void HangAnalyzerLegacyAdapter_MergePartial_ConcatenatesCandidatesFromBothWorkers()
+    public void HangAnalyzer_MergePartial_ConcatenatesCandidatesFromBothWorkers()
     {
         // Live self-attached process heap: OnHeapEntry does real ClrMD type resolution
         // (heap.GetTypeByMethodTable), so this can't be driven by fakes the way the analyzer's own
@@ -211,23 +211,25 @@ public sealed class HangAnalyzerRetypingCharacterizationTests
             ulong relevantMt = FindFirstRelevantMethodTable(heap, out ulong sampleAddress, out ulong sampleSize);
             relevantMt.Should().NotBe(0, "a live .NET test-host process always has some Task-shaped object on its heap");
 
-            DumpDetective.Core.Abstractions.AnalysisContext legacyContext = new() { Runtime = runtime, Cache = new DumpDetective.Analysis.Cache.HeapAnalysisCache(), AnalysisOptions = new() };
+            RuntimeAnalysisContext legacyContextRuntimeCtx = new() { Runtime = runtime, Cache = new DumpDetective.Analysis.Cache.HeapAnalysisCache(), AnalysisOptions = new() };
 
-            HangAnalyzerLegacyAdapter primary = new();
-            primary.BeforeHeapIndexScan(legacyContext);
+            HangAnalyzer primary = new();
+            ((IHeapIndexScanParticipant)primary).BeforeHeapIndexScan(legacyContextRuntimeCtx);
             ((IHeapIndexScanParticipant)primary).OnHeapEntry(new HeapEntry(sampleAddress, relevantMt, sampleSize));
 
-            HangAnalyzerLegacyAdapter worker = (HangAnalyzerLegacyAdapter)((IParallelHeapIndexScanParticipant)primary).CreateWorkerInstance();
-            worker.BeforeHeapIndexScan(legacyContext);
+            HangAnalyzer worker = (HangAnalyzer)((IParallelHeapIndexScanParticipant)primary).CreateWorkerInstance();
+            ((IHeapIndexScanParticipant)worker).BeforeHeapIndexScan(legacyContextRuntimeCtx);
             ((IHeapIndexScanParticipant)worker).OnHeapEntry(new HeapEntry(sampleAddress, relevantMt, sampleSize));
 
             ((IParallelHeapIndexScanParticipant)primary).MergePartial([worker]);
             ((IHeapIndexScanParticipant)primary).OnHeapIndexScanCompleted(true);
 
-            // Thread-stack scan never ran in this test -- BuildSdkContext falls back to a live
+            // Thread-stack scan never ran in this test -- BuildAnalysisContext falls back to a live
             // RuntimeThreadQuery (matching the "invoked outside the pipeline" fallback every
-            // quartet adapter already has), so this only exercises the heap-scan merge, not threads.
-            DumpDetective.Core.Models.AnalyzerDomainResult result = primary.AnalyzeAsync(legacyContext, CancellationToken.None).GetAwaiter().GetResult();
+            // quartet member already has), so this only exercises the heap-scan merge, not threads.
+            DumpDetective.Sdk.Analysis.AnalysisContext legacyContext = ((ICustomizesAnalysisContext)primary).BuildAnalysisContext(legacyContextRuntimeCtx);
+            primary.AnalyzeAsync(legacyContext, CancellationToken.None).GetAwaiter().GetResult();
+            DumpDetective.Core.Models.AnalyzerDomainResult result = (DumpDetective.Core.Models.AnalyzerDomainResult)primary.LastResult!;
             var hangResult = (HangDomainResult)result;
 
             (hangResult.TotalTasks + hangResult.QueuedWorkItems + hangResult.TotalTaskContinuations)
@@ -280,8 +282,7 @@ public sealed class HangAnalyzerRetypingCharacterizationTests
         FakeRuntimeThreadPoolQuery? threadPool = null)
     {
         HangAnalyzer analyzer = new();
-        AnalysisContext context = new()
-        {
+        DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
             RuntimeThreads = threads ?? new FakeRuntimeThreadQuery(),
             HeapObjects = new PrecomputedHeapObjectStream(candidates ?? []),

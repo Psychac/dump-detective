@@ -6,6 +6,7 @@ using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Sdk.Analysis;
 
 using Xunit;
 using Xunit.Abstractions;
@@ -75,7 +76,7 @@ public sealed class DominatorStageBPerfMeasurementTests(ITestOutputHelper output
         {
             using var progressLog = new StreamWriter(progressLogPath, append: false) { AutoFlush = true };
             var progressStopwatch = Stopwatch.StartNew();
-            var progress = new Progress<AnalyzerProgressReport>(r =>
+            var progress = new Progress<DumpDetective.Core.Abstractions.AnalyzerProgressReport>(r =>
                 progressLog.WriteLine($"[{progressStopwatch.Elapsed:hh\\:mm\\:ss}] {r.Phase}"
                     + (string.IsNullOrWhiteSpace(r.Detail) ? "" : $" — {r.Detail}")
                     + $" (scanned {r.ScannedCount:N0})"));
@@ -86,12 +87,12 @@ public sealed class DominatorStageBPerfMeasurementTests(ITestOutputHelper output
 
             var cache = new HeapAnalysisCache();
 
-            // DominatorAnalyzerLegacyAdapter carries both IRequiresReachableGraphIndex and
+            // DominatorAnalyzer carries both IRequiresReachableGraphIndex and
             // IRequiresDominatorTreeIndex — its mere presence in activeAnalyzers, combined with
             // enableExactDominatorTree: true, is what flips buildStageB on in
             // DiskBackedObjectIndexWriter.Build's gating (§10.3). Never AnalyzeAsync'd here — only
             // used as a marker-interface flag for the index build.
-            IReadOnlyList<IAnalyzer> activeAnalyzers = new IAnalyzer[] { new DominatorAnalyzerLegacyAdapter() };
+            IReadOnlyList<IAnalyzer> activeAnalyzers = new IAnalyzer[] { new DominatorAnalyzer() };
 
             var indexStopwatch = Stopwatch.StartNew();
             HeapIndexBuildResult result = cache.PrebuildHeapIndex(

@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers.Leaks;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
@@ -294,8 +295,7 @@ public sealed class ReferenceChainAnalyzerRetypingCharacterizationTests
         ReferenceChainOptions? options = null)
     {
         var analyzer = new ReferenceChainAnalyzer();
-        var context = new AnalysisContext
-        {
+        DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
             HeapTypeStatistics = typeStatistics,
             HeapObjectLookup = objectLookup ?? new FakeHeapObjectLookup(),

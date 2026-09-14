@@ -4,7 +4,7 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Cli.Console;
 using DumpDetective.Cli.Models;
-using DumpDetective.Core.Abstractions;
+using DumpDetective.Sdk.Analysis;
 using DumpDetective.Core.Models;
 
 using System.Diagnostics;
@@ -24,7 +24,7 @@ internal sealed class PerDumpExecutionService(
         IReadOnlyList<IAnalyzer> allAnalyzers,
         IReadOnlyList<IAnalyzer> activeAnalyzers,
         string dumpPath,
-        IProgress<AnalyzerProgressReport>? progress,
+        IProgress<DumpDetective.Core.Abstractions.AnalyzerProgressReport>? progress,
         CancellationToken cancellationToken)
     {
         Stopwatch stopwatch = Stopwatch.StartNew();
@@ -35,9 +35,9 @@ internal sealed class PerDumpExecutionService(
         long managedBeforeLoad = GC.GetTotalMemory(false);
         long allocBeforeLoad = GC.GetTotalAllocatedBytes(precise: false);
 
-        progress?.Report(new AnalyzerProgressReport(0, "loading dump", Detail: null, Elapsed: stopwatch.Elapsed));
+        progress?.Report(new DumpDetective.Core.Abstractions.AnalyzerProgressReport(0, "loading dump", Detail: null, Elapsed: stopwatch.Elapsed));
         using DumpLoadContext loadContext = await _dumpLoader.LoadAsync(dumpPath, cancellationToken);
-        progress?.Report(new AnalyzerProgressReport(0, "preparing index", Detail: null, Elapsed: stopwatch.Elapsed));
+        progress?.Report(new DumpDetective.Core.Abstractions.AnalyzerProgressReport(0, "preparing index", Detail: null, Elapsed: stopwatch.Elapsed));
 
         currentProcess.Refresh();
         long wsAfterLoad = currentProcess.WorkingSet64;
@@ -66,7 +66,7 @@ internal sealed class PerDumpExecutionService(
         // the "running analyzers" phase marker — so their time/memory is attributed to indexing.
         _analyzerExecutionService.RunSharedScans(pipeline, context, cancellationToken);
 
-        progress?.Report(new AnalyzerProgressReport(
+        progress?.Report(new DumpDetective.Core.Abstractions.AnalyzerProgressReport(
             heapIndex.ObjectCount,
             "running analyzers",
             Detail: Path.GetFileName(heapIndex.IndexPath),

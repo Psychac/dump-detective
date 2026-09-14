@@ -206,7 +206,7 @@ namespace DumpDetective.Analysis.Cache
             string dumpPath,
             CancellationToken cancellationToken,
             IProgress<AnalyzerProgressReport>? progress = null,
-            IReadOnlyList<IAnalyzer>? activeAnalyzers = null,
+            IReadOnlyList<Sdk.Analysis.IAnalyzer>? activeAnalyzers = null,
             bool enableExactDominatorTree = false)
         {
             Interlocked.Increment(ref _cacheMisses);

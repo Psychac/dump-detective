@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
@@ -18,7 +19,7 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 /// retained-set analysis from <c>BoundedGraphWalk.CollectRetainedObjects</c> (deleted, dead code
 /// with no remaining caller) to <c>IDominatorTreeProvider.EnumerateRetainedSet</c>/
 /// <c>TryGetRetainedBytes</c>. Updated 2026-09-13 to construct
-/// <see cref="StaticRootLeakDetectorLegacyAdapter"/> for the Tier-1+Tier-2 retyping
+/// <see cref="StaticRootLeakDetector"/> for the Tier-1+Tier-2 retyping
 /// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md) — note that
 /// <c>RootCount == 0</c> here is expected and does not indicate the retyping introduced a
 /// regression: this analyzer's real-root detection is broken upstream (see
@@ -55,10 +56,12 @@ public sealed class StaticRootLeakDetectorDominatorTreeDiscrepancyTests
         // under parallel load. Building the index avoids that fallback entirely -- not a change
         // to production behavior, since the real pipeline always builds an index first anyway.
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
-        using StaticRootLeakDetectorLegacyAdapter analyzer = new();
-        var context = new AnalysisContext { Runtime = runtime, Cache = cache, AnalysisOptions = new AnalysisOptions() };
+        using StaticRootLeakDetector analyzer = new();
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new AnalysisOptions() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        AnalyzerDomainResult result = await analyzer.AnalyzeAsync(context, CancellationToken.None);
+        await analyzer.AnalyzeAsync(context, CancellationToken.None);
+        AnalyzerDomainResult result = (AnalyzerDomainResult)analyzer.LastResult!;
 
         var staticRootResult = result.Should().BeOfType<StaticRootDomainResult>().Subject;
         _output.WriteLine($"RootCount={staticRootResult.RootCount}, TotalRetainedBytes={staticRootResult.TotalRetainedBytes}, TopRoots={staticRootResult.TopRootsByRetainedBytes?.Count ?? 0}, TotalManagedHeapBytes={staticRootResult.TotalManagedHeapBytes}");

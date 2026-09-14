@@ -1,6 +1,8 @@
 using CoreGenerationTag = DumpDetective.Core.Enums.GenerationTag;
 
+using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
@@ -46,10 +48,26 @@ namespace DumpDetective.Analysis.Analyzers.Infra;
 /// coincidence. Fixed properly with a genuine <see cref="FieldValueKind.UInt32"/> read instead of
 /// relying on that coincidence — see <see cref="TryReadPeriod"/>.
 /// </remarks>
-public sealed class TimerLeakAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
+public sealed class TimerLeakAnalyzer :
+    IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
+    IParallelHeapIndexScanParticipant, IRequiresReachableGraphIndex, ICustomizesAnalysisContext
 {
+    private readonly TypedResourceHeapIndexScanState _scanState = new();
+
     public string Name => "Timer Leak Analysis";
     public string Category => "Infrastructure";
+
+    bool ITypedResourceCandidateSource.IsCandidateType(string typeName) => IsCandidateType(typeName);
+
+    void IHeapIndexScanParticipant.BeforeHeapIndexScan(RuntimeAnalysisContext context) => _scanState.BeforeHeapIndexScan(this, context);
+    void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => _scanState.OnHeapEntry(in entry);
+    void IHeapIndexScanParticipant.OnHeapIndexScanCompleted(bool succeeded) => _scanState.OnHeapIndexScanCompleted(succeeded);
+    IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() => new TimerLeakAnalyzer();
+    void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials) =>
+        _scanState.MergeFrom(partials.OfType<TimerLeakAnalyzer>().Select(a => a._scanState));
+
+    Sdk.Analysis.AnalysisContext ICustomizesAnalysisContext.BuildAnalysisContext(RuntimeAnalysisContext context) =>
+        AnalysisContextBuilder.Build(context, analyzerOptions: null, heapObjectsOverride: new PrecomputedHeapObjectStream(_scanState.Candidates));
 
     private static readonly string[] OtherTimerNamespacePrefixes = ["System.Threading.", "System.Timers."];
     private static readonly string[] OtherTimerTokens = ["Timer"];
@@ -85,7 +103,15 @@ public sealed class TimerLeakAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     private static readonly RootPathSearchOptions RootPathOptions = new(
         MaxCandidateNodes: 5_000, MaxCandidateDepth: 8, MaxRootExpansionDepth: 12, LargeFanoutThreshold: 100);
 
-    public AnalyzerDomainResult? LastResult { get; private set; }
+    public AnalyzerDomainResult? LastResult
+    {
+        get => _lastResult;
+        // Stamps AnalyzerName/Category here (not left to a bridging adapter, which no
+        // longer exists) so every LastResult consumer — pipeline or direct caller — sees
+        // them populated the same way.
+        private set => _lastResult = value is null ? null : value with { AnalyzerName = Name, Category = Category };
+    }
+    private AnalyzerDomainResult? _lastResult;
 
     internal static bool IsCandidateType(string typeName) => ClassifyType(typeName) != TimerObjectCategory.None;
 

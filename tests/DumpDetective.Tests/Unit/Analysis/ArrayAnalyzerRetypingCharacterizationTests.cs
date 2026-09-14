@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers.Types;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
@@ -78,15 +79,17 @@ public sealed class ArrayAnalyzerRetypingCharacterizationTests
                 HeapIndexStorageKind.Disk, IndexPath: string.Empty, ObjectCount: 1,
                 Elapsed: TimeSpan.Zero, TypeAggregates: aggregates));
 
-            AnalysisContext context = new()
-            {
+            ArrayAnalysisOptions arrayAnalysisOptions = new() { SparseSampleMinLength = 10 };
+            RuntimeAnalysisContext contextRuntimeCtx = new() {
                 Runtime = runtime,
                 Cache = cache,
-                AnalysisOptions = new AnalysisOptions { ArrayAnalysis = new ArrayAnalysisOptions { SparseSampleMinLength = 10 } },
+                AnalysisOptions = new AnalysisOptions { ArrayAnalysis = arrayAnalysisOptions },
             };
+            DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, arrayAnalysisOptions);
 
-            using ArrayAnalyzerLegacyAdapter adapter = new();
-            var result = (ArrayDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+            using ArrayAnalyzer adapter = new();
+            await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (ArrayDomainResult)adapter.LastResult!;
 
             _output.WriteLine($"mt=0x{mt:x} sampleAddress=0x{sampleAddress:x}");
             _output.WriteLine($"TotalArrayObjects={result.TotalArrayObjects} TotalArrayBytes={result.TotalArrayBytes}");
@@ -119,10 +122,12 @@ public sealed class ArrayAnalyzerRetypingCharacterizationTests
         try
         {
             HeapAnalysisCache cache = new();
-            AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-            using ArrayAnalyzerLegacyAdapter adapter = new();
-            var result = (ArrayDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+            using ArrayAnalyzer adapter = new();
+            await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (ArrayDomainResult)adapter.LastResult!;
 
             result.TotalArrayObjects.Should().Be(0);
             result.TopArrayTypesBySize.Should().BeEmpty();

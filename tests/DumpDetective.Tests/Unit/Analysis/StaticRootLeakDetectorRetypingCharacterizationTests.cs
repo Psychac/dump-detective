@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers.Leaks;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
@@ -257,8 +258,7 @@ public sealed class StaticRootLeakDetectorRetypingCharacterizationTests
         StaticRootLeakAnalysisOptions? options = null)
     {
         StaticRootLeakDetector analyzer = new();
-        AnalysisContext context = new()
-        {
+        DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
             HeapRoots = roots,
             HeapDominators = dominators,

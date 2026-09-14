@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers.Infra;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
@@ -72,8 +73,7 @@ namespace DumpDetective.Tests.Unit.Analysis
         {
             DbConnectionAnalyzer analyzer = new();
             HeapObjectRef candidate = new(address, SdkTypeRefFactory.FromName(typeName, methodTable), Size: 64, TypeDisplayName: typeName);
-            AnalysisContext context = new()
-            {
+            DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
                 Observations = NoOpObservationSink.Instance,
                 DumpObjectFields = new DumpObjectFieldQuery(heap),
                 HeapSegments = new EmptyHeapSegmentQuery(),

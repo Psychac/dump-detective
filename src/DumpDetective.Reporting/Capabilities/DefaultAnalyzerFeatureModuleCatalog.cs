@@ -1,4 +1,3 @@
-using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Analyzers.Async;
 using DumpDetective.Analysis.Analyzers.Gc;
 using DumpDetective.Analysis.Analyzers.Infra;
@@ -19,120 +18,52 @@ internal interface IAnalyzerFeatureModuleCatalog
     IReadOnlyList<Type> GlobalReportSectionBuilderTypes { get; }
 }
 
+/// <summary>
+/// Registers the SDK analyzer types (<c>Sdk.Analysis.IAnalyzer</c>) directly — since the
+/// <c>Core.Abstractions.IAnalyzer</c>-bridging <c>XxxAnalyzerLegacyAdapter</c> classes were deleted
+/// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md's "next steps" step 1), every
+/// analyzer type here is the retyped class itself.
+/// </summary>
 internal sealed class DefaultAnalyzerFeatureModuleCatalog : IAnalyzerFeatureModuleCatalog
 {
     public IReadOnlyList<AnalyzerFeatureModule> Modules { get; } =
     [
-        // MemoryAnalyzerLegacyAdapter, not MemoryAnalyzer directly, since 2026-09-11 (Batch 4 of the
-        // Phase 1 retyping) — see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("memory", "Memory Analysis", typeof(MemoryAnalyzerLegacyAdapter), typeof(MemoryFindingGenerator), typeof(MemoryAnalyzerTrendComparer), typeof(MemoryAnalysisSectionBuilder), 100, ["memory"]),
-        // GCGenerationAnalyzerLegacyAdapter, not GCGenerationAnalyzer directly, since 2026-09-10 —
-        // the Phase 1 retyping pilot; GCGenerationAnalyzer now implements the SDK's capability-scoped
-        // Sdk.Analysis.IAnalyzer, not Core.Abstractions.IAnalyzer. See
-        // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("gc-generation", "GC Generation Analysis", typeof(GCGenerationAnalyzerLegacyAdapter), typeof(GCGenerationFindingGenerator), typeof(GCGenerationTrendComparer), typeof(GCPressureSectionBuilder), 110, ["gc"]),
-        // AllocationPatternAnalyzerLegacyAdapter, not AllocationPatternAnalyzer directly, since
-        // 2026-09-11 (Tier-1 mop-up batch) -- see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("allocation-pattern", "Allocation Pattern Analysis", typeof(AllocationPatternAnalyzerLegacyAdapter), typeof(AllocationPatternFindingGenerator), typeof(AllocationPatternTrendComparer), typeof(AllocationPatternSectionBuilder), 120, ["gc", "allocation"]),
-        // ObjectShapeAnalyzerLegacyAdapter, not ObjectShapeAnalyzer directly, since 2026-09-11
-        // (Tier-1 mop-up batch) -- see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("object-shape", "Object Shape Analysis", typeof(ObjectShapeAnalyzerLegacyAdapter), typeof(ObjectShapeFindingGenerator), typeof(ObjectShapeTrendComparer), typeof(ObjectShapeSectionBuilder), 130, ["types"]),
-        // GCRootAnalyzerLegacyAdapter, not GCRootAnalyzer directly, since 2026-09-11 (GC root
-        // capability retyping batch) — see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("gc-root", "GC Root Analysis", typeof(GCRootAnalyzerLegacyAdapter), typeof(GCRootFindingGenerator), typeof(GCRootTrendComparer), typeof(GCRootIntelligenceSectionBuilder), 140, ["roots"]),
-        // HeapTopologyAnalyzerLegacyAdapter, not HeapTopologyAnalyzer directly, since 2026-09-11
-        // (segment-capability retyping batch, alongside SegmentReservationAnalyzer) — see
-        // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("heap-topology", "Heap Topology Analysis", typeof(HeapTopologyAnalyzerLegacyAdapter), typeof(HeapTopologyFindingGenerator), typeof(HeapTopologyTrendComparer), typeof(HeapTopologySectionBuilder), 150, ["heap"]),
-        // ModuleAnalyzerLegacyAdapter, not ModuleAnalyzer directly, since 2026-09-13 -- see
-        // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("module", "Module Analysis", typeof(ModuleAnalyzerLegacyAdapter), typeof(ModuleFindingGenerator), typeof(ModuleTrendComparer), typeof(ModuleSectionBuilder), 160, ["runtime"]),
-        // CrashAnalyzerLegacyAdapter, not CrashAnalyzer directly, since 2026-09-12 -- see
-        // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("crash", "Crash Analysis", typeof(CrashAnalyzerLegacyAdapter), typeof(CrashFindingGenerator), typeof(CrashTrendComparer), typeof(ExceptionAnalysisSectionBuilder), 170, ["exceptions"]),
-        // HangAnalyzerLegacyAdapter, not HangAnalyzer directly, since 2026-09-12 -- see
-        // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("hang", "Hang Analysis", typeof(HangAnalyzerLegacyAdapter), typeof(HangFindingGenerator), typeof(HangTrendComparer), typeof(HangSectionBuilder), 180, ["threads"]),
-        // AsyncTaskAnalyzerLegacyAdapter, not AsyncTaskAnalyzer directly, since 2026-09-12
-        // (Tier-2 wave) -- see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("async-task", "Async Task Analysis", typeof(AsyncTaskAnalyzerLegacyAdapter), typeof(AsyncTaskFindingGenerator), typeof(AsyncTaskTrendComparer), typeof(AsyncAnalysisSectionBuilder), 190, ["async"]),
-        Module("leak-candidate", "Leak Candidate Analysis", typeof(LeakCandidateAnalyzerLegacyAdapter), typeof(LeakCandidateFindingGenerator), typeof(LeakCandidateTrendComparer), typeof(LeakAnalysisSectionBuilder), 210, ["leaks"]),
-        Module("dominator", "Dominator Analysis", typeof(DominatorAnalyzerLegacyAdapter), typeof(DominatorFindingGenerator), typeof(DominatorTrendComparer), typeof(DominatorSectionBuilder), 220, ["retention", "dominator"]),
-        // StringAnalyzerLegacyAdapter, not StringAnalyzer directly, since 2026-09-13 -- see
-        // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("string", "String Analysis", typeof(StringAnalyzerLegacyAdapter), typeof(StringFindingGenerator), typeof(StringTrendComparer), typeof(StringSectionBuilder), 230, ["memory", "string"]),
-        // CollectionAnalyzerLegacyAdapter, not CollectionAnalyzer directly, since 2026-09-12
-        // (Tier-2 wave) -- see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("collection", "Collection Analysis", typeof(CollectionAnalyzerLegacyAdapter), typeof(CollectionFindingGenerator), typeof(CollectionTrendComparer), typeof(CollectionSectionBuilder), 240, ["collections"]),
-        // StaticRootLeakDetectorLegacyAdapter, not StaticRootLeakDetector directly, since 2026-09-13
-        // -- see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("static-root", "Static Root Leak Detection", typeof(StaticRootLeakDetectorLegacyAdapter), typeof(StaticRootFindingGenerator), typeof(StaticRootTrendComparer), typeof(StaticRootSectionBuilder), 250, ["roots", "leaks"]),
-        Module("reference-chain", "Reference Chain Analysis", typeof(ReferenceChainAnalyzerLegacyAdapter), typeof(ReferenceChainFindingGenerator), typeof(ReferenceChainTrendComparer), typeof(ReferenceChainSectionBuilder), 260, ["roots"]),
-        // GCHandleAnalyzerLegacyAdapter, not GCHandleAnalyzer directly, since 2026-09-11 (Batch 7 of
-        // the Phase 1 retyping) — see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("gc-handle", "GC Handle Analysis", typeof(GCHandleAnalyzerLegacyAdapter), typeof(GCHandleFindingGenerator), typeof(GCHandleTrendComparer), typeof(GCHandleSectionBuilder), 270, ["handles"]),
-        // LohFragmentationAnalyzerLegacyAdapter, not LohFragmentationAnalyzer directly, since
-        // 2026-09-11 (Batch 6 of the Phase 1 retyping) — see
-        // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("loh-fragmentation", "LOH & POH Fragmentation Analysis", typeof(LohFragmentationAnalyzerLegacyAdapter), typeof(LohFragmentationFindingGenerator), typeof(LohFragmentationTrendComparer), typeof(LohFragmentationSectionBuilder), 290, ["gc", "loh", "poh"]),
-        // ThreadStackClusterAnalyzerLegacyAdapter, not ThreadStackClusterAnalyzer directly, since
-        // 2026-09-11 (thread-domain quartet Batch 2) — see
-        // docs/refactor/modularity/phase-1-thread-quartet-plan.md.
-        Module("thread-stack-cluster", "Thread Stack Cluster Analysis", typeof(ThreadStackClusterAnalyzerLegacyAdapter), typeof(ThreadStackClusterFindingGenerator), typeof(ThreadStackClusterTrendComparer), typeof(ThreadStackClusterSectionBuilder), 300, ["threads"]),
-        // ThreadAnalyzerLegacyAdapter, not ThreadAnalyzer directly, since 2026-09-12 -- see
-        // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("thread", "Thread Analysis", typeof(ThreadAnalyzerLegacyAdapter), typeof(ThreadFindingGenerator), typeof(ThreadTrendComparer), typeof(ThreadSectionBuilder), 310, ["threads"]),
-        // LockGraphAnalyzerLegacyAdapter, not LockGraphAnalyzer directly, since 2026-09-11 (thread-
-        // domain quartet Batch 1) — see docs/refactor/modularity/phase-1-thread-quartet-plan.md.
-        Module("lock-graph", "Lock Graph Analysis", typeof(LockGraphAnalyzerLegacyAdapter), typeof(LockGraphFindingGenerator), typeof(LockGraphTrendComparer), typeof(LockGraphSectionBuilder), 320, ["threads", "locks"]),
-        // EventLeakAnalyzerLegacyAdapter, not EventLeakAnalyzer directly, since 2026-09-13 -- see
-        // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("event-leak", "Event Leak Analysis", typeof(EventLeakAnalyzerLegacyAdapter), typeof(EventLeakFindingGenerator), typeof(EventLeakTrendComparer), typeof(EventLeakSectionBuilder), 330, ["events", "leaks"]),
-        // FinalizableObjectAnalyzerLegacyAdapter, not FinalizableObjectAnalyzer directly, since
-        // 2026-09-12 -- see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("finalizable-object", "Finalizable Object Analysis", typeof(FinalizableObjectAnalyzerLegacyAdapter), typeof(FinalizableObjectFindingGenerator), typeof(FinalizableObjectTrendComparer), typeof(FinalizableObjectSectionBuilder), 340, ["gc"]),
-        // AsyncStateMachineAnalyzerLegacyAdapter, not AsyncStateMachineAnalyzer directly, since
-        // 2026-09-12 -- see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("async-state-machine", "Async State Machine Analysis", typeof(AsyncStateMachineAnalyzerLegacyAdapter), typeof(AsyncStateMachineFindingGenerator), typeof(AsyncStateMachineTrendComparer), typeof(AsyncStateMachineSectionBuilder), 350, ["async"]),
-        // ArrayAnalyzerLegacyAdapter, not ArrayAnalyzer directly, since 2026-09-11 --
-        // see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("array", "Array Analysis", typeof(ArrayAnalyzerLegacyAdapter), typeof(ArrayFindingGenerator), typeof(ArrayTrendComparer), typeof(ArraySectionBuilder), 360, ["types"]),
-        // SegmentReservationAnalyzerLegacyAdapter, not SegmentReservationAnalyzer directly, since
-        // 2026-09-11 (segment-capability retyping batch, alongside GCGenerationAnalyzer's pilot) —
-        // see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("segment-reservation", "Segment Reservation Analysis", typeof(SegmentReservationAnalyzerLegacyAdapter), typeof(SegmentReservationFindingGenerator), typeof(SegmentReservationTrendComparer), typeof(SegmentReservationSectionBuilder), 380, ["gc", "segments"]),
-        // WeakReferenceAnalyzerLegacyAdapter, not WeakReferenceAnalyzer directly, since 2026-09-12 --
-        // see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("weak-reference", "Weak Reference Analysis", typeof(WeakReferenceAnalyzerLegacyAdapter), typeof(WeakReferenceFindingGenerator), typeof(WeakReferenceTrendComparer), typeof(WeakReferenceSectionBuilder), 390, ["gc"]),
-        // BoxingAnalyzerLegacyAdapter, not BoxingAnalyzer directly, since 2026-09-12 (Tier-1 mop-up
-        // batch, alongside ObjectShapeAnalyzer -- turned out Tier-1-only on inspection) — see
-        // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("boxing", "Boxing Analysis", typeof(BoxingAnalyzerLegacyAdapter), typeof(BoxingFindingGenerator), typeof(BoxingTrendComparer), typeof(BoxingSectionBuilder), 400, ["types", "perf"]),
-        // JitAnalyzerLegacyAdapter, not JitAnalyzer directly, since 2026-09-11 (Batch 5 of the Phase
-        // 1 retyping) — see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("jit", "JIT Analysis", typeof(JitAnalyzerLegacyAdapter), typeof(JitFindingGenerator), typeof(JitTrendComparer), typeof(JitSectionBuilder), 410, ["runtime", "perf"]),
-        // DbConnectionAnalyzerLegacyAdapter, not DbConnectionAnalyzer directly, since 2026-09-12 --
-        // see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("db-connection", "DbConnection Analysis", typeof(DbConnectionAnalyzerLegacyAdapter), typeof(DbConnectionFindingGenerator), typeof(DbConnectionTrendComparer), typeof(DbConnectionSectionBuilder), 420, ["infra", "network"]),
-        // SqlTransactionAnalyzerLegacyAdapter/SqlCommandAnalyzerLegacyAdapter, not the analyzers
-        // directly, since 2026-09-11 (Tier-2 wave batch 1) -- see
-        // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("sql-transaction", "SQL Transaction Analysis", typeof(SqlTransactionAnalyzerLegacyAdapter), typeof(SqlTransactionFindingGenerator), typeof(SqlTransactionTrendComparer), typeof(SqlTransactionSectionBuilder), 425, ["infra", "network"]),
-        Module("sql-command", "SQL Command Analysis", typeof(SqlCommandAnalyzerLegacyAdapter), typeof(SqlCommandFindingGenerator), typeof(SqlCommandTrendComparer), typeof(SqlCommandSectionBuilder), 426, ["infra", "network"]),
-        // SqlConnectionPoolAnalyzerLegacyAdapter, not SqlConnectionPoolAnalyzer directly, since 2026-09-11
-        // (Tier-2 pilot) -- SqlConnectionPoolAnalyzer now implements SDK IDumpObjectFieldQuery
-        // capability, not Core.Abstractions.IAnalyzer directly. See
-        // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("sql-connection-pool", "SQL Connection Pool Analysis", typeof(SqlConnectionPoolAnalyzerLegacyAdapter), typeof(SqlConnectionPoolFindingGenerator), typeof(SqlConnectionPoolTrendComparer), typeof(SqlConnectionPoolSectionBuilder), 427, ["infra", "network"]),
-        // WcfChannelAnalyzerLegacyAdapter, not WcfChannelAnalyzer directly, since 2026-09-11 --
-        // see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("wcf-channel", "WCF Channel Analysis", typeof(WcfChannelAnalyzerLegacyAdapter), typeof(WcfChannelFindingGenerator), typeof(WcfChannelTrendComparer), typeof(WcfChannelSectionBuilder), 430, ["infra", "network"]),
-        // HttpObjectAnalyzerLegacyAdapter, not HttpObjectAnalyzer directly, since 2026-09-11 --
-        // see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("http-object", "Http Object Analysis", typeof(HttpObjectAnalyzerLegacyAdapter), typeof(HttpObjectFindingGenerator), typeof(HttpObjectTrendComparer), typeof(HttpObjectSectionBuilder), 440, ["infra", "network"]),
-        // TimerLeakAnalyzerLegacyAdapter, not TimerLeakAnalyzer directly, since 2026-09-12 --
-        // see docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
-        Module("timer-leak", "Timer Leak Analysis", typeof(TimerLeakAnalyzerLegacyAdapter), typeof(TimerLeakFindingGenerator), typeof(TimerLeakTrendComparer), typeof(TimerLeakSectionBuilder), 450, ["infra", "timers"]),
+        Module("memory", "Memory Analysis", typeof(MemoryAnalyzer), typeof(MemoryFindingGenerator), typeof(MemoryAnalyzerTrendComparer), typeof(MemoryAnalysisSectionBuilder), 100, ["memory"]),
+        Module("gc-generation", "GC Generation Analysis", typeof(GCGenerationAnalyzer), typeof(GCGenerationFindingGenerator), typeof(GCGenerationTrendComparer), typeof(GCPressureSectionBuilder), 110, ["gc"]),
+        Module("allocation-pattern", "Allocation Pattern Analysis", typeof(AllocationPatternAnalyzer), typeof(AllocationPatternFindingGenerator), typeof(AllocationPatternTrendComparer), typeof(AllocationPatternSectionBuilder), 120, ["gc", "allocation"]),
+        Module("object-shape", "Object Shape Analysis", typeof(ObjectShapeAnalyzer), typeof(ObjectShapeFindingGenerator), typeof(ObjectShapeTrendComparer), typeof(ObjectShapeSectionBuilder), 130, ["types"]),
+        Module("gc-root", "GC Root Analysis", typeof(GCRootAnalyzer), typeof(GCRootFindingGenerator), typeof(GCRootTrendComparer), typeof(GCRootIntelligenceSectionBuilder), 140, ["roots"]),
+        Module("heap-topology", "Heap Topology Analysis", typeof(HeapTopologyAnalyzer), typeof(HeapTopologyFindingGenerator), typeof(HeapTopologyTrendComparer), typeof(HeapTopologySectionBuilder), 150, ["heap"]),
+        Module("module", "Module Analysis", typeof(ModuleAnalyzer), typeof(ModuleFindingGenerator), typeof(ModuleTrendComparer), typeof(ModuleSectionBuilder), 160, ["runtime"]),
+        Module("crash", "Crash Analysis", typeof(CrashAnalyzer), typeof(CrashFindingGenerator), typeof(CrashTrendComparer), typeof(ExceptionAnalysisSectionBuilder), 170, ["exceptions"]),
+        Module("hang", "Hang Analysis", typeof(HangAnalyzer), typeof(HangFindingGenerator), typeof(HangTrendComparer), typeof(HangSectionBuilder), 180, ["threads"]),
+        Module("async-task", "Async Task Analysis", typeof(AsyncTaskAnalyzer), typeof(AsyncTaskFindingGenerator), typeof(AsyncTaskTrendComparer), typeof(AsyncAnalysisSectionBuilder), 190, ["async"]),
+        Module("leak-candidate", "Leak Candidate Analysis", typeof(LeakCandidateAnalyzer), typeof(LeakCandidateFindingGenerator), typeof(LeakCandidateTrendComparer), typeof(LeakAnalysisSectionBuilder), 210, ["leaks"]),
+        Module("dominator", "Dominator Analysis", typeof(DominatorAnalyzer), typeof(DominatorFindingGenerator), typeof(DominatorTrendComparer), typeof(DominatorSectionBuilder), 220, ["retention", "dominator"]),
+        Module("string", "String Analysis", typeof(StringAnalyzer), typeof(StringFindingGenerator), typeof(StringTrendComparer), typeof(StringSectionBuilder), 230, ["memory", "string"]),
+        Module("collection", "Collection Analysis", typeof(CollectionAnalyzer), typeof(CollectionFindingGenerator), typeof(CollectionTrendComparer), typeof(CollectionSectionBuilder), 240, ["collections"]),
+        Module("static-root", "Static Root Leak Detection", typeof(StaticRootLeakDetector), typeof(StaticRootFindingGenerator), typeof(StaticRootTrendComparer), typeof(StaticRootSectionBuilder), 250, ["roots", "leaks"]),
+        Module("reference-chain", "Reference Chain Analysis", typeof(ReferenceChainAnalyzer), typeof(ReferenceChainFindingGenerator), typeof(ReferenceChainTrendComparer), typeof(ReferenceChainSectionBuilder), 260, ["roots"]),
+        Module("gc-handle", "GC Handle Analysis", typeof(GCHandleAnalyzer), typeof(GCHandleFindingGenerator), typeof(GCHandleTrendComparer), typeof(GCHandleSectionBuilder), 270, ["handles"]),
+        Module("loh-fragmentation", "LOH & POH Fragmentation Analysis", typeof(LohFragmentationAnalyzer), typeof(LohFragmentationFindingGenerator), typeof(LohFragmentationTrendComparer), typeof(LohFragmentationSectionBuilder), 290, ["gc", "loh", "poh"]),
+        Module("thread-stack-cluster", "Thread Stack Cluster Analysis", typeof(ThreadStackClusterAnalyzer), typeof(ThreadStackClusterFindingGenerator), typeof(ThreadStackClusterTrendComparer), typeof(ThreadStackClusterSectionBuilder), 300, ["threads"]),
+        Module("thread", "Thread Analysis", typeof(ThreadAnalyzer), typeof(ThreadFindingGenerator), typeof(ThreadTrendComparer), typeof(ThreadSectionBuilder), 310, ["threads"]),
+        Module("lock-graph", "Lock Graph Analysis", typeof(LockGraphAnalyzer), typeof(LockGraphFindingGenerator), typeof(LockGraphTrendComparer), typeof(LockGraphSectionBuilder), 320, ["threads", "locks"]),
+        Module("event-leak", "Event Leak Analysis", typeof(EventLeakAnalyzer), typeof(EventLeakFindingGenerator), typeof(EventLeakTrendComparer), typeof(EventLeakSectionBuilder), 330, ["events", "leaks"]),
+        Module("finalizable-object", "Finalizable Object Analysis", typeof(FinalizableObjectAnalyzer), typeof(FinalizableObjectFindingGenerator), typeof(FinalizableObjectTrendComparer), typeof(FinalizableObjectSectionBuilder), 340, ["gc"]),
+        Module("async-state-machine", "Async State Machine Analysis", typeof(AsyncStateMachineAnalyzer), typeof(AsyncStateMachineFindingGenerator), typeof(AsyncStateMachineTrendComparer), typeof(AsyncStateMachineSectionBuilder), 350, ["async"]),
+        Module("array", "Array Analysis", typeof(ArrayAnalyzer), typeof(ArrayFindingGenerator), typeof(ArrayTrendComparer), typeof(ArraySectionBuilder), 360, ["types"]),
+        Module("segment-reservation", "Segment Reservation Analysis", typeof(SegmentReservationAnalyzer), typeof(SegmentReservationFindingGenerator), typeof(SegmentReservationTrendComparer), typeof(SegmentReservationSectionBuilder), 380, ["gc", "segments"]),
+        Module("weak-reference", "Weak Reference Analysis", typeof(WeakReferenceAnalyzer), typeof(WeakReferenceFindingGenerator), typeof(WeakReferenceTrendComparer), typeof(WeakReferenceSectionBuilder), 390, ["gc"]),
+        Module("boxing", "Boxing Analysis", typeof(BoxingAnalyzer), typeof(BoxingFindingGenerator), typeof(BoxingTrendComparer), typeof(BoxingSectionBuilder), 400, ["types", "perf"]),
+        Module("jit", "JIT Analysis", typeof(JitAnalyzer), typeof(JitFindingGenerator), typeof(JitTrendComparer), typeof(JitSectionBuilder), 410, ["runtime", "perf"]),
+        Module("db-connection", "DbConnection Analysis", typeof(DbConnectionAnalyzer), typeof(DbConnectionFindingGenerator), typeof(DbConnectionTrendComparer), typeof(DbConnectionSectionBuilder), 420, ["infra", "network"]),
+        Module("sql-transaction", "SQL Transaction Analysis", typeof(SqlTransactionAnalyzer), typeof(SqlTransactionFindingGenerator), typeof(SqlTransactionTrendComparer), typeof(SqlTransactionSectionBuilder), 425, ["infra", "network"]),
+        Module("sql-command", "SQL Command Analysis", typeof(SqlCommandAnalyzer), typeof(SqlCommandFindingGenerator), typeof(SqlCommandTrendComparer), typeof(SqlCommandSectionBuilder), 426, ["infra", "network"]),
+        Module("sql-connection-pool", "SQL Connection Pool Analysis", typeof(SqlConnectionPoolAnalyzer), typeof(SqlConnectionPoolFindingGenerator), typeof(SqlConnectionPoolTrendComparer), typeof(SqlConnectionPoolSectionBuilder), 427, ["infra", "network"]),
+        Module("wcf-channel", "WCF Channel Analysis", typeof(WcfChannelAnalyzer), typeof(WcfChannelFindingGenerator), typeof(WcfChannelTrendComparer), typeof(WcfChannelSectionBuilder), 430, ["infra", "network"]),
+        Module("http-object", "Http Object Analysis", typeof(HttpObjectAnalyzer), typeof(HttpObjectFindingGenerator), typeof(HttpObjectTrendComparer), typeof(HttpObjectSectionBuilder), 440, ["infra", "network"]),
+        Module("timer-leak", "Timer Leak Analysis", typeof(TimerLeakAnalyzer), typeof(TimerLeakFindingGenerator), typeof(TimerLeakTrendComparer), typeof(TimerLeakSectionBuilder), 450, ["infra", "timers"]),
     ];
 
     public IReadOnlyList<Type> GlobalReportSectionBuilderTypes { get; } =

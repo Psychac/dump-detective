@@ -1,6 +1,8 @@
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Diagnosers;
 using DumpDetective.Analysis.Cache;
+using DumpDetective.Analysis.Pipeline;
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Abstractions;
 using Microsoft.Diagnostics.Runtime;
 using System;
@@ -32,7 +34,7 @@ namespace BenchmarkSuite1
     /// </summary>
     [MemoryDiagnoser]
     [EventPipeProfiler(EventPipeProfile.GcVerbose)]
-    public class ModuleAnalyzerBenchmark : AnalyzerBenchmarkBase<ModuleAnalyzerLegacyAdapter>
+    public class ModuleAnalyzerBenchmark : AnalyzerBenchmarkBase<ModuleAnalyzer>
     {
         protected override IHeapAnalysisCache? CreateCache() => new HeapAnalysisCache();
 
@@ -53,8 +55,10 @@ namespace BenchmarkSuite1
         {
             if (_runtimeNoCacheRef is null)
                 throw new InvalidOperationException("Runtime not initialized.");
-            AnalysisContext noCacheContext = new() { Runtime = _runtimeNoCacheRef, Cache = null, AnalysisOptions = new() };
-            return Analyzer.AnalyzeAsync(noCacheContext, default).GetAwaiter().GetResult();
+            RuntimeAnalysisContext noCacheRuntimeContext = new() { Runtime = _runtimeNoCacheRef, Cache = null!, AnalysisOptions = new() };
+            DumpDetective.Sdk.Analysis.AnalysisContext noCacheContext = AnalysisContextBuilder.Build(noCacheRuntimeContext, analyzerOptions: null);
+            Analyzer.AnalyzeAsync(noCacheContext, default).GetAwaiter().GetResult();
+            return Analyzer.LastResult!;
         }
 
         /// <summary>
@@ -66,7 +70,8 @@ namespace BenchmarkSuite1
         {
             if (AnalysisContext is null)
                 throw new InvalidOperationException("Benchmark not properly initialized.");
-            return Analyzer.AnalyzeAsync(AnalysisContext, default).GetAwaiter().GetResult();
+            Analyzer.AnalyzeAsync(AnalysisContext, default).GetAwaiter().GetResult();
+            return Analyzer.LastResult!;
         }
 
         protected override void OnCleanup()

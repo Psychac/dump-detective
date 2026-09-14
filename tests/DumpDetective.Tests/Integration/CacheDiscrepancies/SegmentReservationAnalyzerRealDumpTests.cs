@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Analyzers;
@@ -52,10 +53,12 @@ public sealed class SegmentReservationAnalyzerRealDumpTests
         }
 
         HeapAnalysisCache cache = new();
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using SegmentReservationAnalyzerLegacyAdapter adapter = new();
-        var result = (SegmentReservationDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using SegmentReservationAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (SegmentReservationDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("Segment Reservation Analysis");
         result.TotalSegmentCount.Should().Be(expectedSegmentCount);

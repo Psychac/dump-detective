@@ -1,22 +1,21 @@
 ﻿using DumpDetective.Core.Models;
 using System.Diagnostics;
-using DumpDetective.Core.Abstractions;
 using DumpDetective.Analysis.Cache;
 
 namespace DumpDetective.Analysis.Pipeline;
 
 internal sealed class AnalysisPipeline(
-    IEnumerable<IAnalyzer> analyzers,
+    IEnumerable<Sdk.Analysis.IAnalyzer> analyzers,
     FindingGenerationPipeline findingGenerationPipeline,
     AnalyzerCleanupPolicy? cleanupPolicy = null,
     AnalyzerExecutionRunner? executionRunner = null,
     AnalysisDiagnosticsPublisher? diagnosticsPublisher = null,
     AnalyzerResultPostProcessor? resultPostProcessor = null)
 {
-    private readonly IReadOnlyList<IAnalyzer> _analyzers = analyzers.Where(a => a is not IDeferredAnalyzer).ToArray();
+    private readonly IReadOnlyList<Sdk.Analysis.IAnalyzer> _analyzers = analyzers.Where(a => a is not IDeferredAnalyzer).ToArray();
     // Analyzers that must observe the full completed run list (post-hoc, order-agnostic
     // inter-analyzer result bus) run here, after every mid-loop analyzer has finished.
-    private readonly IReadOnlyList<IAnalyzer> _deferredAnalyzers = analyzers.OfType<IDeferredAnalyzer>().ToArray();
+    private readonly IReadOnlyList<Sdk.Analysis.IAnalyzer> _deferredAnalyzers = analyzers.OfType<IDeferredAnalyzer>().ToArray();
     private readonly AnalyzerResultPostProcessor _resultPostProcessor = resultPostProcessor ?? new AnalyzerResultPostProcessor(findingGenerationPipeline);
     private readonly AnalyzerCleanupPolicy _cleanupPolicy = cleanupPolicy ?? new AnalyzerCleanupPolicy();
     private readonly AnalysisDiagnosticsPublisher _diagnosticsPublisher = diagnosticsPublisher ?? new AnalysisDiagnosticsPublisher();
@@ -104,13 +103,13 @@ internal sealed class AnalysisPipeline(
     }
 
     private async Task RunAnalyzerBatchAsync(
-        IReadOnlyList<IAnalyzer> analyzersToRun,
+        IReadOnlyList<Sdk.Analysis.IAnalyzer> analyzersToRun,
         RuntimeAnalysisContext context,
         Guid runId,
         List<AnalyzerRunResult> runResults,
         CancellationToken cancellationToken)
     {
-        foreach (IAnalyzer analyzer in analyzersToRun)
+        foreach (Sdk.Analysis.IAnalyzer analyzer in analyzersToRun)
         {
             if (cancellationToken.IsCancellationRequested)
             {

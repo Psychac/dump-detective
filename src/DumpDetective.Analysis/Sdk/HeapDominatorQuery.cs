@@ -8,7 +8,7 @@ namespace DumpDetective.Analysis.SdkBridge;
 /// Dump-side implementation of the <c>heap.dominators</c> capability, built for
 /// <c>GCRootAnalyzer</c>'s retyping (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md).
 /// A thin pass-through over an already-resolved <see cref="IDominatorTreeProvider"/>/
-/// <see cref="IThreadRetentionProvider"/> pair — the caller (<see cref="LegacyAnalysisContextTranslator"/>)
+/// <see cref="IThreadRetentionProvider"/> pair — the caller (<see cref="Pipeline.AnalysisContextBuilder"/>)
 /// is the one that decides whether the capability exists at all for this session, by only
 /// constructing this type when <c>IHeapAnalysisCache.TryGetDominatorTreeProvider</c> returned
 /// non-null; <c>AnalysisContext.HeapDominators</c> stays null otherwise. Matches the old

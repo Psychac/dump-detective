@@ -16,7 +16,7 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 
 /// <summary>
 /// Real-dump verification for the Tier-2 wave (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
-/// proves <see cref="AsyncTaskAnalyzerLegacyAdapter"/> produces an internally consistent result
+/// proves <see cref="AsyncTaskAnalyzer"/> produces an internally consistent result
 /// against a real, large dump -- covering the unified Task/TaskCompletionSource/IValueTaskSource
 /// candidate stream, continuation-chain BFS, and the new <c>TryReadNestedStructField</c>/
 /// <c>EnumerateObjectReferenceElements</c> Tier-2 primitives it introduced.
@@ -46,12 +46,16 @@ public sealed class AsyncTaskAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using AsyncTaskAnalyzerLegacyAdapter adapter = new();
-        new HeapIndexScanDispatcher().Run(cache, context, [adapter], CancellationToken.None);
+        using AsyncTaskAnalyzer adapter = new();
+        new HeapIndexScanDispatcher().Run(cache, contextRuntimeCtx, [adapter], CancellationToken.None);
 
-        var result = (AsyncTaskDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        context = ((ICustomizesAnalysisContext)adapter).BuildAnalysisContext(contextRuntimeCtx);
+
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (AsyncTaskDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("Async Task Analysis");
 

@@ -7,6 +7,7 @@ using DumpDetective.Cli.Pipeline;
 using DumpDetective.Cli.Output;
 using DumpDetective.Reporting.Models;
 using DumpDetective.Core.Models;
+using DumpDetective.Sdk.Analysis;
 using FluentAssertions;
 using Xunit;
 
@@ -53,8 +54,8 @@ public sealed class WriteOutputStageTests
             var state = new SingleDumpPipelineState
             {
                 Resolved = ResolvedExecutionOptionsFactory.Create(reportPath),
-                ActiveAnalyzers = Array.Empty<DumpDetective.Core.Abstractions.IAnalyzer>(),
-                AllAnalyzers = Array.Empty<DumpDetective.Core.Abstractions.IAnalyzer>(),
+                ActiveAnalyzers = Array.Empty<DumpDetective.Sdk.Analysis.IAnalyzer>(),
+                AllAnalyzers = Array.Empty<DumpDetective.Sdk.Analysis.IAnalyzer>(),
                 RenderedReport = "dummy",
                 ReportDocument = new SingleDumpReportDocument(),
                 Runs = [run]

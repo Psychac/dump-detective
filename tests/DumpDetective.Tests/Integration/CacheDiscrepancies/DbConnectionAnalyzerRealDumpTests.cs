@@ -16,7 +16,7 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 
 /// <summary>
 /// Real-dump verification for the Tier-2 wave (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
-/// proves <see cref="DbConnectionAnalyzerLegacyAdapter"/> produces an internally consistent result
+/// proves <see cref="DbConnectionAnalyzer"/> produces an internally consistent result
 /// against a real, large dump, including its first-ever real exercise of the new
 /// <c>heap.root-paths</c> capability against production data.
 /// </summary>
@@ -45,12 +45,16 @@ public sealed class DbConnectionAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using DbConnectionAnalyzerLegacyAdapter adapter = new();
-        new HeapIndexScanDispatcher().Run(cache, context, [adapter], CancellationToken.None);
+        using DbConnectionAnalyzer adapter = new();
+        new HeapIndexScanDispatcher().Run(cache, contextRuntimeCtx, [adapter], CancellationToken.None);
 
-        var result = (DbConnectionDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        context = ((ICustomizesAnalysisContext)adapter).BuildAnalysisContext(contextRuntimeCtx);
+
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (DbConnectionDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("DB Connection Analysis");
 

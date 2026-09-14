@@ -17,7 +17,7 @@ internal sealed class ThreadStackScanDispatcher
 {
     private const string ScanName = "Shared thread stack scan";
 
-    public void Run(ClrRuntime runtime, AnalysisContext context, IReadOnlyList<IThreadStackScanParticipant> participants, int maxFramesPerThread, CancellationToken cancellationToken)
+    public void Run(ClrRuntime runtime, RuntimeAnalysisContext context, IReadOnlyList<IThreadStackScanParticipant> participants, int maxFramesPerThread, CancellationToken cancellationToken)
     {
         if (participants.Count == 0)
             return;

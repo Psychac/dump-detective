@@ -6,6 +6,7 @@ using DumpDetective.Cli.Models;
 using DumpDetective.Cli.Output;
 using DumpDetective.Cli.Services;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Sdk.Analysis;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Formatters;
 using DumpDetective.Reporting.Models;
@@ -251,7 +252,7 @@ internal sealed class TrendOrchestrationService(
         string? indexDetail = null;
         var progressLock = new object();
 
-        var progress = new Progress<AnalyzerProgressReport>(r =>
+        var progress = new Progress<DumpDetective.Core.Abstractions.AnalyzerProgressReport>(r =>
         {
             Interlocked.Exchange(ref lastScanned, r.ScannedCount);
             lock (progressLock)

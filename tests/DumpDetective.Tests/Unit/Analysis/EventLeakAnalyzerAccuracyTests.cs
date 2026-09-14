@@ -28,7 +28,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
     [Fact]
     public void CalculateSeverity_ZeroSubscribers_NoBonusApplied()
     {
-        int score = EventLeakAnalyzerLegacyAdapter.CalculateSeverity(isStatic: false, subscriberCount: 0, rootHint: string.Empty, DefaultOptions);
+        int score = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: 0, rootHint: string.Empty, DefaultOptions);
 
         score.Should().Be(0, "log2(0+1)=0 so no subscriber-count bonus applies at zero subscribers");
     }
@@ -37,7 +37,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
     public void CalculateSeverity_SubscriberCountLogScale_MatchesFormula()
     {
         var opts = DefaultOptions;
-        int score = EventLeakAnalyzerLegacyAdapter.CalculateSeverity(isStatic: false, subscriberCount: 7, rootHint: string.Empty, opts);
+        int score = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: 7, rootHint: string.Empty, opts);
 
         int expectedLogBonus = (int)(Math.Log2(7 + 1) * opts.SeveritySubscriberLogScale);
         score.Should().Be(7 + expectedLogBonus);
@@ -47,10 +47,10 @@ public sealed class EventLeakAnalyzerAccuracyTests
     public void CalculateSeverity_ScoreIncreasesMonotonicallyWithSubscriberCount()
     {
         var opts = DefaultOptions;
-        int previous = EventLeakAnalyzerLegacyAdapter.CalculateSeverity(isStatic: false, subscriberCount: 0, rootHint: string.Empty, opts);
+        int previous = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: 0, rootHint: string.Empty, opts);
         for (int n = 1; n <= 100; n++)
         {
-            int current = EventLeakAnalyzerLegacyAdapter.CalculateSeverity(isStatic: false, subscriberCount: n, rootHint: string.Empty, opts);
+            int current = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: n, rootHint: string.Empty, opts);
             current.Should().BeGreaterThan(previous, $"severity must strictly increase from {n - 1} to {n} subscribers");
             previous = current;
         }
@@ -66,8 +66,8 @@ public sealed class EventLeakAnalyzerAccuracyTests
         int maxJump = 0;
         for (int n = 0; n < 200; n++)
         {
-            int a = EventLeakAnalyzerLegacyAdapter.CalculateSeverity(isStatic: false, subscriberCount: n, rootHint: string.Empty, opts);
-            int b = EventLeakAnalyzerLegacyAdapter.CalculateSeverity(isStatic: false, subscriberCount: n + 1, rootHint: string.Empty, opts);
+            int a = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: n, rootHint: string.Empty, opts);
+            int b = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: n + 1, rootHint: string.Empty, opts);
             maxJump = Math.Max(maxJump, b - a);
         }
 
@@ -78,8 +78,8 @@ public sealed class EventLeakAnalyzerAccuracyTests
     public void CalculateSeverity_StaticPublisherAppliesBonus()
     {
         var opts = DefaultOptions;
-        int instanceScore = EventLeakAnalyzerLegacyAdapter.CalculateSeverity(isStatic: false, subscriberCount: 3, rootHint: string.Empty, opts);
-        int staticScore = EventLeakAnalyzerLegacyAdapter.CalculateSeverity(isStatic: true, subscriberCount: 3, rootHint: string.Empty, opts);
+        int instanceScore = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: 3, rootHint: string.Empty, opts);
+        int staticScore = EventLeakAnalyzer.CalculateSeverity(isStatic: true, subscriberCount: 3, rootHint: string.Empty, opts);
 
         (staticScore - instanceScore).Should().Be(opts.SeverityStaticPublisherBonus);
     }
@@ -88,8 +88,8 @@ public sealed class EventLeakAnalyzerAccuracyTests
     public void CalculateSeverity_RootHintPresentAppliesBonus()
     {
         var opts = DefaultOptions;
-        int noHint = EventLeakAnalyzerLegacyAdapter.CalculateSeverity(isStatic: false, subscriberCount: 3, rootHint: string.Empty, opts);
-        int withHint = EventLeakAnalyzerLegacyAdapter.CalculateSeverity(isStatic: false, subscriberCount: 3, rootHint: "static root", opts);
+        int noHint = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: 3, rootHint: string.Empty, opts);
+        int withHint = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: 3, rootHint: "static root", opts);
 
         (withHint - noHint).Should().Be(opts.SeverityRootHintBonus);
     }
@@ -98,8 +98,8 @@ public sealed class EventLeakAnalyzerAccuracyTests
     public void CalculateSeverity_DisposedButSubscribedAppliesBonus()
     {
         var opts = DefaultOptions;
-        int notDisposed = EventLeakAnalyzerLegacyAdapter.CalculateSeverity(isStatic: false, subscriberCount: 3, rootHint: string.Empty, opts, isDisposedButSubscribed: false);
-        int disposed = EventLeakAnalyzerLegacyAdapter.CalculateSeverity(isStatic: false, subscriberCount: 3, rootHint: string.Empty, opts, isDisposedButSubscribed: true);
+        int notDisposed = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: 3, rootHint: string.Empty, opts, isDisposedButSubscribed: false);
+        int disposed = EventLeakAnalyzer.CalculateSeverity(isStatic: false, subscriberCount: 3, rootHint: string.Empty, opts, isDisposedButSubscribed: true);
 
         (disposed - notDisposed).Should().Be(opts.SeverityDisposedButSubscribedBonus);
     }
@@ -108,7 +108,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
     public void CalculateSeverity_AllBonusesStack()
     {
         var opts = DefaultOptions;
-        int score = EventLeakAnalyzerLegacyAdapter.CalculateSeverity(
+        int score = EventLeakAnalyzer.CalculateSeverity(
             isStatic: true,
             subscriberCount: 10,
             rootHint: "hint",
@@ -180,7 +180,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
     [Fact]
     public void AddToAccumulator_RecordsPublisherMethodTable_InLeakingMTs()
     {
-        var acc = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), EventLeakAnalyzerLegacyAdapter.GroupAccumulator>();
+        var acc = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), EventLeakAnalyzer.GroupAccumulator>();
         var leakingMTs = new HashSet<ulong>();
         var leak = new EventLeakInfo
         {
@@ -191,7 +191,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
             SubscriberCount = 1,
         };
 
-        EventLeakAnalyzerLegacyAdapter.AddToAccumulator(acc, leak, capacity: 5, leakingMTs);
+        EventLeakAnalyzer.AddToAccumulator(acc, leak, capacity: 5, leakingMTs);
 
         leakingMTs.Should().ContainSingle().Which.Should().Be(0x1234UL);
     }
@@ -199,7 +199,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
     [Fact]
     public void AddToAccumulator_MultipleLeaksSameMethodTable_DeduplicatesInLeakingMTs()
     {
-        var acc = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), EventLeakAnalyzerLegacyAdapter.GroupAccumulator>();
+        var acc = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), EventLeakAnalyzer.GroupAccumulator>();
         var leakingMTs = new HashSet<ulong>();
 
         for (int i = 0; i < 3; i++)
@@ -212,7 +212,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
                 IsStatic = false,
                 SubscriberCount = 1,
             };
-            EventLeakAnalyzerLegacyAdapter.AddToAccumulator(acc, leak, capacity: 5, leakingMTs);
+            EventLeakAnalyzer.AddToAccumulator(acc, leak, capacity: 5, leakingMTs);
         }
 
         leakingMTs.Should().ContainSingle("three leaks from the same MT count as one leaking publisher type, not three");
@@ -221,10 +221,10 @@ public sealed class EventLeakAnalyzerAccuracyTests
     [Fact]
     public void AddToAccumulator_WithoutLeakingMTsArgument_DoesNotThrow()
     {
-        var acc = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), EventLeakAnalyzerLegacyAdapter.GroupAccumulator>();
+        var acc = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), EventLeakAnalyzer.GroupAccumulator>();
         var leak = new EventLeakInfo { PublisherType = "App.Publisher", EventFieldName = "DataReady" };
 
-        var act = () => EventLeakAnalyzerLegacyAdapter.AddToAccumulator(acc, leak, capacity: 5);
+        var act = () => EventLeakAnalyzer.AddToAccumulator(acc, leak, capacity: 5);
 
         act.Should().NotThrow("leakingMTs is optional so existing/other callers that don't care about the clean-vs-leaking count keep working");
     }
@@ -242,7 +242,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
     {
         // These are exactly the false-positive examples called out in the audit: private
         // delegate-typed fields that are callbacks/factories, not C# event backing fields.
-        EventLeakAnalyzerLegacyAdapter.LooksLikeEventFieldName(fieldName, allowBareUnderscorePrefix: false)
+        EventLeakAnalyzer.LooksLikeEventFieldName(fieldName, allowBareUnderscorePrefix: false)
             .Should().BeFalse($"'{fieldName}' has no event-specific name pattern and the type declares no real events");
     }
 
@@ -253,7 +253,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
     {
         // Default (allowBareUnderscorePrefix: true) preserves the original, broader behavior —
         // used when the type is already known to declare at least one real event.
-        EventLeakAnalyzerLegacyAdapter.LooksLikeEventFieldName(fieldName).Should().BeTrue();
+        EventLeakAnalyzer.LooksLikeEventFieldName(fieldName).Should().BeTrue();
     }
 
     [Theory]
@@ -265,15 +265,15 @@ public sealed class EventLeakAnalyzerAccuracyTests
     {
         // Strong, event-specific substrings must still qualify a field regardless of whether the
         // bare "_" prefix fallback is allowed — tightening P2-3 must not regress these.
-        EventLeakAnalyzerLegacyAdapter.LooksLikeEventFieldName(fieldName, allowBareUnderscorePrefix: false)
+        EventLeakAnalyzer.LooksLikeEventFieldName(fieldName, allowBareUnderscorePrefix: false)
             .Should().BeTrue();
     }
 
     [Fact]
     public void LooksLikeEventFieldName_NullOrEmpty_AlwaysRejected()
     {
-        EventLeakAnalyzerLegacyAdapter.LooksLikeEventFieldName(null).Should().BeFalse();
-        EventLeakAnalyzerLegacyAdapter.LooksLikeEventFieldName(string.Empty).Should().BeFalse();
+        EventLeakAnalyzer.LooksLikeEventFieldName(null).Should().BeFalse();
+        EventLeakAnalyzer.LooksLikeEventFieldName(string.Empty).Should().BeFalse();
     }
 
     // -----------------------------------------------------------------------
@@ -334,21 +334,21 @@ public sealed class EventLeakAnalyzerAccuracyTests
     [InlineData(1_000_000, "101+")]
     public void GetSubscriberCountBucketIndex_ReturnsExpectedBucketLabel(int subscriberCount, string expectedLabel)
     {
-        int idx = EventLeakAnalyzerLegacyAdapter.GetSubscriberCountBucketIndex(subscriberCount);
+        int idx = EventLeakAnalyzer.GetSubscriberCountBucketIndex(subscriberCount);
 
-        EventLeakAnalyzerLegacyAdapter.SubscriberCountHistogramBuckets[idx].Label.Should().Be(expectedLabel);
+        EventLeakAnalyzer.SubscriberCountHistogramBuckets[idx].Label.Should().Be(expectedLabel);
     }
 
     [Fact]
     public void AddToAccumulator_IncrementsCorrectSubscriberCountBucket()
     {
-        var acc = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), EventLeakAnalyzerLegacyAdapter.GroupAccumulator>();
+        var acc = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), EventLeakAnalyzer.GroupAccumulator>();
         var leak = new EventLeakInfo { PublisherType = "App.Publisher", EventFieldName = "DataReady", SubscriberCount = 7 };
 
-        EventLeakAnalyzerLegacyAdapter.AddToAccumulator(acc, leak, capacity: 5);
+        EventLeakAnalyzer.AddToAccumulator(acc, leak, capacity: 5);
 
         var group = acc[("App.Publisher", "DataReady", false)];
-        int expectedIdx = EventLeakAnalyzerLegacyAdapter.GetSubscriberCountBucketIndex(7); // "6-10"
+        int expectedIdx = EventLeakAnalyzer.GetSubscriberCountBucketIndex(7); // "6-10"
         group.SubscriberCountBuckets[expectedIdx].Should().Be(1);
         group.SubscriberCountBuckets.Sum().Should().Be(1, "exactly one leak was added, so exactly one bucket total");
     }
@@ -356,9 +356,9 @@ public sealed class EventLeakAnalyzerAccuracyTests
     [Fact]
     public void BuildSubscriberCountHistogram_FoldsAcrossAllGroups_InAscendingBucketOrder()
     {
-        var bucketsA = new int[EventLeakAnalyzerLegacyAdapter.SubscriberCountHistogramBuckets.Length];
+        var bucketsA = new int[EventLeakAnalyzer.SubscriberCountHistogramBuckets.Length];
         bucketsA[0] = 3; // "1"
-        var bucketsB = new int[EventLeakAnalyzerLegacyAdapter.SubscriberCountHistogramBuckets.Length];
+        var bucketsB = new int[EventLeakAnalyzer.SubscriberCountHistogramBuckets.Length];
         bucketsB[0] = 2; // "1"
         bucketsB[^1] = 5; // "101+"
 
@@ -370,7 +370,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
 
         List<NameCountEntry> histogram = EventLeakAnalyzer.BuildSubscriberCountHistogram(groups);
 
-        histogram.Should().HaveCount(EventLeakAnalyzerLegacyAdapter.SubscriberCountHistogramBuckets.Length);
+        histogram.Should().HaveCount(EventLeakAnalyzer.SubscriberCountHistogramBuckets.Length);
         histogram[0].Name.Should().Be("1");
         histogram[0].Count.Should().Be(5, "3 (group A) + 2 (group B)");
         histogram[^1].Name.Should().Be("101+");
@@ -397,7 +397,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
     [Fact]
     public void ParseRootPublisher_TypicalQualifiedName_SplitsAtLastDot()
     {
-        EventLeakAnalyzerLegacyAdapter.ParseRootPublisher("MyApp.Services.Publisher.OnDataChanged", out var publisherType, out var eventFieldName);
+        EventLeakAnalyzer.ParseRootPublisher("MyApp.Services.Publisher.OnDataChanged", out var publisherType, out var eventFieldName);
 
         publisherType.Should().Be("MyApp.Services.Publisher");
         eventFieldName.Should().Be("OnDataChanged");
@@ -406,7 +406,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
     [Fact]
     public void ParseRootPublisher_NoDot_ReturnsDefaults()
     {
-        EventLeakAnalyzerLegacyAdapter.ParseRootPublisher("NoDotHere", out var publisherType, out var eventFieldName);
+        EventLeakAnalyzer.ParseRootPublisher("NoDotHere", out var publisherType, out var eventFieldName);
 
         publisherType.Should().Be("StaticRoot");
         eventFieldName.Should().Be("Unknown");
@@ -415,7 +415,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
     [Fact]
     public void ParseRootPublisher_TrailingDot_ReturnsDefaults()
     {
-        EventLeakAnalyzerLegacyAdapter.ParseRootPublisher("MyApp.Publisher.", out var publisherType, out var eventFieldName);
+        EventLeakAnalyzer.ParseRootPublisher("MyApp.Publisher.", out var publisherType, out var eventFieldName);
 
         publisherType.Should().Be("StaticRoot");
         eventFieldName.Should().Be("Unknown");
@@ -424,7 +424,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
     [Fact]
     public void ParseRootPublisher_SingleDot_SplitsCorrectly()
     {
-        EventLeakAnalyzerLegacyAdapter.ParseRootPublisher("A.B", out var publisherType, out var eventFieldName);
+        EventLeakAnalyzer.ParseRootPublisher("A.B", out var publisherType, out var eventFieldName);
 
         publisherType.Should().Be("A");
         eventFieldName.Should().Be("B");
@@ -437,7 +437,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
     [Fact]
     public void BuildEventNameSet_PairedAddRemove_ReturnsEventName()
     {
-        var result = EventLeakAnalyzerLegacyAdapter.BuildEventNameSet(
+        var result = EventLeakAnalyzer.BuildEventNameSet(
             addNames: ["Changed", "Opened"],
             removeNames: ["Changed", "Opened"]);
 
@@ -448,7 +448,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
     public void BuildEventNameSet_UnpairedAdd_ExcludedFromResult()
     {
         // "Orphan" has add_ but no remove_ → not a real event
-        var result = EventLeakAnalyzerLegacyAdapter.BuildEventNameSet(
+        var result = EventLeakAnalyzer.BuildEventNameSet(
             addNames: ["Changed", "Orphan"],
             removeNames: ["Changed"]);
 
@@ -459,13 +459,13 @@ public sealed class EventLeakAnalyzerAccuracyTests
     [Fact]
     public void BuildEventNameSet_EmptyInput_ReturnsEmpty()
     {
-        EventLeakAnalyzerLegacyAdapter.BuildEventNameSet([], []).Should().BeEmpty();
+        EventLeakAnalyzer.BuildEventNameSet([], []).Should().BeEmpty();
     }
 
     [Fact]
     public void BuildEventNameSet_AddOnlyNoRemove_ReturnsEmpty()
     {
-        var result = EventLeakAnalyzerLegacyAdapter.BuildEventNameSet(["add_Something"], []);
+        var result = EventLeakAnalyzer.BuildEventNameSet(["add_Something"], []);
         result.Should().BeEmpty("no paired remove_ means nothing qualifies as a real event");
     }
 
@@ -485,7 +485,7 @@ public sealed class EventLeakAnalyzerAccuracyTests
         var allAdd = ownAdd.Concat(baseAdd).ToArray();
         var allRemove = ownRemove.Concat(baseRemove).ToArray();
 
-        var names = EventLeakAnalyzerLegacyAdapter.BuildEventNameSet(allAdd, allRemove);
+        var names = EventLeakAnalyzer.BuildEventNameSet(allAdd, allRemove);
 
         names.Should().Contain("OwnEvent");
         names.Should().Contain("InheritedEvent");

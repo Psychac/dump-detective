@@ -3,11 +3,13 @@ using BenchmarkDotNet.Jobs;
 using Microsoft.Diagnostics.Runtime;
 using System;
 using System.IO;
-using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Pipeline;
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Options;
+using DumpDetective.Sdk.Analysis;
 
 namespace BenchmarkSuite1
 {
@@ -25,7 +27,7 @@ namespace BenchmarkSuite1
     /// </remarks>
     [Config(typeof(AnalyzerBenchmarkIterationConfig))]
     [SimpleJob(warmupCount: AnalyzerBenchmarkIterationConfig.WarmupCount, iterationCount: AnalyzerBenchmarkIterationConfig.IterationCount)]
-    public abstract class AnalyzerBenchmarkBase<TAnalyzer> where TAnalyzer : IAnalyzer, new()
+    public abstract class AnalyzerBenchmarkBase<TAnalyzer> where TAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult, new()
     {
         protected TAnalyzer Analyzer = default!;
         protected ClrRuntime? Runtime;
@@ -35,8 +37,9 @@ namespace BenchmarkSuite1
         // Built once in Setup and reused across all iterations — avoids per-call allocation
         // and ensures the index-path is available to every analyzer.
         // Protected setter so subclasses can inject additional options after base.Setup().
-        protected AnalysisContext? AnalysisContext { get; set; }
+        protected DumpDetective.Sdk.Analysis.AnalysisContext? AnalysisContext { get; set; }
 
+        private RuntimeAnalysisContext? _runtimeContext;
         private DataTarget? _dataTarget;
 
         /// <summary>
@@ -90,7 +93,7 @@ namespace BenchmarkSuite1
                 Diagnostics = diagnosticsOptions,
             };
 
-            AnalysisContext = new AnalysisContext
+            _runtimeContext = new RuntimeAnalysisContext
             {
                 Runtime = Runtime,
                 Cache = Cache,
@@ -98,6 +101,10 @@ namespace BenchmarkSuite1
                 Diagnostics = diagnosticsOptions,
                 DiagnosticsSink = NullAnalysisDiagnosticsSink.Instance,
             };
+
+            AnalysisContext = Analyzer is ICustomizesAnalysisContext customizer
+                ? customizer.BuildAnalysisContext(_runtimeContext)
+                : AnalysisContextBuilder.Build(_runtimeContext, analyzerOptions: null);
 
             OnSetup();
         }
@@ -113,6 +120,7 @@ namespace BenchmarkSuite1
         {
             OnCleanup();
             AnalysisContext = null;
+            _runtimeContext = null;
             Cache = null;
             Runtime = null;
             _dataTarget?.Dispose();

@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using System.Buffers.Binary;
 using System.Reflection;
 
@@ -22,7 +23,7 @@ namespace DumpDetective.Tests.Unit.Analysis;
 /// <see cref="GCHandleAnalyzer"/> production code path (disk snapshot -&gt; capability-scoped
 /// handle enumeration -&gt; domain result) without a real dump, using the same disk-index-injection
 /// pattern established by <c>AnalysisPipelineTests.InjectHeapIndex</c>. Runs through
-/// <see cref="GCHandleAnalyzerLegacyAdapter"/> against a real self-attached process heap (Phase 1
+/// <see cref="GCHandleAnalyzer"/> against a real self-attached process heap (Phase 1
 /// retyping — docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md — removed the old
 /// analyzer's <c>Analyze(runtime, heap: null, cache)</c> convenience overload these tests used to
 /// call directly; <c>Core.Abstractions.AnalysisContext.Heap</c> is a computed, never-null property
@@ -158,10 +159,11 @@ public sealed class GCHandleAnalyzerFunctionalTests : IDisposable
 
     private GCHandleDomainResult Analyze(IHeapAnalysisCache cache)
     {
-        AnalysisContext context = new() { Runtime = _runtime, Cache = cache, AnalysisOptions = new() };
-        using GCHandleAnalyzerLegacyAdapter adapter = new();
-        return (GCHandleDomainResult)adapter.AnalyzeAsync(context, CancellationToken.None)
-            .AsTask().GetAwaiter().GetResult();
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = _runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
+        using GCHandleAnalyzer adapter = new();
+        adapter.AnalyzeAsync(context, CancellationToken.None).GetAwaiter().GetResult();
+        return (GCHandleDomainResult)adapter.LastResult!;
     }
 
     private static IHeapAnalysisCache BuildCacheWithHandles(params (ulong Address, ulong MethodTable, byte Kind, ulong DependentTarget)[] records)

@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using System.Reflection;
 
 using DumpDetective.Analysis.Analyzers;
@@ -19,7 +20,7 @@ namespace DumpDetective.Tests.Unit.Analysis;
 /// <summary>
 /// Characterization test for the Phase 1 retyping pilot
 /// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md): proves
-/// <see cref="GCGenerationAnalyzerLegacyAdapter"/> — the new capability-scoped
+/// <see cref="GCGenerationAnalyzer"/> — the new capability-scoped
 /// <see cref="GCGenerationAnalyzer"/>, wrapped to run through the unchanged
 /// <c>Core.Abstractions.IAnalyzer</c> pipeline — reproduces the exact arithmetic the pre-retyping
 /// analyzer body implemented (verified by hand-computing expected values from the injected fixture
@@ -69,11 +70,12 @@ public sealed class GCGenerationAnalyzerRetypingCharacterizationTests
             {
                 GCGenerationAnalysis = new GCGenerationAnalysisOptions { LohThresholdPercent = 33.3 },
             };
-            AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = options };
+            RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = options };
+            DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, options.GCGenerationAnalysis);
 
-            GCGenerationAnalyzerLegacyAdapter adapter = new();
-            GCGenerationDomainResult result = (GCGenerationDomainResult)adapter.AnalyzeAsync(context, CancellationToken.None)
-                .AsTask().GetAwaiter().GetResult();
+            GCGenerationAnalyzer adapter = new();
+            adapter.AnalyzeAsync(context, CancellationToken.None).GetAwaiter().GetResult();
+            GCGenerationDomainResult result = (GCGenerationDomainResult)adapter.LastResult!;
 
             AnalyzerHelpers.ComputeExactGenBytes(heap, out ulong expectedGen0Bytes, out ulong expectedGen1Bytes, out ulong expectedGen2Bytes);
 
@@ -139,11 +141,12 @@ public sealed class GCGenerationAnalyzerRetypingCharacterizationTests
             // the analyzer takes the coarse fallback path (no per-generation breakdown).
             HeapAnalysisCache cache = new();
 
-            AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new AnalysisOptions() };
+            RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new AnalysisOptions() };
+            DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-            GCGenerationAnalyzerLegacyAdapter adapter = new();
-            GCGenerationDomainResult result = (GCGenerationDomainResult)adapter.AnalyzeAsync(context, CancellationToken.None)
-                .AsTask().GetAwaiter().GetResult();
+            GCGenerationAnalyzer adapter = new();
+            adapter.AnalyzeAsync(context, CancellationToken.None).GetAwaiter().GetResult();
+            GCGenerationDomainResult result = (GCGenerationDomainResult)adapter.LastResult!;
 
             result.FallbackMode.Should().BeTrue();
             result.GenBytesAreApproximate.Should().BeTrue();

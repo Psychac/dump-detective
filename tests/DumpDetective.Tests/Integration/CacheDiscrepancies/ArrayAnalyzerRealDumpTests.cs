@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Analyzers.Types;
@@ -14,7 +15,7 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 
 /// <summary>
 /// Real-dump verification for the Tier-2 batch (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
-/// proves <see cref="ArrayAnalyzerLegacyAdapter"/> produces an internally consistent result against
+/// proves <see cref="ArrayAnalyzer"/> produces an internally consistent result against
 /// a real, large dump — the only test exercising all four steps (population, large-array satellite
 /// reads, sparse density via the new <c>dump.array-elements</c> capability, pinned detection)
 /// together against real data.
@@ -44,10 +45,12 @@ public sealed class ArrayAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using ArrayAnalyzerLegacyAdapter adapter = new();
-        var result = (ArrayDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using ArrayAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (ArrayDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("Array Analysis");
         result.TotalArrayObjects.Should().BeGreaterThan(0, "a real 3.5 GB dump has a non-trivial array population");

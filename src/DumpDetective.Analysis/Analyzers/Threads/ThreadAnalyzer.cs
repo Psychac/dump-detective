@@ -1,5 +1,8 @@
+using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.SdkBridge;
+using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Sdk.Analysis;
@@ -20,8 +23,31 @@ namespace DumpDetective.Analysis.Analyzers.Threads
     /// <see cref="RuntimeThreadQuery"/> (which walks every thread independently) only when invoked
     /// outside the pipeline (tests, benchmarks).
     /// </summary>
-    public sealed class ThreadAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
+    public sealed class ThreadAnalyzer :
+        IAnalyzer, IProducesAnalyzerDomainResult, IThreadStackScanParticipant, ICustomizesAnalysisContext
     {
+        private readonly ThreadStackScanState _scanState = new();
+        private IHeapAnalysisCache? _cache;
+
+        int IThreadStackScanParticipant.GetRequiredFrameCount(RuntimeAnalysisContext context) => UnboundedFrameCount;
+
+        void IThreadStackScanParticipant.BeforeThreadStackScan(RuntimeAnalysisContext context)
+        {
+            _cache = context.Cache;
+            _scanState.BeforeThreadStackScan();
+        }
+
+        void IThreadStackScanParticipant.OnThreadStack(in ThreadStackSnapshot snapshot)
+        {
+            int stackRootCount = _cache?.GetOrCountThreadStackRoots(snapshot.Thread, UnboundedFrameCount) ?? 0;
+            _scanState.OnThreadStack(in snapshot, stackRootCount);
+        }
+
+        void IThreadStackScanParticipant.OnThreadStackScanCompleted(bool succeeded) => _scanState.OnThreadStackScanCompleted(succeeded);
+
+        Sdk.Analysis.AnalysisContext ICustomizesAnalysisContext.BuildAnalysisContext(RuntimeAnalysisContext context) =>
+            AnalysisContextBuilder.Build(context, analyzerOptions: null, runtimeThreadsOverride: _scanState.BuildPrecomputedQuery());
+
         // No dump has a call stack anywhere near this deep — this is "walk the whole stack,
         // no artificial truncation" rather than a real bound. §11.4 M8 measured the identical
         // value on a real dump (135 threads) at 2 ms, so there's no cost concern in using a large
@@ -55,7 +81,15 @@ namespace DumpDetective.Analysis.Analyzers.Threads
         public string Name => "Thread Analysis";
         public string Category => "Threads";
 
-        public AnalyzerDomainResult? LastResult { get; private set; }
+        public AnalyzerDomainResult? LastResult
+        {
+            get => _lastResult;
+            // Stamps AnalyzerName/Category here (not left to a bridging adapter, which no
+            // longer exists) so every LastResult consumer — pipeline or direct caller — sees
+            // them populated the same way.
+            private set => _lastResult = value is null ? null : value with { AnalyzerName = Name, Category = Category };
+        }
+        private AnalyzerDomainResult? _lastResult;
 
         public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {

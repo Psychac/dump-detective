@@ -71,12 +71,20 @@ namespace DumpDetective.Analysis.Analyzers.Leaks;
 /// either.</item>
 /// </list>
 /// </remarks>
-public sealed class ReferenceChainAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
+public sealed class ReferenceChainAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult, Pipeline.IRequiresReachableGraphIndex
 {
     public string Name => "Reference Chain Analysis";
     public string Category => "Memory";
 
-    public AnalyzerDomainResult? LastResult { get; private set; }
+    public AnalyzerDomainResult? LastResult
+    {
+        get => _lastResult;
+        // Stamps AnalyzerName/Category here (not left to a bridging adapter, which no
+        // longer exists) so every LastResult consumer — pipeline or direct caller — sees
+        // them populated the same way.
+        private set => _lastResult = value is null ? null : value with { AnalyzerName = Name, Category = Category };
+    }
+    private AnalyzerDomainResult? _lastResult;
 
     private readonly record struct PendingTypeSample(
         string TypeName,

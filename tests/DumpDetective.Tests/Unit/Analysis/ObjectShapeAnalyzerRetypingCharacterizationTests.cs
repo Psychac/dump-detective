@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers.Types;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
@@ -58,10 +59,12 @@ public sealed class ObjectShapeAnalyzerRetypingCharacterizationTests
                 HeapIndexStorageKind.Disk, IndexPath: string.Empty, ObjectCount: 35,
                 Elapsed: TimeSpan.Zero, TypeAggregates: aggregates, TypeShapeCache: shapes));
 
-            AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-            using ObjectShapeAnalyzerLegacyAdapter adapter = new();
-            var result = (ObjectShapeAnalyzerDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+            using ObjectShapeAnalyzer adapter = new();
+            await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (ObjectShapeAnalyzerDomainResult)adapter.LastResult!;
 
             result.TotalTypesAnalyzed.Should().Be(3);
             result.TopReferenceHeavyTypes.Should().ContainSingle(t => t.TypeName == nameRefHeavy);
@@ -94,10 +97,12 @@ public sealed class ObjectShapeAnalyzerRetypingCharacterizationTests
                 Elapsed: TimeSpan.Zero, TypeAggregates: new Dictionary<ulong, TypeAggregateIndexEntry>(),
                 TypeShapeCache: null));
 
-            AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-            using ObjectShapeAnalyzerLegacyAdapter adapter = new();
-            var result = (ObjectShapeAnalyzerDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+            using ObjectShapeAnalyzer adapter = new();
+            await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (ObjectShapeAnalyzerDomainResult)adapter.LastResult!;
 
             result.TotalTypesAnalyzed.Should().Be(0);
             result.TopReferenceHeavyTypes.Should().BeEmpty();

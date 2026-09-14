@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Models;
@@ -16,7 +17,7 @@ namespace DumpDetective.Tests.Unit.Analysis;
 /// <summary>
 /// Characterization test for the Phase 1 retyping batch
 /// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md): proves
-/// <see cref="MemoryAnalyzerLegacyAdapter"/> reproduces pre-retyping arithmetic and invariants.
+/// <see cref="MemoryAnalyzer"/> reproduces pre-retyping arithmetic and invariants.
 /// Runs the no-index (live heap scan) path only — the only path a self-attached test process can
 /// exercise without a real <c>PrebuildHeapIndex</c> disk scan (avoided here for the same reason
 /// <c>HeapTopologyAnalyzerRetypingCharacterizationTests</c> avoids it: disk side effects and
@@ -36,11 +37,12 @@ public sealed class MemoryAnalyzerRetypingCharacterizationTests
         try
         {
             HeapAnalysisCache cache = new();
-            AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-            using MemoryAnalyzerLegacyAdapter adapter = new();
-            var result = (MemoryDomainResult)adapter.AnalyzeAsync(context, CancellationToken.None)
-                .AsTask().GetAwaiter().GetResult();
+            using MemoryAnalyzer adapter = new();
+            adapter.AnalyzeAsync(context, CancellationToken.None).GetAwaiter().GetResult();
+            var result = (MemoryDomainResult)adapter.LastResult!;
 
             result.AnalyzerName.Should().Be("Memory Analysis");
             result.Category.Should().Be("Memory");

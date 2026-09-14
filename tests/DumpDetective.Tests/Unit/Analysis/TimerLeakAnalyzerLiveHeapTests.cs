@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Analyzers.Infra;
@@ -50,8 +51,7 @@ public sealed class TimerLeakAnalyzerLiveHeapTests
             HeapAnalysisCache cache = new();
 
             TimerLeakAnalyzer analyzer = new();
-            AnalysisContext context = new()
-            {
+            DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
                 Observations = NoOpObservationSink.Instance,
                 DumpObjectFields = fields,
                 HeapSegments = new HeapSegmentQuery(heap, heap.Runtime, cache),

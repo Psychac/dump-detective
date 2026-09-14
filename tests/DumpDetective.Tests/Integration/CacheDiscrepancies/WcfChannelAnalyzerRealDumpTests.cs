@@ -18,7 +18,7 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 
 /// <summary>
 /// Real-dump verification for the Tier-2 wave (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
-/// proves <see cref="WcfChannelAnalyzerLegacyAdapter"/> produces an internally consistent result
+/// proves <see cref="WcfChannelAnalyzer"/> produces an internally consistent result
 /// against a real, large .NET Framework dump -- the one place that can exercise the remote-address
 /// fix's "m_String" (.NET Framework <c>System.Uri</c>) field name for real, rather than only the
 /// "_string" (modern .NET) name <c>WcfChannelAnalyzerLiveHeapTests</c> exercises against this
@@ -49,12 +49,16 @@ public sealed class WcfChannelAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using WcfChannelAnalyzerLegacyAdapter adapter = new();
-        new HeapIndexScanDispatcher().Run(cache, context, [adapter], CancellationToken.None);
+        using WcfChannelAnalyzer adapter = new();
+        new HeapIndexScanDispatcher().Run(cache, contextRuntimeCtx, [adapter], CancellationToken.None);
 
-        var result = (WcfChannelDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        context = ((ICustomizesAnalysisContext)adapter).BuildAnalysisContext(contextRuntimeCtx);
+
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (WcfChannelDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("WCF Channel Analysis");
 

@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Analyzers.Leaks;
@@ -47,11 +48,13 @@ public sealed class EventLeakAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        using EventLeakAnalyzerLegacyAdapter adapter = new();
-        var result = (EventLeakDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using EventLeakAnalyzer adapter = new();
+        DumpDetective.Sdk.Analysis.AnalysisContext context = ((ICustomizesAnalysisContext)adapter).BuildAnalysisContext(contextRuntimeCtx);
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (EventLeakDomainResult)adapter.LastResult!;
         sw.Stop();
 
         result.AnalyzerName.Should().Be("Event Leak Analysis");

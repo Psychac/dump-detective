@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers.Gc;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
@@ -53,10 +54,12 @@ public sealed class FinalizableObjectAnalyzerRetypingCharacterizationTests
                 HeapIndexStorageKind.Disk, IndexPath: string.Empty, ObjectCount: 35,
                 Elapsed: TimeSpan.Zero, TypeAggregates: aggregates, TypeShapeCache: null));
 
-            AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-            using FinalizableObjectAnalyzerLegacyAdapter adapter = new();
-            var result = (FinalizableObjectDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+            using FinalizableObjectAnalyzer adapter = new();
+            await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (FinalizableObjectDomainResult)adapter.LastResult!;
 
             result.TotalFinalizableObjects.Should().Be(15); // 5 + 10, excludes the non-finalizable type
             result.TotalFinalizableBytes.Should().Be(1500);
@@ -84,10 +87,12 @@ public sealed class FinalizableObjectAnalyzerRetypingCharacterizationTests
         try
         {
             HeapAnalysisCache cache = new();
-            AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-            using FinalizableObjectAnalyzerLegacyAdapter adapter = new();
-            var result = (FinalizableObjectDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+            using FinalizableObjectAnalyzer adapter = new();
+            await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (FinalizableObjectDomainResult)adapter.LastResult!;
 
             result.TotalFinalizableObjects.Should().BeGreaterThan(0, "a live .NET process always has some finalizable objects on its heap");
             result.TotalFinalizableBytes.Should().BeGreaterThan(0UL);
@@ -107,10 +112,12 @@ public sealed class FinalizableObjectAnalyzerRetypingCharacterizationTests
         try
         {
             HeapAnalysisCache cache = new();
-            AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-            using FinalizableObjectAnalyzerLegacyAdapter adapter = new();
-            var result = (FinalizableObjectDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+            using FinalizableObjectAnalyzer adapter = new();
+            await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (FinalizableObjectDomainResult)adapter.LastResult!;
 
             int classifiedByType = 0;
             foreach (var t in result.TopQueueTypesByCount)

@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Analyzers;
@@ -48,10 +49,12 @@ public sealed class ThreadStackClusterAnalyzerRealDumpTests
         }
 
         HeapAnalysisCache cache = new();
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using ThreadStackClusterAnalyzerLegacyAdapter adapter = new();
-        var result = (ThreadStackClusterDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using ThreadStackClusterAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (ThreadStackClusterDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("Thread Stack Signature Clustering");
         result.AliveThreadCount.Should().Be(expectedAliveThreads);

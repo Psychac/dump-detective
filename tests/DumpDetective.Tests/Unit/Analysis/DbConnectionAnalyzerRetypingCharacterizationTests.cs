@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers.Infra;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
@@ -184,8 +185,7 @@ public sealed class DbConnectionAnalyzerRetypingCharacterizationTests
         params HeapObjectRef[] candidates)
     {
         DbConnectionAnalyzer analyzer = new();
-        AnalysisContext context = new()
-        {
+        DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
             DumpObjectFields = fields,
             HeapSegments = segments,

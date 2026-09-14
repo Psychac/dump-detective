@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers.Leaks;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
@@ -18,7 +19,7 @@ namespace DumpDetective.Tests.Unit.Analysis;
 /// priority ordering, scoring, the exact-index gate, and root-chain enrichment (direct-root
 /// shortcut and root-path-search fallback) against fake, dictionary-backed capability
 /// implementations. The cross-analyzer extraction itself
-/// (<see cref="LeakCandidateAnalyzerLegacyAdapter.BuildSdkContext"/> reading
+/// (<see cref="LeakCandidateAnalyzer.BuildSdkContext"/> reading
 /// <c>context.CompletedRunResults</c>) is exercised end-to-end only by the real-dump test, since
 /// building a full legacy pipeline run here would duplicate that coverage without a fake.
 /// </summary>
@@ -240,8 +241,7 @@ public sealed class LeakCandidateAnalyzerRetypingCharacterizationTests
             logicalTimerCount,
             directRootsByTargetAddress);
 
-        var context = new AnalysisContext
-        {
+        DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
             HeapTypeStatistics = typeStatistics,
             HeapRoots = heapRoots ?? new FakeHeapRootQuery(),

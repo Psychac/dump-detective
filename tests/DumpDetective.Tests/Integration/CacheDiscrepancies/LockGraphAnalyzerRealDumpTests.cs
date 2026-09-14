@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Analyzers;
@@ -50,10 +51,12 @@ public sealed class LockGraphAnalyzerRealDumpTests
         }
 
         HeapAnalysisCache cache = new();
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using LockGraphAnalyzerLegacyAdapter adapter = new();
-        var result = (LockGraphDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using LockGraphAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (LockGraphDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("Lock Graph Analysis");
         result.TotalHeldLocks.Should().Be(expectedHeldLocks);

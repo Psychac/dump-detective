@@ -1,6 +1,9 @@
 using System.Text.RegularExpressions;
 
+using DumpDetective.Analysis.Analyzers.Infra;
+using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Models;
@@ -46,12 +49,36 @@ namespace DumpDetective.Analysis.Analyzers.Async;
 /// Accepted per hard-need-basis: no Tier-2 primitive exists (or is needed elsewhere) for an
 /// unconditional per-type reference-field count outside the shape cache.
 /// </remarks>
-public sealed class AsyncStateMachineAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
+public sealed class AsyncStateMachineAnalyzer :
+    IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
+    IParallelHeapIndexScanParticipant, ICustomizesAnalysisContext
 {
+    private readonly TypedResourceHeapIndexScanState _scanState = new();
+
     public string Name => "Async State Machine Analysis";
     public string Category => "Memory";
 
-    public AnalyzerDomainResult? LastResult { get; private set; }
+    public bool IsCandidateType(string typeName) => AsyncStateMachineNamePattern.Regex.IsMatch(typeName);
+
+    void IHeapIndexScanParticipant.BeforeHeapIndexScan(RuntimeAnalysisContext context) => _scanState.BeforeHeapIndexScan(this, context);
+    void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => _scanState.OnHeapEntry(in entry);
+    void IHeapIndexScanParticipant.OnHeapIndexScanCompleted(bool succeeded) => _scanState.OnHeapIndexScanCompleted(succeeded);
+    IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() => new AsyncStateMachineAnalyzer();
+    void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials) =>
+        _scanState.MergeFrom(partials.OfType<AsyncStateMachineAnalyzer>().Select(a => a._scanState));
+
+    Sdk.Analysis.AnalysisContext ICustomizesAnalysisContext.BuildAnalysisContext(RuntimeAnalysisContext context) =>
+        AnalysisContextBuilder.Build(context, analyzerOptions: null, heapObjectsOverride: new PrecomputedHeapObjectStream(_scanState.Candidates));
+
+    public AnalyzerDomainResult? LastResult
+    {
+        get => _lastResult;
+        // Stamps AnalyzerName/Category here (not left to a bridging adapter, which no
+        // longer exists) so every LastResult consumer — pipeline or direct caller — sees
+        // them populated the same way.
+        private set => _lastResult = value is null ? null : value with { AnalyzerName = Name, Category = Category };
+    }
+    private AnalyzerDomainResult? _lastResult;
 
     public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {

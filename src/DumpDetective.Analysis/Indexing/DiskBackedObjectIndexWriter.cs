@@ -74,7 +74,7 @@ internal sealed class DiskBackedObjectIndexWriter : IObjectIndexWriter
         IProgress<AnalyzerProgressReport>? progress = null,
         string? dumpPath = null,
         DumpSizeTier sizeTier = DumpSizeTier.Medium,
-        IReadOnlyList<IAnalyzer>? activeAnalyzers = null,
+        IReadOnlyList<Sdk.Analysis.IAnalyzer>? activeAnalyzers = null,
         bool enableExactDominatorTree = false)
     {
         ArgumentNullException.ThrowIfNull(dumpPath, nameof(dumpPath));

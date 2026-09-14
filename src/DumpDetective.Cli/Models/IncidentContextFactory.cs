@@ -2,6 +2,7 @@ using System.IO;
 using System.Reflection;
 using DumpDetective.Analysis.Dump;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Sdk.Analysis;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Models;
 

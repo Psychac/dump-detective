@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Analyzers.Gc;
@@ -14,7 +15,7 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 
 /// <summary>
 /// Real-dump verification for the Tier-1+Tier-2 batch (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
-/// proves <see cref="FinalizableObjectAnalyzerLegacyAdapter"/> produces an internally consistent
+/// proves <see cref="FinalizableObjectAnalyzer"/> produces an internally consistent
 /// result against a real, large dump's real finalizer queue and type population -- the actual
 /// behavioral verification the live-process characterization tests deliberately don't attempt,
 /// since a real dump's finalizer queue is a genuinely populated, non-transient snapshot.
@@ -44,10 +45,12 @@ public sealed class FinalizableObjectAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using FinalizableObjectAnalyzerLegacyAdapter adapter = new();
-        var result = (FinalizableObjectDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using FinalizableObjectAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (FinalizableObjectDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("Finalizable Object Analysis");
         result.TotalFinalizableObjects.Should().BeGreaterThan(0, "a real 3.5 GB IIS dump has finalizable objects (streams, handles, timers, ...)");

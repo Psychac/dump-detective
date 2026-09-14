@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using System.Linq;
 
 using DumpDetective.Analysis.Analyzers;
@@ -199,9 +200,11 @@ public sealed class LockGraphAnalyzerLiveHeapTests
     {
         using DataTarget dataTarget = DataTarget.CreateSnapshotAndAttach(Environment.ProcessId);
         ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();
-        var context = new AnalysisContext { Runtime = runtime, Cache = new HeapAnalysisCache() };
-        using LockGraphAnalyzerLegacyAdapter adapter = new();
-        return (LockGraphDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = new HeapAnalysisCache() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
+        using LockGraphAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+        return (LockGraphDomainResult)adapter.LastResult!;
     }
 
     private static async Task<LockGraphDomainResult> AnalyzeUntilAsync(

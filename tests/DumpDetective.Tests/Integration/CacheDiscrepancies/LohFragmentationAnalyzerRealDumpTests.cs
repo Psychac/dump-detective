@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Analyzers;
@@ -57,10 +58,12 @@ public sealed class LohFragmentationAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using LohFragmentationAnalyzerLegacyAdapter adapter = new();
-        var result = (LohFragmentationDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using LohFragmentationAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (LohFragmentationDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("LOH & POH Fragmentation Analysis");
         result.SegmentCount.Should().Be(expectedSegmentCount);

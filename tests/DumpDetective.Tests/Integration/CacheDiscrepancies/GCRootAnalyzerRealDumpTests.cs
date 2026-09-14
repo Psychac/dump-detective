@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Analyzers;
@@ -52,10 +53,12 @@ public sealed class GCRootAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using GCRootAnalyzerLegacyAdapter adapter = new();
-        var result = (GCRootDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using GCRootAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (GCRootDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("GC Root Analysis");
         result.Category.Should().Be("Memory");

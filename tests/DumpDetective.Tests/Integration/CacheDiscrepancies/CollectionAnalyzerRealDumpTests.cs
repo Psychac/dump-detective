@@ -16,7 +16,7 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 
 /// <summary>
 /// Real-dump verification for the Tier-2 wave (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
-/// proves <see cref="CollectionAnalyzerLegacyAdapter"/> produces an internally consistent result
+/// proves <see cref="CollectionAnalyzer"/> produces an internally consistent result
 /// against a real, large dump -- including the new <see cref="DumpDetective.Sdk.Analysis.IDumpObjectFieldQuery.EnumerateInstanceFields"/>-backed
 /// field-layout resolution and the <see cref="DumpDetective.Sdk.Analysis.IHeapReverseReferenceQuery"/>/
 /// <see cref="DumpDetective.Sdk.Analysis.IHeapRootPathQuery"/> post-scan enrichment, none of which the
@@ -47,12 +47,16 @@ public sealed class CollectionAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using CollectionAnalyzerLegacyAdapter adapter = new();
-        new HeapIndexScanDispatcher().Run(cache, context, [adapter], CancellationToken.None);
+        using CollectionAnalyzer adapter = new();
+        new HeapIndexScanDispatcher().Run(cache, contextRuntimeCtx, [adapter], CancellationToken.None);
 
-        var result = (CollectionDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        context = ((ICustomizesAnalysisContext)adapter).BuildAnalysisContext(contextRuntimeCtx);
+
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (CollectionDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("Collection Analysis");
 

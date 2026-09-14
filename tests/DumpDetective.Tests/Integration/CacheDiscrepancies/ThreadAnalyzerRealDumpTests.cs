@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Analyzers.Threads;
@@ -14,7 +15,7 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 
 /// <summary>
 /// Real-dump verification for the Tier-1+Tier-2 batch (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
-/// proves <see cref="ThreadAnalyzerLegacyAdapter"/> produces an internally consistent result against
+/// proves <see cref="ThreadAnalyzer"/> produces an internally consistent result against
 /// a real, large dump's real thread/stack state, run standalone (outside the pipeline's shared
 /// thread-stack scan, so this exercises the live <c>RuntimeThreadQuery</c> fallback path, not the
 /// precomputed one — the precomputed path is exercised indirectly by every full-pipeline real-dump
@@ -45,10 +46,12 @@ public sealed class ThreadAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using ThreadAnalyzerLegacyAdapter adapter = new();
-        var result = (ThreadDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using ThreadAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (ThreadDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("Thread Analysis");
         result.TotalThreadCount.Should().BeGreaterThan(0, "a real IIS crash dump has managed threads");

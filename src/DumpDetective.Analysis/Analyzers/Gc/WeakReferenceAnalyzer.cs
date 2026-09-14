@@ -1,4 +1,7 @@
+using DumpDetective.Analysis.Analyzers.Infra;
+using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
@@ -33,15 +36,39 @@ namespace DumpDetective.Analysis.Analyzers.Gc
     /// as their non-degraded value now; kept in the domain result (not removed) since the report/
     /// finding-generator layer already branches on them and stays correct either way.
     /// </remarks>
-    public sealed class WeakReferenceAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
+    public sealed class WeakReferenceAnalyzer :
+        IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
+        IParallelHeapIndexScanParticipant, IRequiresReachableGraphIndex, ICustomizesAnalysisContext
     {
         private const string WeakRefGenericName = "System.WeakReference`1";
         private const string WeakRefNonGenericName = "System.WeakReference";
 
+        private readonly TypedResourceHeapIndexScanState _scanState = new();
+
         public string Name => "Weak Reference Analysis";
         public string Category => "Memory";
 
-        public AnalyzerDomainResult? LastResult { get; private set; }
+        bool ITypedResourceCandidateSource.IsCandidateType(string typeName) => IsCandidateType(typeName);
+
+        void IHeapIndexScanParticipant.BeforeHeapIndexScan(RuntimeAnalysisContext context) => _scanState.BeforeHeapIndexScan(this, context);
+        void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => _scanState.OnHeapEntry(in entry);
+        void IHeapIndexScanParticipant.OnHeapIndexScanCompleted(bool succeeded) => _scanState.OnHeapIndexScanCompleted(succeeded);
+        IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() => new WeakReferenceAnalyzer();
+        void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials) =>
+            _scanState.MergeFrom(partials.OfType<WeakReferenceAnalyzer>().Select(a => a._scanState));
+
+        Sdk.Analysis.AnalysisContext ICustomizesAnalysisContext.BuildAnalysisContext(RuntimeAnalysisContext context) =>
+            AnalysisContextBuilder.Build(context, analyzerOptions: null, heapObjectsOverride: new PrecomputedHeapObjectStream(_scanState.Candidates));
+
+        public AnalyzerDomainResult? LastResult
+        {
+            get => _lastResult;
+            // Stamps AnalyzerName/Category here (not left to a bridging adapter, which no
+            // longer exists) so every LastResult consumer — pipeline or direct caller — sees
+            // them populated the same way.
+            private set => _lastResult = value is null ? null : value with { AnalyzerName = Name, Category = Category };
+        }
+        private AnalyzerDomainResult? _lastResult;
 
         internal static bool IsCandidateType(string typeName) =>
             typeName.StartsWith(WeakRefGenericName, StringComparison.Ordinal)

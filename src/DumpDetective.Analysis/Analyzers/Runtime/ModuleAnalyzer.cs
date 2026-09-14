@@ -44,7 +44,15 @@ public sealed class ModuleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     public string Name => "Module Analysis";
     public string Category => "Modules";
 
-    public AnalyzerDomainResult? LastResult { get; private set; }
+    public AnalyzerDomainResult? LastResult
+    {
+        get => _lastResult;
+        // Stamps AnalyzerName/Category here (not left to a bridging adapter, which no
+        // longer exists) so every LastResult consumer — pipeline or direct caller — sees
+        // them populated the same way.
+        private set => _lastResult = value is null ? null : value with { AnalyzerName = Name, Category = Category };
+    }
+    private AnalyzerDomainResult? _lastResult;
 
     // Only the heaviest modules (>= HeavyModuleWarningThresholdBytes) get a type breakdown -- keeps
     // the bounded top-N insertion cost proportional to a small module subset, not all modules.

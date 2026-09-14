@@ -32,7 +32,7 @@ internal interface IHeapIndexBuilder
         string dumpPath,
         CancellationToken cancellationToken,
         IProgress<AnalyzerProgressReport>? progress = null,
-        IReadOnlyList<IAnalyzer>? activeAnalyzers = null,
+        IReadOnlyList<Sdk.Analysis.IAnalyzer>? activeAnalyzers = null,
         bool enableExactDominatorTree = false);
 
     /// <summary>Updates the progress reporter used during per-analyzer scans after the index is built.</summary>

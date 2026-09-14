@@ -8,7 +8,7 @@ using DumpDetective.Analysis.Analyzers.Runtime;
 namespace BenchmarkSuite1
 {
     [MemoryDiagnoser]
-    public class CrashAnalyzerBenchmark : AnalyzerBenchmarkBase<CrashAnalyzerLegacyAdapter>
+    public class CrashAnalyzerBenchmark : AnalyzerBenchmarkBase<CrashAnalyzer>
     {
         protected override IHeapAnalysisCache? CreateCache() => new DumpDetective.Analysis.Cache.HeapAnalysisCache();
 
@@ -18,7 +18,8 @@ namespace BenchmarkSuite1
             if (AnalysisContext == null)
                 throw new InvalidOperationException("Benchmark not properly initialized.");
             // Use the async context-based method for full parity
-            return Analyzer.AnalyzeAsync(AnalysisContext, default).GetAwaiter().GetResult();
+            Analyzer.AnalyzeAsync(AnalysisContext, default).GetAwaiter().GetResult();
+            return Analyzer.LastResult!;
         }
     }
 }

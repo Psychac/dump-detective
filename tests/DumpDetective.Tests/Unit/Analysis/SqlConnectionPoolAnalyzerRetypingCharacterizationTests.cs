@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers.Infra;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
@@ -101,8 +102,7 @@ public sealed class SqlConnectionPoolAnalyzerRetypingCharacterizationTests
         // context.HeapObjects itself null (no scan-participant pass ever ran) must degrade the same
         // way as "ran but found nothing" -- both are "no candidates," not an error.
         SqlConnectionPoolAnalyzer analyzer = new();
-        AnalysisContext context = new()
-        {
+        DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
             DumpObjectFields = new FakeDumpObjectFieldQuery(),
             HeapObjects = null,
@@ -121,8 +121,7 @@ public sealed class SqlConnectionPoolAnalyzerRetypingCharacterizationTests
         FakeDumpObjectFieldQuery fields, IReadOnlyList<HeapObjectRef> candidates)
     {
         SqlConnectionPoolAnalyzer analyzer = new();
-        AnalysisContext context = new()
-        {
+        DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
             DumpObjectFields = fields,
             HeapObjects = new PrecomputedHeapObjectStream(candidates),

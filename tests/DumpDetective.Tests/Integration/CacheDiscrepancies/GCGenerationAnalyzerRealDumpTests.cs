@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Analyzers;
@@ -20,7 +21,7 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 /// (<c>GCGenerationAnalyzerRetypingCharacterizationTests</c>) proves the arithmetic against
 /// hand-crafted fixture data; this proves the full real pipeline — real dump load, a real
 /// <c>HeapAnalysisCache.PrebuildHeapIndex</c> scan (hundreds of thousands of distinct types), real
-/// <c>ClrType</c> name resolution — runs end to end through <see cref="GCGenerationAnalyzerLegacyAdapter"/>
+/// <c>ClrType</c> name resolution — runs end to end through <see cref="GCGenerationAnalyzer"/>
 /// without throwing and produces internally consistent output.
 /// </summary>
 public sealed class GCGenerationAnalyzerRealDumpTests
@@ -48,10 +49,12 @@ public sealed class GCGenerationAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using GCGenerationAnalyzerLegacyAdapter adapter = new();
-        var result = (GCGenerationDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using GCGenerationAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (GCGenerationDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("GC Generation Analysis");
         result.Category.Should().Be("GC");

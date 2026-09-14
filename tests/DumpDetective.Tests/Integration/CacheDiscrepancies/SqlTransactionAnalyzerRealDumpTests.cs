@@ -16,7 +16,7 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 
 /// <summary>
 /// Real-dump verification for the Tier-2 wave (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
-/// proves <see cref="SqlTransactionAnalyzerLegacyAdapter"/> reproduces the pre-retyping analyzer's
+/// proves <see cref="SqlTransactionAnalyzer"/> reproduces the pre-retyping analyzer's
 /// behavior against a real, large dump. Same structure as <c>SqlConnectionPoolAnalyzerRealDumpTests</c>.
 /// </summary>
 public sealed class SqlTransactionAnalyzerRealDumpTests
@@ -59,12 +59,16 @@ public sealed class SqlTransactionAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using SqlTransactionAnalyzerLegacyAdapter adapter = new();
-        new HeapIndexScanDispatcher().Run(cache, context, [adapter], CancellationToken.None);
+        using SqlTransactionAnalyzer adapter = new();
+        new HeapIndexScanDispatcher().Run(cache, contextRuntimeCtx, [adapter], CancellationToken.None);
 
-        var result = (SqlTransactionDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        context = ((ICustomizesAnalysisContext)adapter).BuildAnalysisContext(contextRuntimeCtx);
+
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (SqlTransactionDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("SQL Transaction Analysis");
 

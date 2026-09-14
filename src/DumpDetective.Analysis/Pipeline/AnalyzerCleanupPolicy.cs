@@ -1,5 +1,3 @@
-using DumpDetective.Core.Abstractions;
-using DumpDetective.Core.Models;
 using System.Diagnostics;
 using System.Runtime;
 
@@ -12,7 +10,7 @@ internal sealed class AnalyzerCleanupPolicy
 
     public void CleanupAfterAnalyzer(
         RuntimeAnalysisContext context,
-        IAnalyzer analyzer,
+        Sdk.Analysis.IAnalyzer analyzer,
         int completedAnalyzerCount,
         long workingSetBefore,
         bool trackWorkingSet)

@@ -34,7 +34,15 @@ public sealed class AllocationPatternAnalyzer : IAnalyzer, IProducesAnalyzerDoma
     public string Name => "Allocation Pattern Analysis";
     public string Category => "GC";
 
-    public AnalyzerDomainResult? LastResult { get; private set; }
+    public AnalyzerDomainResult? LastResult
+    {
+        get => _lastResult;
+        // Stamps AnalyzerName/Category here (not left to a bridging adapter, which no
+        // longer exists) so every LastResult consumer — pipeline or direct caller — sees
+        // them populated the same way.
+        private set => _lastResult = value is null ? null : value with { AnalyzerName = Name, Category = Category };
+    }
+    private AnalyzerDomainResult? _lastResult;
 
     public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {

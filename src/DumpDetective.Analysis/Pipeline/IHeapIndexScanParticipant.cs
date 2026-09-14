@@ -15,7 +15,7 @@ internal interface IHeapIndexScanParticipant
     /// so <see cref="OnHeapEntry"/> stays branch-free on the "is this the first call" question across
     /// millions of invocations.
     /// </summary>
-    void BeforeHeapIndexScan(DumpDetective.Core.Abstractions.AnalysisContext context);
+    void BeforeHeapIndexScan(RuntimeAnalysisContext context);
 
     /// <summary>
     /// Called once per index record, in address order, during the single shared pass.

@@ -82,13 +82,22 @@ namespace DumpDetective.Analysis.Analyzers.Leaks;
 /// same precedent rather than inventing new plumbing for a single consumer.
 /// </para>
 /// </remarks>
-public sealed class DominatorAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
+public sealed class DominatorAnalyzer :
+    IAnalyzer, IProducesAnalyzerDomainResult, Pipeline.IRequiresReachableGraphIndex, Pipeline.IRequiresDominatorTreeIndex
 {
     public string Name => "Dominator Analysis";
     public string Category => "Memory";
     public int Order => 110;
 
-    public AnalyzerDomainResult? LastResult { get; private set; }
+    public AnalyzerDomainResult? LastResult
+    {
+        get => _lastResult;
+        // Stamps AnalyzerName/Category here (not left to a bridging adapter, which no
+        // longer exists) so every LastResult consumer — pipeline or direct caller — sees
+        // them populated the same way.
+        private set => _lastResult = value is null ? null : value with { AnalyzerName = Name, Category = Category };
+    }
+    private AnalyzerDomainResult? _lastResult;
 
     // Only used by AnalyzeObjectsPass's live-heap fallback (no disk-backed reverse index
     // available) — the primary reverse-index path (BuildLeakSignalsFromReverseIndex) is

@@ -8,11 +8,11 @@ namespace DumpDetective.Tests.Unit.Analysis;
 
 /// <summary>
 /// Tier-2 wave retyping (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
-/// <see cref="WcfChannelAnalyzerLegacyAdapter.CreateWorkerInstance"/>/<c>MergePartial</c> are now
-/// pure generic base-class behavior (<c>TypedResourceCandidateStreamingLegacyAdapter</c>), already
+/// <see cref="WcfChannelAnalyzer.CreateWorkerInstance"/>/<c>MergePartial</c> are now
+/// pure generic base-class behavior (<c>TypedResourceCandidateStreaming</c>), already
 /// covered once by <c>SqlConnectionPoolAnalyzerHeapIndexScanTests</c> — re-testing the identical
 /// generic logic per adapter would be pure duplication. Covers the adapter-specific
-/// <see cref="WcfChannelAnalyzerLegacyAdapter.IsCandidateType"/> wiring plus the classification
+/// <see cref="WcfChannelAnalyzer.IsCandidateType"/> wiring plus the classification
 /// helpers that stayed unchanged on <see cref="WcfChannelAnalyzer"/> through the retyping.
 /// </summary>
 public sealed class WcfChannelAnalyzerHeapIndexScanTests
@@ -26,9 +26,9 @@ public sealed class WcfChannelAnalyzerHeapIndexScanTests
     [InlineData("Microsoft.Data.SqlClient.SqlCommand", false)]
     public void IsCandidateType_MatchesWcfChannelNamespaceAndSuffixOrTokens(string typeName, bool expected)
     {
-        WcfChannelAnalyzerLegacyAdapter adapter = new();
+        WcfChannelAnalyzer adapter = new();
 
-        adapter.IsCandidateType(typeName).Should().Be(expected);
+        ((ITypedResourceCandidateSource)adapter).IsCandidateType(typeName).Should().Be(expected);
     }
 
     [Theory]

@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Analyzers.Types;
@@ -14,7 +15,7 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 
 /// <summary>
 /// Real-dump verification for the Tier-1 mop-up batch (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
-/// proves <see cref="BoxingAnalyzerLegacyAdapter"/> produces an internally consistent result against
+/// proves <see cref="BoxingAnalyzer"/> produces an internally consistent result against
 /// a real, large dump's real <c>TypeAggregates</c>.
 /// </summary>
 public sealed class BoxingAnalyzerRealDumpTests
@@ -42,10 +43,12 @@ public sealed class BoxingAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using BoxingAnalyzerLegacyAdapter adapter = new();
-        var result = (BoxingDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using BoxingAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (BoxingDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("Boxing Analysis");
         result.TotalBoxedObjects.Should().BeGreaterThan(0, "a real 3.5 GB dump has boxed value types (at minimum boxed enums/booleans)");

@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Analyzers;
@@ -54,10 +55,12 @@ public sealed class HeapTopologyAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using HeapTopologyAnalyzerLegacyAdapter adapter = new();
-        var result = (HeapTopologyDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using HeapTopologyAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (HeapTopologyDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("Heap Topology");
         result.TotalSegments.Should().Be(expectedSegmentCount);

@@ -17,7 +17,7 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 /// <summary>
 /// Real-dump verification for <see cref="CrashAnalyzer"/>'s Tier-1+Tier-2 retyping
 /// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md) — proves
-/// <see cref="CrashAnalyzerLegacyAdapter"/> produces an internally consistent result against a real
+/// <see cref="CrashAnalyzer"/> produces an internally consistent result against a real
 /// dump, including the new <see cref="DumpDetective.Sdk.Analysis.IDumpObjectFieldQuery.EnumerateExceptionStackTrace"/>
 /// binary-trace-unwind tier, <see cref="DumpDetective.Sdk.Analysis.IRuntimeThreadQuery.ExceptionAddress"/>-based
 /// active-thread correlation, and <see cref="DumpDetective.Sdk.Analysis.IHeapRootPathQuery"/>-backed
@@ -51,12 +51,16 @@ public sealed class CrashAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using CrashAnalyzerLegacyAdapter adapter = new();
-        new HeapIndexScanDispatcher().Run(cache, context, [adapter], CancellationToken.None);
+        using CrashAnalyzer adapter = new();
+        new HeapIndexScanDispatcher().Run(cache, contextRuntimeCtx, [adapter], CancellationToken.None);
 
-        var result = (CrashDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        context = ((ICustomizesAnalysisContext)adapter).BuildAnalysisContext(contextRuntimeCtx);
+
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (CrashDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("Crash Analysis");
 

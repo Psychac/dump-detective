@@ -13,6 +13,6 @@ internal interface IObjectIndexWriter
         IProgress<AnalyzerProgressReport>? progress = null,
         string? dumpPath = null,
         DumpSizeTier sizeTier = DumpSizeTier.Medium,
-        IReadOnlyList<IAnalyzer>? activeAnalyzers = null,
+        IReadOnlyList<Sdk.Analysis.IAnalyzer>? activeAnalyzers = null,
         bool enableExactDominatorTree = false);
 }

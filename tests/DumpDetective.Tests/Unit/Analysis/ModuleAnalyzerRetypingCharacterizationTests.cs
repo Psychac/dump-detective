@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers.Runtime;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
@@ -16,7 +17,7 @@ namespace DumpDetective.Tests.Unit.Analysis;
 /// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md) — no pre-existing per-analyzer
 /// unit test coverage existed before this (only the real-dump
 /// <c>ModuleAnalyzerTopTypesRealDumpTests</c>, updated separately to use
-/// <see cref="ModuleAnalyzerLegacyAdapter"/>). Proves: module inventory/dedup, version-conflict vs.
+/// <see cref="ModuleAnalyzer"/>). Proves: module inventory/dedup, version-conflict vs.
 /// unknown-identity-duplicate classification, AssemblyRef mismatch detection, AppDomain/cross-domain
 /// analysis, and the <c>ModuleName</c>-grouped heap-footprint aggregation (including the two-pass
 /// heavy-module gate fix found via the real-dump test).
@@ -222,8 +223,7 @@ public sealed class ModuleAnalyzerRetypingCharacterizationTests
         ModuleAnalysisOptions? options = null)
     {
         ModuleAnalyzer analyzer = new();
-        AnalysisContext context = new()
-        {
+        DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
             RuntimeModules = modules,
             DumpObjectFields = fields,

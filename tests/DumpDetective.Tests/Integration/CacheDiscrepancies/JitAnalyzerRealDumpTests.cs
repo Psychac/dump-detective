@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Analyzers;
@@ -42,10 +43,12 @@ public sealed class JitAnalyzerRealDumpTests
         ClrRuntime runtime = dataTarget.ClrVersions[0].CreateRuntime();
 
         HeapAnalysisCache cache = new();
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using JitAnalyzerLegacyAdapter adapter = new();
-        var result = (JitDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using JitAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (JitDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("JIT Analysis");
         result.JitManagerCount.Should().BeGreaterThan(0);

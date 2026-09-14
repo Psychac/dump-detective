@@ -1,10 +1,14 @@
+using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+
+using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Analysis.Analyzers.Threads
 {
@@ -28,12 +32,85 @@ namespace DumpDetective.Analysis.Analyzers.Threads
     /// always goes through the pipeline's shared scan, so an empty candidate list when it didn't run
     /// is accepted rather than re-implementing a second, independent scan path.
     /// </remarks>
-    public sealed class HangAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
+    public sealed class HangAnalyzer :
+        IAnalyzer, IProducesAnalyzerDomainResult, IParallelHeapIndexScanParticipant,
+        IThreadStackScanParticipant, ICustomizesAnalysisContext
     {
+        private ClrHeap? _heap;
+        private readonly Dictionary<ulong, string?> _relevantNameByMt = new();
+        private readonly List<Sdk.Analysis.HeapObjectRef> _scanCandidates = new();
+        private bool _heapScanSucceeded = true;
+
+        private readonly ThreadStackScanState _threadScanState = new();
+
         public string Name => "Hang Analysis";
         public string Category => "Hang";
 
-        public AnalyzerDomainResult? LastResult { get; private set; }
+        // ── Heap-index-scan participant ──────────────────────────────────────────────
+        void IHeapIndexScanParticipant.BeforeHeapIndexScan(RuntimeAnalysisContext context) => _heap = context.Heap;
+
+        void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry)
+        {
+            if (entry.Address == 0 || entry.MethodTable == 0)
+                return;
+
+            if (!_relevantNameByMt.TryGetValue(entry.MethodTable, out string? name))
+            {
+                ClrType? type = _heap!.GetTypeByMethodTable(entry.MethodTable);
+                string resolvedName = type?.Name ?? string.Empty;
+                name = AsyncTypeProfile.FromTypeName(resolvedName).IsPotentiallyRelevant ? resolvedName : null;
+                _relevantNameByMt[entry.MethodTable] = name;
+            }
+
+            if (name is null)
+                return;
+
+            _scanCandidates.Add(new Sdk.Analysis.HeapObjectRef(entry.Address, SdkTypeRefFactory.FromName(name, entry.MethodTable), entry.Size, name));
+        }
+
+        IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() => new HangAnalyzer();
+
+        void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
+        {
+            foreach (IHeapIndexScanParticipant p in partials)
+            {
+                if (p is HangAnalyzer other)
+                {
+                    _scanCandidates.AddRange(other._scanCandidates);
+                    if (!other._heapScanSucceeded)
+                        _heapScanSucceeded = false;
+                }
+            }
+        }
+
+        void IHeapIndexScanParticipant.OnHeapIndexScanCompleted(bool succeeded) => _heapScanSucceeded = succeeded;
+
+        // ── Thread-stack-scan participant ────────────────────────────────────────────
+        // Only the top frame is needed (this analyzer's own wait-pattern check looks at the
+        // innermost frame only).
+        int IThreadStackScanParticipant.GetRequiredFrameCount(RuntimeAnalysisContext context) => 1;
+        void IThreadStackScanParticipant.BeforeThreadStackScan(RuntimeAnalysisContext context) => _threadScanState.BeforeThreadStackScan();
+        // This analyzer never reads RuntimeThreadRef.StackRootCount (its domain result carries no
+        // such field), so stackRootCount stays 0 here.
+        void IThreadStackScanParticipant.OnThreadStack(in ThreadStackSnapshot snapshot) => _threadScanState.OnThreadStack(in snapshot, stackRootCount: 0);
+        void IThreadStackScanParticipant.OnThreadStackScanCompleted(bool succeeded) => _threadScanState.OnThreadStackScanCompleted(succeeded);
+
+        Sdk.Analysis.AnalysisContext ICustomizesAnalysisContext.BuildAnalysisContext(RuntimeAnalysisContext context) =>
+            AnalysisContextBuilder.Build(
+                context,
+                analyzerOptions: null,
+                runtimeThreadsOverride: _threadScanState.BuildPrecomputedQuery(),
+                heapObjectsOverride: new PrecomputedHeapObjectStream(_heapScanSucceeded ? _scanCandidates : []));
+
+        public AnalyzerDomainResult? LastResult
+        {
+            get => _lastResult;
+            // Stamps AnalyzerName/Category here (not left to a bridging adapter, which no
+            // longer exists) so every LastResult consumer — pipeline or direct caller — sees
+            // them populated the same way.
+            private set => _lastResult = value is null ? null : value with { AnalyzerName = Name, Category = Category };
+        }
+        private AnalyzerDomainResult? _lastResult;
 
         public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {

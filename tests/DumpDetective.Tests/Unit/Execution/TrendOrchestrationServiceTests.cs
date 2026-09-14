@@ -3,6 +3,7 @@ using DumpDetective.Analysis.Trend;
 using DumpDetective.Cli.Execution;
 using DumpDetective.Cli.Services;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Sdk.Analysis;
 using DumpDetective.Core.Models;
 
 using FluentAssertions;
@@ -40,7 +41,7 @@ public sealed class TrendOrchestrationServiceTests
 
     private sealed class ThrowingDumpLoader : IDumpLoader
     {
-        public Task<DumpLoadContext> LoadAsync(string dumpPath, CancellationToken cancellationToken, IProgress<AnalyzerProgressReport>? progress = null)
+        public Task<DumpLoadContext> LoadAsync(string dumpPath, CancellationToken cancellationToken, IProgress<DumpDetective.Core.Abstractions.AnalyzerProgressReport>? progress = null)
             => throw new InvalidOperationException("dump load failed");
     }
 }

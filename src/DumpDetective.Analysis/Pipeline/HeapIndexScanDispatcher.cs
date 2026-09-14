@@ -29,7 +29,7 @@ internal sealed class HeapIndexScanDispatcher
     // for eliminating per-object cache-line contention across worker threads.
     private const long LocalTickBatch = 4096;
 
-    public void Run(HeapAnalysisCache cache, AnalysisContext context, IReadOnlyList<IHeapIndexScanParticipant> participants, CancellationToken cancellationToken)
+    public void Run(HeapAnalysisCache cache, RuntimeAnalysisContext context, IReadOnlyList<IHeapIndexScanParticipant> participants, CancellationToken cancellationToken)
         => Run(cache, context, participants, cancellationToken, maxWorkers: 0);
 
     /// <param name="maxWorkers">
@@ -37,7 +37,7 @@ internal sealed class HeapIndexScanDispatcher
     /// object count and processor count. Pass 1 to force the sequential path for all
     /// participants (useful for perf-comparison tests).
     /// </param>
-    public void Run(HeapAnalysisCache cache, AnalysisContext context, IReadOnlyList<IHeapIndexScanParticipant> participants, CancellationToken cancellationToken, int maxWorkers)
+    public void Run(HeapAnalysisCache cache, RuntimeAnalysisContext context, IReadOnlyList<IHeapIndexScanParticipant> participants, CancellationToken cancellationToken, int maxWorkers)
     {
         if (participants.Count == 0)
             return;
@@ -332,7 +332,7 @@ internal sealed class HeapIndexScanDispatcher
     // per-worker partial states back into its original instance via MergePartial.
     private static void RunParallelPass(
         HeapAnalysisCache cache,
-        AnalysisContext context,
+        RuntimeAnalysisContext context,
         IReadOnlyList<IHeapIndexScanParticipant> participants,
         List<int> parallelIndices,
         int workerCount,

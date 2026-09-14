@@ -13,7 +13,7 @@ namespace DumpDetective.Analysis.SdkBridge;
 /// no-index fallback pass needs to stream every heap object when no disk-backed heap index exists
 /// for this session, which is a different shape from every prior <c>IHeapObjectStream</c> consumer
 /// (a heap-index <em>scan participant</em>, only invoked when the pipeline's shared disk-index scan
-/// actually runs — see <see cref="LegacyAnalysisContextTranslator"/>'s own remarks on why
+/// actually runs — see <see cref="Pipeline.AnalysisContextBuilder"/>'s own remarks on why
 /// <c>heapObjectsOverride</c> exists). Prefers the disk-backed index when one is present (a
 /// sequential index read, no per-object ClrMD field walk) — mirrors the pre-retyping analyzer's own
 /// <c>EnumerateLeakEntries</c> fork exactly, falling back to a live <c>ClrHeap.EnumerateObjects()</c>

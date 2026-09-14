@@ -5,7 +5,7 @@ namespace DumpDetective.Analysis.SdkBridge;
 /// <summary>
 /// Discards everything. Phase 5 (observation emission) hasn't started — no migrated analyzer emits
 /// <see cref="Observation"/>s yet — but <c>Sdk.Analysis.AnalysisContext.Observations</c> is
-/// <c>required</c>, so <see cref="LegacyAnalysisContextTranslator"/> needs a sink to hand it. An
+/// <c>required</c>, so <see cref="Pipeline.AnalysisContextBuilder"/> needs a sink to hand it. An
 /// analyzer that ever does call <see cref="EmitAsync"/> through this sink is silently dropping data,
 /// not merely deferring it — safe today only because no migrated analyzer does.
 /// </summary>

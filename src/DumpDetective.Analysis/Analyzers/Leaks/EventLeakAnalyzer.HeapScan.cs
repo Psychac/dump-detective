@@ -1,6 +1,7 @@
 using DumpDetective.Analysis.Analyzers.Leaks.EventLeak;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Analysis.Traversal;
 using DumpDetective.Analysis.Utilities;
@@ -51,20 +52,18 @@ namespace DumpDetective.Analysis.Analyzers.Leaks;
 /// (an <c>InsightFinding</c> builder) was likewise dead -- defined but never invoked from
 /// <c>AnalyzeAsync</c> or anywhere else.
 /// </remarks>
-public sealed class EventLeakAnalyzerLegacyAdapter : LegacyAnalyzerAdapter<EventLeakAnalyzer>, IHeapIndexScanParticipant, IRequiresReachableGraphIndex, IRequiresDominatorTreeIndex
+public sealed partial class EventLeakAnalyzer : IHeapIndexScanParticipant, IRequiresReachableGraphIndex, IRequiresDominatorTreeIndex, ICustomizesAnalysisContext
 {
-    private readonly ILogger<EventLeakAnalyzerLegacyAdapter>? _logger;
+    private readonly ILogger<EventLeakAnalyzer>? _logger;
 
-    public EventLeakAnalyzerLegacyAdapter() : base(new EventLeakAnalyzer())
+    public EventLeakAnalyzer() : this(null)
     {
     }
 
-    public EventLeakAnalyzerLegacyAdapter(ILogger<EventLeakAnalyzerLegacyAdapter>? logger) : base(new EventLeakAnalyzer())
+    public EventLeakAnalyzer(ILogger<EventLeakAnalyzer>? logger)
     {
         _logger = logger;
     }
-
-    protected override object? ResolveOptions(AnalysisOptions options) => options.EventLeak;
 
         // Instance accumulator state for the IHeapIndexScanParticipant path. Populated by
         // BeforeHeapIndexScan (called by the pipeline dispatcher) and mutated per-entry by
@@ -90,7 +89,7 @@ public sealed class EventLeakAnalyzerLegacyAdapter : LegacyAnalyzerAdapter<Event
         // Resets per-entry accumulator fields ahead of the shared heap-index scan pass.
         // Explicit interface implementations: EventLeakAnalyzer is public but HeapEntry is
         // internal, so these members must not be exposed on the public API surface.
-        void IHeapIndexScanParticipant.BeforeHeapIndexScan(AnalysisContext context)
+        void IHeapIndexScanParticipant.BeforeHeapIndexScan(RuntimeAnalysisContext context)
         {
             _participantScanSucceeded = false;
             _participantOptions = context.AnalysisOptions.EventLeak;
@@ -1088,9 +1087,9 @@ public sealed class EventLeakAnalyzerLegacyAdapter : LegacyAnalyzerAdapter<Event
             return (double)gen01Count / probed >= options.LifetimeMismatchGen01Threshold;
         }
 
-    protected override Sdk.Analysis.AnalysisContext BuildSdkContext(AnalysisContext context)
+    Sdk.Analysis.AnalysisContext ICustomizesAnalysisContext.BuildAnalysisContext(RuntimeAnalysisContext context)
     {
-        var options = (EventLeakOptions)ResolveOptions(context.AnalysisOptions)!;
+        EventLeakOptions options = context.AnalysisOptions.EventLeak;
 
         List<EventGroupInfo> groupedLeaks = FindEventLeaks(
             context.Heap, context.Cache, options, context.Progress, CancellationToken.None,
@@ -1101,6 +1100,6 @@ public sealed class EventLeakAnalyzerLegacyAdapter : LegacyAnalyzerAdapter<Event
             options, groupedLeaks, eventsScanned, publisherInstances,
             candidatePublisherTypeCount, leakingPublisherTypeCount);
 
-        return LegacyAnalysisContextTranslator.Translate(context, eventLeakOptions);
+        return AnalysisContextBuilder.Build(context, eventLeakOptions);
     }
 }

@@ -1,5 +1,5 @@
 using DumpDetective.Reporting.Capabilities;
-using DumpDetective.Core.Abstractions;
+using DumpDetective.Sdk.Analysis;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Logging;

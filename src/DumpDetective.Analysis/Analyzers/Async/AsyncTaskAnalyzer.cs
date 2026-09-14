@@ -51,7 +51,7 @@ namespace DumpDetective.Analysis.Analyzers.Async;
 /// source won — the same per-task cost three of the pre-retyping analyzer's four load paths already
 /// paid.
 /// </remarks>
-public sealed class AsyncTaskAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
+public sealed partial class AsyncTaskAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     // m_stateFlags bit masks (matches HangAnalyzer)
     private const int MaskCompleted = 0x1000000;
@@ -84,7 +84,15 @@ public sealed class AsyncTaskAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     public string Name => "Async Task Analysis";
     public string Category => "Memory";
 
-    public AnalyzerDomainResult? LastResult { get; private set; }
+    public AnalyzerDomainResult? LastResult
+    {
+        get => _lastResult;
+        // Stamps AnalyzerName/Category here (not left to a bridging adapter, which no
+        // longer exists) so every LastResult consumer — pipeline or direct caller — sees
+        // them populated the same way.
+        private set => _lastResult = value is null ? null : value with { AnalyzerName = Name, Category = Category };
+    }
+    private AnalyzerDomainResult? _lastResult;
 
     public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {

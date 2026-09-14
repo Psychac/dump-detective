@@ -1,4 +1,6 @@
+using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
@@ -72,10 +74,30 @@ namespace DumpDetective.Analysis.Analyzers.Infra;
 /// contributes to no state bucket — different from an out-of-range/corrupted state value, which
 /// counts toward <see cref="WcfChannelTypeSummary.InvalidStateCount"/>.
 /// </remarks>
-public sealed class WcfChannelAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
+public sealed class WcfChannelAnalyzer :
+    IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
+    IParallelHeapIndexScanParticipant, ICustomizesAnalysisContext
 {
+    private readonly TypedResourceHeapIndexScanState _scanState = new();
+
     public string Name => "WCF Channel Analysis";
     public string Category => "Infrastructure";
+
+    // A genuine (non-nested) factory type name also satisfies the static IsCandidateType's
+    // "Channel" token match (e.g. "TcpChannelFactory" contains "Channel") -- excluded here so
+    // factory instances flow only through this analyzer's independent HeapTypeStatistics-based
+    // FactoryCount, never into the per-object channel-state candidate stream.
+    bool ITypedResourceCandidateSource.IsCandidateType(string typeName) => IsCandidateType(typeName) && !IsFactoryType(typeName);
+
+    void IHeapIndexScanParticipant.BeforeHeapIndexScan(RuntimeAnalysisContext context) => _scanState.BeforeHeapIndexScan(this, context);
+    void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => _scanState.OnHeapEntry(in entry);
+    void IHeapIndexScanParticipant.OnHeapIndexScanCompleted(bool succeeded) => _scanState.OnHeapIndexScanCompleted(succeeded);
+    IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() => new WcfChannelAnalyzer();
+    void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials) =>
+        _scanState.MergeFrom(partials.OfType<WcfChannelAnalyzer>().Select(a => a._scanState));
+
+    Sdk.Analysis.AnalysisContext ICustomizesAnalysisContext.BuildAnalysisContext(RuntimeAnalysisContext context) =>
+        AnalysisContextBuilder.Build(context, analyzerOptions: null, heapObjectsOverride: new PrecomputedHeapObjectStream(_scanState.Candidates));
 
     // CommunicationState enum values
     private const int StateOpening = 1;
@@ -96,7 +118,15 @@ public sealed class WcfChannelAnalyzer : IAnalyzer, IProducesAnalyzerDomainResul
     private static readonly string[] UriFieldNames = ["_uri", "uri", "_address", "address"];
     private static readonly string[] UriInternalStringFieldNames = ["m_String", "_string"];
 
-    public AnalyzerDomainResult? LastResult { get; private set; }
+    public AnalyzerDomainResult? LastResult
+    {
+        get => _lastResult;
+        // Stamps AnalyzerName/Category here (not left to a bridging adapter, which no
+        // longer exists) so every LastResult consumer — pipeline or direct caller — sees
+        // them populated the same way.
+        private set => _lastResult = value is null ? null : value with { AnalyzerName = Name, Category = Category };
+    }
+    private AnalyzerDomainResult? _lastResult;
 
     internal static bool IsCandidateType(string typeName) =>
         TypeNamePatternMatcher.HasPrefixAndSuffixOrContains(typeName, WcfNamespacePrefixes, ".ServiceChannel", WcfContainsTokens);

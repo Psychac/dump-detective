@@ -32,7 +32,7 @@ internal sealed class ExecutePerDumpPipelineStage(PerDumpExecutionService perDum
         string? indexDetail = null;
         var progressLock = new object();
 
-        var progress = new Progress<AnalyzerProgressReport>(r =>
+        var progress = new Progress<DumpDetective.Core.Abstractions.AnalyzerProgressReport>(r =>
         {
             Interlocked.Exchange(ref lastScanned, r.ScannedCount);
             lock (progressLock)

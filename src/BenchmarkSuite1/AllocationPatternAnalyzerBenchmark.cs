@@ -7,7 +7,7 @@ using DumpDetective.Analysis.Analyzers.Memory;
 namespace BenchmarkSuite1
 {
     [MemoryDiagnoser]
-    public class AllocationPatternAnalyzerBenchmark : AnalyzerBenchmarkBase<AllocationPatternAnalyzerLegacyAdapter>
+    public class AllocationPatternAnalyzerBenchmark : AnalyzerBenchmarkBase<AllocationPatternAnalyzer>
     {
         protected override IHeapAnalysisCache? CreateCache() => new DumpDetective.Analysis.Cache.HeapAnalysisCache();
 
@@ -16,7 +16,8 @@ namespace BenchmarkSuite1
         {
             if (AnalysisContext == null)
                 throw new InvalidOperationException("Benchmark not properly initialized.");
-            return Analyzer.AnalyzeAsync(AnalysisContext, default).GetAwaiter().GetResult();
+            Analyzer.AnalyzeAsync(AnalysisContext, default).GetAwaiter().GetResult();
+            return Analyzer.LastResult!;
         }
     }
 }

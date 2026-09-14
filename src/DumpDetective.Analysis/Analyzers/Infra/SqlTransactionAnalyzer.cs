@@ -1,4 +1,6 @@
+using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
@@ -23,8 +25,27 @@ namespace DumpDetective.Analysis.Analyzers.Infra;
 /// (<see cref="SqlTransactionTypeSummary.OtherCount"/>/<see cref="SqlTransactionDomainResult.OtherCount"/>),
 /// so it's tracked and reported here too.
 /// </remarks>
-public sealed class SqlTransactionAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
+public sealed class SqlTransactionAnalyzer :
+    IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
+    IParallelHeapIndexScanParticipant, ICustomizesAnalysisContext
 {
+    // Same provider namespaces as DbConnectionAnalyzer -- transaction types live alongside
+    // connection types in each provider's assembly.
+    private static readonly string[] TransactionNamespacePrefixes =
+    [
+        "System.Data.SqlClient.",
+        "Microsoft.Data.SqlClient.",
+        "System.Data.OleDb.",
+        "System.Data.Odbc.",
+        "Oracle.",
+        "Npgsql.",
+        "MySql.",
+        "Microsoft.Data.Sqlite.",
+        "System.Data.SQLite.",
+    ];
+
+    private readonly TypedResourceHeapIndexScanState _scanState = new();
+
     public string Name => "SQL Transaction Analysis";
     public string Category => "Infrastructure";
 
@@ -34,7 +55,28 @@ public sealed class SqlTransactionAnalyzer : IAnalyzer, IProducesAnalyzerDomainR
     // Field names tried in order when reading the owning connection reference.
     private static readonly string[] ConnectionFieldNames = ["_connection", "_internalConnection", "Connection"];
 
-    public AnalyzerDomainResult? LastResult { get; private set; }
+    public bool IsCandidateType(string typeName) =>
+        TypeNamePatternMatcher.HasPrefixAndSuffixOrContains(typeName, TransactionNamespacePrefixes, "Transaction", null);
+
+    void IHeapIndexScanParticipant.BeforeHeapIndexScan(RuntimeAnalysisContext context) => _scanState.BeforeHeapIndexScan(this, context);
+    void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => _scanState.OnHeapEntry(in entry);
+    void IHeapIndexScanParticipant.OnHeapIndexScanCompleted(bool succeeded) => _scanState.OnHeapIndexScanCompleted(succeeded);
+    IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() => new SqlTransactionAnalyzer();
+    void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials) =>
+        _scanState.MergeFrom(partials.OfType<SqlTransactionAnalyzer>().Select(a => a._scanState));
+
+    Sdk.Analysis.AnalysisContext ICustomizesAnalysisContext.BuildAnalysisContext(RuntimeAnalysisContext context) =>
+        AnalysisContextBuilder.Build(context, analyzerOptions: null, heapObjectsOverride: new PrecomputedHeapObjectStream(_scanState.Candidates));
+
+    public AnalyzerDomainResult? LastResult
+    {
+        get => _lastResult;
+        // Stamps AnalyzerName/Category here (not left to a bridging adapter, which no
+        // longer exists) so every LastResult consumer — pipeline or direct caller — sees
+        // them populated the same way.
+        private set => _lastResult = value is null ? null : value with { AnalyzerName = Name, Category = Category };
+    }
+    private AnalyzerDomainResult? _lastResult;
 
     public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {

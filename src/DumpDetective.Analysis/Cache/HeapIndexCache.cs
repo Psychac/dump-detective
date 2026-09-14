@@ -65,7 +65,7 @@ internal class HeapIndexCache : IDisposable
         string dumpPath,
         CancellationToken cancellationToken,
         IProgress<AnalyzerProgressReport>? progress = null,
-        IReadOnlyList<IAnalyzer>? activeAnalyzers = null,
+        IReadOnlyList<Sdk.Analysis.IAnalyzer>? activeAnalyzers = null,
         bool enableExactDominatorTree = false)
     {
         if (_heapIndex is not null)

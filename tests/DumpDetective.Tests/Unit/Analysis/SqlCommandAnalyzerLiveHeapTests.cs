@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers.Infra;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
@@ -9,7 +10,7 @@ using Xunit;
 
 // Test-only fixture type mirroring SqlCommandAnalyzer's expected SqlCommand field shape
 // (_activeConnection object reference) — declared under the real provider's namespace so
-// SqlCommandAnalyzerLegacyAdapter.IsCandidateType's namespace-prefix + "Command"-suffix match fires
+// SqlCommandAnalyzer.IsCandidateType's namespace-prefix + "Command"-suffix match fires
 // against it, without depending on the actual Microsoft.Data.SqlClient package (not referenced by
 // this project — R10, hard-need basis: no new external dependency for this).
 namespace Microsoft.Data.SqlClient
@@ -94,8 +95,7 @@ namespace DumpDetective.Tests.Unit.Analysis
         {
             SqlCommandAnalyzer analyzer = new();
             HeapObjectRef candidate = new(address, SdkTypeRefFactory.FromName(typeName, methodTable), Size: 32, TypeDisplayName: typeName);
-            AnalysisContext context = new()
-            {
+            DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
                 Observations = NoOpObservationSink.Instance,
                 DumpObjectFields = new DumpObjectFieldQuery(heap),
                 HeapObjects = new PrecomputedHeapObjectStream([candidate]),

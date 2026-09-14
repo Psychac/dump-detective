@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
@@ -14,7 +15,7 @@ namespace DumpDetective.Tests.Unit.Analysis;
 
 /// <summary>
 /// Ported for the Tier-1 mop-up batch (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
-/// <see cref="AllocationPatternAnalyzerLegacyAdapter"/> in place of the retyped
+/// <see cref="AllocationPatternAnalyzer"/> in place of the retyped
 /// <see cref="AllocationPatternAnalyzer"/> directly (the pipeline only ever sees the registered
 /// <c>Core.Abstractions.IAnalyzer</c>). All synthetic <c>TypeAggregates</c>/<c>HeapIndexBuildResult</c>
 /// injection is unchanged from the pre-retyping version.
@@ -61,15 +62,16 @@ public sealed class AllocationPatternAnalyzerTests
         var fi = typeof(HeapAnalysisCache).GetField("_heapIndex", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
         fi.SetValue(cache, heapIndex);
 
-        var context = new AnalysisContext
-        {
+        RuntimeAnalysisContext contextRuntimeCtx = new() {
             Runtime = runtime,
             Cache = cache,
             AnalysisOptions = new AnalysisOptions { AllocationPatternAnalysis = new AllocationPatternAnalysisOptions() }
         };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using AllocationPatternAnalyzerLegacyAdapter adapter = new();
-        var result = (AllocationPatternDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using AllocationPatternAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (AllocationPatternDomainResult)adapter.LastResult!;
 
         result.Profile.Should().Be(AllocationProfile.Mixed);
         result.TopTransientTypes.Should().ContainSingle(t => t.TypeName.StartsWith("MT:0x1", System.StringComparison.OrdinalIgnoreCase));
@@ -101,15 +103,16 @@ public sealed class AllocationPatternAnalyzerTests
         var fi = typeof(HeapAnalysisCache).GetField("_heapIndex", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
         fi.SetValue(cache, heapIndex);
 
-        var context = new AnalysisContext
-        {
+        RuntimeAnalysisContext contextRuntimeCtx = new() {
             Runtime = runtime,
             Cache = cache,
             AnalysisOptions = new AnalysisOptions { AllocationPatternAnalysis = new AllocationPatternAnalysisOptions() }
         };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using AllocationPatternAnalyzerLegacyAdapter adapter = new();
-        var result = (AllocationPatternDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using AllocationPatternAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (AllocationPatternDomainResult)adapter.LastResult!;
 
         result.TopTransientTypes.Should().HaveCount(500);
     }
@@ -144,15 +147,16 @@ public sealed class AllocationPatternAnalyzerTests
         var fi = typeof(HeapAnalysisCache).GetField("_heapIndex", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
         fi.SetValue(cache, heapIndex);
 
-        var context = new AnalysisContext
-        {
+        RuntimeAnalysisContext contextRuntimeCtx = new() {
             Runtime = runtime,
             Cache = cache,
             AnalysisOptions = new AnalysisOptions { AllocationPatternAnalysis = new AllocationPatternAnalysisOptions() }
         };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using AllocationPatternAnalyzerLegacyAdapter adapter = new();
-        var result = (AllocationPatternDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using AllocationPatternAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (AllocationPatternDomainResult)adapter.LastResult!;
 
         // The Gen0-heavy MT 0xB should appear in transient or shortish despite lower count
         (result.TopTransientTypes.Any(t => t.TypeName.StartsWith("MT:0xB", System.StringComparison.OrdinalIgnoreCase))
@@ -184,9 +188,11 @@ public sealed class AllocationPatternAnalyzerTests
         var fi = typeof(HeapAnalysisCache).GetField("_heapIndex", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
         fi.SetValue(cache, heapIndex);
 
-        var context = new AnalysisContext { Runtime = runtime, Cache = cache, AnalysisOptions = new AnalysisOptions { AllocationPatternAnalysis = new AllocationPatternAnalysisOptions() } };
-        using AllocationPatternAnalyzerLegacyAdapter adapter = new();
-        var result = (AllocationPatternDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new AnalysisOptions { AllocationPatternAnalysis = new AllocationPatternAnalysisOptions() } };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
+        using AllocationPatternAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (AllocationPatternDomainResult)adapter.LastResult!;
 
         result.FinalizableTypeCount.Should().Be(1);
         result.FinalizableBytes.Should().Be(1000);
@@ -227,9 +233,11 @@ public sealed class AllocationPatternAnalyzerTests
         var fi = typeof(HeapAnalysisCache).GetField("_heapIndex", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
         fi.SetValue(cache, heapIndex);
 
-        var context = new AnalysisContext { Runtime = runtime, Cache = cache, AnalysisOptions = new AnalysisOptions { AllocationPatternAnalysis = new AllocationPatternAnalysisOptions() } };
-        using AllocationPatternAnalyzerLegacyAdapter adapter = new();
-        var result = (AllocationPatternDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new AnalysisOptions { AllocationPatternAnalysis = new AllocationPatternAnalysisOptions() } };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
+        using AllocationPatternAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (AllocationPatternDomainResult)adapter.LastResult!;
 
         result.LohSizeBands.Should().NotBeNull();
         result.LohSizeBands!.Should().HaveCount(3);

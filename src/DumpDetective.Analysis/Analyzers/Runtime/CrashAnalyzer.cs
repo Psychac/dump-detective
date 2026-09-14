@@ -1,4 +1,6 @@
+using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
@@ -6,6 +8,8 @@ using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+
+using Microsoft.Diagnostics.Runtime;
 
 namespace DumpDetective.Analysis.Analyzers.Runtime
 {
@@ -40,12 +44,92 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
     /// tier specifically, restoring the pre-retyping analyzer's exact three-tier fallback
     /// (<c>_stackTraceString</c> text → binary trace-array unwind → <c>_remoteStackTraceString</c>).
     /// </remarks>
-    public sealed class CrashAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
+    public sealed class CrashAnalyzer :
+        IAnalyzer, IProducesAnalyzerDomainResult, IParallelHeapIndexScanParticipant, ICustomizesAnalysisContext
     {
+        private ClrHeap? _heap;
+        private readonly Dictionary<ulong, bool> _isExceptionByMt = new();
+        private readonly Dictionary<ulong, bool> _isAggregateByMt = new();
+        private readonly List<Sdk.Analysis.HeapObjectRef> _scanCandidates = new();
+        private readonly HashSet<ulong> _aggregateAddresses = new();
+        private bool _scanSucceeded = true;
+
         public string Name => "Crash Analysis";
         public string Category => "Crash";
 
-        public AnalyzerDomainResult? LastResult { get; private set; }
+        public AnalyzerDomainResult? LastResult
+        {
+            get => _lastResult;
+            // Stamps AnalyzerName/Category here (not left to a bridging adapter, which no
+            // longer exists) so every LastResult consumer — pipeline or direct caller — sees
+            // them populated the same way.
+            private set => _lastResult = value is null ? null : value with { AnalyzerName = Name, Category = Category };
+        }
+        private AnalyzerDomainResult? _lastResult;
+
+        void IHeapIndexScanParticipant.BeforeHeapIndexScan(RuntimeAnalysisContext context) => _heap = context.Heap;
+
+        void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry)
+        {
+            if (entry.Address == 0 || entry.MethodTable == 0)
+                return;
+
+            if (!_isExceptionByMt.TryGetValue(entry.MethodTable, out bool isException))
+            {
+                ClrType? type = _heap!.GetTypeByMethodTable(entry.MethodTable);
+                isException = type?.IsException == true;
+                _isExceptionByMt[entry.MethodTable] = isException;
+                if (isException)
+                    _isAggregateByMt[entry.MethodTable] = IsAggregateExceptionType(type);
+            }
+
+            if (!isException)
+                return;
+
+            string name = _heap!.GetTypeByMethodTable(entry.MethodTable)?.Name ?? $"MT:0x{entry.MethodTable:x}";
+            _scanCandidates.Add(new Sdk.Analysis.HeapObjectRef(entry.Address, SdkTypeRefFactory.FromName(name, entry.MethodTable), entry.Size, name));
+
+            if (_isAggregateByMt.TryGetValue(entry.MethodTable, out bool isAggregate) && isAggregate)
+                _aggregateAddresses.Add(entry.Address);
+        }
+
+        // Walks the base-type chain so AggregateException subclasses (rare, but legal) are still
+        // unwrapped, not just the sealed-in-practice BCL type.
+        private static bool IsAggregateExceptionType(ClrType? type)
+        {
+            while (type != null)
+            {
+                if (type.Name == "System.AggregateException")
+                    return true;
+                type = type.BaseType;
+            }
+            return false;
+        }
+
+        IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() => new CrashAnalyzer();
+
+        void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
+        {
+            foreach (IHeapIndexScanParticipant p in partials)
+            {
+                if (p is not CrashAnalyzer other)
+                    continue;
+
+                _scanCandidates.AddRange(other._scanCandidates);
+                foreach (ulong address in other._aggregateAddresses)
+                    _aggregateAddresses.Add(address);
+                if (!other._scanSucceeded)
+                    _scanSucceeded = false;
+            }
+        }
+
+        void IHeapIndexScanParticipant.OnHeapIndexScanCompleted(bool succeeded) => _scanSucceeded = succeeded;
+
+        Sdk.Analysis.AnalysisContext ICustomizesAnalysisContext.BuildAnalysisContext(RuntimeAnalysisContext context) =>
+            AnalysisContextBuilder.Build(
+                context,
+                new CrashAnalyzerOptions(new CrashAnalysisOptions(), _scanSucceeded ? _aggregateAddresses : []),
+                heapObjectsOverride: new PrecomputedHeapObjectStream(_scanSucceeded ? _scanCandidates : []));
 
         public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {

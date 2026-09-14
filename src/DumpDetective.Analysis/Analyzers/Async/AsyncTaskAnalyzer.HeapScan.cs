@@ -41,7 +41,7 @@ namespace DumpDetective.Analysis.Analyzers.Async;
 /// per-task field-read cost three of the pre-retyping analyzer's four load paths already paid, just
 /// no longer skipped on the one path that happened to have it for free.
 /// </remarks>
-public sealed class AsyncTaskAnalyzerLegacyAdapter : LegacyAnalyzerAdapter<AsyncTaskAnalyzer>, IParallelHeapIndexScanParticipant
+public sealed partial class AsyncTaskAnalyzer : IParallelHeapIndexScanParticipant, ICustomizesAnalysisContext
 {
     private HashSet<ulong>? _taskMts;
     private HashSet<ulong>? _tcsMts;
@@ -51,13 +51,9 @@ public sealed class AsyncTaskAnalyzerLegacyAdapter : LegacyAnalyzerAdapter<Async
     private List<(ulong Address, ulong Mt, ulong Size)>? _participantVtsEntries;
     private bool _scanSucceeded = true;
 
-    public AsyncTaskAnalyzerLegacyAdapter() : base(new AsyncTaskAnalyzer())
-    {
-    }
-
     // ── Heap-index-scan participant: discovers Task/TCS/VTS candidate addresses in one shared
     // pass, same three-MT-set shape the pre-retyping analyzer's own BeforeHeapIndexScan used. ──
-    public void BeforeHeapIndexScan(AnalysisContext context)
+    void IHeapIndexScanParticipant.BeforeHeapIndexScan(RuntimeAnalysisContext context)
     {
         _participantTaskEntries = new List<(ulong, ulong, ulong)>(capacity: 1024);
         _participantTcsEntries = new List<(ulong, ulong, ulong)>(capacity: 64);
@@ -119,13 +115,13 @@ public sealed class AsyncTaskAnalyzerLegacyAdapter : LegacyAnalyzerAdapter<Async
         }
     }
 
-    IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() => new AsyncTaskAnalyzerLegacyAdapter();
+    IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() => new AsyncTaskAnalyzer();
 
     void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
     {
         foreach (IHeapIndexScanParticipant p in partials)
         {
-            if (p is not AsyncTaskAnalyzerLegacyAdapter other)
+            if (p is not AsyncTaskAnalyzer other)
                 continue;
 
             _participantTaskEntries!.AddRange(other._participantTaskEntries!);
@@ -138,12 +134,12 @@ public sealed class AsyncTaskAnalyzerLegacyAdapter : LegacyAnalyzerAdapter<Async
 
     void IHeapIndexScanParticipant.OnHeapIndexScanCompleted(bool succeeded) => _scanSucceeded = succeeded;
 
-    protected override Sdk.Analysis.AnalysisContext BuildSdkContext(AnalysisContext context) =>
-        LegacyAnalysisContextTranslator.Translate(
-            context, ResolveOptions(context.AnalysisOptions),
+    Sdk.Analysis.AnalysisContext ICustomizesAnalysisContext.BuildAnalysisContext(RuntimeAnalysisContext context) =>
+        AnalysisContextBuilder.Build(
+            context, analyzerOptions: null,
             heapObjectsOverride: new PrecomputedHeapObjectStream(BuildCandidateList(context)));
 
-    private List<Sdk.Analysis.HeapObjectRef> BuildCandidateList(AnalysisContext context)
+    private List<Sdk.Analysis.HeapObjectRef> BuildCandidateList(RuntimeAnalysisContext context)
     {
         var typeNameByMt = new Dictionary<ulong, string>(capacity: 64);
         var result = new List<Sdk.Analysis.HeapObjectRef>(capacity: 1024);
@@ -161,7 +157,7 @@ public sealed class AsyncTaskAnalyzerLegacyAdapter : LegacyAnalyzerAdapter<Async
     // fast-path sources (neither format carries it) -- AppendCandidates resolves it with one
     // heap.GetObject call per entry, same per-task ClrMD cost the pre-retyping analyzer's own
     // Phase 2 always paid via taskObj.Size, just relocated here.
-    private IReadOnlyList<(ulong Address, ulong Mt, ulong Size)> LoadTaskCandidates(AnalysisContext context)
+    private IReadOnlyList<(ulong Address, ulong Mt, ulong Size)> LoadTaskCandidates(RuntimeAnalysisContext context)
     {
         if (context.Cache is HeapAnalysisCache heapCache && heapCache.TryGetHeapIndex(out HeapIndexBuildResult? heapIndex))
         {

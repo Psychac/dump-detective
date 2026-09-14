@@ -5,6 +5,7 @@ using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Sdk.Analysis;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using System;
@@ -91,23 +92,23 @@ public class FullPipelineBenchmark
         // Stage 4: build pipeline with all real analyzers — same list as DefaultAnalyzerFactory
         _pipeline = new AnalysisPipeline(new IAnalyzer[]
         {
-            new MemoryAnalyzerLegacyAdapter(),
-            new GCGenerationAnalyzerLegacyAdapter(),
-            new HeapTopologyAnalyzerLegacyAdapter(),
-            new ModuleAnalyzerLegacyAdapter(),
-            new CrashAnalyzerLegacyAdapter(),
-            new HangAnalyzerLegacyAdapter(),
-            new DominatorAnalyzerLegacyAdapter(),
-            new StringAnalyzerLegacyAdapter(),
-            new CollectionAnalyzerLegacyAdapter(),
-            new StaticRootLeakDetectorLegacyAdapter(),
-            new ReferenceChainAnalyzerLegacyAdapter(),
-            new GCHandleAnalyzerLegacyAdapter(),
-            new LohFragmentationAnalyzerLegacyAdapter(),
-            new ThreadStackClusterAnalyzerLegacyAdapter(),
-            new ThreadAnalyzerLegacyAdapter(),
-            new LockGraphAnalyzerLegacyAdapter(),
-            new EventLeakAnalyzerLegacyAdapter(),
+            new MemoryAnalyzer(),
+            new GCGenerationAnalyzer(),
+            new HeapTopologyAnalyzer(),
+            new ModuleAnalyzer(),
+            new CrashAnalyzer(),
+            new HangAnalyzer(),
+            new DominatorAnalyzer(),
+            new StringAnalyzer(),
+            new CollectionAnalyzer(),
+            new StaticRootLeakDetector(),
+            new ReferenceChainAnalyzer(),
+            new GCHandleAnalyzer(),
+            new LohFragmentationAnalyzer(),
+            new ThreadStackClusterAnalyzer(),
+            new ThreadAnalyzer(),
+            new LockGraphAnalyzer(),
+            new EventLeakAnalyzer(),
         }, new FindingGenerationPipeline(Array.Empty<DumpDetective.Core.Abstractions.IFindingGenerator>()));
     }
 

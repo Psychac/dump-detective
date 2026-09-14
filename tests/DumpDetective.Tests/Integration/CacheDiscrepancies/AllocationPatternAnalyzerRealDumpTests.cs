@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Analyzers.Memory;
@@ -14,7 +15,7 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 
 /// <summary>
 /// Real-dump verification for the Tier-1 mop-up batch (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
-/// proves <see cref="AllocationPatternAnalyzerLegacyAdapter"/> produces an internally consistent
+/// proves <see cref="AllocationPatternAnalyzer"/> produces an internally consistent
 /// result against a real, large dump.
 /// </summary>
 public sealed class AllocationPatternAnalyzerRealDumpTests
@@ -42,10 +43,12 @@ public sealed class AllocationPatternAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using AllocationPatternAnalyzerLegacyAdapter adapter = new();
-        var result = (AllocationPatternDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using AllocationPatternAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (AllocationPatternDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("Allocation Pattern Analysis");
         result.TotalManagedBytes.Should().BeGreaterThan(0, "a real 3.5 GB dump has a non-trivial managed heap");

@@ -1,8 +1,9 @@
-using DumpDetective.Core.Abstractions;
 using DumpDetective.Cli.Models;
+using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Services;
+using DumpDetective.Sdk.Analysis;
 
 using DumpDetective.Core.Options;
 

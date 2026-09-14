@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Analyzers.Gc;
@@ -14,7 +15,7 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 
 /// <summary>
 /// Real-dump verification for the Tier-1+Tier-2 batch (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
-/// proves <see cref="WeakReferenceAnalyzerLegacyAdapter"/> produces an internally consistent result
+/// proves <see cref="WeakReferenceAnalyzer"/> produces an internally consistent result
 /// against a real, large dump's real GC handle table and heap-index scan.
 /// </summary>
 public sealed class WeakReferenceAnalyzerRealDumpTests
@@ -42,10 +43,12 @@ public sealed class WeakReferenceAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using WeakReferenceAnalyzerLegacyAdapter adapter = new();
-        var result = (WeakReferenceDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using WeakReferenceAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (WeakReferenceDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("Weak Reference Analysis");
         result.TotalWeakHandles.Should().BeGreaterThan(0, "a real 3.5 GB IIS dump has weak GC handles");

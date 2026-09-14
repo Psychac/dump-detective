@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Models;
@@ -15,7 +16,7 @@ namespace DumpDetective.Tests.Unit.Analysis;
 /// <summary>
 /// Characterization test for the thread-domain quartet retyping
 /// (docs/refactor/modularity/phase-1-thread-quartet-plan.md): proves
-/// <see cref="ThreadStackClusterAnalyzerLegacyAdapter"/> reproduces pre-retyping arithmetic against a
+/// <see cref="ThreadStackClusterAnalyzer"/> reproduces pre-retyping arithmetic against a
 /// self-attached process's real thread set, cross-checked against ClrMD ground truth. Complements
 /// <c>ThreadStackClusterAnalyzerOptionsTests</c>' pure-logic coverage of the preserved static helpers
 /// (<c>BuildClusterTree</c>, <c>ClassifyFrameworkPattern</c>) and <c>AnalysisPipelineTests</c>' shared-
@@ -37,10 +38,12 @@ public sealed class ThreadStackClusterAnalyzerRetypingCharacterizationTests
         }
 
         HeapAnalysisCache cache = new();
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using ThreadStackClusterAnalyzerLegacyAdapter adapter = new();
-        var result = (ThreadStackClusterDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using ThreadStackClusterAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (ThreadStackClusterDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("Thread Stack Signature Clustering");
         result.Category.Should().Be("Threads");

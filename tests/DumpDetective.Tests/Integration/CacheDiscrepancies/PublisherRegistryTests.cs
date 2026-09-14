@@ -146,7 +146,7 @@ public sealed class PublisherRegistryTests
         registry.StaticPublisherMTs.Should().NotBeEmpty("the reference dump must contain at least one static event publisher for this regression to be meaningful");
 
         var scanner = new EventLeakFastScanner(heap, registry);
-        var groupAcc = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), EventLeakAnalyzerLegacyAdapter.GroupAccumulator>();
+        var groupAcc = new Dictionary<(string PublisherType, string EventFieldName, bool IsStatic), EventLeakAnalyzer.GroupAccumulator>();
         var rootHints = new Dictionary<ulong, string>();
         var options = new EventLeakOptions();
         int eventsScanned = 0;

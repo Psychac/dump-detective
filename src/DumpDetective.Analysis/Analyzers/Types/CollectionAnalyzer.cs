@@ -1,5 +1,8 @@
 using DumpDetective.Analysis.Analyzers;
+using DumpDetective.Analysis.Analyzers.Infra;
+using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
@@ -69,12 +72,42 @@ namespace DumpDetective.Analysis.Analyzers.Types
     /// candidate now always arrives via the pipeline's one shared heap-index scan
     /// (<c>context.HeapObjects</c>), never a second hand-rolled walk.
     /// </remarks>
-    public sealed class CollectionAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
+    public sealed class CollectionAnalyzer :
+        IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
+        IParallelHeapIndexScanParticipant, IRequiresReachableGraphIndex, ICustomizesAnalysisContext
     {
+        private readonly TypedResourceHeapIndexScanState _scanState = new();
+
         public string Name => "Collection Analysis";
         public string Category => "Memory";
 
-        public AnalyzerDomainResult? LastResult { get; private set; }
+        public AnalyzerDomainResult? LastResult
+        {
+            get => _lastResult;
+            // Stamps AnalyzerName/Category here (not left to a bridging adapter, which no
+            // longer exists) so every LastResult consumer — pipeline or direct caller — sees
+            // them populated the same way.
+            private set => _lastResult = value is null ? null : value with { AnalyzerName = Name, Category = Category };
+        }
+        private AnalyzerDomainResult? _lastResult;
+
+        bool ITypedResourceCandidateSource.IsCandidateType(string typeName) => IsCandidateType(typeName);
+
+        void IHeapIndexScanParticipant.BeforeHeapIndexScan(RuntimeAnalysisContext context) => _scanState.BeforeHeapIndexScan(this, context);
+        void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => _scanState.OnHeapEntry(in entry);
+        void IHeapIndexScanParticipant.OnHeapIndexScanCompleted(bool succeeded) => _scanState.OnHeapIndexScanCompleted(succeeded);
+        IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() => new CollectionAnalyzer();
+        void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials) =>
+            _scanState.MergeFrom(partials.OfType<CollectionAnalyzer>().Select(a => a._scanState));
+
+        // Preserves the exact object graph the pre-migration adapter's ResolveOptions built
+        // (new CollectionAnalysisOptions(), new ReferenceChainOptions()) — not this analyzer's own
+        // null-ReferenceChain fallback, which only applies when AnalyzerOptions is omitted entirely.
+        Sdk.Analysis.AnalysisContext ICustomizesAnalysisContext.BuildAnalysisContext(RuntimeAnalysisContext context) =>
+            AnalysisContextBuilder.Build(
+                context,
+                new CollectionAnalyzerOptions(new CollectionAnalysisOptions(), new ReferenceChainOptions()),
+                heapObjectsOverride: new PrecomputedHeapObjectStream(_scanState.Candidates));
 
         public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {

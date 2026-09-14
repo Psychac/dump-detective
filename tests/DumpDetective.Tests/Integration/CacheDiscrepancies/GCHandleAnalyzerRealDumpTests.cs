@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Analyzers;
@@ -51,10 +52,12 @@ public sealed class GCHandleAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using GCHandleAnalyzerLegacyAdapter adapter = new();
-        var result = (GCHandleDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using GCHandleAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (GCHandleDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("GC Handle Analysis");
         result.TotalHandles.Should().Be(expectedTotalHandles);

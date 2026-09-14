@@ -16,7 +16,7 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 
 /// <summary>
 /// Real-dump verification for the Tier-2 wave (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
-/// proves <see cref="AsyncStateMachineAnalyzerLegacyAdapter"/> produces an internally consistent
+/// proves <see cref="AsyncStateMachineAnalyzer"/> produces an internally consistent
 /// result against a real, large dump -- including the suspend-state histogram, now built from the
 /// pipeline's one shared heap-index scan instead of the pre-retyping analyzer's own separate second
 /// full-heap pass.
@@ -46,12 +46,16 @@ public sealed class AsyncStateMachineAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using AsyncStateMachineAnalyzerLegacyAdapter adapter = new();
-        new HeapIndexScanDispatcher().Run(cache, context, [adapter], CancellationToken.None);
+        using AsyncStateMachineAnalyzer adapter = new();
+        new HeapIndexScanDispatcher().Run(cache, contextRuntimeCtx, [adapter], CancellationToken.None);
 
-        var result = (AsyncStateMachineDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        context = ((ICustomizesAnalysisContext)adapter).BuildAnalysisContext(contextRuntimeCtx);
+
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (AsyncStateMachineDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("Async State Machine Analysis");
 

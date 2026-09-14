@@ -1,7 +1,8 @@
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Cli.Models;
 using DumpDetective.Cli.Output;
-using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
+using DumpDetective.Sdk.Analysis;
 
 using FluentAssertions;
 
@@ -25,19 +26,22 @@ public sealed class AnalysisSummaryFormatterTests
         summary.Should().Be("Config: file (C:/configs/config.json)  ·  2 analyzers: LeakAnalyzer, ThreadAnalyzer");
     }
 
-    private sealed class TestAnalyzer(string name) : IAnalyzer
+    private sealed class TestAnalyzer(string name) : IAnalyzer, IProducesAnalyzerDomainResult
     {
         public string Name { get; } = name;
+        public string Category => "Test";
 
-        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        public AnalyzerDomainResult? LastResult { get; private set; }
+
+        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
-            AnalyzerDomainResult result = new GenericAnalyzerDomainResult
+            LastResult = new GenericAnalyzerDomainResult
             {
                 AnalyzerName = Name,
                 Category = "Test"
             };
 
-            return ValueTask.FromResult(result);
+            return ValueTask.CompletedTask;
         }
     }
 }

@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers.Types;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
@@ -373,8 +374,7 @@ public sealed class CollectionAnalyzerRetypingCharacterizationTests
     public async Task AnalyzeAsync_NoHeapObjectsStream_ReturnsEmptyResult()
     {
         var analyzer = new CollectionAnalyzer();
-        var context = new AnalysisContext
-        {
+        DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
             DumpObjectFields = new FakeDumpObjectFieldQuery(),
             HeapObjectLookup = new FakeHeapObjectLookup(),
@@ -399,8 +399,7 @@ public sealed class CollectionAnalyzerRetypingCharacterizationTests
         params HeapObjectRef[] candidates)
     {
         CollectionAnalyzer analyzer = new();
-        AnalysisContext context = new()
-        {
+        DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
             AnalyzerOptions = new CollectionAnalyzerOptions(
                 new CollectionAnalysisOptions { WasteThresholdBytes = 0 },

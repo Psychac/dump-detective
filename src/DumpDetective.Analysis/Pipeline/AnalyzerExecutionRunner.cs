@@ -1,5 +1,7 @@
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
+
 using System.Diagnostics;
 
 namespace DumpDetective.Analysis.Pipeline;
@@ -10,7 +12,7 @@ internal sealed class AnalyzerExecutionRunner(AnalysisDiagnosticsPublisher diagn
 
     public async Task<AnalyzerDomainResult> ExecuteAsync(
         Guid runId,
-        IAnalyzer analyzer,
+        Sdk.Analysis.IAnalyzer analyzer,
         RuntimeAnalysisContext context,
         Stopwatch stopwatch,
         CancellationToken cancellationToken)
@@ -48,7 +50,23 @@ internal sealed class AnalyzerExecutionRunner(AnalysisDiagnosticsPublisher diagn
         context.Progress = new ThrottledProgress<AnalyzerProgressReport>(analyzerProgress, 150);
 
         Task<AnalyzerDomainResult> analyzeTask = Task.Run(
-            async () => await analyzer.AnalyzeAsync(context, cancellationToken),
+            async () =>
+            {
+                Sdk.Analysis.AnalysisContext sdkContext = analyzer is ICustomizesAnalysisContext customizer
+                    ? customizer.BuildAnalysisContext(context)
+                    : AnalysisContextBuilder.Build(context, analyzerOptions: null);
+
+                await analyzer.AnalyzeAsync(sdkContext, cancellationToken);
+
+                AnalyzerDomainResult result = ((IProducesAnalyzerDomainResult)analyzer).LastResult
+                    ?? throw new InvalidOperationException($"{analyzer.Name} did not produce a result via {nameof(IProducesAnalyzerDomainResult)}.");
+
+                // Every analyzer's own domain result construction leaves AnalyzerName/Category
+                // unset (that was always the bridging adapter's job, not the analyzer's) — stamp
+                // them here from the analyzer's own Name/Category, same as the deleted
+                // LegacyAnalyzerAdapter<T>.AnalyzeAsync's own `result.Stamp(this)` call did.
+                return result with { AnalyzerName = analyzer.Name, Category = analyzer.Category };
+            },
             cancellationToken);
 
         while (true)

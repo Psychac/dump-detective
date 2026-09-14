@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers.Infra;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
@@ -77,8 +78,7 @@ public sealed class SqlTransactionAnalyzerRetypingCharacterizationTests
     private static async Task<SqlTransactionDomainResult> Analyze(FakeDumpObjectFieldQuery fields, params HeapObjectRef[] candidates)
     {
         SqlTransactionAnalyzer analyzer = new();
-        AnalysisContext context = new()
-        {
+        DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
             DumpObjectFields = fields,
             HeapObjects = new PrecomputedHeapObjectStream(candidates),

@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers.Infra;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
@@ -38,7 +39,7 @@ namespace DumpDetective.Tests.Unit.Analysis
     /// <summary>
     /// Ported for the Tier-2 retyping (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
     /// this file's pre-retyping coverage of <c>MergePartial</c>'s new-key-from-worker branch is now
-    /// pure generic base-class behavior (<c>TypedResourceCandidateStreamingLegacyAdapter</c>),
+    /// pure generic base-class behavior (<c>TypedResourceCandidateStreaming</c>),
     /// already covered once by <c>SqlConnectionPoolAnalyzerHeapIndexScanTests</c>. What only a real
     /// live heap can prove: that the remote-address fix -- chasing into <c>System.Uri</c>'s internal
     /// string-holding field instead of the pre-retyping analyzer's broken <c>ClrObject.ToString()</c>
@@ -76,8 +77,7 @@ namespace DumpDetective.Tests.Unit.Analysis
         {
             WcfChannelAnalyzer analyzer = new();
             HeapObjectRef candidate = new(address, SdkTypeRefFactory.FromName(typeName, methodTable), Size: 32, TypeDisplayName: typeName);
-            AnalysisContext context = new()
-            {
+            DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
                 Observations = NoOpObservationSink.Instance,
                 DumpObjectFields = new DumpObjectFieldQuery(heap),
                 HeapTypeStatistics = new EmptyHeapTypeStatisticsQuery(),

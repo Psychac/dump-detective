@@ -18,7 +18,7 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 /// <summary>
 /// Real-dump verification for the Tier-2 pilot
 /// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md): proves
-/// <see cref="SqlConnectionPoolAnalyzerLegacyAdapter"/> — candidate discovery via the pipeline's
+/// <see cref="SqlConnectionPoolAnalyzer"/> — candidate discovery via the pipeline's
 /// shared heap-index-scan-participant mechanism, field-value extraction via the new
 /// <c>dump.object-fields</c> capability — reproduces the pre-retyping analyzer's behavior against a
 /// real, large dump. Unlike the dictionary-backed fake in
@@ -61,12 +61,16 @@ public sealed class SqlConnectionPoolAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using SqlConnectionPoolAnalyzerLegacyAdapter adapter = new();
-        new HeapIndexScanDispatcher().Run(cache, context, [adapter], CancellationToken.None);
+        using SqlConnectionPoolAnalyzer adapter = new();
+        new HeapIndexScanDispatcher().Run(cache, contextRuntimeCtx, [adapter], CancellationToken.None);
 
-        var result = (SqlConnectionPoolDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        context = ((ICustomizesAnalysisContext)adapter).BuildAnalysisContext(contextRuntimeCtx);
+
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (SqlConnectionPoolDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("SQL Connection Pool Analysis");
 

@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Models;
@@ -15,7 +16,7 @@ namespace DumpDetective.Tests.Unit.Analysis;
 /// <summary>
 /// Characterization test for the Phase 1 retyping batch
 /// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md): proves
-/// <see cref="SegmentReservationAnalyzerLegacyAdapter"/> reproduces the pre-retyping arithmetic.
+/// <see cref="SegmentReservationAnalyzer"/> reproduces the pre-retyping arithmetic.
 /// Unlike <c>GCGenerationAnalyzer</c>'s pilot test, segment data can't be hand-crafted via
 /// reflection injection — <c>SegmentSummary</c> wraps a real, live <c>ClrSegment</c>, not a
 /// synthesizable value — so this cross-checks the retyped output directly against ClrMD ground
@@ -34,11 +35,12 @@ public sealed class SegmentReservationAnalyzerRetypingCharacterizationTests
         try
         {
             HeapAnalysisCache cache = new();
-            AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-            SegmentReservationAnalyzerLegacyAdapter adapter = new();
-            SegmentReservationDomainResult result = (SegmentReservationDomainResult)adapter.AnalyzeAsync(context, CancellationToken.None)
-                .AsTask().GetAwaiter().GetResult();
+            SegmentReservationAnalyzer adapter = new();
+            adapter.AnalyzeAsync(context, CancellationToken.None).GetAwaiter().GetResult();
+            SegmentReservationDomainResult result = (SegmentReservationDomainResult)adapter.LastResult!;
 
             result.AnalyzerName.Should().Be("Segment Reservation Analysis");
             result.Category.Should().Be("Memory");

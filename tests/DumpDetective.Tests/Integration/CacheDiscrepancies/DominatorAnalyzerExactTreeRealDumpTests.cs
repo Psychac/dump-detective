@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using System.Diagnostics;
 
 using Microsoft.Diagnostics.Runtime;
@@ -7,6 +8,7 @@ using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Sdk.Analysis;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 
@@ -62,8 +64,8 @@ public sealed class DominatorAnalyzerExactTreeRealDumpTests(ITestOutputHelper ou
             // silently skip Stage B entirely and every "exact" comparison below would be
             // heuristic-vs-heuristic, not exact-vs-heuristic. The marker lives on the adapter, not
             // the retyped inner DominatorAnalyzer, which the pipeline never sees directly — see
-            // DominatorAnalyzerLegacyAdapter's own remarks.
-            using var dominatorAnalyzer = new DominatorAnalyzerLegacyAdapter();
+            // DominatorAnalyzer's own remarks.
+            using var dominatorAnalyzer = new DominatorAnalyzer();
             IReadOnlyList<IAnalyzer> activeAnalyzers = new IAnalyzer[] { dominatorAnalyzer };
 
             var indexStopwatch = Stopwatch.StartNew();
@@ -71,20 +73,21 @@ public sealed class DominatorAnalyzerExactTreeRealDumpTests(ITestOutputHelper ou
             indexStopwatch.Stop();
             output.WriteLine($"Phase 1 index build (incl. §D5 forward index, Stage B): {indexStopwatch.ElapsedMilliseconds:N0} ms");
 
-            DominatorAnalyzerLegacyAdapter analyzer = dominatorAnalyzer;
+            DominatorAnalyzer analyzer = dominatorAnalyzer;
 
-            var context = new AnalysisContext
-            {
+            RuntimeAnalysisContext contextRuntimeCtx = new() {
                 Runtime = runtime,
                 Cache = cache,
                 AnalysisOptions = new AnalysisOptions { MemoryLeak = new RetentionOptions() },
             };
+            DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
             long memoryBefore = GC.GetTotalMemory(forceFullCollection: false);
             long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
             long wsBefore = Environment.WorkingSet;
             var analyzerStopwatch = Stopwatch.StartNew();
-            AnalyzerDomainResult result = analyzer.AnalyzeAsync(context, CancellationToken.None).AsTask().GetAwaiter().GetResult();
+            analyzer.AnalyzeAsync(context, CancellationToken.None).GetAwaiter().GetResult();
+            AnalyzerDomainResult result = (AnalyzerDomainResult)analyzer.LastResult!;
             analyzerStopwatch.Stop();
             long memoryAfter = GC.GetTotalMemory(forceFullCollection: false);
             long allocatedAfter = GC.GetAllocatedBytesForCurrentThread();
@@ -114,14 +117,15 @@ public sealed class DominatorAnalyzerExactTreeRealDumpTests(ITestOutputHelper ou
             // §12.1 (docs/analysis/phase1-redesigns/dominator-tree-phase1-integration.md): with
             // Stage B built above, GCRootAnalyzer's ByKind rollup should now come back exact rather
             // than shallow-size-summed.
-            using var gcRootAnalyzer = new GCRootAnalyzerLegacyAdapter();
-            var gcRootContext = new AnalysisContext
-            {
+            using var gcRootAnalyzer = new GCRootAnalyzer();
+            RuntimeAnalysisContext gcRootContextRuntimeCtx = new() {
                 Runtime = runtime,
                 Cache = cache,
                 AnalysisOptions = new AnalysisOptions { MemoryLeak = new RetentionOptions() },
             };
-            AnalyzerDomainResult gcRootResult = gcRootAnalyzer.AnalyzeAsync(gcRootContext, CancellationToken.None).AsTask().GetAwaiter().GetResult();
+            DumpDetective.Sdk.Analysis.AnalysisContext gcRootContext = AnalysisContextBuilder.Build(gcRootContextRuntimeCtx, analyzerOptions: null);
+            gcRootAnalyzer.AnalyzeAsync(gcRootContext, CancellationToken.None).GetAwaiter().GetResult();
+            AnalyzerDomainResult gcRootResult = (AnalyzerDomainResult)gcRootAnalyzer.LastResult!;
             if (gcRootResult is GCRootDomainResult gcRoot)
             {
                 output.WriteLine($"§12.1: GCRootAnalyzer ByKind ({gcRoot.ByKind.Count:N0} kinds):");

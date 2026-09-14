@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers.Async;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
@@ -246,8 +247,7 @@ public sealed class AsyncTaskAnalyzerRetypingCharacterizationTests
         params HeapObjectRef[] candidates)
     {
         var analyzer = new AsyncTaskAnalyzer();
-        var context = new AnalysisContext
-        {
+        DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
             DumpObjectFields = fields,
             HeapObjectLookup = objectLookup,

@@ -22,7 +22,7 @@ namespace DumpDetective.Analysis.SdkBridge;
 /// lazily on the first <see cref="TryFindRootPath"/> call, not at construction -- both real
 /// consumers only pay this cost when they actually reach their own root-path-enrichment step
 /// today (a bounded, capped subset of their results), and eagerly resolving it in
-/// <c>LegacyAnalysisContextTranslator.Translate</c> for every retyped analyzer, most of which never
+/// <c>Pipeline.AnalysisContextBuilder.Build</c> for every retyped analyzer, most of which never
 /// call this capability at all, would be a real, avoidable cost regression.
 ///
 /// The constructed <see cref="RootPathFinder"/>/<see cref="ReferenceGraph"/> pair is cached and
@@ -32,7 +32,7 @@ namespace DumpDetective.Analysis.SdkBridge;
 /// <see cref="RootPathSearchOptions"/> passed to the *first* call on a given
 /// <see cref="HeapRootPathQuery"/> instance governs every subsequent call too -- a real constraint,
 /// not an oversight, but safe today because each retyped analyzer gets its own fresh instance
-/// (translated once per <c>LegacyAnalyzerAdapter</c> invocation) and every real consumer already
+/// (translated once per <c>the pipeline</c> invocation) and every real consumer already
 /// uses one fixed options value for all of its own targets.
 /// </remarks>
 internal sealed class HeapRootPathQuery : IHeapRootPathQuery

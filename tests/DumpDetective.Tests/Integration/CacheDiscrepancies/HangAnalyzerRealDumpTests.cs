@@ -15,7 +15,7 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 
 /// <summary>
 /// Real-dump verification for the Tier-1+Tier-2 batch (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
-/// proves <see cref="HangAnalyzerLegacyAdapter"/> produces an internally consistent result against
+/// proves <see cref="HangAnalyzer"/> produces an internally consistent result against
 /// a real, large dump's real thread state, thread pool, and heap-index scan. The heap-index-scan
 /// side is driven explicitly via <see cref="HeapIndexScanDispatcher"/> (matching
 /// <c>TimerLeakAnalyzerRealDumpTests</c>' own pattern) — without it, the adapter's own
@@ -50,12 +50,16 @@ public sealed class HangAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using HangAnalyzerLegacyAdapter adapter = new();
-        new HeapIndexScanDispatcher().Run(cache, context, [adapter], CancellationToken.None);
+        using HangAnalyzer adapter = new();
+        new HeapIndexScanDispatcher().Run(cache, contextRuntimeCtx, [adapter], CancellationToken.None);
 
-        var result = (HangDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        context = ((ICustomizesAnalysisContext)adapter).BuildAnalysisContext(contextRuntimeCtx);
+
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (HangDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("Hang Analysis");
         result.TotalAliveThreads.Should().BeGreaterThan(0, "a real IIS crash dump has alive managed threads");

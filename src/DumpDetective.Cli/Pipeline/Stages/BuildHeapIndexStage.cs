@@ -4,6 +4,7 @@ using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Cli.Console;
 using DumpDetective.Cli.Execution;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Sdk.Analysis;
 using DumpDetective.Core.Options;
 using System.Diagnostics;
 
@@ -41,7 +42,7 @@ internal sealed class BuildHeapIndexStage(AnalyzerExecutionService analyzerExecu
         var timeline = new PhaseTimeline();
         timeline.Record(lastPhase, wallClock.Elapsed);
 
-        var progress = new Progress<AnalyzerProgressReport>(r =>
+        var progress = new Progress<DumpDetective.Core.Abstractions.AnalyzerProgressReport>(r =>
         {
             // Only update the shared state here — do NOT call ConsoleUx.ObjectScanProgress.
             // Progress<T> callbacks run on a ThreadPool thread; calling the console renderer

@@ -1,17 +1,17 @@
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Pipeline;
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
+using DumpDetective.Sdk.Analysis;
 
 using FluentAssertions;
 
 using Xunit;
 
 namespace DumpDetective.Tests.Unit.Analysis;
-
-using CoreAnalysisContext = DumpDetective.Core.Abstractions.AnalysisContext;
 
 public sealed class AnalysisDiagnosticsTests
 {
@@ -72,21 +72,27 @@ public sealed class AnalysisDiagnosticsTests
         };
     }
 
-    private sealed class MetricsAnalyzer : IAnalyzer
+    private sealed class MetricsAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult, ICustomizesAnalysisContext
     {
         public string Name => "MetricsAnalyzer";
         public string Category => "Test";
 
-        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(CoreAnalysisContext context, CancellationToken cancellationToken)
+        public AnalyzerDomainResult? LastResult { get; private set; }
+
+        // This test uses a fake RuntimeAnalysisContext with Runtime = null! — bypass the normal
+        // capability-building context (which unconditionally touches context.Heap).
+        public AnalysisContext BuildAnalysisContext(RuntimeAnalysisContext context) => new() { Observations = NoOpObservationSink.Instance };
+
+        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
-            GenericAnalyzerDomainResult result = new()
+            LastResult = new GenericAnalyzerDomainResult
             {
                 AnalyzerName = Name,
                 Category = Category,
                 Warnings = ["Synthetic warning"],
             };
 
-            return ValueTask.FromResult<AnalyzerDomainResult>(result);
+            return ValueTask.CompletedTask;
         }
     }
 

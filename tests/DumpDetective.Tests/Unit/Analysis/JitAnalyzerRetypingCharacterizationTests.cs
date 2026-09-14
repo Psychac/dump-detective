@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Models;
@@ -15,7 +16,7 @@ namespace DumpDetective.Tests.Unit.Analysis;
 /// <summary>
 /// Characterization test for the Phase 1 retyping batch
 /// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md): proves
-/// <see cref="JitAnalyzerLegacyAdapter"/> reproduces pre-retyping arithmetic and invariants against
+/// <see cref="JitAnalyzer"/> reproduces pre-retyping arithmetic and invariants against
 /// a real, live self-attached process — thread stack/JIT data can't be hand-crafted via reflection
 /// injection any more than segment/root data could (Batches 1–4's same reasoning), so this checks
 /// internal-consistency invariants rather than hand-computed fixture values.
@@ -30,11 +31,12 @@ public sealed class JitAnalyzerRetypingCharacterizationTests
         try
         {
             HeapAnalysisCache cache = new();
-            AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-            using JitAnalyzerLegacyAdapter adapter = new();
-            var result = (JitDomainResult)adapter.AnalyzeAsync(context, CancellationToken.None)
-                .AsTask().GetAwaiter().GetResult();
+            using JitAnalyzer adapter = new();
+            adapter.AnalyzeAsync(context, CancellationToken.None).GetAwaiter().GetResult();
+            var result = (JitDomainResult)adapter.LastResult!;
 
             result.AnalyzerName.Should().Be("JIT Analysis");
             result.Category.Should().Be("Performance");

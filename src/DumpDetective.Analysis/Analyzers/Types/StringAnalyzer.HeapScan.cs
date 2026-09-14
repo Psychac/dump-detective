@@ -42,7 +42,7 @@ namespace DumpDetective.Analysis.Analyzers.Types;
 /// simplification — an empty/zero result when the shared scan didn't run is accepted, matching
 /// <c>TimerLeakAnalyzer</c>/<c>WeakReferenceAnalyzer</c>/<c>AsyncTaskAnalyzer</c>/<c>HangAnalyzer</c>.
 /// </remarks>
-public sealed class StringAnalyzerLegacyAdapter : LegacyAnalyzerAdapter<StringAnalyzer>, IParallelHeapIndexScanParticipant
+public sealed partial class StringAnalyzer : IParallelHeapIndexScanParticipant, ICustomizesAnalysisContext
 {
     private const int MaxStringOwnerTypesToTrack = 100;
     private const int MaxSamplesPerOwnerType = 2000;
@@ -82,13 +82,7 @@ public sealed class StringAnalyzerLegacyAdapter : LegacyAnalyzerAdapter<StringAn
     private Random? _reservoirRng;
     private IReadOnlyDictionary<ulong, int[]>? _precomputedStringFieldIndices;
 
-    public StringAnalyzerLegacyAdapter() : base(new StringAnalyzer())
-    {
-    }
-
-    protected override object? ResolveOptions(AnalysisOptions options) => options.StringAnalysis;
-
-    public void BeforeHeapIndexScan(AnalysisContext context)
+    void IHeapIndexScanParticipant.BeforeHeapIndexScan(RuntimeAnalysisContext context)
     {
         _heap = context.Heap;
 
@@ -244,13 +238,13 @@ public sealed class StringAnalyzerLegacyAdapter : LegacyAnalyzerAdapter<StringAn
         _stringOwnerSampleCounts[mt] = Math.Min(n, MaxSamplesPerOwnerType);
     }
 
-    IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() => new StringAnalyzerLegacyAdapter();
+    IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() => new StringAnalyzer();
 
     void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials)
     {
         foreach (IHeapIndexScanParticipant p in partials)
         {
-            if (p is not StringAnalyzerLegacyAdapter other)
+            if (p is not StringAnalyzer other)
                 continue;
 
             _candidates.AddRange(other._candidates);
@@ -274,12 +268,12 @@ public sealed class StringAnalyzerLegacyAdapter : LegacyAnalyzerAdapter<StringAn
 
     void IHeapIndexScanParticipant.OnHeapIndexScanCompleted(bool succeeded) => _scanSucceeded = succeeded;
 
-    protected override Sdk.Analysis.AnalysisContext BuildSdkContext(AnalysisContext context)
+    Sdk.Analysis.AnalysisContext ICustomizesAnalysisContext.BuildAnalysisContext(RuntimeAnalysisContext context)
     {
-        var options = (StringAnalysisOptions)ResolveOptions(context.AnalysisOptions)!;
+        StringAnalysisOptions options = context.AnalysisOptions.StringAnalysis;
         IReadOnlyList<(string TypeName, ulong TotalBytes)>? ownerTypeBytes = BuildOwnerTypeBytes();
 
-        return LegacyAnalysisContextTranslator.Translate(
+        return AnalysisContextBuilder.Build(
             context, new StringAnalyzerOptions(options, ownerTypeBytes),
             heapObjectsOverride: new PrecomputedHeapObjectStream(_scanSucceeded ? _candidates : []));
     }

@@ -22,10 +22,10 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 /// plan, and the only one whose retyping needed a cross-analyzer-dependency bridge (see
 /// <see cref="LeakCandidateAnalyzer"/>'s own remarks). Unlike every other real-dump test in this
 /// suite, this one's real point isn't the analyzer's own logic (already covered by the fake-backed
-/// characterization suite) — it's proving <see cref="LeakCandidateAnalyzerLegacyAdapter.BuildSdkContext"/>'s
+/// characterization suite) — it's proving <see cref="LeakCandidateAnalyzer.BuildSdkContext"/>'s
 /// extraction from <c>context.CompletedRunResults</c> actually works end-to-end: real
-/// <see cref="GCHandleAnalyzerLegacyAdapter"/>/<see cref="TimerLeakAnalyzerLegacyAdapter"/>/
-/// <see cref="GCRootAnalyzerLegacyAdapter"/> results, manually sequenced the same way
+/// <see cref="GCHandleAnalyzer"/>/<see cref="TimerLeakAnalyzer"/>/
+/// <see cref="GCRootAnalyzer"/> results, manually sequenced the same way
 /// <c>AnalysisPipeline</c>'s two-phase execution would, then handed to the deferred analyzer.
 /// </summary>
 public sealed class LeakCandidateAnalyzerRealDumpTests
@@ -53,31 +53,37 @@ public sealed class LeakCandidateAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
         // Manually reproduce AnalysisPipeline's two-phase execution: run the three source
         // analyzers first (wave 1), snapshot their results into CompletedRunResults, then run the
-        // deferred analyzer (wave 2) -- exactly what LeakCandidateAnalyzerLegacyAdapter's
+        // deferred analyzer (wave 2) -- exactly what LeakCandidateAnalyzer's
         // IDeferredAnalyzer marker asks the real pipeline to do.
-        using GCHandleAnalyzerLegacyAdapter gcHandleAdapter = new();
-        AnalyzerDomainResult gcHandleResult = await gcHandleAdapter.AnalyzeAsync(context, CancellationToken.None);
+        using GCHandleAnalyzer gcHandleAdapter = new();
+        await gcHandleAdapter.AnalyzeAsync(context, CancellationToken.None);
+        AnalyzerDomainResult gcHandleResult = (AnalyzerDomainResult)gcHandleAdapter.LastResult!;
 
-        using TimerLeakAnalyzerLegacyAdapter timerLeakAdapter = new();
-        new HeapIndexScanDispatcher().Run(cache, context, [timerLeakAdapter], CancellationToken.None);
-        AnalyzerDomainResult timerLeakResult = await timerLeakAdapter.AnalyzeAsync(context, CancellationToken.None);
+        using TimerLeakAnalyzer timerLeakAdapter = new();
+        new HeapIndexScanDispatcher().Run(cache, contextRuntimeCtx, [timerLeakAdapter], CancellationToken.None);
+        await timerLeakAdapter.AnalyzeAsync(context, CancellationToken.None);
+        AnalyzerDomainResult timerLeakResult = (AnalyzerDomainResult)timerLeakAdapter.LastResult!;
 
-        using GCRootAnalyzerLegacyAdapter gcRootAdapter = new();
-        AnalyzerDomainResult gcRootResult = await gcRootAdapter.AnalyzeAsync(context, CancellationToken.None);
+        using GCRootAnalyzer gcRootAdapter = new();
+        await gcRootAdapter.AnalyzeAsync(context, CancellationToken.None);
+        AnalyzerDomainResult gcRootResult = (AnalyzerDomainResult)gcRootAdapter.LastResult!;
 
-        context.CompletedRunResults =
+        contextRuntimeCtx.CompletedRunResults =
         [
             new AnalyzerRunResult(gcHandleAdapter.Name, AnalyzerExecutionStatus.Success, TimeSpan.Zero, gcHandleResult, null, null),
             new AnalyzerRunResult(timerLeakAdapter.Name, AnalyzerExecutionStatus.Success, TimeSpan.Zero, timerLeakResult, null, null),
             new AnalyzerRunResult(gcRootAdapter.Name, AnalyzerExecutionStatus.Success, TimeSpan.Zero, gcRootResult, null, null),
         ];
 
-        using LeakCandidateAnalyzerLegacyAdapter adapter = new();
-        var result = (LeakCandidateDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using LeakCandidateAnalyzer adapter = new();
+        DumpDetective.Sdk.Analysis.AnalysisContext leakCandidateContext = ((ICustomizesAnalysisContext)adapter).BuildAnalysisContext(contextRuntimeCtx);
+        await adapter.AnalyzeAsync(leakCandidateContext, CancellationToken.None);
+            var result = (LeakCandidateDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("Leak Candidate Analysis");
         result.Category.Should().Be("Memory");

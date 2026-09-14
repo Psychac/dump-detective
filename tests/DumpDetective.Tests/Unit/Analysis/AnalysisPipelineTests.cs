@@ -7,9 +7,11 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Platform.Storage.Container;
 using DumpDetective.Analysis.Pipeline;
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
+using DumpDetective.Sdk.Analysis;
 
 using FluentAssertions;
 
@@ -20,7 +22,6 @@ using DumpDetective.Analysis.Analyzers.Threads;
 
 namespace DumpDetective.Tests.Unit.Analysis;
 
-using CoreAnalysisContext = DumpDetective.Core.Abstractions.AnalysisContext;
 using DumpDetective.Tests.Helpers;
 
 public sealed class AnalysisPipelineTests
@@ -115,10 +116,10 @@ public sealed class AnalysisPipelineTests
     /// Gate for the thread-domain quartet retyping
     /// (docs/refactor/modularity/phase-1-thread-quartet-plan.md § 6): proves the pipeline's shared
     /// <c>ThreadStackScanDispatcher</c> pass still runs exactly once per thread when retyped
-    /// analyzers (<see cref="LockGraphAnalyzerLegacyAdapter"/>, <see cref="ThreadStackClusterAnalyzerLegacyAdapter"/>
-    /// — both implement <see cref="IThreadStackScanParticipant"/> on the adapter, not the inner SDK
-    /// analyzer) are registered alongside still-legacy participants — the property this whole
-    /// retyping approach depends on, asserted directly rather than assumed from the design.
+    /// analyzers (<see cref="LockGraphAnalyzer"/>, <see cref="ThreadStackClusterAnalyzer"/>
+    /// — both implement <see cref="IThreadStackScanParticipant"/> directly) are registered alongside
+    /// other participants — the property this whole shared-scan design depends on, asserted
+    /// directly rather than assumed from the design.
     /// </summary>
     [Fact]
     public async Task ExecuteAsync_ScansThreadStacksExactlyOnce_WhenRetypedAndLegacyParticipantsAreMixed()
@@ -131,8 +132,8 @@ public sealed class AnalysisPipelineTests
             expectedThreadCount++;
 
         var first = new ThreadStackScanParticipantTestAnalyzer("First", 0);
-        using LockGraphAnalyzerLegacyAdapter lockGraph = new();
-        using ThreadStackClusterAnalyzerLegacyAdapter threadStackCluster = new();
+        using LockGraphAnalyzer lockGraph = new();
+        using ThreadStackClusterAnalyzer threadStackCluster = new();
         var second = new ThreadStackScanParticipantTestAnalyzer("Second", 2);
         IAnalyzer[] analyzers = [first, lockGraph, threadStackCluster, second];
 
@@ -149,7 +150,7 @@ public sealed class AnalysisPipelineTests
             analyzer.BeforeThreadStackScanCallCount.Should().Be(1);
         }
 
-        // Both retyped adapters' own results still come out correctly through the bridge.
+        // Both analyzers' own results still come out correctly.
         AnalyzerRunResult lockGraphRun = results.Single(r => r.AnalyzerName == lockGraph.Name);
         lockGraphRun.Status.Should().Be(AnalyzerExecutionStatus.Success);
         lockGraphRun.Result.Should().BeOfType<LockGraphDomainResult>();
@@ -229,13 +230,20 @@ public sealed class AnalysisPipelineTests
         // Delegates so the run-length encoding (format v9) lives in exactly one place.
         ObjectColumnSectionsWriter.WriteGenerationColumn(writer, new sbyte[recordCount]);
 
-    private sealed class TestAnalyzer(string name, int order, Action? onExecute = null, bool throwError = false, bool throwCanceled = false) : IAnalyzer
+    private sealed class TestAnalyzer(string name, int order, Action? onExecute = null, bool throwError = false, bool throwCanceled = false) : IAnalyzer, IProducesAnalyzerDomainResult, ICustomizesAnalysisContext
     {
         public string Name { get; } = name;
         public int Order { get; } = order;
         public string Category => "Test";
 
-        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(CoreAnalysisContext context, CancellationToken cancellationToken)
+        public AnalyzerDomainResult? LastResult { get; private set; }
+
+        // These tests exercise pipeline orchestration (failure/cancellation handling), not real
+        // heap access, and use a fake RuntimeAnalysisContext with Runtime = null! — bypass the
+        // normal capability-building context (which unconditionally touches context.Heap).
+        public AnalysisContext BuildAnalysisContext(RuntimeAnalysisContext context) => new() { Observations = NoOpObservationSink.Instance };
+
+        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             onExecute?.Invoke();
 
@@ -249,65 +257,69 @@ public sealed class AnalysisPipelineTests
                 throw new InvalidOperationException("Failure from test analyzer.");
             }
 
-            AnalyzerDomainResult result = new GenericAnalyzerDomainResult
+            LastResult = new GenericAnalyzerDomainResult
             {
                 AnalyzerName = Name,
                 Category = Category
             };
 
-            return ValueTask.FromResult(result);
+            return ValueTask.CompletedTask;
         }
     }
 
-    private sealed class ScanParticipantTestAnalyzer(string name, int order) : IAnalyzer, IHeapIndexScanParticipant
+    private sealed class ScanParticipantTestAnalyzer(string name, int order) : IAnalyzer, IProducesAnalyzerDomainResult, IHeapIndexScanParticipant
     {
         public string Name { get; } = name;
         public int Order { get; } = order;
         public string Category => "Test";
+
+        public AnalyzerDomainResult? LastResult { get; private set; }
 
         public List<HeapEntry> ScannedEntries { get; } = new();
         public int BeforeHeapIndexScanCallCount { get; private set; }
 
-        public void BeforeHeapIndexScan(CoreAnalysisContext context) => BeforeHeapIndexScanCallCount++;
+        public void BeforeHeapIndexScan(RuntimeAnalysisContext context) => BeforeHeapIndexScanCallCount++;
 
         public void OnHeapEntry(in HeapEntry entry) => ScannedEntries.Add(entry);
 
-        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(CoreAnalysisContext context, CancellationToken cancellationToken)
+        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
-            AnalyzerDomainResult result = new GenericAnalyzerDomainResult
+            LastResult = new GenericAnalyzerDomainResult
             {
                 AnalyzerName = Name,
                 Category = Category
             };
 
-            return ValueTask.FromResult(result);
+            return ValueTask.CompletedTask;
         }
     }
 
-    private sealed class ThreadStackScanParticipantTestAnalyzer(string name, int order) : IAnalyzer, IThreadStackScanParticipant
+    private sealed class ThreadStackScanParticipantTestAnalyzer(string name, int order) : IAnalyzer, IProducesAnalyzerDomainResult, IThreadStackScanParticipant
     {
         public string Name { get; } = name;
         public int Order { get; } = order;
         public string Category => "Test";
 
+        public AnalyzerDomainResult? LastResult { get; private set; }
+
         public int OnThreadStackCallCount { get; private set; }
         public int BeforeThreadStackScanCallCount { get; private set; }
 
-        public int GetRequiredFrameCount(CoreAnalysisContext context) => 1;
+        public int GetRequiredFrameCount(RuntimeAnalysisContext context) => 1;
 
-        public void BeforeThreadStackScan(CoreAnalysisContext context) => BeforeThreadStackScanCallCount++;
+        public void BeforeThreadStackScan(RuntimeAnalysisContext context) => BeforeThreadStackScanCallCount++;
 
         public void OnThreadStack(in ThreadStackSnapshot snapshot) => OnThreadStackCallCount++;
 
-        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(CoreAnalysisContext context, CancellationToken cancellationToken)
+        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
-            AnalyzerDomainResult result = new GenericAnalyzerDomainResult
+            LastResult = new GenericAnalyzerDomainResult
             {
                 AnalyzerName = Name,
                 Category = Category
             };
 
-            return ValueTask.FromResult(result);
+            return ValueTask.CompletedTask;
         }
     }
 }

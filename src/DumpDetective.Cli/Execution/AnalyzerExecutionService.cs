@@ -5,6 +5,7 @@ using DumpDetective.Cli.Pipeline;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
+using DumpDetective.Sdk.Analysis;
 
 using DumpDetective.Cli.Services;
 using DumpDetective.Cli.Diagnostics;
@@ -20,7 +21,7 @@ internal sealed class AnalyzerExecutionService(FindingGenerationPipeline finding
         ResolvedExecutionOptions resolved,
         DumpLoadContext loadContext,
         IHeapAnalysisCache heapCache,
-        IReadOnlyList<IAnalyzer> activeAnalyzers)
+        IReadOnlyList<Sdk.Analysis.IAnalyzer> activeAnalyzers)
     {
         return new RuntimeAnalysisContext
         {
@@ -36,7 +37,7 @@ internal sealed class AnalyzerExecutionService(FindingGenerationPipeline finding
         };
     }
 
-    public AnalysisPipeline CreatePipeline(IReadOnlyList<IAnalyzer> activeAnalyzers) =>
+    public AnalysisPipeline CreatePipeline(IReadOnlyList<Sdk.Analysis.IAnalyzer> activeAnalyzers) =>
         new(activeAnalyzers, _findingGenerationPipeline);
 
     /// <summary>

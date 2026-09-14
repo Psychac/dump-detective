@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using System.Reflection;
 
 using DumpDetective.Analysis.Analyzers;
@@ -18,7 +19,7 @@ namespace DumpDetective.Tests.Unit.Analysis;
 /// <summary>
 /// Characterization test for the Phase 1 retyping batch
 /// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md): proves
-/// <see cref="GCRootAnalyzerLegacyAdapter"/> — the new capability-scoped
+/// <see cref="GCRootAnalyzer"/> — the new capability-scoped
 /// <see cref="GCRootAnalyzer"/>, wrapped to run through the unchanged
 /// <c>Core.Abstractions.IAnalyzer</c> pipeline — reproduces the pre-retyping analyzer's arithmetic
 /// and invariants. Unlike <c>GCGenerationAnalyzer</c>'s pilot test, root data can't be hand-crafted
@@ -58,11 +59,12 @@ public sealed class GCRootAnalyzerRetypingCharacterizationTests
                 HeapIndexStorageKind.Disk, IndexPath: string.Empty, ObjectCount: 100,
                 Elapsed: TimeSpan.Zero, TypeAggregates: aggregates));
 
-            AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-            using GCRootAnalyzerLegacyAdapter adapter = new();
-            var result = (GCRootDomainResult)adapter.AnalyzeAsync(context, CancellationToken.None)
-                .AsTask().GetAwaiter().GetResult();
+            using GCRootAnalyzer adapter = new();
+            adapter.AnalyzeAsync(context, CancellationToken.None).GetAwaiter().GetResult();
+            var result = (GCRootDomainResult)adapter.LastResult!;
 
             result.AnalyzerName.Should().Be("GC Root Analysis");
             result.Category.Should().Be("Memory");
@@ -125,11 +127,12 @@ public sealed class GCRootAnalyzerRetypingCharacterizationTests
         try
         {
             HeapAnalysisCache cache = new();
-            AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-            using GCRootAnalyzerLegacyAdapter adapter = new();
-            var result = (GCRootDomainResult)adapter.AnalyzeAsync(context, CancellationToken.None)
-                .AsTask().GetAwaiter().GetResult();
+            using GCRootAnalyzer adapter = new();
+            adapter.AnalyzeAsync(context, CancellationToken.None).GetAwaiter().GetResult();
+            var result = (GCRootDomainResult)adapter.LastResult!;
 
             result.TotalRoots.Should().Be(0);
             result.ByKind.Should().BeEmpty();

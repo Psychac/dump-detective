@@ -1,4 +1,6 @@
+using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
@@ -46,10 +48,26 @@ namespace DumpDetective.Analysis.Analyzers.Infra;
 /// its own verification pass (field name stability across the SqlClient/Npgsql/MySql/Oracle provider
 /// matrix this analyzer targets), not a quick addition to this batch.
 /// </remarks>
-public sealed class DbConnectionAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
+public sealed class DbConnectionAnalyzer :
+    IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
+    IParallelHeapIndexScanParticipant, IRequiresReachableGraphIndex, ICustomizesAnalysisContext
 {
+    private readonly TypedResourceHeapIndexScanState _scanState = new();
+
     public string Name => "DB Connection Analysis";
     public string Category => "Infrastructure";
+
+    bool ITypedResourceCandidateSource.IsCandidateType(string typeName) => IsCandidateType(typeName);
+
+    void IHeapIndexScanParticipant.BeforeHeapIndexScan(RuntimeAnalysisContext context) => _scanState.BeforeHeapIndexScan(this, context);
+    void IHeapIndexScanParticipant.OnHeapEntry(in HeapEntry entry) => _scanState.OnHeapEntry(in entry);
+    void IHeapIndexScanParticipant.OnHeapIndexScanCompleted(bool succeeded) => _scanState.OnHeapIndexScanCompleted(succeeded);
+    IHeapIndexScanParticipant IParallelHeapIndexScanParticipant.CreateWorkerInstance() => new DbConnectionAnalyzer();
+    void IParallelHeapIndexScanParticipant.MergePartial(IReadOnlyList<IHeapIndexScanParticipant> partials) =>
+        _scanState.MergeFrom(partials.OfType<DbConnectionAnalyzer>().Select(a => a._scanState));
+
+    Sdk.Analysis.AnalysisContext ICustomizesAnalysisContext.BuildAnalysisContext(RuntimeAnalysisContext context) =>
+        AnalysisContextBuilder.Build(context, analyzerOptions: null, heapObjectsOverride: new PrecomputedHeapObjectStream(_scanState.Candidates));
 
     // ADO.NET ConnectionState enum values
     private const int StateOpen = 1;
@@ -78,7 +96,15 @@ public sealed class DbConnectionAnalyzer : IAnalyzer, IProducesAnalyzerDomainRes
     private static readonly RootPathSearchOptions RootPathOptions = new(
         MaxCandidateNodes: 5_000, MaxCandidateDepth: 8, MaxRootExpansionDepth: 12, LargeFanoutThreshold: 100);
 
-    public AnalyzerDomainResult? LastResult { get; private set; }
+    public AnalyzerDomainResult? LastResult
+    {
+        get => _lastResult;
+        // Stamps AnalyzerName/Category here (not left to a bridging adapter, which no
+        // longer exists) so every LastResult consumer — pipeline or direct caller — sees
+        // them populated the same way.
+        private set => _lastResult = value is null ? null : value with { AnalyzerName = Name, Category = Category };
+    }
+    private AnalyzerDomainResult? _lastResult;
 
     // Candidate type must end in "Connection" (covers SqlConnection, NpgsqlConnection, etc.)
     internal static bool IsCandidateType(string typeName) =>

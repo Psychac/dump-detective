@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Models;
@@ -15,7 +16,7 @@ namespace DumpDetective.Tests.Unit.Analysis;
 /// <summary>
 /// Characterization test for the Phase 1 retyping batch
 /// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md): proves
-/// <see cref="LohFragmentationAnalyzerLegacyAdapter"/> reproduces pre-retyping arithmetic on the
+/// <see cref="LohFragmentationAnalyzer"/> reproduces pre-retyping arithmetic on the
 /// no-index (live segment scan) fallback path — segment/free-block data can't be hand-crafted via
 /// reflection injection any more than other batches' segment/root data could. Deliberately doesn't
 /// also exercise the disk-index fast path here: unlike a plain <c>Dictionary</c> fixture (cheap to
@@ -56,11 +57,12 @@ public sealed class LohFragmentationAnalyzerRetypingCharacterizationTests
             expectedUsedBytes = expectedTotalBytes > expectedFreeBytes ? expectedTotalBytes - expectedFreeBytes : 0;
 
             HeapAnalysisCache cache = new();
-            AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-            using LohFragmentationAnalyzerLegacyAdapter adapter = new();
-            var result = (LohFragmentationDomainResult)adapter.AnalyzeAsync(context, CancellationToken.None)
-                .AsTask().GetAwaiter().GetResult();
+            using LohFragmentationAnalyzer adapter = new();
+            adapter.AnalyzeAsync(context, CancellationToken.None).GetAwaiter().GetResult();
+            var result = (LohFragmentationDomainResult)adapter.LastResult!;
 
             result.AnalyzerName.Should().Be("LOH & POH Fragmentation Analysis");
             result.Category.Should().Be("Memory");

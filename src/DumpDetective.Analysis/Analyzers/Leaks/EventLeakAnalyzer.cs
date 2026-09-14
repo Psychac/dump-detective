@@ -16,7 +16,7 @@ namespace DumpDetective.Analysis.Analyzers.Leaks;
 /// largest analyzer in this wave (~3,000 lines pre-retyping). Its scan (module/type discovery,
 /// delegate-chain walking, subscriber type/method resolution, root-hint mapping, disposal
 /// checking) is deliberately, measurably perf-sensitive dump-side work — ported unchanged into
-/// <see cref="EventLeakAnalyzerLegacyAdapter"/> rather than retargeted onto Tier-2 field-read
+/// <see cref="EventLeakAnalyzer"/> rather than retargeted onto Tier-2 field-read
 /// primitives (see that type's own remarks for why). This analyzer receives the adapter's
 /// finished per-group aggregates via <see cref="EventLeakAnalyzerOptions"/> and does only the
 /// capability-light tail: significance filtering, severity-ranked snapshot assembly, retained-bytes
@@ -35,12 +35,20 @@ namespace DumpDetective.Analysis.Analyzers.Leaks;
 /// — the same retarget every prior batch's evidence-path search made). Requires zero brand-new
 /// Tier-2 primitives.
 /// </remarks>
-public sealed class EventLeakAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
+public sealed partial class EventLeakAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "Event Leak Analysis";
     public string Category => "Events";
 
-    public AnalyzerDomainResult? LastResult { get; private set; }
+    public AnalyzerDomainResult? LastResult
+    {
+        get => _lastResult;
+        // Stamps AnalyzerName/Category here (not left to a bridging adapter, which no
+        // longer exists) so every LastResult consumer — pipeline or direct caller — sees
+        // them populated the same way.
+        private set => _lastResult = value is null ? null : value with { AnalyzerName = Name, Category = Category };
+    }
+    private AnalyzerDomainResult? _lastResult;
 
     // Cap on the correlation views (design §7) — first-class cross-group folds, not a
     // per-group re-derivation.
@@ -358,7 +366,7 @@ public sealed class EventLeakAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     /// </summary>
     internal static List<NameCountEntry> BuildSubscriberCountHistogram(List<EventGroupInfo> groups)
     {
-        var totals = new int[EventLeakAnalyzerLegacyAdapter.SubscriberCountHistogramBuckets.Length];
+        var totals = new int[EventLeakAnalyzer.SubscriberCountHistogramBuckets.Length];
         for (int i = 0; i < groups.Count; i++)
         {
             int[]? buckets = groups[i].SubscriberCountBuckets;
@@ -371,7 +379,7 @@ public sealed class EventLeakAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 
         var result = new List<NameCountEntry>(totals.Length);
         for (int b = 0; b < totals.Length; b++)
-            result.Add(new NameCountEntry(EventLeakAnalyzerLegacyAdapter.SubscriberCountHistogramBuckets[b].Label, totals[b]));
+            result.Add(new NameCountEntry(EventLeakAnalyzer.SubscriberCountHistogramBuckets[b].Label, totals[b]));
         return result;
     }
 

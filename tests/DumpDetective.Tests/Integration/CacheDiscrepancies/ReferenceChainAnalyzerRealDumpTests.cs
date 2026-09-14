@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Analyzers.Leaks;
@@ -50,10 +51,12 @@ public sealed class ReferenceChainAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using ReferenceChainAnalyzerLegacyAdapter adapter = new();
-        var result = (ReferenceChainDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using ReferenceChainAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (ReferenceChainDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("Reference Chain Analysis");
         result.Category.Should().Be("Memory");

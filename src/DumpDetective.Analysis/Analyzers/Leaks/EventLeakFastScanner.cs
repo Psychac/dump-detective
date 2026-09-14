@@ -107,7 +107,7 @@ internal sealed class EventLeakFastScanner
     /// </returns>
     public bool Scan(
         IEnumerable<HeapEntry> streamingEntries,
-        Dictionary<GroupKey, EventLeakAnalyzerLegacyAdapter.GroupAccumulator> groupAcc,
+        Dictionary<GroupKey, EventLeakAnalyzer.GroupAccumulator> groupAcc,
         Dictionary<ulong, string> rootHints,
         EventLeakOptions options,
         HashSet<ulong> leakingMTs,
@@ -123,13 +123,13 @@ internal sealed class EventLeakFastScanner
     /// <summary>
     /// Processes a single heap entry using descriptors pre-resolved by
     /// <see cref="PublisherRegistry"/>. Used both by <see cref="Scan"/>'s single-pass loop and
-    /// directly by <see cref="EventLeakAnalyzerLegacyAdapter.OnHeapEntry"/> when driven by the shared
+    /// directly by <see cref="EventLeakAnalyzer.OnHeapEntry"/> when driven by the shared
     /// <see cref="Pipeline.IHeapIndexScanParticipant"/> dispatcher pass.
     /// </summary>
     public void ScanEntry(
         in HeapEntry entry,
         List<(ulong addr, ulong mt, ulong delegateAddr)> buf,
-        Dictionary<GroupKey, EventLeakAnalyzerLegacyAdapter.GroupAccumulator> groupAcc,
+        Dictionary<GroupKey, EventLeakAnalyzer.GroupAccumulator> groupAcc,
         Dictionary<ulong, string> rootHints,
         EventLeakOptions options,
         HashSet<ulong> leakingMTs,
@@ -154,7 +154,7 @@ internal sealed class EventLeakFastScanner
 
     private void SinglePassScan(
         IEnumerable<HeapEntry> entries,
-        Dictionary<GroupKey, EventLeakAnalyzerLegacyAdapter.GroupAccumulator> groupAcc,
+        Dictionary<GroupKey, EventLeakAnalyzer.GroupAccumulator> groupAcc,
         Dictionary<ulong, string> rootHints,
         EventLeakOptions options,
         HashSet<ulong> leakingMTs,
@@ -181,7 +181,7 @@ internal sealed class EventLeakFastScanner
         HeapEntry entry,
         EventFieldDescriptor[] descriptors,
         List<(ulong addr, ulong mt, ulong delegateAddr)> buf,
-        Dictionary<GroupKey, EventLeakAnalyzerLegacyAdapter.GroupAccumulator> groupAcc,
+        Dictionary<GroupKey, EventLeakAnalyzer.GroupAccumulator> groupAcc,
         Dictionary<ulong, string> rootHints,
         EventLeakOptions options,
         HashSet<ulong> leakingMTs,
@@ -206,7 +206,7 @@ internal sealed class EventLeakFastScanner
         HeapEntry entry,
         EventFieldDescriptor[] descriptors,
         List<(ulong addr, ulong mt, ulong delegateAddr)> buf,
-        Dictionary<GroupKey, EventLeakAnalyzerLegacyAdapter.GroupAccumulator> groupAcc,
+        Dictionary<GroupKey, EventLeakAnalyzer.GroupAccumulator> groupAcc,
         Dictionary<ulong, string> rootHints,
         EventLeakOptions options,
         HashSet<ulong> leakingMTs,
@@ -246,7 +246,7 @@ internal sealed class EventLeakFastScanner
             // Gen2 is a useful severity signal but excluding Gen0/Gen1 publishers removes a
             // large fraction of real subscriber counts from the total.
             if (TypeFilterHelper.IsCompilerGenerated(descriptor.PublisherTypeName)
-                || EventLeakAnalyzerLegacyAdapter.IsNoiseTypeName(descriptor.PublisherTypeName))
+                || EventLeakAnalyzer.IsNoiseTypeName(descriptor.PublisherTypeName))
                 continue;
             if (buf.Count < options.PublisherSubscriberThreshold) continue;
 
@@ -254,7 +254,7 @@ internal sealed class EventLeakFastScanner
 
             bool mismatch = CheckLifetimeMismatchDirect(subscribers, options);
 
-            EventLeakInfo leak = EventLeakAnalyzerLegacyAdapter.CreateLeakInfo(
+            EventLeakInfo leak = EventLeakAnalyzer.CreateLeakInfo(
                 publisherAddress: entry.Address,
                 publisherType: descriptor.PublisherTypeName,
                 eventFieldName: descriptor.FieldName,
@@ -272,7 +272,7 @@ internal sealed class EventLeakFastScanner
 
             // IsLikelyPublisher: subscriber count and gen already validated above.
             // Still call to honour any future threshold changes.
-            EventLeakAnalyzerLegacyAdapter.AddToAccumulator(groupAcc, leak, options.TopDetailedInstancesPerGroup, leakingMTs);
+            EventLeakAnalyzer.AddToAccumulator(groupAcc, leak, options.TopDetailedInstancesPerGroup, leakingMTs);
         }
 
         // NOTE: publisherInstances is intentionally NOT incremented here.

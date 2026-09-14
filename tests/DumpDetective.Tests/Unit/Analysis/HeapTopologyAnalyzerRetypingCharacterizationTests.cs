@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using System.Reflection;
 
 using DumpDetective.Analysis.Analyzers;
@@ -18,7 +19,7 @@ namespace DumpDetective.Tests.Unit.Analysis;
 /// <summary>
 /// Characterization test for the Phase 1 retyping batch
 /// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md): proves
-/// <see cref="HeapTopologyAnalyzerLegacyAdapter"/> reproduces the pre-retyping arithmetic. Same
+/// <see cref="HeapTopologyAnalyzer"/> reproduces the pre-retyping arithmetic. Same
 /// ClrMD-ground-truth-cross-check approach as <c>SegmentReservationAnalyzerRetypingCharacterizationTests</c>
 /// for segment/LOH/POH/Frozen data (can't be hand-crafted via reflection injection); the exact-SOH-
 /// derivation branch uses a synthetic injected index (same <c>AnalysisPipelineTests.InjectHeapIndex</c>
@@ -85,11 +86,12 @@ public sealed class HeapTopologyAnalyzerRetypingCharacterizationTests
                     [0xDEAD_BEEF] = new(0xDEAD_BEEF, ModuleId: 0, Count: syntheticObjectCount, TotalSize: syntheticTotalIndexedBytes, LohCount: 0, LohSize: 0, SampleAddress: 0),
                 }));
 
-            AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-            HeapTopologyAnalyzerLegacyAdapter adapter = new();
-            HeapTopologyDomainResult result = (HeapTopologyDomainResult)adapter.AnalyzeAsync(context, CancellationToken.None)
-                .AsTask().GetAwaiter().GetResult();
+            HeapTopologyAnalyzer adapter = new();
+            adapter.AnalyzeAsync(context, CancellationToken.None).GetAwaiter().GetResult();
+            HeapTopologyDomainResult result = (HeapTopologyDomainResult)adapter.LastResult!;
 
             result.AnalyzerName.Should().Be("Heap Topology");
             result.Category.Should().Be("Memory");
@@ -140,11 +142,12 @@ public sealed class HeapTopologyAnalyzerRetypingCharacterizationTests
         try
         {
             HeapAnalysisCache cache = new();
-            AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-            HeapTopologyAnalyzerLegacyAdapter adapter = new();
-            HeapTopologyDomainResult result = (HeapTopologyDomainResult)adapter.AnalyzeAsync(context, CancellationToken.None)
-                .AsTask().GetAwaiter().GetResult();
+            HeapTopologyAnalyzer adapter = new();
+            adapter.AnalyzeAsync(context, CancellationToken.None).GetAwaiter().GetResult();
+            HeapTopologyDomainResult result = (HeapTopologyDomainResult)adapter.LastResult!;
 
             // No index available: SOH's arithmetic derivation never runs. Every SOH segment's
             // CountObjects call returns the "-1, not walked here" sentinel, which the per-segment

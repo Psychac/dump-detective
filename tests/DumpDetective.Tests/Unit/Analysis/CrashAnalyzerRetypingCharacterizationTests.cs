@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers.Runtime;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
@@ -176,8 +177,7 @@ public sealed class CrashAnalyzerRetypingCharacterizationTests
         params HeapObjectRef[] candidates)
     {
         CrashAnalyzer analyzer = new();
-        AnalysisContext context = new()
-        {
+        DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
             DumpObjectFields = fields ?? new FakeDumpObjectFieldQuery(),
             DumpArrayShapes = arrayShapes ?? new FakeDumpArrayShapeQuery(),

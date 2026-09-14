@@ -1,4 +1,5 @@
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
@@ -24,8 +25,18 @@ namespace DumpDetective.Analysis.Analyzers.Threads;
 /// originally miscategorized as Tier 1 + Tier 2 in the plan's own grep-derived split; corrected
 /// there once this was confirmed.
 /// </remarks>
-public sealed class LockGraphAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
+public sealed class LockGraphAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult, IThreadStackScanParticipant, ICustomizesAnalysisContext
 {
+    private readonly ThreadStackScanState _scanState = new();
+
+    int IThreadStackScanParticipant.GetRequiredFrameCount(RuntimeAnalysisContext context) => FrameScanDepth;
+    void IThreadStackScanParticipant.BeforeThreadStackScan(RuntimeAnalysisContext context) => _scanState.BeforeThreadStackScan();
+    void IThreadStackScanParticipant.OnThreadStack(in ThreadStackSnapshot snapshot) => _scanState.OnThreadStack(in snapshot, stackRootCount: 0);
+    void IThreadStackScanParticipant.OnThreadStackScanCompleted(bool succeeded) => _scanState.OnThreadStackScanCompleted(succeeded);
+
+    Sdk.Analysis.AnalysisContext ICustomizesAnalysisContext.BuildAnalysisContext(RuntimeAnalysisContext context) =>
+        AnalysisContextBuilder.Build(context, analyzerOptions: null, runtimeThreadsOverride: _scanState.BuildPrecomputedQuery());
+
     // A thread physically blocked inside Monitor.Enter/Wait has one or more native "Runtime"
     // transition frames (no Method, empty signature) ahead of the actual managed
     // Monitor.Enter_Slowpath/ObjWait frame — verified via a live self-attach snapshot of a real
@@ -46,7 +57,15 @@ public sealed class LockGraphAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     public string Name => "Lock Graph Analysis";
     public string Category => "Locks";
 
-    public AnalyzerDomainResult? LastResult { get; private set; }
+    public AnalyzerDomainResult? LastResult
+    {
+        get => _lastResult;
+        // Stamps AnalyzerName/Category here (not left to a bridging adapter, which no
+        // longer exists) so every LastResult consumer — pipeline or direct caller — sees
+        // them populated the same way.
+        private set => _lastResult = value is null ? null : value with { AnalyzerName = Name, Category = Category };
+    }
+    private AnalyzerDomainResult? _lastResult;
 
     public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {

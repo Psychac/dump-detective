@@ -3,17 +3,17 @@ using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Jobs;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Pipeline;
+using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
+using DumpDetective.Sdk.Analysis;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace BenchmarkSuite1;
-
-using CoreAnalysisContext = DumpDetective.Core.Abstractions.AnalysisContext;
 
 [MemoryDiagnoser]
 [ShortRunJob]
@@ -46,21 +46,23 @@ public class PipelineHotspotBenchmark
         return results.Count;
     }
 
-    private sealed class SyntheticAnalyzer(string name, int order) : IAnalyzer
+    private sealed class SyntheticAnalyzer(string name, int order) : IAnalyzer, IProducesAnalyzerDomainResult
     {
         public string Name { get; } = name;
         public int Order { get; } = order;
         public string Category => "Synthetic";
 
-        public ValueTask<AnalyzerDomainResult> AnalyzeAsync(CoreAnalysisContext context, CancellationToken cancellationToken)
+        public AnalyzerDomainResult? LastResult { get; private set; }
+
+        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
-            GenericAnalyzerDomainResult result = new()
+            LastResult = new GenericAnalyzerDomainResult
             {
                 AnalyzerName = Name,
                 Category = Category
             };
 
-            return ValueTask.FromResult<AnalyzerDomainResult>(result);
+            return ValueTask.CompletedTask;
         }
     }
 }

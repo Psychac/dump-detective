@@ -2,6 +2,7 @@ using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Dump;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Sdk.Analysis;
 using DumpDetective.Core.Models;
 using System.Diagnostics;
 using DumpDetective.Cli.Services;

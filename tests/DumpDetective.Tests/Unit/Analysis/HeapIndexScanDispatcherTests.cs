@@ -62,8 +62,7 @@ public sealed class HeapIndexScanDispatcherTests : IDisposable
     {
         HeapAnalysisCache cache = CreateCacheWithIndex([(0x1000, 0x2000, 100), (0x1100, 0x2100, 200)]);
         InMemoryAnalysisDiagnosticsSink sink = new();
-        RuntimeAnalysisContext context = new()
-        {
+        RuntimeAnalysisContext context = new() {
             Runtime = null!,
             Cache = cache,
             DiagnosticsSink = sink
@@ -213,7 +212,7 @@ public sealed class HeapIndexScanDispatcherTests : IDisposable
         public List<HeapEntry> Entries { get; } = new();
         public bool? CompletedWithSuccess { get; private set; }
 
-        public void BeforeHeapIndexScan(AnalysisContext context)
+        public void BeforeHeapIndexScan(RuntimeAnalysisContext context)
         {
         }
 
@@ -232,7 +231,7 @@ public sealed class HeapIndexScanDispatcherTests : IDisposable
         public IReadOnlyList<IHeapIndexScanParticipant>? MergedPartials { get; private set; }
         public List<FakeParallelParticipant> CreatedWorkers { get; } = new();
 
-        public void BeforeHeapIndexScan(AnalysisContext context)
+        public void BeforeHeapIndexScan(RuntimeAnalysisContext context)
         {
         }
 

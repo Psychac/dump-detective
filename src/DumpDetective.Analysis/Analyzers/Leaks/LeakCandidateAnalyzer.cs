@@ -1,8 +1,11 @@
+using DumpDetective.Analysis.Analyzers.Gc;
 using DumpDetective.Analysis.Analyzers.Infra;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
 
@@ -56,13 +59,64 @@ namespace DumpDetective.Analysis.Analyzers.Leaks;
 /// `ReferenceChainAnalyzer`'s batch — never surfaced in <see cref="LeakCandidateDomainResult"/>.
 /// </para>
 /// </remarks>
-public sealed class LeakCandidateAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
+public sealed class LeakCandidateAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult, IDeferredAnalyzer, ICustomizesAnalysisContext
 {
     public string Name => "Leak Candidate Analysis";
     public string Category => "Memory";
     public int Order => 100;
 
-    public AnalyzerDomainResult? LastResult { get; private set; }
+    public AnalyzerDomainResult? LastResult
+    {
+        get => _lastResult;
+        // Stamps AnalyzerName/Category here (not left to a bridging adapter, which no
+        // longer exists) so every LastResult consumer — pipeline or direct caller — sees
+        // them populated the same way.
+        private set => _lastResult = value is null ? null : value with { AnalyzerName = Name, Category = Category };
+    }
+    private AnalyzerDomainResult? _lastResult;
+
+    // Reads context.CompletedRunResults for cross-analyzer correlation — see this class's own
+    // remarks on why this lives here rather than in a real dependency-graph orchestrator (Phase 4).
+    Sdk.Analysis.AnalysisContext ICustomizesAnalysisContext.BuildAnalysisContext(RuntimeAnalysisContext context)
+    {
+        IReadOnlyList<AnalyzerRunResult>? completedRunResults = context.CompletedRunResults;
+
+        // Sourced from the already-completed gc-handle analyzer run rather than re-walking
+        // runtime.EnumerateHandles() here — avoids a second full handle scan for the same signal.
+        GCHandleDomainResult? gcHandleResult = completedRunResults?.GetResult<GCHandleDomainResult>();
+        var pinnedTargetTypes = new HashSet<string>(StringComparer.Ordinal);
+        var dependentTargetTypes = new HashSet<string>(StringComparer.Ordinal);
+        if (gcHandleResult is not null)
+        {
+            foreach (NameCountEntry entry in gcHandleResult.TopPinnedTargetTypes ?? [])
+                pinnedTargetTypes.Add(entry.Name);
+            foreach (NameCountEntry entry in gcHandleResult.DependentTopTargetTypes ?? [])
+                dependentTargetTypes.Add(entry.Name);
+        }
+
+        // Sourced from the already-completed timer-leak analyzer run — LogicalTimerCount is its
+        // de-duplicated count (TimerQueueTimerCount), not the raw double-counted TotalTimers, so
+        // it's the right magnitude signal to correlate against each timer wrapper type's row here.
+        TimerLeakDomainResult? timerLeakResult = completedRunResults?.GetResult<TimerLeakDomainResult>();
+        int logicalTimerCount = timerLeakResult?.LogicalTimerCount ?? 0;
+
+        // Sourced from the already-completed GC-root analyzer run — a cheap, exact shortcut for
+        // candidates that are themselves a direct root target, before falling back to a bounded
+        // root-path search inside the inner analyzer.
+        GCRootDomainResult? gcRootResult = completedRunResults?.GetResult<GCRootDomainResult>();
+        Dictionary<ulong, RootFinding>? directRootsByTargetAddress = null;
+        if (gcRootResult is not null && gcRootResult.TopRootsBySeverity.Count > 0)
+        {
+            directRootsByTargetAddress = new Dictionary<ulong, RootFinding>(gcRootResult.TopRootsBySeverity.Count);
+            foreach (RootFinding root in gcRootResult.TopRootsBySeverity)
+                directRootsByTargetAddress[root.TargetAddress] = root;
+        }
+
+        var options = new LeakCandidateAnalyzerOptions(
+            new ReferenceChainOptions(), pinnedTargetTypes, dependentTargetTypes, logicalTimerCount, directRootsByTargetAddress);
+
+        return AnalysisContextBuilder.Build(context, options);
+    }
 
     // Bounds root-chain enrichment (P3-1/P3-2), not the returned candidate population — matches
     // GCRootAnalyzer.StackOwnerAttributionLimit's precedent: purely cosmetic per-candidate lookup

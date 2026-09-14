@@ -8,10 +8,10 @@ namespace DumpDetective.Tests.Unit.Analysis;
 
 /// <summary>
 /// Tier-2 wave retyping (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md):
-/// <see cref="SqlTransactionAnalyzerLegacyAdapter.CreateWorkerInstance"/>/<c>MergePartial</c> are now
-/// pure generic base-class behavior (<c>TypedResourceCandidateStreamingLegacyAdapter</c>), already
+/// <see cref="SqlTransactionAnalyzer.CreateWorkerInstance"/>/<c>MergePartial</c> are now
+/// pure generic base-class behavior (<c>TypedResourceCandidateStreaming</c>), already
 /// covered once by <c>SqlConnectionPoolAnalyzerHeapIndexScanTests</c> — re-testing the identical
-/// generic logic per adapter would be pure duplication. Only <see cref="SqlTransactionAnalyzerLegacyAdapter.IsCandidateType"/>
+/// generic logic per adapter would be pure duplication. Only <see cref="SqlTransactionAnalyzer.IsCandidateType"/>
 /// is adapter-specific (its own namespace-prefix/suffix wiring), so that's what's covered here.
 /// </summary>
 public sealed class SqlTransactionAnalyzerHeapIndexScanTests
@@ -24,7 +24,7 @@ public sealed class SqlTransactionAnalyzerHeapIndexScanTests
     [InlineData("System.Data.ProviderBase.DbConnectionPool", false)]
     public void IsCandidateType_MatchesTransactionSuffixAcrossKnownProviders(string typeName, bool expected)
     {
-        SqlTransactionAnalyzerLegacyAdapter adapter = new();
+        SqlTransactionAnalyzer adapter = new();
 
         adapter.IsCandidateType(typeName).Should().Be(expected);
     }

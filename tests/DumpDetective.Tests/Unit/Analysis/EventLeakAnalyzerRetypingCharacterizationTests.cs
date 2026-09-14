@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers.Leaks;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
@@ -18,7 +19,7 @@ namespace DumpDetective.Tests.Unit.Analysis;
 /// The bulk of this analyzer's pure logic (severity scoring, correlation folds, subscriber-count
 /// histogram, timer/property-changed classification, accumulator merging) is already covered by
 /// the pre-existing <c>EventLeakAnalyzerAccuracyTests</c>, unchanged by this retyping — it now
-/// targets <see cref="EventLeakAnalyzerLegacyAdapter"/> for the members that moved there. This
+/// targets <see cref="EventLeakAnalyzer"/> for the members that moved there. This
 /// file covers only what's new: the capability-driven <c>AnalyzeAsync</c> entry point, the
 /// dominator-tree-vs-type-size-map retained-bytes backfill, and the root-path evidence retarget.
 /// </summary>
@@ -141,8 +142,7 @@ public sealed class EventLeakAnalyzerRetypingCharacterizationTests
         EventLeakAnalyzerOptions analyzerOptions)
     {
         EventLeakAnalyzer analyzer = new();
-        AnalysisContext context = new()
-        {
+        DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
             HeapTypeStatistics = typeStatistics,
             HeapDominators = dominators,

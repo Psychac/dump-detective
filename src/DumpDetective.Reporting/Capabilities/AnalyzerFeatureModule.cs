@@ -1,6 +1,7 @@
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
+using DumpDetective.Sdk.Analysis;
 
 namespace DumpDetective.Reporting.Capabilities;
 

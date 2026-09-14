@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Models;
@@ -15,7 +16,7 @@ namespace DumpDetective.Tests.Unit.Analysis;
 /// <summary>
 /// Characterization test for the thread-domain quartet retyping
 /// (docs/refactor/modularity/phase-1-thread-quartet-plan.md): proves
-/// <see cref="LockGraphAnalyzerLegacyAdapter"/> reproduces pre-retyping arithmetic against a
+/// <see cref="LockGraphAnalyzer"/> reproduces pre-retyping arithmetic against a
 /// self-attached process's real sync-block table, cross-checked against ClrMD ground truth — sync
 /// blocks and thread state can't be hand-crafted via reflection injection any more than other
 /// batches' segment/root/handle data could. Complements
@@ -40,10 +41,12 @@ public sealed class LockGraphAnalyzerRetypingCharacterizationTests
         }
 
         HeapAnalysisCache cache = new();
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using LockGraphAnalyzerLegacyAdapter adapter = new();
-        var result = (LockGraphDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        using LockGraphAnalyzer adapter = new();
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (LockGraphDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("Lock Graph Analysis");
         result.Category.Should().Be("Locks");

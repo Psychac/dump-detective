@@ -68,7 +68,7 @@ internal sealed class EventNameResolver
             current = current.BaseType;
         }
 
-        var names = EventLeakAnalyzerLegacyAdapter.BuildEventNameSet(allAddNames, allRemoveNames);
+        var names = EventLeakAnalyzer.BuildEventNameSet(allAddNames, allRemoveNames);
         _cache[mt] = names;
         return names;
     }

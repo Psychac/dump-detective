@@ -50,12 +50,20 @@ namespace DumpDetective.Analysis.Analyzers.Types;
 /// always-available <see cref="IHeapTypeStatisticsQuery"/> (which has its own no-index fallback,
 /// already shared by five other analyzers).
 /// </remarks>
-public sealed class StringAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
+public sealed partial class StringAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "String Analysis";
     public string Category => "Memory";
 
-    public AnalyzerDomainResult? LastResult { get; private set; }
+    public AnalyzerDomainResult? LastResult
+    {
+        get => _lastResult;
+        // Stamps AnalyzerName/Category here (not left to a bridging adapter, which no
+        // longer exists) so every LastResult consumer — pipeline or direct caller — sees
+        // them populated the same way.
+        private set => _lastResult = value is null ? null : value with { AnalyzerName = Name, Category = Category };
+    }
+    private AnalyzerDomainResult? _lastResult;
 
     private const int PreviewLength = 80;
     private const int MaxLengthSamples = 100_000;

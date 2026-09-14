@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
@@ -15,7 +16,7 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 /// Validates P3-2 of docs/analysis/phase1/module-analyzer-audit.md: heavy modules
 /// (>= HeavyModuleWarningThresholdBytes) carry a bounded, correctly-ordered top-10 type
 /// breakdown resolved against the real dump's ClrMD type names. Updated 2026-09-13 to construct
-/// <see cref="ModuleAnalyzerLegacyAdapter"/> for the Tier-1+Tier-2 retyping
+/// <see cref="ModuleAnalyzer"/> for the Tier-1+Tier-2 retyping
 /// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md) — this test now exercises
 /// the retyped analyzer's <c>ModuleName</c>-grouped heap-footprint aggregation, which replaced the
 /// pre-retyping <c>ModuleAggregator</c>/<c>ModuleId</c> join.
@@ -47,20 +48,22 @@ public sealed class ModuleAnalyzerTopTypesRealDumpTests
 
         // Low threshold guarantees at least one heavy module on any real-world dump, keeping
         // the test deterministic instead of depending on this specific dump's module sizes.
+        var moduleAnalysisOptions = new ModuleAnalysisOptions { HeavyModuleWarningThresholdBytes = 1UL * 1024 * 1024 };
         var options = new AnalysisOptions
         {
-            ModuleAnalysis = new ModuleAnalysisOptions { HeavyModuleWarningThresholdBytes = 1UL * 1024 * 1024 }
+            ModuleAnalysis = moduleAnalysisOptions
         };
 
-        var context = new AnalysisContext
-        {
+        RuntimeAnalysisContext contextRuntimeCtx = new() {
             Runtime = runtime,
             Cache = cache,
             AnalysisOptions = options
         };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, moduleAnalysisOptions);
 
-        using ModuleAnalyzerLegacyAdapter analyzer = new();
-        var result = (ModuleDomainResult)await analyzer.AnalyzeAsync(context, CancellationToken.None);
+        using ModuleAnalyzer analyzer = new();
+        await analyzer.AnalyzeAsync(context, CancellationToken.None);
+            var result = (ModuleDomainResult)analyzer.LastResult!;
 
         result.TopModulesByHeapMemory.Should().NotBeNull();
         var heavyModules = result.TopModulesByHeapMemory!

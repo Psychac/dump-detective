@@ -13,6 +13,7 @@ using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Sdk.Analysis;
 using DumpDetective.Core.Options;
 using DumpDetective.Analysis.Analyzers.Types;
 
@@ -126,7 +127,7 @@ namespace BenchmarkSuite1
             };
 
             var pipeline = new AnalysisPipeline(
-                new IAnalyzer[] { new StringAnalyzerLegacyAdapter() },
+                new IAnalyzer[] { new StringAnalyzer() },
                 new FindingGenerationPipeline(Array.Empty<IFindingGenerator>()));
 
             var sw = Stopwatch.StartNew();

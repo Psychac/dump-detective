@@ -27,7 +27,8 @@ namespace DumpDetective.Analysis.Analyzers.Gc;
 /// rather than falling back to a live-heap pass), since its per-kind "% of managed heap" and
 /// severity scoring both depend on the index's exact type-aggregate totals.
 /// </remarks>
-public sealed class GCRootAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
+public sealed class GCRootAnalyzer :
+    IAnalyzer, IProducesAnalyzerDomainResult, Pipeline.IRequiresReachableGraphIndex, Pipeline.IRequiresDominatorTreeIndex
 {
     // Matches BoundedGraphWalk.AbsoluteMaxDepth's precedent (see docs/refactor/analysis-profile-
     // removal-plan.md §9.16 for why these bounds exist without being user-configurable) — used
@@ -44,7 +45,15 @@ public sealed class GCRootAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     public string Name => "GC Root Analysis";
     public string Category => "Memory";
 
-    public AnalyzerDomainResult? LastResult { get; private set; }
+    public AnalyzerDomainResult? LastResult
+    {
+        get => _lastResult;
+        // Stamps AnalyzerName/Category here (not left to a bridging adapter, which no
+        // longer exists) so every LastResult consumer — pipeline or direct caller — sees
+        // them populated the same way.
+        private set => _lastResult = value is null ? null : value with { AnalyzerName = Name, Category = Category };
+    }
+    private AnalyzerDomainResult? _lastResult;
 
     public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {

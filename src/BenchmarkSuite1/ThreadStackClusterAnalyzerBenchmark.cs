@@ -6,11 +6,11 @@ using DumpDetective.Analysis.Analyzers.Threads;
 
 namespace BenchmarkSuite1
 {
-    // Benchmarks ThreadStackClusterAnalyzerLegacyAdapter, not ThreadStackClusterAnalyzer directly,
+    // Benchmarks ThreadStackClusterAnalyzer, not ThreadStackClusterAnalyzer directly,
     // since 2026-09-11 (thread-domain quartet Batch 2) — see LockGraphAnalyzerBenchmark's comment and
     // docs/refactor/modularity/phase-1-thread-quartet-plan.md.
     [MemoryDiagnoser]
-    public class ThreadStackClusterAnalyzerBenchmark : AnalyzerBenchmarkBase<ThreadStackClusterAnalyzerLegacyAdapter>
+    public class ThreadStackClusterAnalyzerBenchmark : AnalyzerBenchmarkBase<ThreadStackClusterAnalyzer>
     {
         protected override IHeapAnalysisCache? CreateCache() => new DumpDetective.Analysis.Cache.HeapAnalysisCache();
 
@@ -19,7 +19,8 @@ namespace BenchmarkSuite1
         {
             if (AnalysisContext == null)
                 throw new InvalidOperationException("Benchmark not properly initialized.");
-            return Analyzer.AnalyzeAsync(AnalysisContext, default).GetAwaiter().GetResult();
+            Analyzer.AnalyzeAsync(AnalysisContext, default).GetAwaiter().GetResult();
+            return Analyzer.LastResult!;
         }
     }
 }

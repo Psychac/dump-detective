@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers.Types;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
@@ -52,10 +53,12 @@ public sealed class BoxingAnalyzerRetypingCharacterizationTests
                 HeapIndexStorageKind.Disk, IndexPath: string.Empty, ObjectCount: 7,
                 Elapsed: TimeSpan.Zero, TypeAggregates: aggregates, TypeShapeCache: null));
 
-            AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-            using BoxingAnalyzerLegacyAdapter adapter = new();
-            var result = (BoxingDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+            using BoxingAnalyzer adapter = new();
+            await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (BoxingDomainResult)adapter.LastResult!;
 
             result.TotalBoxedObjects.Should().Be(7);
             result.TotalBoxedBytes.Should().Be(700);
@@ -103,15 +106,17 @@ public sealed class BoxingAnalyzerRetypingCharacterizationTests
             // Threshold of -1 forces every value type to count as "oversized", regardless of its
             // real StaticSize -- isolates the threshold-comparison logic from needing a specific
             // real type's exact size.
-            AnalysisContext context = new()
-            {
+            BoxingAnalysisOptions boxingAnalysisOptions = new() { OversizedThresholdBytes = -1 };
+            RuntimeAnalysisContext contextRuntimeCtx = new() {
                 Runtime = runtime,
                 Cache = cache,
-                AnalysisOptions = new AnalysisOptions { BoxingAnalysis = new BoxingAnalysisOptions { OversizedThresholdBytes = -1 } },
+                AnalysisOptions = new AnalysisOptions { BoxingAnalysis = boxingAnalysisOptions },
             };
+            DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, boxingAnalysisOptions);
 
-            using BoxingAnalyzerLegacyAdapter adapter = new();
-            var result = (BoxingDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+            using BoxingAnalyzer adapter = new();
+            await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (BoxingDomainResult)adapter.LastResult!;
 
             result.OversizedValueTypeInstanceCount.Should().Be(2);
             result.TopOversizedTypes.Should().ContainSingle(t => t.TypeName == clrType.Name);
@@ -132,10 +137,12 @@ public sealed class BoxingAnalyzerRetypingCharacterizationTests
         {
             HeapAnalysisCache cache = new();
 
-            AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+            DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-            using BoxingAnalyzerLegacyAdapter adapter = new();
-            var result = (BoxingDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+            using BoxingAnalyzer adapter = new();
+            await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (BoxingDomainResult)adapter.LastResult!;
 
             result.TotalBoxedObjects.Should().Be(0);
             result.TopBoxedTypes.Should().BeEmpty();

@@ -16,7 +16,7 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 /// <summary>
 /// Real-dump verification for <see cref="StringAnalyzer"/>'s Tier-1+Tier-2 retyping
 /// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md) — proves
-/// <see cref="StringAnalyzerLegacyAdapter"/> produces an internally consistent result against a
+/// <see cref="StringAnalyzer"/> produces an internally consistent result against a
 /// real dump, exercising the shared disk-index scan pass for both string-content dedup (via
 /// <see cref="DumpDetective.Sdk.Analysis.IDumpObjectFieldQuery.TryGetStringValue(ulong, int, out string?)"/>)
 /// and the P1-3 string-field-ownership reservoir sampling — neither of which the fake-backed
@@ -49,12 +49,16 @@ public sealed class StringAnalyzerRealDumpTests
         HeapAnalysisCache cache = new();
         cache.PrebuildHeapIndex(heap, dumpPath, CancellationToken.None, progress: null);
 
-        AnalysisContext context = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        RuntimeAnalysisContext contextRuntimeCtx = new() { Runtime = runtime, Cache = cache, AnalysisOptions = new() };
+        DumpDetective.Sdk.Analysis.AnalysisContext context = AnalysisContextBuilder.Build(contextRuntimeCtx, analyzerOptions: null);
 
-        using StringAnalyzerLegacyAdapter adapter = new();
-        new HeapIndexScanDispatcher().Run(cache, context, [adapter], CancellationToken.None);
+        using StringAnalyzer adapter = new();
+        new HeapIndexScanDispatcher().Run(cache, contextRuntimeCtx, [adapter], CancellationToken.None);
 
-        var result = (StringDomainResult)await adapter.AnalyzeAsync(context, CancellationToken.None);
+        context = ((ICustomizesAnalysisContext)adapter).BuildAnalysisContext(contextRuntimeCtx);
+
+        await adapter.AnalyzeAsync(context, CancellationToken.None);
+            var result = (StringDomainResult)adapter.LastResult!;
 
         result.AnalyzerName.Should().Be("String Analysis");
 

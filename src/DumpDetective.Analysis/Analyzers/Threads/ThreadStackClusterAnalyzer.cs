@@ -1,4 +1,5 @@
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
@@ -22,12 +23,31 @@ namespace DumpDetective.Analysis.Analyzers.Threads
     /// analyzer reads no live object field values anywhere — cluster signatures are built purely from
     /// frame method signatures/frame names and thread state flags, all coarse/structural.
     /// </remarks>
-    public sealed class ThreadStackClusterAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
+    public sealed class ThreadStackClusterAnalyzer :
+        IAnalyzer, IProducesAnalyzerDomainResult, IThreadStackScanParticipant, ICustomizesAnalysisContext
     {
+        private readonly ThreadStackScanState _scanState = new();
+
         public string Name => "Thread Stack Signature Clustering";
         public string Category => "Threads";
 
-        public AnalyzerDomainResult? LastResult { get; private set; }
+        int IThreadStackScanParticipant.GetRequiredFrameCount(RuntimeAnalysisContext context) => ThreadAnalyzer.UnboundedFrameCount;
+        void IThreadStackScanParticipant.BeforeThreadStackScan(RuntimeAnalysisContext context) => _scanState.BeforeThreadStackScan();
+        void IThreadStackScanParticipant.OnThreadStack(in ThreadStackSnapshot snapshot) => _scanState.OnThreadStack(in snapshot, stackRootCount: 0);
+        void IThreadStackScanParticipant.OnThreadStackScanCompleted(bool succeeded) => _scanState.OnThreadStackScanCompleted(succeeded);
+
+        Sdk.Analysis.AnalysisContext ICustomizesAnalysisContext.BuildAnalysisContext(RuntimeAnalysisContext context) =>
+            AnalysisContextBuilder.Build(context, analyzerOptions: null, runtimeThreadsOverride: _scanState.BuildPrecomputedQuery());
+
+        public AnalyzerDomainResult? LastResult
+        {
+            get => _lastResult;
+            // Stamps AnalyzerName/Category here (not left to a bridging adapter, which no
+            // longer exists) so every LastResult consumer — pipeline or direct caller — sees
+            // them populated the same way.
+            private set => _lastResult = value is null ? null : value with { AnalyzerName = Name, Category = Category };
+        }
+        private AnalyzerDomainResult? _lastResult;
 
         // P2-4: how many entries the frame-level hotspot histogram surfaces in the domain result.
         private const int TopFrameHotspotsToReport = 10;

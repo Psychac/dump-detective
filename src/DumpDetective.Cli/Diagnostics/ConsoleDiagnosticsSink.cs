@@ -36,7 +36,7 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
     // happened to be active when the whole thing finished.
     private PhaseTimeline? _currentPhaseTimeline;
 
-    public ConsoleDiagnosticsSink(bool enabled, IReadOnlyList<IAnalyzer> analyzers)
+    public ConsoleDiagnosticsSink(bool enabled, IReadOnlyList<Sdk.Analysis.IAnalyzer> analyzers)
     {
         _enabled = enabled;
         _stages = BuildStages(analyzers, out Dictionary<string, int> analyzerStageByName);
@@ -431,14 +431,14 @@ internal sealed class ConsoleDiagnosticsSink : IAnalysisDiagnosticsSink
     // Build logical analyzer groups (stages) based on analyzer type names.
     // Mirrors the rank mapping used by AnalyzerFilterService so the console groups
     // match the order analyzers are executed in the pipeline.
-    private static IReadOnlyList<AnalyzerStage> BuildStages(IReadOnlyList<IAnalyzer> analyzers, out Dictionary<string, int> analyzerStageByName)
+    private static IReadOnlyList<AnalyzerStage> BuildStages(IReadOnlyList<Sdk.Analysis.IAnalyzer> analyzers, out Dictionary<string, int> analyzerStageByName)
     {
         // Group analyzers by report domain (SectionIdDomainMap). Order groups
         // using the canonical DomainsInOrder, then any remaining domains by
         // lowest pipeline rank so display matches both reporting and execution.
         var domainBuckets = new Dictionary<string, (int MinRank, List<string> Names)>(StringComparer.Ordinal);
 
-        foreach (IAnalyzer a in analyzers)
+        foreach (Sdk.Analysis.IAnalyzer a in analyzers)
         {
             string domain = SectionIdDomainMap.GetDomain(a.Name);
             if (string.IsNullOrWhiteSpace(domain))

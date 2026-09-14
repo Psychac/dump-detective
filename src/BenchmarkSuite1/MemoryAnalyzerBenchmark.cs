@@ -6,13 +6,13 @@ using DumpDetective.Analysis.Analyzers.Memory;
 
 namespace BenchmarkSuite1
 {
-    // Benchmarks MemoryAnalyzerLegacyAdapter, not MemoryAnalyzer directly, since 2026-09-11 (Batch 4
+    // Benchmarks MemoryAnalyzer, not MemoryAnalyzer directly, since 2026-09-11 (Batch 4
     // of the Phase 1 retyping) — MemoryAnalyzer now implements the SDK's capability-scoped
     // Sdk.Analysis.IAnalyzer, not Core.Abstractions.IAnalyzer, so it no longer satisfies
     // AnalyzerBenchmarkBase<T>'s `where T : IAnalyzer, new()` constraint on its own. See
     // docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md.
     [MemoryDiagnoser]
-    internal class MemoryAnalyzerBenchmark : AnalyzerBenchmarkBase<MemoryAnalyzerLegacyAdapter>
+    internal class MemoryAnalyzerBenchmark : AnalyzerBenchmarkBase<MemoryAnalyzer>
     {
         protected override IHeapAnalysisCache? CreateCache() => new DumpDetective.Analysis.Cache.HeapAnalysisCache();
 
@@ -21,7 +21,8 @@ namespace BenchmarkSuite1
         {
             if (AnalysisContext == null)
                 throw new InvalidOperationException("Benchmark not properly initialized.");
-            return Analyzer.AnalyzeAsync(AnalysisContext, default).GetAwaiter().GetResult();
+            Analyzer.AnalyzeAsync(AnalysisContext, default).GetAwaiter().GetResult();
+            return Analyzer.LastResult!;
         }
     }
 }

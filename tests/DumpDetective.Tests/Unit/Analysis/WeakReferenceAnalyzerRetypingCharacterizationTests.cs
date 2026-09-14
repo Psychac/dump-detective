@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers.Gc;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
@@ -284,8 +285,7 @@ public sealed class WeakReferenceAnalyzerRetypingCharacterizationTests
         HeapObjectRef[]? candidates = null)
     {
         WeakReferenceAnalyzer analyzer = new();
-        AnalysisContext context = new()
-        {
+        DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
             HeapHandles = handles ?? new FakeHeapHandleQuery(),
             HeapSegments = segments ?? new FakeHeapSegmentQuery(),

@@ -4,6 +4,15 @@
 
 **36 of 36 analyzers retyped** — Phase 1's analyzer retyping step is complete.
 
+**Next steps item 1 done (2026-09-14)**: `LegacyAnalyzerAdapter`, all 36 `XxxAnalyzerLegacyAdapter`
+bridge classes, `Core.Abstractions.IAnalyzer`, and `Core.Models.AnalysisContext` are deleted. The
+pipeline (`AnalysisPipeline`, `HeapIndexScanDispatcher`, `ThreadStackScanDispatcher`,
+`AnalyzerExecutionRunner`, `DefaultAnalyzerFactory`) now runs `Sdk.Analysis.IAnalyzer` natively
+against `RuntimeAnalysisContext`/the new `AnalysisContextBuilder` (`LegacyAnalysisContextTranslator`,
+renamed/promoted). See [Legacy-adapter removal](#legacy-adapter-removal-2026-09-14) below. Next
+steps items 2 (`DependencyDirectionTests`, SDK project rules) and 3 (Phase 3/5 follow-on) are still
+open.
+
 All analyzers migrated to SDK contracts via `LegacyAnalyzer` adapters (dump-side implementations in `DumpDetective.Analysis/Sdk/`):
 
 `AllocationPatternAnalyzer`, `ArrayAnalyzer`, `AsyncStateMachineAnalyzer`, `AsyncTaskAnalyzer`, `BoxingAnalyzer`,
@@ -118,9 +127,49 @@ Tier 1 finished by thread-quartet audit (2026-09-11): `LockGraphAnalyzer`/`Threa
 - Phase 4 session DAG
 - Full source-neutral object/field model — Tier 2 stays dump-specific (no other planned source needs field introspection)
 
+## Legacy-adapter removal (2026-09-14)
+
+Next steps item 1 (below), fully executed:
+
+- **Pipeline retargeted**: `RuntimeAnalysisContext` stopped deriving from the old
+  `Core.Abstractions.AnalysisContext` and became a standalone class carrying the same fields
+  (`Runtime`, `Cache`, `AnalysisOptions`, `Diagnostics`, `DiagnosticsSink`, `Progress`,
+  `ReportSubPhase`, `CompletedRunResults`) plus its existing `RuntimeFacade`/`HeapIndexBuilder`/
+  `Query` additions. `LegacyAnalysisContextTranslator.Translate` was promoted/renamed to
+  `Pipeline/AnalysisContextBuilder.Build` — the primary (only) `Sdk.Analysis.AnalysisContext`
+  builder. A new opt-in `ICustomizesAnalysisContext` interface covers the handful of analyzers that
+  need bespoke context injection (precomputed thread/heap queries, cross-analyzer
+  `CompletedRunResults` reads). `AnalyzerExecutionRunner` now builds context via
+  `ICustomizesAnalysisContext` or `AnalysisContextBuilder`, awaits the bare `ValueTask`, then reads
+  `IProducesAnalyzerDomainResult.LastResult`.
+- **Scan-participant relocation**: `IHeapIndexScanParticipant`/`IThreadStackScanParticipant`/
+  `IParallelHeapIndexScanParticipant`/`IRequiresDominatorTreeIndex`/`IRequiresReachableGraphIndex`
+  retargeted from the old `AnalysisContext` to `RuntimeAnalysisContext`. Real scan/customization
+  logic that lived on ~23 `XxxAnalyzerLegacyAdapter` classes moved onto the SDK analyzer classes
+  themselves: a new shared `TypedResourceHeapIndexScanState` helper (`Analyzers/Infra/`) replaced the
+  old `TypedResourceCandidateStreamingLegacyAdapter<TSelf, TSdkAnalyzer>` base for the 10
+  typed-resource-shaped analyzers (SqlCommand/SqlTransaction/SqlConnectionPool/HttpObject/
+  WcfChannel/TimerLeak/DbConnection/WeakReference/Collection/AsyncStateMachine); a shared
+  `ThreadStackScanState` helper covers the thread quartet (LockGraph/Thread/ThreadStackCluster/Hang).
+  `EventLeakAnalyzer`, `AsyncTaskAnalyzer`, and `StringAnalyzer` — whose adapters carried the largest
+  bespoke scan bodies — were merged in via a `partial class` split (`EventLeakAnalyzer.HeapScan.cs`
+  etc.) to keep the diff reviewable.
+- **Real bug found and fixed during verification**: the deleted `LegacyAnalyzerAdapter<T>.AnalyzeAsync`
+  always did `result.Stamp(this)`, populating `AnalyzerName`/`Category` on every domain result. No
+  analyzer's own `AnalyzeAsync` set these fields itself — that was always the adapter's job. Missing
+  this in the initial pass silently produced empty-named results everywhere. Fixed by having each of
+  the 36 analyzers' `LastResult` setter stamp `AnalyzerName`/`Category` from its own `Name`/`Category`
+  (matches the deleted adapter's behavior exactly, now analyzer-owned instead of adapter-owned).
+- **Registration**: `DefaultAnalyzerFeatureModuleCatalog`'s 36 `Module(...)` entries now register
+  `typeof(XxxAnalyzer)` directly (was `typeof(XxxAnalyzerLegacyAdapter)`); `DefaultAnalyzerFactory`/
+  `IAnalyzerFactory` return `Sdk.Analysis.IAnalyzer`.
+- **Verification**: full non-real-dump suite green (1576/1576). Every analyzer's `[DiscrepancyFact]`
+  real-dump test run individually, foreground, sequentially against the 3.3 GB reference dump —
+  timings match historical per-analyzer baselines (single-digit to low-double-digit seconds), no
+  regressions found beyond the Stamp bug above (caught and fixed before the real-dump pass).
+
 ## Next steps
 
-Once all 36 done (29 done 2026-09-13):
-1. Delete `LegacyAnalyzerAdapter` and old `Core.Abstractions.IAnalyzer`/`Models.AnalysisContext`
+1. ~~Delete `LegacyAnalyzerAdapter` and old `Core.Abstractions.IAnalyzer`/`Models.AnalysisContext`~~ — done 2026-09-14, see above.
 2. Update `DependencyDirectionTests`, SDK project rules
 3. Phase 3's capability-attribute discovery and Phase 5's observation emission now have real ground to build on

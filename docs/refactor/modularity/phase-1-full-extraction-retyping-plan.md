@@ -10,8 +10,9 @@ pipeline (`AnalysisPipeline`, `HeapIndexScanDispatcher`, `ThreadStackScanDispatc
 `AnalyzerExecutionRunner`, `DefaultAnalyzerFactory`) now runs `Sdk.Analysis.IAnalyzer` natively
 against `RuntimeAnalysisContext`/the new `AnalysisContextBuilder` (`LegacyAnalysisContextTranslator`,
 renamed/promoted). See [Legacy-adapter removal](#legacy-adapter-removal-2026-09-14) below. Next
-steps items 2 (`DependencyDirectionTests`, SDK project rules) and 3 (Phase 3/5 follow-on) are still
-open.
+steps item 2 (`DependencyDirectionTests`, SDK project rules) is also done (2026-09-15). Phase 1's
+analyzer retyping step is now fully closed out; remaining work moves to Phase 3/5 (see item 3
+below).
 
 All analyzers migrated to SDK contracts via `LegacyAnalyzer` adapters (dump-side implementations in `DumpDetective.Analysis/Sdk/`):
 

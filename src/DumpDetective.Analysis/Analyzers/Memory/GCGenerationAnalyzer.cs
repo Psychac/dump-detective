@@ -15,6 +15,7 @@ namespace DumpDetective.Analysis.Analyzers.Memory
     /// existing pipeline via <see cref="GCGenerationAnalyzerLegacyAdapter"/>, which also wraps
     /// <c>Core.Abstractions.IAnalyzer</c> for <c>BenchmarkSuite1</c>.
     /// </summary>
+    [AnalyzerModule(key: "gc-generation", displayName: "GC Generation Analysis", order: 110, tags: ["gc"])]
     public sealed class GCGenerationAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     {
         public string Name => "GC Generation Analysis";

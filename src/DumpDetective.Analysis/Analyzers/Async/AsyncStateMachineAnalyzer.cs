@@ -49,6 +49,7 @@ namespace DumpDetective.Analysis.Analyzers.Async;
 /// Accepted per hard-need-basis: no Tier-2 primitive exists (or is needed elsewhere) for an
 /// unconditional per-type reference-field count outside the shape cache.
 /// </remarks>
+[AnalyzerModule(key: "async-state-machine", displayName: "Async State Machine Analysis", order: 350, tags: ["async"])]
 public sealed class AsyncStateMachineAnalyzer :
     IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
     IParallelHeapIndexScanParticipant, ICustomizesAnalysisContext

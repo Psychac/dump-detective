@@ -23,6 +23,7 @@ namespace DumpDetective.Analysis.Analyzers.Threads
     /// analyzer reads no live object field values anywhere — cluster signatures are built purely from
     /// frame method signatures/frame names and thread state flags, all coarse/structural.
     /// </remarks>
+    [AnalyzerModule(key: "thread-stack-cluster", displayName: "Thread Stack Cluster Analysis", order: 300, tags: ["threads"])]
     public sealed class ThreadStackClusterAnalyzer :
         IAnalyzer, IProducesAnalyzerDomainResult, IThreadStackScanParticipant, ICustomizesAnalysisContext
     {

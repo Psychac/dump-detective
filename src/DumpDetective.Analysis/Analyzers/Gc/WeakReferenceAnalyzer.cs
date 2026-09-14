@@ -36,6 +36,7 @@ namespace DumpDetective.Analysis.Analyzers.Gc
     /// as their non-degraded value now; kept in the domain result (not removed) since the report/
     /// finding-generator layer already branches on them and stays correct either way.
     /// </remarks>
+    [AnalyzerModule(key: "weak-reference", displayName: "Weak Reference Analysis", order: 390, tags: ["gc"])]
     public sealed class WeakReferenceAnalyzer :
         IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
         IParallelHeapIndexScanParticipant, IRequiresReachableGraphIndex, ICustomizesAnalysisContext

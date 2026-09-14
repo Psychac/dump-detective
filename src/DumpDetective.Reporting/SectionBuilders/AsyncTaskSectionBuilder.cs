@@ -8,7 +8,7 @@ using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
-internal sealed class AsyncAnalysisSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
+internal sealed class AsyncTaskSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
     public string AnalyzerName => "Async Task Analysis";
     public string DisplayTitle => "Task Overview";

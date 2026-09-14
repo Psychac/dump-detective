@@ -8,9 +8,9 @@ using Xunit;
 
 namespace DumpDetective.Tests.Unit.Reporting;
 
-public sealed class ExceptionAnalysisSectionBuilderTests
+public sealed class CrashSectionBuilderTests
 {
-    private readonly ExceptionAnalysisSectionBuilder _builder = new();
+    private readonly CrashSectionBuilder _builder = new();
 
     // LeadFinding is no longer built here — the per-candidate confidence-weighting logic moved to
     // CrashFindingGeneratorTests, since LeadFinding is now derived from CrashFindingGenerator's

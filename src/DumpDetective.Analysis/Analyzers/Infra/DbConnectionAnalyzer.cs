@@ -48,6 +48,7 @@ namespace DumpDetective.Analysis.Analyzers.Infra;
 /// its own verification pass (field name stability across the SqlClient/Npgsql/MySql/Oracle provider
 /// matrix this analyzer targets), not a quick addition to this batch.
 /// </remarks>
+[AnalyzerModule(key: "db-connection", displayName: "DbConnection Analysis", order: 420, tags: ["infra", "network"])]
 public sealed class DbConnectionAnalyzer :
     IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
     IParallelHeapIndexScanParticipant, IRequiresReachableGraphIndex, ICustomizesAnalysisContext

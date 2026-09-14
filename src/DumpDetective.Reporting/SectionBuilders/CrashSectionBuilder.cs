@@ -7,7 +7,7 @@ using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
-internal sealed class ExceptionAnalysisSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
+internal sealed class CrashSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
     // Report-width display limits (§9.26 D5) — the analyzer emits complete, uncapped candidate and
     // instance data; these are render-layer-only slicing constants.

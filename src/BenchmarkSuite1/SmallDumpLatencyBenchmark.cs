@@ -93,7 +93,7 @@ public class SmallDumpLatencyBenchmark
             new DominatorAnalyzer(),
             new StringAnalyzer(),
             new CollectionAnalyzer(),
-            new StaticRootLeakDetector(),
+            new StaticRootAnalyzer(),
             new ReferenceChainAnalyzer(),
             new GCHandleAnalyzer(),
             new LohFragmentationAnalyzer(),

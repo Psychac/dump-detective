@@ -8,7 +8,7 @@ using System.Linq;
 namespace DumpDetective.Reporting.SectionBuilders;
 
 /// <summary>B1 — Generation Pressure. Source: <see cref="GCGenerationDomainResult"/>.</summary>
-internal sealed class GCPressureSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
+internal sealed class GCGenerationSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
     public string AnalyzerName => "GC Generation Analysis";
     public string DisplayTitle => "Generation Pressure";

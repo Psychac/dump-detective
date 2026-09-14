@@ -51,6 +51,7 @@ namespace DumpDetective.Analysis.Analyzers.Async;
 /// source won — the same per-task cost three of the pre-retyping analyzer's four load paths already
 /// paid.
 /// </remarks>
+[AnalyzerModule(key: "async-task", displayName: "Async Task Analysis", order: 190, tags: ["async"])]
 public sealed partial class AsyncTaskAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     // m_stateFlags bit masks (matches HangAnalyzer)

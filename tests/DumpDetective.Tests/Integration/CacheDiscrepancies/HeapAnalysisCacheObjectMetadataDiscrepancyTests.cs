@@ -38,7 +38,7 @@ public sealed class HeapAnalysisCacheObjectMetadataDiscrepancyTests
         ClrHeap heap = runtime.Heap;
 
         // In-memory mode: no PrebuildHeapIndex call at all — matches every other discrepancy
-        // test's "memCache" convention (e.g. StaticRootLeakDetectorDiscrepancyTests).
+        // test's "memCache" convention (e.g. StaticRootAnalyzerDiscrepancyTests).
         HeapAnalysisCache memCache = new();
 
         string freshDumpPath = dumpPath + ".freshdiskcheck.HeapAnalysisCacheObjectMetadataDiscrepancyTests";

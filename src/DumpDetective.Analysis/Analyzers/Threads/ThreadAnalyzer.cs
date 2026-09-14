@@ -23,6 +23,7 @@ namespace DumpDetective.Analysis.Analyzers.Threads
     /// <see cref="RuntimeThreadQuery"/> (which walks every thread independently) only when invoked
     /// outside the pipeline (tests, benchmarks).
     /// </summary>
+    [AnalyzerModule(key: "thread", displayName: "Thread Analysis", order: 310, tags: ["threads"])]
     public sealed class ThreadAnalyzer :
         IAnalyzer, IProducesAnalyzerDomainResult, IThreadStackScanParticipant, ICustomizesAnalysisContext
     {

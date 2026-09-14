@@ -35,6 +35,7 @@ namespace DumpDetective.Analysis.Analyzers.Leaks;
 /// — the same retarget every prior batch's evidence-path search made). Requires zero brand-new
 /// Tier-2 primitives.
 /// </remarks>
+[AnalyzerModule(key: "event-leak", displayName: "Event Leak Analysis", order: 330, tags: ["events", "leaks"])]
 public sealed partial class EventLeakAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "Event Leak Analysis";

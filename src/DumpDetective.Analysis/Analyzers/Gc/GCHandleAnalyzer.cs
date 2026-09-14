@@ -21,6 +21,7 @@ namespace DumpDetective.Analysis.Analyzers.Gc;
 /// <see cref="IHeapObjectLookup"/>. Runs through the existing pipeline via
 /// <see cref="GCHandleAnalyzerLegacyAdapter"/>.
 /// </summary>
+[AnalyzerModule(key: "gc-handle", displayName: "GC Handle Analysis", order: 270, tags: ["handles"])]
 public sealed class GCHandleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "GC Handle Analysis";

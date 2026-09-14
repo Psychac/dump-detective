@@ -29,6 +29,7 @@ namespace DumpDetective.Analysis.Analyzers.Memory;
 /// was already marked <c>[Obsolete]</c> on the helper itself — effectively dead code before this
 /// retyping, not a real behavior this needs to preserve.
 /// </remarks>
+[AnalyzerModule(key: "allocation-pattern", displayName: "Allocation Pattern Analysis", order: 120, tags: ["gc", "allocation"])]
 public sealed class AllocationPatternAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "Allocation Pattern Analysis";

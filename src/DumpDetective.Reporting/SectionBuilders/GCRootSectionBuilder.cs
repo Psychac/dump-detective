@@ -8,7 +8,7 @@ using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
-internal sealed class GCRootIntelligenceSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
+internal sealed class GCRootSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
     public string AnalyzerName => "GC Root Analysis";
     public string DisplayTitle => "GC Root Intelligence";

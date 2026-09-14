@@ -19,7 +19,7 @@ namespace DumpDetective.Analysis.Indexing.Satellite;
 /// to a declaring field (record count stashed in the shared <see cref="IndexHeader"/>'s Reserved
 /// field, see <see cref="IndexHeader.PatchReserved"/>):
 ///   RootAddress (8) | OwnerTypeLen (2) | FieldNameLen (2) | AppDomainId (4) | OwnerType (N) | FieldName (M)
-/// Consumers: GCRootAnalyzer, StaticRootLeakDetector, FinalizableObjectAnalyzer
+/// Consumers: GCRootAnalyzer, StaticRootAnalyzer, FinalizableObjectAnalyzer
 /// Typical size: ~2 MB (fixed records) + a few hundred KB (trailer)
 /// See docs/analysis/root-field-name-index-plan.md for the design.
 /// </remarks>

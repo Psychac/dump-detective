@@ -44,6 +44,7 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
     /// tier specifically, restoring the pre-retyping analyzer's exact three-tier fallback
     /// (<c>_stackTraceString</c> text → binary trace-array unwind → <c>_remoteStackTraceString</c>).
     /// </remarks>
+    [AnalyzerModule(key: "crash", displayName: "Crash Analysis", order: 170, tags: ["exceptions"])]
     public sealed class CrashAnalyzer :
         IAnalyzer, IProducesAnalyzerDomainResult, IParallelHeapIndexScanParticipant, ICustomizesAnalysisContext
     {

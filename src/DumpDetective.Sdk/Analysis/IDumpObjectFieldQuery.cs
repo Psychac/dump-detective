@@ -144,7 +144,7 @@ public interface IDumpObjectFieldQuery
     /// <see cref="InstanceFieldDescriptor.Kind"/>) can't distinguish a delegate field from any other
     /// object-reference field; this walks the field's own declared type's base-type chain for
     /// <c>System.MulticastDelegate</c>. Returns <c>false</c> for an invalid address. Added
-    /// 2026-09-13 for <c>StaticRootLeakDetector</c>'s retyping.
+    /// 2026-09-13 for <c>StaticRootAnalyzer</c>'s retyping.
     /// </summary>
     bool HasDelegateField(ulong address);
 }

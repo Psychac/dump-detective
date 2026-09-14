@@ -11,7 +11,7 @@ namespace DumpDetective.Analysis.Indexing.Dominator;
 /// docs/cache/cache-format-clean-slate-redesign.md §4) derives it on demand by inverting the
 /// persisted <c>DominatorImmediateDominatorAddresses</c> row-index column once, in memory, the first
 /// time a query actually needs it — not on every build, and not even on every run: measurements §15
-/// found this direction's only production consumer, <c>StaticRootLeakDetector</c>, called zero times
+/// found this direction's only production consumer, <c>StaticRootAnalyzer</c>, called zero times
 /// across every real dump tested.
 /// </summary>
 internal sealed unsafe class DominatorChildIndexReader : IDisposable

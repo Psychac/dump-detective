@@ -27,6 +27,7 @@ namespace DumpDetective.Analysis.Analyzers.Gc;
 /// rather than falling back to a live-heap pass), since its per-kind "% of managed heap" and
 /// severity scoring both depend on the index's exact type-aggregate totals.
 /// </remarks>
+[AnalyzerModule(key: "gc-root", displayName: "GC Root Analysis", order: 140, tags: ["roots"])]
 public sealed class GCRootAnalyzer :
     IAnalyzer, IProducesAnalyzerDomainResult, Pipeline.IRequiresReachableGraphIndex, Pipeline.IRequiresDominatorTreeIndex
 {

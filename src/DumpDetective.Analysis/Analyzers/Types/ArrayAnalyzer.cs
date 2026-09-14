@@ -30,6 +30,7 @@ namespace DumpDetective.Analysis.Analyzers.Types;
 /// and <see cref="IHeapRootQuery"/> unchanged — no scan-participant needed at all, unlike the Infra
 /// batch's typed-resource-quartet analyzers.
 /// </remarks>
+[AnalyzerModule(key: "array", displayName: "Array Analysis", order: 360, tags: ["types"])]
 public sealed class ArrayAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "Array Analysis";

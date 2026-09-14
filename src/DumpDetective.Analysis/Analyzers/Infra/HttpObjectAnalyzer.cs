@@ -29,6 +29,7 @@ namespace DumpDetective.Analysis.Analyzers.Infra;
 /// <see cref="HeapTypeStatistics.ModuleName"/> instead of a direct <c>TypeAggregateNameResolver</c>
 /// call, since that's already resolved the same way for every type.
 /// </remarks>
+[AnalyzerModule(key: "http-object", displayName: "Http Object Analysis", order: 440, tags: ["infra", "network"])]
 public sealed class HttpObjectAnalyzer :
     IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
     IParallelHeapIndexScanParticipant, ICustomizesAnalysisContext

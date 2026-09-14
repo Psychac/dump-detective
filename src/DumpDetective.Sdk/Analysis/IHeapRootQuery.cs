@@ -11,7 +11,7 @@ namespace DumpDetective.Sdk.Analysis;
 /// docs/refactor/modularity/phase-1-sdk-review-findings.md item 20) except <c>None</c>, ClrMD's own
 /// sentinel/unset value that no real enumerated root ever has. <c>StaticVar</c>/<c>ThreadStaticVar</c>
 /// are kept as two distinct values, not collapsed into one <c>Static</c> — that distinction is
-/// already actively used in real production code (<c>StaticRootLeakDetector</c>). <c>Other</c> is a
+/// already actively used in real production code (<c>StaticRootAnalyzer</c>). <c>Other</c> is a
 /// forward-compat catch-all only, for a future ClrMD version adding something new — not, as an
 /// earlier version of this enum did, a bucket that silently swallowed known, current values
 /// (<c>FinalizerQueue</c> had no representation at all; <c>StrongHandle</c>/<c>RefCountedHandle</c>/

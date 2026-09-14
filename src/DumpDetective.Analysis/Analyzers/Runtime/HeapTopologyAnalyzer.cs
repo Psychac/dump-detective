@@ -26,6 +26,7 @@ namespace DumpDetective.Analysis.Analyzers.Runtime;
 /// <c>Phase1TotalObjectCount - LohCount - PohCount - FrozenCount</c>, free once Phase 1's
 /// already-exact total is available.
 /// </summary>
+[AnalyzerModule(key: "heap-topology", displayName: "Heap Topology Analysis", order: 150, tags: ["heap"])]
 public sealed class HeapTopologyAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "Heap Topology";

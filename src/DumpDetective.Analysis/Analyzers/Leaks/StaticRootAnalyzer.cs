@@ -53,7 +53,8 @@ namespace DumpDetective.Analysis.Analyzers.Leaks;
 /// output value.
 /// </para>
 /// </remarks>
-public sealed class StaticRootLeakDetector : IAnalyzer, IProducesAnalyzerDomainResult
+[AnalyzerModule(key: "static-root", displayName: "Static Root Leak Detection", order: 250, tags: ["roots", "leaks"])]
+public sealed class StaticRootAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "Static Root Leak Detection";
     public string Category => "Memory";

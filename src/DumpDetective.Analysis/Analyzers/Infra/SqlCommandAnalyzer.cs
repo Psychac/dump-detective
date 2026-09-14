@@ -33,6 +33,7 @@ namespace DumpDetective.Analysis.Analyzers.Infra;
 /// surfaced it in <see cref="SqlCommandTypeSummary"/>/<see cref="SqlCommandDomainResult"/> — this
 /// retyping doesn't add it either, since that would be a real behavior change, not a plumbing one.
 /// </remarks>
+[AnalyzerModule(key: "sql-command", displayName: "SQL Command Analysis", order: 426, tags: ["infra", "network"])]
 public sealed class SqlCommandAnalyzer :
     IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
     IParallelHeapIndexScanParticipant, ICustomizesAnalysisContext

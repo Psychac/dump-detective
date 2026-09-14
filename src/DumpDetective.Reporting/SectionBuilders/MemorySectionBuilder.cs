@@ -10,7 +10,7 @@ using DumpDetective.Core.Enums;
 namespace DumpDetective.Reporting.SectionBuilders;
 
 /// <summary>A2 — Memory Overview. Source: <see cref="MemoryDomainResult"/>.</summary>
-internal sealed class MemoryAnalysisSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
+internal sealed class MemorySectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
     public string AnalyzerName => "Memory Analysis";
     public string DisplayTitle => "Memory Overview";

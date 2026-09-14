@@ -25,6 +25,7 @@ namespace DumpDetective.Analysis.Analyzers.Types;
 /// adapter, not through DI, matching every other Tier-1/Tier-2 retyping so far; the failure path
 /// itself (see <c>HeapTypeStatisticsQuery.BuildFromIndex</c>) is preserved, just silent.
 /// </remarks>
+[AnalyzerModule(key: "object-shape", displayName: "Object Shape Analysis", order: 130, tags: ["types"])]
 public sealed class ObjectShapeAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "Object Shape Analysis";

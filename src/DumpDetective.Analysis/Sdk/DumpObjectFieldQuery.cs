@@ -289,7 +289,7 @@ internal sealed class DumpObjectFieldQuery : IDumpObjectFieldQuery
     }
 
     /// <summary>
-    /// Ported near-verbatim from the pre-retyping <c>StaticRootLeakDetector</c>'s own
+    /// Ported near-verbatim from the pre-retyping <c>StaticRootAnalyzer</c>'s own
     /// <c>HasDelegateFields</c> — checks both instance and static fields (a field-like event
     /// compiles to a static backing delegate field, not an instance one), cached per method table.
     /// </summary>

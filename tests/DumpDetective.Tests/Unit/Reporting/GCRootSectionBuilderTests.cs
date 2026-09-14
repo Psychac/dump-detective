@@ -15,12 +15,12 @@ namespace DumpDetective.Tests.Unit.Reporting;
 /// Regression coverage for the real-dump "possible object cycle detected" JSON failure:
 /// <see cref="RootOwnedSubgraphFinding.SubgraphTypeNames"/> comes from a breadth-first walk capped
 /// at 500 *nodes* (not 20 hops), so for a near-linear reachable subgraph (e.g. a long List/
-/// LinkedList chain) it can carry close to 500 hops. <c>GCRootIntelligenceSectionBuilder</c> merges
+/// LinkedList chain) it can carry close to 500 hops. <c>GCRootSectionBuilder</c> merges
 /// these into a shared-prefix trie for its "Root-owned subgraph shapes" TreeWidget; an unbranched
 /// run of that length previously nested hundreds of levels of <see cref="TreeNode.Children"/>,
 /// exceeding <c>System.Text.Json</c>'s serializer <c>MaxDepth</c>.
 /// </summary>
-public sealed class GCRootIntelligenceSectionBuilderTests
+public sealed class GCRootSectionBuilderTests
 {
     private static GCRootDomainResult BuildResult(IReadOnlyList<string> subgraphTypeNames) =>
         new(
@@ -55,7 +55,7 @@ public sealed class GCRootIntelligenceSectionBuilderTests
         // the 64-level rendering cap this test guards against regressing.
         GCRootDomainResult result = BuildResult(LongUnbranchedChain(300));
 
-        AnalyzerDetailSection section = new GCRootIntelligenceSectionBuilder().Build(result);
+        AnalyzerDetailSection section = new GCRootSectionBuilder().Build(result);
 
         TreeWidget widget = section.TreeWidgets!.Single(w => w.Title.StartsWith("Root-owned subgraph shapes"));
         widget.AnyTruncated.Should().BeTrue();
@@ -77,7 +77,7 @@ public sealed class GCRootIntelligenceSectionBuilderTests
     public void Build_UnbranchedChainBeyondSafetyBound_SerializesWithoutCycleException()
     {
         GCRootDomainResult result = BuildResult(LongUnbranchedChain(300));
-        AnalyzerDetailSection section = new GCRootIntelligenceSectionBuilder().Build(result);
+        AnalyzerDetailSection section = new GCRootSectionBuilder().Build(result);
 
         Action act = () => JsonSerializer.Serialize(
             new List<AnalyzerDetailSection> { section }, ReportJsonContext.Default.Options);
@@ -90,7 +90,7 @@ public sealed class GCRootIntelligenceSectionBuilderTests
     {
         GCRootDomainResult result = BuildResult(LongUnbranchedChain(5));
 
-        AnalyzerDetailSection section = new GCRootIntelligenceSectionBuilder().Build(result);
+        AnalyzerDetailSection section = new GCRootSectionBuilder().Build(result);
 
         TreeWidget widget = section.TreeWidgets!.Single(w => w.Title.StartsWith("Root-owned subgraph shapes"));
         widget.AnyTruncated.Should().BeFalse();

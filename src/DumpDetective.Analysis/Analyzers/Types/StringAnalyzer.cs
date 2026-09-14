@@ -50,6 +50,7 @@ namespace DumpDetective.Analysis.Analyzers.Types;
 /// always-available <see cref="IHeapTypeStatisticsQuery"/> (which has its own no-index fallback,
 /// already shared by five other analyzers).
 /// </remarks>
+[AnalyzerModule(key: "string", displayName: "String Analysis", order: 230, tags: ["memory", "string"])]
 public sealed partial class StringAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "String Analysis";

@@ -72,6 +72,7 @@ namespace DumpDetective.Analysis.Analyzers.Types
     /// candidate now always arrives via the pipeline's one shared heap-index scan
     /// (<c>context.HeapObjects</c>), never a second hand-rolled walk.
     /// </remarks>
+    [AnalyzerModule(key: "collection", displayName: "Collection Analysis", order: 240, tags: ["collections"])]
     public sealed class CollectionAnalyzer :
         IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
         IParallelHeapIndexScanParticipant, IRequiresReachableGraphIndex, ICustomizesAnalysisContext

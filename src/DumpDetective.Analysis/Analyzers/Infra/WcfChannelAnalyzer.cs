@@ -74,6 +74,7 @@ namespace DumpDetective.Analysis.Analyzers.Infra;
 /// contributes to no state bucket — different from an out-of-range/corrupted state value, which
 /// counts toward <see cref="WcfChannelTypeSummary.InvalidStateCount"/>.
 /// </remarks>
+[AnalyzerModule(key: "wcf-channel", displayName: "WCF Channel Analysis", order: 430, tags: ["infra", "network"])]
 public sealed class WcfChannelAnalyzer :
     IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
     IParallelHeapIndexScanParticipant, ICustomizesAnalysisContext

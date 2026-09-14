@@ -33,6 +33,7 @@ namespace DumpDetective.Analysis.Analyzers.Memory;
 /// <c>DumpDetective.Sdk</c> — has no restriction against referencing dump-side, ClrMD-touching
 /// types, so this reuse is a plain internal call, not a boundary violation.
 /// </remarks>
+[AnalyzerModule(key: "memory", displayName: "Memory Analysis", order: 100, tags: ["memory"])]
 public sealed class MemoryAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     // Retained-size is a bounded BFS per candidate, not a cheap lookup — computing it for every

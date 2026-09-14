@@ -12,7 +12,7 @@ namespace DumpDetective.Tests.Integration.CacheDiscrepancies;
 /// <see cref="ClrHeap.EnumerateRoots"/>, with zero dependency on this project's root cache, index
 /// writer, or classification logic — the point is to answer "does this dump have any
 /// StaticVar/ThreadStaticVar roots at all" independent of whether our own pipeline is the one asking.
-/// Written to settle whether <c>StaticRootLeakDetector</c> reporting zero static roots on two real
+/// Written to settle whether <c>StaticRootAnalyzer</c> reporting zero static roots on two real
 /// dumps is a real dump characteristic or a bug in how this project reads/classifies roots.
 /// </summary>
 public sealed class RootKindHistogramDiagnosticTests(ITestOutputHelper output)

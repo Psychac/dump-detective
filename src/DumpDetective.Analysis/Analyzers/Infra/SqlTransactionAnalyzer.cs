@@ -25,6 +25,7 @@ namespace DumpDetective.Analysis.Analyzers.Infra;
 /// (<see cref="SqlTransactionTypeSummary.OtherCount"/>/<see cref="SqlTransactionDomainResult.OtherCount"/>),
 /// so it's tracked and reported here too.
 /// </remarks>
+[AnalyzerModule(key: "sql-transaction", displayName: "SQL Transaction Analysis", order: 425, tags: ["infra", "network"])]
 public sealed class SqlTransactionAnalyzer :
     IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
     IParallelHeapIndexScanParticipant, ICustomizesAnalysisContext

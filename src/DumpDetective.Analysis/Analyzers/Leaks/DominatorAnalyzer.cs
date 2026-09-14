@@ -63,7 +63,7 @@ namespace DumpDetective.Analysis.Analyzers.Leaks;
 /// </para>
 /// <para>
 /// <b>Accepted simplifications</b> (same reasoning already applied in
-/// <c>GCRootAnalyzer</c>/<c>MemoryAnalyzer</c>/<c>StaticRootLeakDetector</c>'s own batches): the
+/// <c>GCRootAnalyzer</c>/<c>MemoryAnalyzer</c>/<c>StaticRootAnalyzer</c>'s own batches): the
 /// live-scan fallback's <c>cache.MethodTableHasOutgoingRefs</c> shape pre-filter is dropped — it
 /// costs at most one trivial single-object iteration for a true leaf and changes no output value.
 /// <c>ComputeCrossTypeOverlap</c>'s <c>cache.EnumerateIndexedEntriesAsTuples</c> disk-index stream
@@ -82,6 +82,7 @@ namespace DumpDetective.Analysis.Analyzers.Leaks;
 /// same precedent rather than inventing new plumbing for a single consumer.
 /// </para>
 /// </remarks>
+[AnalyzerModule(key: "dominator", displayName: "Dominator Analysis", order: 220, tags: ["retention", "dominator"])]
 public sealed class DominatorAnalyzer :
     IAnalyzer, IProducesAnalyzerDomainResult, Pipeline.IRequiresReachableGraphIndex, Pipeline.IRequiresDominatorTreeIndex
 {

@@ -2,7 +2,7 @@
 
 namespace DumpDetective.Analysis.Trend.Comparers
 {
-    internal sealed class MemoryAnalyzerTrendComparer : IAnalyzerTrendComparer
+    internal sealed class MemoryTrendComparer : IAnalyzerTrendComparer
     {
         public string AnalyzerName => "Memory Analysis";
 

@@ -23,6 +23,7 @@ namespace DumpDetective.Analysis.Analyzers.Runtime;
 /// (the only real consumer so far) actually needs, not the speculative shape they originally shipped
 /// with (see each interface's own remarks).
 /// </remarks>
+[AnalyzerModule(key: "jit", displayName: "JIT Analysis", order: 410, tags: ["runtime", "perf"])]
 public sealed class JitAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "JIT Analysis";

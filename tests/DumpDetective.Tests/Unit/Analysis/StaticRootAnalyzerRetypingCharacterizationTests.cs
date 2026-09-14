@@ -13,7 +13,7 @@ using Xunit;
 namespace DumpDetective.Tests.Unit.Analysis;
 
 /// <summary>
-/// Characterization tests for the Tier-1+Tier-2 retyping of <see cref="StaticRootLeakDetector"/>
+/// Characterization tests for the Tier-1+Tier-2 retyping of <see cref="StaticRootAnalyzer"/>
 /// (docs/refactor/modularity/phase-1-full-extraction-retyping-plan.md). No pre-existing per-analyzer
 /// unit test coverage existed before this, and the real-dump gate can't exercise real positive data
 /// either — this analyzer's static-root detection is broken upstream (see the analyzer's own
@@ -22,7 +22,7 @@ namespace DumpDetective.Tests.Unit.Analysis;
 /// per-type/namespace retained-set breakdown, collection/event-handler (instance and static field)
 /// detection, Gen2-or-larger fraction, root-path evidence, and the no-dominator-tree fallback.
 /// </summary>
-public sealed class StaticRootLeakDetectorRetypingCharacterizationTests
+public sealed class StaticRootAnalyzerRetypingCharacterizationTests
 {
     [Fact]
     public async Task AnalyzeAsync_NoStaticRoots_ReturnsEmptyResult()
@@ -257,7 +257,7 @@ public sealed class StaticRootLeakDetectorRetypingCharacterizationTests
         FakeHeapRootPathQuery rootPaths, FakeDumpObjectFieldQuery fields, FakeHeapTypeStatisticsQuery typeStatistics,
         StaticRootLeakAnalysisOptions? options = null)
     {
-        StaticRootLeakDetector analyzer = new();
+        StaticRootAnalyzer analyzer = new();
         DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
             HeapRoots = roots,

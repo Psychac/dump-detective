@@ -24,6 +24,7 @@ namespace DumpDetective.Analysis.Analyzers.Memory;
 /// Covers §25.1 (committed vs reserved), §25.2 (segment lifecycle), and §25.3 (address space
 /// pressure). Operates entirely on segment metadata — no heap object scan.
 /// </summary>
+[AnalyzerModule(key: "segment-reservation", displayName: "Segment Reservation Analysis", order: 380, tags: ["gc", "segments"])]
 public sealed class SegmentReservationAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "Segment Reservation Analysis";

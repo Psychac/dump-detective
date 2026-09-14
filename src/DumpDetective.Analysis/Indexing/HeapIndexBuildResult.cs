@@ -81,7 +81,7 @@ internal sealed record HeapIndexBuildResult(
     /// Each element: (<c>TargetAddress</c>, <c>RootAddress</c>, <c>Kind</c> byte matching
     /// <c>Microsoft.Diagnostics.Runtime.GCRootKind</c>).
     /// Consumers: <c>GCRootAnalyzer</c>, <c>FinalizableObjectAnalyzer</c>,
-    ///            <c>StaticRootLeakDetector</c>.
+    ///            <c>StaticRootAnalyzer</c>.
     /// </summary>
     (ulong TargetAddr, ulong RootAddr, byte Kind)[]? InMemoryRootCandidates = null,
     /// <summary>

@@ -36,6 +36,7 @@ namespace DumpDetective.Analysis.Analyzers.Gc
     /// counts, so this analyzer needs no fallback logic of its own at all: a single
     /// <see cref="IHeapTypeStatisticsQuery.GetTypeStatistics"/> call now serves both paths.
     /// </remarks>
+    [AnalyzerModule(key: "finalizable-object", displayName: "Finalizable Object Analysis", order: 340, tags: ["gc"])]
     public sealed class FinalizableObjectAnalyzer :
         IAnalyzer, IProducesAnalyzerDomainResult, IRequiresReachableGraphIndex, IRequiresDominatorTreeIndex
     {

@@ -25,6 +25,7 @@ namespace DumpDetective.Analysis.Analyzers.Threads;
 /// originally miscategorized as Tier 1 + Tier 2 in the plan's own grep-derived split; corrected
 /// there once this was confirmed.
 /// </remarks>
+[AnalyzerModule(key: "lock-graph", displayName: "Lock Graph Analysis", order: 320, tags: ["threads", "locks"])]
 public sealed class LockGraphAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult, IThreadStackScanParticipant, ICustomizesAnalysisContext
 {
     private readonly ThreadStackScanState _scanState = new();

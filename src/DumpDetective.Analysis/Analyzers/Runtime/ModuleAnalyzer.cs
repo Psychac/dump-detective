@@ -39,6 +39,7 @@ namespace DumpDetective.Analysis.Analyzers.Runtime;
 /// pass: <see cref="IHeapTypeStatisticsQuery.GetTypeStatistics"/>'s dictionary key already *is* the
 /// resolved type name.
 /// </remarks>
+[AnalyzerModule(key: "module", displayName: "Module Analysis", order: 160, tags: ["runtime"])]
 public sealed class ModuleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "Module Analysis";

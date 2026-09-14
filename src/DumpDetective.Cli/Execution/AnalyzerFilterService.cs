@@ -144,7 +144,7 @@ internal static class AnalyzerFilterService
             or nameof(StringAnalyzer)
                 => 2,
 
-            nameof(StaticRootLeakDetector)
+            nameof(StaticRootAnalyzer)
             or nameof(ReferenceChainAnalyzer)
                 => 3,
 

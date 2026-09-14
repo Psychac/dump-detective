@@ -59,6 +59,7 @@ namespace DumpDetective.Analysis.Analyzers.Leaks;
 /// `ReferenceChainAnalyzer`'s batch — never surfaced in <see cref="LeakCandidateDomainResult"/>.
 /// </para>
 /// </remarks>
+[AnalyzerModule(key: "leak-candidate", displayName: "Leak Candidate Analysis", order: 210, tags: ["leaks"])]
 public sealed class LeakCandidateAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult, IDeferredAnalyzer, ICustomizesAnalysisContext
 {
     public string Name => "Leak Candidate Analysis";

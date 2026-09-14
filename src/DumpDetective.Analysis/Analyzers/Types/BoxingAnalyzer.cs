@@ -31,6 +31,7 @@ namespace DumpDetective.Analysis.Analyzers.Types
     /// documents (two distinct method tables resolving to the same display name collapse to one
     /// dictionary entry) — not new here, just inherited from the shared surface.
     /// </remarks>
+    [AnalyzerModule(key: "boxing", displayName: "Boxing Analysis", order: 400, tags: ["types", "perf"])]
     public sealed class BoxingAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     {
         public string Name => "Boxing Analysis";

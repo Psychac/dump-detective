@@ -9,7 +9,7 @@ using Xunit;
 
 namespace DumpDetective.Tests.Unit.Reporting;
 
-public sealed class MemoryAnalysisSectionBuilderTests
+public sealed class MemorySectionBuilderTests
 {
     private static MemoryDomainResult BuildResult(IReadOnlyList<SizeBucketEntry>? histogram, long totalObjects) =>
         new(
@@ -31,7 +31,7 @@ public sealed class MemoryAnalysisSectionBuilderTests
     {
         MemoryDomainResult result = BuildResult(histogram: null, totalObjects: 1_000);
 
-        AnalyzerDetailSection section = new MemoryAnalysisSectionBuilder().Build(result);
+        AnalyzerDetailSection section = new MemorySectionBuilder().Build(result);
 
         TextBlocks(section).Should().ContainSingle(t =>
             t.Contains("histogram unavailable") && t.Contains("Phase-1"));
@@ -44,7 +44,7 @@ public sealed class MemoryAnalysisSectionBuilderTests
             histogram: [new SizeBucketEntry("< 1 KB", 500, 50_000)],
             totalObjects: 1_000);
 
-        AnalyzerDetailSection section = new MemoryAnalysisSectionBuilder().Build(result);
+        AnalyzerDetailSection section = new MemorySectionBuilder().Build(result);
 
         TextBlocks(section).Should().NotContain(t => t.Contains("histogram unavailable"));
     }
@@ -54,7 +54,7 @@ public sealed class MemoryAnalysisSectionBuilderTests
     {
         MemoryDomainResult result = BuildResult(histogram: null, totalObjects: 0);
 
-        AnalyzerDetailSection section = new MemoryAnalysisSectionBuilder().Build(result);
+        AnalyzerDetailSection section = new MemorySectionBuilder().Build(result);
 
         TextBlocks(section).Should().NotContain(t => t.Contains("histogram unavailable"));
     }

@@ -19,7 +19,7 @@ internal static class SectionIdDomainMap
         ["Dominator Analysis"]         = ("Memory",     "A3"),
         ["GCRootAnalyzer"]             = ("Memory",     "A5"),
         ["GC Root Analysis"]           = ("Memory",     "A5"),
-        ["StaticRootLeakDetector"]     = ("Memory",     "A6"),
+        ["StaticRootAnalyzer"]     = ("Memory",     "A6"),
         ["Static Root Leak Detection"] = ("Memory",     "A6"),
         ["StringAnalyzer"]             = ("Memory",     "A7"),
         ["String Analysis"]            = ("Memory",     "A7"),
@@ -74,7 +74,7 @@ internal static class SectionIdDomainMap
         // Domain F — Exceptions
         ["CrashAnalyzer"]              = ("Exceptions", "F1"),
         ["Crash Analysis"]             = ("Exceptions", "F1"),
-        ["Exception Analysis"]         = ("Exceptions", "F1"),  // ExceptionAnalysisSectionBuilder display name
+        ["Exception Analysis"]         = ("Exceptions", "F1"),  // CrashSectionBuilder display name
 
         // Domain G — Runtime Infrastructure
         ["ModuleAnalyzer"]             = ("Runtime",    "G1"),
@@ -84,11 +84,11 @@ internal static class SectionIdDomainMap
         ["JIT Analysis"]               = ("Runtime",    "G3"),
 
         // IReportSectionBuilder display-title aliases (for sections where DisplayTitle is used as AnalyzerName in the AnalyzerDetailSection)
-        ["GC Root Intelligence"]       = ("Memory",     "A5"),   // GCRootIntelligenceSectionBuilder display title
-        ["Memory Overview"]            = ("Memory",     "A2"),   // MemoryAnalysisSectionBuilder display title
-        ["Generation Pressure"]        = ("GC",         "B1"),   // GCPressureSectionBuilder display title
+        ["GC Root Intelligence"]       = ("Memory",     "A5"),   // GCRootSectionBuilder display title
+        ["Memory Overview"]            = ("Memory",     "A2"),   // MemorySectionBuilder display title
+        ["Generation Pressure"]        = ("GC",         "B1"),   // GCGenerationSectionBuilder display title
         ["Heap Topology"]              = ("GC",         "B3"),   // HeapTopologySectionBuilder display title
-        ["Task Overview"]              = ("Async",      "E1"),   // AsyncAnalysisSectionBuilder display title
+        ["Task Overview"]              = ("Async",      "E1"),   // AsyncTaskSectionBuilder display title
 
         // Individual B7/B8 — split builders
         ["GCHandleAnalyzer"]            = ("GC",      "B7"),

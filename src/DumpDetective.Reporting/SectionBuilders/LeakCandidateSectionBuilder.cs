@@ -8,7 +8,7 @@ using System.Linq;
 
 namespace DumpDetective.Reporting.SectionBuilders;
 
-internal sealed class LeakAnalysisSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
+internal sealed class LeakCandidateSectionBuilder : SectionBuilderBase, IAnalyzerSectionBuilder
 {
     public string AnalyzerName => "Leak Candidate Analysis";
     public string DisplayTitle => "Leak Candidates";

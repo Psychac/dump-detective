@@ -100,7 +100,7 @@ namespace DumpDetective.Analysis.Trend
                     double currentBytes = entry.TotalMemoryImpact;
                     baselineByName.TryGetValue(entry.RootDescription, out double baseBytes);
                     if (currentBytes > baseBytes * 1.5 + 1024)
-                        signals.Add(new NewLeakSignal(entry.RootDescription, baseBytes, currentBytes, "StaticRootLeakDetector"));
+                        signals.Add(new NewLeakSignal(entry.RootDescription, baseBytes, currentBytes, "StaticRootAnalyzer"));
                 }
 
                 if (signals.Count > 0)

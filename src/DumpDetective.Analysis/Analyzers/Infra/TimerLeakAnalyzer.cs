@@ -48,6 +48,7 @@ namespace DumpDetective.Analysis.Analyzers.Infra;
 /// coincidence. Fixed properly with a genuine <see cref="FieldValueKind.UInt32"/> read instead of
 /// relying on that coincidence — see <see cref="TryReadPeriod"/>.
 /// </remarks>
+[AnalyzerModule(key: "timer-leak", displayName: "Timer Leak Analysis", order: 450, tags: ["infra", "timers"])]
 public sealed class TimerLeakAnalyzer :
     IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
     IParallelHeapIndexScanParticipant, IRequiresReachableGraphIndex, ICustomizesAnalysisContext

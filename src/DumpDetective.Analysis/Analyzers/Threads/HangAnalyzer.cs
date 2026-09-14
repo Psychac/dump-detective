@@ -32,6 +32,7 @@ namespace DumpDetective.Analysis.Analyzers.Threads
     /// always goes through the pipeline's shared scan, so an empty candidate list when it didn't run
     /// is accepted rather than re-implementing a second, independent scan path.
     /// </remarks>
+    [AnalyzerModule(key: "hang", displayName: "Hang Analysis", order: 180, tags: ["threads"])]
     public sealed class HangAnalyzer :
         IAnalyzer, IProducesAnalyzerDomainResult, IParallelHeapIndexScanParticipant,
         IThreadStackScanParticipant, ICustomizesAnalysisContext

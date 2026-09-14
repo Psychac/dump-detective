@@ -29,7 +29,7 @@ public interface IHeapDominatorQuery
     /// Every object in <paramref name="rootAddress"/>'s dominator subtree (mirrors
     /// <c>IDominatorTreeProvider.EnumerateRetainedSet</c>) — the per-object companion to
     /// <see cref="TryGetRetainedSize"/>'s aggregate byte total. Added 2026-09-13 for
-    /// <c>StaticRootLeakDetector</c>'s retyping — its first real consumer; every prior
+    /// <c>StaticRootAnalyzer</c>'s retyping — its first real consumer; every prior
     /// <see cref="IHeapDominatorQuery"/> consumer only needed the aggregate. Deliberately uncapped
     /// (no <c>maxNodes</c>/<c>maxDepth</c> parameter), matching this project's "no sampling"
     /// convention and the pre-retyping analyzer's own unbounded walk — callers needing a bounded

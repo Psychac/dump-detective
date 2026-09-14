@@ -68,21 +68,53 @@ not proportional to that risk profile once two representative real-dump runs and
 unit tests already confirm it.
 
 **Deferred**, per § 8's explicit scope and consistent with how Phase 1 was scoped — nothing here has
-a real second consumer yet to validate a new abstraction against:
-- `Sources.ClrDump` reorganization (migration step 2) — dump code (`DumpLoader`, `RuntimeFacade`,
+a real second consumer yet to validate a new abstraction against. Each item below is marked with
+where it actually gets picked up, so it isn't silently lost between phase docs:
+
+- **`Sources.ClrDump` reorganization (migration step 2)** — dump code (`DumpLoader`, `RuntimeFacade`,
   heap indexing, cache, graph, query) stays in `Analysis` exactly where it is. No "thin
   `IArtifactSource` adapter" was built either — nothing exists yet to register it with (no
   `ArtifactSourceRegistry`), so a stub adapter would be unexercised code.
-- `IHeapAnalysisCache` → capability-scoped query surfaces (migration step 3) — a Phase 3
-  (capability model) concern; Phase 3 itself is deferred.
-- `IIndexStorage`/`LocalDiskIndexStorage`/`InMemoryIndexStorage` — this abstraction doesn't exist
+  **Owner: [phase-6-trace-source.md § Phase 6a](phase-6-trace-source.md#phase-6a--trace-ingest)** —
+  `Sources.NetTrace` is the real second `IArtifactSource`-shaped implementation being built there;
+  per that doc's own status, `IArtifactSource` itself is still deliberately *not yet* extracted
+  ("extracted later once real usage informs their shape"). Once 6a's index sections stabilize,
+  extracting `IArtifactSource`/`ArtifactSourceRegistry` from the two real implementations
+  (`ClrDump` + `NetTrace`) and reorganizing `Sources.ClrDump` behind it is the natural next step —
+  do it there, informed by two real sources, not here against one.
+- **`IHeapAnalysisCache` → capability-scoped query surfaces (migration step 3)** — not a Phase 3
+  concern as originally scoped here; superseded by
+  [phase-1-full-extraction-retyping-plan.md](phase-1-full-extraction-retyping-plan.md)'s Tier
+  1/Tier 2 capability-surface split, which landed this outside this phase's own migration steps
+  (see [modularity-plan.md § 10 point 8](../modularity-plan.md#10-external-review-2026-09-08--where-this-can-be-questioned)
+  for how the ownership question got resolved). **Status: done** — 36/36 analyzers retyped, per
+  [phase-3-plugin-packaging.md](phase-3-plugin-packaging.md)'s status line. This bullet is kept here
+  only so the original plan and its actual resolution stay linked.
+- **`IIndexStorage`/`LocalDiskIndexStorage`/`InMemoryIndexStorage`** — this abstraction doesn't exist
   today even in dump-specific form (the container works directly against `FileStream`/
   `MemoryMappedFile`); building it now would be new design work with no second backing store to
   validate it against, the same reasoning that deferred `IArtifactSource` in Phase 1.
-- `InternTable` — confirmed no existing equivalent to extract; same reasoning as above.
-- `ObservationStore`, `TimelineAligner`, `Session/*` — Phase 4/5 concerns, explicitly out of scope.
-- The stub second source (exit criterion 5) — the real validation of this whole phase's
-  abstraction, and honestly still missing. It can't exist until Phase 6a.
+  **Still open, no owner yet** — Phase 6a's own container reuse
+  ([§ "A real generalization question resolved simply"](phase-6-trace-source.md#phase-6a--trace-ingest))
+  went through `CacheContainerWriter` directly rather than through a new `IIndexStorage` seam, so
+  6a does *not* automatically produce this abstraction the way it does for `IArtifactSource`. Revisit
+  only if/when a real second backing store (not just a second artifact kind) is actually needed.
+- **`InternTable`** — confirmed no existing equivalent to extract; same reasoning as above, same
+  "still open, no owner" status — watch for one to fall out of Phase 6a/6b's entity-resolution work
+  before building this speculatively.
+- **`ObservationStore`, `TimelineAligner`, `Session/*`** — Phase 4/5 concerns, explicitly out of
+  scope. **Owners:** `ObservationStore` → [phase-5-observations-synthesis.md](phase-5-observations-synthesis.md)
+  (its exit criteria already require `ObservationStore` to handle a full large-dump run in bounded
+  memory — the exact assumption this doc flagged as untested); `Session/*` →
+  [phase-4-session-orchestration.md](phase-4-session-orchestration.md) (`SessionBuilder`,
+  `SessionValidator` under its `Session/` folder); `TimelineAligner` has no explicit owner in either
+  doc yet — flagged there as a gap, not assumed to fall out automatically.
+- **The stub second source (exit criterion 5)** — the real validation of this whole phase's
+  abstraction. **Owner: [phase-6-trace-source.md § Phase 6a](phase-6-trace-source.md#phase-6a--trace-ingest)**,
+  in progress — trace ingest is a *real* second source, not the trivial stub this exit criterion
+  originally described, which is a stronger validation once it's far enough along, but the formal
+  `IArtifactSource` extraction step (see first bullet above) is what actually closes this criterion
+  and hasn't happened yet.
 
 ## Target shape
 

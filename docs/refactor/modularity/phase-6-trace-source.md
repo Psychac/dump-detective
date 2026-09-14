@@ -42,6 +42,13 @@ side (actual *correlation* is Phase 7).
 
 ## Phase 6a — Trace Ingest
 
+**Also tracked here, carried over from Phase 2's deferred scope** (see
+[phase-2-artifact-platform.md](phase-2-artifact-platform.md#migration-steps)'s deferred-items list):
+extracting `IArtifactSource`/`ArtifactSourceRegistry` from this source plus `ClrDump`, and the
+`Sources.ClrDump` reorganization that depends on it — deliberately not done yet (see "real usage
+informs their shape" note below), do it once this phase's index sections stabilize. Also: Phase 2's
+exit criterion 5 (stub second source) is what this whole sub-phase is the real, non-stub answer to.
+
 ### Status: four slices shipped 2026-09-09 — `trace.methods`, `trace.gcevents`, `trace.contention`, `trace.cpu-samples`
 
 Per the discussion that started this phase (see

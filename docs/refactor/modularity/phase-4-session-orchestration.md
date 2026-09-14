@@ -4,6 +4,12 @@ Part of [../modularity-plan.md](../modularity-plan.md). Implements north-star **
 Depends on [phase-3-plugin-packaging.md](phase-3-plugin-packaging.md).
 (Supersedes `phase-4-orchestration-dag.md` from the dump-only draft.)
 
+**Also owns, carried over from Phase 2's deferred scope**: `Session/*`
+(see [phase-2-artifact-platform.md](phase-2-artifact-platform.md#migration-steps)'s deferred-items
+list) — `SessionBuilder`/`SessionValidator` below are that item's real home. `TimelineAligner` is
+*not* claimed here or in Phase 5 yet; whichever phase's work item ends up needing multi-artifact
+alignment first should pick it up explicitly rather than assume the other phase has it.
+
 ## Goal
 
 Replace the fixed five-stage pipeline **and** the proposed mode enum with one capability-driven

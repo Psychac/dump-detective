@@ -499,6 +499,13 @@ generalize.
 - **Static report UI vs. live query UI** — the former is a Phase 8 deliverable; the latter needs a
   long-running host exposing capability query surfaces, which Phase 4 makes possible but does not
   scope.
+- **Phase 2's still-genuinely-unowned deferred items** — as of 2026-09-15,
+  [phase-2-artifact-platform.md](modularity/phase-2-artifact-platform.md#migration-steps)'s
+  deferred list has each item cross-linked to an owning phase except two:
+  `IIndexStorage`/`LocalDiskIndexStorage`/`InMemoryIndexStorage` and `InternTable`, neither of
+  which any later phase's real work has produced a second consumer for yet, and `TimelineAligner`,
+  which neither Phase 4 nor Phase 5 claims. Don't assume these fall out automatically of Phase 6;
+  revisit explicitly once a real second backing store or multi-artifact alignment need appears.
 
 ---
 

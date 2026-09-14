@@ -4,6 +4,11 @@ Part of [../modularity-plan.md](../modularity-plan.md). Implements the model in
 [observation-and-correlation-model.md](observation-and-correlation-model.md), proven against
 dump-only sessions. Depends on [phase-4-session-orchestration.md](phase-4-session-orchestration.md).
 
+**Also owns, carried over from Phase 2's deferred scope**: `ObservationStore`
+(see [phase-2-artifact-platform.md](phase-2-artifact-platform.md#migration-steps)'s deferred-items
+list) — the "handles a full large-dump run within bounded memory" exit criterion below is exactly
+the assumption Phase 2 flagged as unvalidated and deferred to here.
+
 ## Goal
 
 Migrate analyzers to emit observations, move finding generation from hand-written per-analyzer

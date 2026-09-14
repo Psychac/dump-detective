@@ -3,6 +3,14 @@
 Part of [../modularity-plan.md](../modularity-plan.md). Implements north-star **Layer 3**
 (in-process). Depends on [phase-2-artifact-platform.md](phase-2-artifact-platform.md).
 
+**Status, 2026-09-15: migration steps 1–2 done, steps 3–6 not started.** Started ahead of the
+modularity plan's own [§8 minimum-viable path](../modularity-plan.md#8-the-minimum-viable-unified-path--adopted-as-the-chosen-plan-2026-09-08),
+which had deferred the plugin split until the trace/correlation capability proved itself — per
+explicit instruction this session, not a formal revisiting of that deferral. Made possible by the
+36/36 analyzer retyping to the SDK `IAnalyzer`/`AnalysisContext` contract finishing first (commit
+`b713c165`), since step 2 needs every analyzer to already be a real `Sdk.Analysis.IAnalyzer`.
+Commit `541c1317`.
+
 ## Goal
 
 Kill `DefaultAnalyzerFeatureModuleCatalog` as a hand-maintained list, and make analyzers declare
@@ -21,7 +29,7 @@ analyzers fed by heap capabilities, trace capabilities, or both:
 | `Plugins.Threads` | Thread, ThreadStackCluster, Hang, LockGraph | `trace.contention-events`, `trace.thread-timeline` |
 | `Plugins.Async` | AsyncTask, AsyncStateMachine | `trace.thread-timeline` |
 | `Plugins.Types` | ObjectShape, Array, Boxing, Collection, String | `trace.alloc-samples` |
-| `Plugins.Leaks` | LeakCandidate, StaticRootLeakDetector, ReferenceChain, Dominator, EventLeak | `trace.alloc-samples` |
+| `Plugins.Leaks` | LeakCandidate, StaticRootAnalyzer, ReferenceChain, Dominator, EventLeak | `trace.alloc-samples` |
 | `Plugins.Infra` | DbConnection, WcfChannel, HttpObject, TimerLeak | `trace.http-events` |
 | `Plugins.Runtime` | Module, Crash, Jit, HeapTopology | `trace.jit-events`, `trace.exception-events` |
 | `Plugins.Cpu` | *(none — dump can't provide this)* | `trace.cpu-samples` |
@@ -61,9 +69,27 @@ Each package carries its analyzers plus their section builders, synthesis rules,
 
 ## Migration steps
 
-1. Add the capability attributes to the SDK (Phase 1 reserved them).
-2. Build `PluginCatalogBuilder` (scan → catalog), producing the same shape the old catalog did so
-   consumers don't change yet.
+1. **Done (Phase 1).** Capability attributes (`AnalyzerModuleAttribute`, `RequiresCapabilityAttribute`,
+   `OptionalCapabilityAttribute`) and `CapabilityVocabulary` shipped in `DumpDetective.Sdk` during
+   Phase 1, ahead of any analyzer using them.
+2. **Done, 2026-09-15 (commit `541c1317`).** Built `PluginCatalogBuilder`
+   ([src/DumpDetective.Reporting/Capabilities/PluginCatalogBuilder.cs](../../../src/DumpDetective.Reporting/Capabilities/PluginCatalogBuilder.cs)),
+   producing the same shape the old catalog does — not wired into DI yet, verified instead by a
+   before/after equivalence test suite
+   ([PluginCatalogBuilderTests.cs](../../../tests/DumpDetective.Tests/Unit/Reporting/PluginCatalogBuilderTests.cs))
+   run against `DefaultAnalyzerFeatureModuleCatalog` while both still exist side by side, rather than
+   deferring that diff to step 4 as originally planned. All 36 analyzers now carry `[AnalyzerModule]`.
+   One design change from what this doc originally sketched: `FindingGenerator`/`TrendComparer`/
+   `SectionBuilder` companion types are **not** declared on the attribute — `AnalyzerModuleAttribute`
+   stayed `key`/`displayName`/`order`/`tags` only. Checked first: stripping a trailing `Analyzer` from
+   the analyzer's own type name and appending `FindingGenerator`/`TrendComparer`/`SectionBuilder`
+   already matched 31 of 35 analyzers' real names exactly, so `PluginCatalogBuilder` resolves
+   companions by that convention via reflection instead, failing fast with a clear message on any
+   miss. The 7 mismatched companion types (plus `StaticRootLeakDetector`, renamed to
+   `StaticRootAnalyzer` so the "strip `Analyzer`" rule has zero exceptions) were renamed to fit,
+   rather than growing the attribute to carry redundant `typeof()` references — e.g.
+   `ExceptionAnalysisSectionBuilder` → `CrashSectionBuilder`, `LeakAnalysisSectionBuilder` →
+   `LeakCandidateSectionBuilder`. Full list in the commit.
 3. Split analyzers + their reporting pieces into the packages above; annotate each with the
    capability declarations from Phase 0's capability map.
 4. Delete `DefaultAnalyzerFeatureModuleCatalog.cs`, verified by a before/after catalog snapshot
@@ -73,7 +99,13 @@ Each package carries its analyzers plus their section builders, synthesis rules,
    never each other. **An analyzer must not reference `Sources.ClrDump`** — if one needs something
    only ClrMD can answer, that's a missing capability surface in Phase 2, not a license to
    reference the dump source directly. This rule is what keeps analyzers source-neutral, and it
-   will be the most-violated rule in the plan.
+   will be the most-violated rule in the plan. Note: `Sources.ClrDump` as a distinct project
+   doesn't exist yet — that reorganization is still deferred, tracked in
+   [phase-2-artifact-platform.md](phase-2-artifact-platform.md#migration-steps) with its actual
+   owner now [phase-6-trace-source.md](phase-6-trace-source.md#phase-6a--trace-ingest). Until it
+   lands, this rule applies to referencing dump-specific code under `Analysis` directly, not a
+   literal `Sources.*` project boundary — re-check this rule's wording once the reorganization
+   happens.
 
 ## Exit criteria
 

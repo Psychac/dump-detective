@@ -16,16 +16,17 @@ public sealed class PluginCatalogBuilderTests
 {
     private static IAnalyzerFeatureModuleCatalog BuildScannedCatalog()
     {
-        // LeakCandidateAnalyzer anchors the still-in-Analysis assembly now that GCRootAnalyzer
-        // (this test's anchor before the Plugins.Gc migration) has moved into its own package —
+        // DbConnectionAnalyzer anchors the still-in-Analysis assembly now that LeakCandidateAnalyzer
+        // (this test's anchor before the Plugins.Leaks migration) has moved into its own package —
         // see docs/refactor/modularity/phase-3-plugin-packaging.md.
         return new PluginCatalogBuilder().Build(
-            typeof(DumpDetective.Analysis.Analyzers.Leaks.LeakCandidateAnalyzer).Assembly,
+            typeof(DumpDetective.Analysis.Analyzers.Infra.DbConnectionAnalyzer).Assembly,
             typeof(DumpDetective.Analysis.Analyzers.Gc.GCRootAnalyzer).Assembly,
             typeof(DumpDetective.Analysis.Analyzers.Memory.MemoryAnalyzer).Assembly,
             typeof(DumpDetective.Analysis.Analyzers.Threads.ThreadAnalyzer).Assembly,
             typeof(DumpDetective.Analysis.Analyzers.Async.AsyncTaskAnalyzer).Assembly,
-            typeof(DumpDetective.Analysis.Analyzers.Types.ArrayAnalyzer).Assembly);
+            typeof(DumpDetective.Analysis.Analyzers.Types.ArrayAnalyzer).Assembly,
+            typeof(DumpDetective.Analysis.Analyzers.Leaks.LeakCandidateAnalyzer).Assembly);
     }
 
     [Fact]

@@ -4,8 +4,8 @@ Part of [../modularity-plan.md](../modularity-plan.md). Implements north-star **
 (in-process). Depends on [phase-2-artifact-platform.md](phase-2-artifact-platform.md).
 
 **Status, 2026-09-15: migration steps 1–2 done, step 3 in progress (`Plugins.Memory`,
-`Plugins.Gc`, `Plugins.Threads`, `Plugins.Async`, and `Plugins.Types` shipped, 3 packages left),
-steps 4–6 not started.** Started ahead of the
+`Plugins.Gc`, `Plugins.Threads`, `Plugins.Async`, `Plugins.Types`, and `Plugins.Leaks` shipped, 2
+packages left), steps 4–6 not started.** Started ahead of the
 modularity plan's own [§8 minimum-viable path](../modularity-plan.md#8-the-minimum-viable-unified-path--adopted-as-the-chosen-plan-2026-09-08),
 which had deferred the plugin split until the trace/correlation capability proved itself — per
 explicit instruction this session, not a formal revisiting of that deferral. Made possible by the
@@ -250,6 +250,49 @@ Each package carries its analyzers plus their section builders, synthesis rules,
      during `Plugins.Memory`. Split into its own file, kept in `Analysis.Models` rather than moved.
    - `PluginCatalogBuilderTests.BuildScannedCatalog` anchor list gained a sixth assembly
      (`ArrayAnalyzer`'s).
+
+   **`Plugins.Leaks` done, 2026-09-15** — sixth package shipped end-to-end (`LeakCandidateAnalyzer`,
+   `StaticRootAnalyzer`, `ReferenceChainAnalyzer`, `DominatorAnalyzer`, `EventLeakAnalyzer`).
+   `LeakCandidateAnalyzer`'s own cross-analyzer coupling had already been decoupled ahead of time
+   (commit `c724344`, ahead of `Plugins.Gc`), but this package surfaced a new, previously-unnoticed
+   instance of the same shape of problem, in a place no prior package had touched:
+   - `DumpDetective.Analysis.Trend.TrendAnalyzer` — the shared, source-neutral trend dispatcher
+     every domain's comparer plugs into, and which must never depend on any `Plugins.*` package —
+     had a private `ComputeNewLeakSignalsCore` method reading `DominatorDomainResult`,
+     `StaticRootDomainResult`, and `LeakCandidateDomainResult` by concrete type for its
+     new-leak-signal heuristic. Left as-is this would have created the forbidden
+     `Analysis → Plugins.Leaks` dependency the moment the three model files moved. Fixed the same
+     way as the `LeakCandidateAnalyzer` precedent: three narrow read-only interfaces
+     (`IRetainedObjectsByTypeSignal`, `IStaticRootsByDescriptionSignal`,
+     `ILeakCandidatesByTypeSignal`) added to `DumpDetective.Core.Models`, each exposing the handful
+     of `(name, bytes)` pairs `TrendAnalyzer` actually needs via the already-public `NameBytesEntry`
+     record — thinner than the producing analyzers' own richer snapshot records, same as
+     `IDirectRootSignal` was for `GCRootDomainResult`. Landed as its own preparatory commit ahead of
+     the package move, verified against the existing trend and new-leak-signal tests (no behavior
+     change). Worth checking on every future package: not just analyzer-to-analyzer `DomainResult`
+     reads, but also whether any shared, must-stay-neutral infrastructure (trend comparison,
+     insight scoring, etc.) reads a moving model by concrete type.
+   - `EventLeakEvidence` (colocated in `EventLeakDomainResult.cs`) turned out to be needed directly
+     by `Analysis/Models/Evidence.cs`'s `EvidenceConfidence.Compute(EventLeakEvidence?)` overload — a
+     shared, source-neutral confidence-scoring utility every domain's finding generator relies on.
+     Same "colocated model, real consumer elsewhere" issue hit during `Plugins.Memory` and
+     `Plugins.Types`. Split into its own definition, kept in `Analysis/Models/Evidence.cs` rather
+     than moved.
+   - Files moved (`git mv`, namespaces left unchanged, same as every prior package) needed the same
+     two `InternalsVisibleTo` grants `Plugins.Async`/`Plugins.Types` needed: `DumpDetective.Analysis`
+     → `Plugins.Leaks` and `DumpDetective.Core` → `Plugins.Leaks` (this package's moved
+     `EventLeakAnalyzer` files reach `DumpDetective.Core.Models`' internal `EventGroupInfo`,
+     `EventLeakInfo`, and `SubscriberInfo`, on top of the usual trend-comparer internals). No
+     `GlobalUsings.cs` surprises this time — copied the `Plugins.Types` template directly.
+   - `PluginCatalogBuilderTests.BuildScannedCatalog`'s anchor list needed a **replacement**, not
+     just an addition, for the first time: it had anchored the "rest of `Analysis`" assembly on
+     `LeakCandidateAnalyzer` itself (chosen back when `Plugins.Gc` shipped, precisely because
+     `LeakCandidateAnalyzer` was staying put at the time). Replaced with `DbConnectionAnalyzer`
+     (still-unmigrated `Infra` domain) and added a seventh anchor for the moved
+     `LeakCandidateAnalyzer`. Worth checking on every future package: whether the current anchor for
+     "the rest of `Analysis`" is one of the analyzers about to move.
+   - Verified against the real reference dump (`LeakCandidateAnalyzerRealDumpTests`, single
+     invocation, foreground): behavior unchanged, ~1m17s, no regression.
 4. Delete `DefaultAnalyzerFeatureModuleCatalog.cs`, verified by a before/after catalog snapshot
    diff.
 5. Add the `plugins/` drop-in + ALC loader path with at least one test plugin.

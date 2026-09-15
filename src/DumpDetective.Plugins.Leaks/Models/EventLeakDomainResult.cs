@@ -100,16 +100,3 @@ internal sealed record EventLeakInstanceSnapshot(
     bool HasLifetimeMismatch = false,
     IReadOnlyList<SubscriberDetail>? SubscriberDetails = null,
     EventLeakEvidence? Evidence = null);
-
-/// <summary>
-/// EventLeak-specific evidence shape (design §4.3): the publisher's own BFS-derived root path
-/// and a cheap subscriber-derived root hint are tracked separately rather than conflated into
-/// one field, so the report can label which source produced the displayed path. Distinct from
-/// the shared <see cref="Evidence"/> record used by Dominator/StaticRoot/Timer analyzers.
-/// </summary>
-internal sealed record EventLeakEvidence(
-    int SchemaVersion,
-    string? PublisherRootPath,
-    string? SampleSubscriberHint,
-    bool SearchTruncated,
-    IReadOnlyList<EvidenceSignal> Signals);

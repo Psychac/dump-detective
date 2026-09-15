@@ -45,4 +45,8 @@ internal sealed record LeakCandidateDomainResult(
     int TotalCandidates,
     IReadOnlyList<LeakCandidateRecord> TopCandidates,
     IReadOnlyDictionary<LeakClass, int> CandidatesByClass,
-    bool HeuristicOnly = true) : AnalyzerDomainResult;
+    bool HeuristicOnly = true) : AnalyzerDomainResult, ILeakCandidatesByTypeSignal
+{
+    IReadOnlyList<NameBytesEntry> ILeakCandidatesByTypeSignal.TopCandidatesByType =>
+        TopCandidates.Select(c => new NameBytesEntry(c.TypeName, c.TotalSize)).ToArray();
+}

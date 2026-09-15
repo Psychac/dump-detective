@@ -48,6 +48,7 @@
     <ProjectReference Include="..\DumpDetective.Plugins.Threads\DumpDetective.Plugins.Threads.csproj" />
     <ProjectReference Include="..\DumpDetective.Plugins.Async\DumpDetective.Plugins.Async.csproj" />
     <ProjectReference Include="..\DumpDetective.Plugins.Types\DumpDetective.Plugins.Types.csproj" />
+    <ProjectReference Include="..\DumpDetective.Plugins.Leaks\DumpDetective.Plugins.Leaks.csproj" />
     <ProjectReference Include="..\DumpDetective.Sdk\DumpDetective.Sdk.csproj" />
   </ItemGroup>
   <ItemGroup>

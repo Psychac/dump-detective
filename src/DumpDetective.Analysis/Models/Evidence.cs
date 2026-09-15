@@ -14,6 +14,23 @@ internal sealed record Evidence(
 internal readonly record struct EvidenceSignal(string Name, string Description, double? Value = null);
 
 /// <summary>
+/// EventLeak-specific evidence shape (design §4.3): the publisher's own BFS-derived root path
+/// and a cheap subscriber-derived root hint are tracked separately rather than conflated into
+/// one field, so the report can label which source produced the displayed path. Distinct from
+/// the shared <see cref="Evidence"/> record used by Dominator/StaticRoot/Timer analyzers.
+/// Kept here (not moved to <c>Plugins.Leaks</c> with the rest of the EventLeak domain model)
+/// because <see cref="EvidenceConfidence"/>'s <c>EventLeakEvidence</c> overload, a shared,
+/// source-neutral utility every domain's finding generator relies on, needs it directly and
+/// must not depend on any <c>Plugins.*</c> package.
+/// </summary>
+internal sealed record EventLeakEvidence(
+    int SchemaVersion,
+    string? PublisherRootPath,
+    string? SampleSubscriberHint,
+    bool SearchTruncated,
+    IReadOnlyList<EvidenceSignal> Signals);
+
+/// <summary>
 /// Derives a per-finding confidence score from <see cref="Evidence"/>: a resolved, non-truncated
 /// sample root path is high confidence; a truncated path is partial/bounded; no path is speculative.
 /// </summary>

@@ -22,7 +22,13 @@ internal sealed record StaticRootDomainResult(
     int RootCount,
     ulong TotalRetainedBytes,
     IReadOnlyList<StaticRootSnapshot>? TopRootsByRetainedBytes = null,
-    ulong TotalManagedHeapBytes = 0) : AnalyzerDomainResult;
+    ulong TotalManagedHeapBytes = 0) : AnalyzerDomainResult, IStaticRootsByDescriptionSignal
+{
+    IReadOnlyList<NameBytesEntry> IStaticRootsByDescriptionSignal.TopRootsByRetainedBytes =>
+        (TopRootsByRetainedBytes ?? Array.Empty<StaticRootSnapshot>())
+            .Select(r => new NameBytesEntry(r.RootDescription, r.TotalMemoryImpact))
+            .ToArray();
+}
 
 internal sealed record StaticRootSnapshot(
     string RootDescription,

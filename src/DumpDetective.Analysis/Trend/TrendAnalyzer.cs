@@ -56,21 +56,21 @@ namespace DumpDetective.Analysis.Trend
             var result = new Dictionary<string, IReadOnlyList<NewLeakSignal>>(StringComparer.Ordinal);
 
             // Dominator Analysis (legacy alias: Memory Leak Analysis) — compare TopHighlyReferencedObjects by type.
-            if (TryGetRetentionResult(baseline, out DominatorDomainResult bLeak) &&
-                TryGetRetentionResult(current, out DominatorDomainResult cLeak))
+            if (TryGetRetentionResult(baseline, out IRetainedObjectsByTypeSignal? bLeak) &&
+                TryGetRetentionResult(current, out IRetainedObjectsByTypeSignal? cLeak))
             {
                 var baselineByType = new Dictionary<string, double>(StringComparer.Ordinal);
-                foreach (HighlyReferencedObjectSnapshot obj in bLeak.TopHighlyReferencedObjects ?? Array.Empty<HighlyReferencedObjectSnapshot>())
+                foreach (NameBytesEntry obj in bLeak.TopHighlyReferencedObjectsByType)
                 {
-                    baselineByType.TryGetValue(obj.TypeName, out double prev);
-                    baselineByType[obj.TypeName] = prev + obj.Size;
+                    baselineByType.TryGetValue(obj.Name, out double prev);
+                    baselineByType[obj.Name] = prev + obj.Bytes;
                 }
 
                 var currentByType = new Dictionary<string, double>(StringComparer.Ordinal);
-                foreach (HighlyReferencedObjectSnapshot obj in cLeak.TopHighlyReferencedObjects ?? Array.Empty<HighlyReferencedObjectSnapshot>())
+                foreach (NameBytesEntry obj in cLeak.TopHighlyReferencedObjectsByType)
                 {
-                    currentByType.TryGetValue(obj.TypeName, out double prev);
-                    currentByType[obj.TypeName] = prev + obj.Size;
+                    currentByType.TryGetValue(obj.Name, out double prev);
+                    currentByType[obj.Name] = prev + obj.Bytes;
                 }
 
                 var signals = new List<NewLeakSignal>();
@@ -88,19 +88,19 @@ namespace DumpDetective.Analysis.Trend
             // Static Root Leak Detection — compare TopRootsByRetainedBytes
             if (baseline.DomainResults.TryGetValue("Static Root Leak Detection", out var bStaticRaw) &&
                 current.DomainResults.TryGetValue("Static Root Leak Detection", out var cStaticRaw) &&
-                bStaticRaw is StaticRootDomainResult bStatic && cStaticRaw is StaticRootDomainResult cStatic)
+                bStaticRaw is IStaticRootsByDescriptionSignal bStatic && cStaticRaw is IStaticRootsByDescriptionSignal cStatic)
             {
                 var baselineByName = new Dictionary<string, double>(StringComparer.Ordinal);
-                foreach (StaticRootSnapshot entry in bStatic.TopRootsByRetainedBytes ?? Array.Empty<StaticRootSnapshot>())
-                    baselineByName[entry.RootDescription] = entry.TotalMemoryImpact;
+                foreach (NameBytesEntry entry in bStatic.TopRootsByRetainedBytes)
+                    baselineByName[entry.Name] = entry.Bytes;
 
                 var signals = new List<NewLeakSignal>();
-                foreach (StaticRootSnapshot entry in cStatic.TopRootsByRetainedBytes ?? Array.Empty<StaticRootSnapshot>())
+                foreach (NameBytesEntry entry in cStatic.TopRootsByRetainedBytes)
                 {
-                    double currentBytes = entry.TotalMemoryImpact;
-                    baselineByName.TryGetValue(entry.RootDescription, out double baseBytes);
+                    double currentBytes = entry.Bytes;
+                    baselineByName.TryGetValue(entry.Name, out double baseBytes);
                     if (currentBytes > baseBytes * 1.5 + 1024)
-                        signals.Add(new NewLeakSignal(entry.RootDescription, baseBytes, currentBytes, "StaticRootAnalyzer"));
+                        signals.Add(new NewLeakSignal(entry.Name, baseBytes, currentBytes, "StaticRootAnalyzer"));
                 }
 
                 if (signals.Count > 0)
@@ -110,20 +110,20 @@ namespace DumpDetective.Analysis.Trend
             // Leak Candidate Analysis — compare current candidate footprint by type.
             if (baseline.DomainResults.TryGetValue(LeakCandidateAnalyzerName, out AnalyzerDomainResult? bLeakCandidateRaw) &&
                 current.DomainResults.TryGetValue(LeakCandidateAnalyzerName, out AnalyzerDomainResult? cLeakCandidateRaw) &&
-                bLeakCandidateRaw is LeakCandidateDomainResult bLeakCandidates &&
-                cLeakCandidateRaw is LeakCandidateDomainResult cLeakCandidates)
+                bLeakCandidateRaw is ILeakCandidatesByTypeSignal bLeakCandidates &&
+                cLeakCandidateRaw is ILeakCandidatesByTypeSignal cLeakCandidates)
             {
                 var baselineByType = new Dictionary<string, double>(StringComparer.Ordinal);
-                foreach (LeakCandidateRecord candidate in bLeakCandidates.TopCandidates)
-                    baselineByType[candidate.TypeName] = candidate.TotalSize;
+                foreach (NameBytesEntry candidate in bLeakCandidates.TopCandidatesByType)
+                    baselineByType[candidate.Name] = candidate.Bytes;
 
                 var signals = new List<NewLeakSignal>();
-                foreach (LeakCandidateRecord candidate in cLeakCandidates.TopCandidates)
+                foreach (NameBytesEntry candidate in cLeakCandidates.TopCandidatesByType)
                 {
-                    double currentBytes = candidate.TotalSize;
-                    baselineByType.TryGetValue(candidate.TypeName, out double baseBytes);
+                    double currentBytes = candidate.Bytes;
+                    baselineByType.TryGetValue(candidate.Name, out double baseBytes);
                     if (currentBytes > baseBytes * 1.5 + 1024)
-                        signals.Add(new NewLeakSignal(candidate.TypeName, baseBytes, currentBytes, "LeakCandidateAnalyzer"));
+                        signals.Add(new NewLeakSignal(candidate.Name, baseBytes, currentBytes, "LeakCandidateAnalyzer"));
                 }
 
                 if (signals.Count > 0)
@@ -133,23 +133,23 @@ namespace DumpDetective.Analysis.Trend
             return result;
         }
 
-        private static bool TryGetRetentionResult(AnalysisSnapshot snapshot, out DominatorDomainResult result)
+        private static bool TryGetRetentionResult(AnalysisSnapshot snapshot, out IRetainedObjectsByTypeSignal? result)
         {
             if (snapshot.DomainResults.TryGetValue(RetentionAnalyzerName, out AnalyzerDomainResult? retentionRaw) &&
-                retentionRaw is DominatorDomainResult retention)
+                retentionRaw is IRetainedObjectsByTypeSignal retention)
             {
                 result = retention;
                 return true;
             }
 
             if (snapshot.DomainResults.TryGetValue(LegacyLeakAnalyzerName, out AnalyzerDomainResult? leakRaw) &&
-                leakRaw is DominatorDomainResult leak)
+                leakRaw is IRetainedObjectsByTypeSignal leak)
             {
                 result = leak;
                 return true;
             }
 
-            result = null!;
+            result = null;
             return false;
         }
 

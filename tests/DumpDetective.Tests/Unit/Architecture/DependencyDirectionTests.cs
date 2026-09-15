@@ -47,7 +47,18 @@ public sealed class DependencyDirectionTests
         // package — ObjectShape/Array/Boxing/Collection/String. Cleanest move yet: no cross-analyzer
         // DomainResult reads, and CollectionAnalyzer's ReferenceChainOptions dependency is only a
         // Core.Options record, not a reference to the not-yet-migrated ReferenceChainAnalyzer.
-        reportingRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core", "DumpDetective.Plugins.Async", "DumpDetective.Plugins.Gc", "DumpDetective.Plugins.Memory", "DumpDetective.Plugins.Threads", "DumpDetective.Plugins.Types", "DumpDetective.Sdk"]);
+        // DumpDetective.Plugins.Leaks added 2026-09-15: Phase 3 migration step 3's sixth domain
+        // package — LeakCandidate/StaticRoot/ReferenceChain/Dominator/EventLeak. New blocker not
+        // seen in any prior package: DumpDetective.Analysis.Trend.TrendAnalyzer (shared, source-
+        // neutral trend dispatcher) read DominatorDomainResult/StaticRootDomainResult/
+        // LeakCandidateDomainResult by concrete type in its new-leak-signal heuristic. Fixed the
+        // same way LeakCandidateAnalyzer's cross-analyzer coupling was fixed ahead of Plugins.Gc:
+        // narrow structural signal interfaces (IRetainedObjectsByTypeSignal,
+        // IStaticRootsByDescriptionSignal, ILeakCandidatesByTypeSignal) in DumpDetective.Core.Models.
+        // EventLeakEvidence stayed behind in Analysis/Models/Evidence.cs (not moved with
+        // EventLeakDomainResult) because EvidenceConfidence's EventLeakEvidence overload — a shared
+        // utility every domain's finding generator relies on — needs it directly.
+        reportingRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core", "DumpDetective.Plugins.Async", "DumpDetective.Plugins.Gc", "DumpDetective.Plugins.Leaks", "DumpDetective.Plugins.Memory", "DumpDetective.Plugins.Threads", "DumpDetective.Plugins.Types", "DumpDetective.Sdk"]);
         // DumpDetective.Sources.NetTrace added 2026-09-09: the interim trace/dump router
         // (docs/refactor/modularity-plan.md § 8) needs Cli to reach the trace-only analysis path
         // directly, the same way it already reaches dump analysis through Analysis/Reporting.

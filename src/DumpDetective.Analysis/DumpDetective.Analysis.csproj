@@ -30,6 +30,7 @@
     <InternalsVisibleTo Include="DumpDetective.Plugins.Threads" />
     <InternalsVisibleTo Include="DumpDetective.Plugins.Async" />
     <InternalsVisibleTo Include="DumpDetective.Plugins.Types" />
+    <InternalsVisibleTo Include="DumpDetective.Plugins.Leaks" />
     <InternalsVisibleTo Include="ProfileRootEnumeration" />
     <InternalsVisibleTo Include="ProfileRootPhase" />
     <InternalsVisibleTo Include="ProbeCacheReaders" />

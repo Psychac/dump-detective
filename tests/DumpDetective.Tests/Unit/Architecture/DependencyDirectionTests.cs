@@ -63,7 +63,16 @@ public sealed class DependencyDirectionTests
         // DomainResult reads either direction, and every pipeline interface the quartet implements
         // (IParallelHeapIndexScanParticipant, ICustomizesAnalysisContext) is an Analysis/Pipeline
         // forward reference, same as the Threads/Async precedent.
-        reportingRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core", "DumpDetective.Plugins.Async", "DumpDetective.Plugins.Gc", "DumpDetective.Plugins.Leaks", "DumpDetective.Plugins.Memory", "DumpDetective.Plugins.Runtime", "DumpDetective.Plugins.Threads", "DumpDetective.Plugins.Types", "DumpDetective.Sdk"]);
+        // DumpDetective.Plugins.Infra added 2026-09-15: Phase 3 migration step 3's eighth and final
+        // domain package — DbConnection/WcfChannel/HttpObject/TimerLeak/SqlCommand/
+        // SqlConnectionPool/SqlTransaction. No cross-analyzer DomainResult reads either direction;
+        // TimerLeakDomainResult already read only through ILogicalTimerCountSignal. The shared
+        // typed-resource pipeline infra (ITypedResourceCandidateSource, TypedResourceScanDriver,
+        // TypedResourceSampler, TypedResourceHeapIndexScanState) stayed in Analysis instead of
+        // moving here, since Plugins.Async/Plugins.Gc/Plugins.Types already forward-reference it —
+        // moving it into Plugins.Infra would have created a forbidden Plugins.* -> Plugins.Infra
+        // dependency.
+        reportingRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core", "DumpDetective.Plugins.Async", "DumpDetective.Plugins.Gc", "DumpDetective.Plugins.Infra", "DumpDetective.Plugins.Leaks", "DumpDetective.Plugins.Memory", "DumpDetective.Plugins.Runtime", "DumpDetective.Plugins.Threads", "DumpDetective.Plugins.Types", "DumpDetective.Sdk"]);
         // DumpDetective.Sources.NetTrace added 2026-09-09: the interim trace/dump router
         // (docs/refactor/modularity-plan.md § 8) needs Cli to reach the trace-only analysis path
         // directly, the same way it already reaches dump analysis through Analysis/Reporting.

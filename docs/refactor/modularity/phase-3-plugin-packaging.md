@@ -3,9 +3,10 @@
 Part of [../modularity-plan.md](../modularity-plan.md). Implements north-star **Layer 3**
 (in-process). Depends on [phase-2-artifact-platform.md](phase-2-artifact-platform.md).
 
-**Status, 2026-09-15: migration steps 1–2 done, step 3 in progress (`Plugins.Memory`,
-`Plugins.Gc`, `Plugins.Threads`, `Plugins.Async`, `Plugins.Types`, `Plugins.Leaks`, and
-`Plugins.Runtime` shipped, 1 package left), steps 4–6 not started.** Started ahead of the
+**Status, 2026-09-15: migration steps 1–2 done, step 3 complete (`Plugins.Memory`,
+`Plugins.Gc`, `Plugins.Threads`, `Plugins.Async`, `Plugins.Types`, `Plugins.Leaks`,
+`Plugins.Runtime`, and `Plugins.Infra` shipped — all 8 domain packages, all 36 analyzers now
+outside `DumpDetective.Analysis`), steps 4–6 not started.** Started ahead of the
 modularity plan's own [§8 minimum-viable path](../modularity-plan.md#8-the-minimum-viable-unified-path--adopted-as-the-chosen-plan-2026-09-08),
 which had deferred the plugin split until the trace/correlation capability proved itself — per
 explicit instruction this session, not a formal revisiting of that deferral. Made possible by the
@@ -328,6 +329,50 @@ Each package carries its analyzers plus their section builders, synthesis rules,
      `ModuleAnalyzerRealDumpTests` (12s), `ModuleAnalyzerTopTypesRealDumpTests` (7s),
      `JitAnalyzerRealDumpTests` (19s), `CrashAnalyzerRealDumpTests` (23s),
      `HeapTopologyAnalyzerRealDumpTests` (2s) — all passed, no regression.
+
+   **`Plugins.Infra` done, 2026-09-15** — eighth and final package shipped end-to-end
+   (`DbConnectionAnalyzer`, `WcfChannelAnalyzer`, `HttpObjectAnalyzer`, `TimerLeakAnalyzer`,
+   `SqlCommandAnalyzer`, `SqlConnectionPoolAnalyzer`, `SqlTransactionAnalyzer`). The domain's
+   real analyzer count (7) is larger than the table at the top of this doc suggested (4) — the
+   three SQL-specific analyzers (`SqlCommand`/`SqlConnectionPool`/`SqlTransaction`) were added to
+   the `Infra` domain after that table was written. No cross-analyzer `DomainResult` reads in
+   either direction: `TimerLeakDomainResult` appears in `LeakCandidateAnalyzer.cs` only inside an
+   XML doc comment — the real dependency was already decoupled through
+   `ILogicalTimerCountSignal` (`Core.Models`) ahead of `Plugins.Gc`.
+   - Files moved (`git mv`, namespaces left unchanged, same template as every prior package).
+     `ConnectionStringAnonymiser.cs` (used only by `DbConnectionAnalyzer` and
+     `SqlConnectionPoolAnalyzer`) moved with the package. `Models/InfrastructureDomainModels.cs`
+     — the one file holding all 7 analyzers' domain results — was split into one file per
+     analyzer (`DbConnectionDomainResult.cs`, `SqlConnectionPoolDomainResult.cs`,
+     `SqlTransactionDomainResult.cs`, `SqlCommandDomainResult.cs`, `WcfChannelDomainResult.cs`,
+     `HttpObjectDomainResult.cs`, `TimerLeakDomainResult.cs`), matching the one-file-per-analyzer
+     convention every other package already uses.
+   - New instance of the "shape problem" first seen in `Plugins.Async`: four shared
+     "typed-resource" pipeline files that lived in `Analyzers/Infra/`
+     (`ITypedResourceCandidateSource.cs`, `TypedResourceHeapIndexScanState.cs`,
+     `TypedResourceSampler.cs`, `TypedResourceScanDriver.cs`) are forward-referenced by three
+     already-shipped packages — `AsyncStateMachineAnalyzer` (`Plugins.Async`),
+     `WeakReferenceAnalyzer` (`Plugins.Gc`), and `CollectionAnalyzer` (`Plugins.Types`). Moving
+     them into `Plugins.Infra` would have created a `Plugins.* → Plugins.Infra` dependency, which
+     the "packages may not reference each other" rule forbids. Left in `Analysis/Analyzers/Infra/`
+     instead, matching the `Plugins.Threads`/`Plugins.Async` precedent for shared pipeline infra.
+   - Needed the same two `InternalsVisibleTo` grants every plugin package needs:
+     `DumpDetective.Analysis` → `Plugins.Infra` and `DumpDetective.Core` → `Plugins.Infra`
+     (`IAnalyzerTrendComparer`/`AnalyzerMetric`/`MetricDelta`). No `BenchmarkSuite1.csproj` change
+     needed — no Infra analyzer is benchmarked today.
+   - `PluginCatalogBuilderTests.BuildScannedCatalog`'s anchor list needed no replacement this
+     time: since `Infra` is the last domain package, there is no longer any "rest of `Analysis`"
+     assembly to anchor at all — `DbConnectionAnalyzer`'s assembly reference is now simply one of
+     the eight domain-package assemblies being scanned, same as the other seven.
+   - Verified against the real reference dump, one test at a time, foreground:
+     `DbConnectionAnalyzerRealDumpTests` (4s), `HttpObjectAnalyzerRealDumpTests` (14s),
+     `TimerLeakAnalyzerRealDumpTests` (7s), `WcfChannelAnalyzerRealDumpTests` (8s),
+     `SqlCommandAnalyzerRealDumpTests` (39s), `SqlConnectionPoolAnalyzerRealDumpTests` (21s),
+     `SqlTransactionAnalyzerRealDumpTests` (16s) — all passed, no regression.
+
+   All 36 `[AnalyzerModule]`-attributed analyzers now live outside `DumpDetective.Analysis`,
+   across 8 domain packages — step 3 is complete. Step 4 (deleting
+   `DefaultAnalyzerFeatureModuleCatalog.cs`) is now unblocked but not started.
 4. Delete `DefaultAnalyzerFeatureModuleCatalog.cs`, verified by a before/after catalog snapshot
    diff.
 5. Add the `plugins/` drop-in + ALC loader path with at least one test plugin.

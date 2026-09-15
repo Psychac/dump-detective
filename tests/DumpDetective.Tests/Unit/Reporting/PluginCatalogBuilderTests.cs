@@ -16,9 +16,10 @@ public sealed class PluginCatalogBuilderTests
 {
     private static IAnalyzerFeatureModuleCatalog BuildScannedCatalog()
     {
-        // DbConnectionAnalyzer anchors the still-in-Analysis assembly now that LeakCandidateAnalyzer
-        // (this test's anchor before the Plugins.Leaks migration) has moved into its own package —
-        // see docs/refactor/modularity/phase-3-plugin-packaging.md.
+        // DbConnectionAnalyzer (Plugins.Infra) is the eighth and final domain package to ship —
+        // every [AnalyzerModule]-attributed analyzer now lives outside DumpDetective.Analysis, so
+        // there is no longer any "rest of Analysis" assembly left to anchor. This is now simply
+        // the list of all eight domain-package assemblies.
         return new PluginCatalogBuilder().Build(
             typeof(DumpDetective.Analysis.Analyzers.Infra.DbConnectionAnalyzer).Assembly,
             typeof(DumpDetective.Analysis.Analyzers.Gc.GCRootAnalyzer).Assembly,

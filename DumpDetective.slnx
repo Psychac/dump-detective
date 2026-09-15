@@ -13,6 +13,7 @@
     <Project Path="src/DumpDetective.Plugins.Types/DumpDetective.Plugins.Types.csproj" />
     <Project Path="src/DumpDetective.Plugins.Leaks/DumpDetective.Plugins.Leaks.csproj" />
     <Project Path="src/DumpDetective.Plugins.Runtime/DumpDetective.Plugins.Runtime.csproj" />
+    <Project Path="src/DumpDetective.Plugins.Infra/DumpDetective.Plugins.Infra.csproj" />
     <Project Path="src/DumpDetective.Sources.NetTrace/DumpDetective.Sources.NetTrace.csproj" />
     <Project Path="src/BenchmarkSuite1/BenchmarkSuite1.csproj" />
   </Folder>

@@ -27,7 +27,12 @@ public sealed class DependencyDirectionTests
         // shape) belongs here, not in Cli — this project is the one that owns report-shape
         // contracts (see AnalysisReportDocument), the same reasoning that already puts
         // ReportOutputWriter's file-writing role in Cli instead.
-        reportingRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core", "DumpDetective.Sdk"]);
+        // DumpDetective.Plugins.Memory added 2026-09-15: Phase 3 migration step 3's first
+        // domain package (docs/refactor/modularity/phase-3-plugin-packaging.md) — Reporting still
+        // needs to reference it directly since DefaultAnalyzerFeatureModuleCatalog constructs its
+        // analyzer/model/comparer types by typeof(), and PluginCatalogBuilder's TrendComparer
+        // resolution still walks analyzerType.Assembly.
+        reportingRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core", "DumpDetective.Plugins.Memory", "DumpDetective.Sdk"]);
         // DumpDetective.Sources.NetTrace added 2026-09-09: the interim trace/dump router
         // (docs/refactor/modularity-plan.md § 8) needs Cli to reach the trace-only analysis path
         // directly, the same way it already reaches dump analysis through Analysis/Reporting.

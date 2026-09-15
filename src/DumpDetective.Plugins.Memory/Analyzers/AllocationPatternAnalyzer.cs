@@ -30,6 +30,7 @@ namespace DumpDetective.Analysis.Analyzers.Memory;
 /// retyping, not a real behavior this needs to preserve.
 /// </remarks>
 [AnalyzerModule(key: "allocation-pattern", displayName: "Allocation Pattern Analysis", order: 120, tags: ["gc", "allocation"])]
+[RequiresCapability(CapabilityVocabulary.HeapTypes)]
 public sealed class AllocationPatternAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "Allocation Pattern Analysis";

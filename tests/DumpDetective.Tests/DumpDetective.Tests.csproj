@@ -18,6 +18,7 @@
     <PackageReference Include="Moq" Version="4.*" />
     <ProjectReference Include="..\..\src\DumpDetective.Core\DumpDetective.Core.csproj" />
     <ProjectReference Include="..\..\src\DumpDetective.Analysis\DumpDetective.Analysis.csproj" />
+    <ProjectReference Include="..\..\src\DumpDetective.Plugins.Memory\DumpDetective.Plugins.Memory.csproj" />
     <ProjectReference Include="..\..\src\DumpDetective.Reporting\DumpDetective.Reporting.csproj" />
     <ProjectReference Include="..\..\src\DumpDetective.Cli\DumpDetective.Cli.csproj" />
     <ProjectReference Include="..\..\src\DumpDetective.Sdk\DumpDetective.Sdk.csproj" />

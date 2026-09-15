@@ -16,7 +16,9 @@ public sealed class PluginCatalogBuilderTests
 {
     private static IAnalyzerFeatureModuleCatalog BuildScannedCatalog()
     {
-        return new PluginCatalogBuilder().Build(typeof(DumpDetective.Analysis.Analyzers.Memory.MemoryAnalyzer).Assembly);
+        return new PluginCatalogBuilder().Build(
+            typeof(DumpDetective.Analysis.Analyzers.Gc.GCRootAnalyzer).Assembly,
+            typeof(DumpDetective.Analysis.Analyzers.Memory.MemoryAnalyzer).Assembly);
     }
 
     [Fact]

@@ -25,6 +25,7 @@ namespace DumpDetective.Analysis.Analyzers.Memory;
 /// pressure). Operates entirely on segment metadata — no heap object scan.
 /// </summary>
 [AnalyzerModule(key: "segment-reservation", displayName: "Segment Reservation Analysis", order: 380, tags: ["gc", "segments"])]
+[RequiresCapability(CapabilityVocabulary.HeapSegments)]
 public sealed class SegmentReservationAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "Segment Reservation Analysis";

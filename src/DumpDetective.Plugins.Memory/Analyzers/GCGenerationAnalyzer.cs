@@ -16,6 +16,7 @@ namespace DumpDetective.Analysis.Analyzers.Memory
     /// <c>Core.Abstractions.IAnalyzer</c> for <c>BenchmarkSuite1</c>.
     /// </summary>
     [AnalyzerModule(key: "gc-generation", displayName: "GC Generation Analysis", order: 110, tags: ["gc"])]
+    [RequiresCapability(CapabilityVocabulary.HeapTypes)]
     public sealed class GCGenerationAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     {
         public string Name => "GC Generation Analysis";

@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="DumpDetective.Analysis" />
+    <InternalsVisibleTo Include="DumpDetective.Plugins.Memory" />
     <InternalsVisibleTo Include="DumpDetective.Sources.NetTrace" />
     <InternalsVisibleTo Include="DumpDetective.Tests" />
   </ItemGroup>

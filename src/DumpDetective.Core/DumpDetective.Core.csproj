@@ -17,6 +17,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="DumpDetective.Analysis" />
     <InternalsVisibleTo Include="DumpDetective.Reporting" />
+    <InternalsVisibleTo Include="DumpDetective.Plugins.Memory" />
     <InternalsVisibleTo Include="DumpDetective.Cli" />
     <InternalsVisibleTo Include="DumpDetective.Tests" />
     <InternalsVisibleTo Include="ProfileRootPhase" />

@@ -34,6 +34,11 @@ namespace DumpDetective.Analysis.Analyzers.Memory;
 /// types, so this reuse is a plain internal call, not a boundary violation.
 /// </remarks>
 [AnalyzerModule(key: "memory", displayName: "Memory Analysis", order: 100, tags: ["memory"])]
+[RequiresCapability(
+    CapabilityVocabulary.HeapTypes,
+    CapabilityVocabulary.HeapSegments,
+    CapabilityVocabulary.HeapObjects,
+    CapabilityVocabulary.HeapReferences)]
 public sealed class MemoryAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     // Retained-size is a bounded BFS per candidate, not a cheap lookup — computing it for every

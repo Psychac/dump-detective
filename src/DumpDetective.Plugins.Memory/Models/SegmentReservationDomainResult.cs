@@ -16,12 +16,8 @@ internal sealed record SegmentReservationEntry(
     int LogicalHeap,
     double FillPct);
 
-/// <summary>
-/// GC region generation, per <see cref="ClrSegment.Kind" /> — distinct from <see cref="HeapSegmentKind"/>,
-/// which collapses Gen0/Gen1/Gen2/Ephemeral into a single SmallObjectHeap bucket. Region-based stats need
-/// the per-generation split since each generation is its own population of regions in regions-based GC.
-/// </summary>
-internal enum RegionGenerationKind { Generation0, Generation1, Generation2, Large, Pinned, Frozen, Ephemeral }
+// RegionGenerationKind lives in DumpDetective.Analysis.Models/RegionGenerationKind.cs — it's
+// shared with SegmentKindMapper and SdkSegmentKindMapper, which stay in DumpDetective.Analysis.
 
 /// <summary>Aggregate stats for one <see cref="RegionGenerationKind"/> bucket, populated only for regions-based heaps.</summary>
 internal sealed record RegionGenerationStats(

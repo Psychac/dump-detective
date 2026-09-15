@@ -3,7 +3,8 @@
 Part of [../modularity-plan.md](../modularity-plan.md). Implements north-star **Layer 3**
 (in-process). Depends on [phase-2-artifact-platform.md](phase-2-artifact-platform.md).
 
-**Status, 2026-09-15: migration steps 1–2 done, steps 3–6 not started.** Started ahead of the
+**Status, 2026-09-15: migration steps 1–2 done, step 3 in progress (`Plugins.Memory` shipped, 7
+packages left), steps 4–6 not started.** Started ahead of the
 modularity plan's own [§8 minimum-viable path](../modularity-plan.md#8-the-minimum-viable-unified-path--adopted-as-the-chosen-plan-2026-09-08),
 which had deferred the plugin split until the trace/correlation capability proved itself — per
 explicit instruction this session, not a formal revisiting of that deferral. Made possible by the
@@ -92,6 +93,39 @@ Each package carries its analyzers plus their section builders, synthesis rules,
    `LeakCandidateSectionBuilder`. Full list in the commit.
 3. Split analyzers + their reporting pieces into the packages above; annotate each with the
    capability declarations from Phase 0's capability map.
+   **`Plugins.Memory` done, 2026-09-15** — first package shipped end-to-end (`MemoryAnalyzer`,
+   `GCGenerationAnalyzer`, `AllocationPatternAnalyzer`, `LohFragmentationAnalyzer`,
+   `SegmentReservationAnalyzer`). Real, non-speculative dependency findings from doing this one:
+   - **`FindingGenerator`/`SectionBuilder` stayed in `DumpDetective.Reporting` — interim, not the
+     target shape.** `IAnalyzerSectionBuilder`, `AnalyzerDetailSection`, and the ~40-record
+     report-block DSL (`SectionBuilderBase`, `SectionIdDomainMap`, `MetricUtils`) all live inside
+     `Reporting` itself today, not in a shared contract layer a plugin package can implement
+     against without `Plugins.Memory → Reporting` — but `Reporting` already needs
+     `Reporting → Plugins.Memory` to wire up `DefaultAnalyzerFeatureModuleCatalog`/
+     `PluginCatalogBuilder`, so moving the companions with the analyzer creates a cycle. Neither
+     `DumpDetective.Core` (deliberately still dump-runtime-aware until Phase 7, see
+     modularity-plan.md § 10 point 8) nor `DumpDetective.Sdk` (its `Synthesis` namespace already
+     reserved for the *new* observation/finding schema Phase 5 introduces to replace this exact
+     DSL) is the right permanent home. **This is a real gap, not resolved here** — every future
+     package will hit the same cycle for its `SectionBuilder`. It should close either when Phase 5
+     replaces `FindingGenerator`/`SectionBuilder`/`TrendComparer` with the generic synthesis
+     differ, or sooner if a package needs its `SectionBuilder` to move before then — at which
+     point extracting the DSL contract into a proper shared location (likely `Sdk`, once it has a
+     second real consumer to shape it against) becomes non-speculative and should be done as its
+     own change, not folded into the next package's migration.
+   - Two model types (`RegionGenerationKind`, `TypeGenerationProfile`) were colocated with a
+     specific analyzer's `DomainResult` but consumed by other, unrelated analyzers still in
+     `Analysis` — split into their own files and kept in `Analysis.Models` rather than moved.
+     Worth checking for on every future package: a `DomainResult` file moving isn't guaranteed to
+     be self-contained.
+   - `InsightEngine` (cross-analyzer scoring, lived in `Analysis/Insight/`) directly referenced
+     every analyzer's `DomainResult` type, which would force `Analysis → Plugins.Memory` — the
+     mirror-image cycle to the `SectionBuilder` one, but this one had a clean fix: `InsightEngine`
+     is a pure, source-neutral consumer of already-produced domain results (no ClrMD/heap access
+     of its own), so it moved to `Reporting` (which already depended on both `Analysis` and, now,
+     `Plugins.Memory`). Each future package should check whether `InsightEngine` references its
+     `DomainResult` types too — it does, for most domains — though the fix, once made once, does
+     not need repeating per package.
 4. Delete `DefaultAnalyzerFeatureModuleCatalog.cs`, verified by a before/after catalog snapshot
    diff.
 5. Add the `plugins/` drop-in + ALC loader path with at least one test plugin.

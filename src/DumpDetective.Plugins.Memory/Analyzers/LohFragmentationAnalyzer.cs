@@ -38,6 +38,7 @@ namespace DumpDetective.Analysis.Analyzers.Memory
     /// same signal as <see cref="IHeapTypeStatisticsQuery.HasExactGenerationData"/>.
     /// </remarks>
     [AnalyzerModule(key: "loh-fragmentation", displayName: "LOH & POH Fragmentation Analysis", order: 290, tags: ["gc", "loh", "poh"])]
+    [RequiresCapability(CapabilityVocabulary.HeapSegments, CapabilityVocabulary.HeapTypes)]
     public sealed class LohFragmentationAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     {
         // Matches LargeObjectTracker's LOH threshold so both modes select the same candidates.

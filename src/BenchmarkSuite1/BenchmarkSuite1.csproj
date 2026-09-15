@@ -15,6 +15,7 @@
     <!-- Removed legacy project reference: ..\..\DumpDetective\DumpDetective.csproj -->
     <ProjectReference Include="..\DumpDetective.Core\DumpDetective.Core.csproj" />
     <ProjectReference Include="..\DumpDetective.Analysis\DumpDetective.Analysis.csproj" />
+    <ProjectReference Include="..\DumpDetective.Plugins.Memory\DumpDetective.Plugins.Memory.csproj" />
     <ProjectReference Include="..\DumpDetective.Reporting\DumpDetective.Reporting.csproj" />
   </ItemGroup>
 </Project>

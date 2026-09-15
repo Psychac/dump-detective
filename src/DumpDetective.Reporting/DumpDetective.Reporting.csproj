@@ -46,6 +46,7 @@
     <ProjectReference Include="..\DumpDetective.Plugins.Memory\DumpDetective.Plugins.Memory.csproj" />
     <ProjectReference Include="..\DumpDetective.Plugins.Gc\DumpDetective.Plugins.Gc.csproj" />
     <ProjectReference Include="..\DumpDetective.Plugins.Threads\DumpDetective.Plugins.Threads.csproj" />
+    <ProjectReference Include="..\DumpDetective.Plugins.Async\DumpDetective.Plugins.Async.csproj" />
     <ProjectReference Include="..\DumpDetective.Sdk\DumpDetective.Sdk.csproj" />
   </ItemGroup>
   <ItemGroup>

@@ -37,7 +37,13 @@ public sealed class DependencyDirectionTests
         // one needed no leftover models in Analysis: LeakCandidateAnalyzer's cross-analyzer read of
         // GCHandleDomainResult/GCRootDomainResult was decoupled first (structural signal interfaces
         // in DumpDetective.Core.Models), so all four models moved cleanly with no carve-out.
-        reportingRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core", "DumpDetective.Plugins.Gc", "DumpDetective.Plugins.Memory", "DumpDetective.Sdk"]);
+        // DumpDetective.Plugins.Threads added 2026-09-15: Phase 3 migration step 3's third domain
+        // package — Thread/ThreadStackCluster/Hang/LockGraph. This assertion wasn't updated when
+        // that package shipped; caught here as a side effect of adding Plugins.Async.
+        // DumpDetective.Plugins.Async added 2026-09-15: Phase 3 migration step 3's fourth domain
+        // package — AsyncTask/AsyncStateMachine. No carve-out needed: neither domain result is read
+        // by another analyzer, so unlike Plugins.Gc there was no cross-analyzer coupling to unwind.
+        reportingRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core", "DumpDetective.Plugins.Async", "DumpDetective.Plugins.Gc", "DumpDetective.Plugins.Memory", "DumpDetective.Plugins.Threads", "DumpDetective.Sdk"]);
         // DumpDetective.Sources.NetTrace added 2026-09-09: the interim trace/dump router
         // (docs/refactor/modularity-plan.md § 8) needs Cli to reach the trace-only analysis path
         // directly, the same way it already reaches dump analysis through Analysis/Reporting.

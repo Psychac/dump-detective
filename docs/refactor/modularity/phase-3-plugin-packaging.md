@@ -4,7 +4,8 @@ Part of [../modularity-plan.md](../modularity-plan.md). Implements north-star **
 (in-process). Depends on [phase-2-artifact-platform.md](phase-2-artifact-platform.md).
 
 **Status, 2026-09-15: migration steps 1–2 done, step 3 in progress (`Plugins.Memory`,
-`Plugins.Gc`, and `Plugins.Threads` shipped, 5 packages left), steps 4–6 not started.** Started ahead of the
+`Plugins.Gc`, `Plugins.Threads`, and `Plugins.Async` shipped, 4 packages left), steps 4–6 not
+started.** Started ahead of the
 modularity plan's own [§8 minimum-viable path](../modularity-plan.md#8-the-minimum-viable-unified-path--adopted-as-the-chosen-plan-2026-09-08),
 which had deferred the plugin split until the trace/correlation capability proved itself — per
 explicit instruction this session, not a formal revisiting of that deferral. Made possible by the
@@ -191,6 +192,43 @@ Each package carries its analyzers plus their section builders, synthesis rules,
      (`ThreadAnalyzer`'s), alongside the still-in-`Analysis` `LeakCandidateAnalyzer` anchor and the
      two prior packages' anchors — unaffected otherwise, since none of the thread quartet's types
      were ever the scan's anchor.
+
+   **`Plugins.Async` done, 2026-09-15** — fourth package shipped end-to-end (`AsyncTaskAnalyzer`,
+   `AsyncStateMachineAnalyzer`). The cleanest move so far — no cross-analyzer `DomainResult` reads
+   to unwind (unlike `Plugins.Gc`) and no shared infra to leave behind beyond what `Plugins.Threads`
+   already established as the pattern:
+   - Files moved (`git mv`, namespaces left unchanged — `DumpDetective.Analysis.Analyzers.Async`,
+     `DumpDetective.Analysis.Models`, `DumpDetective.Analysis.Trend.Comparers` — matching every
+     prior package's choice to avoid a cascading rename across `DefaultAnalyzerFeatureModuleCatalog`,
+     `InsightEngine`, and tests) needed two more `InternalsVisibleTo` grants than the checklist
+     implied: `DumpDetective.Analysis` → `Plugins.Async` (for the `internal` pipeline-participant
+     interfaces: `IHeapIndexScanParticipant`, `IParallelHeapIndexScanParticipant`,
+     `ICustomizesAnalysisContext`, `ITypedResourceCandidateSource`, `RuntimeAnalysisContext`,
+     `TypedResourceHeapIndexScanState`) and `DumpDetective.Core` → `Plugins.Async` (for
+     `IAnalyzerTrendComparer`/`AnalyzerMetric`/`MetricDelta`, all `internal` in `Core.Models`).
+     Worth checking explicitly on every future package, not just assumed from the `.csproj`
+     template: which `internal` surfaces the moved files reach into, on both `Analysis` and `Core`.
+   - **`AsyncStateMachineNamePattern`** (`Analysis/Utilities/`) looked like a clean move — used by
+     `AsyncStateMachineAnalyzer.IsCandidateType` and nothing else in `Analysis`'s own analyzer code —
+     until `DiskBackedObjectIndexWriter.IsAsyncStateMachineType` (Phase 1 heap-index-build code,
+     `Analysis/Indexing/`) turned out to share the exact same regex to compute
+     `TypeAggregateFlags.IsAsyncStateMachineType` at scan time. Moving the utility into
+     `Plugins.Async` would have created the reverse-direction dependency the architecture rule
+     forbids (`Analysis` → a `Plugins.*` package). Left in `Analysis/Utilities/` instead — a plain
+     forward reference from `Plugins.Async` (already an allowed direction) costs nothing. The
+     `Plugins.Memory`-style "does it reference the domain's own models" heuristic doesn't catch this
+     shape of coupling: check every utility a moving analyzer touches for callers *outside* the
+     domain, not just for dependencies *within* it.
+   - `DependencyDirectionTests.RefactoredProjects_ShouldFollowStrictDependencyDirection`
+     (`tests/DumpDetective.Tests/Unit/Architecture/`) asserts `Reporting`'s exact project-reference
+     set — and was never updated when `Plugins.Threads` shipped, so it was already silently wrong
+     (missing `Plugins.Threads`) before this migration touched it. Fixed both gaps in the same edit.
+     This test should be the first thing checked when landing any future package, since nothing
+     else in the build catches a missing entry here.
+   - `DumpDetective.slnx` had the same latent gap — `Plugins.Threads` was never added to the
+     solution file either. Added both `Plugins.Threads` and `Plugins.Async` here.
+   - `PluginCatalogBuilderTests.BuildScannedCatalog` anchor list gained a fifth assembly
+     (`AsyncTaskAnalyzer`'s).
 4. Delete `DefaultAnalyzerFeatureModuleCatalog.cs`, verified by a before/after catalog snapshot
    diff.
 5. Add the `plugins/` drop-in + ALC loader path with at least one test plugin.

@@ -23,7 +23,8 @@ public sealed class PluginCatalogBuilderTests
             typeof(DumpDetective.Analysis.Analyzers.Leaks.LeakCandidateAnalyzer).Assembly,
             typeof(DumpDetective.Analysis.Analyzers.Gc.GCRootAnalyzer).Assembly,
             typeof(DumpDetective.Analysis.Analyzers.Memory.MemoryAnalyzer).Assembly,
-            typeof(DumpDetective.Analysis.Analyzers.Threads.ThreadAnalyzer).Assembly);
+            typeof(DumpDetective.Analysis.Analyzers.Threads.ThreadAnalyzer).Assembly,
+            typeof(DumpDetective.Analysis.Analyzers.Async.AsyncTaskAnalyzer).Assembly);
     }
 
     [Fact]

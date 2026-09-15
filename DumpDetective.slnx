@@ -10,6 +10,7 @@
     <Project Path="src/DumpDetective.Plugins.Gc/DumpDetective.Plugins.Gc.csproj" />
     <Project Path="src/DumpDetective.Plugins.Threads/DumpDetective.Plugins.Threads.csproj" />
     <Project Path="src/DumpDetective.Plugins.Async/DumpDetective.Plugins.Async.csproj" />
+    <Project Path="src/DumpDetective.Plugins.Types/DumpDetective.Plugins.Types.csproj" />
     <Project Path="src/DumpDetective.Sources.NetTrace/DumpDetective.Sources.NetTrace.csproj" />
     <Project Path="src/BenchmarkSuite1/BenchmarkSuite1.csproj" />
   </Folder>

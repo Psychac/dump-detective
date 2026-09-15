@@ -4,8 +4,8 @@ Part of [../modularity-plan.md](../modularity-plan.md). Implements north-star **
 (in-process). Depends on [phase-2-artifact-platform.md](phase-2-artifact-platform.md).
 
 **Status, 2026-09-15: migration steps 1–2 done, step 3 in progress (`Plugins.Memory`,
-`Plugins.Gc`, `Plugins.Threads`, and `Plugins.Async` shipped, 4 packages left), steps 4–6 not
-started.** Started ahead of the
+`Plugins.Gc`, `Plugins.Threads`, `Plugins.Async`, and `Plugins.Types` shipped, 3 packages left),
+steps 4–6 not started.** Started ahead of the
 modularity plan's own [§8 minimum-viable path](../modularity-plan.md#8-the-minimum-viable-unified-path--adopted-as-the-chosen-plan-2026-09-08),
 which had deferred the plugin split until the trace/correlation capability proved itself — per
 explicit instruction this session, not a formal revisiting of that deferral. Made possible by the
@@ -229,6 +229,27 @@ Each package carries its analyzers plus their section builders, synthesis rules,
      solution file either. Added both `Plugins.Threads` and `Plugins.Async` here.
    - `PluginCatalogBuilderTests.BuildScannedCatalog` anchor list gained a fifth assembly
      (`AsyncTaskAnalyzer`'s).
+
+   **`Plugins.Types` done, 2026-09-15** — fifth package shipped end-to-end (`ObjectShapeAnalyzer`,
+   `ArrayAnalyzer`, `BoxingAnalyzer`, `CollectionAnalyzer`, `StringAnalyzer`). Cleanest move yet: no
+   cross-analyzer `DomainResult` reads to unwind, and `CollectionAnalyzer`'s `ReferenceChainOptions`
+   dependency is only a `Core.Options` record, not a reference to the not-yet-migrated
+   `ReferenceChainAnalyzer` class.
+   - Files moved (`git mv`, namespaces left unchanged, same as every prior package) needed the same
+     two extra `InternalsVisibleTo` grants `Plugins.Async` needed: `DumpDetective.Analysis` →
+     `Plugins.Types` (internal pipeline-participant interfaces) and `DumpDetective.Core` →
+     `Plugins.Types` (`IAnalyzerTrendComparer`/`AnalyzerMetric`/`MetricDelta`, and this package's own
+     `StringLeakInfo`). Also needed a `GlobalUsings.cs` in the new project (`DumpDetective.Analysis.
+     Models`, `DumpDetective.Analysis.Pipeline`) — the moved files relied on `Analysis`'s own
+     `GlobalUsings.cs` for those, which obviously doesn't travel with a `git mv`. Worth checking on
+     every future package: whether the source project has a `GlobalUsings.cs` the moved files were
+     silently depending on.
+   - `DistributionSummary` (colocated in `StringDomainResult.cs`) turned out to be consumed by
+     still-in-`Analysis` heap-index infra (`HeapIndexBuildResult`, `DiskBackedObjectIndexWriter`,
+     `TypeAggregateIndexReader`) — the same "colocated model, real consumer elsewhere" issue hit
+     during `Plugins.Memory`. Split into its own file, kept in `Analysis.Models` rather than moved.
+   - `PluginCatalogBuilderTests.BuildScannedCatalog` anchor list gained a sixth assembly
+     (`ArrayAnalyzer`'s).
 4. Delete `DefaultAnalyzerFeatureModuleCatalog.cs`, verified by a before/after catalog snapshot
    diff.
 5. Add the `plugins/` drop-in + ALC loader path with at least one test plugin.

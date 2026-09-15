@@ -18,6 +18,7 @@
     <ProjectReference Include="..\DumpDetective.Plugins.Memory\DumpDetective.Plugins.Memory.csproj" />
     <ProjectReference Include="..\DumpDetective.Plugins.Gc\DumpDetective.Plugins.Gc.csproj" />
     <ProjectReference Include="..\DumpDetective.Plugins.Threads\DumpDetective.Plugins.Threads.csproj" />
+    <ProjectReference Include="..\DumpDetective.Plugins.Types\DumpDetective.Plugins.Types.csproj" />
     <ProjectReference Include="..\DumpDetective.Reporting\DumpDetective.Reporting.csproj" />
   </ItemGroup>
 </Project>

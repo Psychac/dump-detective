@@ -16,12 +16,6 @@ internal sealed record LongStringEntry(
     /// <summary>Type name of the object holding this string (if available)</summary>
     string? TypeName = null);
 
-internal sealed record DistributionSummary(
-    IReadOnlyDictionary<string, double> Percentiles,
-    IReadOnlyDictionary<string, int> LengthBuckets,
-    IReadOnlyDictionary<string, int> FrequencyBuckets,
-    int SampleCount);
-
 internal sealed record DuplicateStringSnapshot(
     string Preview,
     int Count,

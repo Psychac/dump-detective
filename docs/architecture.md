@@ -203,11 +203,15 @@ shared built index. Full sub-cache responsibilities and governing constraints ar
 
 ## 9. Analysis layer — analyzer catalog
 
-Analyzers are registered as **feature modules** in `DefaultAnalyzerFeatureModuleCatalog`
-(`DumpDetective.Reporting.Capabilities`), one entry per analyzer bundling its `IAnalyzer`,
-`IFindingGenerator`, `IAnalyzerTrendComparer`, and `IAnalyzerSectionBuilder`, plus an execution
-`Order` and a set of `Tags` used for CLI filtering (`--tags`, `--only`, `--skip`). Current catalog,
-in execution order:
+Analyzers are registered as **feature modules**, discovered by `PluginCatalogBuilder`
+(`DumpDetective.Reporting.Capabilities`) scanning the 8 domain-package assemblies for
+`[AnalyzerModule]`-attributed `Sdk.Analysis.IAnalyzer` types — replacing the old hand-maintained
+`DefaultAnalyzerFeatureModuleCatalog` list (deleted in
+docs/refactor/modularity/phase-3-plugin-packaging.md migration step 4). Each module bundles its
+`IAnalyzer`, `IFindingGenerator`, `IAnalyzerTrendComparer`, and `IAnalyzerSectionBuilder` — the
+latter three resolved by naming convention (`{AnalyzerName minus trailing "Analyzer"}{Suffix}`) —
+plus an execution `Order` and a set of `Tags` used for CLI filtering (`--tags`, `--only`, `--skip`),
+both declared on the `[AnalyzerModule]` attribute. Current catalog, in execution order:
 
 | Order | Key | Analyzer | Tags |
 |---|---|---|---|
@@ -395,8 +399,9 @@ Adding an analyzer:
 1. Add a `XxxDomainResult` in `DumpDetective.Analysis.Models`
 2. Implement `XxxAnalyzer.cs` using streaming heap loops
 3. Implement its `IFindingGenerator`, `IAnalyzerTrendComparer`, `IAnalyzerSectionBuilder`
-4. Register one `Module(...)` entry in `DefaultAnalyzerFeatureModuleCatalog` (key, display name,
-   the four types above, execution order, tags)
+4. Annotate the analyzer with `[AnalyzerModule(key, displayName, order, tags)]` and name the three
+   companion types by convention (`{AnalyzerName minus trailing "Analyzer"}{Suffix}`) —
+   `PluginCatalogBuilder` discovers it automatically via assembly scan, no manual registration
 5. Add tests and docs
 
 No core engine changes are needed to add an analyzer — the staged pipeline, report assembly, and

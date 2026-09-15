@@ -32,7 +32,12 @@ public sealed class DependencyDirectionTests
         // needs to reference it directly since DefaultAnalyzerFeatureModuleCatalog constructs its
         // analyzer/model/comparer types by typeof(), and PluginCatalogBuilder's TrendComparer
         // resolution still walks analyzerType.Assembly.
-        reportingRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core", "DumpDetective.Plugins.Memory", "DumpDetective.Sdk"]);
+        // DumpDetective.Plugins.Gc added 2026-09-15: Phase 3 migration step 3's second domain
+        // package — GCRoot/GCHandle/FinalizableObject/WeakReference. Unlike Plugins.Memory, this
+        // one needed no leftover models in Analysis: LeakCandidateAnalyzer's cross-analyzer read of
+        // GCHandleDomainResult/GCRootDomainResult was decoupled first (structural signal interfaces
+        // in DumpDetective.Core.Models), so all four models moved cleanly with no carve-out.
+        reportingRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core", "DumpDetective.Plugins.Gc", "DumpDetective.Plugins.Memory", "DumpDetective.Sdk"]);
         // DumpDetective.Sources.NetTrace added 2026-09-09: the interim trace/dump router
         // (docs/refactor/modularity-plan.md § 8) needs Cli to reach the trace-only analysis path
         // directly, the same way it already reaches dump analysis through Analysis/Reporting.

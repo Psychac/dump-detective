@@ -3,8 +3,8 @@
 Part of [../modularity-plan.md](../modularity-plan.md). Implements north-star **Layer 3**
 (in-process). Depends on [phase-2-artifact-platform.md](phase-2-artifact-platform.md).
 
-**Status, 2026-09-15: migration steps 1–2 done, step 3 in progress (`Plugins.Memory` shipped, 7
-packages left), steps 4–6 not started.** Started ahead of the
+**Status, 2026-09-15: migration steps 1–2 done, step 3 in progress (`Plugins.Memory` and
+`Plugins.Gc` shipped, 6 packages left), steps 4–6 not started.** Started ahead of the
 modularity plan's own [§8 minimum-viable path](../modularity-plan.md#8-the-minimum-viable-unified-path--adopted-as-the-chosen-plan-2026-09-08),
 which had deferred the plugin split until the trace/correlation capability proved itself — per
 explicit instruction this session, not a formal revisiting of that deferral. Made possible by the
@@ -126,6 +126,44 @@ Each package carries its analyzers plus their section builders, synthesis rules,
      `Plugins.Memory`). Each future package should check whether `InsightEngine` references its
      `DomainResult` types too — it does, for most domains — though the fix, once made once, does
      not need repeating per package.
+
+   **`Plugins.Gc` done, 2026-09-15** — second package shipped end-to-end (`GCRootAnalyzer`,
+   `GCHandleAnalyzer`, `FinalizableObjectAnalyzer`, `WeakReferenceAnalyzer`). Unlike
+   `Plugins.Memory`, this one hit a real cross-*analyzer* dependency, not just a shared-model one:
+   - **`LeakCandidateAnalyzer`** (`Analysis/Analyzers/Leaks/`, destined for the future
+     `Plugins.Threads` package, not this one) is the only analyzer in the codebase that reads
+     another analyzer's already-completed `DomainResult` directly — `GCHandleDomainResult` and
+     `GCRootDomainResult` here, plus `TimerLeakDomainResult` and a static reference to
+     `TimerLeakAnalyzer.NamedTimerWrapperTypeNames` for a different future package. Left as-is,
+     this would have forced the same "leave the model behind in `Analysis.Models`" carve-out
+     `Plugins.Memory` needed for `RegionGenerationKind`/`TypeGenerationProfile` — except recurring
+     for every package `LeakCandidateAnalyzer` touches, not a one-off. Landed as its own commit
+     ahead of the package move (commit `c724344`): three narrow structural signal interfaces
+     (`IHandleRetentionSignal`, `IDirectRootSignal`, `ILogicalTimerCountSignal`) plus a shared
+     `TimerWrapperTypeNames` vocabulary constant, added to `DumpDetective.Core.Models` (zero
+     project references, already reachable from `Analysis` and every plugin package).
+     `GCHandleDomainResult`/`GCRootDomainResult`/`TimerLeakDomainResult` implement the interfaces;
+     `LeakCandidateAnalyzer` now reads via `GetResult<TInterface>()` instead of the concrete types,
+     and `AnalyzerRunResultsExtensions.GetResult<T>`'s constraint relaxed from
+     `where T : AnalyzerDomainResult` to `where T : class` to allow it. Pure refactor, no
+     scheduling change — `LeakCandidateAnalyzer` still runs deferred exactly as before. This let
+     **all four** `Gc` models move with no carve-out, and the same interface pattern is reusable
+     the next time a package hits this shape of problem (e.g. whenever `TimerLeakAnalyzer` gets its
+     own package).
+   - `GCRootAnalysisProjection` (`Analysis/Utilities/`) turned out to depend on `RootFinding`/
+     `RootKindSummary` (defined alongside `GCRootDomainResult`), so it moved into
+     `Plugins.Gc/Utilities/` too, even though it currently has no callers anywhere — dead code, but
+     moving it was cheaper and safer than deleting unrelated code as a side effect of this
+     migration. `MemoryAnalysisProjection`'s equivalent stayed in `Analysis/Utilities` in the
+     `Plugins.Memory` migration precisely because it *doesn't* depend on the moved models — the
+     rule for these utility classes is "does it reference the domain's own models," not "which
+     analyzer does it serve."
+   - `PluginCatalogBuilderTests.BuildScannedCatalog` had been (accidentally) scanning all of
+     `Analysis` via `typeof(GCRootAnalyzer).Assembly`, since `GCRootAnalyzer` used to live there.
+     Moving it out silently dropped ~27 still-in-`Analysis` analyzers from the test's module-count
+     check until it was pointed at `LeakCandidateAnalyzer`'s assembly instead — worth checking for
+     on every future package: whatever anchors this test's scan of "the rest of `Analysis`" needs
+     to keep pointing at something that stays there.
 4. Delete `DefaultAnalyzerFeatureModuleCatalog.cs`, verified by a before/after catalog snapshot
    diff.
 5. Add the `plugins/` drop-in + ALC loader path with at least one test plugin.

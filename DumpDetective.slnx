@@ -7,6 +7,7 @@
     <Project Path="src/DumpDetective.Sdk/DumpDetective.Sdk.csproj" />
     <Project Path="src/DumpDetective.Platform/DumpDetective.Platform.csproj" />
     <Project Path="src/DumpDetective.Plugins.Memory/DumpDetective.Plugins.Memory.csproj" />
+    <Project Path="src/DumpDetective.Plugins.Gc/DumpDetective.Plugins.Gc.csproj" />
     <Project Path="src/DumpDetective.Sources.NetTrace/DumpDetective.Sources.NetTrace.csproj" />
     <Project Path="src/BenchmarkSuite1/BenchmarkSuite1.csproj" />
   </Folder>

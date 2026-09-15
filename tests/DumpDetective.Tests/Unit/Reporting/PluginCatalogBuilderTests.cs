@@ -16,7 +16,11 @@ public sealed class PluginCatalogBuilderTests
 {
     private static IAnalyzerFeatureModuleCatalog BuildScannedCatalog()
     {
+        // LeakCandidateAnalyzer anchors the still-in-Analysis assembly now that GCRootAnalyzer
+        // (this test's anchor before the Plugins.Gc migration) has moved into its own package —
+        // see docs/refactor/modularity/phase-3-plugin-packaging.md.
         return new PluginCatalogBuilder().Build(
+            typeof(DumpDetective.Analysis.Analyzers.Leaks.LeakCandidateAnalyzer).Assembly,
             typeof(DumpDetective.Analysis.Analyzers.Gc.GCRootAnalyzer).Assembly,
             typeof(DumpDetective.Analysis.Analyzers.Memory.MemoryAnalyzer).Assembly);
     }

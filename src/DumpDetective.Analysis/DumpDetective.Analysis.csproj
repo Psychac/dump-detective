@@ -24,6 +24,7 @@
     <InternalsVisibleTo Include="DumpDetective.Cli" />
     <InternalsVisibleTo Include="DumpDetective.Reporting" />
     <InternalsVisibleTo Include="DumpDetective.Plugins.Memory" />
+    <InternalsVisibleTo Include="DumpDetective.Plugins.Gc" />
     <InternalsVisibleTo Include="DumpDetective.Tests" />
     <InternalsVisibleTo Include="BenchmarkSuite1" />
     <InternalsVisibleTo Include="ProfileRootEnumeration" />

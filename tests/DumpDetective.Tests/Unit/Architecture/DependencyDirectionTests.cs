@@ -76,7 +76,11 @@ public sealed class DependencyDirectionTests
         // DumpDetective.Sources.NetTrace added 2026-09-09: the interim trace/dump router
         // (docs/refactor/modularity-plan.md § 8) needs Cli to reach the trace-only analysis path
         // directly, the same way it already reaches dump analysis through Analysis/Reporting.
-        cliRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core", "DumpDetective.Reporting", "DumpDetective.Sources.NetTrace"]);
+        // DumpDetective.Orchestration added 2026-09-15: Phase 4 step 1's generic DAG engine
+        // (docs/refactor/modularity/phase-4-session-orchestration.md) — Cli owns the concrete
+        // single-dump node adapters (they depend on Analysis/Reporting types), Orchestration owns
+        // only IPipelineNode/PipelineGraph/PipelineExecutor.
+        cliRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core", "DumpDetective.Orchestration", "DumpDetective.Reporting", "DumpDetective.Sources.NetTrace"]);
     }
 
     [Fact]
@@ -91,6 +95,21 @@ public sealed class DependencyDirectionTests
         IReadOnlyCollection<string> projectRefs = ReadProjectReferenceNames(platformProjectPath);
 
         projectRefs.Should().Equal(["DumpDetective.Sdk"]);
+    }
+
+    [Fact]
+    public void OrchestrationProject_ShouldDependOnSdkAndPlatformOnly()
+    {
+        // Phase 4 step 1: "references Sdk + Platform; no Sources.*, no Plugins.*" —
+        // docs/refactor/modularity/phase-4-session-orchestration.md's target shape. Orchestration
+        // is the generic DAG engine (IPipelineNode/PipelineGraph/PipelineExecutor); it must not
+        // know about dumps, traces, or any concrete analyzer domain.
+        string repoRoot = FindRepositoryRoot();
+        string orchestrationProjectPath = Path.Combine(repoRoot, "src", "DumpDetective.Orchestration", "DumpDetective.Orchestration.csproj");
+
+        IReadOnlyCollection<string> projectRefs = ReadProjectReferenceNames(orchestrationProjectPath);
+
+        projectRefs.Should().Equal(["DumpDetective.Platform", "DumpDetective.Sdk"]);
     }
 
     [Fact]

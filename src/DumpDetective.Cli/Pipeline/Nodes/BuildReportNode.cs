@@ -1,15 +1,20 @@
+using DumpDetective.Orchestration.Graph;
 using DumpDetective.Reporting.Services;
 using DumpDetective.Reporting.Formatters;
 
-namespace DumpDetective.Cli.Pipeline.Stages;
+namespace DumpDetective.Cli.Pipeline.Nodes;
 
-internal sealed class BuildReportStage(ReportBuilderFacade reportBuilderFacade) : IAnalysisStage
+internal sealed class BuildReportNode(ReportBuilderFacade reportBuilderFacade) : IPipelineNode
 {
-    public string Name => "Build report";
+    public string Id => "Build report";
+    public IReadOnlyCollection<string> Produces { get; } = [SingleDumpPipelineKeys.ReportDocument];
+    public IReadOnlyCollection<string> Consumes { get; } = [SingleDumpPipelineKeys.AnalyzerRuns];
 
-    public Task ExecuteAsync(SingleDumpPipelineState state, CancellationToken cancellationToken)
+    public ValueTask ExecuteAsync(PipelineNodeContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+
+        SingleDumpPipelineState state = context.Get<SingleDumpPipelineState>(SingleDumpPipelineKeys.State);
 
         if (state.IncidentContext is null)
         {
@@ -31,6 +36,8 @@ internal sealed class BuildReportStage(ReportBuilderFacade reportBuilderFacade) 
             state.Resolved.Report.Format,
             new HtmlRenderSettings(state.Resolved.Report.PreRender, state.Resolved.Report.StyleVersion));
 
-        return Task.CompletedTask;
+        context.Set(SingleDumpPipelineKeys.ReportDocument, doc);
+
+        return ValueTask.CompletedTask;
     }
 }

@@ -2,9 +2,10 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using DumpDetective.Cli.Pipeline.Stages;
 using DumpDetective.Cli.Pipeline;
+using DumpDetective.Cli.Pipeline.Nodes;
 using DumpDetective.Cli.Output;
+using DumpDetective.Orchestration.Graph;
 using DumpDetective.Reporting.Models;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
@@ -61,8 +62,10 @@ public sealed class WriteOutputStageTests
                 Runs = [run]
             };
 
-            var stage = new WriteOutputStage(new ReportOutputWriter());
-            await stage.ExecuteAsync(state, CancellationToken.None);
+            var node = new WriteOutputNode(new ReportOutputWriter());
+            var context = new PipelineNodeContext();
+            context.Set(SingleDumpPipelineKeys.State, state);
+            await node.ExecuteAsync(context, CancellationToken.None);
 
             // Expected artifacts path is artifacts/<dump-base-name> where dump-base-name comes from Resolved.DumpPath
             string dumpBase = Path.GetFileNameWithoutExtension(state.Resolved.DumpPath);

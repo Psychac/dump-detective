@@ -1,33 +1,37 @@
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Dump;
 using DumpDetective.Analysis.Pipeline;
+using DumpDetective.Cli.Diagnostics;
 using DumpDetective.Cli.Execution;
+using DumpDetective.Cli.Models;
 using DumpDetective.Core.Abstractions;
-using DumpDetective.Sdk.Analysis;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
-using DumpDetective.Cli.Diagnostics;
+using DumpDetective.Orchestration.Graph;
+using DumpDetective.Sdk.Analysis;
 
-namespace DumpDetective.Cli.Pipeline.Stages;
+namespace DumpDetective.Cli.Pipeline.Nodes;
 
-using DumpDetective.Cli.Models;
-
-internal sealed class RunAnalyzersPipelineStage(DumpDetective.Cli.Execution.AnalyzerExecutionService analyzerExecutionService) : IAnalysisStage
+internal sealed class RunAnalyzersNode(AnalyzerExecutionService analyzerExecutionService) : IPipelineNode
 {
-    public string Name => "Run analyzers";
-    private readonly DumpDetective.Cli.Execution.AnalyzerExecutionService _analyzerExecutionService = analyzerExecutionService;
+    public string Id => "Run analyzers";
+    public IReadOnlyCollection<string> Produces { get; } = [SingleDumpPipelineKeys.AnalyzerRuns];
+    public IReadOnlyCollection<string> Consumes { get; } =
+        [SingleDumpPipelineKeys.HeapIndex, SingleDumpPipelineKeys.AnalysisContext, SingleDumpPipelineKeys.Pipeline];
 
-    public async Task ExecuteAsync(SingleDumpPipelineState state, CancellationToken cancellationToken)
+    public async ValueTask ExecuteAsync(PipelineNodeContext context, CancellationToken cancellationToken)
     {
-        // Context and pipeline are built by BuildHeapIndexStage, which also runs the shared
-        // heap-index/thread-stack scan passes under its own header/timer before this stage starts.
-        RuntimeAnalysisContext context = state.Context!;
+        SingleDumpPipelineState state = context.Get<SingleDumpPipelineState>(SingleDumpPipelineKeys.State);
+
+        // Context and pipeline are built by BuildHeapIndexNode, which also runs the shared
+        // heap-index/thread-stack scan passes under its own header/timer before this node starts.
+        RuntimeAnalysisContext runtimeContext = state.Context!;
         AnalysisPipeline pipeline = state.Pipeline!;
 
         IReadOnlyList<AnalyzerRunResult> runs;
         try
         {
-            runs = await _analyzerExecutionService.ExecuteAsync(pipeline, context, cancellationToken);
+            runs = await analyzerExecutionService.ExecuteAsync(pipeline, runtimeContext, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -54,5 +58,7 @@ internal sealed class RunAnalyzersPipelineStage(DumpDetective.Cli.Execution.Anal
             resolved: state.Resolved,
             activeAnalyzers: state.ActiveAnalyzers,
             elapsed: state.AnalysisElapsed);
+
+        context.Set(SingleDumpPipelineKeys.AnalyzerRuns, state.Runs);
     }
 }

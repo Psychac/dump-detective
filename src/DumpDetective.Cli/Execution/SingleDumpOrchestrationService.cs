@@ -1,7 +1,9 @@
 using DumpDetective.Analysis.Insight;
 using DumpDetective.Cli.Console;
 using DumpDetective.Cli.Pipeline;
+using DumpDetective.Cli.Pipeline.Nodes;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Orchestration.Graph;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Core.Models;
 using DumpDetective.Cli.Models;
@@ -13,12 +15,12 @@ using System.Diagnostics;
 namespace DumpDetective.Cli.Execution;
 
 /// <summary>
-/// Orchestrates a single-dump analysis run: stages → pipeline runner → console summary → exit code.
+/// Orchestrates a single-dump analysis run: nodes → pipeline executor → console summary → exit code.
 /// </summary>
 internal sealed class SingleDumpOrchestrationService(
-    SingleDumpStageFactory stageFactory)
+    SingleDumpNodeFactory nodeFactory)
 {
-    private readonly SingleDumpStageFactory _stageFactory = stageFactory;
+    private readonly SingleDumpNodeFactory _nodeFactory = nodeFactory;
 
     private const string TemporaryAdaptiveIndexingNotice =
         "TEMP-ADAPTIVE-INDEXING: Auto mode uses a provisional dump-size threshold; tune memory-vs-disk selection with large-dump profiling.";
@@ -38,8 +40,6 @@ internal sealed class SingleDumpOrchestrationService(
         if (resolved.DiagnosticMode)
             ConsoleUx.Info(AnalysisSummaryFormatter.FormatConfigSummary(resolved, activeAnalyzers));
 
-        IReadOnlyList<IAnalysisStage> stages = _stageFactory.BuildStages();
-
         using SingleDumpPipelineState state = new()
         {
             Resolved = resolved,
@@ -47,7 +47,14 @@ internal sealed class SingleDumpOrchestrationService(
             ActiveAnalyzers = activeAnalyzers
         };
 
-        await new StagedPipelineRunner().RunAsync(stages, state, cancellationToken);
+        IReadOnlyList<IPipelineNode> nodes = _nodeFactory.BuildNodes();
+        PipelineGraph graph = PipelineGraphBuilder.Build(nodes);
+
+        var context = new PipelineNodeContext();
+        context.Set(SingleDumpPipelineKeys.State, state);
+
+        var observer = new ConsoleMemoryPipelineObserver(state);
+        await new PipelineExecutor().RunAsync(graph, context, cancellationToken, observer);
 
         // Run the cross-cutting insight engine after all analyzer findings are generated.
         state.Insights = new InsightEngine().Analyze(state.Runs);

@@ -4,21 +4,26 @@ using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Cli.Console;
 using DumpDetective.Cli.Execution;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Orchestration.Graph;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Core.Options;
 using System.Diagnostics;
 
-namespace DumpDetective.Cli.Pipeline.Stages;
+namespace DumpDetective.Cli.Pipeline.Nodes;
 
-internal sealed class BuildHeapIndexStage(AnalyzerExecutionService analyzerExecutionService) : IAnalysisStage
+internal sealed class BuildHeapIndexNode(AnalyzerExecutionService analyzerExecutionService) : IPipelineNode
 {
     private const int HeartbeatMs = 300;
-    private readonly AnalyzerExecutionService _analyzerExecutionService = analyzerExecutionService;
 
-    public string Name => "Scan + Index heap";
+    public string Id => "Scan + Index heap";
+    public IReadOnlyCollection<string> Produces { get; } =
+        [SingleDumpPipelineKeys.HeapIndex, SingleDumpPipelineKeys.AnalysisContext, SingleDumpPipelineKeys.Pipeline];
+    public IReadOnlyCollection<string> Consumes { get; } = [SingleDumpPipelineKeys.LoadContext];
 
-    public async Task ExecuteAsync(SingleDumpPipelineState state, CancellationToken cancellationToken)
+    public async ValueTask ExecuteAsync(PipelineNodeContext context, CancellationToken cancellationToken)
     {
+        SingleDumpPipelineState state = context.Get<SingleDumpPipelineState>(SingleDumpPipelineKeys.State);
+
         DumpIndexPaths.ResolveCacheDirectory(
             state.Resolved.DumpPath,
             state.Resolved.CacheDirectory,
@@ -27,8 +32,8 @@ internal sealed class BuildHeapIndexStage(AnalyzerExecutionService analyzerExecu
         HeapAnalysisCache heapCache = new();
         IHeapIndexBuilder heapBuilder = heapCache;
 
-        // Wall-clock stopwatch owned by this stage so elapsed always ticks forward,
-        // regardless of whether the writer has stopped its own internal stopwatch.
+        // Wall-clock stopwatch owned by this node so elapsed always ticks forward, regardless of
+        // whether the writer has stopped its own internal stopwatch.
         Stopwatch wallClock = Stopwatch.StartNew();
 
         // Shared state updated by the progress callback and read by the heartbeat.
@@ -45,9 +50,9 @@ internal sealed class BuildHeapIndexStage(AnalyzerExecutionService analyzerExecu
         var progress = new Progress<DumpDetective.Core.Abstractions.AnalyzerProgressReport>(r =>
         {
             // Only update the shared state here — do NOT call ConsoleUx.ObjectScanProgress.
-            // Progress<T> callbacks run on a ThreadPool thread; calling the console renderer
-            // here races with the heartbeat loop below, producing garbled output and stale phases.
-            // The heartbeat is the sole renderer.
+            // Progress<T> callbacks run on a ThreadPool thread; calling the console renderer here
+            // races with the heartbeat loop below, producing garbled output and stale phases. The
+            // heartbeat is the sole renderer.
             Interlocked.Exchange(ref lastScanned, r.ScannedCount);
             lock (progressLock)
             {
@@ -57,8 +62,8 @@ internal sealed class BuildHeapIndexStage(AnalyzerExecutionService analyzerExecu
             timeline.Record(r.Phase, wallClock.Elapsed);
         });
 
-        // Run the synchronous index build on a thread-pool thread so the heartbeat
-        // loop below can keep the spinner's elapsed counter live between progress events.
+        // Run the synchronous index build on a thread-pool thread so the heartbeat loop below can
+        // keep the spinner's elapsed counter live between progress events.
         Task<HeapIndexBuildResult> buildTask = Task.Run(
             () => heapBuilder.PrebuildHeapIndex(
                 state.LoadContext!.Heap,
@@ -82,18 +87,18 @@ internal sealed class BuildHeapIndexStage(AnalyzerExecutionService analyzerExecu
             // the whole stage is done.
             ConsoleUx.PhaseBreakdown(timeline.DrainCompletedSegments());
 
-            // Heartbeat: re-render the spinner with the wall-clock elapsed so the
-            // timer keeps ticking even when the writer hasn't fired a progress event.
+            // Heartbeat: re-render the spinner with the wall-clock elapsed so the timer keeps
+            // ticking even when the writer hasn't fired a progress event.
             string details;
             lock (progressLock)
                 details = string.IsNullOrWhiteSpace(lastDetail) ? lastPhase : lastDetail;
-            ConsoleUx.ObjectScanProgress(Name, Interlocked.Read(ref lastScanned), wallClock.Elapsed, details);
+            ConsoleUx.ObjectScanProgress(Id, Interlocked.Read(ref lastScanned), wallClock.Elapsed, details);
         }
 
         HeapIndexBuildResult heapIndex = await buildTask;
         wallClock.Stop();
 
-        ConsoleUx.ObjectScanComplete(Name, heapIndex.ObjectCount, heapIndex.Elapsed, Path.GetFileName(heapIndex.IndexPath));
+        ConsoleUx.ObjectScanComplete(Id, heapIndex.ObjectCount, heapIndex.Elapsed, Path.GetFileName(heapIndex.IndexPath));
         ConsoleUx.PhaseBreakdown(timeline.GetRemainingSegments(wallClock.Elapsed));
 
         if (heapIndex.SatelliteWarnings is { Count: > 0 } satelliteWarnings)
@@ -112,20 +117,23 @@ internal sealed class BuildHeapIndexStage(AnalyzerExecutionService analyzerExecu
         state.HeapCache = heapCache;
         state.HeapIndex = heapIndex;
 
-        RuntimeAnalysisContext context = _analyzerExecutionService.BuildContext(
+        RuntimeAnalysisContext runtimeContext = analyzerExecutionService.BuildContext(
             state.Resolved,
             state.LoadContext!,
             heapCache,
             state.ActiveAnalyzers);
-        AnalysisPipeline pipeline = _analyzerExecutionService.CreatePipeline(state.ActiveAnalyzers);
+        AnalysisPipeline pipeline = analyzerExecutionService.CreatePipeline(state.ActiveAnalyzers);
 
         // Shared heap-index/thread-stack scan passes are one pass over the index fanned out to
         // every participating analyzer, not an individual analyzer — run them here, under this
-        // stage's header/timer, instead of letting them run inside "Run analyzers".
-        _analyzerExecutionService.RunSharedScans(pipeline, context, cancellationToken);
+        // node's header/timer, instead of letting them run inside "Run analyzers".
+        analyzerExecutionService.RunSharedScans(pipeline, runtimeContext, cancellationToken);
 
-        state.Context = context;
+        state.Context = runtimeContext;
         state.Pipeline = pipeline;
+
+        context.Set(SingleDumpPipelineKeys.HeapIndex, heapIndex);
+        context.Set(SingleDumpPipelineKeys.AnalysisContext, runtimeContext);
+        context.Set(SingleDumpPipelineKeys.Pipeline, pipeline);
     }
 }
-

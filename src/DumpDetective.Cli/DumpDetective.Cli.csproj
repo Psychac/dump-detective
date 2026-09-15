@@ -18,6 +18,7 @@
     <ProjectReference Include="..\DumpDetective.Analysis\DumpDetective.Analysis.csproj" />
     <ProjectReference Include="..\DumpDetective.Reporting\DumpDetective.Reporting.csproj" />
     <ProjectReference Include="..\DumpDetective.Sources.NetTrace\DumpDetective.Sources.NetTrace.csproj" />
+    <ProjectReference Include="..\DumpDetective.Orchestration\DumpDetective.Orchestration.csproj" />
   </ItemGroup>
 
   <ItemGroup>

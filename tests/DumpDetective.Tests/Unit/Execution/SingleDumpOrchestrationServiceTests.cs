@@ -18,12 +18,12 @@ public sealed class SingleDumpOrchestrationServiceTests
     public async Task ExecuteAsync_PropagatesException_WhenDumpLoadFails()
     {
         var resolved = ResolvedExecutionOptionsFactory.Create("out.json");
-        var stageFactory = new SingleDumpStageFactory(
+        var nodeFactory = new SingleDumpNodeFactory(
             dumpLoader: new ThrowingDumpLoader(),
             analyzerExecutionService: null!,
             reportBuilderFacade: null!,
             outputWriter: null!);
-        var service = new SingleDumpOrchestrationService(stageFactory);
+        var service = new SingleDumpOrchestrationService(nodeFactory);
 
         Func<Task> act = () => service.ExecuteAsync(
             resolved,

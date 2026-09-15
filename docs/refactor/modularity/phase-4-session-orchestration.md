@@ -10,6 +10,22 @@ list) — `SessionBuilder`/`SessionValidator` below are that item's real home. `
 *not* claimed here or in Phase 5 yet; whichever phase's work item ends up needing multi-artifact
 alignment first should pick it up explicitly rather than assume the other phase has it.
 
+**Status, 2026-09-15: migration step 1 done.** `DumpDetective.Orchestration` exists with the
+generic `Graph/` engine (`IPipelineNode`, `PipelineNodeContext`, `PipelineGraph`,
+`PipelineGraphBuilder`, `PipelineExecutor`, `NodeScheduler`), referencing only `Sdk` + `Platform`
+(enforced by `OrchestrationProject_ShouldDependOnSdkAndPlatformOnly`). The single-dump path's five
+stages are now five `IPipelineNode` adapters in `DumpDetective.Cli/Pipeline/Nodes/` (they still
+depend on `Analysis`/`Reporting`, which is why the adapters live in `Cli` and not in
+`Orchestration`), wired by `SingleDumpNodeFactory` and run by `PipelineExecutor` from
+`SingleDumpOrchestrationService`. `IAnalysisStage`, `StagedPipelineRunner`,
+`SingleDumpStageFactory`, and the 5 old stage classes are deleted (nothing referenced them once the
+switch happened, so their step-4 retirement was pulled forward rather than left as dead code).
+`SingleDumpPipelineState` is unchanged — the nodes still operate on it as their shared data bag;
+`Produces`/`Consumes` are hand-declared per this step's scope, not yet derived from capabilities.
+`TrendOrchestrationService`/`PerDumpExecutionService` (multi-dump path) and `Discovery`/`Session`
+(steps 2–3) are untouched. Verified via the full non-real-dump suite (1586 passed) plus one
+foreground run against the ~3.3GB reference dump through the new executor.
+
 ## Goal
 
 Replace the fixed five-stage pipeline **and** the proposed mode enum with one capability-driven

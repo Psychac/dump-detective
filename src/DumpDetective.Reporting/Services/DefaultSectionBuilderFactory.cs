@@ -10,7 +10,7 @@ internal sealed class DefaultSectionBuilderFactory : ISectionBuilderFactory
     private readonly IAnalyzerFeatureModuleCatalog _moduleCatalog;
 
     public DefaultSectionBuilderFactory()
-        : this(new ServiceCollection().BuildServiceProvider(), new DefaultAnalyzerFeatureModuleCatalog())
+        : this(new ServiceCollection().BuildServiceProvider(), PluginCatalogBuilder.BuildDefault())
     {
     }
 

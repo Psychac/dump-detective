@@ -52,7 +52,7 @@ public sealed class DominatorConcurrentResidentMemoryRealDumpTests(ITestOutputHe
         var cache = new HeapAnalysisCache();
 
         // Real production analyzer list, in real module order — not a hand-copied subset, so this
-        // stays in sync with the actual registry (DefaultAnalyzerFeatureModuleCatalog) automatically.
+        // stays in sync with the actual registry (PluginCatalogBuilder.BuildDefault()) automatically.
         var analyzers = new DefaultAnalyzerFactory().CreateAnalyzers();
         output.WriteLine($"Analyzer count: {analyzers.Count}");
 

@@ -5,6 +5,12 @@ using DumpDetective.Sdk.Analysis;
 
 namespace DumpDetective.Reporting.Capabilities;
 
+internal interface IAnalyzerFeatureModuleCatalog
+{
+    IReadOnlyList<AnalyzerFeatureModule> Modules { get; }
+    IReadOnlyList<Type> GlobalReportSectionBuilderTypes { get; }
+}
+
 internal sealed record AnalyzerFeatureModule(
     string Key,
     string DisplayName,

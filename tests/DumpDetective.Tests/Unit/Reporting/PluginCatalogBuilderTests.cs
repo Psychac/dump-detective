@@ -1,4 +1,5 @@
 using DumpDetective.Reporting.Capabilities;
+using DumpDetective.Reporting.SectionBuilders;
 
 using FluentAssertions;
 
@@ -8,71 +9,112 @@ namespace DumpDetective.Tests.Unit.Reporting;
 
 /// <summary>
 /// The "before/after catalog snapshot diff" docs/refactor/modularity/phase-3-plugin-packaging.md's
-/// migration step 4 asks for, run now instead of at swap-in time so a convention/attribute-porting
-/// mistake is caught while <see cref="DefaultAnalyzerFeatureModuleCatalog"/> still exists to diff
-/// against.
+/// migration step 4 asks for: the snapshot below (key, display name, order, tags) was captured from
+/// the hand-maintained <c>DefaultAnalyzerFeatureModuleCatalog</c> immediately before it was deleted,
+/// so this file is the diff target — a regression in <see cref="PluginCatalogBuilder"/>'s scanning
+/// or convention resolution now has nothing live to compare against, only this frozen data.
 /// </summary>
 public sealed class PluginCatalogBuilderTests
 {
-    private static IAnalyzerFeatureModuleCatalog BuildScannedCatalog()
+    private static readonly (string Key, string DisplayName, int Order, string[] Tags)[] ExpectedModules =
+    [
+        ("memory", "Memory Analysis", 100, ["memory"]),
+        ("gc-generation", "GC Generation Analysis", 110, ["gc"]),
+        ("allocation-pattern", "Allocation Pattern Analysis", 120, ["gc", "allocation"]),
+        ("object-shape", "Object Shape Analysis", 130, ["types"]),
+        ("gc-root", "GC Root Analysis", 140, ["roots"]),
+        ("heap-topology", "Heap Topology Analysis", 150, ["heap"]),
+        ("module", "Module Analysis", 160, ["runtime"]),
+        ("crash", "Crash Analysis", 170, ["exceptions"]),
+        ("hang", "Hang Analysis", 180, ["threads"]),
+        ("async-task", "Async Task Analysis", 190, ["async"]),
+        ("leak-candidate", "Leak Candidate Analysis", 210, ["leaks"]),
+        ("dominator", "Dominator Analysis", 220, ["retention", "dominator"]),
+        ("string", "String Analysis", 230, ["memory", "string"]),
+        ("collection", "Collection Analysis", 240, ["collections"]),
+        ("static-root", "Static Root Leak Detection", 250, ["roots", "leaks"]),
+        ("reference-chain", "Reference Chain Analysis", 260, ["roots"]),
+        ("gc-handle", "GC Handle Analysis", 270, ["handles"]),
+        ("loh-fragmentation", "LOH & POH Fragmentation Analysis", 290, ["gc", "loh", "poh"]),
+        ("thread-stack-cluster", "Thread Stack Cluster Analysis", 300, ["threads"]),
+        ("thread", "Thread Analysis", 310, ["threads"]),
+        ("lock-graph", "Lock Graph Analysis", 320, ["threads", "locks"]),
+        ("event-leak", "Event Leak Analysis", 330, ["events", "leaks"]),
+        ("finalizable-object", "Finalizable Object Analysis", 340, ["gc"]),
+        ("async-state-machine", "Async State Machine Analysis", 350, ["async"]),
+        ("array", "Array Analysis", 360, ["types"]),
+        ("segment-reservation", "Segment Reservation Analysis", 380, ["gc", "segments"]),
+        ("weak-reference", "Weak Reference Analysis", 390, ["gc"]),
+        ("boxing", "Boxing Analysis", 400, ["types", "perf"]),
+        ("jit", "JIT Analysis", 410, ["runtime", "perf"]),
+        ("db-connection", "DbConnection Analysis", 420, ["infra", "network"]),
+        ("sql-transaction", "SQL Transaction Analysis", 425, ["infra", "network"]),
+        ("sql-command", "SQL Command Analysis", 426, ["infra", "network"]),
+        ("sql-connection-pool", "SQL Connection Pool Analysis", 427, ["infra", "network"]),
+        ("wcf-channel", "WCF Channel Analysis", 430, ["infra", "network"]),
+        ("http-object", "Http Object Analysis", 440, ["infra", "network"]),
+        ("timer-leak", "Timer Leak Analysis", 450, ["infra", "timers"]),
+    ];
+
+    private static readonly Type[] ExpectedGlobalReportSectionBuilderTypes =
+    [
+        typeof(ExecutiveSummarySectionBuilder),
+        typeof(TypeSystemSectionBuilder),
+        typeof(InsightsSectionBuilder),
+        typeof(ConfidenceSectionBuilder),
+    ];
+
+    private static IAnalyzerFeatureModuleCatalog BuildScannedCatalog() => PluginCatalogBuilder.BuildDefault();
+
+    [Fact]
+    public void Build_ProducesSameModuleCountAsSnapshot()
     {
-        // DbConnectionAnalyzer (Plugins.Infra) is the eighth and final domain package to ship —
-        // every [AnalyzerModule]-attributed analyzer now lives outside DumpDetective.Analysis, so
-        // there is no longer any "rest of Analysis" assembly left to anchor. This is now simply
-        // the list of all eight domain-package assemblies.
-        return new PluginCatalogBuilder().Build(
-            typeof(DumpDetective.Analysis.Analyzers.Infra.DbConnectionAnalyzer).Assembly,
-            typeof(DumpDetective.Analysis.Analyzers.Gc.GCRootAnalyzer).Assembly,
-            typeof(DumpDetective.Analysis.Analyzers.Memory.MemoryAnalyzer).Assembly,
-            typeof(DumpDetective.Analysis.Analyzers.Threads.ThreadAnalyzer).Assembly,
-            typeof(DumpDetective.Analysis.Analyzers.Async.AsyncTaskAnalyzer).Assembly,
-            typeof(DumpDetective.Analysis.Analyzers.Types.ArrayAnalyzer).Assembly,
-            typeof(DumpDetective.Analysis.Analyzers.Leaks.LeakCandidateAnalyzer).Assembly,
-            typeof(DumpDetective.Analysis.Analyzers.Runtime.ModuleAnalyzer).Assembly);
+        IAnalyzerFeatureModuleCatalog actual = BuildScannedCatalog();
+
+        actual.Modules.Should().HaveCount(ExpectedModules.Length);
     }
 
     [Fact]
-    public void Build_ProducesSameModuleCountAsDefaultCatalog()
+    public void Build_ProducesModulesMatchingSnapshot()
     {
-        IAnalyzerFeatureModuleCatalog expected = new DefaultAnalyzerFeatureModuleCatalog();
         IAnalyzerFeatureModuleCatalog actual = BuildScannedCatalog();
-
-        actual.Modules.Should().HaveCount(expected.Modules.Count);
-    }
-
-    [Fact]
-    public void Build_ProducesModulesShapeIdenticalToDefaultCatalog()
-    {
-        IAnalyzerFeatureModuleCatalog expected = new DefaultAnalyzerFeatureModuleCatalog();
-        IAnalyzerFeatureModuleCatalog actual = BuildScannedCatalog();
-
-        var expectedByKey = expected.Modules.ToDictionary(m => m.Key);
         var actualByKey = actual.Modules.ToDictionary(m => m.Key);
 
-        actualByKey.Keys.Should().BeEquivalentTo(expectedByKey.Keys);
+        actualByKey.Keys.Should().BeEquivalentTo(ExpectedModules.Select(m => m.Key));
 
-        foreach (string key in expectedByKey.Keys)
+        foreach ((string key, string displayName, int order, string[] tags) in ExpectedModules)
         {
-            AnalyzerFeatureModule expectedModule = expectedByKey[key];
             AnalyzerFeatureModule actualModule = actualByKey[key];
 
-            actualModule.DisplayName.Should().Be(expectedModule.DisplayName, "key {0}", key);
-            actualModule.AnalyzerType.Should().Be(expectedModule.AnalyzerType, "key {0}", key);
-            actualModule.FindingGeneratorType.Should().Be(expectedModule.FindingGeneratorType, "key {0}", key);
-            actualModule.TrendComparerType.Should().Be(expectedModule.TrendComparerType, "key {0}", key);
-            actualModule.AnalyzerSectionBuilderType.Should().Be(expectedModule.AnalyzerSectionBuilderType, "key {0}", key);
-            actualModule.Order.Should().Be(expectedModule.Order, "key {0}", key);
-            actualModule.Tags.Should().BeEquivalentTo(expectedModule.Tags, "key {0}", key);
+            actualModule.DisplayName.Should().Be(displayName, "key {0}", key);
+            actualModule.Order.Should().Be(order, "key {0}", key);
+            actualModule.Tags.Should().BeEquivalentTo(tags, "key {0}", key);
         }
     }
 
     [Fact]
-    public void Build_ProducesSameGlobalReportSectionBuilderTypesAsDefaultCatalog()
+    public void Build_ModuleCompanionTypesFollowNamingConvention()
     {
-        IAnalyzerFeatureModuleCatalog expected = new DefaultAnalyzerFeatureModuleCatalog();
         IAnalyzerFeatureModuleCatalog actual = BuildScannedCatalog();
 
-        actual.GlobalReportSectionBuilderTypes.Should().BeEquivalentTo(expected.GlobalReportSectionBuilderTypes);
+        foreach (AnalyzerFeatureModule module in actual.Modules)
+        {
+            string baseName = module.AnalyzerType.Name.EndsWith("Analyzer", StringComparison.Ordinal)
+                ? module.AnalyzerType.Name[..^"Analyzer".Length]
+                : module.AnalyzerType.Name;
+
+            module.FindingGeneratorType.Name.Should().Be($"{baseName}FindingGenerator", "analyzer {0}", module.AnalyzerType.Name);
+            module.TrendComparerType.Name.Should().Be($"{baseName}TrendComparer", "analyzer {0}", module.AnalyzerType.Name);
+            module.AnalyzerSectionBuilderType.Name.Should().Be($"{baseName}SectionBuilder", "analyzer {0}", module.AnalyzerType.Name);
+        }
+    }
+
+    [Fact]
+    public void Build_ProducesExpectedGlobalReportSectionBuilderTypes()
+    {
+        IAnalyzerFeatureModuleCatalog actual = BuildScannedCatalog();
+
+        actual.GlobalReportSectionBuilderTypes.Should().BeEquivalentTo(ExpectedGlobalReportSectionBuilderTypes);
     }
 
     [Fact]

@@ -24,6 +24,14 @@
     <ProjectReference Include="..\..\src\DumpDetective.Sdk\DumpDetective.Sdk.csproj" />
     <ProjectReference Include="..\..\src\DumpDetective.Platform\DumpDetective.Platform.csproj" />
     <ProjectReference Include="..\..\src\DumpDetective.Sources.NetTrace\DumpDetective.Sources.NetTrace.csproj" />
+    <!--
+      Referenced only so MSBuild builds it and copies its output next to this project's own —
+      DropInPluginLoaderTests locates DumpDetective.TestPlugin.dll by that copy and loads it through
+      its own isolated AssemblyLoadContext, exactly like a real drop-in plugin. No test code
+      references its namespace/types directly, so it is never loaded into the default ALC by the
+      test host itself.
+    -->
+    <ProjectReference Include="..\Fixtures\DumpDetective.TestPlugin\DumpDetective.TestPlugin.csproj" />
   </ItemGroup>
 
   <ItemGroup>

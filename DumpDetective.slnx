@@ -20,4 +20,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/DumpDetective.Tests/DumpDetective.Tests.csproj" />
   </Folder>
+  <Folder Name="/tests/Fixtures/">
+    <Project Path="tests/Fixtures/DumpDetective.TestPlugin/DumpDetective.TestPlugin.csproj" />
+  </Folder>
 </Solution>

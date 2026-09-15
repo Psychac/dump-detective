@@ -12,7 +12,7 @@ internal sealed class DefaultAnalyzerFactory : IAnalyzerFactory
     private readonly IAnalyzerFeatureModuleCatalog _moduleCatalog;
 
     public DefaultAnalyzerFactory()
-        : this(BuildCompatibilityServiceProvider(NullLoggerFactory.Instance), new DefaultAnalyzerFeatureModuleCatalog())
+        : this(BuildCompatibilityServiceProvider(NullLoggerFactory.Instance), PluginCatalogBuilder.BuildDefault())
     {
     }
 

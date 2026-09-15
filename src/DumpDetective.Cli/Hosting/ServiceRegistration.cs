@@ -36,8 +36,8 @@ internal static class ServiceRegistration
 
         services.AddSingleton<RootCommandBuilder>();
 
-        DefaultAnalyzerFeatureModuleCatalog moduleCatalog = new();
-        services.AddSingleton<IAnalyzerFeatureModuleCatalog>(moduleCatalog);
+        IAnalyzerFeatureModuleCatalog moduleCatalog = PluginCatalogBuilder.BuildDefault();
+        services.AddSingleton(moduleCatalog);
 
         services.AddSingleton<DumpDetective.Cli.Configuration.ConfigurationResolver>();
         services.AddSingleton<StartupValidator>();

@@ -7,18 +7,17 @@ namespace DumpDetective.Reporting.Capabilities;
 
 /// <summary>
 /// Builds an <see cref="IAnalyzerFeatureModuleCatalog"/> by scanning assemblies for
-/// <see cref="AnalyzerModuleAttribute"/>-annotated <c>Sdk.Analysis.IAnalyzer</c> implementations,
-/// replacing <see cref="DefaultAnalyzerFeatureModuleCatalog"/>'s hand-maintained module list — see
-/// docs/refactor/modularity/phase-3-plugin-packaging.md migration step 2.
+/// <see cref="AnalyzerModuleAttribute"/>-annotated <c>Sdk.Analysis.IAnalyzer</c> implementations —
+/// the sole catalog implementation since migration step 4 deleted the hand-maintained
+/// <c>DefaultAnalyzerFeatureModuleCatalog</c> — see
+/// docs/refactor/modularity/phase-3-plugin-packaging.md migration steps 2 and 4.
 /// </summary>
 /// <remarks>
 /// Each analyzer's <c>FindingGenerator</c>/<c>TrendComparer</c>/<c>SectionBuilder</c> companion
 /// types are located by convention — <c>{AnalyzerName minus trailing "Analyzer"}{Suffix}</c> — not
 /// declared on the attribute. Verified before this was written: 36/36 analyzers already follow this
 /// convention (renamed the handful that didn't as part of the same change), so the convention
-/// carries real information instead of being a rule invented to fit later. Not yet wired into DI —
-/// that swap, alongside deleting <see cref="DefaultAnalyzerFeatureModuleCatalog"/>, is migration
-/// step 4.
+/// carries real information instead of being a rule invented to fit later.
 /// </remarks>
 internal sealed class PluginCatalogBuilder
 {
@@ -29,6 +28,30 @@ internal sealed class PluginCatalogBuilder
         typeof(InsightsSectionBuilder),
         typeof(ConfidenceSectionBuilder),
     ];
+
+    /// <summary>
+    /// The 8 domain-package assemblies that carry every <see cref="AnalyzerModuleAttribute"/>-
+    /// annotated analyzer, one representative type per package — used to build the production
+    /// catalog without a caller having to know the full package list.
+    /// </summary>
+    private static readonly Assembly[] DefaultAnalyzerAssemblies =
+    [
+        typeof(DumpDetective.Analysis.Analyzers.Memory.MemoryAnalyzer).Assembly,
+        typeof(DumpDetective.Analysis.Analyzers.Gc.GCRootAnalyzer).Assembly,
+        typeof(DumpDetective.Analysis.Analyzers.Threads.ThreadAnalyzer).Assembly,
+        typeof(DumpDetective.Analysis.Analyzers.Async.AsyncTaskAnalyzer).Assembly,
+        typeof(DumpDetective.Analysis.Analyzers.Types.ArrayAnalyzer).Assembly,
+        typeof(DumpDetective.Analysis.Analyzers.Leaks.LeakCandidateAnalyzer).Assembly,
+        typeof(DumpDetective.Analysis.Analyzers.Runtime.ModuleAnalyzer).Assembly,
+        typeof(DumpDetective.Analysis.Analyzers.Infra.DbConnectionAnalyzer).Assembly,
+    ];
+
+    /// <summary>
+    /// Builds the production catalog by scanning <see cref="DefaultAnalyzerAssemblies"/> — the
+    /// single source of truth for "which assemblies carry analyzers" that DI wiring, factory
+    /// fallback constructors, and tests all share.
+    /// </summary>
+    public static IAnalyzerFeatureModuleCatalog BuildDefault() => new PluginCatalogBuilder().Build(DefaultAnalyzerAssemblies);
 
     public IAnalyzerFeatureModuleCatalog Build(params IReadOnlyList<Assembly> analyzerAssemblies)
     {

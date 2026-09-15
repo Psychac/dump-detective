@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>14.0</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>DumpDetective.TestPlugin</RootNamespace>
+  </PropertyGroup>
+
+  <!--
+    Deliberately references DumpDetective.Sdk only — this is the fixture proving out
+    docs/refactor/modularity/phase-3-plugin-packaging.md migration step 6's rule ("plugin packages
+    reference Sdk + Platform only") for a genuinely out-of-tree drop-in plugin, not an in-repo
+    domain package (which may reference Analysis/Core). DropInPluginLoaderTests copies this
+    project's build output into a `plugins/DumpDetective.TestPlugin/` drop-in layout and loads it
+    through an isolated AssemblyLoadContext, the same way a real third-party plugin would arrive.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\DumpDetective.Sdk\DumpDetective.Sdk.csproj" Private="false" ReferenceOutputAssembly="true" />
+  </ItemGroup>
+
+</Project>

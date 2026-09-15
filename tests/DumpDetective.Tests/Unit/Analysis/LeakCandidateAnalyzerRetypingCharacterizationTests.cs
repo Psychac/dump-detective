@@ -3,6 +3,7 @@ using DumpDetective.Analysis.Analyzers.Leaks;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Enums;
+using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Identity;
@@ -187,9 +188,9 @@ public sealed class LeakCandidateAnalyzerRetypingCharacterizationTests
         var objectLookup = new FakeHeapObjectLookup();
         objectLookup.SetObject(0x1000, "MyApp.Cache");
 
-        var directRoots = new Dictionary<ulong, RootFinding>
+        var directRoots = new Dictionary<ulong, DirectRootEntry>
         {
-            [0x1000] = new RootFinding("StaticVar", 0x2000, "MyApp.Registry._instance", "MyApp.Cache", 0x1000, 1000, 50),
+            [0x1000] = new DirectRootEntry(0x1000, "StaticVar", "MyApp.Registry._instance"),
         };
 
         LeakCandidateDomainResult result = await Analyze(typeStats, objectLookup: objectLookup, directRootsByTargetAddress: directRoots);
@@ -231,7 +232,7 @@ public sealed class LeakCandidateAnalyzerRetypingCharacterizationTests
         IReadOnlySet<string>? pinnedTargetTypes = null,
         IReadOnlySet<string>? dependentTargetTypes = null,
         int logicalTimerCount = 0,
-        IReadOnlyDictionary<ulong, RootFinding>? directRootsByTargetAddress = null)
+        IReadOnlyDictionary<ulong, DirectRootEntry>? directRootsByTargetAddress = null)
     {
         var analyzer = new LeakCandidateAnalyzer();
         var options = new LeakCandidateAnalyzerOptions(

@@ -85,7 +85,11 @@ internal sealed record GCHandleDomainResult(
     /// <summary>Minimum absolute Gen2/LOH WeakLong target count required before the fraction
     /// threshold is evaluated (P3-2) — avoids noise on small weak-handle populations.</summary>
     int WeakLongGen2MinimumCountThreshold = 100,
-    double DependentUnresolvedPercentWarningThreshold = 50.0) : AnalyzerDomainResult;
+    double DependentUnresolvedPercentWarningThreshold = 50.0) : AnalyzerDomainResult, IHandleRetentionSignal
+{
+    IReadOnlyList<NameCountEntry> IHandleRetentionSignal.TopPinnedTargetTypes => TopPinnedTargetTypes ?? [];
+    IReadOnlyList<NameCountEntry> IHandleRetentionSignal.DependentTopTargetTypes => DependentTopTargetTypes ?? [];
+}
 
 /// <summary>One individual Pinned/AsyncPinned handle target, for the P2-4 top-N address table.</summary>
 internal sealed record PinnedHandleAddressEntry(ulong Address, string TypeName, ulong Bytes, string HandleKind);

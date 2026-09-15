@@ -1,5 +1,3 @@
-using DumpDetective.Analysis.Analyzers.Gc;
-using DumpDetective.Analysis.Analyzers.Infra;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.SdkBridge;
@@ -28,15 +26,20 @@ namespace DumpDetective.Analysis.Analyzers.Leaks;
 /// live in <c>Core.Models</c>, which the SDK cannot reference. The real, principled fix
 /// (docs/refactor/modularity/phase-4-session-orchestration.md's dependency-graph orchestrator,
 /// where nodes declare <c>Produces</c>/<c>Consumes</c> instead of a single "run me last" bucket) is
-/// Phase 4 and hasn't started. This retyping doesn't wait for it: <see cref="LeakCandidateAnalyzerLegacyAdapter"/>
-/// still implements <c>IDeferredAnalyzer</c> and still reads <c>context.CompletedRunResults</c> —
-/// exactly as the pre-retyping analyzer did — but does so in <c>BuildSdkContext</c>, extracting only
-/// the three specific signals actually consumed (<c>GCHandleDomainResult</c>'s pinned/dependent
-/// target types, <c>TimerLeakDomainResult</c>'s logical timer count, <c>GCRootDomainResult</c>'s
-/// direct-root lookup) into <see cref="LeakCandidateAnalyzerOptions"/>, handed through the existing
-/// <c>AnalyzerOptions</c> slot. This inner analyzer has zero knowledge that <c>CompletedRunResults</c>
-/// exists — it just reads three plain fields. When Phase 4 lands, this adapter-side extraction is
-/// replaced by real graph edges, not reworked from scratch.
+/// Phase 4 and hasn't started. This class still implements <c>IDeferredAnalyzer</c> and still reads
+/// <c>context.CompletedRunResults</c> in <see cref="ICustomizesAnalysisContext.BuildAnalysisContext"/>,
+/// extracting only the three specific signals actually consumed — <see cref="Core.Models.IHandleRetentionSignal"/>'s
+/// pinned/dependent target types, <see cref="Core.Models.ILogicalTimerCountSignal"/>'s logical timer
+/// count, <see cref="Core.Models.IDirectRootSignal"/>'s direct-root lookup — into
+/// <see cref="LeakCandidateAnalyzerOptions"/>, handed through the existing <c>AnalyzerOptions</c>
+/// slot. Reading through those three structural interfaces (docs/refactor/modularity/phase-3-plugin-packaging.md)
+/// rather than the concrete <c>GCHandleDomainResult</c>/<c>GCRootDomainResult</c>/<c>TimerLeakDomainResult</c>
+/// types means this analyzer has no compile-time dependency on whichever package ends up owning
+/// them — it's what let all three move into per-domain plugin packages without this one needing to
+/// reference each of those packages in turn. The inner analyzer (<see cref="AnalyzeAsync"/>) still
+/// has zero knowledge that <c>CompletedRunResults</c> exists — it just reads plain fields off
+/// <see cref="LeakCandidateAnalyzerOptions"/>. When Phase 4 lands, this context-building-side
+/// extraction is replaced by real graph edges, not reworked from scratch.
 /// </para>
 /// <para>
 /// <see cref="IHeapTypeStatisticsQuery.GetTypeStatistics"/> replaces the pre-retyping analyzer's own
@@ -84,32 +87,34 @@ public sealed class LeakCandidateAnalyzer : IAnalyzer, IProducesAnalyzerDomainRe
 
         // Sourced from the already-completed gc-handle analyzer run rather than re-walking
         // runtime.EnumerateHandles() here — avoids a second full handle scan for the same signal.
-        GCHandleDomainResult? gcHandleResult = completedRunResults?.GetResult<GCHandleDomainResult>();
+        // Read via the structural signal interface, not the concrete DomainResult type, so this
+        // analyzer has no compile-time dependency on whichever package owns GCHandleDomainResult.
+        IHandleRetentionSignal? handleRetentionSignal = completedRunResults?.GetResult<IHandleRetentionSignal>();
         var pinnedTargetTypes = new HashSet<string>(StringComparer.Ordinal);
         var dependentTargetTypes = new HashSet<string>(StringComparer.Ordinal);
-        if (gcHandleResult is not null)
+        if (handleRetentionSignal is not null)
         {
-            foreach (NameCountEntry entry in gcHandleResult.TopPinnedTargetTypes ?? [])
+            foreach (NameCountEntry entry in handleRetentionSignal.TopPinnedTargetTypes)
                 pinnedTargetTypes.Add(entry.Name);
-            foreach (NameCountEntry entry in gcHandleResult.DependentTopTargetTypes ?? [])
+            foreach (NameCountEntry entry in handleRetentionSignal.DependentTopTargetTypes)
                 dependentTargetTypes.Add(entry.Name);
         }
 
         // Sourced from the already-completed timer-leak analyzer run — LogicalTimerCount is its
         // de-duplicated count (TimerQueueTimerCount), not the raw double-counted TotalTimers, so
         // it's the right magnitude signal to correlate against each timer wrapper type's row here.
-        TimerLeakDomainResult? timerLeakResult = completedRunResults?.GetResult<TimerLeakDomainResult>();
-        int logicalTimerCount = timerLeakResult?.LogicalTimerCount ?? 0;
+        ILogicalTimerCountSignal? logicalTimerCountSignal = completedRunResults?.GetResult<ILogicalTimerCountSignal>();
+        int logicalTimerCount = logicalTimerCountSignal?.LogicalTimerCount ?? 0;
 
         // Sourced from the already-completed GC-root analyzer run — a cheap, exact shortcut for
         // candidates that are themselves a direct root target, before falling back to a bounded
         // root-path search inside the inner analyzer.
-        GCRootDomainResult? gcRootResult = completedRunResults?.GetResult<GCRootDomainResult>();
-        Dictionary<ulong, RootFinding>? directRootsByTargetAddress = null;
-        if (gcRootResult is not null && gcRootResult.TopRootsBySeverity.Count > 0)
+        IDirectRootSignal? directRootSignal = completedRunResults?.GetResult<IDirectRootSignal>();
+        Dictionary<ulong, DirectRootEntry>? directRootsByTargetAddress = null;
+        if (directRootSignal is not null && directRootSignal.TopRootsBySeverity.Count > 0)
         {
-            directRootsByTargetAddress = new Dictionary<ulong, RootFinding>(gcRootResult.TopRootsBySeverity.Count);
-            foreach (RootFinding root in gcRootResult.TopRootsBySeverity)
+            directRootsByTargetAddress = new Dictionary<ulong, DirectRootEntry>(directRootSignal.TopRootsBySeverity.Count);
+            foreach (DirectRootEntry root in directRootSignal.TopRootsBySeverity)
                 directRootsByTargetAddress[root.TargetAddress] = root;
         }
 
@@ -311,7 +316,7 @@ public sealed class LeakCandidateAnalyzer : IAnalyzer, IProducesAnalyzerDomainRe
                 continue;
 
             if (options.DirectRootsByTargetAddress is not null
-                && options.DirectRootsByTargetAddress.TryGetValue(sampleAddress, out RootFinding? directRoot))
+                && options.DirectRootsByTargetAddress.TryGetValue(sampleAddress, out DirectRootEntry? directRoot))
             {
                 string fieldSuffix = directRoot.FieldDescription is not null ? $" {directRoot.FieldDescription}" : string.Empty;
                 candidates[i] = candidate with
@@ -355,7 +360,7 @@ public sealed class LeakCandidateAnalyzer : IAnalyzer, IProducesAnalyzerDomainRe
         if (isStaticRooted)
             return LeakClass.StaticRetention;
 
-        if (logicalTimerCount >= TimerLeakWarningThreshold && TimerLeakAnalyzer.NamedTimerWrapperTypeNames.Contains(typeName))
+        if (logicalTimerCount >= TimerLeakWarningThreshold && TimerWrapperTypeNames.Names.Contains(typeName))
             return LeakClass.TimerLeak;
 
         if (isDelegate || typeName.Contains("Event", StringComparison.OrdinalIgnoreCase))
@@ -404,7 +409,7 @@ public sealed class LeakCandidateAnalyzer : IAnalyzer, IProducesAnalyzerDomainRe
             score += 5;
         if (isDelegate)
             score += 5;
-        if (TimerLeakAnalyzer.NamedTimerWrapperTypeNames.Contains(typeName))
+        if (TimerWrapperTypeNames.Names.Contains(typeName))
         {
             if (logicalTimerCount >= TimerLeakCriticalThreshold)
                 score += 20;

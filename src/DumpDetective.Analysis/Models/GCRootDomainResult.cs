@@ -48,4 +48,19 @@ internal sealed record GCRootDomainResult(
     IReadOnlyList<RootOwnedSubgraphFinding> RootOwnedSubgraphs,
     bool SubgraphWalkCapped,
     int SubgraphWalkCappedCount,
-    int DroppedZeroEstimateRootCount = 0) : AnalyzerDomainResult;
+    int DroppedZeroEstimateRootCount = 0) : AnalyzerDomainResult, IDirectRootSignal
+{
+    IReadOnlyList<DirectRootEntry> IDirectRootSignal.TopRootsBySeverity
+    {
+        get
+        {
+            var entries = new DirectRootEntry[TopRootsBySeverity.Count];
+            for (int i = 0; i < TopRootsBySeverity.Count; i++)
+            {
+                RootFinding root = TopRootsBySeverity[i];
+                entries[i] = new DirectRootEntry(root.TargetAddress, root.RootKind, root.FieldDescription);
+            }
+            return entries;
+        }
+    }
+}

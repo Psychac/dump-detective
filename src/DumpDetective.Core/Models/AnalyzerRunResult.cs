@@ -98,8 +98,14 @@ internal sealed record AnalyzerRunResult(
 /// </summary>
 internal static class AnalyzerRunResultsExtensions
 {
-    /// <summary>Returns the first domain result of type <typeparamref name="T"/> in the run list, or null if none ran or produced one.</summary>
-    public static T? GetResult<T>(this IReadOnlyList<AnalyzerRunResult> runs) where T : AnalyzerDomainResult
+    /// <summary>
+    /// Returns the first domain result of type <typeparamref name="T"/> in the run list, or null if
+    /// none ran or produced one. <typeparamref name="T"/> is usually an <see cref="AnalyzerDomainResult"/>
+    /// subtype, but can also be a structural signal interface (e.g. <see cref="IHandleRetentionSignal"/>)
+    /// implemented by one — the pattern match below works either way, since it checks the runtime
+    /// type, not a static constraint.
+    /// </summary>
+    public static T? GetResult<T>(this IReadOnlyList<AnalyzerRunResult> runs) where T : class
     {
         for (int i = 0; i < runs.Count; i++)
         {

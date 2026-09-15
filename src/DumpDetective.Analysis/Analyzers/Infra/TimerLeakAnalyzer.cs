@@ -78,22 +78,6 @@ public sealed class TimerLeakAnalyzer :
         "System.Threading.TimerThread",
     ];
 
-    /// <summary>
-    /// Exact-match timer wrapper/queue type names classified with a dedicated
-    /// <see cref="TimerObjectCategory"/> (excludes the generic "OtherTimer" namespace/token
-    /// fallback). Exposed for <c>LeakCandidateAnalyzer</c> to correlate its per-type candidate
-    /// rows with <see cref="TimerLeakDomainResult.LogicalTimerCount"/> without duplicating these
-    /// literals.
-    /// </summary>
-    public static readonly IReadOnlySet<string> NamedTimerWrapperTypeNames = new HashSet<string>(StringComparer.Ordinal)
-    {
-        "System.Threading.Timer",
-        "System.Timers.Timer",
-        "System.Threading.TimerQueueTimer",
-        "System.Threading.TimerHolder",
-        "System.Threading.PeriodicTimer",
-    };
-
     private static readonly string[] PeriodFieldNames = ["_period", "m_period"];
     private static readonly string[] TimerCallbackFieldNames = ["_timerCallback", "m_timerCallback"];
 

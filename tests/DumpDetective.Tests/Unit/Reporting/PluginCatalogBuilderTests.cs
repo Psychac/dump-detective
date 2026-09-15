@@ -22,7 +22,8 @@ public sealed class PluginCatalogBuilderTests
         return new PluginCatalogBuilder().Build(
             typeof(DumpDetective.Analysis.Analyzers.Leaks.LeakCandidateAnalyzer).Assembly,
             typeof(DumpDetective.Analysis.Analyzers.Gc.GCRootAnalyzer).Assembly,
-            typeof(DumpDetective.Analysis.Analyzers.Memory.MemoryAnalyzer).Assembly);
+            typeof(DumpDetective.Analysis.Analyzers.Memory.MemoryAnalyzer).Assembly,
+            typeof(DumpDetective.Analysis.Analyzers.Threads.ThreadAnalyzer).Assembly);
     }
 
     [Fact]

@@ -3,8 +3,8 @@
 Part of [../modularity-plan.md](../modularity-plan.md). Implements north-star **Layer 3**
 (in-process). Depends on [phase-2-artifact-platform.md](phase-2-artifact-platform.md).
 
-**Status, 2026-09-15: migration steps 1–2 done, step 3 in progress (`Plugins.Memory` and
-`Plugins.Gc` shipped, 6 packages left), steps 4–6 not started.** Started ahead of the
+**Status, 2026-09-15: migration steps 1–2 done, step 3 in progress (`Plugins.Memory`,
+`Plugins.Gc`, and `Plugins.Threads` shipped, 5 packages left), steps 4–6 not started.** Started ahead of the
 modularity plan's own [§8 minimum-viable path](../modularity-plan.md#8-the-minimum-viable-unified-path--adopted-as-the-chosen-plan-2026-09-08),
 which had deferred the plugin split until the trace/correlation capability proved itself — per
 explicit instruction this session, not a formal revisiting of that deferral. Made possible by the
@@ -164,6 +164,33 @@ Each package carries its analyzers plus their section builders, synthesis rules,
      check until it was pointed at `LeakCandidateAnalyzer`'s assembly instead — worth checking for
      on every future package: whatever anchors this test's scan of "the rest of `Analysis`" needs
      to keep pointing at something that stays there.
+
+   **`Plugins.Threads` done, 2026-09-15** — third package shipped end-to-end (`ThreadAnalyzer`,
+   `ThreadStackClusterAnalyzer`, `HangAnalyzer`, `LockGraphAnalyzer`, plus `ThreadWaitClassifier`).
+   Unlike `Plugins.Gc`, this move found no cross-analyzer `DomainResult` reads and no colocated-
+   model carve-out — the quartet's only real dependency risk was infrastructure, not models:
+   - `JitAnalyzer` and `CrashAnalyzer` (destined for the future `Plugins.Runtime` package) also
+     consume `IRuntimeThreadQuery` for exception/thread correlation, so the concrete query
+     implementations (`RuntimeThreadQuery`, `PrecomputedRuntimeThreadQuery`,
+     `RuntimeThreadPoolQuery`, `HeapSyncBlockQuery`, `ThreadStackTranslator`, all in
+     `Analysis/Sdk/`) and the thread-stack scan orchestration (`IThreadStackScanParticipant`,
+     `ThreadStackScanState`, `ThreadStackScanDispatcher`, `AnalysisPipeline`,
+     `AnalysisContextBuilder`, all in `Analysis/Pipeline/`) stayed in `DumpDetective.Analysis`
+     rather than moving into `Plugins.Threads`. No code changes were needed to make this work —
+     every analyzer in the quartet already consumed this infra only through the SDK-defined
+     interfaces, so the package boundary just falls where the interface already was.
+   - As with `Plugins.Gc`/`Plugins.Memory`, `InsightEngine` (`Reporting/Insight/`) directly
+     references all four `DomainResult` types, so `Reporting` now depends on `Plugins.Threads`
+     too — consistent with, not a new instance of, the pattern already accepted for the prior two
+     packages.
+   - `ThreadStackClusterAnalysisOptions` (and `ThreadAnalysisOptions`) stayed in
+     `DumpDetective.Core/Options/`, matching where `GCHandleAnalysisOptions`/
+     `GCGenerationAnalysisOptions`/`MemoryAnalysisOptions` already live for the shipped packages —
+     analyzer options are not part of what a package migration moves.
+   - `PluginCatalogBuilderTests.BuildScannedCatalog` anchor list gained a fourth assembly
+     (`ThreadAnalyzer`'s), alongside the still-in-`Analysis` `LeakCandidateAnalyzer` anchor and the
+     two prior packages' anchors — unaffected otherwise, since none of the thread quartet's types
+     were ever the scan's anchor.
 4. Delete `DefaultAnalyzerFeatureModuleCatalog.cs`, verified by a before/after catalog snapshot
    diff.
 5. Add the `plugins/` drop-in + ALC loader path with at least one test plugin.

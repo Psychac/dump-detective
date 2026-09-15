@@ -4,8 +4,6 @@ namespace DumpDetective.Analysis.Models;
 
 // Segments
 
-public enum HeapSegmentKind { SmallObjectHeap, LargeObjectHeap, PinnedObjectHeap, Frozen, Unknown }
-
 internal sealed record HeapSegmentSnapshot(
     ulong Address,
     ulong Start,

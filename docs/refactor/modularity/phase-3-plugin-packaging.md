@@ -4,8 +4,8 @@ Part of [../modularity-plan.md](../modularity-plan.md). Implements north-star **
 (in-process). Depends on [phase-2-artifact-platform.md](phase-2-artifact-platform.md).
 
 **Status, 2026-09-15: migration steps 1–2 done, step 3 in progress (`Plugins.Memory`,
-`Plugins.Gc`, `Plugins.Threads`, `Plugins.Async`, `Plugins.Types`, and `Plugins.Leaks` shipped, 2
-packages left), steps 4–6 not started.** Started ahead of the
+`Plugins.Gc`, `Plugins.Threads`, `Plugins.Async`, `Plugins.Types`, `Plugins.Leaks`, and
+`Plugins.Runtime` shipped, 1 package left), steps 4–6 not started.** Started ahead of the
 modularity plan's own [§8 minimum-viable path](../modularity-plan.md#8-the-minimum-viable-unified-path--adopted-as-the-chosen-plan-2026-09-08),
 which had deferred the plugin split until the trace/correlation capability proved itself — per
 explicit instruction this session, not a formal revisiting of that deferral. Made possible by the
@@ -293,6 +293,41 @@ Each package carries its analyzers plus their section builders, synthesis rules,
      "the rest of `Analysis`" is one of the analyzers about to move.
    - Verified against the real reference dump (`LeakCandidateAnalyzerRealDumpTests`, single
      invocation, foreground): behavior unchanged, ~1m17s, no regression.
+
+   **`Plugins.Runtime` done, 2026-09-15** — seventh package shipped end-to-end (`ModuleAnalyzer`,
+   `CrashAnalyzer`, `JitAnalyzer`, `HeapTopologyAnalyzer`). Cleanest move of all seven: no
+   cross-analyzer `DomainResult` reads in either direction, and every pipeline interface the
+   quartet implements (`CrashAnalyzer`'s `IParallelHeapIndexScanParticipant` and
+   `ICustomizesAnalysisContext`) is a plain forward reference into already-in-`Analysis`
+   pipeline infra — the same `Plugins.Threads`/`Plugins.Async` precedent, no code changes
+   needed to make it work.
+   - Files moved (`git mv`, namespaces left unchanged, same template as every prior package).
+     One genuine "colocated model, real consumer elsewhere" instance, same shape as
+     `Plugins.Memory`'s `RegionGenerationKind`/`TypeGenerationProfile` and `Plugins.Types`'s
+     `DistributionSummary`: `HeapSegmentKind` was defined inside `HeapTopologyDomainResult.cs`
+     but consumed by three still-in-`Analysis` files with no relation to `HeapTopologyAnalyzer`
+     (`Analyzers/SegmentKindMapper.cs`, `Cache/SegmentSummary.cs`,
+     `Models/SharedDomainModels.cs`). Split into its own file, kept in `Analysis/Models/`
+     rather than moved — caught immediately by the build, not by a test.
+   - `CrashAnalyzerHelpers.cs` (`Analysis/Models/`) held `CrashAnalyzer`'s own private helper
+     types (`ExceptionAnalysis`, `CrashThreadCandidate`, `ExceptionInstance`, etc.) — confirmed
+     via caller search that nothing outside `CrashAnalyzer.cs` itself referenced them (Reporting
+     consumes the distinct, already-public `CrashThreadCandidateSnapshot` from
+     `CrashDomainResult.cs` instead), so it moved alongside `CrashAnalyzer.cs` with no carve-out,
+     same as `CrashAnalyzerOptions.cs`.
+   - Needed the same two `InternalsVisibleTo` grants every plugin package needs:
+     `DumpDetective.Analysis` → `Plugins.Runtime` (pipeline interfaces, `AssemblyIdentity`) and
+     `DumpDetective.Core` → `Plugins.Runtime` (`IAnalyzerTrendComparer`/`AnalyzerMetric`/
+     `MetricDelta`). `BenchmarkSuite1.csproj` also needed a direct reference added — it already
+     had one to `Plugins.Types` for an unrelated benchmark, but `ModuleAnalyzerBenchmark.cs`
+     needed `Plugins.Runtime` directly since `ModuleAnalyzer` moved there.
+   - `PluginCatalogBuilderTests.BuildScannedCatalog` anchor list gained an eighth assembly
+     (`ModuleAnalyzer`'s), added rather than replaced — no analyzer anchoring "the rest of
+     `Analysis`" was among the four that moved this time.
+   - Verified against the real reference dump, one test at a time, foreground:
+     `ModuleAnalyzerRealDumpTests` (12s), `ModuleAnalyzerTopTypesRealDumpTests` (7s),
+     `JitAnalyzerRealDumpTests` (19s), `CrashAnalyzerRealDumpTests` (23s),
+     `HeapTopologyAnalyzerRealDumpTests` (2s) — all passed, no regression.
 4. Delete `DefaultAnalyzerFeatureModuleCatalog.cs`, verified by a before/after catalog snapshot
    diff.
 5. Add the `plugins/` drop-in + ALC loader path with at least one test plugin.

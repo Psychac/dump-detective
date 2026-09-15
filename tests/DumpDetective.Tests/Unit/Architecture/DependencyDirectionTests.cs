@@ -58,7 +58,12 @@ public sealed class DependencyDirectionTests
         // EventLeakEvidence stayed behind in Analysis/Models/Evidence.cs (not moved with
         // EventLeakDomainResult) because EvidenceConfidence's EventLeakEvidence overload — a shared
         // utility every domain's finding generator relies on — needs it directly.
-        reportingRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core", "DumpDetective.Plugins.Async", "DumpDetective.Plugins.Gc", "DumpDetective.Plugins.Leaks", "DumpDetective.Plugins.Memory", "DumpDetective.Plugins.Threads", "DumpDetective.Plugins.Types", "DumpDetective.Sdk"]);
+        // DumpDetective.Plugins.Runtime added 2026-09-15: Phase 3 migration step 3's seventh domain
+        // package — Module/Crash/Jit/HeapTopology. Cleanest move of all seven: no cross-analyzer
+        // DomainResult reads either direction, and every pipeline interface the quartet implements
+        // (IParallelHeapIndexScanParticipant, ICustomizesAnalysisContext) is an Analysis/Pipeline
+        // forward reference, same as the Threads/Async precedent.
+        reportingRefs.Should().Equal(["DumpDetective.Analysis", "DumpDetective.Core", "DumpDetective.Plugins.Async", "DumpDetective.Plugins.Gc", "DumpDetective.Plugins.Leaks", "DumpDetective.Plugins.Memory", "DumpDetective.Plugins.Runtime", "DumpDetective.Plugins.Threads", "DumpDetective.Plugins.Types", "DumpDetective.Sdk"]);
         // DumpDetective.Sources.NetTrace added 2026-09-09: the interim trace/dump router
         // (docs/refactor/modularity-plan.md § 8) needs Cli to reach the trace-only analysis path
         // directly, the same way it already reaches dump analysis through Analysis/Reporting.

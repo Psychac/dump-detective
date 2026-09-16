@@ -187,12 +187,24 @@ Carried forward, not resolved by this phase — each is explicitly Phase 4 or Ph
 - **No orchestrator exists to consume capability declarations.** `[RequiresCapability]`/
   `[OptionalCapability]` are validated for syntactic correctness (known vocabulary members) but
   nothing computes the runnable/degraded/skipped buckets described under "Key design decisions" —
-  that's Phase 4. Until then, capability attributes are inert metadata beyond what
-  `DropInPluginLoader` checks at discovery time.
+  that's Phase 4. **Update, 2026-09-16:** the orchestrator (`CapabilityResolver`) now exists (Phase
+  4 step 2), but nothing feeds it real declarations yet — see next bullet — so this is still
+  functionally unclosed. Tracked as [phase-4-session-orchestration.md step 3](phase-4-session-orchestration.md#migration-steps).
 - **Analyzers don't declare capabilities yet.** Step 1 shipped the attributes ahead of any real
   use; the 36 in-repo analyzers carry `[AnalyzerModule]` but not `[RequiresCapability]`/
   `[OptionalCapability]` — there's no consumer for those declarations yet (previous bullet), so
-  adding them now would be speculative. Do this once Phase 4 exists to act on it.
+  adding them now would be speculative. Do this once Phase 4 exists to act on it. **Update,
+  2026-09-16:** Phase 4's orchestrator exists now — this is unblocked and explicitly scheduled as
+  [phase-4-session-orchestration.md step 3](phase-4-session-orchestration.md#migration-steps), not
+  yet done.
+- **`AnalyzerScope { PerArtifact | PerSession }` — missed here, not caught until Phase 4, corrected
+  2026-09-16.** [phase-4-session-orchestration.md](phase-4-session-orchestration.md)'s design
+  section assumed this SDK attribute would land in "Phase 1/3," but neither this phase's migration
+  steps nor its target attribute list (`AnalyzerModuleAttribute`/`RequiresCapabilityAttribute`/
+  `OptionalCapabilityAttribute`, step 1 above) ever actually claimed it — a real gap between what
+  Phase 4 assumed upstream and what upstream delivered. Reassigned to Phase 4 itself
+  ([step 5](phase-4-session-orchestration.md#migration-steps)), which is also the first phase with
+  a real consumer for it (mixed dump+trace sessions).
 
 ## Exit criteria
 
@@ -201,10 +213,11 @@ Carried forward, not resolved by this phase — each is explicitly Phase 4 or Ph
 - ✅ CLI behavior (`--tags`/`--only`/`--skip`, ordering) unchanged, verified by existing
   integration tests.
 - ⬜ Every analyzer declares capabilities; no analyzer references any `Sources.*` package —
-  deferred, see "Known gaps".
+  deferred, see "Known gaps". Owner: [phase-4-session-orchestration.md step 3](phase-4-session-orchestration.md#migration-steps).
 - ⬜ Capability satisfaction report is produced for a dump-only session and correctly lists
   `Plugins.Cpu` analyzers as skipped-for-missing-`trace.cpu-samples` — needs Phase 4's
-  orchestrator; not started.
+  orchestrator, which now exists; the report itself is not yet built. Owner:
+  [phase-4-session-orchestration.md step 3](phase-4-session-orchestration.md#migration-steps).
 
 ## Risk / effort
 

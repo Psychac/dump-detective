@@ -78,7 +78,6 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
             sb.AppendLine("|---|---|");
             sb.AppendLine($"| **Mode** | {Esc(ctx.Mode)} |");
             sb.AppendLine($"| **Dump Path** | `{ctx.DumpPath}` |");
-            if (!string.IsNullOrWhiteSpace(ctx.BaselineDumpPath)) sb.AppendLine($"| **Baseline Dump** | `{ctx.BaselineDumpPath}` |");
             sb.AppendLine($"| **Report** | {Esc(ctx.ReportFormat)} |");
             sb.AppendLine($"| **Config** | {(ctx.UsedConfigFile ? "config file" : "command line") + (string.IsNullOrWhiteSpace(ctx.ConfigPath) ? string.Empty : $" ({Esc(ctx.ConfigPath)})")} |");
             sb.AppendLine($"| **Diagnostic Mode** | {(ctx.DiagnosticMode ? "on" : "off")} |");

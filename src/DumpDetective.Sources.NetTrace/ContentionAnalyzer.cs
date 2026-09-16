@@ -1,8 +1,5 @@
-using System.Buffers.Binary;
-
-using DumpDetective.Platform.Storage.Container;
+using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
-using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Temporal;
 
@@ -20,62 +17,56 @@ namespace DumpDetective.Sources.NetTrace;
 /// this failure mode for a different analyzer (<c>gc.pressure</c> → factual type, severity moved to
 /// synthesis). A raw per-episode fact, not a verdict about which episodes are worth flagging, is
 /// what belongs here; "hotspot" identification is a synthesis-rule output once one exists.
+///
+/// Retyped from <c>ITraceAnalyzer</c> onto <see cref="IAnalyzer"/> in
+/// docs/refactor/modularity/phase-4-session-orchestration.md migration step 5b — the record
+/// decoding this analyzer used to do itself now lives in <see cref="TraceContentionQuery"/>; this
+/// class is now just the thin mapping from <see cref="ContentionEpisode"/> to
+/// <see cref="Observation"/>.
 /// </remarks>
-internal sealed class ContentionAnalyzer : ITraceAnalyzer
+[RequiresCapability(CapabilityVocabulary.TraceContentionEvents)]
+internal sealed class ContentionAnalyzer : IAnalyzer
 {
     public string Name => "ContentionAnalyzer";
 
-    public IReadOnlySet<CacheSectionId> RequiredSections { get; } = new HashSet<CacheSectionId> { CacheSectionId.TraceContention };
+    public string Category => "Trace";
 
-    public IReadOnlyList<Observation> Analyze(CacheContainerReader container, ArtifactId artifactId)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
-        if (!container.TryOpenSection(CacheSectionId.TraceContention, out Stream? sectionStream) || sectionStream is null)
-            return [];
+        ITraceContentionQuery? query = context.TraceContention;
+        if (query is null)
+            return;
 
         var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.TraceContentionEvents };
-        var results = new List<Observation>();
 
-        Span<byte> record = stackalloc byte[8 + 8 + 4 + 1];
-        using (sectionStream)
+        foreach (ContentionEpisode episode in query.EnumerateEpisodes())
         {
-            while (true)
+            cancellationToken.ThrowIfCancellationRequested();
+
+            await context.Observations.EmitAsync(new Observation
             {
-                int read = sectionStream.ReadAtLeast(record, record.Length, throwOnEndOfStream: false);
-                if (read < record.Length)
-                    break;
-
-                long startTicks = BinaryPrimitives.ReadInt64LittleEndian(record);
-                long durationTicks = BinaryPrimitives.ReadInt64LittleEndian(record[8..]);
-                int threadId = BinaryPrimitives.ReadInt32LittleEndian(record[16..]);
-
-                results.Add(new Observation
+                Id = ObservationId.NewId(),
+                ObservationType = "contention.episode",
+                Subjects = [episode.Thread],
+                When = new TemporalExtent
                 {
-                    Id = ObservationId.NewId(),
-                    ObservationType = "contention.episode",
-                    Subjects = [new ThreadRef { OsThreadId = (uint)threadId, Fidelity = MatchFidelity.Exact }],
-                    When = new TemporalExtent
-                    {
-                        Kind = TemporalKind.Interval,
-                        Start = new TimeAnchor { ProcessUptime = TimeSpan.FromTicks(startTicks), Confidence = AnchorConfidence.Exact },
-                        End = new TimeAnchor { ProcessUptime = TimeSpan.FromTicks(startTicks + durationTicks), Confidence = AnchorConfidence.Exact },
-                    },
-                    Measures = new Dictionary<string, Measure>
-                    {
-                        ["contention.duration"] = new Measure(
-                            TimeSpan.FromTicks(durationTicks).TotalMilliseconds, MeasureUnit.Milliseconds, MeasureSemantics.Duration),
-                    },
-                    Provenance = new Provenance
-                    {
-                        Artifact = artifactId,
-                        AnalyzerKey = Name,
-                        CapabilitiesUsed = capabilitiesUsed,
-                        Fidelity = FidelityLevel.Full,
-                    },
-                    Confidence = 1.0,
-                });
-            }
+                    Kind = TemporalKind.Interval,
+                    Start = new TimeAnchor { ProcessUptime = episode.StartProcessUptime, Confidence = AnchorConfidence.Exact },
+                    End = new TimeAnchor { ProcessUptime = episode.StartProcessUptime + episode.Duration, Confidence = AnchorConfidence.Exact },
+                },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["contention.duration"] = new Measure(episode.Duration.TotalMilliseconds, MeasureUnit.Milliseconds, MeasureSemantics.Duration),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value, // guaranteed set — see AnalysisContext.ArtifactId's remarks
+                    AnalyzerKey = Name,
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
         }
-
-        return results;
     }
 }

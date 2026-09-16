@@ -1,4 +1,6 @@
-using DumpDetective.Platform.Storage.Container;
+using System.Linq;
+
+using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
@@ -12,106 +14,68 @@ using Xunit;
 namespace DumpDetective.Tests.Unit.TraceIngest;
 
 /// <summary>
-/// Fast, deterministic characterization of <see cref="CpuHotspotAnalyzer"/>'s address-range
-/// resolution against synthetic <c>trace.methods</c>/<c>trace.cpu-samples</c> sections — the real-
-/// trace tests (<c>CpuHotspotIndexerRealTraceTests</c>) prove this works against real data but can't
-/// cheaply exercise exact boundary cases (a sample landing on a method's first byte, its last valid
-/// byte, one past the end, or in the gap between two methods) the way a synthetic container can.
+/// Thin mapping test for the retyped <see cref="CpuHotspotAnalyzer"/> (now <c>IAnalyzer</c>,
+/// docs/refactor/modularity/phase-4-session-orchestration.md migration step 5b) — address-range
+/// resolution itself is <see cref="TraceCpuSampleQuery"/>'s job, covered by
+/// <c>TraceCpuSampleQueryTests</c>; this only verifies the analyzer turns a
+/// <see cref="CpuSampleAttribution"/> into the expected <see cref="Observation"/> shape and
+/// declares the right capability.
 /// </summary>
-public sealed class CpuHotspotAnalyzerTests : IDisposable
+public sealed class CpuHotspotAnalyzerTests
 {
-    private const ulong MethodAStart = 0x1000;
-    private const int MethodASize = 0x10; // valid range: [0x1000, 0x1010)
-    private const ulong MethodBStart = 0x2000;
-    private const int MethodBSize = 0x20; // valid range: [0x2000, 0x2020)
-
-    private readonly string _containerPath;
-
-    public CpuHotspotAnalyzerTests()
+    [Fact]
+    public void RequiresCapability_DeclaresTraceCpuSamples()
     {
-        _containerPath = Path.Combine(Path.GetTempPath(), $"cpu-hotspot-unit-test-{Guid.NewGuid():N}.bin");
-    }
+        var attribute = typeof(CpuHotspotAnalyzer).GetCustomAttributes(typeof(RequiresCapabilityAttribute), inherit: false)
+            .Cast<RequiresCapabilityAttribute>().Single();
 
-    public void Dispose()
-    {
-        if (File.Exists(_containerPath))
-            File.Delete(_containerPath);
+        attribute.Capabilities.Should().ContainSingle().Which.Should().Be(CapabilityVocabulary.TraceCpuSamples);
     }
 
     [Fact]
-    public void Analyze_SamplesAtBoundaries_ResolveExactlyTheContainingMethod()
+    public async Task AnalyzeAsync_EmitsOneObservationPerAttribution()
     {
-        BuildContainer(samples:
-        [
-            (MethodAStart, 1L), // exact start of A -> resolves to A
-            (MethodAStart + MethodASize - 1, 2L), // last valid byte of A -> resolves to A
-            (MethodAStart + MethodASize, 3L), // one past the end of A -> unresolved (no method owns it)
-            (MethodBStart - 1, 4L), // one before B, in the gap -> unresolved
-            (MethodBStart, 5L), // exact start of B -> resolves to B
-            (MethodBStart + 5, 6L), // mid-range of B -> resolves to B
-        ]);
+        var methodRef = new MethodRef
+        {
+            DeclaringType = new TypeRef { CanonicalName = "Some.Type", Fidelity = MatchFidelity.Exact },
+            Name = "MethodA",
+            NormalizedSignature = "()",
+            Fidelity = MatchFidelity.Exact,
+        };
+        var attribution = new CpuSampleAttribution(methodRef, SampleCount: 7, TimeSpan.FromMilliseconds(10), TimeSpan.FromMilliseconds(50));
 
-        CacheContainerReader.TryOpen(_containerPath, out CacheContainerReader? reader).Should().BeTrue();
-        var analyzer = new CpuHotspotAnalyzer();
+        var sink = new CollectingObservationSink();
+        var context = new AnalysisContext
+        {
+            Observations = sink,
+            ArtifactId = new ArtifactId("test"),
+            TraceCpuSamples = new StubTraceCpuSampleQuery([attribution]),
+        };
 
-        IReadOnlyList<Observation> observations = analyzer.Analyze(reader!, new ArtifactId("test"));
+        await new CpuHotspotAnalyzer().AnalyzeAsync(context, CancellationToken.None);
 
-        observations.Should().HaveCount(2, "only MethodA and MethodB should have resolved samples");
-
-        Observation methodAObs = observations.Single(o => ((MethodRef)o.Subjects[0]).Name == "MethodA");
-        methodAObs.Measures["cpu.sample-count"].Value.Should().Be(2, "two samples fall inside MethodA's range");
-
-        Observation methodBObs = observations.Single(o => ((MethodRef)o.Subjects[0]).Name == "MethodB");
-        methodBObs.Measures["cpu.sample-count"].Value.Should().Be(2, "two samples fall inside MethodB's range");
-
-        // Real-producer characterization for docs/refactor/modularity/phase-1-sdk-review-findings.md
-        // item 11: TemporalExtent's Kind/End invariant is a trusted-producer contract, not
-        // runtime-enforced — this is that trust being verified against a real analyzer's actual output.
-        methodAObs.When.Kind.Should().Be(TemporalKind.Interval);
-        methodAObs.When.End.Should().NotBeNull("an Interval-kind extent must carry an End anchor");
+        Observation observation = sink.Observations.Should().ContainSingle().Subject;
+        observation.ObservationType.Should().Be("cpu.sample-attribution");
+        observation.Subjects.Should().ContainSingle().Which.Should().Be(methodRef);
+        observation.Measures["cpu.sample-count"].Value.Should().Be(7);
+        observation.When.Kind.Should().Be(TemporalKind.Interval);
+        observation.Provenance.Artifact.Should().Be(new ArtifactId("test"));
+        observation.Provenance.CapabilitiesUsed.Should().ContainSingle().Which.Should().Be(new Capability(CapabilityVocabulary.TraceCpuSamples));
     }
 
     [Fact]
-    public void Analyze_NoCpuSamplesSection_ReturnsEmpty()
+    public async Task AnalyzeAsync_NoTraceCpuSamplesCapability_EmitsNothing()
     {
-        using (var containerWriter = new CacheContainerWriter(_containerPath))
-        {
-            containerWriter.BeginSection(CacheSectionId.TraceMethods);
-            using (var writer = new TraceMethodIndexWriter(containerWriter.Stream))
-            {
-                writer.Add(1, 0, MethodAStart, MethodASize, 0, MatchFidelity.Exact, "Some.Type", "MethodA", "()");
-                containerWriter.EndSection(writer.Flush());
-            }
+        var sink = new CollectingObservationSink();
+        var context = new AnalysisContext { Observations = sink, ArtifactId = new ArtifactId("test") };
 
-            containerWriter.Finish();
-        }
+        await new CpuHotspotAnalyzer().AnalyzeAsync(context, CancellationToken.None);
 
-        CacheContainerReader.TryOpen(_containerPath, out CacheContainerReader? reader).Should().BeTrue();
-        var analyzer = new CpuHotspotAnalyzer();
-
-        analyzer.Analyze(reader!, new ArtifactId("test")).Should().BeEmpty();
+        sink.Observations.Should().BeEmpty();
     }
 
-    private void BuildContainer(IReadOnlyList<(ulong InstructionPointer, long TimestampTicks)> samples)
+    private sealed class StubTraceCpuSampleQuery(IReadOnlyList<CpuSampleAttribution> attributions) : ITraceCpuSampleQuery
     {
-        using var containerWriter = new CacheContainerWriter(_containerPath);
-
-        containerWriter.BeginSection(CacheSectionId.TraceMethods);
-        using (var methodWriter = new TraceMethodIndexWriter(containerWriter.Stream))
-        {
-            methodWriter.Add(1, 0, MethodAStart, MethodASize, 0, MatchFidelity.Exact, "Some.Type", "MethodA", "()");
-            methodWriter.Add(2, 0, MethodBStart, MethodBSize, 0, MatchFidelity.Exact, "Some.Type", "MethodB", "()");
-            containerWriter.EndSection(methodWriter.Flush());
-        }
-
-        containerWriter.BeginSection(CacheSectionId.TraceCpuSamples);
-        using (var sampleWriter = new CpuSampleIndexWriter(containerWriter.Stream))
-        {
-            foreach ((ulong ip, long ticks) in samples)
-                sampleWriter.Add(ticks, processId: 1, threadId: 1, instructionPointer: ip);
-            containerWriter.EndSection(sampleWriter.Flush());
-        }
-
-        containerWriter.Finish();
+        public IEnumerable<CpuSampleAttribution> EnumerateSampleAttributions() => attributions;
     }
 }

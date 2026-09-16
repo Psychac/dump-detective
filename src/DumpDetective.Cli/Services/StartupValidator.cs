@@ -63,16 +63,6 @@ internal sealed class StartupValidator
             errors.Add($"DumpPath '{options.DumpPath}' does not exist.");
         }
 
-        if (!string.IsNullOrWhiteSpace(options.BaselineDumpPath) && !File.Exists(options.BaselineDumpPath))
-        {
-            errors.Add($"BaselineDumpPath '{options.BaselineDumpPath}' does not exist.");
-        }
-
-        if (!string.IsNullOrWhiteSpace(options.BaselineDumpPath) && options.TrendDumpPaths is { Count: > 0 })
-        {
-            errors.Add("BaselineDumpPath and TrendDumpPaths are mutually exclusive.");
-        }
-
         if (options.TrendDumpPaths is { Count: > 0 })
         {
             if (options.TrendDumpPaths.Count < 2)

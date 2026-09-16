@@ -11,11 +11,11 @@ internal sealed record AnalysisCommandRequest(
     IReadOnlyCollection<string> IncludeAnalyzers,
     IReadOnlyCollection<string> ExcludeAnalyzers,
     bool DiagnosticMode,
-    string? BaselineDumpPath,
     IReadOnlyList<string>? TrendDumpPaths,
     bool EnableMemoryDiagnostics,
     bool EnablePerformanceDiagnostics,
     ReportStyleVersion? ReportStyleVersion = null,
     bool PreRender = false,
     bool SeparateJson = false,
-    string? CacheDirectory = null);
+    string? CacheDirectory = null,
+    string? TracePath = null);

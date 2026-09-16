@@ -256,7 +256,6 @@ public sealed class ConfigurationResolverTests
             IncludeAnalyzers: Array.Empty<string>(),
             ExcludeAnalyzers: Array.Empty<string>(),
             DiagnosticMode: false,
-            BaselineDumpPath: null,
             TrendDumpPaths: null,
             EnableMemoryDiagnostics: false,
             EnablePerformanceDiagnostics: true);

@@ -69,7 +69,6 @@ public sealed class StartupValidatorTests
         return new ResolvedExecutionOptions(
             DumpPath: dumpPath,
             OutputPath: Path.ChangeExtension(dumpPath, ".txt")!,
-            BaselineDumpPath: null,
             TrendDumpPaths: trendDumpPaths,
             Diagnostics: new DiagnosticsOptions(),
             Report: new ReportOptions { Format = ReportFormat.Text },

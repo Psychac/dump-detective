@@ -1,4 +1,6 @@
 using DumpDetective.Platform.Storage.Container;
+using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sources.NetTrace;
@@ -47,15 +49,23 @@ public sealed class CpuHotspotIndexerRealTraceTests : IDisposable
     }
 
     [RealTraceFact]
-    public void Analyze_RealEtlCapture_ResolvesLeafSamplesToRealManagedMethods()
+    public async Task Analyze_RealEtlCapture_ResolvesLeafSamplesToRealManagedMethods()
     {
         File.Exists(TracePath).Should().BeTrue($"expected real .etl at {TracePath} or a DD_BENCHMARK_ETL override.");
 
         TraceIndexBuilder.Build(TracePath, _containerPath, targetProcessId: null);
         CacheContainerReader.TryOpen(_containerPath, out CacheContainerReader? reader).Should().BeTrue();
 
-        var analyzer = new CpuHotspotAnalyzer();
-        IReadOnlyList<Observation> observations = analyzer.Analyze(reader!, new DumpDetective.Sdk.Artifacts.ArtifactId(TracePath));
+        var sink = new CollectingObservationSink();
+        var context = new AnalysisContext
+        {
+            Observations = sink,
+            ArtifactId = new ArtifactId(TracePath),
+            TraceCpuSamples = new TraceCpuSampleQuery(reader!),
+        };
+
+        await new CpuHotspotAnalyzer().AnalyzeAsync(context, CancellationToken.None);
+        IReadOnlyList<Observation> observations = sink.Observations;
 
         observations.Should().NotBeEmpty("a real HighCPU capture should resolve at least some leaf samples to a managed method");
         observations.Should().OnlyContain(o => o.ObservationType == "cpu.sample-attribution");

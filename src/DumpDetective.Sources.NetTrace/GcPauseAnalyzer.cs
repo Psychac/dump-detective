@@ -1,8 +1,5 @@
-using System.Buffers.Binary;
-
-using DumpDetective.Platform.Storage.Container;
+using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
-using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Temporal;
 
@@ -16,77 +13,67 @@ namespace DumpDetective.Sources.NetTrace;
 /// docs/refactor/modularity/observation-and-correlation-model.md § 2a for why: an observation's
 /// job is the raw fact, not a judgment about it.
 /// </summary>
-internal sealed class GcPauseAnalyzer : ITraceAnalyzer
+/// <remarks>
+/// Retyped from <c>ITraceAnalyzer</c> onto <see cref="IAnalyzer"/> in
+/// docs/refactor/modularity/phase-4-session-orchestration.md migration step 5b — the record
+/// decoding this analyzer used to do itself now lives in <see cref="TraceGcPauseQuery"/>; this
+/// class is now just the thin mapping from <see cref="GcPauseRecord"/> to <see cref="Observation"/>.
+/// </remarks>
+[RequiresCapability(CapabilityVocabulary.TraceGcEvents)]
+internal sealed class GcPauseAnalyzer : IAnalyzer
 {
     public string Name => "GcPauseAnalyzer";
 
-    public IReadOnlySet<CacheSectionId> RequiredSections { get; } = new HashSet<CacheSectionId> { CacheSectionId.TraceGcEvents };
+    public string Category => "Trace";
 
-    public IReadOnlyList<Observation> Analyze(CacheContainerReader container, ArtifactId artifactId)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
-        if (!container.TryOpenSection(CacheSectionId.TraceGcEvents, out Stream? sectionStream) || sectionStream is null)
-            return [];
+        ITraceGcPauseQuery? query = context.TraceGcPauses;
+        if (query is null)
+            return;
 
         var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.TraceGcEvents };
-        var results = new List<Observation>();
 
-        Span<byte> record = stackalloc byte[8 + 4 + 1 + 8 + 1 + 4 + 8];
-        using (sectionStream)
+        foreach (GcPauseRecord pause in query.EnumeratePauses())
         {
-            while (true)
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // GCSuspendEEReason (Microsoft.Diagnostics.Tracing.Parsers.Clr) has no direct SDK
+            // representation — Measure is for quantities, not categories — so the raw enum
+            // ordinal is carried as a Custom-unit measure rather than dropped. Still a raw fact,
+            // not a judgment: no reason value is more or less "severe" here.
+            var measures = new Dictionary<string, Measure>
             {
-                int read = sectionStream.ReadAtLeast(record, record.Length, throwOnEndOfStream: false);
-                if (read < record.Length)
-                    break;
-
-                long timestampTicks = BinaryPrimitives.ReadInt64LittleEndian(record);
-                int threadId = BinaryPrimitives.ReadInt32LittleEndian(record[8..]);
-                byte reason = record[12];
-                long pauseTicks = BinaryPrimitives.ReadInt64LittleEndian(record[13..]);
-                bool hasGcData = record[21] != 0;
-                int generation = BinaryPrimitives.ReadInt32LittleEndian(record[22..]);
-                long heapBytes = BinaryPrimitives.ReadInt64LittleEndian(record[26..]);
-
-                // GCSuspendEEReason (Microsoft.Diagnostics.Tracing.Parsers.Clr) has no direct SDK
-                // representation — Measure is for quantities, not categories — so the raw enum
-                // ordinal is carried as a Custom-unit measure rather than dropped. Still a raw fact,
-                // not a judgment: no reason value is more or less "severe" here.
-                var measures = new Dictionary<string, Measure>
-                {
-                    ["gc.suspend-reason"] = new Measure(reason, MeasureUnit.Custom, MeasureSemantics.Absolute),
-                    ["pause.duration"] = new Measure(
-                        TimeSpan.FromTicks(pauseTicks).TotalMilliseconds, MeasureUnit.Milliseconds, MeasureSemantics.Duration),
-                };
-                if (hasGcData)
-                {
-                    measures["gc.generation"] = new Measure(generation, MeasureUnit.Count, MeasureSemantics.Absolute);
-                    measures["heap.size"] = new Measure(heapBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute);
-                }
-
-                results.Add(new Observation
-                {
-                    Id = ObservationId.NewId(),
-                    ObservationType = "gc.pause",
-                    Subjects = [new ThreadRef { OsThreadId = (uint)threadId, Fidelity = MatchFidelity.Exact }],
-                    When = new TemporalExtent
-                    {
-                        Kind = TemporalKind.Interval,
-                        Start = new TimeAnchor { ProcessUptime = TimeSpan.FromTicks(timestampTicks), Confidence = AnchorConfidence.Exact },
-                        End = new TimeAnchor { ProcessUptime = TimeSpan.FromTicks(timestampTicks + pauseTicks), Confidence = AnchorConfidence.Exact },
-                    },
-                    Measures = measures,
-                    Provenance = new Provenance
-                    {
-                        Artifact = artifactId,
-                        AnalyzerKey = Name,
-                        CapabilitiesUsed = capabilitiesUsed,
-                        Fidelity = FidelityLevel.Full,
-                    },
-                    Confidence = 1.0,
-                });
+                ["gc.suspend-reason"] = new Measure(pause.Reason, MeasureUnit.Custom, MeasureSemantics.Absolute),
+                ["pause.duration"] = new Measure(pause.Duration.TotalMilliseconds, MeasureUnit.Milliseconds, MeasureSemantics.Duration),
+            };
+            if (pause.Generation is int generation && pause.HeapSizeBytes is long heapBytes)
+            {
+                measures["gc.generation"] = new Measure(generation, MeasureUnit.Count, MeasureSemantics.Absolute);
+                measures["heap.size"] = new Measure(heapBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute);
             }
-        }
 
-        return results;
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "gc.pause",
+                Subjects = [pause.Thread],
+                When = new TemporalExtent
+                {
+                    Kind = TemporalKind.Interval,
+                    Start = new TimeAnchor { ProcessUptime = pause.StartProcessUptime, Confidence = AnchorConfidence.Exact },
+                    End = new TimeAnchor { ProcessUptime = pause.StartProcessUptime + pause.Duration, Confidence = AnchorConfidence.Exact },
+                },
+                Measures = measures,
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value, // guaranteed set — see AnalysisContext.ArtifactId's remarks
+                    AnalyzerKey = Name,
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
     }
 }

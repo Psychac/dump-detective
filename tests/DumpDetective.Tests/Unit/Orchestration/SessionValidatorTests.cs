@@ -43,13 +43,58 @@ public sealed class SessionValidatorTests
         act.Should().NotThrow();
     }
 
+    /// <summary>
+    /// Widened in migration step 5c: a session of exactly one dump plus one trace is the new
+    /// combined-session shape this rule exists to allow — see <c>SessionValidator</c>'s own remarks.
+    /// </summary>
     [Fact]
-    public void Validate_Throws_WhenArtifactsHaveMixedSourceKinds()
+    public void Validate_DoesNotThrow_ForOneDumpPlusOneTraceArtifact()
     {
         ArtifactDescriptor dump = CreateArtifact("dump-1", "clr-dump");
         ArtifactDescriptor trace = CreateArtifact("trace-1", "nettrace");
 
         Action act = () => SessionValidator.Validate([dump, trace]);
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void Validate_Throws_WhenArtifactsHaveMixedSourceKinds_AndAreNotOneDumpPlusOneTrace()
+    {
+        ArtifactDescriptor dump = CreateArtifact("dump-1", "clr-dump");
+        ArtifactDescriptor gcDump = CreateArtifact("gcdump-1", "gcdump");
+
+        Action act = () => SessionValidator.Validate([dump, gcDump]);
+
+        act.Should().Throw<SessionValidationException>();
+    }
+
+    [Fact]
+    public void Validate_Throws_WhenTwoDumpsPlusOneTrace()
+    {
+        ArtifactDescriptor[] artifacts =
+        [
+            CreateArtifact("dump-1", "clr-dump"),
+            CreateArtifact("dump-2", "clr-dump"),
+            CreateArtifact("trace-1", "nettrace"),
+        ];
+
+        Action act = () => SessionValidator.Validate(artifacts);
+
+        act.Should().Throw<SessionValidationException>();
+    }
+
+    [Fact]
+    public void Validate_Throws_WhenOneDumpPlusTwoTraces()
+    {
+        ArtifactDescriptor[] artifacts =
+        [
+            CreateArtifact("dump-1", "clr-dump"),
+            CreateArtifact("trace-1", "nettrace"),
+            CreateArtifact("trace-2", "nettrace"),
+        ];
+
+        Action act = () => SessionValidator.Validate(artifacts);
 
         act.Should().Throw<SessionValidationException>();
     }

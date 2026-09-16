@@ -19,10 +19,14 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 string repoRoot = FindRepoRoot(AppContext.BaseDirectory);
 // Phase 3 (2026-09-15) moved all 36 analyzers out of src/DumpDetective.Analysis/Analyzers into
 // 8 per-domain DumpDetective.Plugins.* packages (each with its own Analyzers/ subfolder) — this
-// must scan all of them, not the old single directory.
+// must scan all of them, not the old single directory. Step 5b (2026-09-16) retyped the 3
+// trace-side analyzers in DumpDetective.Sources.NetTrace onto IAnalyzer too — that project has no
+// Analyzers/ subfolder (only 3 files, kept flat), so it's scanned at its own root rather than a
+// nested folder.
 string[] analyzerDirs = Directory.GetDirectories(Path.Combine(repoRoot, "src"), "DumpDetective.Plugins.*")
     .Select(pluginDir => Path.Combine(pluginDir, "Analyzers"))
     .Where(Directory.Exists)
+    .Append(Path.Combine(repoRoot, "src", "DumpDetective.Sources.NetTrace"))
     .OrderBy(d => d, StringComparer.Ordinal)
     .ToArray();
 string outputPath = Path.Combine(repoRoot, "docs", "refactor", "modularity", "capability-mapping.md");
@@ -76,6 +80,12 @@ var sdkContextPropertyToCapability = new Dictionary<string, string>(StringCompar
     ["RuntimeModules"] = RuntimeModules,
     ["RuntimeJit"] = RuntimeJit,
     ["DumpObjectFields"] = DumpObjectFields,
+
+    // Trace-side surfaces added in step 5b (2026-09-16) — DumpDetective.Sources.NetTrace's 3
+    // retyped analyzers are the only consumers today.
+    ["TraceCpuSamples"] = TraceCpuSamples,
+    ["TraceGcPauses"] = TraceGcEvents,
+    ["TraceContention"] = TraceContentionEvents,
 };
 
 // ── Legacy IHeapAnalysisCache member -> capability (ground truth: dump-side *Query.cs bridge implementations) ──
@@ -176,12 +186,24 @@ var optionalTraceCapabilities = new Dictionary<string, (string[] Capabilities, s
     ["TimerLeakAnalyzer"] = ([TraceThreadTimeline], "Timer callback firing activity over time distinguishes a live timer from an abandoned one better than a live-count snapshot."),
     ["WcfChannelAnalyzer"] = ([TraceCustomEvents], "No dedicated WCF trace capability exists; trace.custom-events is the only plausible escape hatch, unconfirmed."),
     ["WeakReferenceAnalyzer"] = ([TraceGcEvents], "Collection timing relative to when a weak reference clears is inherently a GC-event-stream concern."),
+
+    // Already trace-based (Sources.NetTrace, step 5b) — no dump-only-first "optional once trace
+    // exists" axis applies; these rows exist so the table covers all 39 analyzers, not 36.
+    ["CpuHotspotAnalyzer"] = ([], "Already a trace-only analyzer — trace.cpu-samples is its required capability, not an optional one."),
+    ["GcPauseAnalyzer"] = ([], "Already a trace-only analyzer — trace.gc-events is its required capability, not an optional one."),
+    ["ContentionAnalyzer"] = ([], "Already a trace-only analyzer — trace.contention-events is its required capability, not an optional one."),
 };
 
 var rows = new List<AnalyzerCapabilityRow>();
 
 foreach (string file in analyzerDirs
     .SelectMany(dir => Directory.GetFiles(dir, "*.cs", SearchOption.AllDirectories))
+    // DumpDetective.Sources.NetTrace is scanned at its project root (no Analyzers/ subfolder, see
+    // above), which — unlike every Plugins.*/Analyzers path — also contains obj/bin build output;
+    // exclude it rather than let the parser waste time on generated files that never declare
+    // IAnalyzer anyway.
+    .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+             && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
     .OrderBy(f => f, StringComparer.Ordinal))
 {
     string text = File.ReadAllText(file);

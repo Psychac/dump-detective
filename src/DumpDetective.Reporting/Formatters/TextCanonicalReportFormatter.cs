@@ -55,7 +55,6 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
             sb.AppendLine(StringConstants.Equals80);
             sb.AppendLine($"- Mode: {ctx.Mode}");
             sb.AppendLine($"- Dump Path: {ctx.DumpPath}");
-            if (!string.IsNullOrWhiteSpace(ctx.BaselineDumpPath)) sb.AppendLine($"- Baseline Dump: {ctx.BaselineDumpPath}");
             sb.AppendLine($"- Report: {ctx.ReportFormat}");
             sb.AppendLine($"- Config: {(ctx.UsedConfigFile ? "config file" : "command line")}" + (string.IsNullOrWhiteSpace(ctx.ConfigPath) ? string.Empty : $" ({ctx.ConfigPath})"));
             sb.AppendLine($"- Diagnostic Mode: {(ctx.DiagnosticMode ? "on" : "off")}");

@@ -13,23 +13,35 @@ namespace DumpDetective.Orchestration.Session;
 /// trend runs — trend dump files are routinely named per-snapshot, not per-process. Only checks
 /// safe to make on today's data land here; identity/alignment checks wait for real per-artifact
 /// probing, per step 2's known-gap note.
+///
+/// <b>Source-kind rule widened in migration step 5c</b> to also accept a combined session: exactly
+/// one <c>clr-dump</c> artifact plus one <c>nettrace</c> artifact. Every other multi-kind shape is
+/// still rejected — a session isn't yet designed to accept e.g. two dumps and a trace, or a dump
+/// plus two traces, and accepting those silently would just move today's "how would the graph even
+/// use this" question further downstream. The all-same-kind rule (trend/baseline dumps) is
+/// unchanged.
 /// </remarks>
 public static class SessionValidator
 {
+    // Matches ArtifactDescriptor.SourceKind's own doc comment ("clr-dump", "nettrace", "gcdump",
+    // ... — a source-neutral tag, not a file extension). No shared constant exists yet for these;
+    // SingleDumpArtifactFactory/TraceArtifactFactory use the same literals.
+    private const string ClrDumpSourceKind = "clr-dump";
+    private const string NetTraceSourceKind = "nettrace";
+
     public static void Validate(IReadOnlyList<ArtifactDescriptor> artifacts)
     {
         if (artifacts.Count == 0)
             throw new SessionValidationException("A session needs at least one artifact.");
 
-        string sourceKind = artifacts[0].SourceKind;
-        string[] mismatchedPaths = artifacts
-            .Where(a => !string.Equals(a.SourceKind, sourceKind, StringComparison.Ordinal))
-            .Select(a => a.Path)
-            .ToArray();
-        if (mismatchedPaths.Length > 0)
+        string[] distinctKinds = artifacts.Select(a => a.SourceKind).Distinct(StringComparer.Ordinal).ToArray();
+        if (distinctKinds.Length > 1 && !IsOneDumpPlusOneTrace(artifacts))
+        {
             throw new SessionValidationException(
-                $"A session's artifacts must all share one source kind ('{sourceKind}'); " +
-                $"found a different kind in: {string.Join(", ", mismatchedPaths)}.");
+                "A session's artifacts must either all share one source kind, or be exactly one " +
+                $"'{ClrDumpSourceKind}' artifact plus one '{NetTraceSourceKind}' artifact (a combined " +
+                $"session); found source kinds: {string.Join(", ", distinctKinds)}.");
+        }
 
         string[] duplicatePaths = artifacts
             .GroupBy(a => a.Path, StringComparer.OrdinalIgnoreCase)
@@ -40,6 +52,11 @@ public static class SessionValidator
             throw new SessionValidationException(
                 $"A session's artifacts must be distinct paths; duplicated: {string.Join(", ", duplicatePaths)}.");
     }
+
+    private static bool IsOneDumpPlusOneTrace(IReadOnlyList<ArtifactDescriptor> artifacts) =>
+        artifacts.Count == 2
+        && artifacts.Count(a => string.Equals(a.SourceKind, ClrDumpSourceKind, StringComparison.Ordinal)) == 1
+        && artifacts.Count(a => string.Equals(a.SourceKind, NetTraceSourceKind, StringComparison.Ordinal)) == 1;
 }
 
 public sealed class SessionValidationException(string message) : Exception(message);

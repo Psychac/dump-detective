@@ -40,8 +40,8 @@ public sealed class ServiceRegistrationTests
         services.GetRequiredService<AnalyzerExecutionService>().Should().NotBeNull();
         services.GetRequiredService<ReportOutputWriter>().Should().NotBeNull();
         services.GetRequiredService<DumpAnalysisService>().Should().NotBeNull();
-        services.GetRequiredService<SingleDumpOrchestrationService>().Should().NotBeNull();
-        services.GetRequiredService<TrendOrchestrationService>().Should().NotBeNull();
+        services.GetRequiredService<DumpOrchestrationService>().Should().NotBeNull();
+        services.GetRequiredService<TraceOrchestrationService>().Should().NotBeNull();
         services.GetRequiredService<IAnalyzerFactory>().Should().NotBeNull();
         services.GetRequiredService<ISectionBuilderFactory>().Should().NotBeNull();
         services.GetRequiredService<FindingGenerationPipeline>().Should().NotBeNull();
@@ -61,9 +61,9 @@ public sealed class ServiceRegistrationTests
         using IHost host = ServiceRegistration.BuildHost(Array.Empty<string>());
         IServiceProvider services = host.Services;
 
-        services.GetRequiredService<SingleDumpOrchestrationService>()
-            .Should().BeSameAs(services.GetRequiredService<SingleDumpOrchestrationService>());
-        services.GetRequiredService<TrendOrchestrationService>()
-            .Should().BeSameAs(services.GetRequiredService<TrendOrchestrationService>());
+        services.GetRequiredService<DumpOrchestrationService>()
+            .Should().BeSameAs(services.GetRequiredService<DumpOrchestrationService>());
+        services.GetRequiredService<TraceOrchestrationService>()
+            .Should().BeSameAs(services.GetRequiredService<TraceOrchestrationService>());
     }
 }

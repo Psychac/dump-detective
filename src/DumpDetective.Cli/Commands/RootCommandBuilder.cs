@@ -24,13 +24,6 @@ internal sealed class RootCommandBuilder
         Description = "Path to JSON config. If found, config values take precedence over CLI values."
     };
 
-    // need to see use case and remove this.
-    [Obsolete("Use --trend instead.")]
-    private readonly Option<string?> _baselineDumpOption = new("--baseline")
-    {
-        Description = "Baseline dump path used for comparison."
-    };
-
     private readonly Option<string?> _trendDumpOption = new("--trend")
     {
         Description = "Semicolon-separated dump paths ordered oldest->newest."
@@ -76,13 +69,21 @@ internal sealed class RootCommandBuilder
         Description = "Directory to store the disk-based heap index cache. Falls back to a folder next to the dump, then to a temp-folder location if neither is writable."
     };
 
+    private readonly Option<string?> _tracePathOption = new("--trace")
+    {
+        Description = "Path to a trace capture (.etl/.nettrace) to analyze alongside the dump, " +
+            "producing a combined dump+trace session (docs/refactor/modularity/" +
+            "phase-4-session-orchestration.md migration step 5d). Cannot be combined with " +
+            "--trend — a session accepts either N dumps or exactly one dump plus one trace, not " +
+            "both at once."
+    };
+
     public RootCommand Build()
     {
         var command = new RootCommand("DumpDetective dump analyzer")
         {
             _dumpPathArgument,
             _configPathOption,
-            _baselineDumpOption,
             _trendDumpOption,
             _memoryDiagnosticsOption,
             _performanceDiagnosticsOption,
@@ -94,7 +95,8 @@ internal sealed class RootCommandBuilder
             _preRenderOption,
             _separateJsonOption,
             _outputPathOption,
-            _cacheDirectoryOption
+            _cacheDirectoryOption,
+            _tracePathOption
         };
 
         return command;
@@ -110,14 +112,14 @@ internal sealed class RootCommandBuilder
             ParseNameList(parseResult.GetValue(_includeAnalyzersOption)),
             ParseNameList(parseResult.GetValue(_excludeAnalyzersOption)),
             parseResult.GetValue(_diagnosticModeOption),
-            parseResult.GetValue(_baselineDumpOption),
             ParseTrend(parseResult.GetValue(_trendDumpOption)),
             parseResult.GetValue(_memoryDiagnosticsOption),
             parseResult.GetValue(_performanceDiagnosticsOption),
             ParseReportStyle(parseResult.GetValue(_reportStyleOption)),
             parseResult.GetValue(_preRenderOption),
             parseResult.GetValue(_separateJsonOption),
-            parseResult.GetValue(_cacheDirectoryOption));
+            parseResult.GetValue(_cacheDirectoryOption),
+            parseResult.GetValue(_tracePathOption));
     }
 
     private static IReadOnlyList<string>? ParseTrend(string? value)

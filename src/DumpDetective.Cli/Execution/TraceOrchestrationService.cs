@@ -1,21 +1,23 @@
 using System.Diagnostics;
 
 using DumpDetective.Cli.Console;
-using DumpDetective.Cli.Output;
-using DumpDetective.Reporting.Models;
+using DumpDetective.Cli.Pipeline;
+using DumpDetective.Cli.Pipeline.Nodes;
+using DumpDetective.Orchestration.Graph;
 using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
-using DumpDetective.Sources.NetTrace;
 
 namespace DumpDetective.Cli.Execution;
 
 /// <summary>
-/// Trace-only counterpart to <see cref="SingleDumpOrchestrationService"/> — the CLI-facing half of
-/// the interim router accepted in docs/refactor/modularity-plan.md § 8. Builds the trace's own
-/// container, runs the Phase 6b analyzers over it, prints a console summary, and writes
-/// <c>report.json</c> unconditionally (§ 8 step 6). No combined dump+trace session (out of scope
-/// for this increment — see docs/refactor/modularity/phase-6-trace-source.md § Phase 6b exit
-/// criteria).
+/// Trace-only counterpart to <see cref="DumpOrchestrationService"/> — runs the same
+/// <see cref="TraceNodeFactory"/> node triple a combined dump+trace session runs, just alone in its
+/// own <see cref="PipelineGraph"/>/<see cref="PipelineNodeContext"/> instead of appended to a dump
+/// artifact's nodes. Unified onto the node-based path in migration step 5f — before that, this
+/// class called the now-deleted <c>TraceAnalysisRunner</c> directly, a separate procedural
+/// implementation of the same 3 steps <see cref="BuildTraceIndexNode"/>/<see cref="RunTraceAnalyzersNode"/>/
+/// <see cref="WriteTraceReportNode"/> now own, which the combined path would otherwise have had to
+/// duplicate or diverge from.
 /// </summary>
 internal sealed class TraceOrchestrationService
 {
@@ -25,15 +27,15 @@ internal sealed class TraceOrchestrationService
         ConsoleUx.Header("DumpDetective Trace Analysis");
         ConsoleUx.Info($"Trace: {Path.GetFileName(tracePath)}");
 
-        IReadOnlyList<Observation> observations = TraceAnalysisRunner.Run(tracePath, targetProcessId: null, cancellationToken);
+        using TracePipelineState state = new() { TracePath = tracePath, OutputPath = outputPath };
 
-        PrintSummary(observations);
+        PipelineGraph graph = PipelineGraphBuilder.Build(TraceNodeFactory.BuildNodes());
+        var context = new PipelineNodeContext();
+        context.Set(TracePipelineKeys.State, state);
 
-        var report = new TraceSessionReport(tracePath, DateTime.UtcNow, observations);
-        string resolvedOutputPath = TraceReportWriter.ResolveOutputPath(tracePath, outputPath);
-        await TraceReportWriter.WriteAsync(report, resolvedOutputPath, cancellationToken);
+        await new PipelineExecutor().RunAsync(graph, context, cancellationToken);
 
-        ConsoleUx.Success($"Trace analysis complete in {stopwatch.Elapsed.TotalSeconds:N1}s — {observations.Count} observation(s).");
+        ConsoleUx.Success($"Trace analysis complete in {stopwatch.Elapsed.TotalSeconds:N1}s — {state.Observations.Count} observation(s).");
         return 0;
     }
 
@@ -41,9 +43,10 @@ internal sealed class TraceOrchestrationService
     /// Deliberately a plain console printer, not a synthesis rule — there is no
     /// <see cref="Synthesis.ISynthesisRule"/> engine wired up yet (Phase 5, deferred under § 8).
     /// Aggregating for a human-readable summary here does not feed back into any
-    /// <see cref="Observation"/>; it is presentation only.
+    /// <see cref="Observation"/>; it is presentation only. Internal (not private) so
+    /// <see cref="WriteTraceReportNode"/> can reuse it for both the standalone and combined paths.
     /// </summary>
-    private static void PrintSummary(IReadOnlyList<Observation> observations)
+    internal static void PrintSummary(IReadOnlyList<Observation> observations)
     {
         var byType = observations.GroupBy(o => o.ObservationType);
         foreach (var group in byType)

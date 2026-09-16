@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Observations;
 
 namespace DumpDetective.Sdk.Analysis;
@@ -41,6 +42,18 @@ public sealed class AnalysisContext
 {
     public required IObservationSink Observations { get; init; }
 
+    /// <summary>
+    /// The artifact this context is scoped to — needed by any analyzer that actually emits an
+    /// <see cref="Sdk.Observations.Observation"/> (its <c>Provenance.Artifact</c> is required).
+    /// Nullable rather than required, matching every other surface on this type: no dump-side
+    /// analyzer emits a real <see cref="Sdk.Observations.Observation"/> yet (Phase 5 hasn't started
+    /// — see <c>NoOpObservationSink</c>'s own remarks), so <c>AnalysisContextBuilder</c> leaves this
+    /// null today without needing a change; the trace-side analyzers retyped in
+    /// docs/refactor/modularity/phase-4-session-orchestration.md migration step 5b are this
+    /// property's first real consumer.
+    /// </summary>
+    public ArtifactId? ArtifactId { get; init; }
+
     public IProgress<AnalyzerProgressReport>? Progress { get; set; }
 
     /// <summary>
@@ -79,4 +92,8 @@ public sealed class AnalysisContext
     /// <summary>Tier 2 (<c>dump.array-elements</c>) — see <see cref="IDumpArrayShapeQuery"/>'s own
     /// remarks.</summary>
     public IDumpArrayShapeQuery? DumpArrayShapes { get; init; }
+
+    public ITraceCpuSampleQuery? TraceCpuSamples { get; init; }
+    public ITraceGcPauseQuery? TraceGcPauses { get; init; }
+    public ITraceContentionQuery? TraceContention { get; init; }
 }

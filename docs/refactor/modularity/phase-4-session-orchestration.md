@@ -239,12 +239,12 @@ running code.
      per-dump memory tables in `TrendOrchestrationService`. Report/artifact content is unaffected
      (golden tests compare report content, not console text) — this is a deliberate simplification,
      not an oversight.
-   - **Not yet verified:** an actual N>1 real-dump trend run through the new path — needs real
-     `.dmp` files, and this repo's real-dump tests must run one at a time, foreground. Verified so
-     far only via the full non-real-dump suite (1605 passed, +5 new `SessionValidatorTests`) plus
-     inspection matching the new `TrendBuildReportNode`'s snapshot/comparison logic line-for-line
-     against the deleted inline block it replaces.
-5. ⬜ **Pending.** Wire combined dump+trace sessions: build `AnalyzerScope { PerArtifact | PerSession }`
+   - **Verified (2026-09-16, manual):** an actual N>1 real-dump trend run through the new path,
+     confirmed manually against real `.dmp` files (run one at a time, foreground, per this repo's
+     real-dump test constraint). Also verified via the full non-real-dump suite (1605 passed, +5 new
+     `SessionValidatorTests`) plus inspection matching the new `TrendBuildReportNode`'s
+     snapshot/comparison logic line-for-line against the deleted inline block it replaces.
+5. ✅ **Done (2026-09-17).** Wire combined dump+trace sessions: build `AnalyzerScope { PerArtifact | PerSession }`
    (reassigned to this phase above — nobody upstream built it), unify the dump and trace analyzer
    catalogs into one `CapabilityResolver`-resolvable set (closing the other half of Phase 3's
    capability-satisfaction-report exit criterion left open by step 3 — a dump-only session should
@@ -264,18 +264,226 @@ running code.
    ("Multi-artifact sessions | Session DAG (Phase 4)") actually gets delivered, and where
    `modularity-plan.md`'s named debt ("a combined dump+trace session still isn't wired") gets paid
    off.
-6. ⬜ **Pending.** Retire the old orchestrators, stages, and filter service.
-7. ⬜ **Pending.** CLI collapses to `dd analyze <paths...>`; `--baseline`/`--trend` become sugar
-   over ordering.
+   - **Shipped (2026-09-16), sub-step 5a.** `AnalyzerScopeAttribute`/`AnalyzerScope { PerArtifact |
+     PerSession }` added to `DumpDetective.Sdk.Analysis`, mirroring
+     `RequiresCapabilityAttribute`'s shape. Undeclared defaults to `PerArtifact`, matching every
+     analyzer in today's real 36-analyzer catalog — nothing is session-scoped yet (Phase 5/7's
+     correlation analyzers are the first expected `PerSession` case), so this sub-step is a real
+     but currently-inert declaration, not consumption logic; the graph builder doesn't read it yet
+     (that's sub-step 5e, alongside the `RunAnalyzersNode` split).
+   - **Shipped (2026-09-16), sub-step 5b.** `CpuHotspotAnalyzer`/`GcPauseAnalyzer`/`ContentionAnalyzer`
+     (`DumpDetective.Sources.NetTrace`) retyped from the old, minimal `ITraceAnalyzer` (deleted —
+     no implementors remain) onto `Sdk.Analysis.IAnalyzer`, each declaring
+     `[RequiresCapability]` for its own `trace.*` capability. Added 3 new SDK query surfaces
+     (`ITraceCpuSampleQuery`/`ITraceGcPauseQuery`/`ITraceContentionQuery`, mirroring the existing
+     `IHeap*Query`/`IRuntime*Query` pattern) plus matching nullable `AnalysisContext` properties;
+     the address-range resolution `CpuHotspotAnalyzer` used to do itself moved into
+     `TraceCpuSampleQuery`, so the retyped analyzer is now just the thin mapping to `Observation`.
+     `AnalysisContext` also gained a nullable `ArtifactId` (needed for `Provenance.Artifact`) —
+     harmless to every existing dump-side call site, which leaves it null exactly like every other
+     never-consumed nullable surface on that type (no dump analyzer emits a real `Observation` yet).
+     `TraceAnalysisRunner` (kept — its retirement is 5f's job) now builds a real `AnalysisContext`
+     and runs the 3 analyzers through `IAnalyzer.AnalyzeAsync`, collecting output via a new
+     `CollectingObservationSink` — the first real (non-`NoOp`) `IObservationSink` in the codebase.
+     `tools/CapabilityMappingAudit` extended to also scan `DumpDetective.Sources.NetTrace`;
+     [capability-mapping.md](capability-mapping.md) regenerated, now covering all 39 analyzers (was
+     36).
+   - **Shipped (2026-09-16), sub-step 5c.** New `TraceArtifactFactory`
+     (`DumpDetective.Cli.Execution`), mirroring `SingleDumpArtifactFactory`'s own simplifications
+     (static "every trace capability" `Provides` set, not a per-trace probe; same deferred-real-probe
+     rationale). `SessionValidator`'s source-kind rule widened from "all artifacts must share one
+     kind" to "all artifacts must share one kind, **or** be exactly one `clr-dump` plus one
+     `nettrace`" — every other multi-kind shape (two dumps + a trace, a dump + two traces, a dump +
+     a `gcdump`, ...) still rejected, not opened up wholesale.
+   - **Shipped (2026-09-16), sub-step 5d.** New `--trace <path>` CLI option
+     (`AnalysisCommandRequest`/`ResolvedExecutionOptions`/`RootCommandBuilder`), rejected outright
+     when combined with `--trend`/`--baseline` (a session accepts either N dumps or exactly one
+     dump plus one trace, not both — `SessionValidator` already enforces this too, but
+     `DumpAnalysisService` throws a clearer message before ever building a session). When `--trace`
+     is given, `DumpAnalysisService.ExecuteAsync` builds a combined artifact list
+     (`SingleDumpArtifactFactory` + `TraceArtifactFactory`), resolves capabilities against the
+     **unified** 36+3 analyzer catalog for an accurate `CapabilityReport`, then narrows back down to
+     just the dump-catalog instances (new `FilterToDumpCatalog`, reference-equality-based) before
+     handing anything to `AnalysisPipeline` — a trace analyzer must never reach that pipeline, since
+     `AnalysisContextBuilder` never populates its `Trace*` surfaces dump-side and it would just
+     silently no-op (correct-but-misleading "ran, found nothing"). Execution stays two separate
+     pipelines, not one graph: after the dump pipeline finishes, `TraceOrchestrationService`'s trace
+     half (extracted into a new reusable `RunAndWriteReportAsync`) also runs, writing its own
+     `report.json` next to the trace file — "runs both sources' analyzers and reports both
+     (uncorrelated)," exactly the increment phase-6-trace-source.md's own exit-criteria section named
+     as deferred. Unifying dump+trace into one graph (so e.g. `--include-analyzers` could target a
+     trace analyzer, or a single combined report could show both) is step 5e/5f's job.
+   - **Reordered ahead of 5e (2026-09-16).** Re-reading step 2's own known-gap note found that
+     splitting `RunAnalyzersNode` (5e) was deliberately deferred until "there's more than one
+     artifact scope" — a condition 5d's two-separate-pipelines design didn't actually satisfy yet
+     (a combined session still ran through two disconnected engines, not one graph). Doing 5e first
+     would have been a no-observable-benefit split, exactly the anti-pattern this doc's own Risk
+     section warns against. 5f (below) creates the real second-scope-in-one-graph case first, so
+     5e's split (next) has an actual payoff to prove against.
+   - **Shipped (2026-09-16), sub-step 5f.** New trace-side node triple —
+     `BuildTraceIndexNode`/`RunTraceAnalyzersNode`/`WriteTraceReportNode`
+     (`DumpDetective.Cli.Pipeline.Nodes`), built by `TraceNodeFactory`, backed by a new
+     `TracePipelineState`/`TracePipelineKeys` pair mirroring `SingleDumpPipelineState`/
+     `SingleDumpPipelineKeys`. New `TraceContainer` (`DumpDetective.Sources.NetTrace`) wraps
+     `TraceIndexBuilder.Build` + `CacheContainerReader` behind the 3 SDK trace-query interfaces, so
+     the Platform-internal reader type never has to cross into `DumpDetective.Cli` (which has no
+     `InternalsVisibleTo` grant for it). `SingleDumpOrchestrationService.ExecuteAsync` gained an
+     optional `tracePath` parameter: when set, it appends `TraceNodeFactory`'s 3 nodes to the dump's
+     own 5, builds **one** `PipelineGraph`/`PipelineNodeContext`, and runs both through **one**
+     `PipelineExecutor` call — the "1-dump session and dump+trace+... session, same code path" goal
+     this doc's own Target-shape section named. `DumpAnalysisService` simplified back down
+     accordingly (no more separate `TraceOrchestrationService` call after the dump half). Each trace
+     analyzer's `AnalyzeAsync` call is individually try/caught inside `RunTraceAnalyzersNode`
+     (warn + continue), mirroring `AnalysisPipeline`'s own per-analyzer failure isolation, so one bad
+     trace analyzer can't sink a combined run's dump half. `TraceOrchestrationService` itself is
+     retyped onto the same node-based path for the standalone trace-only entry point (no dump at
+     all) rather than deleted outright, so trace-only and combined share identical node
+     implementations; `TraceAnalysisRunner` (the old procedural duplicate) is deleted.
+     **Known gap, not closed here:** a hard failure in `BuildTraceIndexNode`/`WriteTraceReportNode`
+     (e.g. a corrupt trace file) still aborts the whole combined run before the dump half's
+     insight-engine/diagnostics-summary/footer code runs, even though the dump's own report is
+     already on disk by then (`WriteOutputNode` runs first) — real cross-scope failure isolation
+     needs `PipelineExecutor`/`NodeScheduler` to actually track per-branch dependents, which today's
+     purely-sequential scheduler doesn't do (confirmed by reading `NodeScheduler.ScheduleSequential`
+     directly — no parallelism exists yet either, so this phase's separately-planned "artifact-level
+     parallelism" is also still just a design goal, not implemented).
+   - **5e re-scoped and closed at this granularity (2026-09-17).** The doc's original goal for 5e —
+     re-express `RunAnalyzersNode`'s `AnalysisPipeline` bundling as real graph edges "once
+     dump-scoped and trace-scoped analyzers have to coexist in one graph" — is satisfied by what 5f
+     actually shipped: `RunAnalyzersNode` (dump's 36) and `RunTraceAnalyzersNode` (trace's 3) are
+     two real, independently-keyed nodes in one `PipelineGraph`. The finer ask — one node per
+     *individual analyzer* (36 separate nodes instead of one bundle) — was considered and
+     deliberately **not** built: nothing today reads a per-analyzer `observations:{analyzerKey}`
+     graph key (that only matters once Phase 5's synthesis rules or Phase 7's cross-source
+     correlation exist and want to depend on one specific analyzer's output). Building it now would
+     mean re-expressing `AnalysisPipeline`'s ordering/deferred-analyzer-pass/diagnostics/
+     result-post-processing as graph edges, on the hot path every real run and every test already
+     goes through, for zero observable behavior change — the same "splitting a working bundle for
+     no observable benefit" anti-pattern this doc's own Risk section warns against, one level
+     deeper than before. **Revisit this specifically when Phase 5 or Phase 7 lands and names a real
+     per-analyzer graph-key consumer** — not before.
+   - **Shipped (2026-09-17), sub-step 5g.** New `UnifiedCapabilityResolutionTests` (3 tests) closes
+     Phase 3's exit criterion left half-open by step 3 — the criterion couldn't previously be fully
+     verified because `CpuHotspotAnalyzer` wasn't in a resolvable catalog until step 5b's retyping.
+     Resolving the real unified 39-analyzer catalog against a dump-only session now shows exactly
+     the 3 trace analyzers `Unsatisfied` (not filtered out by name — genuinely missing `trace.*`
+     capabilities) and the 36 dump analyzers `Satisfied`; the reciprocal (trace-only session skips
+     the 36 dump analyzers) and combined (dump+trace session skips none) shapes are verified too.
+   - **Step 5 complete.** All sub-steps landed except 5e, which was re-scoped and closed at the
+     artifact-scope granularity 5f actually delivered — see 5e's own note above for why the finer
+     per-analyzer split was deliberately deferred, not abandoned.
+   - **Verified:** new `AnalyzerScopeAttributeTests` (3 tests, 5a) + moved/updated trace-ingest unit
+     tests (`TraceCpuSampleQueryTests`, `CpuHotspotAnalyzerTests`, 5b) + new `TraceArtifactFactoryTests`
+     (2 tests) + updated/new `SessionValidatorTests` (one stale mixed-kind test now asserts the new
+     accept path; 3 new reject-shape tests added, 5c) + new `FilterToDumpCatalogTests` (2 tests, 5d)
+     + new `TraceNodeFactoryTests` (3 tests, 5f, proving the shared-graph structural claim cheaply)
+     + full non-real-dump suite (~1620 passed across several runs — two isolated, unrelated
+     single-test flakes appeared and reproduced as pass-in-isolation, consistent with this suite's
+     pre-existing flake history, not a regression) + one foreground real-trace run
+     (`DD_RUN_DISCREPANCY_TESTS=1`, the real-trace opt-in switch — not the real-dump one, and not
+     gated by the one-at-a-time real-dump constraint) against the real 912.1 MB `HighCPU_11.etl`: all
+     9 `TraceIngest` tests passed, confirming `CpuHotspotAnalyzer`'s
+     end-to-end path through the new `AnalysisContext`/`TraceCpuSampleQuery` wiring still resolves
+     real leaf samples to real managed methods. **Plus, for 5f specifically, 3 sequential foreground
+     CLI smoke runs against real artifacts** (never parallel/background, per this project's
+     real-dump-test discipline): (1) real-trace-only through the new graph-based
+     `TraceOrchestrationService` against `HighCPU_11.etl` — 33.1s, 66,132 observations, correct
+     console summary; (2) real-dump-only against the ~3.3 GB reference dump — 73.2s, all 36
+     analyzers ran, report written, confirming the `SingleDumpOrchestrationService` signature change
+     is a no-op for the pure-dump path; (3) **real combined dump+trace** — 104.4s, console output
+     showed "Run trace analyzers"/"Write trace report" as stages of the *same* pipeline as the
+     dump's "Run analyzers", per-node memory tracking covered both, and both artifacts' real
+     `report.json`/`report.html` outputs were confirmed written to disk (the trace's own
+     `report.json`, timestamped to the run, landed next to the trace file as designed).
+6. 🔶 **Partially done (2026-09-17).** Retire the old orchestrators, stages, and filter service.
+   - **Stages: already done.** `IAnalysisStage`/`StagedPipelineRunner`/`SingleDumpStageFactory` and
+     the 5 old stage classes were deleted in step 1 — nothing left to retire here.
+   - **Orchestrators: done.** `TrendOrchestrationService` and `SingleDumpNodeFactory` deleted;
+     `SingleDumpOrchestrationService` absorbed both (it already built the same Load/Index/Analyze
+     node types for one artifact that `TrendOrchestrationService` built its own copy of for N —
+     the only real difference was which report node closes the run, now an `if (isTrend)` branch in
+     one method instead of two separate classes). Kept the class name rather than renaming to
+     something scope-neutral, matching this phase's own precedent of retyping
+     `TraceOrchestrationService` in place (step 5f) rather than deleting-and-replacing it.
+     `DumpAnalysisService` now calls one method regardless of N or trace presence.
+     `TrendOrchestrationServiceTests`/`SingleDumpOrchestrationServiceTests` merged into one file
+     covering both shapes' failure-propagation behavior.
+   - **Filter service: deliberately not done — blocked by the same precondition as 5e.** The doc's
+     "becomes graph-node filtering" plan for `AnalyzerFilterService` means "don't even create a
+     node for an excluded analyzer," which needs one graph node per analyzer to filter at that
+     granularity — exactly the fine-grained `RunAnalyzersNode` split 5e re-scoped and deferred until
+     Phase 5/7 names a real consumer. `AnalyzerFilterService` still does real, necessary work today
+     (name validation, include/exclude filtering, domain/stage ordering, synthesizing
+     `SkippedByFilter` results) with no other home to move to yet, so it's untouched. Revisit
+     together with 5e's deferred split, same trigger.
+   - **Verified:** merged `SingleDumpOrchestrationServiceTests` (2 tests, both dump-load-failure
+     shapes) + updated `ServiceRegistrationTests` (`TrendOrchestrationService` references swapped
+     for `TraceOrchestrationService`, the DI registrations that actually still exist) + full
+     non-real-dump suite (1624 passed, run 3x) + two sequential foreground real-dump CLI smoke runs
+     (never parallel/background): single-dump (75.5s, matching the pre-merge 73.2s/75.5s baseline)
+     and a real 2-dump trend run against the same `Crash_IIS_BALTSTPRD` crash pair (191.9s,
+     7.0 MB report containing 237 trend-specific mentions, confirming the merged trend branch still
+     produces a real trend report end to end).
+   - **Renamed (2026-09-17, after step 7 settled the CLI-shape question):**
+     `SingleDumpOrchestrationService` → `DumpOrchestrationService`. The name stopped describing this
+     class the moment it absorbed the trend (N-dump) case above; kept dump-centric rather than
+     something session-generic, since this class still always requires at least one dump — a
+     trace-only run has no dump artifact and stays on `TraceOrchestrationService`'s own path.
+     Verified: full non-real-dump suite (1624 passed) + one foreground real-dump smoke run (71.0s,
+     matching every prior baseline).
+7. ✅ **Done (2026-09-17).** CLI collapses to `dd analyze <paths...>`; `--baseline`/`--trend`
+   become sugar over ordering.
+   - **Decided:** unlike `--trace`/`--trend` (kept, real options), `--baseline` is removed outright
+     rather than kept as permanent sugar — it was already `[Obsolete("Use --trend instead")]`, and
+     `--trend "old.dmp;new.dmp"` is already its exact 2-dump replacement, so there was no real
+     back-compat case for keeping a third way to say the same thing.
+   - **Shipped:** `--baseline` deleted from `RootCommandBuilder`/`AnalysisCommandRequest`/
+     `ResolvedExecutionOptions`; `DumpAnalysisService.TryResolveTrendSequence`'s baseline-fallback
+     branch and `StartupValidator`'s baseline-specific checks removed. `AnalysisIncidentContext`'s
+     `BaselineDumpPath` report-metadata field (and both report formatters' "Baseline Dump" line)
+     deleted too, rather than left as permanently-dead-but-present — it only ever populated from
+     the now-gone CLI flag, never from `--trend`. `config.json`'s `BaselineDumpPath` key joined the
+     existing dead-key warning list (`Profile`/`Analyzers`/`ExecutionPolicy`) instead of silently
+     no-op'ing for anyone with an old config file.
+   - **Decided (2026-09-17): no verb, no argument-shape change.** Discussed and settled: the CLI
+     keeps today's shape — one positional dump path, separate `--trace`/`--trend` options — rather
+     than gaining a `dd analyze` verb or flattening everything into one generic `<paths...>` list.
+     None of this phase's own exit criteria (below) call for a CLI verb; the actual "one code path"
+     goal was already delivered internally by step 6. Introducing a verb now would be a user-facing
+     surface change with a real migration story and no concrete driver behind it (nothing in Phase
+     5+ is currently known to need it) — this is the one piece of step 7 genuinely worth treating as
+     a deliberate no-op rather than a deferral.
+   - **Verified:** full non-real-dump suite (1624 passed across several runs; the one recurring
+     flake, `ArrayAnalyzerRetypingCharacterizationTests`, reproduced independently of this change —
+     see 5f/6's own notes on this suite's pre-existing flake history) + one foreground real-dump CLI
+     smoke run (72.2s, matching every prior single-dump baseline) + confirmed `--baseline` is now a
+     genuinely unrecognized argument, not silently ignored.
 
 ## Exit criteria
 
-- Identical output to the pre-phase pipeline for both single-dump and multi-dump corpora.
+- Identical output to the pre-phase pipeline for both single-dump and multi-dump corpora. — **Met**:
+  verified via real single-dump (72.2s–75.5s across several runs) and real 2-dump trend
+  (191.9s, real trend report) CLI smoke runs after both the step 6 orchestrator merge and the step 7
+  `--baseline` removal.
 - A non-default graph (custom node injected, analyzers filtered) runs successfully — proving
-  generality rather than a re-skin.
-- Artifact-level parallelism is off by default and cannot be enabled without an explicit flag.
-- `IAnalysisStage` and both old orchestrators are gone.
-- `PhaseTimeline` preserved, now keyed by node id.
+  generality rather than a re-skin. — **Met**: the combined dump+trace graph (step 5f) appends a
+  genuinely different node shape (`BuildTraceIndexNode`/`RunTraceAnalyzersNode`/
+  `WriteTraceReportNode`) to the dump's own nodes and runs both through one `PipelineExecutor` call,
+  verified against a real combined dump+trace CLI run (104.4s).
+- Artifact-level parallelism is off by default and cannot be enabled without an explicit flag. —
+  **Trivially met, not actually built**: `NodeScheduler.ScheduleSequential` (confirmed by reading it
+  directly) never parallelizes anything, artifact-level or otherwise — there's no flag because
+  there's no capability to gate. Real artifact-level parallelism remains a stated design goal (see
+  "Key design decisions" above), not implemented work; revisit if a real performance need for it
+  ever materializes.
+- `IAnalysisStage` and both old orchestrators are gone. — **Met**: `IAnalysisStage` is gone (step 1).
+  `TrendOrchestrationService` is deleted; `SingleDumpOrchestrationService` absorbed its
+  responsibilities (step 6) and was then renamed to `DumpOrchestrationService` (step 7's own note
+  above) once the CLI-shape question resolved and the old name's staleness had no more reason to
+  wait — so there is exactly one class doing this job now, under a name that actually describes it,
+  and neither of the two original class names survives.
+- `PhaseTimeline` preserved, now keyed by node id. — inherited from step 1, unchanged by steps 5-7;
+  not independently re-verified in this pass.
 
 ## Risk / effort
 

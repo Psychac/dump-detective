@@ -5,7 +5,6 @@ namespace DumpDetective.Cli.Models;
 internal sealed record ResolvedExecutionOptions(
     string DumpPath,
     string OutputPath,
-    string? BaselineDumpPath,
     IReadOnlyList<string>? TrendDumpPaths,
     DiagnosticsOptions Diagnostics,
     ReportOptions Report,
@@ -16,4 +15,13 @@ internal sealed record ResolvedExecutionOptions(
     bool DiagnosticMode)
 {
     public string? CacheDirectory { get; init; }
+
+    /// <summary>
+    /// Trace capture to analyze alongside <see cref="DumpPath"/> — see
+    /// docs/refactor/modularity/phase-4-session-orchestration.md migration step 5d. Mutually
+    /// exclusive with <see cref="TrendDumpPaths"/>, enforced in
+    /// <c>DumpAnalysisService.ExecuteAsync</c> (a session accepts either N dumps or exactly one
+    /// dump plus one trace, not both — see <c>SessionValidator</c>).
+    /// </summary>
+    public string? TracePath { get; init; }
 }

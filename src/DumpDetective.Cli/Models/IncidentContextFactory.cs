@@ -43,7 +43,6 @@ internal static class IncidentContextFactory
             return new AnalysisIncidentContext(
             Mode: mode,
             DumpPath: dumpPath,
-            BaselineDumpPath: resolved.BaselineDumpPath,
             TrendDumpPaths: resolved.TrendDumpPaths,
             ReportFormat: resolved.Report.Format.ToString(),
             ConfigPath: resolved.ConfigPath,

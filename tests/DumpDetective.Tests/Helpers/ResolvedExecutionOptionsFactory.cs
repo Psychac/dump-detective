@@ -9,7 +9,6 @@ internal static class ResolvedExecutionOptionsFactory
         return new ResolvedExecutionOptions(
             DumpPath: dumpPath,
             OutputPath: outputPath,
-            BaselineDumpPath: null,
             TrendDumpPaths: null,
             Diagnostics: new DiagnosticsOptions(),
             Report: new ReportOptions(),

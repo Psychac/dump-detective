@@ -9,7 +9,7 @@
 - Register DI and assemble analyzers and generators.
 
 **Key types / interfaces:**
-- `SingleDumpOrchestrationService`
+- `DumpOrchestrationService`
 - `AnalyzerFilterService`
 - `ResolvedExecutionOptions`
 

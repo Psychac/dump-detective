@@ -9,7 +9,6 @@ namespace DumpDetective.Cli.Configuration;
 internal sealed class CliConfigurationFileModel
 {
     public string? DumpPath { get; init; }
-    public string? BaselineDumpPath { get; init; }
     public List<string>? TrendDumpPaths { get; init; }
 
     public DiagnosticsOptions? Diagnostics { get; init; }

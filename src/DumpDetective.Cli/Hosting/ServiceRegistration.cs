@@ -45,9 +45,7 @@ internal static class ServiceRegistration
         services.AddSingleton<DumpDetective.Cli.Execution.AnalyzerExecutionService>();
         services.AddSingleton<ReportOutputWriter>();
         services.AddSingleton<DumpAnalysisService>();
-        services.AddSingleton<SingleDumpNodeFactory>();
-        services.AddSingleton<SingleDumpOrchestrationService>();
-        services.AddSingleton<TrendOrchestrationService>();
+        services.AddSingleton<DumpOrchestrationService>();
         services.AddSingleton<TraceOrchestrationService>();
         services.AddSingleton<IAnalyzerFactory, DefaultAnalyzerFactory>();
         services.AddSingleton<ISectionBuilderFactory, DefaultSectionBuilderFactory>();

@@ -29,7 +29,6 @@ internal sealed class ConfigurationResolver
             ReportOptions report = Resolve(usedConfigFile, BuildReportFromConfig, AnalyzerOptionsBuilder.BuildReportFromCli, fileModel, request);
 
             string? configuredDumpPath = fileModel?.DumpPath;
-            string? configuredBaseline = fileModel?.BaselineDumpPath;
             IReadOnlyList<string>? configuredTrend = fileModel?.TrendDumpPaths;
             IReadOnlyList<string>? effectiveTrend = configuredTrend ?? request.TrendDumpPaths;
             IReadOnlyCollection<string>? configuredInclude = fileModel?.IncludeAnalyzers;
@@ -65,7 +64,6 @@ internal sealed class ConfigurationResolver
             return new ResolvedExecutionOptions(
                 effectiveDumpPath!,
                 outputPath,
-                configuredBaseline ?? request.BaselineDumpPath,
                 effectiveTrend,
                 diagnostics,
                 report,
@@ -75,7 +73,8 @@ internal sealed class ConfigurationResolver
                 effectiveExclude,
                 request.DiagnosticMode)
             {
-                CacheDirectory = fileModel?.CacheDirectory ?? request.CacheDirectory
+                CacheDirectory = fileModel?.CacheDirectory ?? request.CacheDirectory,
+                TracePath = request.TracePath
             };
         }
         catch (Exception ex) when (ex is ArgumentException or FileNotFoundException)
@@ -140,8 +139,9 @@ internal sealed class ConfigurationResolver
     // docs/refactor/analysis-options-removal-plan.md. Every analyzer now runs the same fixed,
     // exact analysis regardless of config.json, so a config file written against either system
     // would otherwise be silently ignored by the deserializer with no signal to the user. Warn
-    // instead.
-    private static readonly string[] s_deadTopLevelKeys = ["Profile", "Analyzers", "ExecutionPolicy"];
+    // instead. BaselineDumpPath joined this list in Phase 4 step 7 — the CLI's --baseline (already
+    // Obsolete, pointing at --trend) was removed outright rather than kept as permanent sugar.
+    private static readonly string[] s_deadTopLevelKeys = ["Profile", "Analyzers", "ExecutionPolicy", "BaselineDumpPath"];
 
     private static void WarnIfDeadKeysPresent(string json)
     {

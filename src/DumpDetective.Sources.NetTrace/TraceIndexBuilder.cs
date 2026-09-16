@@ -30,9 +30,9 @@ internal static class TraceIndexBuilder
     /// </summary>
     /// <param name="sections">
     /// Which sections to build. Defaults to all three — callers that know they only need a subset
-    /// (e.g. <c>TraceAnalysisRunner</c>, which only runs analyzers reading
-    /// <see cref="CacheSectionId.TraceGcEvents"/>/<see cref="CacheSectionId.TraceContention"/> today)
-    /// should pass that subset: each section is its own independent streaming pass (see remarks
+    /// (e.g. <c>BuildTraceIndexNode</c>, which drops <see cref="CacheSectionId.TraceCpuSamples"/>
+    /// for a non-ETL capture) should pass that subset: each section is its own independent streaming
+    /// pass (see remarks
     /// above), so skipping an unneeded one is a real, proportionate saving — measured at over half
     /// the wall-clock of a real trace-only run when <see cref="CacheSectionId.TraceMethods"/> was
     /// always built regardless of whether anything read it.

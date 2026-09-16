@@ -5,7 +5,6 @@ namespace DumpDetective.Core.Models;
 internal sealed record AnalysisIncidentContext(
     string Mode,
     string DumpPath,
-    string? BaselineDumpPath,
     IReadOnlyList<string>? TrendDumpPaths,
     string ReportFormat,
     string? ConfigPath,

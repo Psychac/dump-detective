@@ -83,6 +83,14 @@ namespace DumpDetective.Analysis.Analyzers.Leaks;
 /// </para>
 /// </remarks>
 [AnalyzerModule(key: "dominator", displayName: "Dominator Analysis", order: 220, tags: ["retention", "dominator"])]
+[RequiresCapability(
+    CapabilityVocabulary.HeapDominators,
+    CapabilityVocabulary.HeapObjects,
+    CapabilityVocabulary.HeapReferences,
+    CapabilityVocabulary.HeapReverseReferences,
+    CapabilityVocabulary.HeapTypes)]
+[OptionalCapability(CapabilityVocabulary.TraceAllocSamples)]
+[OptionalCapability(CapabilityVocabulary.TraceGcEvents)]
 public sealed class DominatorAnalyzer :
     IAnalyzer, IProducesAnalyzerDomainResult, Pipeline.IRequiresReachableGraphIndex, Pipeline.IRequiresDominatorTreeIndex
 {

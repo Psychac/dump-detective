@@ -26,6 +26,9 @@ namespace DumpDetective.Analysis.Analyzers.Infra;
 /// so it's tracked and reported here too.
 /// </remarks>
 [AnalyzerModule(key: "sql-transaction", displayName: "SQL Transaction Analysis", order: 425, tags: ["infra", "network"])]
+[RequiresCapability(
+    CapabilityVocabulary.DumpObjectFields,
+    CapabilityVocabulary.HeapObjects)]
 public sealed class SqlTransactionAnalyzer :
     IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
     IParallelHeapIndexScanParticipant, ICustomizesAnalysisContext

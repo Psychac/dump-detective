@@ -26,6 +26,11 @@ namespace DumpDetective.Analysis.Analyzers.Threads;
 /// there once this was confirmed.
 /// </remarks>
 [AnalyzerModule(key: "lock-graph", displayName: "Lock Graph Analysis", order: 320, tags: ["threads", "locks"])]
+[RequiresCapability(
+    CapabilityVocabulary.HeapObjects,
+    CapabilityVocabulary.RuntimeLocks,
+    CapabilityVocabulary.RuntimeThreads)]
+[OptionalCapability(CapabilityVocabulary.TraceContentionEvents)]
 public sealed class LockGraphAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult, IThreadStackScanParticipant, ICustomizesAnalysisContext
 {
     private readonly ThreadStackScanState _scanState = new();

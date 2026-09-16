@@ -45,6 +45,12 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
     /// (<c>_stackTraceString</c> text → binary trace-array unwind → <c>_remoteStackTraceString</c>).
     /// </remarks>
     [AnalyzerModule(key: "crash", displayName: "Crash Analysis", order: 170, tags: ["exceptions"])]
+    [RequiresCapability(
+        CapabilityVocabulary.DumpObjectFields,
+        CapabilityVocabulary.HeapObjects,
+        CapabilityVocabulary.HeapSegments,
+        CapabilityVocabulary.RuntimeThreads)]
+    [OptionalCapability(CapabilityVocabulary.TraceExceptionEvents)]
     public sealed class CrashAnalyzer :
         IAnalyzer, IProducesAnalyzerDomainResult, IParallelHeapIndexScanParticipant, ICustomizesAnalysisContext
     {

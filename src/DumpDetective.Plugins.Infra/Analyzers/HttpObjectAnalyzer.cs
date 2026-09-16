@@ -30,6 +30,12 @@ namespace DumpDetective.Analysis.Analyzers.Infra;
 /// call, since that's already resolved the same way for every type.
 /// </remarks>
 [AnalyzerModule(key: "http-object", displayName: "Http Object Analysis", order: 440, tags: ["infra", "network"])]
+[RequiresCapability(
+    CapabilityVocabulary.DumpObjectFields,
+    CapabilityVocabulary.HeapObjects,
+    CapabilityVocabulary.HeapSegments,
+    CapabilityVocabulary.HeapTypes)]
+[OptionalCapability(CapabilityVocabulary.TraceHttpEvents)]
 public sealed class HttpObjectAnalyzer :
     IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
     IParallelHeapIndexScanParticipant, ICustomizesAnalysisContext

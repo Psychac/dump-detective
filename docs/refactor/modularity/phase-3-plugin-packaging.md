@@ -187,16 +187,17 @@ Carried forward, not resolved by this phase — each is explicitly Phase 4 or Ph
 - **No orchestrator exists to consume capability declarations.** `[RequiresCapability]`/
   `[OptionalCapability]` are validated for syntactic correctness (known vocabulary members) but
   nothing computes the runnable/degraded/skipped buckets described under "Key design decisions" —
-  that's Phase 4. **Update, 2026-09-16:** the orchestrator (`CapabilityResolver`) now exists (Phase
-  4 step 2), but nothing feeds it real declarations yet — see next bullet — so this is still
-  functionally unclosed. Tracked as [phase-4-session-orchestration.md step 3](phase-4-session-orchestration.md#migration-steps).
+  that's Phase 4. **Closed, 2026-09-16** — `CapabilityResolver` (Phase 4 step 2) now computes all
+  three buckets for real declarations (Phase 4 step 3), and `ConsoleUx.CapabilityReport` surfaces
+  them. See [phase-4-session-orchestration.md step 3](phase-4-session-orchestration.md#migration-steps).
 - **Analyzers don't declare capabilities yet.** Step 1 shipped the attributes ahead of any real
   use; the 36 in-repo analyzers carry `[AnalyzerModule]` but not `[RequiresCapability]`/
   `[OptionalCapability]` — there's no consumer for those declarations yet (previous bullet), so
-  adding them now would be speculative. Do this once Phase 4 exists to act on it. **Update,
-  2026-09-16:** Phase 4's orchestrator exists now — this is unblocked and explicitly scheduled as
-  [phase-4-session-orchestration.md step 3](phase-4-session-orchestration.md#migration-steps), not
-  yet done.
+  adding them now would be speculative. Do this once Phase 4 exists to act on it. **Closed,
+  2026-09-16** — all 36 analyzers now declare real `[RequiresCapability]`/`[OptionalCapability]`,
+  transcribed from a re-verified `capability-mapping.md` (the generating tool itself was found
+  stale — still scanning the pre-Phase-3 analyzer location — and fixed first). See
+  [phase-4-session-orchestration.md step 3](phase-4-session-orchestration.md#migration-steps).
 - **`AnalyzerScope { PerArtifact | PerSession }` — missed here, not caught until Phase 4, corrected
   2026-09-16.** [phase-4-session-orchestration.md](phase-4-session-orchestration.md)'s design
   section assumed this SDK attribute would land in "Phase 1/3," but neither this phase's migration
@@ -212,12 +213,17 @@ Carried forward, not resolved by this phase — each is explicitly Phase 4 or Ph
   package.
 - ✅ CLI behavior (`--tags`/`--only`/`--skip`, ordering) unchanged, verified by existing
   integration tests.
-- ⬜ Every analyzer declares capabilities; no analyzer references any `Sources.*` package —
-  deferred, see "Known gaps". Owner: [phase-4-session-orchestration.md step 3](phase-4-session-orchestration.md#migration-steps).
+- ✅ Every analyzer declares capabilities (2026-09-16, via
+  [phase-4-session-orchestration.md step 3](phase-4-session-orchestration.md#migration-steps)); no
+  analyzer references any `Sources.*` package — still true, unchanged by this.
 - ⬜ Capability satisfaction report is produced for a dump-only session and correctly lists
-  `Plugins.Cpu` analyzers as skipped-for-missing-`trace.cpu-samples` — needs Phase 4's
-  orchestrator, which now exists; the report itself is not yet built. Owner:
-  [phase-4-session-orchestration.md step 3](phase-4-session-orchestration.md#migration-steps).
+  `Plugins.Cpu` analyzers as skipped-for-missing-`trace.cpu-samples` — split in two, 2026-09-16:
+  the report itself (runnable/degraded/skipped buckets, visible output) is **done**, via
+  [phase-4-session-orchestration.md step 3](phase-4-session-orchestration.md#migration-steps); the
+  specific `Plugins.Cpu`-skipped case can't be demonstrated until the dump and trace analyzer
+  catalogs are unified (`Plugins.Cpu` has zero analyzers in today's dump-only catalog —
+  `CpuHotspotAnalyzer` lives in `Sources.NetTrace`), which is
+  [phase-4-session-orchestration.md step 5](phase-4-session-orchestration.md#migration-steps).
 
 ## Risk / effort
 

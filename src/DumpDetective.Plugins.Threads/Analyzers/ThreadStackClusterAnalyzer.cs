@@ -24,6 +24,9 @@ namespace DumpDetective.Analysis.Analyzers.Threads
     /// frame method signatures/frame names and thread state flags, all coarse/structural.
     /// </remarks>
     [AnalyzerModule(key: "thread-stack-cluster", displayName: "Thread Stack Cluster Analysis", order: 300, tags: ["threads"])]
+    [RequiresCapability(CapabilityVocabulary.RuntimeThreads)]
+    [OptionalCapability(CapabilityVocabulary.TraceCpuSamples)]
+    [OptionalCapability(CapabilityVocabulary.TraceThreadTimeline)]
     public sealed class ThreadStackClusterAnalyzer :
         IAnalyzer, IProducesAnalyzerDomainResult, IThreadStackScanParticipant, ICustomizesAnalysisContext
     {

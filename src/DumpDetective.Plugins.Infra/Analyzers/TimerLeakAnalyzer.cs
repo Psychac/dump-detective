@@ -49,6 +49,11 @@ namespace DumpDetective.Analysis.Analyzers.Infra;
 /// relying on that coincidence — see <see cref="TryReadPeriod"/>.
 /// </remarks>
 [AnalyzerModule(key: "timer-leak", displayName: "Timer Leak Analysis", order: 450, tags: ["infra", "timers"])]
+[RequiresCapability(
+    CapabilityVocabulary.DumpObjectFields,
+    CapabilityVocabulary.HeapObjects,
+    CapabilityVocabulary.HeapSegments)]
+[OptionalCapability(CapabilityVocabulary.TraceThreadTimeline)]
 public sealed class TimerLeakAnalyzer :
     IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
     IParallelHeapIndexScanParticipant, IRequiresReachableGraphIndex, ICustomizesAnalysisContext

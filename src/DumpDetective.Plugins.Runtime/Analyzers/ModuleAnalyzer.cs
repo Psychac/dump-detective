@@ -40,6 +40,10 @@ namespace DumpDetective.Analysis.Analyzers.Runtime;
 /// resolved type name.
 /// </remarks>
 [AnalyzerModule(key: "module", displayName: "Module Analysis", order: 160, tags: ["runtime"])]
+[RequiresCapability(
+    CapabilityVocabulary.DumpObjectFields,
+    CapabilityVocabulary.HeapTypes,
+    CapabilityVocabulary.RuntimeModules)]
 public sealed class ModuleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "Module Analysis";

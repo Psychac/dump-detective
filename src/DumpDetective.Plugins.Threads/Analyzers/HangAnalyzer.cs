@@ -33,6 +33,12 @@ namespace DumpDetective.Analysis.Analyzers.Threads
     /// is accepted rather than re-implementing a second, independent scan path.
     /// </remarks>
     [AnalyzerModule(key: "hang", displayName: "Hang Analysis", order: 180, tags: ["threads"])]
+    [RequiresCapability(
+        CapabilityVocabulary.DumpObjectFields,
+        CapabilityVocabulary.HeapObjects,
+        CapabilityVocabulary.RuntimeThreads)]
+    [OptionalCapability(CapabilityVocabulary.TraceThreadTimeline)]
+    [OptionalCapability(CapabilityVocabulary.TraceContentionEvents)]
     public sealed class HangAnalyzer :
         IAnalyzer, IProducesAnalyzerDomainResult, IParallelHeapIndexScanParticipant,
         IThreadStackScanParticipant, ICustomizesAnalysisContext

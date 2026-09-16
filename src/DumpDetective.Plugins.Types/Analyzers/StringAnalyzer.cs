@@ -51,6 +51,12 @@ namespace DumpDetective.Analysis.Analyzers.Types;
 /// already shared by five other analyzers).
 /// </remarks>
 [AnalyzerModule(key: "string", displayName: "String Analysis", order: 230, tags: ["memory", "string"])]
+[RequiresCapability(
+    CapabilityVocabulary.DumpObjectFields,
+    CapabilityVocabulary.HeapObjects,
+    CapabilityVocabulary.HeapSegments,
+    CapabilityVocabulary.HeapTypes)]
+[OptionalCapability(CapabilityVocabulary.TraceAllocSamples)]
 public sealed partial class StringAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "String Analysis";

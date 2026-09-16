@@ -49,6 +49,11 @@ namespace DumpDetective.Analysis.Analyzers.Infra;
 /// matrix this analyzer targets), not a quick addition to this batch.
 /// </remarks>
 [AnalyzerModule(key: "db-connection", displayName: "DbConnection Analysis", order: 420, tags: ["infra", "network"])]
+[RequiresCapability(
+    CapabilityVocabulary.DumpObjectFields,
+    CapabilityVocabulary.HeapDominators,
+    CapabilityVocabulary.HeapObjects,
+    CapabilityVocabulary.HeapSegments)]
 public sealed class DbConnectionAnalyzer :
     IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
     IParallelHeapIndexScanParticipant, IRequiresReachableGraphIndex, ICustomizesAnalysisContext

@@ -27,6 +27,10 @@ namespace DumpDetective.Analysis.Analyzers.Runtime;
 /// already-exact total is available.
 /// </summary>
 [AnalyzerModule(key: "heap-topology", displayName: "Heap Topology Analysis", order: 150, tags: ["heap"])]
+[RequiresCapability(
+    CapabilityVocabulary.HeapSegments,
+    CapabilityVocabulary.HeapTypes)]
+[OptionalCapability(CapabilityVocabulary.TraceGcEvents)]
 public sealed class HeapTopologyAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "Heap Topology";

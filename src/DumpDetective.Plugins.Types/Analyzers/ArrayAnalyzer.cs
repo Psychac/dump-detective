@@ -31,6 +31,12 @@ namespace DumpDetective.Analysis.Analyzers.Types;
 /// batch's typed-resource-quartet analyzers.
 /// </remarks>
 [AnalyzerModule(key: "array", displayName: "Array Analysis", order: 360, tags: ["types"])]
+[RequiresCapability(
+    CapabilityVocabulary.HeapObjects,
+    CapabilityVocabulary.HeapRoots,
+    CapabilityVocabulary.HeapSegments,
+    CapabilityVocabulary.HeapTypes)]
+[OptionalCapability(CapabilityVocabulary.TraceAllocSamples)]
 public sealed class ArrayAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "Array Analysis";

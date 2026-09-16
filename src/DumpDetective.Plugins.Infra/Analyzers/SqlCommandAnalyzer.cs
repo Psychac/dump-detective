@@ -34,6 +34,9 @@ namespace DumpDetective.Analysis.Analyzers.Infra;
 /// retyping doesn't add it either, since that would be a real behavior change, not a plumbing one.
 /// </remarks>
 [AnalyzerModule(key: "sql-command", displayName: "SQL Command Analysis", order: 426, tags: ["infra", "network"])]
+[RequiresCapability(
+    CapabilityVocabulary.DumpObjectFields,
+    CapabilityVocabulary.HeapObjects)]
 public sealed class SqlCommandAnalyzer :
     IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
     IParallelHeapIndexScanParticipant, ICustomizesAnalysisContext

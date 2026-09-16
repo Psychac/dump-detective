@@ -75,6 +75,12 @@ namespace DumpDetective.Analysis.Analyzers.Infra;
 /// counts toward <see cref="WcfChannelTypeSummary.InvalidStateCount"/>.
 /// </remarks>
 [AnalyzerModule(key: "wcf-channel", displayName: "WCF Channel Analysis", order: 430, tags: ["infra", "network"])]
+[RequiresCapability(
+    CapabilityVocabulary.DumpObjectFields,
+    CapabilityVocabulary.HeapDominators,
+    CapabilityVocabulary.HeapObjects,
+    CapabilityVocabulary.HeapTypes)]
+[OptionalCapability(CapabilityVocabulary.TraceCustomEvents)]
 public sealed class WcfChannelAnalyzer :
     IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
     IParallelHeapIndexScanParticipant, ICustomizesAnalysisContext

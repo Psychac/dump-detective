@@ -36,6 +36,10 @@ namespace DumpDetective.Analysis.Analyzers.Leaks;
 /// Tier-2 primitives.
 /// </remarks>
 [AnalyzerModule(key: "event-leak", displayName: "Event Leak Analysis", order: 330, tags: ["events", "leaks"])]
+[RequiresCapability(
+    CapabilityVocabulary.HeapDominators,
+    CapabilityVocabulary.HeapTypes)]
+[OptionalCapability(CapabilityVocabulary.TraceAllocSamples)]
 public sealed partial class EventLeakAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "Event Leak Analysis";

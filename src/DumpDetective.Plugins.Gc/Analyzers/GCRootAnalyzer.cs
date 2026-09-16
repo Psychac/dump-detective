@@ -28,6 +28,14 @@ namespace DumpDetective.Analysis.Analyzers.Gc;
 /// severity scoring both depend on the index's exact type-aggregate totals.
 /// </remarks>
 [AnalyzerModule(key: "gc-root", displayName: "GC Root Analysis", order: 140, tags: ["roots"])]
+[RequiresCapability(
+    CapabilityVocabulary.HeapDominators,
+    CapabilityVocabulary.HeapObjects,
+    CapabilityVocabulary.HeapReferences,
+    CapabilityVocabulary.HeapRoots,
+    CapabilityVocabulary.HeapSegments,
+    CapabilityVocabulary.HeapTypes)]
+[OptionalCapability(CapabilityVocabulary.TraceAllocSamples)]
 public sealed class GCRootAnalyzer :
     IAnalyzer, IProducesAnalyzerDomainResult, Pipeline.IRequiresReachableGraphIndex, Pipeline.IRequiresDominatorTreeIndex
 {

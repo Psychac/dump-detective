@@ -73,6 +73,15 @@ namespace DumpDetective.Analysis.Analyzers.Types
     /// (<c>context.HeapObjects</c>), never a second hand-rolled walk.
     /// </remarks>
     [AnalyzerModule(key: "collection", displayName: "Collection Analysis", order: 240, tags: ["collections"])]
+    [RequiresCapability(
+        CapabilityVocabulary.DumpObjectFields,
+        CapabilityVocabulary.HeapDominators,
+        CapabilityVocabulary.HeapObjects,
+        CapabilityVocabulary.HeapReverseReferences,
+        CapabilityVocabulary.HeapSegments,
+        CapabilityVocabulary.HeapTypes)]
+    [OptionalCapability(CapabilityVocabulary.TraceAllocSamples)]
+    [OptionalCapability(CapabilityVocabulary.TraceGcEvents)]
     public sealed class CollectionAnalyzer :
         IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
         IParallelHeapIndexScanParticipant, IRequiresReachableGraphIndex, ICustomizesAnalysisContext

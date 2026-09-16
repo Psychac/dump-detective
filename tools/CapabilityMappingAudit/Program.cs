@@ -17,7 +17,14 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 string repoRoot = FindRepoRoot(AppContext.BaseDirectory);
-string analyzersDir = Path.Combine(repoRoot, "src", "DumpDetective.Analysis", "Analyzers");
+// Phase 3 (2026-09-15) moved all 36 analyzers out of src/DumpDetective.Analysis/Analyzers into
+// 8 per-domain DumpDetective.Plugins.* packages (each with its own Analyzers/ subfolder) — this
+// must scan all of them, not the old single directory.
+string[] analyzerDirs = Directory.GetDirectories(Path.Combine(repoRoot, "src"), "DumpDetective.Plugins.*")
+    .Select(pluginDir => Path.Combine(pluginDir, "Analyzers"))
+    .Where(Directory.Exists)
+    .OrderBy(d => d, StringComparer.Ordinal)
+    .ToArray();
 string outputPath = Path.Combine(repoRoot, "docs", "refactor", "modularity", "capability-mapping.md");
 
 // ── Ground truth: CapabilityVocabulary.cs constants (src/DumpDetective.Sdk/Artifacts/CapabilityVocabulary.cs) ──
@@ -173,9 +180,8 @@ var optionalTraceCapabilities = new Dictionary<string, (string[] Capabilities, s
 
 var rows = new List<AnalyzerCapabilityRow>();
 
-// AllDirectories: Phase 0 item 4 (2026-09-11) moved analyzers into per-domain package
-// subfolders (Memory/, Gc/, Threads/, ...); this must recurse to still find them.
-foreach (string file in Directory.GetFiles(analyzersDir, "*.cs", SearchOption.AllDirectories)
+foreach (string file in analyzerDirs
+    .SelectMany(dir => Directory.GetFiles(dir, "*.cs", SearchOption.AllDirectories))
     .OrderBy(f => f, StringComparer.Ordinal))
 {
     string text = File.ReadAllText(file);

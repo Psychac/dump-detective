@@ -63,6 +63,12 @@ namespace DumpDetective.Analysis.Analyzers.Leaks;
 /// </para>
 /// </remarks>
 [AnalyzerModule(key: "leak-candidate", displayName: "Leak Candidate Analysis", order: 210, tags: ["leaks"])]
+[RequiresCapability(
+    CapabilityVocabulary.HeapObjects,
+    CapabilityVocabulary.HeapRoots,
+    CapabilityVocabulary.HeapTypes)]
+[OptionalCapability(CapabilityVocabulary.TraceAllocSamples)]
+[OptionalCapability(CapabilityVocabulary.TraceGcEvents)]
 public sealed class LeakCandidateAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult, IDeferredAnalyzer, ICustomizesAnalysisContext
 {
     public string Name => "Leak Candidate Analysis";

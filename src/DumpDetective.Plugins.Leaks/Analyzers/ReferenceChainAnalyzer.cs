@@ -72,6 +72,13 @@ namespace DumpDetective.Analysis.Analyzers.Leaks;
 /// </list>
 /// </remarks>
 [AnalyzerModule(key: "reference-chain", displayName: "Reference Chain Analysis", order: 260, tags: ["roots"])]
+[RequiresCapability(
+    CapabilityVocabulary.HeapDominators,
+    CapabilityVocabulary.HeapObjects,
+    CapabilityVocabulary.HeapReferences,
+    CapabilityVocabulary.HeapRoots,
+    CapabilityVocabulary.HeapTypes)]
+[OptionalCapability(CapabilityVocabulary.TraceAllocSamples)]
 public sealed class ReferenceChainAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult, Pipeline.IRequiresReachableGraphIndex
 {
     public string Name => "Reference Chain Analysis";

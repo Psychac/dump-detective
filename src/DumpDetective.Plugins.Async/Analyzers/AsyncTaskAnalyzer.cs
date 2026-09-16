@@ -52,6 +52,13 @@ namespace DumpDetective.Analysis.Analyzers.Async;
 /// paid.
 /// </remarks>
 [AnalyzerModule(key: "async-task", displayName: "Async Task Analysis", order: 190, tags: ["async"])]
+[RequiresCapability(
+    CapabilityVocabulary.DumpObjectFields,
+    CapabilityVocabulary.HeapObjects,
+    CapabilityVocabulary.HeapReferences,
+    CapabilityVocabulary.HeapSegments,
+    CapabilityVocabulary.HeapTypes)]
+[OptionalCapability(CapabilityVocabulary.TraceThreadTimeline)]
 public sealed partial class AsyncTaskAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     // m_stateFlags bit masks (matches HangAnalyzer)

@@ -24,6 +24,10 @@ namespace DumpDetective.Analysis.Analyzers.Runtime;
 /// with (see each interface's own remarks).
 /// </remarks>
 [AnalyzerModule(key: "jit", displayName: "JIT Analysis", order: 410, tags: ["runtime", "perf"])]
+[RequiresCapability(
+    CapabilityVocabulary.RuntimeJit,
+    CapabilityVocabulary.RuntimeThreads)]
+[OptionalCapability(CapabilityVocabulary.TraceJitEvents)]
 public sealed class JitAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "JIT Analysis";

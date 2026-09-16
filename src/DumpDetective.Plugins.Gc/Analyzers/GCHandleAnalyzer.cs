@@ -22,6 +22,12 @@ namespace DumpDetective.Analysis.Analyzers.Gc;
 /// <see cref="GCHandleAnalyzerLegacyAdapter"/>.
 /// </summary>
 [AnalyzerModule(key: "gc-handle", displayName: "GC Handle Analysis", order: 270, tags: ["handles"])]
+[RequiresCapability(
+    CapabilityVocabulary.HeapDominators,
+    CapabilityVocabulary.HeapHandles,
+    CapabilityVocabulary.HeapObjects,
+    CapabilityVocabulary.HeapSegments)]
+[OptionalCapability(CapabilityVocabulary.TraceGcEvents)]
 public sealed class GCHandleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "GC Handle Analysis";

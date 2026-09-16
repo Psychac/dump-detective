@@ -50,6 +50,11 @@ namespace DumpDetective.Analysis.Analyzers.Async;
 /// unconditional per-type reference-field count outside the shape cache.
 /// </remarks>
 [AnalyzerModule(key: "async-state-machine", displayName: "Async State Machine Analysis", order: 350, tags: ["async"])]
+[RequiresCapability(
+    CapabilityVocabulary.DumpObjectFields,
+    CapabilityVocabulary.HeapObjects,
+    CapabilityVocabulary.HeapTypes)]
+[OptionalCapability(CapabilityVocabulary.TraceThreadTimeline)]
 public sealed class AsyncStateMachineAnalyzer :
     IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
     IParallelHeapIndexScanParticipant, ICustomizesAnalysisContext

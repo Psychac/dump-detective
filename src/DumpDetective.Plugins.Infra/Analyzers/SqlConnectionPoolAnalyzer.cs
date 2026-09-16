@@ -35,6 +35,9 @@ namespace DumpDetective.Analysis.Analyzers.Infra;
 /// overloading one slot for two unrelated purposes.
 /// </remarks>
 [AnalyzerModule(key: "sql-connection-pool", displayName: "SQL Connection Pool Analysis", order: 427, tags: ["infra", "network"])]
+[RequiresCapability(
+    CapabilityVocabulary.DumpObjectFields,
+    CapabilityVocabulary.HeapObjects)]
 public sealed class SqlConnectionPoolAnalyzer :
     IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
     IParallelHeapIndexScanParticipant, ICustomizesAnalysisContext

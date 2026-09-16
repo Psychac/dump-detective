@@ -24,6 +24,9 @@ namespace DumpDetective.Analysis.Analyzers.Threads
     /// outside the pipeline (tests, benchmarks).
     /// </summary>
     [AnalyzerModule(key: "thread", displayName: "Thread Analysis", order: 310, tags: ["threads"])]
+    [RequiresCapability(CapabilityVocabulary.RuntimeThreads)]
+    [OptionalCapability(CapabilityVocabulary.TraceThreadTimeline)]
+    [OptionalCapability(CapabilityVocabulary.TraceContentionEvents)]
     public sealed class ThreadAnalyzer :
         IAnalyzer, IProducesAnalyzerDomainResult, IThreadStackScanParticipant, ICustomizesAnalysisContext
     {

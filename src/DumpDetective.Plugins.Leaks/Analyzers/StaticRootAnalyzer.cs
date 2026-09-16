@@ -54,6 +54,14 @@ namespace DumpDetective.Analysis.Analyzers.Leaks;
 /// </para>
 /// </remarks>
 [AnalyzerModule(key: "static-root", displayName: "Static Root Leak Detection", order: 250, tags: ["roots", "leaks"])]
+[RequiresCapability(
+    CapabilityVocabulary.DumpObjectFields,
+    CapabilityVocabulary.HeapDominators,
+    CapabilityVocabulary.HeapObjects,
+    CapabilityVocabulary.HeapRoots,
+    CapabilityVocabulary.HeapSegments,
+    CapabilityVocabulary.HeapTypes)]
+[OptionalCapability(CapabilityVocabulary.TraceAllocSamples)]
 public sealed class StaticRootAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 {
     public string Name => "Static Root Leak Detection";

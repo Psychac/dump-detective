@@ -24,33 +24,55 @@ public static class CapabilityResolver
     {
         List<IAnalyzer> satisfied = [];
         List<UnsatisfiedAnalyzer> unsatisfied = [];
+        List<DegradedAnalyzer> degraded = [];
 
         foreach (IAnalyzer candidate in candidates)
         {
-            IReadOnlyList<string> required =
-                candidate.GetType().GetCustomAttribute<RequiresCapabilityAttribute>()?.Capabilities ?? [];
+            Type candidateType = candidate.GetType();
 
-            string[] missing = required
+            IReadOnlyList<string> required =
+                candidateType.GetCustomAttribute<RequiresCapabilityAttribute>()?.Capabilities ?? [];
+
+            string[] missingRequired = required
                 .Where(capability => !availableCapabilities.Contains(new Capability(capability)))
                 .ToArray();
 
-            if (missing.Length == 0)
-                satisfied.Add(candidate);
-            else
-                unsatisfied.Add(new UnsatisfiedAnalyzer(candidate, missing));
+            if (missingRequired.Length > 0)
+            {
+                unsatisfied.Add(new UnsatisfiedAnalyzer(candidate, missingRequired));
+                continue;
+            }
+
+            satisfied.Add(candidate);
+
+            MissingOptionalCapability[] missingOptional = candidateType
+                .GetCustomAttributes<OptionalCapabilityAttribute>()
+                .Where(optional => !availableCapabilities.Contains(new Capability(optional.Capability)))
+                .Select(optional => new MissingOptionalCapability(optional.Capability, optional.Fidelity))
+                .ToArray();
+
+            if (missingOptional.Length > 0)
+                degraded.Add(new DegradedAnalyzer(candidate, missingOptional));
         }
 
-        return new CapabilityResolution(satisfied, unsatisfied);
+        return new CapabilityResolution(satisfied, unsatisfied, degraded);
     }
 }
 
 /// <summary>
 /// Result of <see cref="CapabilityResolver.Resolve"/>: analyzers whose declared requirements are
-/// fully met by the session, and analyzers that were dropped along with the capabilities they were
-/// missing.
+/// fully met by the session (<see cref="Satisfied"/>, a superset of <see cref="Degraded"/>'s
+/// analyzers), analyzers that were dropped along with the capabilities they were missing
+/// (<see cref="Unsatisfied"/>), and analyzers within <see cref="Satisfied"/> that will run at
+/// reduced fidelity because a declared optional capability is unavailable (<see cref="Degraded"/>).
 /// </summary>
 public sealed record CapabilityResolution(
     IReadOnlyList<IAnalyzer> Satisfied,
-    IReadOnlyList<UnsatisfiedAnalyzer> Unsatisfied);
+    IReadOnlyList<UnsatisfiedAnalyzer> Unsatisfied,
+    IReadOnlyList<DegradedAnalyzer> Degraded);
 
 public sealed record UnsatisfiedAnalyzer(IAnalyzer Analyzer, IReadOnlyList<string> MissingCapabilities);
+
+public sealed record DegradedAnalyzer(IAnalyzer Analyzer, IReadOnlyList<MissingOptionalCapability> MissingOptional);
+
+public sealed record MissingOptionalCapability(string Capability, FidelityBoost Fidelity);

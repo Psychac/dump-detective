@@ -17,7 +17,10 @@ alignment first should pick it up explicitly rather than assume the other phase 
 orchestrator exists to consume capability declarations... that's Phase 4."* The orchestrator
 (`CapabilityResolver`) shipped in step 2 below, but nothing has fed it real per-analyzer
 declarations yet, so it's still provably a no-op today — that loop was never closed. Step 3 below
-closes it. Also reassigned here: `AnalyzerScope { PerArtifact | PerSession }` (see "Key design
+closes the first ("analyzers declare capabilities") in full; the second ("capability satisfaction
+report... lists `Plugins.Cpu` as skipped") only partially — the report becomes real in step 3, but
+nothing can land in its *skipped* bucket until step 5 unifies the dump and trace catalogs, so the
+specific `Plugins.Cpu` demonstration Phase 3 named waits for step 5. Also reassigned here: `AnalyzerScope { PerArtifact | PerSession }` (see "Key design
 decisions" below) — this doc originally said it "lands in the SDK attribute set in Phase 1/3," but
 neither phase's own migration steps or target attribute list ever claimed it (checked: Phase 1's
 target set is `RequiresCapabilityAttribute`/`OptionalCapabilityAttribute`/`AnalyzerModuleAttribute`
@@ -173,16 +176,48 @@ running code.
      (1593 passed) unchanged, proving the capability-derived filter is a no-op against today's
      single-dump analyzer catalog.
 
-3. ⬜ **Pending.** Close Phase 3's carried-over gap: declare real `[RequiresCapability]`/
-   `[OptionalCapability]` on the 36 in-repo analyzers (Phase 3 shipped the attributes and the
-   8 domain packages but deliberately left every analyzer's declarations unwritten, waiting for
-   this phase's orchestrator to exist), and make `CapabilityResolver`'s runnable/degraded/skipped
-   buckets real output, not just an internal computation — a dump-only session must visibly list
-   `Plugins.Cpu`'s analyzers as skipped-for-missing-`trace.cpu-samples`, closing Phase 3's own named
-   exit criterion. This step deliberately runs before N-artifact generalization: it exercises
-   `CapabilityResolver` against real, differentiated declarations for the first time (today it's a
-   provable no-op), and step 5's `AnalyzerScope`/combined-session work below is only meaningful once
-   analyzers actually declare what they need.
+3. ✅ **Done (2026-09-16).** Close Phase 3's carried-over gap: declare real `[RequiresCapability]`/
+   `[OptionalCapability]` on the 36 in-repo analyzers, using
+   [capability-mapping.md](capability-mapping.md) as the source of truth, and make
+   `CapabilityResolver`'s runnable/runnable-degraded/skipped buckets real, visible output.
+   - **Tool fixed first:** `tools/CapabilityMappingAudit` still pointed at the pre-Phase-3
+     `src/DumpDetective.Analysis/Analyzers` path (Phase 3 moved all 36 analyzers into 8
+     `Plugins.*` packages) and silently wrote an empty table when re-run. Fixed to scan all
+     `src/DumpDetective.Plugins.*/Analyzers` directories; re-running surfaced real drift since
+     Phase 0 wrote the original table — all 25 then-"Legacy" analyzers have since been retyped
+     onto the SDK `IAnalyzer` (36/36 "SDK" now), which changed several analyzers' actual required
+     capabilities (e.g. some gained `heap.segments`, some lost capabilities they no longer read).
+     The regenerated table, not the stale checked-in one, was used as the transcription source.
+   - **Shipped:** `[RequiresCapability]`/`[OptionalCapability]` added to all 31 analyzers that
+     didn't already have them (5 in `Plugins.Memory` were done in an earlier session and matched
+     the regenerated table exactly, no drift). `CapabilityResolver` extended with a third bucket —
+     `Degraded` (required capabilities met, some declared optional capability missing) — alongside
+     the existing `Satisfied`/`Unsatisfied`, using `OptionalCapabilityAttribute.Fidelity`
+     (`FidelityBoost`, already present in the SDK from Phase 1) per missing optional capability.
+     `ConsoleUx.CapabilityReport` prints the degraded/skipped buckets with per-analyzer missing-
+     capability reasons, wired into `DumpAnalysisService.ExecuteAsync` behind `DiagnosticMode`
+     (same gating convention as the existing config-summary print).
+   - **Confirmed, not assumed:** this step cannot fully close Phase 3's "dump-only session
+     correctly lists `Plugins.Cpu` analyzers as skipped" exit criterion — verified via a real-catalog
+     integration test (`RealDumpOnlySession_SkipsNoAnalyzer`) that a dump-only session skips zero of
+     the 36 analyzers (every required capability is `heap.*`/`runtime.*`/`dump.*`, all satisfied by
+     `SingleDumpArtifactFactory`'s static set) and `Plugins.Cpu` has zero analyzers in this catalog
+     at all (`CpuHotspotAnalyzer` lives in `Sources.NetTrace`, not yet unified — step 5). What this
+     step does demonstrate for real, also verified by test
+     (`RealDumpOnlySession_DegradesEveryAnalyzerThatDeclaresAnOptionalTraceCapability`): the
+     *degraded* bucket is real and correct — a dump-only session degrades exactly the analyzers
+     with a declared optional trace capability, real, checkable proof the graded-fidelity mechanism
+     works end to end. Fidelity levels themselves are uniformly `FidelityBoost.Moderate` (the
+     attribute's default) — `capability-mapping.md`'s hand-curated rationale column doesn't carry a
+     scripted signal for differentiating Minor/Moderate/Major per analyzer, so no per-analyzer
+     distinction was invented; revisit if a real signal for it appears.
+   - **Verified:** new `AnalyzerCapabilityDeclarationTests` (real 36-analyzer catalog: every
+     analyzer declares valid, vocabulary-member capabilities; a dump-only session skips none,
+     degrades exactly the expected set) + extended `CapabilityResolverTests` (degraded-bucket unit
+     tests) — 7 new tests, full non-real-dump suite 1600 passed (was 1593), 0 failed. No real-dump
+     run needed: the change is confined to compile-time attribute metadata and an additive,
+     diagnostic-gated report — `CapabilityResolver`'s existing `Satisfied` computation is
+     unchanged, and the new real-catalog tests already exercise the actual 36 analyzers.
 4. ⬜ **Pending.** Generalize to N artifacts: multi-dump sessions now flow through graph
    construction rather than `TrendOrchestrationService`. Verify trend output matches the old path.
    Also builds `SessionValidator`, carried over unbuilt from step 2 — nothing to validate with one
@@ -191,7 +226,11 @@ running code.
    `AnalyzerScope` land, sequenced after this step verifies the N-artifact graph-construction
    mechanics on the simpler, single-source case first.
 5. ⬜ **Pending.** Wire combined dump+trace sessions: build `AnalyzerScope { PerArtifact | PerSession }`
-   (reassigned to this phase above — nobody upstream built it) and generate the real target shape
+   (reassigned to this phase above — nobody upstream built it), unify the dump and trace analyzer
+   catalogs into one `CapabilityResolver`-resolvable set (closing the other half of Phase 3's
+   capability-satisfaction-report exit criterion left open by step 3 — a dump-only session should
+   now correctly show `Plugins.Cpu`'s `CpuHotspotAnalyzer` as skipped-for-missing-`trace.cpu-samples`),
+   and generate the real target shape
    from "Key design decisions" above — **one node per satisfiable (analyzer × applicable-artifact-
    scope) pair**, not the coarser "one node per artifact" that would only bundle each artifact's
    analyzers behind `AnalysisPipeline` again. This is where `RunAnalyzersNode`'s remaining

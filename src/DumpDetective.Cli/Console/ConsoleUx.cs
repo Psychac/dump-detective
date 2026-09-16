@@ -1,5 +1,6 @@
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
+using DumpDetective.Orchestration.Discovery;
 using Spectre.Console;
 using System.Threading;
 using System.Threading.Tasks;
@@ -191,6 +192,41 @@ internal static class ConsoleUx
     }
 
     // ── Post-analysis summary ────────────────────────────────────────────
+
+    /// <summary>
+    /// Prints the capability-satisfaction report (docs/refactor/modularity/phase-4-session-orchestration.md
+    /// migration step 3): which analyzers run at reduced fidelity for a missing optional
+    /// capability, and which were skipped entirely for a missing required one. Silent when both
+    /// buckets are empty (a plain dump-only session today: no analyzer's required capabilities go
+    /// unmet, so nothing is ever skipped, though most run degraded pending a trace source).
+    /// </summary>
+    public static void CapabilityReport(CapabilityResolution resolution)
+    {
+        if (resolution.Unsatisfied.Count == 0 && resolution.Degraded.Count == 0)
+            return;
+
+        SafeMarkupLine("  [grey]capability report:[/]");
+
+        if (resolution.Degraded.Count > 0)
+        {
+            SafeMarkupLine($"    [yellow]{resolution.Degraded.Count} analyzer{(resolution.Degraded.Count == 1 ? "" : "s")} running at reduced fidelity[/]  [grey](missing optional capabilities)[/]");
+            foreach (DegradedAnalyzer degraded in resolution.Degraded)
+            {
+                string missing = string.Join(", ", degraded.MissingOptional.Select(m => m.Capability));
+                SafeMarkupLine($"      [silver]{Escape(degraded.Analyzer.Name).PadRight(40)}[/]  [grey]missing: {Escape(missing)}[/]");
+            }
+        }
+
+        if (resolution.Unsatisfied.Count > 0)
+        {
+            SafeMarkupLine($"    [red]{resolution.Unsatisfied.Count} analyzer{(resolution.Unsatisfied.Count == 1 ? "" : "s")} skipped[/]  [grey](missing required capabilities)[/]");
+            foreach (UnsatisfiedAnalyzer unsatisfied in resolution.Unsatisfied)
+            {
+                string missing = string.Join(", ", unsatisfied.MissingCapabilities);
+                SafeMarkupLine($"      [silver]{Escape(unsatisfied.Analyzer.Name).PadRight(40)}[/]  [grey]missing: {Escape(missing)}[/]");
+            }
+        }
+    }
 
     public static void RunStatusSummary(int success, int failed, int skippedByFilter, int skippedByCancellation, int findings)
     {

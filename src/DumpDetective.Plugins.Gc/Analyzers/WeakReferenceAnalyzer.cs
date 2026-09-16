@@ -37,6 +37,14 @@ namespace DumpDetective.Analysis.Analyzers.Gc
     /// finding-generator layer already branches on them and stays correct either way.
     /// </remarks>
     [AnalyzerModule(key: "weak-reference", displayName: "Weak Reference Analysis", order: 390, tags: ["gc"])]
+    [RequiresCapability(
+        CapabilityVocabulary.DumpObjectFields,
+        CapabilityVocabulary.HeapDominators,
+        CapabilityVocabulary.HeapHandles,
+        CapabilityVocabulary.HeapObjects,
+        CapabilityVocabulary.HeapReachability,
+        CapabilityVocabulary.HeapSegments)]
+    [OptionalCapability(CapabilityVocabulary.TraceGcEvents)]
     public sealed class WeakReferenceAnalyzer :
         IAnalyzer, IProducesAnalyzerDomainResult, ITypedResourceCandidateSource,
         IParallelHeapIndexScanParticipant, IRequiresReachableGraphIndex, ICustomizesAnalysisContext

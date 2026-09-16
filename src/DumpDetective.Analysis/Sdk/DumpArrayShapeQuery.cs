@@ -22,7 +22,7 @@ internal sealed class DumpArrayShapeQuery : IDumpArrayShapeQuery
         length = 0;
         rank = 0;
         ClrObject obj = _heap.GetObject(address);
-        if (!obj.IsValid || obj.Type is null)
+        if (!obj.IsValid || obj.Type is null || !obj.Type.IsArray)
             return false;
 
         ClrArray arr = obj.AsArray();
@@ -34,7 +34,7 @@ internal sealed class DumpArrayShapeQuery : IDumpArrayShapeQuery
     public int? CountNullOrZeroElements(ulong address)
     {
         ClrObject obj = _heap.GetObject(address);
-        if (!obj.IsValid || obj.Type is null)
+        if (!obj.IsValid || obj.Type is null || !obj.Type.IsArray)
             return null;
 
         ClrArray arr = obj.AsArray();
@@ -51,7 +51,7 @@ internal sealed class DumpArrayShapeQuery : IDumpArrayShapeQuery
     public IReadOnlyList<ulong> EnumerateObjectReferenceElements(ulong address, int maxElements)
     {
         ClrObject obj = _heap.GetObject(address);
-        if (!obj.IsValid || obj.Type is null)
+        if (!obj.IsValid || obj.Type is null || !obj.Type.IsArray)
             return [];
 
         ClrArray arr = obj.AsArray();

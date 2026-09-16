@@ -218,13 +218,32 @@ running code.
      run needed: the change is confined to compile-time attribute metadata and an additive,
      diagnostic-gated report — `CapabilityResolver`'s existing `Satisfied` computation is
      unchanged, and the new real-catalog tests already exercise the actual 36 analyzers.
-4. ⬜ **Pending.** Generalize to N artifacts: multi-dump sessions now flow through graph
-   construction rather than `TrendOrchestrationService`. Verify trend output matches the old path.
-   Also builds `SessionValidator`, carried over unbuilt from step 2 — nothing to validate with one
-   artifact, but real once N>1 dumps must be checked for process-identity compatibility. Scoped to
-   N *homogeneous* dump artifacts (trend) — step 5 below is where mixed dump+trace sessions and
-   `AnalyzerScope` land, sequenced after this step verifies the N-artifact graph-construction
-   mechanics on the simpler, single-source case first.
+4. ✅ **Done (2026-09-16).** Generalized to N artifacts: `TrendOrchestrationService` now builds one
+   `IPipelineNode` triple (Load/Index/Analyze) per trend dump path — the same node classes
+   `SingleDumpNodeFactory` uses for N=1, namespaced via new `ArtifactPipelineKeys.ForArtifact` so
+   N artifacts' nodes share one `PipelineNodeContext` without colliding — plus a new
+   `TrendBuildReportNode` (replaces the inline snapshot/comparison block that used to live directly
+   in `TrendOrchestrationService`) and the existing `WriteOutputNode`, reused unmodified as the
+   shared sink. `PerDumpExecutionService` (the hand-rolled duplicate of Load/Index/Analyze the old
+   trend path used instead of the graph) is deleted, per step 1's precedent of retiring superseded
+   code immediately rather than leaving it dead.
+   - **Shipped:** `SessionValidator` (`Discovery` → `Session`, structural-only per the known-gap
+     note above: same source-kind, distinct paths — no process-identity check, since
+     `ArtifactDescriptor.Process`/`CapturedAt` are still placeholders). `DumpAnalysisService` also
+     fixed to build the session from the *actual* N trend dump paths instead of always building a
+     one-artifact session even on the trend path — a real, if latent, capability-resolution gap
+     from step 2 that this step's `SessionValidator` wiring surfaced.
+   - **Known gap, not this step's to close:** live console output for a trend run now comes from
+     the same generic `ConsoleMemoryPipelineObserver`/node-progress rendering the single-dump path
+     already uses, rather than the old bespoke per-dump `[dump] stage` progress bridging and nested
+     per-dump memory tables in `TrendOrchestrationService`. Report/artifact content is unaffected
+     (golden tests compare report content, not console text) — this is a deliberate simplification,
+     not an oversight.
+   - **Not yet verified:** an actual N>1 real-dump trend run through the new path — needs real
+     `.dmp` files, and this repo's real-dump tests must run one at a time, foreground. Verified so
+     far only via the full non-real-dump suite (1605 passed, +5 new `SessionValidatorTests`) plus
+     inspection matching the new `TrendBuildReportNode`'s snapshot/comparison logic line-for-line
+     against the deleted inline block it replaces.
 5. ⬜ **Pending.** Wire combined dump+trace sessions: build `AnalyzerScope { PerArtifact | PerSession }`
    (reassigned to this phase above — nobody upstream built it), unify the dump and trace analyzer
    catalogs into one `CapabilityResolver`-resolvable set (closing the other half of Phase 3's

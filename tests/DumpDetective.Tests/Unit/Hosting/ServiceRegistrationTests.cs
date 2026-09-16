@@ -38,7 +38,6 @@ public sealed class ServiceRegistrationTests
         services.GetRequiredService<StartupValidator>().Should().NotBeNull();
         services.GetRequiredService<IDumpLoader>().Should().NotBeNull();
         services.GetRequiredService<AnalyzerExecutionService>().Should().NotBeNull();
-        services.GetRequiredService<PerDumpExecutionService>().Should().NotBeNull();
         services.GetRequiredService<ReportOutputWriter>().Should().NotBeNull();
         services.GetRequiredService<DumpAnalysisService>().Should().NotBeNull();
         services.GetRequiredService<SingleDumpOrchestrationService>().Should().NotBeNull();

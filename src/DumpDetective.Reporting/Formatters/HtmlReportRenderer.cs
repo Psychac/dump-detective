@@ -144,12 +144,20 @@ internal sealed class HtmlReportRenderer : IReportFormatter
         return Convert.ToBase64String(output.ToArray());
     }
 
+    // Same depth ReportJsonContext.Default.Options.MaxDepth serialized these documents with —
+    // JsonNode.Parse's own default (64) is well below what a real dump's deep TreeWidget chains
+    // (see GCRootSectionBuilder.MaxSubgraphTreeDepth) or section nesting can round-trip.
+    private static readonly JsonDocumentOptions CompactParseOptions = new()
+    {
+        MaxDepth = ReportJsonContext.Default.Options.MaxDepth
+    };
+
     private static string CompactReportJson(AnalysisReportDocument doc, string reportJson)
     {
         if (doc is not TrendReportDocument)
             return reportJson;
 
-        JsonNode? node = JsonNode.Parse(reportJson);
+        JsonNode? node = JsonNode.Parse(reportJson, nodeOptions: null, documentOptions: CompactParseOptions);
         if (node is not JsonObject obj)
             return reportJson;
 
@@ -162,7 +170,7 @@ internal sealed class HtmlReportRenderer : IReportFormatter
 
     private static string CompactPerDumpJson(string perDumpJson)
     {
-        JsonNode? node = JsonNode.Parse(perDumpJson);
+        JsonNode? node = JsonNode.Parse(perDumpJson, nodeOptions: null, documentOptions: CompactParseOptions);
         if (node is not JsonObject obj)
             return perDumpJson;
 

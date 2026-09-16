@@ -75,16 +75,22 @@ internal sealed class DumpAnalysisService
 
         _startupValidator.ValidateRegistrations(analyzers, _findingGenerators, _trendComparers, _sectionBuilderFactory);
 
+        bool isTrend = TryResolveTrendSequence(resolved, out IReadOnlyList<string>? trendDumpPaths);
+        IReadOnlyList<string> sessionDumpPaths = isTrend ? trendDumpPaths! : [resolved.DumpPath];
+
         // Capability-derived selection (docs/refactor/modularity/phase-4-session-orchestration.md
-        // migration step 2) sits ahead of the existing name-based include/exclude filter below.
-        // Every dump analyzer's *required* capabilities are met by a dump-only session today (step
-        // 3 declared real per-analyzer requirements, but none of the 36 require anything a dump
-        // can't provide), so nothing is ever skipped yet — the real effect visible today is most
-        // analyzers running degraded (see CapabilityReport below) for a missing optional trace
-        // capability. Skipping a whole analyzer needs the dump+trace catalogs to be one catalog
-        // (step 5).
-        ArtifactDescriptor dumpArtifact = SingleDumpArtifactFactory.Create(resolved.DumpPath);
-        AnalysisSession session = SessionBuilder.Build([dumpArtifact]);
+        // migration step 2, generalized to N artifacts in step 4) sits ahead of the existing
+        // name-based include/exclude filter below. Every dump analyzer's *required* capabilities
+        // are met by a dump-only session today (step 3 declared real per-analyzer requirements, but
+        // none of the 36 require anything a dump can't provide), so nothing is ever skipped yet —
+        // the real effect visible today is most analyzers running degraded (see CapabilityReport
+        // below) for a missing optional trace capability. Skipping a whole analyzer needs the
+        // dump+trace catalogs to be one catalog (step 5).
+        IReadOnlyList<ArtifactDescriptor> artifacts = sessionDumpPaths
+            .Select(SingleDumpArtifactFactory.Create)
+            .ToArray();
+        SessionValidator.Validate(artifacts);
+        AnalysisSession session = SessionBuilder.Build(artifacts);
         CapabilityResolution resolution = CapabilityResolver.Resolve(analyzers, session.AvailableCapabilities);
         analyzers = resolution.Satisfied;
 
@@ -99,8 +105,8 @@ internal sealed class DumpAnalysisService
         }
 
         IReadOnlyList<IAnalyzer> activeAnalyzers = GetActiveAnalyzers(resolved, analyzers);
-    
-        if (TryResolveTrendSequence(resolved, out IReadOnlyList<string>? trendDumpPaths))
+
+        if (isTrend)
             return await _trendOrchestration.ExecuteAsync(resolved, analyzers, activeAnalyzers, trendDumpPaths!, cancellationToken);
         return await _singleDumpOrchestration.ExecuteAsync(resolved, analyzers, activeAnalyzers, cancellationToken);
     }

@@ -18,15 +18,12 @@ public sealed class TrendOrchestrationServiceTests
     public async Task ExecuteAsync_PropagatesException_WhenDumpLoadFails()
     {
         var resolved = ResolvedExecutionOptionsFactory.Create("out.json");
-        var perDumpExecutionService = new PerDumpExecutionService(
-            dumpLoader: new ThrowingDumpLoader(),
-            analyzerExecutionService: null!);
-
         var service = new TrendOrchestrationService(
+            dumpLoader: new ThrowingDumpLoader(),
+            analyzerExecutionService: null!,
             reportBuilderFacade: null!,
             trendAnalyzer: new TrendAnalyzer(Array.Empty<IAnalyzerTrendComparer>()),
-            outputWriter: null!,
-            perDumpExecutionService: perDumpExecutionService);
+            outputWriter: null!);
 
         Func<Task> act = () => service.ExecuteAsync(
             resolved,

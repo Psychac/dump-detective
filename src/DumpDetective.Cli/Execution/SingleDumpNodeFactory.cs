@@ -24,9 +24,9 @@ internal sealed class SingleDumpNodeFactory(
 
     public IReadOnlyList<IPipelineNode> BuildNodes() =>
         [
-            new LoadDumpNode(_dumpLoader),
-            new BuildHeapIndexNode(_analyzerExecutionService),
-            new RunAnalyzersNode(_analyzerExecutionService),
+            new LoadDumpNode(_dumpLoader, ArtifactPipelineKeys.SingleDump, id: "Load dump"),
+            new BuildHeapIndexNode(_analyzerExecutionService, ArtifactPipelineKeys.SingleDump, id: "Scan + Index heap"),
+            new RunAnalyzersNode(_analyzerExecutionService, ArtifactPipelineKeys.SingleDump, id: "Run analyzers", mode: "Single"),
             new BuildReportNode(_reportBuilderFacade),
             new WriteOutputNode(_outputWriter)
         ];

@@ -43,7 +43,6 @@ internal static class ServiceRegistration
         services.AddSingleton<StartupValidator>();
         services.AddSingleton<IDumpLoader, DumpLoader>();
         services.AddSingleton<DumpDetective.Cli.Execution.AnalyzerExecutionService>();
-        services.AddSingleton<PerDumpExecutionService>();
         services.AddSingleton<ReportOutputWriter>();
         services.AddSingleton<DumpAnalysisService>();
         services.AddSingleton<SingleDumpNodeFactory>();

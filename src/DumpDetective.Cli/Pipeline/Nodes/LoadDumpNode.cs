@@ -6,17 +6,17 @@ using System.Diagnostics;
 
 namespace DumpDetective.Cli.Pipeline.Nodes;
 
-internal sealed class LoadDumpNode(IDumpLoader dumpLoader) : IPipelineNode
+internal sealed class LoadDumpNode(IDumpLoader dumpLoader, ArtifactPipelineKeys keys, string id) : IPipelineNode
 {
     private const int HeartbeatMs = 300;
 
-    public string Id => "Load dump";
-    public IReadOnlyCollection<string> Produces { get; } = [SingleDumpPipelineKeys.LoadContext];
+    public string Id { get; } = id;
+    public IReadOnlyCollection<string> Produces { get; } = [keys.LoadContext];
     public IReadOnlyCollection<string> Consumes { get; } = [];
 
     public async ValueTask ExecuteAsync(PipelineNodeContext context, CancellationToken cancellationToken)
     {
-        SingleDumpPipelineState state = context.Get<SingleDumpPipelineState>(SingleDumpPipelineKeys.State);
+        SingleDumpPipelineState state = context.Get<SingleDumpPipelineState>(keys.State);
 
         Stopwatch wallClock = Stopwatch.StartNew();
 
@@ -57,6 +57,6 @@ internal sealed class LoadDumpNode(IDumpLoader dumpLoader) : IPipelineNode
         wallClock.Stop();
         ConsoleUx.PhaseBreakdown(timeline.GetRemainingSegments(wallClock.Elapsed));
 
-        context.Set(SingleDumpPipelineKeys.LoadContext, state.LoadContext);
+        context.Set(keys.LoadContext, state.LoadContext);
     }
 }

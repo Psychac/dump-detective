@@ -12,16 +12,16 @@ using DumpDetective.Sdk.Analysis;
 
 namespace DumpDetective.Cli.Pipeline.Nodes;
 
-internal sealed class RunAnalyzersNode(AnalyzerExecutionService analyzerExecutionService) : IPipelineNode
+internal sealed class RunAnalyzersNode(AnalyzerExecutionService analyzerExecutionService, ArtifactPipelineKeys keys, string id, string mode) : IPipelineNode
 {
-    public string Id => "Run analyzers";
-    public IReadOnlyCollection<string> Produces { get; } = [SingleDumpPipelineKeys.AnalyzerRuns];
+    public string Id { get; } = id;
+    public IReadOnlyCollection<string> Produces { get; } = [keys.AnalyzerRuns];
     public IReadOnlyCollection<string> Consumes { get; } =
-        [SingleDumpPipelineKeys.HeapIndex, SingleDumpPipelineKeys.AnalysisContext, SingleDumpPipelineKeys.Pipeline];
+        [keys.HeapIndex, keys.AnalysisContext, keys.Pipeline];
 
     public async ValueTask ExecuteAsync(PipelineNodeContext context, CancellationToken cancellationToken)
     {
-        SingleDumpPipelineState state = context.Get<SingleDumpPipelineState>(SingleDumpPipelineKeys.State);
+        SingleDumpPipelineState state = context.Get<SingleDumpPipelineState>(keys.State);
 
         // Context and pipeline are built by BuildHeapIndexNode, which also runs the shared
         // heap-index/thread-stack scan passes under its own header/timer before this node starts.
@@ -53,12 +53,12 @@ internal sealed class RunAnalyzersNode(AnalyzerExecutionService analyzerExecutio
         state.AnalysisElapsed = state.PipelineStopwatch.Elapsed;
 
         state.IncidentContext = IncidentContextFactory.Create(
-            mode: "Single",
+            mode: mode,
             loadContext: state.LoadContext,
             resolved: state.Resolved,
             activeAnalyzers: state.ActiveAnalyzers,
             elapsed: state.AnalysisElapsed);
 
-        context.Set(SingleDumpPipelineKeys.AnalyzerRuns, state.Runs);
+        context.Set(keys.AnalyzerRuns, state.Runs);
     }
 }

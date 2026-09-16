@@ -11,18 +11,18 @@ using System.Diagnostics;
 
 namespace DumpDetective.Cli.Pipeline.Nodes;
 
-internal sealed class BuildHeapIndexNode(AnalyzerExecutionService analyzerExecutionService) : IPipelineNode
+internal sealed class BuildHeapIndexNode(AnalyzerExecutionService analyzerExecutionService, ArtifactPipelineKeys keys, string id) : IPipelineNode
 {
     private const int HeartbeatMs = 300;
 
-    public string Id => "Scan + Index heap";
+    public string Id { get; } = id;
     public IReadOnlyCollection<string> Produces { get; } =
-        [SingleDumpPipelineKeys.HeapIndex, SingleDumpPipelineKeys.AnalysisContext, SingleDumpPipelineKeys.Pipeline];
-    public IReadOnlyCollection<string> Consumes { get; } = [SingleDumpPipelineKeys.LoadContext];
+        [keys.HeapIndex, keys.AnalysisContext, keys.Pipeline];
+    public IReadOnlyCollection<string> Consumes { get; } = [keys.LoadContext];
 
     public async ValueTask ExecuteAsync(PipelineNodeContext context, CancellationToken cancellationToken)
     {
-        SingleDumpPipelineState state = context.Get<SingleDumpPipelineState>(SingleDumpPipelineKeys.State);
+        SingleDumpPipelineState state = context.Get<SingleDumpPipelineState>(keys.State);
 
         DumpIndexPaths.ResolveCacheDirectory(
             state.Resolved.DumpPath,
@@ -132,8 +132,8 @@ internal sealed class BuildHeapIndexNode(AnalyzerExecutionService analyzerExecut
         state.Context = runtimeContext;
         state.Pipeline = pipeline;
 
-        context.Set(SingleDumpPipelineKeys.HeapIndex, heapIndex);
-        context.Set(SingleDumpPipelineKeys.AnalysisContext, runtimeContext);
-        context.Set(SingleDumpPipelineKeys.Pipeline, pipeline);
+        context.Set(keys.HeapIndex, heapIndex);
+        context.Set(keys.AnalysisContext, runtimeContext);
+        context.Set(keys.Pipeline, pipeline);
     }
 }

@@ -9,8 +9,11 @@ namespace DumpDetective.Sdk.Artifacts;
 /// compile-time source of truth (a future analyzer needs a <c>const string</c> to pass to
 /// <c>[RequiresCapability(...)]</c>, which a JSON file can't provide); the checked-in, versioned
 /// mirror <c>schema/DumpDetective.Schema/capability-registry.json</c> landed in Phase 1 and is kept
-/// in sync by <c>SdkRegistryConformanceTests.CapabilityRegistry_ShouldMatchCapabilityVocabularyExactly</c>
-/// — grouped here by the artifact kind that provides them, not by the analyzer that consumes them.
+/// in sync by <c>SdkRegistryConformanceTests.CapabilityRegistry_ShouldMatchCapabilityVocabularyExactly</c>.
+/// After adding a field here, run <c>dotnet run --project tools/CapabilityRegistryAudit</c> to
+/// scaffold the matching registry entry (it derives the mechanical fields and flags the rest for
+/// curation) instead of hand-writing the JSON — grouped here by the artifact kind that provides
+/// them, not by the analyzer that consumes them.
 /// </summary>
 public static class CapabilityVocabulary
 {

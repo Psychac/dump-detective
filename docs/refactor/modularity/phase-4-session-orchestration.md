@@ -10,22 +10,6 @@ list) — `SessionBuilder`/`SessionValidator` below are that item's real home. `
 *not* claimed here or in Phase 5 yet; whichever phase's work item ends up needing multi-artifact
 alignment first should pick it up explicitly rather than assume the other phase has it.
 
-**Status, 2026-09-15: migration step 1 done.** `DumpDetective.Orchestration` exists with the
-generic `Graph/` engine (`IPipelineNode`, `PipelineNodeContext`, `PipelineGraph`,
-`PipelineGraphBuilder`, `PipelineExecutor`, `NodeScheduler`), referencing only `Sdk` + `Platform`
-(enforced by `OrchestrationProject_ShouldDependOnSdkAndPlatformOnly`). The single-dump path's five
-stages are now five `IPipelineNode` adapters in `DumpDetective.Cli/Pipeline/Nodes/` (they still
-depend on `Analysis`/`Reporting`, which is why the adapters live in `Cli` and not in
-`Orchestration`), wired by `SingleDumpNodeFactory` and run by `PipelineExecutor` from
-`SingleDumpOrchestrationService`. `IAnalysisStage`, `StagedPipelineRunner`,
-`SingleDumpStageFactory`, and the 5 old stage classes are deleted (nothing referenced them once the
-switch happened, so their step-4 retirement was pulled forward rather than left as dead code).
-`SingleDumpPipelineState` is unchanged — the nodes still operate on it as their shared data bag;
-`Produces`/`Consumes` are hand-declared per this step's scope, not yet derived from capabilities.
-`TrendOrchestrationService`/`PerDumpExecutionService` (multi-dump path) and `Discovery`/`Session`
-(steps 2–3) are untouched. Verified via the full non-real-dump suite (1586 passed) plus one
-foreground run against the ~3.3GB reference dump through the new executor.
-
 ## Goal
 
 Replace the fixed five-stage pipeline **and** the proposed mode enum with one capability-driven
@@ -103,14 +87,59 @@ running code.
 
 ## Migration steps
 
-1. Scaffold the orchestration project; wrap today's five stages as five nodes with hand-declared
-   edges. Prove `PipelineExecutor` reproduces current behavior before anything is dynamic.
-2. Introduce `SessionBuilder` + `CapabilityResolver`; generate analyzer nodes from the Phase 3
-   catalog. Verify byte-identical output vs. the old pipeline on the test-dump corpus.
-3. Generalize to N artifacts: multi-dump sessions now flow through graph construction rather than
-   `TrendOrchestrationService`. Verify trend output matches the old path.
-4. Retire the old orchestrators, stages, and filter service.
-5. CLI collapses to `dd analyze <paths...>`; `--baseline`/`--trend` become sugar over ordering.
+1. ✅ **Done (2026-09-15).** Scaffold the orchestration project; wrap today's five stages as five
+   nodes with hand-declared edges. Prove `PipelineExecutor` reproduces current behavior before
+   anything is dynamic.
+   - **Shipped:** `DumpDetective.Orchestration` with the generic `Graph/` engine (`IPipelineNode`,
+     `PipelineNodeContext`, `PipelineGraph`, `PipelineGraphBuilder`, `PipelineExecutor`,
+     `NodeScheduler`), referencing only `Sdk` + `Platform` (enforced by
+     `OrchestrationProject_ShouldDependOnSdkAndPlatformOnly`). The single-dump path's five stages
+     became five `IPipelineNode` adapters in `DumpDetective.Cli/Pipeline/Nodes/` (they still
+     depend on `Analysis`/`Reporting`, which is why they live in `Cli`, not `Orchestration`),
+     wired by `SingleDumpNodeFactory` and run via `SingleDumpOrchestrationService`.
+   - **Deleted:** `IAnalysisStage`, `StagedPipelineRunner`, `SingleDumpStageFactory`, and the 5 old
+     stage classes — nothing referenced them once the switch happened, so their step-4 retirement
+     was pulled forward instead of left as dead code.
+   - **Not yet touched:** `SingleDumpPipelineState` (still one shared data bag; `Produces`/
+     `Consumes` are hand-declared, not derived from capabilities), `TrendOrchestrationService`/
+     `PerDumpExecutionService` (multi-dump path), `Discovery`/`Session` (steps 2–3).
+   - **Verified:** full non-real-dump suite (1586 passed) + one foreground run against the
+     ~3.3GB reference dump through the new executor.
+
+2. ✅ **Done (2026-09-16), narrower than worded above.** Introduce `SessionBuilder` +
+   `CapabilityResolver`; generate analyzer nodes from the Phase 3 catalog. Verify byte-identical
+   output vs. the old pipeline on the test-dump corpus.
+   - **Shipped:** `Discovery/CapabilityResolver.cs` and `Session/{AnalysisSession,SessionBuilder}.cs`.
+     `CapabilityResolver` reflects each candidate `IAnalyzer`'s `[RequiresCapability]` against an
+     `AnalysisSession`'s available capabilities (works over `IAnalyzer` instances directly, not
+     `Reporting.Capabilities.AnalyzerFeatureModule`, to respect the Sdk/Platform-only dependency
+     rule). `SessionBuilder` unions N `ArtifactDescriptor.Provides` sets into one session (N=1
+     today). `DumpAnalysisService.ExecuteAsync` now builds an `ArtifactDescriptor` for the dump
+     (`SingleDumpArtifactFactory`, new, `Cli/Execution/`) and runs `CapabilityResolver.Resolve`
+     ahead of the existing name-based include/exclude filter.
+   - **Narrowed vs. "generate analyzer nodes":** node granularity is unchanged — still one
+     `RunAnalyzersNode`, still backed by `AnalysisPipeline` as-is. Splitting into one
+     `IPipelineNode` per analyzer would mean re-expressing `AnalysisPipeline`'s
+     ordering/deferred-analyzer-pass/diagnostics/result-post-processing as graph edges — exactly
+     the "doing all three at once" failure mode this doc's own Risk section warns against.
+     Deferred to whichever later step forces it (likely step 3).
+   - **Known gaps, carried into step 3:** `SingleDumpArtifactFactory`'s capability set is a static
+     "every dump capability" list (provably a no-op filter today, since every catalog analyzer is
+     dump-capable) rather than a real per-dump probe — analyzer selection happens before
+     `LoadDumpNode` loads the dump, so no real ClrMD data exists yet at that point. `SessionValidator`
+     (process-identity compatibility, alignment feasibility) is still unbuilt — nothing to
+     validate yet with one artifact.
+   - **Verified:** new `CapabilityResolverTests`/`SessionBuilderTests` + full non-real-dump suite
+     (1593 passed) unchanged, proving the capability-derived filter is a no-op against today's
+     single-dump analyzer catalog.
+
+3. ⬜ **Pending.** Generalize to N artifacts: multi-dump sessions now flow through graph
+   construction rather than `TrendOrchestrationService`. Verify trend output matches the old path.
+   Also builds `SessionValidator`, carried over unbuilt from step 2 — nothing to validate with one
+   artifact, but real once N>1 dumps must be checked for process-identity compatibility.
+4. ⬜ **Pending.** Retire the old orchestrators, stages, and filter service.
+5. ⬜ **Pending.** CLI collapses to `dd analyze <paths...>`; `--baseline`/`--trend` become sugar
+   over ordering.
 
 ## Exit criteria
 

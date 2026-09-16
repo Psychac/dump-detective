@@ -130,6 +130,20 @@ CLI, JSON, and structured reports. Summarize and rank findings; avoid raw dumps.
   workarounds for a specific bug/API quirk, or a non-obvious design decision still deserve a
   comment explaining the reasoning — naming alone can't carry that.
 
+## Documentation style
+Docs in `docs/` (architecture, refactor plans, ADRs, etc.) are user-facing and must stay
+structured and easy to scan — not just correct.
+- Don't track status as free-floating prose paragraphs ("Status, <date>: ...") bolted on next to a
+  structured list (e.g. a numbered migration-steps list) that already describes the same work —
+  the two inevitably drift out of sync. Put status directly on the relevant list item instead
+  (done/pending marker + a short note of what shipped, what was narrowed, what's still open), so
+  there's one place to read, not two competing narratives.
+- Prefer scannable structure — headings, numbered/bulleted lists, short sub-bullets — over walls
+  of dense prose. If a paragraph is doing several distinct jobs (what shipped, what was deferred,
+  what was verified), split it into labeled sub-bullets rather than one long run-on paragraph.
+- Every fact should live in exactly one place. If a decision or caveat is already captured
+  somewhere, link or reference it rather than re-explaining it in new prose nearby.
+
 ## Testing
 Support small and very large dumps. Include perf benchmarks and memory validation.
 

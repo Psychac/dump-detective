@@ -1,9 +1,12 @@
 using DumpDetective.Cli.Commands;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
+using DumpDetective.Orchestration.Discovery;
+using DumpDetective.Orchestration.Session;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Services;
 using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Cli.Configuration;
 using DumpDetective.Cli.Diagnostics;
 using DumpDetective.Cli.Models;
@@ -68,8 +71,18 @@ internal sealed class DumpAnalysisService
         _startupValidator.Validate(resolved);
 
         IReadOnlyList<IAnalyzer> analyzers = _analyzerFactory.CreateAnalyzers();
-        
+
         _startupValidator.ValidateRegistrations(analyzers, _findingGenerators, _trendComparers, _sectionBuilderFactory);
+
+        // Capability-derived selection (docs/refactor/modularity/phase-4-session-orchestration.md
+        // migration step 2) sits ahead of the existing name-based include/exclude filter below.
+        // Every analyzer in the catalog is dump-capable today, so this is provably a no-op filter —
+        // it exists to prove the mechanism before step 3 generalizes it to real per-artifact
+        // capability sets.
+        ArtifactDescriptor dumpArtifact = SingleDumpArtifactFactory.Create(resolved.DumpPath);
+        AnalysisSession session = SessionBuilder.Build([dumpArtifact]);
+        CapabilityResolution resolution = CapabilityResolver.Resolve(analyzers, session.AvailableCapabilities);
+        analyzers = resolution.Satisfied;
 
         // combine filter validation, application and ordering into one local helper for clarity
         IReadOnlyList<IAnalyzer> GetActiveAnalyzers(ResolvedExecutionOptions opts, IReadOnlyList<IAnalyzer> all)

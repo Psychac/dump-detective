@@ -5,10 +5,12 @@ using DumpDetective.Sdk.Analysis;
 namespace DumpDetective.Sdk.Artifacts;
 
 /// <summary>
-/// The known capability vocabulary, per docs/refactor/modularity/source-model.md § 3. Interim
-/// source of truth until the checked-in <c>capability-registry.json</c> lands (deferred — see
-/// docs/refactor/modularity-plan.md § 10 point 4); grouped by the artifact kind that provides them,
-/// not by the analyzer that consumes them.
+/// The known capability vocabulary, per docs/refactor/modularity/source-model.md § 3. This is the
+/// compile-time source of truth (a future analyzer needs a <c>const string</c> to pass to
+/// <c>[RequiresCapability(...)]</c>, which a JSON file can't provide); the checked-in, versioned
+/// mirror <c>schema/DumpDetective.Schema/capability-registry.json</c> landed in Phase 1 and is kept
+/// in sync by <c>SdkRegistryConformanceTests.CapabilityRegistry_ShouldMatchCapabilityVocabularyExactly</c>
+/// — grouped here by the artifact kind that provides them, not by the analyzer that consumes them.
 /// </summary>
 public static class CapabilityVocabulary
 {

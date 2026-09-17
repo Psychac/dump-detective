@@ -5,6 +5,7 @@ using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Analysis.Utilities;
 using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Identity;
 
 using FluentAssertions;
@@ -285,6 +286,7 @@ public sealed class HangAnalyzerRetypingCharacterizationTests
         HangAnalyzer analyzer = new();
         DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
+            ArtifactId = new ArtifactId("test"),
             RuntimeThreads = threads ?? new FakeRuntimeThreadQuery(),
             HeapObjects = new PrecomputedHeapObjectStream(candidates ?? []),
             DumpObjectFields = fields ?? new FakeDumpObjectFieldQuery(),

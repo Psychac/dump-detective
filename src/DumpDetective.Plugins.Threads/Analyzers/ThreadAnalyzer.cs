@@ -7,6 +7,8 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 using System.Runtime.InteropServices;
 
@@ -95,24 +97,31 @@ namespace DumpDetective.Analysis.Analyzers.Threads
         }
         private AnalyzerDomainResult? _lastResult;
 
-        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             IRuntimeThreadQuery threads = context.RuntimeThreads
                 ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.RuntimeThreads}' capability.");
 
-            LastResult = Analyze(threads, cancellationToken);
-            return ValueTask.CompletedTask;
+            LastResult = await Analyze(threads, context, cancellationToken);
         }
 
-        private static ThreadDomainResult Analyze(IRuntimeThreadQuery threads, CancellationToken cancellationToken)
+        /// <summary>
+        /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): emits one
+        /// <c>thread.state</c> observation per alive thread, inline in <see cref="ProcessThread"/> —
+        /// the canonical per-thread source (every field below is already computed there for
+        /// categorization); bounded by real thread count (hundreds at most on any real dump, never
+        /// heap-scale).
+        /// </summary>
+        private static async ValueTask<ThreadDomainResult> Analyze(IRuntimeThreadQuery threads, AnalysisContext observationContext, CancellationToken cancellationToken)
         {
             var categorization = new ThreadCategorization();
             var threadsWithLocks = new List<ThreadWithStackTrace>();
             var blockedThreads = new List<ThreadWithStackTrace>();
             var threadsWithExceptions = new List<ThreadWithStackTrace>();
             var otherThreads = new List<ThreadWithStackTrace>();
+            var observationCapabilities = new HashSet<Capability> { CapabilityVocabulary.RuntimeThreads };
 
             foreach (RuntimeThreadRef thread in threads.EnumerateThreads())
             {
@@ -122,7 +131,7 @@ namespace DumpDetective.Analysis.Analyzers.Threads
                     ? new List<ThreadStackFrameRef>(threads.EnumerateStackFrames(thread))
                     : [];
 
-                ProcessThread(thread, frames, categorization, threadsWithLocks, blockedThreads, threadsWithExceptions, otherThreads);
+                await ProcessThread(thread, frames, categorization, threadsWithLocks, blockedThreads, threadsWithExceptions, otherThreads, observationContext, observationCapabilities, cancellationToken);
             }
 
             FinalizeCategorization(categorization, threadsWithLocks, blockedThreads, threadsWithExceptions, otherThreads);
@@ -130,14 +139,17 @@ namespace DumpDetective.Analysis.Analyzers.Threads
         }
 
         // Shared per-thread categorization body.
-        private static void ProcessThread(
+        private static async ValueTask ProcessThread(
             RuntimeThreadRef thread,
             IReadOnlyList<ThreadStackFrameRef> availableFrames,
             ThreadCategorization result,
             List<ThreadWithStackTrace> threadsWithLocks,
             List<ThreadWithStackTrace> blockedThreads,
             List<ThreadWithStackTrace> threadsWithExceptions,
-            List<ThreadWithStackTrace> otherThreads)
+            List<ThreadWithStackTrace> otherThreads,
+            AnalysisContext observationContext,
+            IReadOnlySet<Capability> observationCapabilities,
+            CancellationToken cancellationToken)
         {
             result.TotalCount++;
             IncrementCount(result.StateDistribution, thread.ThreadStateDisplay);
@@ -233,6 +245,30 @@ namespace DumpDetective.Analysis.Analyzers.Threads
 
                 // Every alive thread not already recorded above — a deterministic complete list,
                 // not a reservoir sample (§9.23).
+                await observationContext.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "thread.state",
+                    Subjects = [thread.Thread],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["stack-size.bytes"] = new Measure(thread.StackSizeBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                        ["locks-held.count"] = new Measure(thread.LockCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["stack-root.count"] = new Measure(thread.StackRootCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["has-exception"] = new Measure(thread.HasCurrentException ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["async-chain.depth"] = new Measure(moveNextDepth, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = observationContext.ArtifactId!.Value,
+                        AnalyzerKey = "Thread Analysis",
+                        CapabilitiesUsed = observationCapabilities,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                }, cancellationToken);
+
                 bool isAlreadyCaptured = thread.LockCount > 0 || waitClassification != null || thread.HasCurrentException;
                 if (!isAlreadyCaptured)
                 {

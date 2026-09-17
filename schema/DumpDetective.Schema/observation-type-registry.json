@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/observation-type-registry.json",
-  "registryVersion": "1.11.0",
+  "registryVersion": "1.16.0",
   "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
   "observationTypes": {
     "gc.pause": {
@@ -220,6 +220,74 @@
       },
       "note": "One observation per region-generation bucket (bounded to at most 7), only emitted when the dump is regions-based (.NET 9+ GC).",
       "addedIn": "1.11.0"
+    },
+    "thread.blocked": {
+      "producedBy": "LockGraphAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Threads/Analyzers/LockGraphAnalyzer.cs",
+      "requiresCapabilities": ["runtime.locks", "heap.objects", "runtime.threads"],
+      "subjectKind": "thread",
+      "temporalKind": "point",
+      "measures": {
+        "locks-held.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per deadlock-candidate thread (alive, holds a lock, blocked on a monitor). Named for the canonical example in observation-and-correlation-model.md § 4 — 'deadlock' is a synthesis-rule judgment, not this raw fact.",
+      "addedIn": "1.12.0"
+    },
+    "lock.contested": {
+      "producedBy": "LockGraphAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Threads/Analyzers/LockGraphAnalyzer.cs",
+      "requiresCapabilities": ["runtime.locks", "heap.objects", "runtime.threads"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "waiting.count": { "unit": "count", "semantics": "absolute" },
+        "recursion.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per contested lock. Subjects carries the lock's type, plus the owning thread as a second subject when resolved (a relation, per observation-and-correlation-model.md § 1's Subjects remarks).",
+      "addedIn": "1.13.0"
+    },
+    "thread.wait-state": {
+      "producedBy": "HangAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Threads/Analyzers/HangAnalyzer.cs",
+      "requiresCapabilities": ["runtime.threads"],
+      "subjectKind": "thread",
+      "temporalKind": "point",
+      "measures": {
+        "locks-held.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per alive thread that is actually waiting — a proper subset of all alive threads. WaitType/WaitReason omitted (categorical, no enum instance left in scope by the time the domain result exists).",
+      "addedIn": "1.14.0"
+    },
+    "thread.state": {
+      "producedBy": "ThreadAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Threads/Analyzers/ThreadAnalyzer.cs",
+      "requiresCapabilities": ["runtime.threads"],
+      "subjectKind": "thread",
+      "temporalKind": "point",
+      "measures": {
+        "stack-size.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "locks-held.count": { "unit": "count", "semantics": "absolute" },
+        "stack-root.count": { "unit": "count", "semantics": "absolute" },
+        "has-exception": { "unit": "count", "semantics": "absolute" },
+        "async-chain.depth": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per alive thread — bounded by real thread count, never heap-scale.",
+      "addedIn": "1.15.0"
+    },
+    "thread.stack-cluster": {
+      "producedBy": "ThreadStackClusterAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Threads/Analyzers/ThreadStackClusterAnalyzer.cs",
+      "requiresCapabilities": ["runtime.threads"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "cluster.count": { "unit": "count", "semantics": "absolute" },
+        "threadpool-worker.count": { "unit": "count", "semantics": "absolute" },
+        "gc.count": { "unit": "count", "semantics": "absolute" },
+        "finalizer.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per distinct call-stack-shape cluster among alive threads (filtered by MinClusterSize). No entity subject — a cluster spans many threads; SampleOsThreadIds is a sample, not full membership.",
+      "addedIn": "1.16.0"
     }
   }
 }

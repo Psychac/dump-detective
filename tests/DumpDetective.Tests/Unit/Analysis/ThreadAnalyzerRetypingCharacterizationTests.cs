@@ -3,6 +3,7 @@ using DumpDetective.Analysis.Analyzers.Threads;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Identity;
 
 using FluentAssertions;
@@ -287,6 +288,7 @@ public sealed class ThreadAnalyzerRetypingCharacterizationTests
         ThreadAnalyzer analyzer = new();
         DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
+            ArtifactId = new ArtifactId("test"),
             RuntimeThreads = threads,
         };
 

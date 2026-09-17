@@ -7,6 +7,9 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 using Microsoft.Diagnostics.Runtime;
 
@@ -119,7 +122,7 @@ namespace DumpDetective.Analysis.Analyzers.Threads
         }
         private AnalyzerDomainResult? _lastResult;
 
-        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -133,8 +136,49 @@ namespace DumpDetective.Analysis.Analyzers.Threads
                 ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.RuntimeThreadPool}' capability.");
             HangAnalysisOptions options = context.AnalyzerOptions as HangAnalysisOptions ?? new HangAnalysisOptions();
 
-            LastResult = Analyze(candidates, dumpFields, threads, threadPool, options, cancellationToken);
-            return ValueTask.CompletedTask;
+            var result = Analyze(candidates, dumpFields, threads, threadPool, options, cancellationToken);
+            LastResult = result;
+
+            await EmitObservationsAsync(context, result, cancellationToken);
+        }
+
+        /// <summary>
+        /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): one
+        /// <c>thread.wait-state</c> observation per <see cref="HangDomainResult.WaitingThreads"/>
+        /// entry — bounded to alive threads that are actually waiting, a proper subset of all alive
+        /// threads. <c>WaitType</c>/<c>WaitReason</c>/<c>TopStackFrame</c> are left out of
+        /// <c>Measures</c> (categorical strings, and by the time this domain result exists the
+        /// original <c>WaitType</c> enum instance is gone — same "no enum in scope" gap
+        /// <c>GCRootAnalyzer</c>'s <c>RootKind</c> omission documents).
+        /// </summary>
+        private static async ValueTask EmitObservationsAsync(AnalysisContext context, HangDomainResult result, CancellationToken cancellationToken)
+        {
+            var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.RuntimeThreads };
+
+            foreach (WaitingThreadSnapshot wt in result.TopWaitingThreads ?? [])
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                await context.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "thread.wait-state",
+                    Subjects = [new ThreadRef { OsThreadId = wt.OSThreadId, ManagedThreadId = (int)wt.ThreadId, Fidelity = MatchFidelity.Exact }],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["locks-held.count"] = new Measure(wt.LockCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = context.ArtifactId!.Value,
+                        AnalyzerKey = "Hang Analysis",
+                        CapabilitiesUsed = capabilitiesUsed,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                }, cancellationToken);
+            }
         }
 
         private static HangDomainResult Analyze(

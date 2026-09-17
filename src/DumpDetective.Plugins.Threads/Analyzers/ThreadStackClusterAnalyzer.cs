@@ -5,6 +5,8 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Threads
 {
@@ -81,7 +83,7 @@ namespace DumpDetective.Analysis.Analyzers.Threads
             new("Threadpool-idle", "<No managed frames> (Threadpool)", "CLR thread pool worker waiting for work"),
         ];
 
-        public ValueTask AnalyzeAsync(Sdk.Analysis.AnalysisContext context, CancellationToken cancellationToken)
+        public async ValueTask AnalyzeAsync(Sdk.Analysis.AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -90,8 +92,54 @@ namespace DumpDetective.Analysis.Analyzers.Threads
 
             ThreadStackClusterAnalysisOptions options = context.AnalyzerOptions as ThreadStackClusterAnalysisOptions ?? new ThreadStackClusterAnalysisOptions();
 
-            LastResult = Analyze(threadQuery, options, cancellationToken);
-            return ValueTask.CompletedTask;
+            var result = Analyze(threadQuery, options, cancellationToken);
+            LastResult = result;
+
+            await EmitObservationsAsync(context, result, cancellationToken);
+        }
+
+        /// <summary>
+        /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): one
+        /// <c>thread.stack-cluster</c> observation per <see cref="ThreadStackClusterDomainResult.TopClusters"/>
+        /// entry — bounded by distinct call-stack shapes among alive threads (filtered by
+        /// <c>MinClusterSize</c>), never heap-scale. No entity subject: a cluster spans many
+        /// threads, and <c>SampleOsThreadIds</c> is only a sample, not the full membership, so
+        /// attributing the observation to one sampled thread would misrepresent its cardinality —
+        /// same "no natural anchor" reasoning as <c>MemoryAnalyzer</c>'s segment-composition.
+        /// <see cref="ThreadClusterSnapshot.FrameworkPattern"/> (a lookup-table classification) is
+        /// left out, matching the project's existing "no categorical judgment in Measures" scoping.
+        /// </summary>
+        private static async ValueTask EmitObservationsAsync(Sdk.Analysis.AnalysisContext context, ThreadStackClusterDomainResult result, CancellationToken cancellationToken)
+        {
+            var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.RuntimeThreads };
+
+            foreach (ThreadClusterSnapshot cluster in result.TopClusters ?? [])
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                await context.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "thread.stack-cluster",
+                    Subjects = [],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["cluster.count"] = new Measure(cluster.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["threadpool-worker.count"] = new Measure(cluster.ThreadpoolWorkerCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["gc.count"] = new Measure(cluster.GcCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["finalizer.count"] = new Measure(cluster.FinalizerCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = context.ArtifactId!.Value,
+                        AnalyzerKey = "Thread Stack Signature Clustering",
+                        CapabilitiesUsed = capabilitiesUsed,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                }, cancellationToken);
+            }
         }
 
         private static ThreadStackClusterDomainResult Analyze(

@@ -41,6 +41,11 @@ public sealed class SdkRegistryConformanceTests
             ["heap.loh-type-composition"] = ["loh.count", "loh.bytes"],
             ["heap.segment-reservation"] = ["committed.bytes", "reserved.bytes", "reservation-gap.bytes", "reserved-to-committed.ratio", "ephemeral.segment-count", "ephemeral.avg-fill-percent", "segment.count"],
             ["heap.region-composition"] = ["region-kind.ordinal", "region.count", "reserved.bytes", "committed.bytes", "near-empty.count", "near-empty.committed-bytes"],
+            ["thread.blocked"] = ["locks-held.count"],
+            ["lock.contested"] = ["waiting.count", "recursion.count"],
+            ["thread.wait-state"] = ["locks-held.count"],
+            ["thread.state"] = ["stack-size.bytes", "locks-held.count", "stack-root.count", "has-exception", "async-chain.depth"],
+            ["thread.stack-cluster"] = ["cluster.count", "threadpool-worker.count", "gc.count", "finalizer.count"],
         };
 
     [Fact]

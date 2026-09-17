@@ -4,6 +4,9 @@ using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Threads;
 
@@ -73,7 +76,7 @@ public sealed class LockGraphAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     }
     private AnalyzerDomainResult? _lastResult;
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -84,18 +87,33 @@ public sealed class LockGraphAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
         IRuntimeThreadQuery threadQuery = context.RuntimeThreads
             ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.RuntimeThreads}' capability.");
 
-        LastResult = Analyze(syncBlockQuery, objectLookup, threadQuery, cancellationToken);
-        return ValueTask.CompletedTask;
+        LastResult = await Analyze(syncBlockQuery, objectLookup, threadQuery, context, cancellationToken);
     }
 
     private readonly record struct LockEntry(ulong ObjectAddress, string TypeName, RuntimeThreadRef? Owner, int RecursionCount, int WaitingThreadCount);
 
-    private static LockGraphDomainResult Analyze(
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): emits
+    /// <c>lock.contested</c> (one per contested lock, inline where <c>cl.Owner</c>'s real
+    /// <see cref="ThreadRef"/> is still in scope — a second pass over
+    /// <see cref="LockGraphDomainResult.ContestedLockDetails"/> would only have the owner's managed
+    /// id, not a full <see cref="ThreadRef"/>) and <c>thread.blocked</c> (one per deadlock candidate
+    /// — named for the doc's own canonical example in
+    /// observation-and-correlation-model.md § 4's correlation-recipes table, deliberately not
+    /// <c>deadlock.candidate</c>: "deadlock" is itself the judgment a synthesis rule reaches, not a
+    /// raw fact this analyzer observed).
+    /// </summary>
+    private static async ValueTask<LockGraphDomainResult> Analyze(
         IHeapSyncBlockQuery syncBlockQuery,
         IHeapObjectLookup objectLookup,
         IRuntimeThreadQuery threadQuery,
+        AnalysisContext observationContext,
         CancellationToken cancellationToken)
     {
+        var observationCapabilities = new HashSet<Capability>
+        {
+            CapabilityVocabulary.RuntimeLocks, CapabilityVocabulary.HeapObjects, CapabilityVocabulary.RuntimeThreads,
+        };
         var threadsByOsId = new Dictionary<uint, RuntimeThreadRef>();
         foreach (RuntimeThreadRef t in threadQuery.EnumerateThreads())
             threadsByOsId[t.Thread.OsThreadId] = t;
@@ -194,6 +212,26 @@ public sealed class LockGraphAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 
             deadlockCandidates.Add(new DeadlockCandidateSnapshot(
                 (uint)managedThreadId, thread.Thread.OsThreadId, lockTypes, lockAddresses, summary, ownerFrames));
+
+            await observationContext.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "thread.blocked",
+                Subjects = [thread.Thread],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["locks-held.count"] = new Measure(locksHeld.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = observationContext.ArtifactId!.Value,
+                    AnalyzerKey = "Lock Graph Analysis",
+                    CapabilitiesUsed = observationCapabilities,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
         }
 
         var typeWaiters = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -209,6 +247,32 @@ public sealed class LockGraphAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
         {
             uint? ownerManagedId = cl.Owner is RuntimeThreadRef owner && owner.Thread.ManagedThreadId is int mid ? (uint)mid : null;
             contestedLockDetails.Add(new ContestedLockSnapshot(cl.ObjectAddress, cl.TypeName, cl.WaitingThreadCount, ownerManagedId, cl.RecursionCount));
+
+            (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(cl.TypeName);
+            var subjects = new List<EntityRef> { new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity } };
+            if (cl.Owner is RuntimeThreadRef ownerThread)
+                subjects.Add(ownerThread.Thread);
+
+            await observationContext.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "lock.contested",
+                Subjects = subjects,
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["waiting.count"] = new Measure(cl.WaitingThreadCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["recursion.count"] = new Measure(cl.RecursionCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = observationContext.ArtifactId!.Value,
+                    AnalyzerKey = "Lock Graph Analysis",
+                    CapabilitiesUsed = observationCapabilities,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
         }
 
         return new LockGraphDomainResult(

@@ -78,14 +78,20 @@ public sealed class ArrayAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     }
 
     /// <summary>
-    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): two observation
-    /// types — <c>type.array-composition</c> per <see cref="ArrayDomainResult.TopArrayTypesBySize"/>
-    /// entry (bounded to distinct element-type+rank combinations, unlike the whole-heap type
-    /// population), and <c>heap.sparse-array</c> per <see cref="ArrayDomainResult.TopSparseArrays"/>
-    /// entry (bounded, ≤64, resolved to a real <see cref="Sdk.Identity.TypeRef"/> via
-    /// <see cref="IHeapObjectLookup"/> since each entry retains its sample address).
-    /// <see cref="ArrayDomainResult.TopLargeArrays"/>/<see cref="ArrayDomainResult.TopPinnedArrays"/>
-    /// left out of this pass.
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): four observation
+    /// types. <c>type.array-composition</c> is emitted per <see cref="ArrayDomainResult.TopArrayTypesBySize"/>
+    /// entry (exhaustive over distinct element-type+rank combinations, despite the "Top" name — no
+    /// cap) and carries raw <c>loh.count</c>/<c>loh.bytes</c>/<c>pinned.count</c>/<c>pinned.bytes</c>
+    /// per type+rank, not just the blended <c>gen2-plus-loh.percent</c>, specifically so a synthesis
+    /// rule can reconstruct <see cref="ArrayDomainResult.LohArrayBytes"/>/<see cref="ArrayDomainResult.PinnedArrayBytes"/>
+    /// exactly by summing across all of them (audit finding from the per-analyzer playbook's step 3 —
+    /// see docs/refactor/modularity/phase-5-observations-synthesis.md's "Before step 2" prerequisites).
+    /// <c>heap.sparse-array</c>, <c>heap.large-array</c>, and <c>heap.pinned-array</c> are each
+    /// emitted per their respective bounded top-N entry (≤64 sparse, whatever the LOH satellite
+    /// index/fallback captured for large, ≤<c>options.TopPinnedArrayLimit</c> for pinned), resolved
+    /// to a real <see cref="Sdk.Identity.TypeRef"/> via <see cref="IHeapObjectLookup"/> since
+    /// each entry retains its sample/instance address — same shape, same narrative-fidelity ceiling as
+    /// the domain result's own bounded lists.
     /// </summary>
     private static async ValueTask EmitObservationsAsync(AnalysisContext context, IHeapObjectLookup objectLookup, ArrayDomainResult result, CancellationToken cancellationToken)
     {
@@ -109,6 +115,11 @@ public sealed class ArrayAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
                     ["shallow.bytes"] = new Measure(profile.TotalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                     ["gen2-plus-loh.percent"] = new Measure(profile.Gen2PlusLohPercent, MeasureUnit.Percent, MeasureSemantics.Ratio),
                     ["avg-size.bytes"] = new Measure(profile.AverageInstanceSize, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["array.rank"] = new Measure(profile.Rank, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["loh.count"] = new Measure(profile.LohCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["loh.bytes"] = new Measure(profile.LohBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["pinned.count"] = new Measure(profile.PinnedCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["pinned.bytes"] = new Measure(profile.PinnedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                 },
                 Provenance = new Provenance
                 {
@@ -151,6 +162,66 @@ public sealed class ArrayAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
                 Confidence = 1.0,
             }, cancellationToken);
         }
+
+        foreach (LargeArrayEntry large in result.TopLargeArrays)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!objectLookup.TryGetObject(large.Address, out HeapObjectRef obj))
+                continue;
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "heap.large-array",
+                Subjects = [obj.Type],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["length"] = new Measure(large.Length, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["shallow.bytes"] = new Measure(large.Size, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["array.rank"] = new Measure(large.Rank, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Array Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
+
+        foreach (LargeArrayEntry pinned in result.TopPinnedArrays ?? [])
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!objectLookup.TryGetObject(pinned.Address, out HeapObjectRef obj))
+                continue;
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "heap.pinned-array",
+                Subjects = [obj.Type],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["length"] = new Measure(pinned.Length, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["shallow.bytes"] = new Measure(pinned.Size, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["array.rank"] = new Measure(pinned.Rank, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Array Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
     }
 
     private static ArrayDomainResult Analyze(
@@ -167,8 +238,8 @@ public sealed class ArrayAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
         ulong totalHeapBytes = typeStatistics.GetTotalIndexedBytes();
 
         var arrayTypeNames = new HashSet<string>(StringComparer.Ordinal);
-        // Map: elementTypeName+rank key -> (count, totalBytes, isMultiDim, rank, gen2Count, lohCount, moduleName)
-        var typeMap = new Dictionary<string, (long Count, ulong Bytes, bool IsMultiDim, int Rank, long Gen2Count, long LohCount, string ModuleName)>(256);
+        // Map: elementTypeName+rank key -> (count, totalBytes, isMultiDim, rank, gen2Count, lohCount, lohBytes, moduleName)
+        var typeMap = new Dictionary<string, (long Count, ulong Bytes, bool IsMultiDim, int Rank, long Gen2Count, long LohCount, ulong LohBytes, string ModuleName)>(256);
 
         long totalObjects = 0;
         ulong totalBytes = 0;
@@ -207,9 +278,10 @@ public sealed class ArrayAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
             if (typeMap.TryGetValue(key, out var existing))
                 typeMap[key] = (existing.Count + e.InstanceCount,
                                 existing.Bytes + e.TotalSize, isMultiDim, e.ArrayRank,
-                                existing.Gen2Count + e.Gen2Count, existing.LohCount + e.LohCount, existing.ModuleName);
+                                existing.Gen2Count + e.Gen2Count, existing.LohCount + e.LohCount,
+                                existing.LohBytes + e.LohSize, existing.ModuleName);
             else
-                typeMap[key] = (e.InstanceCount, e.TotalSize, isMultiDim, e.ArrayRank, e.Gen2Count, e.LohCount, e.ModuleName);
+                typeMap[key] = (e.InstanceCount, e.TotalSize, isMultiDim, e.ArrayRank, e.Gen2Count, e.LohCount, e.LohSize, e.ModuleName);
 
             // Sparse candidate: 1-D ref-type arrays (walked via GetObjectValue), or 1-D
             // primitive-numeric-type arrays (walked via chunked ReadValues<T>). Arbitrary structs
@@ -224,12 +296,12 @@ public sealed class ArrayAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
         }
 
         // -- Step 2: Top array types by total bytes -----------------------------------------
-        var typeList = new List<(string ElemName, int Rank, int Count, ulong Bytes, bool IsMultiDim, long Gen2Count, long LohCount, string ModuleName)>(typeMap.Count);
-        foreach (KeyValuePair<string, (long Count, ulong Bytes, bool IsMultiDim, int Rank, long Gen2Count, long LohCount, string ModuleName)> kv in typeMap)
+        var typeList = new List<(string ElemName, int Rank, int Count, ulong Bytes, bool IsMultiDim, long Gen2Count, long LohCount, ulong LohBytes, string ModuleName)>(typeMap.Count);
+        foreach (KeyValuePair<string, (long Count, ulong Bytes, bool IsMultiDim, int Rank, long Gen2Count, long LohCount, ulong LohBytes, string ModuleName)> kv in typeMap)
         {
             int rankSep = kv.Key.LastIndexOf("[rank=", StringComparison.Ordinal);
             string elemName = rankSep > 0 ? kv.Key[..rankSep] : kv.Key;
-            typeList.Add((elemName, kv.Value.Rank, (int)Math.Min(kv.Value.Count, int.MaxValue), kv.Value.Bytes, kv.Value.IsMultiDim, kv.Value.Gen2Count, kv.Value.LohCount, kv.Value.ModuleName));
+            typeList.Add((elemName, kv.Value.Rank, (int)Math.Min(kv.Value.Count, int.MaxValue), kv.Value.Bytes, kv.Value.IsMultiDim, kv.Value.Gen2Count, kv.Value.LohCount, kv.Value.LohBytes, kv.Value.ModuleName));
         }
         typeList.Sort(static (a, b) => b.Bytes.CompareTo(a.Bytes));
 
@@ -239,7 +311,9 @@ public sealed class ArrayAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
             double percentOfHeap = totalHeapBytes > 0 ? t.Bytes * 100.0 / totalHeapBytes : 0.0;
             double gen2PlusLohPct = t.Count > 0 ? (t.Gen2Count + t.LohCount) * 100.0 / t.Count : 0.0;
             double avgSize = t.Count > 0 ? t.Bytes / (double)t.Count : 0.0;
-            topArrayTypes.Add(new ArrayTypeProfile(t.ElemName, t.Rank, t.Count, t.Bytes, t.IsMultiDim, percentOfHeap, gen2PlusLohPct, avgSize, t.ModuleName));
+            topArrayTypes.Add(new ArrayTypeProfile(
+                t.ElemName, t.Rank, t.Count, t.Bytes, t.IsMultiDim, percentOfHeap, gen2PlusLohPct, avgSize, t.ModuleName,
+                LohCount: t.LohCount, LohBytes: t.LohBytes));
         }
 
         // -- Step 3: Large array analysis ----------------------------------------------------
@@ -344,6 +418,10 @@ public sealed class ArrayAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
         int pinnedArrayCount = 0;
         ulong pinnedArrayBytes = 0;
         var topPinnedArrays = new List<LargeArrayEntry>(64);
+        // Per-type accumulation, merged into topArrayTypes below -- exhaustive like LohCount/LohBytes
+        // above, not just the options.TopPinnedArrayLimit-capped sample topPinnedArrays keeps for
+        // narrative purposes. Keyed identically to typeMap's own key so the merge is a plain lookup.
+        var pinnedByType = new Dictionary<string, (long Count, ulong Bytes)>(64);
 
         foreach (HeapRootRef root in roots.EnumerateRoots())
         {
@@ -364,11 +442,27 @@ public sealed class ArrayAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
                 Length: length,
                 Rank: rank,
                 Size: obj.Size));
+
+            string pinnedKey = $"{obj.TypeDisplayName}[rank={rank}]";
+            pinnedByType[pinnedKey] = pinnedByType.TryGetValue(pinnedKey, out var existingPinned)
+                ? (existingPinned.Count + 1, existingPinned.Bytes + obj.Size)
+                : (1, obj.Size);
         }
 
         topPinnedArrays.Sort(static (a, b) => b.Size.CompareTo(a.Size));
         if (topPinnedArrays.Count > options.TopPinnedArrayLimit)
             topPinnedArrays.RemoveRange(options.TopPinnedArrayLimit, topPinnedArrays.Count - options.TopPinnedArrayLimit);
+
+        if (pinnedByType.Count > 0)
+        {
+            for (int i = 0; i < topArrayTypes.Count; i++)
+            {
+                ArrayTypeProfile profile = topArrayTypes[i];
+                string key = $"{profile.ElementTypeName}[rank={profile.Rank}]";
+                if (pinnedByType.TryGetValue(key, out var pinned))
+                    topArrayTypes[i] = profile with { PinnedCount = pinned.Count, PinnedBytes = pinned.Bytes };
+            }
+        }
 
         return new ArrayDomainResult(
             TotalArrayObjects: (int)Math.Min(totalObjects, int.MaxValue),

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/observation-type-registry.json",
-  "registryVersion": "1.42.0",
+  "registryVersion": "1.43.0",
   "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
   "observationTypes": {
     "gc.pause": {
@@ -511,9 +511,14 @@
         "instance.count": { "unit": "count", "semantics": "absolute" },
         "shallow.bytes": { "unit": "bytes", "semantics": "absolute" },
         "gen2-plus-loh.percent": { "unit": "percent", "semantics": "ratio" },
-        "avg-size.bytes": { "unit": "bytes", "semantics": "absolute" }
+        "avg-size.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "array.rank": { "unit": "count", "semantics": "absolute" },
+        "loh.count": { "unit": "count", "semantics": "absolute" },
+        "loh.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "pinned.count": { "unit": "count", "semantics": "absolute" },
+        "pinned.bytes": { "unit": "bytes", "semantics": "absolute" }
       },
-      "note": "One per distinct array element-type+rank combination — bounded, unlike the whole-heap type population.",
+      "note": "One per distinct array element-type+rank combination — exhaustive despite the 'Top' name, no cap. array.rank/loh.*/pinned.* added in 1.43.0 (Phase 5 step 2 audit finding) specifically so a synthesis rule can reconstruct LohArrayBytes/PinnedArrayBytes exactly by summing across all entries — gen2-plus-loh.percent alone can't, since it blends gen2 and LOH into one ratio.",
       "addedIn": "1.32.0"
     },
     "heap.sparse-array": {
@@ -530,6 +535,34 @@
       },
       "note": "One per TopSparseArrays entry (bounded, sparse ratio >= 0.5).",
       "addedIn": "1.33.0"
+    },
+    "heap.large-array": {
+      "producedBy": "ArrayAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Types/Analyzers/ArrayAnalyzer.cs",
+      "requiresCapabilities": ["heap.types", "heap.objects"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "length": { "unit": "count", "semantics": "absolute" },
+        "shallow.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "array.rank": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per TopLargeArrays entry (bounded to whatever the LOH satellite index/fallback captured). Backs the finding generator's 'largest array element type' narrative — Phase 5 step 2 audit finding, this was previously unobserved.",
+      "addedIn": "1.43.0"
+    },
+    "heap.pinned-array": {
+      "producedBy": "ArrayAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Types/Analyzers/ArrayAnalyzer.cs",
+      "requiresCapabilities": ["heap.types", "heap.objects"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "length": { "unit": "count", "semantics": "absolute" },
+        "shallow.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "array.rank": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per TopPinnedArrays entry (bounded, options.TopPinnedArrayLimit). Backs the finding generator's 'largest pinned array element type' narrative — Phase 5 step 2 audit finding, this was previously unobserved.",
+      "addedIn": "1.43.0"
     },
     "collection.wasteful": {
       "producedBy": "CollectionAnalyzer",

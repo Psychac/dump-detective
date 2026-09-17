@@ -13,7 +13,15 @@ internal sealed record ArrayTypeProfile(
     double PercentOfTotalHeapBytes = 0,
     double Gen2PlusLohPercent = 0,
     double AverageInstanceSize = 0,
-    string ModuleName = "Unknown");
+    string ModuleName = "Unknown",
+    // Raw LOH count/bytes and pinned count/bytes for this type+rank, added for Phase 5 step 2
+    // (docs/refactor/modularity/phase-5-observations-synthesis.md's per-analyzer playbook):
+    // Gen2PlusLohPercent blends gen2 and LOH into one ratio, so it can't reconstruct
+    // ArrayDomainResult.LohArrayBytes/PinnedArrayBytes by summing across types — these can.
+    long LohCount = 0,
+    ulong LohBytes = 0,
+    long PinnedCount = 0,
+    ulong PinnedBytes = 0);
 
 internal sealed record LargeArrayEntry(
     ulong Address,

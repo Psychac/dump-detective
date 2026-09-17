@@ -1,0 +1,26 @@
+[
+  {
+    "analyzer": "Array Analysis",
+    "category": "Memory",
+    "severity": 1,
+    "title": "Sparse System.Int32[] wastes 19.1 MB",
+    "evidence": "Array of System.Int32 at 0x1000 has 1,000 elements but 90% are null/default, wasting approximately 19.1 MB.",
+    "recommendation": "Consider replacing sparse arrays with a Dictionary\u003Cint, T\u003E or SortedList\u003Cint, T\u003E when the majority of entries are null or default, to reclaim the wasted memory.",
+    "tags": [
+      "array",
+      "sparse",
+      "memory",
+      "waste"
+    ],
+    "fingerprint": null,
+    "metricValue": 20000000,
+    "metricUnit": "bytes",
+    "caveats": null,
+    "evidenceTables": null,
+    "confidenceScore": 0.7,
+    "effectiveCaveats": [],
+    "effectiveEvidenceTables": [],
+    "effectiveConfidenceScore": 0.7,
+    "effectiveFingerprint": "array analysis::memory::sparse systemint32 wastes 191 mb::array|memory|sparse|waste"
+  }
+]

@@ -58,6 +58,18 @@ follow from it**:
    [observation-and-correlation-model.md § 2a](observation-and-correlation-model.md) — raw measures,
    factual observation types, measurement-only confidence. Composite scores that previously lived in
    domain results are *not* ported into observations; they become synthesis-rule outputs.
+   **Done, shipped 2026-09-17 across 8 commits** (one per plugin package: Gc, Memory, Threads,
+   Infra, Runtime, Types, Async, Leaks) — 35 of 36 analyzers emit observations (`LeakCandidateAnalyzer`
+   deliberately deferred to step 6, same reasoning as its Stage-1-purity deferral above), ~50
+   distinct `ObservationType`s registered in `observation-type-registry.json`. Infrastructure: a real
+   `CollectingObservationSink`/`ArtifactId` now flow through `RuntimeAnalysisContext` →
+   `AnalysisContextBuilder` (was `NoOpObservationSink.Instance`/null); the sink was relocated from
+   the trace-only project into the SDK so both sides share it. Domain results are untouched (no
+   golden-file risk introduced); every emission is scoped to an already-bounded population
+   (typed-resource candidate streams, top-N selections, or a single whole-heap aggregate) — never a
+   second, unbounded per-object pass. Along the way, found and fixed a real pre-existing gap: several
+   analyzer unit tests construct `AnalysisContext` directly without `ArtifactId`, which only surfaced
+   once those analyzers started emitting real observations (16 test files fixed across the 8 batches).
 2. **Author synthesis rules** replacing each `IFindingGenerator`. Verified by golden-file equality
    against today's findings for the full test corpus — a finding that changes text or severity is a
    bug in this phase, not an improvement.
@@ -97,8 +109,18 @@ follow from it**:
 
 ## Exit criteria
 
-- Every analyzer emits observations; `ObservationStore` handles a full large-dump run within
-  bounded memory (the model's key unvalidated assumption, now tested).
+- Every analyzer emits observations (**35/36 done — see step 1**); `ObservationStore` handles a full
+  large-dump run within bounded memory. **Measured, not just tested, 2026-09-17** against the
+  3.35 GB reference dump: 36 analyzers emitted **81,316 observations** in 61 s (heap index build
+  0.55 s). `finalizer.queue-entry` alone accounts for 68,576 of those (84%) — the one analyzer that
+  deliberately emits its whole, uncapped population (see its own step-1 remarks); every other type
+  is in the low thousands or less. Managed-memory delta across the run (forced GC before/after) was
+  ~1.85 GB, but that figure is an upper bound on the observations themselves — it includes every
+  analyzer's own (unchanged) domain results and working memory, not an isolated observation-only
+  measurement. Conclusion: an in-memory `List<Observation>` (`CollectingObservationSink`) is
+  sufficient at this scale — nowhere near the "analyzer emits a million observations" failure mode
+  § below warns about — so the disk-backed `ObservationStore` design remains deferred, not built on
+  a guess. See `tests/DumpDetective.Tests/Integration/CacheDiscrepancies/ObservationVolumeRealDumpTests.cs`.
 - Findings produced via synthesis rules are **byte-identical** to pre-phase findings across the
   golden corpus.
 - Trend reports identical, with ≤ ~5 bespoke comparers remaining and each justified in writing.
@@ -123,7 +145,9 @@ Two real risks:
   observations than expected if analyzers emit per-object. Guidance: observations are *conclusions*,
   not records — per-object data stays in the index and is referenced via `EvidenceRef`, never
   copied into observations. If an analyzer wants to emit a million observations, that's a modeling
-  error.
+  error. **Measured, not just guarded against, 2026-09-17**: 81,316 observations on the 3.35 GB
+  reference dump (see the exit-criteria entry above for the full breakdown) — three orders of
+  magnitude below the "40 M objects" failure case this risk describes.
 - **Temptation to improve findings while rewriting them.** Every "while we're here, this wording is
   better" breaks the equality check that makes this phase safe. Improvements land *after*, as
   separate changes.

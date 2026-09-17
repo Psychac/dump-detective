@@ -52,6 +52,83 @@ follow from it**:
   rollup over stage-2 output, not an independent copy of any stage-1 judgment. Already satisfies
   this phase's exit criterion ("reuses synthesis outputs or is gone").
 
+### Before step 2 — synthesis-rule authoring
+
+Not yet gated above; surfaced 2026-09-17 while scoping step 2. Ordered by need — each depends on
+the one before it:
+
+1. **`ISynthesisRule` / `ObservationQuery` must actually be designed.** **Done, shipped
+   2026-09-17.** Resolved narrower than the model doc's original hybrid lean — see
+   [observation-and-correlation-model.md § 7](observation-and-correlation-model.md) for the
+   reasoning against a comparator/predicate DSL. Shipped:
+   `src/DumpDetective.Reporting/Synthesis/SynthesisEngine.cs` (per-`ObservationType` index built
+   once per run, sequential rule execution, per-rule catch-and-log isolation, `Fingerprint`-sorted
+   output — no zero-match skip, so a future negative-result rule can still fire), plus
+   `DefaultSynthesisRuleFactory`/`ISynthesisRuleCatalog` in
+   `src/DumpDetective.Reporting/Services/` mirroring `DefaultAnalyzerFactory`'s existing
+   `ActivatorUtilities` pattern exactly. `DefaultSynthesisRuleCatalog` is deliberately empty — no
+   rule exists yet — and is *not* wired into `ServiceRegistration.cs`/the CLI pipeline, since there
+   is no consumer for its output until a rule and its pipeline node exist; wiring it in now would be
+   speculative. A `SynthesisRuleRegistryConformanceTests.SynthesisRuleCatalog_ShouldHaveUniqueRuleIds`
+   architecture test guards `RuleId` collisions across the catalog going forward (trivially green
+   today, real protection once rules land — see reasoning in the test itself for why this is a
+   uniqueness check, not a full versioned JSON registry like the observation-type one).
+   `ConfidenceBreakdown.MeasurementCertain` (all caps/factors at 1.0) ships alongside it, so step
+   2/6 rules in a dump-only session don't each hand-roll the same boilerplate object ahead of step
+   7's real cap wiring. Covered by `tests/DumpDetective.Tests/Unit/Synthesis/SynthesisEngineTests.cs`
+   and the architecture test above. Still open, unchanged by this: items 2-3 below.
+2. **Freeze the golden-file corpus, and audit registered `ObservationType`s against what
+   generators actually read** — originally two separate items, merged and refined 2026-09-18 after
+   checking what already exists, which turned out to be more than either assumed: every one of the
+   ~30 `IFindingGenerator`s already has
+   a `*FindingGeneratorTests.cs` with hand-picked boundary fixtures per threshold constant, and a
+   working golden/snapshot mechanism (`Golden/GoldenTestBase.cs`, documented in `Golden/README.md`
+   — auto-creates a `.golden` baseline, forces a review-and-commit, diffs on mismatch) already backs
+   `ReportSerializer`/`TrendReportComposer`/`HtmlReportRenderer`. Neither #2 nor #3 needs new
+   infrastructure — both are cheaper, per-analyzer procedures reusing what's there. Replaced by the
+   per-analyzer playbook below, run at the moment that analyzer migrates, never in bulk upfront:
+
+   1. Open that analyzer's existing `*FindingGeneratorTests.cs`. Its `BuildResult(...)` calls are
+      the fixture set — reuse them; only add a new fixture if a threshold constant genuinely has no
+      boundary case there yet.
+   2. For each fixture, snapshot the **full** `Finding` list (`Title`, `Evidence`, `Recommendation`,
+      `Tags`, `MetricValue`, `Severity` — not just the subset today's loose
+      `Contains`/`Tags`/`Severity` assertions check) through `GoldenTestBase.ApproveGoldenOutput`,
+      under `Golden/Baselines/Synthesis/<AnalyzerName>/`. Commit the generated baselines — this is
+      the frozen corpus for that analyzer, and only that analyzer, captured from the pre-migration
+      generator.
+   3. Cross-check every field the generator reads — branch conditions *and* narrative-interpolated
+      values, both required, not just thresholds — against that analyzer's entry in
+      `SdkRegistryConformanceTests.KnownEmittedObservationTypes`.
+   4. Gap found → extend that analyzer's `Observation` emission (and the registry-conformance
+      table) to carry the missing value, before writing the rule. Never have the new rule reach
+      back into the old domain result or hardcode the value — either defeats the purity rules step
+      1 exists to enforce.
+   5. Write the `ISynthesisRule`, run it over the same fixtures, diff against this item's baselines.
+   6. Only then retire that analyzer's `IFindingGenerator`.
+3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until step 6
+   (see the Stage-1 purity bullet above), so its `IFindingGenerator` cannot be retired in step 2/3
+   with the rest — state this so "retire `IFindingGenerator`" doesn't implicitly assume 36/36.
+
+Judgment call, not a gate — decide before designing `Finding`/`ConfidenceBreakdown` in step 2/7,
+since redesigning after the fact is the expensive path:
+[../../ReportStructure/ReportSystemVision.md § 6.2](../../ReportStructure/ReportSystemVision.md)
+reframes findings as a `Claim` (structured `assertion`, `support`/`counter`, `falsifiedBy`, split
+confidence) well beyond today's `Finding`. Phase 5 doesn't have to build that now — the report is
+a later phase — but since `ISynthesisRule` and `ConfidenceBreakdown` are being designed from
+scratch in this same step, it's worth deciding whether `Finding` carries a few forward-compatible
+stub fields (empty `counter`/`derivedFrom`) now rather than a second rewrite later.
+
+**Decided 2026-09-17: no.** `Finding` ships as already designed in
+[observation-and-correlation-model.md § 2](observation-and-correlation-model.md) —
+`DerivedFrom` already covers lineage; no `counter`/`falsifiedBy`/`support` stubs added. Reasoning:
+there is still zero real `ISynthesisRule` in the codebase to shape those fields against, so adding
+them now would be the same speculative-design risk `ObservationQuery.AdditionalPredicate`'s own
+remarks already warn against (see phase-1-sdk-review-findings.md item 16) — guessing a `Claim`
+grammar ahead of the report phase that actually needs it, rather than letting that phase's real
+rule-authoring surface what it needs. Revisit when the report phase (`ReportSystemVision.md`)
+actually starts, not before.
+
 ## Work
 
 1. **Emit observations alongside domain results**, obeying the purity rules in

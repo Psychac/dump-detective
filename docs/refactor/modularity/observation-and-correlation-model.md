@@ -287,9 +287,22 @@ beyond the confidence caps above:
   the same columnar/interned discipline as heap indices — an observation store, not an in-memory
   list. This needs real design before Phase 6, and is the single biggest unvalidated assumption in
   this model.
-- **Do synthesis rules need to be code, or can they be declarative?** Declarative rules (a DSL or
+- ~~**Do synthesis rules need to be code, or can they be declarative?** Declarative rules (a DSL or
   config) would let rules ship without recompiling; code rules are more expressive. Leaning:
-  `ISynthesisRule` as code, with a declarative `ObservationQuery` for matching — hybrid.
+  `ISynthesisRule` as code, with a declarative `ObservationQuery` for matching — hybrid.~~
+  **Resolved, narrower than first leaning** — see
+  [phase-5-observations-synthesis.md](phase-5-observations-synthesis.md)'s "Before step 2"
+  prerequisites: `ObservationQuery` stays a plain `ObservationType` set plus an optional
+  `Func<Observation, bool>` delegate (`AdditionalPredicate`), not a comparator/predicate grammar —
+  no rule count or observation-volume evidence justified building an evaluator language for a fixed
+  ~30-40-rule, offline, non-hot-path batch job. `ISynthesisRule.SynthesizeAsync` stays code, always.
+  The `SynthesisEngine` (`src/DumpDetective.Reporting/Synthesis/SynthesisEngine.cs`) indexes
+  observations by `ObservationType` once per run, runs rules sequentially (no rule-level
+  parallelism — not justified at measured scale), isolates a throwing rule via catch-and-log rather
+  than failing the whole pass, and sorts combined findings by `Fingerprint` for deterministic
+  golden-file comparison. It does not skip a rule with zero matched observations — whether that
+  means "nothing to report" or an explicit no-issue finding
+  ([ReportSystemVision.md § 7.2](../../ReportStructure/ReportSystemVision.md)) is left to the rule.
 - **Does `AnalyzerDomainResult` survive long-term?** Phase 5 keeps it for presentation. Whether
   detail sections should eventually be built from observations too (making domain results
   redundant) is unresolved — it would be more uniform but could lose domain-specific richness

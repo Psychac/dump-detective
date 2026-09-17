@@ -529,6 +529,14 @@ comment — so no two renderers can disagree, and a test can assert *the claim*,
 This is the concrete difference from the sibling's mandatory `lead`, whose `what` / `abnormal` /
 `action` are author-written strings that can drift from their rows.
 
+**Relationship to Phase 5's `Finding`.** [phase-5-observations-synthesis.md](../refactor/modularity/phase-5-observations-synthesis.md)
+ships a narrower `Finding` record (assertion as free-text `Narrative`, no `support`/`counter`/
+`falsifiedBy`) as its `IFindingGenerator` replacement, and deliberately does not pre-add
+`Claim`-shaped stub fields to it — decided 2026-09-17, on the grounds that no real synthesis rule
+exists yet to design those fields against. `Finding.DerivedFrom` is the one field already shared
+with `Claim`'s lineage concept. Revisit `Finding` → `Claim` promotion when this report phase
+actually starts.
+
 ### 6.3 A claim carries its own refutation
 
 The novel requirement, and non-negotiable. Every claim answers:

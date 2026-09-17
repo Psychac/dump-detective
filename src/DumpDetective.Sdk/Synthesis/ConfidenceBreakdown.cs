@@ -21,4 +21,20 @@ public sealed record ConfidenceBreakdown
     public required double CapabilityFidelity { get; init; }
     public required double ConflictPenalty { get; init; }
     public IReadOnlyList<string> LimitingFactors { get; init; } = [];
+
+    /// <summary>
+    /// Every cap and factor at its ceiling — a dump-only session's default until Phase 7 actually
+    /// wires cross-artifact caps in. Removes the 30-rule copy-paste-the-same-1.0-object boilerplate
+    /// this record would otherwise force on every Phase 5 step-2 synthesis rule; see
+    /// docs/refactor/modularity/phase-5-observations-synthesis.md's "Before step 2" prerequisites.
+    /// </summary>
+    public static ConfidenceBreakdown MeasurementCertain { get; } = new()
+    {
+        Composite = 1.0,
+        EvidenceStrength = 1.0,
+        IdentityFidelityCap = 1.0,
+        TemporalAlignmentCap = 1.0,
+        CapabilityFidelity = 1.0,
+        ConflictPenalty = 1.0,
+    };
 }

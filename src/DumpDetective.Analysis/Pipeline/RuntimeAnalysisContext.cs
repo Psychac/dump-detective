@@ -4,6 +4,8 @@ using DumpDetective.Analysis.Query;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
+using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
 
 using Microsoft.Diagnostics.Runtime;
 
@@ -22,6 +24,27 @@ internal sealed class RuntimeAnalysisContext
     public AnalysisOptions AnalysisOptions { get; init; } = new();
     public DiagnosticsOptions Diagnostics { get; init; } = new();
     public IAnalysisDiagnosticsSink DiagnosticsSink { get; init; } = NullAnalysisDiagnosticsSink.Instance;
+
+    /// <summary>
+    /// Identifies the dump artifact this run's analyzers should stamp on every
+    /// <see cref="Observation"/> they emit (Phase 5 step 1,
+    /// docs/refactor/modularity/phase-5-observations-synthesis.md). <see cref="AnalyzerExecutionService"/>
+    /// overrides this with the real dump path; the placeholder default keeps every existing test that
+    /// constructs a <see cref="RuntimeAnalysisContext"/> directly (no dump file on disk — e.g. a
+    /// self-attached live process) compiling and working without needing to know about artifact
+    /// identity.
+    /// </summary>
+    public ArtifactId ArtifactId { get; init; } = new("dump");
+
+    /// <summary>
+    /// The sink every analyzer in this run emits <see cref="Observation"/>s through — one instance
+    /// shared across the whole run, mirroring the trace side's <c>RunTraceAnalyzersNode</c>. A real
+    /// <see cref="CollectingObservationSink"/>, not <c>NoOpObservationSink</c>: Phase 5 step 1 needs
+    /// emitted observations to be inspectable (tests, and eventually the pipeline), and an in-memory
+    /// list is the same low-risk choice the trace side already made — see that type's own remarks for
+    /// why a disk-backed store isn't built ahead of measuring whether it's needed.
+    /// </summary>
+    public IObservationSink ObservationSink { get; init; } = new CollectingObservationSink();
 
     /// <summary>
     /// Progress reporter injected by the pipeline per analyzer run.

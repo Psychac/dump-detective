@@ -50,7 +50,8 @@ internal static class AnalysisContextBuilder
 
         return new()
         {
-            Observations = NoOpObservationSink.Instance,
+            Observations = context.ObservationSink,
+            ArtifactId = context.ArtifactId,
             Progress = WrapProgress(context.Progress),
             AnalyzerOptions = analyzerOptions,
             HeapObjects = heapObjectsOverride ?? new HeapObjectStream(context.Heap, context.Cache),

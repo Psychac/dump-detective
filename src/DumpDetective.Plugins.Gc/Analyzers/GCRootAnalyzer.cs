@@ -4,6 +4,8 @@ using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Gc;
 
@@ -65,7 +67,7 @@ public sealed class GCRootAnalyzer :
     }
     private AnalyzerDomainResult? _lastResult;
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -83,8 +85,68 @@ public sealed class GCRootAnalyzer :
         // context.HeapDominators is deliberately not required — null means Stage B wasn't built
         // for this run, and every consumer below degrades to shallow-size/BFS-heuristic behavior
         // in that case, exactly like the pre-retyping analyzer's own null-treeProvider path.
-        LastResult = Analyze(rootQuery, context.HeapDominators, objectLookup, referenceQuery, segmentQuery, typeStatistics, cancellationToken);
-        return ValueTask.CompletedTask;
+        var result = (GCRootDomainResult)Analyze(rootQuery, context.HeapDominators, objectLookup, referenceQuery, segmentQuery, typeStatistics, cancellationToken);
+        LastResult = result;
+
+        await EmitObservationsAsync(context, objectLookup, result, cancellationToken);
+    }
+
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): emits one
+    /// <c>heap.root</c> <see cref="Observation"/> per already-computed <see cref="RootFinding"/> —
+    /// a second, read-only pass over <see cref="GCRootDomainResult.TopRootsBySeverity"/> rather than
+    /// threading the sink through <see cref="Analyze"/> itself, so that method stays the pure,
+    /// synchronous, independently-testable computation it already is. Deliberately raw: retained
+    /// bytes and subgraph size only — no severity, no root-kind banding (see
+    /// observation-and-correlation-model.md § 2a). <see cref="RootFinding.RootKind"/> is left out of
+    /// <see cref="Measure"/> for now: it's a category, not a quantity, and unlike
+    /// <c>GcPauseAnalyzer</c>'s <c>gc.suspend-reason</c> precedent there's no live enum instance left
+    /// by the time <see cref="Analyze"/> returns to carry as a raw ordinal — revisit if a synthesis
+    /// rule actually needs to group by it.
+    /// </summary>
+    private static async ValueTask EmitObservationsAsync(
+        AnalysisContext context, IHeapObjectLookup objectLookup, GCRootDomainResult result, CancellationToken cancellationToken)
+    {
+        var capabilitiesUsed = new HashSet<Capability>
+        {
+            CapabilityVocabulary.HeapRoots, CapabilityVocabulary.HeapObjects, CapabilityVocabulary.HeapSegments, CapabilityVocabulary.HeapTypes,
+        };
+        FidelityLevel fidelity = context.HeapDominators is not null ? FidelityLevel.Full : FidelityLevel.Degraded;
+
+        for (int i = 0; i < result.TopRootsBySeverity.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            RootFinding finding = result.TopRootsBySeverity[i];
+            if (!objectLookup.TryGetObject(finding.TargetAddress, out HeapObjectRef targetObj))
+                continue;
+
+            var measures = new Dictionary<string, Measure>
+            {
+                ["retained.bytes"] = new Measure(finding.EstimatedRetainedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+            };
+            if (i < result.RootOwnedSubgraphs.Count)
+                measures["subgraph.node-count"] = new Measure(result.RootOwnedSubgraphs[i].SubgraphNodeCount, MeasureUnit.Count, MeasureSemantics.Absolute);
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "heap.root",
+                Subjects = [targetObj.Type],
+                // No dump capture timestamp is plumbed into AnalysisContext yet (Vision §3.3's open
+                // question) — Unknown is the honest value, not a guess dressed up as Exact.
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = measures,
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "GC Root Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = fidelity,
+                },
+                Confidence = finding.RetainedBytesIsExact ? 1.0 : 0.7,
+            }, cancellationToken);
+        }
     }
 
     private static AnalyzerDomainResult Analyze(

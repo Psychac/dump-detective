@@ -18,11 +18,10 @@ public sealed class SdkRegistryConformanceTests
 {
     /// <summary>
     /// The <c>ObservationType</c> values real analyzers emit today, and the measure keys each
-    /// carries — hand-maintained rather than reflected out of analyzer source, since there are only
-    /// three and <c>ObservationType</c>/measure keys are inline string literals
-    /// (src/DumpDetective.Sources.NetTrace/{GcPauseAnalyzer,ContentionAnalyzer,CpuHotspotAnalyzer}.cs),
-    /// not constants a test could reference directly. Update this table alongside the registry
-    /// when a new analyzer starts emitting <see cref="DumpDetective.Sdk.Observations.Observation"/>s.
+    /// carries — hand-maintained rather than reflected out of analyzer source, since
+    /// <c>ObservationType</c>/measure keys are inline string literals, not constants a test could
+    /// reference directly. Update this table alongside the registry when a new analyzer starts
+    /// emitting <see cref="DumpDetective.Sdk.Observations.Observation"/>s.
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string[]> KnownEmittedObservationTypes =
         new Dictionary<string, string[]>
@@ -30,6 +29,11 @@ public sealed class SdkRegistryConformanceTests
             ["gc.pause"] = ["gc.suspend-reason", "pause.duration", "gc.generation", "heap.size"],
             ["contention.episode"] = ["contention.duration"],
             ["cpu.sample-attribution"] = ["cpu.sample-count"],
+            ["heap.root"] = ["retained.bytes", "subgraph.node-count"],
+            ["handle.pinned"] = ["retained.bytes"],
+            ["finalizer.queue-entry"] = ["retained.bytes", "disposed-but-live"],
+            ["weakhandle.target"] = ["retained.bytes"],
+            ["weakreference.stale-wrapper"] = ["shallow.bytes"],
         };
 
     [Fact]

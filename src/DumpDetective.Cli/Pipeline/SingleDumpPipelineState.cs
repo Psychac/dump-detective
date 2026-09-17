@@ -42,6 +42,15 @@ internal sealed class SingleDumpPipelineState : IDisposable
     // ── Stage 3: RunAnalyzersPipelineStage ──────────────────────────────────
     public IReadOnlyList<AnalyzerRunResult> Runs { get; set; } = [];
 
+    /// <summary>
+    /// Every <see cref="DumpDetective.Sdk.Observations.Observation"/> emitted by this run's
+    /// analyzers, captured from <see cref="Context"/>'s shared <c>ObservationSink</c> once analyzers
+    /// finish running (Phase 5 step 1, docs/refactor/modularity/phase-5-observations-synthesis.md).
+    /// Nothing consumes this yet — no synthesis stage exists — so it exists purely to make emission
+    /// inspectable/testable; step 2 wires a real consumer.
+    /// </summary>
+    public IReadOnlyList<DumpDetective.Sdk.Observations.Observation> Observations { get; set; } = [];
+
     /// <summary>Elapsed time from pipeline start through the end of analyzer execution (stages 1–3).</summary>
     public TimeSpan AnalysisElapsed { get; set; }
 

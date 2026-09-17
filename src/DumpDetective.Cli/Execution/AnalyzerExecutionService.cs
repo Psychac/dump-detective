@@ -6,6 +6,7 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 
 using DumpDetective.Cli.Services;
 using DumpDetective.Cli.Diagnostics;
@@ -27,6 +28,7 @@ internal sealed class AnalyzerExecutionService(FindingGenerationPipeline finding
         {
             Runtime = loadContext.Runtime,
             Cache = heapCache,
+            ArtifactId = new ArtifactId(loadContext.DumpPath),
             RuntimeFacade = new RuntimeFacade(loadContext.Runtime, loadContext.Heap),
             // Every per-analyzer options property on AnalysisOptions keeps its own fixed default —
             // see docs/refactor/analysis-options-removal-plan.md. Nothing external can override

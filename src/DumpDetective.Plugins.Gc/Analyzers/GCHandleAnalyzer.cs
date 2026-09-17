@@ -4,6 +4,9 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 // DumpDetective.Analysis.Models and DumpDetective.Sdk.Analysis both declare HeapSegmentKind
 // (deliberately identical names, see SdkSegmentKindMapper) — alias the SDK one to disambiguate.
@@ -43,7 +46,7 @@ public sealed class GCHandleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     }
     private AnalyzerDomainResult? _lastResult;
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -59,8 +62,61 @@ public sealed class GCHandleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
         // context.HeapDominators is deliberately not required — null means Stage B wasn't built for
         // this run, and every retained-bytes consumer below degrades to the target's own shallow
         // size in that case, exactly like the pre-retyping analyzer's own null-treeProvider path.
-        LastResult = Analyze(handleQuery, context.HeapDominators, segmentQuery, objectLookup, options, cancellationToken);
-        return ValueTask.CompletedTask;
+        var result = Analyze(handleQuery, context.HeapDominators, segmentQuery, objectLookup, options, cancellationToken);
+        LastResult = result;
+
+        await EmitObservationsAsync(context, objectLookup, result, cancellationToken);
+    }
+
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): emits one
+    /// <c>handle.pinned</c> observation per already-computed, already-bounded
+    /// <see cref="GCHandleDomainResult.TopPinnedHandleAddresses"/> entry — the pinned-handle facts
+    /// are the ones with a clean per-type entity anchor and a bounded (top-N, not per-handle) list
+    /// already in the domain result. The many other aggregate facts on this result (weak-handle
+    /// generation counts, dependent-handle resolution, ref-counted target types) have no comparably
+    /// bounded per-entity shape yet; left for a later pass rather than invented here on a guess.
+    /// </summary>
+    private static async ValueTask EmitObservationsAsync(
+        AnalysisContext context, IHeapObjectLookup objectLookup, GCHandleDomainResult result, CancellationToken cancellationToken)
+    {
+        var capabilitiesUsed = new HashSet<Capability>
+        {
+            CapabilityVocabulary.HeapHandles, CapabilityVocabulary.HeapObjects, CapabilityVocabulary.HeapSegments,
+        };
+        FidelityLevel fidelity = context.HeapDominators is not null ? FidelityLevel.Full : FidelityLevel.Degraded;
+
+        foreach (PinnedHandleAddressEntry entry in result.TopPinnedHandleAddresses)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Re-resolves the same (cache-backed) address rather than threading a TypeRef through
+            // PinnedHandleAddressEntry — that record is presentation-shaped (a display type name),
+            // and SdkTypeRefFactory (which built it the first time, inside Analyze) is internal to
+            // DumpDetective.Analysis, not visible from this plugin assembly.
+            if (!objectLookup.TryGetObject(entry.Address, out HeapObjectRef targetObj))
+                continue;
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "handle.pinned",
+                Subjects = [targetObj.Type],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["retained.bytes"] = new Measure(entry.Bytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "GC Handle Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = fidelity,
+                },
+                Confidence = result.PinnedRetainedBytesIsExact ? 1.0 : 0.7,
+            }, cancellationToken);
+        }
     }
 
     private static GCHandleDomainResult Analyze(

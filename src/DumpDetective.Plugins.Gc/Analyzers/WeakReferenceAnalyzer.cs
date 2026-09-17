@@ -6,6 +6,8 @@ using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Gc
 {
@@ -83,7 +85,7 @@ namespace DumpDetective.Analysis.Analyzers.Gc
             typeName.StartsWith(WeakRefGenericName, StringComparison.Ordinal)
             || string.Equals(typeName, WeakRefNonGenericName, StringComparison.Ordinal);
 
-        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -100,11 +102,20 @@ namespace DumpDetective.Analysis.Analyzers.Gc
             IHeapDominatorQuery? dominators = context.HeapDominators; // optional -- Stage B may not be built
             IHeapReachabilityQuery? reachability = context.HeapReachability; // optional -- Stage A may not be built
 
-            LastResult = Analyze(handles, segments, objectLookup, dumpFields, weakRefCandidates, dominators, reachability, cancellationToken);
-            return ValueTask.CompletedTask;
+            LastResult = await Analyze(handles, segments, objectLookup, dumpFields, weakRefCandidates, dominators, reachability, context, cancellationToken);
         }
 
-        private static WeakReferenceDomainResult Analyze(
+        /// <summary>
+        /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): emits
+        /// <c>weakhandle.target</c> (one per alive weak-handle target, Phase A) and
+        /// <c>weakreference.stale-wrapper</c> (one per stale <c>WeakReference&lt;T&gt;</c> wrapper,
+        /// Phase B) inline in their existing loops — the only place <see cref="HeapObjectRef.Type"/>
+        /// is in scope; <see cref="WeakReferenceDomainResult"/>'s aggregated dictionaries only carry
+        /// display-name strings. Only the alive/stale subsets are emitted, not every weak handle or
+        /// every <c>WeakReference&lt;T&gt;</c> instance — the same "already-selected, not raw
+        /// re-materialization" scoping <c>GCHandleAnalyzer</c>'s pinned-handle emission uses.
+        /// </summary>
+        private static async ValueTask<WeakReferenceDomainResult> Analyze(
             IHeapHandleQuery handles,
             IHeapSegmentQuery segments,
             IHeapObjectLookup objectLookup,
@@ -112,8 +123,14 @@ namespace DumpDetective.Analysis.Analyzers.Gc
             IHeapObjectStream weakRefCandidates,
             IHeapDominatorQuery? dominators,
             IHeapReachabilityQuery? reachability,
+            AnalysisContext observationContext,
             CancellationToken cancellationToken)
         {
+            var observationCapabilities = new HashSet<Capability>
+            {
+                CapabilityVocabulary.HeapHandles, CapabilityVocabulary.HeapSegments, CapabilityVocabulary.HeapObjects,
+            };
+            FidelityLevel observationFidelity = dominators is not null ? FidelityLevel.Full : FidelityLevel.Degraded;
             // ── Phases A & C: Weak handle liveness + Dependent handle dead-key count ──
             int totalWeakHandles = 0;
             int aliveWeakTargets = 0;
@@ -174,8 +191,30 @@ namespace DumpDetective.Analysis.Analyzers.Gc
                             IncrementDict(heldOnlyViaWeakReferenceTypeHits, target.TypeDisplayName);
                         }
 
-                        if (dominators is not null && dominators.TryGetRetainedSize(h.TargetAddress, out ulong retained))
+                        ulong retained = 0;
+                        bool hasRetained = dominators is not null && dominators.TryGetRetainedSize(h.TargetAddress, out retained);
+                        if (hasRetained)
                             aliveWeakTargetsRetainedBytes += retained;
+
+                        var weakHandleMeasures = new Dictionary<string, Measure>();
+                        if (hasRetained)
+                            weakHandleMeasures["retained.bytes"] = new Measure(retained, MeasureUnit.Bytes, MeasureSemantics.Absolute);
+                        await observationContext.Observations.EmitAsync(new Observation
+                        {
+                            Id = ObservationId.NewId(),
+                            ObservationType = "weakhandle.target",
+                            Subjects = [target.Type],
+                            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                            Measures = weakHandleMeasures,
+                            Provenance = new Provenance
+                            {
+                                Artifact = observationContext.ArtifactId!.Value,
+                                AnalyzerKey = "Weak Reference Analysis",
+                                CapabilitiesUsed = observationCapabilities,
+                                Fidelity = observationFidelity,
+                            },
+                            Confidence = hasRetained ? 1.0 : 0.5,
+                        }, cancellationToken);
                     }
                     else
                     {
@@ -211,6 +250,26 @@ namespace DumpDetective.Analysis.Analyzers.Gc
                 {
                     staleWrapperCount++;
                     IncrementDict(staleHolderTypeHits, candidate.TypeDisplayName);
+
+                    await observationContext.Observations.EmitAsync(new Observation
+                    {
+                        Id = ObservationId.NewId(),
+                        ObservationType = "weakreference.stale-wrapper",
+                        Subjects = [candidate.Type],
+                        When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                        Measures = new Dictionary<string, Measure>
+                        {
+                            ["shallow.bytes"] = new Measure(candidate.Size, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                        },
+                        Provenance = new Provenance
+                        {
+                            Artifact = observationContext.ArtifactId!.Value,
+                            AnalyzerKey = "Weak Reference Analysis",
+                            CapabilitiesUsed = observationCapabilities,
+                            Fidelity = observationFidelity,
+                        },
+                        Confidence = 1.0,
+                    }, cancellationToken);
                 }
             }
 

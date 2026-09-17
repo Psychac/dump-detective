@@ -52,6 +52,9 @@ internal sealed class RunAnalyzersNode(AnalyzerExecutionService analyzerExecutio
             .ToArray();
         state.AnalysisElapsed = state.PipelineStopwatch.Elapsed;
 
+        if (runtimeContext.ObservationSink is Sdk.Observations.CollectingObservationSink collectingSink)
+            state.Observations = collectingSink.Observations;
+
         state.IncidentContext = IncidentContextFactory.Create(
             mode: mode,
             loadContext: state.LoadContext,

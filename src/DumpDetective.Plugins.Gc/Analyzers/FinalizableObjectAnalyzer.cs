@@ -4,6 +4,8 @@ using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Gc
 {
@@ -68,7 +70,7 @@ namespace DumpDetective.Analysis.Analyzers.Gc
         }
         private AnalyzerDomainResult? _lastResult;
 
-        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -84,17 +86,27 @@ namespace DumpDetective.Analysis.Analyzers.Gc
                 ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapRootPaths}' capability.");
             IHeapDominatorQuery? dominators = context.HeapDominators; // optional -- Stage B may not be built
 
-            LastResult = Analyze(statsQuery, finalizerQueue, segments, dumpFields, rootPaths, dominators, cancellationToken);
-            return ValueTask.CompletedTask;
+            LastResult = await Analyze(statsQuery, finalizerQueue, segments, dumpFields, rootPaths, dominators, context, cancellationToken);
         }
 
-        private static FinalizableObjectDomainResult Analyze(
+        /// <summary>
+        /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): emits one
+        /// <c>finalizer.queue-entry</c> observation per valid finalizer-queue entry, inline in the
+        /// same loop that builds <see cref="FinalizableObjectDomainResult.TopQueueEntriesByRetainedSize"/>
+        /// — unlike <c>GCRootAnalyzer</c>/<c>GCHandleAnalyzer</c>'s second-pass approach, this loop is
+        /// the only place <see cref="FinalizerQueueObjectRef.Type"/> is still in scope; the domain
+        /// result only carries a display-name string, not the <see cref="Sdk.Identity.TypeRef"/>
+        /// itself. Raw facts only: retained bytes and whether it's disposed-but-live — no
+        /// severity/classification (observation-and-correlation-model.md § 2a).
+        /// </summary>
+        private static async ValueTask<FinalizableObjectDomainResult> Analyze(
             IHeapTypeStatisticsQuery statsQuery,
             IHeapFinalizerQueueQuery finalizerQueue,
             IHeapSegmentQuery segments,
             IDumpObjectFieldQuery dumpFields,
             IHeapRootPathQuery rootPaths,
             IHeapDominatorQuery? dominators,
+            AnalysisContext observationContext,
             CancellationToken cancellationToken)
         {
             // ── Step 1: Population from heap.types, filtered by IsFinalizableType ────────
@@ -188,6 +200,12 @@ namespace DumpDetective.Analysis.Analyzers.Gc
             // once -- mirrors the pre-retyping analyzer's own disposedFieldCache exactly.
             var resolvedDisposedFieldNameCache = new Dictionary<ulong, string?>();
 
+            var observationCapabilities = new HashSet<Capability>
+            {
+                CapabilityVocabulary.HeapFinalizerQueue, CapabilityVocabulary.HeapSegments, CapabilityVocabulary.HeapTypes,
+            };
+            FidelityLevel observationFidelity = dominators is not null ? FidelityLevel.Full : FidelityLevel.Degraded;
+
             for (int i = 0; i < queueSamples.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -229,6 +247,29 @@ namespace DumpDetective.Analysis.Analyzers.Gc
                 totalQueueRetained += retained;
 
                 int generation = ToLegacyGeneration(segments.GetGeneration(entry.Address));
+
+                await observationContext.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "finalizer.queue-entry",
+                    Subjects = [entry.Type],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["retained.bytes"] = new Measure(retained, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                        // 1.0 = disposed-but-still-queued, 0.0 = not in that state — a raw boolean
+                        // fact, not a leak judgment (that's a synthesis-rule call, Phase 5 step 2+).
+                        ["disposed-but-live"] = new Measure(entry.IsDisposableType && disposedFound && !disposedValue ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = observationContext.ArtifactId!.Value,
+                        AnalyzerKey = "Finalizable Object Analysis",
+                        CapabilitiesUsed = observationCapabilities,
+                        Fidelity = observationFidelity,
+                    },
+                    Confidence = retainedIsExact ? 1.0 : 0.7,
+                }, cancellationToken);
 
                 topEntries.Add(new FinalizerQueueEntry(
                     Address: entry.Address,

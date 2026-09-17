@@ -5,6 +5,8 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Memory;
 
@@ -46,7 +48,7 @@ public sealed class AllocationPatternAnalyzer : IAnalyzer, IProducesAnalyzerDoma
     }
     private AnalyzerDomainResult? _lastResult;
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -54,8 +56,60 @@ public sealed class AllocationPatternAnalyzer : IAnalyzer, IProducesAnalyzerDoma
             ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.HeapTypes}' capability.");
 
         AllocationPatternAnalysisOptions options = context.AnalyzerOptions as AllocationPatternAnalysisOptions ?? new AllocationPatternAnalysisOptions();
-        LastResult = Analyze(typeStatistics, options, context.Progress, cancellationToken);
-        return ValueTask.CompletedTask;
+        bool hasExactGenerationData = typeStatistics.HasExactGenerationData;
+        var result = Analyze(typeStatistics, options, context.Progress, cancellationToken);
+        LastResult = result;
+
+        // Analyze() returns an all-zero Empty() result when the index lacks exact generation
+        // data — nothing was actually measured, so there's nothing honest to emit (a zero-value,
+        // zero-confidence observation would be noise, not a fact).
+        if (hasExactGenerationData)
+            await EmitObservationAsync(context, result, cancellationToken);
+    }
+
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): a single
+    /// whole-heap <c>gc.allocation-composition</c> observation — count-based percentages and
+    /// finalizable totals, distinct from <c>GCGenerationAnalyzer</c>'s byte-based
+    /// <c>gc.generation-composition</c> (two analyzers independently measuring related facts is
+    /// legitimate corroboration under this model, not duplication — see
+    /// observation-and-correlation-model.md § 4's noisy-OR confidence formula, which is keyed
+    /// exactly on distinct (artifact, analyzer) pairs). Deliberately excludes every per-type list on
+    /// this result (<c>TopTransientTypes</c>/<c>TopShortishTypes</c>/<c>TopLongLivedTypes</c>/
+    /// <c>TopHighGen1SurvivorTypes</c>) and <see cref="AllocationPatternDomainResult.AllocationProfile"/>
+    /// itself: those are the audit's already-catalogued Smell B (bucketed by a hand-picked
+    /// threshold, not a raw fact) — see analyzer-pipeline-stages-and-leadfinding-dedup.md — so baking
+    /// them into an observation would smuggle judgment past the purity rule this phase exists to
+    /// enforce, on top of being the same unbounded whole-heap-population volume risk
+    /// <c>GCGenerationAnalyzer</c>'s own remarks flag.
+    /// </summary>
+    private static async ValueTask EmitObservationAsync(
+        AnalysisContext context, AllocationPatternDomainResult result, CancellationToken cancellationToken)
+    {
+        await context.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "gc.allocation-composition",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["gen0.count-fraction"] = new Measure(result.Gen0CountPct / 100.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                ["gen1.count-fraction"] = new Measure(result.Gen1CountPct / 100.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                ["gen2.count-fraction"] = new Measure(result.Gen2CountPct / 100.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                ["loh.count-fraction"] = new Measure(result.LohCountPct / 100.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                ["finalizable.type-count"] = new Measure(result.FinalizableTypeCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["finalizable.bytes"] = new Measure(result.FinalizableBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = context.ArtifactId!.Value,
+                AnalyzerKey = "Allocation Pattern Analysis",
+                CapabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapTypes },
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
     }
 
     private static AllocationPatternDomainResult Analyze(

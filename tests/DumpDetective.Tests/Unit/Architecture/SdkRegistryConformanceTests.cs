@@ -34,6 +34,13 @@ public sealed class SdkRegistryConformanceTests
             ["finalizer.queue-entry"] = ["retained.bytes", "disposed-but-live"],
             ["weakhandle.target"] = ["retained.bytes"],
             ["weakreference.stale-wrapper"] = ["shallow.bytes"],
+            ["gc.generation-composition"] = ["gen0.bytes", "gen1.bytes", "gen2.bytes", "loh.bytes", "poh.bytes", "gen2.fraction", "loh.fraction"],
+            ["gc.allocation-composition"] = ["gen0.count-fraction", "gen1.count-fraction", "gen2.count-fraction", "loh.count-fraction", "finalizable.type-count", "finalizable.bytes"],
+            ["heap.segment-composition"] = ["generation.ordinal", "committed.bytes", "reserved.bytes", "used.bytes", "segment.count"],
+            ["heap.loh-fragmentation"] = ["kind.ordinal", "segment.count", "total.bytes", "free.bytes", "used.bytes", "fragmentation.percent", "largest-free-block.bytes"],
+            ["heap.loh-type-composition"] = ["loh.count", "loh.bytes"],
+            ["heap.segment-reservation"] = ["committed.bytes", "reserved.bytes", "reservation-gap.bytes", "reserved-to-committed.ratio", "ephemeral.segment-count", "ephemeral.avg-fill-percent", "segment.count"],
+            ["heap.region-composition"] = ["region-kind.ordinal", "region.count", "reserved.bytes", "committed.bytes", "near-empty.count", "near-empty.committed-bytes"],
         };
 
     [Fact]

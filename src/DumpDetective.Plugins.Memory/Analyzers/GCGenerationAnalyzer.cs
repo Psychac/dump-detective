@@ -4,6 +4,8 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Memory
 {
@@ -35,7 +37,7 @@ namespace DumpDetective.Analysis.Analyzers.Memory
         }
         private AnalyzerDomainResult? _lastResult;
 
-        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -43,8 +45,56 @@ namespace DumpDetective.Analysis.Analyzers.Memory
                 ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapTypes}' capability.");
             GCGenerationAnalysisOptions options = context.AnalyzerOptions as GCGenerationAnalysisOptions ?? new GCGenerationAnalysisOptions();
 
-            LastResult = Analyze(statsQuery, options, context.Progress);
-            return ValueTask.CompletedTask;
+            var result = Analyze(statsQuery, options, context.Progress);
+            LastResult = result;
+
+            await EmitObservationAsync(context, result, cancellationToken);
+        }
+
+        /// <summary>
+        /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): emits a
+        /// single whole-heap <c>gc.generation-composition</c> observation — the exact canonical
+        /// example named in observation-and-correlation-model.md § 2a. Deliberately <b>not</b> one
+        /// observation per <see cref="GCGenerationDomainResult.PerTypeGenerationProfiles"/> entry:
+        /// that list carries every distinct type on the heap (the same population the Vision doc
+        /// cites at 131,568 unique names on the reference dump), which is exactly the "observations
+        /// are conclusions, not per-object records" volume risk
+        /// observation-and-correlation-model.md § 7 flags as unvalidated — left for a deliberate,
+        /// separately-measured pass rather than emitted here on a guess. No entity subject: this is
+        /// a whole-process scalar composition with no natural per-type anchor (see
+        /// ReportSystemVision.md § 8's same observation about whole-process scalars).
+        /// </summary>
+        private static async ValueTask EmitObservationAsync(AnalysisContext context, GCGenerationDomainResult result, CancellationToken cancellationToken)
+        {
+            ulong totalManagedBytes = result.Gen0Bytes + result.Gen1Bytes + result.Gen2Bytes + result.LohBytes + result.PohBytes;
+            double gen2Fraction = totalManagedBytes == 0 ? 0.0 : result.Gen2Bytes / (double)totalManagedBytes;
+            double lohFraction = totalManagedBytes == 0 ? 0.0 : result.LohBytes / (double)totalManagedBytes;
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "gc.generation-composition",
+                Subjects = [],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["gen0.bytes"] = new Measure(result.Gen0Bytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["gen1.bytes"] = new Measure(result.Gen1Bytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["gen2.bytes"] = new Measure(result.Gen2Bytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["loh.bytes"] = new Measure(result.LohBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["poh.bytes"] = new Measure(result.PohBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["gen2.fraction"] = new Measure(gen2Fraction, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                    ["loh.fraction"] = new Measure(lohFraction, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "GC Generation Analysis",
+                    CapabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapTypes },
+                    Fidelity = result.FallbackMode ? FidelityLevel.Degraded : FidelityLevel.Full,
+                },
+                Confidence = result.GenBytesAreApproximate ? 0.5 : 1.0,
+            }, cancellationToken);
         }
 
         private static GCGenerationDomainResult Analyze(

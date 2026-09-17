@@ -15,6 +15,9 @@ using System.Buffers.Binary;
 // (deliberately identical names, see SdkSegmentKindMapper) — alias the SDK one (what this analyzer
 // sources segment data as) to disambiguate.
 using SdkHeapSegmentKind = DumpDetective.Sdk.Analysis.HeapSegmentKind;
+using DumpDetective.Sdk.Identity;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Memory
 {
@@ -69,7 +72,7 @@ namespace DumpDetective.Analysis.Analyzers.Memory
         }
         private AnalyzerDomainResult? _lastResult;
 
-        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -78,8 +81,86 @@ namespace DumpDetective.Analysis.Analyzers.Memory
             IHeapTypeStatisticsQuery typeStatistics = context.HeapTypeStatistics
                 ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapTypes}' capability.");
 
-            LastResult = Analyze(segmentQuery, typeStatistics, context.Progress, cancellationToken);
-            return ValueTask.CompletedTask;
+            var result = Analyze(segmentQuery, typeStatistics, context.Progress, cancellationToken);
+            LastResult = result;
+
+            await EmitObservationsAsync(context, result, cancellationToken);
+        }
+
+        /// <summary>
+        /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): two
+        /// observation types — <c>heap.loh-fragmentation</c>, one per
+        /// <see cref="LohFragmentationDomainResult.KindBreakdown"/> row (bounded to Large/Pinned, at
+        /// most 2), and <c>heap.loh-type-composition</c>, one per
+        /// <see cref="LohFragmentationDomainResult.TypeProfiles"/> entry — bounded to types that
+        /// actually have LOH objects (a small fraction of the whole-heap type population, unlike
+        /// <c>GCGenerationAnalyzer</c>'s full per-type list), so it doesn't carry that analyzer's
+        /// volume risk. <see cref="LohFragmentationDomainResult.TopSegments"/> and
+        /// <see cref="LohFragmentationDomainResult.TopLargeObjects"/> are left out of this pass —
+        /// same "no <c>segment</c> entity kind yet" gap as <c>MemoryAnalyzer</c>'s segment summaries.
+        /// </summary>
+        private static async ValueTask EmitObservationsAsync(AnalysisContext context, LohFragmentationDomainResult result, CancellationToken cancellationToken)
+        {
+            var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapSegments };
+
+            foreach (LohKindBreakdown kind in result.KindBreakdown ?? [])
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                await context.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "heap.loh-fragmentation",
+                    Subjects = [],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["kind.ordinal"] = new Measure((double)kind.Kind, MeasureUnit.Custom, MeasureSemantics.Absolute),
+                        ["segment.count"] = new Measure(kind.SegmentCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["total.bytes"] = new Measure(kind.TotalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                        ["free.bytes"] = new Measure(kind.FreeBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                        ["used.bytes"] = new Measure(kind.UsedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                        ["fragmentation.percent"] = new Measure(kind.FragmentationPercent, MeasureUnit.Percent, MeasureSemantics.Ratio),
+                        ["largest-free-block.bytes"] = new Measure(kind.LargestFreeBlock, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = context.ArtifactId!.Value,
+                        AnalyzerKey = "LOH & POH Fragmentation Analysis",
+                        CapabilitiesUsed = capabilitiesUsed,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                }, cancellationToken);
+            }
+
+            foreach (LohTypeProfile profile in result.TopLargeObjectTypes ?? [])
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(profile.TypeName);
+
+                await context.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "heap.loh-type-composition",
+                    Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["loh.count"] = new Measure(profile.ObjectCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["loh.bytes"] = new Measure(profile.TotalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = context.ArtifactId!.Value,
+                        AnalyzerKey = "LOH & POH Fragmentation Analysis",
+                        CapabilitiesUsed = capabilitiesUsed,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                }, cancellationToken);
+            }
         }
 
         private static LohFragmentationDomainResult Analyze(

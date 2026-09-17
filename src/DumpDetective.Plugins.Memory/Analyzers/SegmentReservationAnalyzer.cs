@@ -4,6 +4,8 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 // DumpDetective.Analysis.Models and DumpDetective.Sdk.Analysis both declare HeapSegmentKind and
 // RegionGenerationKind (deliberately identical names, see SdkSegmentKindMapper) — alias the
@@ -41,7 +43,7 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer, IProducesAnalyzerDom
     }
     private AnalyzerDomainResult? _lastResult;
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -49,8 +51,86 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer, IProducesAnalyzerDom
             ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapSegments}' capability.");
         SegmentReservationAnalysisOptions options = context.AnalyzerOptions as SegmentReservationAnalysisOptions ?? new SegmentReservationAnalysisOptions();
 
-        LastResult = Analyze(segmentQuery, options, context.Progress, cancellationToken);
-        return ValueTask.CompletedTask;
+        var result = (SegmentReservationDomainResult)Analyze(segmentQuery, options, context.Progress, cancellationToken);
+        LastResult = result;
+
+        await EmitObservationsAsync(context, result, cancellationToken);
+    }
+
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): a single
+    /// whole-heap <c>heap.segment-reservation</c> observation, plus one <c>heap.region-composition</c>
+    /// observation per <see cref="SegmentReservationDomainResult.RegionStats"/> row when
+    /// <see cref="SegmentReservationDomainResult.IsRegionsBased"/> (bounded to at most 7 buckets —
+    /// see <see cref="RegionBucketAccumulator"/>'s own remarks). Deliberately excludes
+    /// <see cref="SegmentReservationDomainResult.AddressSpacePressureRisk"/>/
+    /// <see cref="SegmentReservationDomainResult.PressureRiskReason"/> — a hand-picked-threshold
+    /// classification, the same Smell A shape already fixed on the other four Memory analyzers — and
+    /// <see cref="SegmentReservationDomainResult.SegmentTable"/>, for the same "no <c>segment</c>
+    /// entity kind yet" reason <c>MemoryAnalyzer</c>/<c>LohFragmentationAnalyzer</c> skip theirs.
+    /// </summary>
+    private static async ValueTask EmitObservationsAsync(AnalysisContext context, SegmentReservationDomainResult result, CancellationToken cancellationToken)
+    {
+        var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapSegments };
+
+        await context.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "heap.segment-reservation",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["committed.bytes"] = new Measure(result.TotalCommittedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["reserved.bytes"] = new Measure(result.TotalReservedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["reservation-gap.bytes"] = new Measure(result.ReservationGapBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["reserved-to-committed.ratio"] = new Measure(result.ReservedToCommittedRatio, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                ["ephemeral.segment-count"] = new Measure(result.EphemeralSegmentCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["ephemeral.avg-fill-percent"] = new Measure(result.AvgEphemeralFillPct, MeasureUnit.Percent, MeasureSemantics.Ratio),
+                ["segment.count"] = new Measure(result.TotalSegmentCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = context.ArtifactId!.Value,
+                AnalyzerKey = "Segment Reservation Analysis",
+                CapabilitiesUsed = capabilitiesUsed,
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
+
+        if (!result.IsRegionsBased)
+            return;
+
+        foreach (RegionGenerationStats region in result.RegionStats)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "heap.region-composition",
+                Subjects = [],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["region-kind.ordinal"] = new Measure((double)region.Kind, MeasureUnit.Custom, MeasureSemantics.Absolute),
+                    ["region.count"] = new Measure(region.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["reserved.bytes"] = new Measure(region.TotalReservedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["committed.bytes"] = new Measure(region.TotalCommittedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["near-empty.count"] = new Measure(region.NearEmptyCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["near-empty.committed-bytes"] = new Measure(region.NearEmptyCommittedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Segment Reservation Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
     }
 
     private static AnalyzerDomainResult Analyze(

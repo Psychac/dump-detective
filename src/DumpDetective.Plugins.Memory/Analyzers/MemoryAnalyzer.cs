@@ -5,6 +5,8 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 // DumpDetective.Analysis.Models and DumpDetective.Sdk.Analysis both declare HeapSegmentKind and
 // RegionGenerationKind (deliberately identical names, see SdkSegmentKindMapper) — alias the SDK
@@ -68,7 +70,7 @@ public sealed class MemoryAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     }
     private AnalyzerDomainResult? _lastResult;
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -83,8 +85,56 @@ public sealed class MemoryAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 
         MemoryAnalysisOptions options = context.AnalyzerOptions as MemoryAnalysisOptions ?? new MemoryAnalysisOptions();
 
-        LastResult = Analyze(typeStatistics, segmentQuery, objectLookup, referenceQuery, options, context.Progress, cancellationToken);
-        return ValueTask.CompletedTask;
+        var result = Analyze(typeStatistics, segmentQuery, objectLookup, referenceQuery, options, context.Progress, cancellationToken);
+        LastResult = result;
+
+        await EmitObservationsAsync(context, result, cancellationToken);
+    }
+
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): one
+    /// <c>heap.segment-composition</c> observation per <see cref="MemoryDomainResult.SegmentSummaries"/>
+    /// row — bounded to at most 6 (one per generation label), unlike <c>TopTypes</c> on this same
+    /// result, which is the full per-type population and carries the same unbounded-volume risk
+    /// <c>GCGenerationAnalyzer</c>'s own remarks flag, so it's left out here too. No <c>type</c>/
+    /// <c>thread</c>/<c>module</c> subject fits a generation-segment aggregate — there's no
+    /// <c>segment</c> <see cref="Sdk.Identity.EntityKind"/> in the SDK yet (see
+    /// ReportSystemVision.md § 4.1's aspirational entity list) — so <c>generation.ordinal</c> carries
+    /// which row this is, the same raw-ordinal convention <c>GcPauseAnalyzer</c>'s
+    /// <c>gc.suspend-reason</c> established.
+    /// </summary>
+    private static async ValueTask EmitObservationsAsync(AnalysisContext context, MemoryDomainResult result, CancellationToken cancellationToken)
+    {
+        var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapSegments };
+
+        foreach (GCSegmentSummary summary in result.SegmentSummaries)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "heap.segment-composition",
+                Subjects = [],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["generation.ordinal"] = new Measure(GetGenerationOrder(summary.Generation), MeasureUnit.Custom, MeasureSemantics.Absolute),
+                    ["committed.bytes"] = new Measure(summary.CommittedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["reserved.bytes"] = new Measure(summary.ReservedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["used.bytes"] = new Measure(summary.UsedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["segment.count"] = new Measure(summary.SegmentCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Memory Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
     }
 
     private static MemoryDomainResult Analyze(

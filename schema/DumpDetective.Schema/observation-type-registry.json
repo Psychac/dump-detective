@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/observation-type-registry.json",
-  "registryVersion": "1.4.0",
+  "registryVersion": "1.11.0",
   "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
   "observationTypes": {
     "gc.pause": {
@@ -103,6 +103,123 @@
       },
       "note": "One observation per WeakReference<T> instance whose m_handle field reads 0 (Phase B) — only the stale subset, not every WeakReference<T> instance.",
       "addedIn": "1.4.0"
+    },
+    "gc.generation-composition": {
+      "producedBy": "GCGenerationAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Memory/Analyzers/GCGenerationAnalyzer.cs",
+      "requiresCapabilities": ["heap.types"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "gen0.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "gen1.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "gen2.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "loh.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "poh.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "gen2.fraction": { "unit": "ratio", "semantics": "ratio" },
+        "loh.fraction": { "unit": "ratio", "semantics": "ratio" }
+      },
+      "note": "Single whole-heap observation per run — the canonical gc.generation-composition example named in observation-and-correlation-model.md § 2a. No entity subject (whole-process scalar). Per-type breakdown deliberately deferred (unbounded volume risk).",
+      "addedIn": "1.5.0"
+    },
+    "gc.allocation-composition": {
+      "producedBy": "AllocationPatternAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Memory/Analyzers/AllocationPatternAnalyzer.cs",
+      "requiresCapabilities": ["heap.types"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "gen0.count-fraction": { "unit": "ratio", "semantics": "ratio" },
+        "gen1.count-fraction": { "unit": "ratio", "semantics": "ratio" },
+        "gen2.count-fraction": { "unit": "ratio", "semantics": "ratio" },
+        "loh.count-fraction": { "unit": "ratio", "semantics": "ratio" },
+        "finalizable.type-count": { "unit": "count", "semantics": "absolute" },
+        "finalizable.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "Count-based whole-heap composition, distinct from GCGenerationAnalyzer's byte-based gc.generation-composition — independent corroborating measurement, not duplication (observation-and-correlation-model.md § 4). Excludes AllocationProfile and the four Top*Types lists (Smell B — bucketed by a hand-picked threshold, not a raw fact).",
+      "addedIn": "1.6.0"
+    },
+    "heap.segment-composition": {
+      "producedBy": "MemoryAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Memory/Analyzers/MemoryAnalyzer.cs",
+      "requiresCapabilities": ["heap.segments"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "generation.ordinal": { "unit": "custom", "semantics": "absolute" },
+        "committed.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "reserved.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "used.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "segment.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One observation per generation label (bounded to at most 6). No segment entity kind exists yet, so generation.ordinal carries which row this is, same convention as gc.suspend-reason.",
+      "addedIn": "1.7.0"
+    },
+    "heap.loh-fragmentation": {
+      "producedBy": "LohFragmentationAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Memory/Analyzers/LohFragmentationAnalyzer.cs",
+      "requiresCapabilities": ["heap.segments"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "kind.ordinal": { "unit": "custom", "semantics": "absolute" },
+        "segment.count": { "unit": "count", "semantics": "absolute" },
+        "total.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "free.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "used.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "fragmentation.percent": { "unit": "percent", "semantics": "ratio" },
+        "largest-free-block.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "One observation per LOH/POH kind breakdown row (bounded to at most 2: Large, Pinned).",
+      "addedIn": "1.8.0"
+    },
+    "heap.loh-type-composition": {
+      "producedBy": "LohFragmentationAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Memory/Analyzers/LohFragmentationAnalyzer.cs",
+      "requiresCapabilities": ["heap.segments", "heap.types"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "loh.count": { "unit": "count", "semantics": "absolute" },
+        "loh.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "One observation per type that actually has LOH objects — bounded to a small fraction of the whole-heap type population, unlike GCGenerationAnalyzer's per-type list.",
+      "addedIn": "1.9.0"
+    },
+    "heap.segment-reservation": {
+      "producedBy": "SegmentReservationAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Memory/Analyzers/SegmentReservationAnalyzer.cs",
+      "requiresCapabilities": ["heap.segments"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "committed.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "reserved.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "reservation-gap.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "reserved-to-committed.ratio": { "unit": "ratio", "semantics": "ratio" },
+        "ephemeral.segment-count": { "unit": "count", "semantics": "absolute" },
+        "ephemeral.avg-fill-percent": { "unit": "percent", "semantics": "ratio" },
+        "segment.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "Single whole-heap observation per run. Excludes AddressSpacePressureRisk/PressureRiskReason — a hand-picked-threshold classification (Smell A).",
+      "addedIn": "1.10.0"
+    },
+    "heap.region-composition": {
+      "producedBy": "SegmentReservationAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Memory/Analyzers/SegmentReservationAnalyzer.cs",
+      "requiresCapabilities": ["heap.segments"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "region-kind.ordinal": { "unit": "custom", "semantics": "absolute" },
+        "region.count": { "unit": "count", "semantics": "absolute" },
+        "reserved.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "committed.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "near-empty.count": { "unit": "count", "semantics": "absolute" },
+        "near-empty.committed-bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "One observation per region-generation bucket (bounded to at most 7), only emitted when the dump is regions-based (.NET 9+ GC).",
+      "addedIn": "1.11.0"
     }
   }
 }

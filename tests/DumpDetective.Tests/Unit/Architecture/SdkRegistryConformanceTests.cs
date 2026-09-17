@@ -53,6 +53,12 @@ public sealed class SdkRegistryConformanceTests
             ["infra.http-object"] = ["shallow.bytes"],
             ["infra.timer"] = ["instance.count", "shallow.bytes"],
             ["infra.wcf-channel"] = ["retained.bytes"],
+            ["runtime.jit-activity"] = ["jit-heap.bytes", "active-methods.count", "distinct-methods.count", "tiered-methods.count", "managed-frame.count", "unmanaged-frame.count", "ready-to-run-frame.count", "dynamic-method-frame.count"],
+            ["heap.segment-kind-composition"] = ["kind.ordinal", "segment.count", "object.count", "committed.bytes", "reserved.bytes"],
+            ["heap.poh-type-composition"] = ["instance.count", "shallow.bytes"],
+            ["heap.frozen-type-composition"] = ["instance.count", "shallow.bytes"],
+            ["runtime.module-heap-footprint"] = ["unique-type.count", "object.count", "shallow.bytes", "loh.bytes", "gen2.object-count"],
+            ["runtime.active-exception"] = ["generation.ordinal", "shallow.bytes"],
         };
 
     [Fact]

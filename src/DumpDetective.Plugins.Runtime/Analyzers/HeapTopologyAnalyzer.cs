@@ -4,6 +4,9 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 using DumpHeapSegmentKind = DumpDetective.Analysis.Models.HeapSegmentKind;
 using SdkHeapObjectRef = DumpDetective.Sdk.Analysis.HeapObjectRef;
@@ -46,7 +49,7 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer, IProducesAnalyzerDomainRes
     }
     private AnalyzerDomainResult? _lastResult;
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -55,8 +58,88 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer, IProducesAnalyzerDomainRes
         IHeapTypeStatisticsQuery statsQuery = context.HeapTypeStatistics
             ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapTypes}' capability.");
 
-        LastResult = Analyze(segmentQuery, statsQuery, context.Progress, cancellationToken);
-        return ValueTask.CompletedTask;
+        var result = (HeapTopologyDomainResult)Analyze(segmentQuery, statsQuery, context.Progress, cancellationToken);
+        LastResult = result;
+
+        await EmitObservationsAsync(context, result, cancellationToken);
+    }
+
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): one
+    /// <c>heap.segment-kind-composition</c> observation per <see cref="HeapTopologyDomainResult.KindSummaries"/>
+    /// row (bounded to 5: SOH/LOH/POH/Frozen/Unknown), plus <c>heap.poh-type-composition</c>/
+    /// <c>heap.frozen-type-composition</c> per <see cref="HeapTopologyDomainResult.TopPohTypes"/>/
+    /// <see cref="HeapTopologyDomainResult.TopFrozenTypes"/> entry (already capped by
+    /// <c>HeapTopologyAnalyzerOptions.TopSegmentsCount</c>). <see cref="HeapTopologyDomainResult.TopSegmentsBySize"/>
+    /// left out — same "no segment entity kind yet" gap as <c>MemoryAnalyzer</c>.
+    /// </summary>
+    private static async ValueTask EmitObservationsAsync(AnalysisContext context, HeapTopologyDomainResult result, CancellationToken cancellationToken)
+    {
+        var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapSegments, CapabilityVocabulary.HeapTypes };
+
+        foreach (SegmentKindSummary kind in result.KindSummaries)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "heap.segment-kind-composition",
+                Subjects = [],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["kind.ordinal"] = new Measure((double)kind.Kind, MeasureUnit.Custom, MeasureSemantics.Absolute),
+                    ["segment.count"] = new Measure(kind.SegmentCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["object.count"] = new Measure(kind.ObjectCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["committed.bytes"] = new Measure(kind.TotalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["reserved.bytes"] = new Measure(kind.ReservedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Heap Topology",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
+
+        await EmitTypeCompositionAsync(context, "heap.poh-type-composition", result.TopPohTypes, capabilitiesUsed, cancellationToken);
+        await EmitTypeCompositionAsync(context, "heap.frozen-type-composition", result.TopFrozenTypes, capabilitiesUsed, cancellationToken);
+    }
+
+    private static async ValueTask EmitTypeCompositionAsync(
+        AnalysisContext context, string observationType, IReadOnlyList<TypeSnapshot> types, IReadOnlySet<Capability> capabilitiesUsed, CancellationToken cancellationToken)
+    {
+        foreach (TypeSnapshot snapshot in types)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(snapshot.TypeName);
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = observationType,
+                Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["instance.count"] = new Measure(snapshot.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["shallow.bytes"] = new Measure(snapshot.TotalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Heap Topology",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
     }
 
     private static AnalyzerDomainResult Analyze(

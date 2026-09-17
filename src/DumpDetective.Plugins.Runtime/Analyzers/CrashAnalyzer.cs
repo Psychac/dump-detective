@@ -8,6 +8,8 @@ using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 using Microsoft.Diagnostics.Runtime;
 
@@ -138,7 +140,7 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
                 new CrashAnalyzerOptions(new CrashAnalysisOptions(), _scanSucceeded ? _aggregateAddresses : []),
                 heapObjectsOverride: new PrecomputedHeapObjectStream(_scanSucceeded ? _scanCandidates : []));
 
-        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -158,20 +160,30 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
             CrashAnalyzerOptions crashOptions = context.AnalyzerOptions as CrashAnalyzerOptions
                 ?? new CrashAnalyzerOptions(new CrashAnalysisOptions(), new HashSet<ulong>());
 
-            ExceptionAnalysis analysis = Analyze(candidates, fields, arrayShapes, objectLookup, segments, threads, crashOptions, cancellationToken);
+            ExceptionAnalysis analysis = await Analyze(candidates, fields, arrayShapes, objectLookup, segments, threads, crashOptions, context, cancellationToken);
             LastResult = BuildDomainResult(analysis, context.HeapRootPaths, crashOptions.Options);
-            return ValueTask.CompletedTask;
         }
 
-        private ExceptionAnalysis Analyze(
+        /// <summary>
+        /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): one
+        /// <c>runtime.active-exception</c> observation per candidate whose address matches a
+        /// thread's live current-exception — inline right by <c>list.Add(instance)</c>, where
+        /// <c>candidate.Type</c> is still in scope. Only the active subset, not every scanned
+        /// exception candidate (which — unlike GCRootAnalyzer's uncapped root list — really can run
+        /// into the thousands under a genuine exception storm; <c>ExceptionsByType</c> is already
+        /// per-type-capped by <c>options.MaxExceptionsPerType</c>, and even that population is left
+        /// out of this pass).
+        /// </summary>
+        private async ValueTask<ExceptionAnalysis> Analyze(
             IHeapObjectStream candidates, IDumpObjectFieldQuery fields, IDumpArrayShapeQuery arrayShapes,
             IHeapObjectLookup objectLookup, IHeapSegmentQuery segments, IRuntimeThreadQuery threads,
-            CrashAnalyzerOptions crashOptions, CancellationToken cancellationToken)
+            CrashAnalyzerOptions crashOptions, AnalysisContext observationContext, CancellationToken cancellationToken)
         {
             CrashAnalysisOptions options = crashOptions.Options;
             IReadOnlySet<ulong> aggregateAddresses = crashOptions.AggregateExceptionAddresses;
 
             Dictionary<ulong, ActiveExceptionContext> activeExceptions = BuildActiveExceptionLookup(threads);
+            var observationCapabilities = new HashSet<Capability> { CapabilityVocabulary.HeapObjects, CapabilityVocabulary.HeapSegments, CapabilityVocabulary.RuntimeThreads };
 
             var exceptionsByType = new Dictionary<string, List<ExceptionInstance>>(StringComparer.Ordinal);
             var exceptionTypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -265,6 +277,27 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
                             candidateThread.SampleMessage = instance.Message;
                         candidateThread.SampleHResult = instance.HResult;
                         candidateThread.SampleInnerExceptionType ??= instance.InnerExceptionType;
+
+                        await observationContext.Observations.EmitAsync(new Observation
+                        {
+                            Id = ObservationId.NewId(),
+                            ObservationType = "runtime.active-exception",
+                            Subjects = [candidate.Type],
+                            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                            Measures = new Dictionary<string, Measure>
+                            {
+                                ["generation.ordinal"] = new Measure(generation, MeasureUnit.Custom, MeasureSemantics.Absolute),
+                                ["shallow.bytes"] = new Measure(candidate.Size, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                            },
+                            Provenance = new Provenance
+                            {
+                                Artifact = observationContext.ArtifactId!.Value,
+                                AnalyzerKey = "Crash Analysis",
+                                CapabilitiesUsed = observationCapabilities,
+                                Fidelity = FidelityLevel.Full,
+                            },
+                            Confidence = 1.0,
+                        }, cancellationToken);
                     }
 
                     list.Add(instance);

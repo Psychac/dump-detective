@@ -4,6 +4,8 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Runtime;
 
@@ -43,7 +45,7 @@ public sealed class JitAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     }
     private AnalyzerDomainResult? _lastResult;
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -54,8 +56,51 @@ public sealed class JitAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 
         JitAnalysisOptions options = context.AnalyzerOptions as JitAnalysisOptions ?? new JitAnalysisOptions();
 
-        LastResult = Analyze(jitQuery, threadQuery, options, cancellationToken);
-        return ValueTask.CompletedTask;
+        var result = Analyze(jitQuery, threadQuery, options, cancellationToken);
+        LastResult = result;
+
+        await EmitObservationAsync(context, result, cancellationToken);
+    }
+
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): a single
+    /// whole-run <c>runtime.jit-activity</c> observation. Deliberately no per-method observation for
+    /// <see cref="JitDomainResult.TopLargestMethods"/>: a proper <see cref="Sdk.Identity.MethodRef"/>
+    /// needs the method name and parameter types split out, but
+    /// <see cref="ThreadStackFrameRef"/> only exposes pre-formatted display/signature strings — no
+    /// existing SDK helper parses those apart the way <c>EntityCanonicalizer</c> does for bare type
+    /// names, and hand-rolling one here risks the exact "regex drift" bug class already seen
+    /// elsewhere in this project (project_asyncstatemachine-reaudit memory). Left for a real
+    /// MethodRef-construction pass, not guessed at.
+    /// </summary>
+    private static async ValueTask EmitObservationAsync(AnalysisContext context, JitDomainResult result, CancellationToken cancellationToken)
+    {
+        await context.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "runtime.jit-activity",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["jit-heap.bytes"] = new Measure(result.TotalJitHeapBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["active-methods.count"] = new Measure(result.ActiveMethodsOnStacks, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["distinct-methods.count"] = new Measure(result.DistinctMethodsOnStacks, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["tiered-methods.count"] = new Measure(result.TieredMethodCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["managed-frame.count"] = new Measure(result.ManagedFrameCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["unmanaged-frame.count"] = new Measure(result.UnmanagedFrameCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["ready-to-run-frame.count"] = new Measure(result.ReadyToRunFrameCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["dynamic-method-frame.count"] = new Measure(result.DynamicMethodFrameCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = context.ArtifactId!.Value,
+                AnalyzerKey = "JIT Analysis",
+                CapabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.RuntimeJit, CapabilityVocabulary.RuntimeThreads },
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
     }
 
     private static JitDomainResult Analyze(

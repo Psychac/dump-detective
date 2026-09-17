@@ -5,6 +5,9 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Runtime;
 
@@ -67,7 +70,7 @@ public sealed class ModuleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     private const int MaxAssemblyRefMismatchesToReport = 30;
     private const int MaxAssemblyRefsPerModuleToCheck = 200;
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -80,8 +83,51 @@ public sealed class ModuleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 
         ModuleAnalysisOptions options = context.AnalyzerOptions as ModuleAnalysisOptions ?? new ModuleAnalysisOptions();
 
-        LastResult = Analyze(modules, fields, typeStatistics, options, cancellationToken);
-        return ValueTask.CompletedTask;
+        var result = Analyze(modules, fields, typeStatistics, options, cancellationToken);
+        LastResult = result;
+
+        await EmitObservationsAsync(context, result, cancellationToken);
+    }
+
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): one
+    /// <c>runtime.module-heap-footprint</c> observation per <see cref="ModuleDomainResult.TopModulesByHeapMemory"/>
+    /// entry — a real per-module aggregate, bounded to the modules the pipeline already ranked.
+    /// Subject uses <see cref="Sdk.Identity.ModuleRef"/> directly (just a simple name, no
+    /// canonicalization needed, unlike types).
+    /// </summary>
+    private static async ValueTask EmitObservationsAsync(AnalysisContext context, ModuleDomainResult result, CancellationToken cancellationToken)
+    {
+        var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapTypes, CapabilityVocabulary.RuntimeModules };
+
+        foreach (ModuleHeapStats module in result.TopModulesByHeapMemory ?? [])
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "runtime.module-heap-footprint",
+                Subjects = [new ModuleRef { SimpleName = module.ModuleName, Fidelity = MatchFidelity.Exact }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["unique-type.count"] = new Measure(module.UniqueTypeCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["object.count"] = new Measure(module.ObjectCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["shallow.bytes"] = new Measure(module.TotalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["loh.bytes"] = new Measure(module.LohBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["gen2.object-count"] = new Measure(module.Gen2ObjectCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Module Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
     }
 
     private static ModuleDomainResult Analyze(

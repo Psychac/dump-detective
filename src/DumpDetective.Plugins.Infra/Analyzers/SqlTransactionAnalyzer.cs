@@ -5,6 +5,8 @@ using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Infra;
 
@@ -82,27 +84,35 @@ public sealed class SqlTransactionAnalyzer :
     }
     private AnalyzerDomainResult? _lastResult;
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         IDumpObjectFieldQuery fields = context.DumpObjectFields
             ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.DumpObjectFields}' capability.");
 
-        LastResult = Analyze(fields, context.HeapObjects);
-        return ValueTask.CompletedTask;
+        LastResult = await Analyze(fields, context.HeapObjects, context, cancellationToken);
     }
 
-    private static SqlTransactionDomainResult Analyze(IDumpObjectFieldQuery fields, IHeapObjectStream? candidates)
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): one
+    /// <c>infra.sql-transaction</c> observation per active transaction instance — same "only the
+    /// anomaly-relevant subset, inline" scoping as <c>SqlCommandAnalyzer</c>.
+    /// </summary>
+    private static async ValueTask<SqlTransactionDomainResult> Analyze(
+        IDumpObjectFieldQuery fields, IHeapObjectStream? candidates, AnalysisContext observationContext, CancellationToken cancellationToken)
     {
         if (candidates is null)
             return Empty();
 
+        var observationCapabilities = new HashSet<Capability> { CapabilityVocabulary.DumpObjectFields, CapabilityVocabulary.HeapObjects };
         var typeStats = new Dictionary<string, (int Total, int Active, int Disposed, int Other, ulong Bytes)>(StringComparer.Ordinal);
         var topActive = new List<SqlTransactionSnapshot>();
 
         foreach (HeapObjectRef candidate in candidates.EnumerateObjects())
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             (int stateVal, ulong? connectionAddress) = TryReadTransactionState(fields, candidate.Address);
             typeStats.TryGetValue(candidate.TypeDisplayName, out var ts);
 
@@ -111,6 +121,26 @@ public sealed class SqlTransactionAnalyzer :
             {
                 active++;
                 topActive.Add(new SqlTransactionSnapshot(candidate.TypeDisplayName, candidate.Address, "Active", stateVal, connectionAddress));
+
+                await observationContext.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "infra.sql-transaction",
+                    Subjects = [candidate.Type],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["shallow.bytes"] = new Measure(candidate.Size, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = observationContext.ArtifactId!.Value,
+                        AnalyzerKey = "SQL Transaction Analysis",
+                        CapabilitiesUsed = observationCapabilities,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                }, cancellationToken);
             }
             else if (stateVal == StateDisposed)
             {

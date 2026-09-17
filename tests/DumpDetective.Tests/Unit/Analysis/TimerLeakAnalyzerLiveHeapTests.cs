@@ -6,6 +6,7 @@ using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Identity;
 
 using FluentAssertions;
@@ -53,6 +54,7 @@ public sealed class TimerLeakAnalyzerLiveHeapTests
             TimerLeakAnalyzer analyzer = new();
             DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
                 Observations = NoOpObservationSink.Instance,
+                ArtifactId = new ArtifactId("test"),
                 DumpObjectFields = fields,
                 HeapSegments = new HeapSegmentQuery(heap, heap.Runtime, cache),
                 HeapObjectLookup = new HeapObjectLookup(heap, cache),

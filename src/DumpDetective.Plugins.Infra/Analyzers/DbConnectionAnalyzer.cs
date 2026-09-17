@@ -5,6 +5,9 @@ using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Infra;
 
@@ -116,7 +119,7 @@ public sealed class DbConnectionAnalyzer :
     internal static bool IsCandidateType(string typeName) =>
         TypeNamePatternMatcher.HasPrefixAndSuffixOrContains(typeName, ConnectionNamespacePrefixes, "Connection", null);
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -127,8 +130,59 @@ public sealed class DbConnectionAnalyzer :
         IHeapRootPathQuery rootPaths = context.HeapRootPaths
             ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.HeapRootPaths}' capability.");
 
-        LastResult = Analyze(fields, segments, context.HeapDominators, rootPaths, context.HeapObjects);
-        return ValueTask.CompletedTask;
+        var result = Analyze(fields, segments, context.HeapDominators, rootPaths, context.HeapObjects);
+        LastResult = result;
+
+        await EmitObservationsAsync(context, result, cancellationToken);
+    }
+
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): one
+    /// <c>infra.db-connection</c> observation per <see cref="DbConnectionDomainResult.TopOpenConnections"/>
+    /// entry — a second pass over the fully dominator/root-path-enriched result (not inline in
+    /// <see cref="Analyze"/>, unlike <c>SqlCommandAnalyzer</c>/<c>SqlTransactionAnalyzer</c>) so the
+    /// observation's <c>retained.bytes</c> reflects the exact dominator-tree value when available,
+    /// not the shallow size seen mid-scan. No <c>IHeapObjectLookup</c> on this analyzer, so the
+    /// subject's <see cref="TypeRef"/> is rebuilt via <see cref="EntityCanonicalizer"/> from
+    /// <see cref="DbConnectionSnapshot.TypeName"/>, same as <c>LohFragmentationAnalyzer</c>.
+    /// </summary>
+    private static async ValueTask EmitObservationsAsync(AnalysisContext context, DbConnectionDomainResult result, CancellationToken cancellationToken)
+    {
+        var capabilitiesUsed = new HashSet<Capability>
+        {
+            CapabilityVocabulary.DumpObjectFields, CapabilityVocabulary.HeapObjects, CapabilityVocabulary.HeapSegments,
+        };
+
+        foreach (DbConnectionSnapshot snap in result.TopOpenConnections)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(snap.TypeName);
+
+            var measures = new Dictionary<string, Measure>
+            {
+                ["generation.ordinal"] = new Measure(snap.Generation, MeasureUnit.Custom, MeasureSemantics.Absolute),
+            };
+            if (snap.RetainedBytes is ulong retained)
+                measures["retained.bytes"] = new Measure(retained, MeasureUnit.Bytes, MeasureSemantics.Absolute);
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "infra.db-connection",
+                Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = measures,
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "DB Connection Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = snap.RetainedBytes is not null ? FidelityLevel.Full : FidelityLevel.Degraded,
+                },
+                Confidence = snap.RetainedBytes is not null ? 1.0 : 0.7,
+            }, cancellationToken);
+        }
     }
 
     private static DbConnectionDomainResult Analyze(

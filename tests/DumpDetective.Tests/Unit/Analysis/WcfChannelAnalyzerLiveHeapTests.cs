@@ -3,6 +3,7 @@ using DumpDetective.Analysis.Analyzers.Infra;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Identity;
 
 using FluentAssertions;
@@ -79,6 +80,7 @@ namespace DumpDetective.Tests.Unit.Analysis
             HeapObjectRef candidate = new(address, SdkTypeRefFactory.FromName(typeName, methodTable), Size: 32, TypeDisplayName: typeName);
             DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
                 Observations = NoOpObservationSink.Instance,
+                ArtifactId = new ArtifactId("test"),
                 DumpObjectFields = new DumpObjectFieldQuery(heap),
                 HeapTypeStatistics = new EmptyHeapTypeStatisticsQuery(),
                 HeapObjects = new PrecomputedHeapObjectStream([candidate]),

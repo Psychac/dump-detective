@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/observation-type-registry.json",
-  "registryVersion": "1.16.0",
+  "registryVersion": "1.23.0",
   "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
   "observationTypes": {
     "gc.pause": {
@@ -288,6 +288,94 @@
       },
       "note": "One per distinct call-stack-shape cluster among alive threads (filtered by MinClusterSize). No entity subject — a cluster spans many threads; SampleOsThreadIds is a sample, not full membership.",
       "addedIn": "1.16.0"
+    },
+    "infra.sql-connection-pool": {
+      "producedBy": "SqlConnectionPoolAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Infra/Analyzers/SqlConnectionPoolAnalyzer.cs",
+      "requiresCapabilities": ["dump.object-fields", "heap.objects"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "current.size": { "unit": "count", "semantics": "absolute" },
+        "max.size": { "unit": "count", "semantics": "absolute" },
+        "min.size": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per discovered ADO.NET connection-pool manager instance — a handful per process, never heap-scale. max.size/min.size omitted when unresolved.",
+      "addedIn": "1.17.0"
+    },
+    "infra.sql-command": {
+      "producedBy": "SqlCommandAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Infra/Analyzers/SqlCommandAnalyzer.cs",
+      "requiresCapabilities": ["dump.object-fields", "heap.objects"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "shallow.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "One per active command instance — only the active subset, not every scanned candidate.",
+      "addedIn": "1.18.0"
+    },
+    "infra.sql-transaction": {
+      "producedBy": "SqlTransactionAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Infra/Analyzers/SqlTransactionAnalyzer.cs",
+      "requiresCapabilities": ["dump.object-fields", "heap.objects"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "shallow.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "One per active transaction instance — only the active subset.",
+      "addedIn": "1.19.0"
+    },
+    "infra.db-connection": {
+      "producedBy": "DbConnectionAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Infra/Analyzers/DbConnectionAnalyzer.cs",
+      "requiresCapabilities": ["dump.object-fields", "heap.objects", "heap.segments"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "generation.ordinal": { "unit": "custom", "semantics": "absolute" },
+        "retained.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "One per open connection in TopOpenConnections. retained.bytes omitted when no dominator tree was available.",
+      "addedIn": "1.20.0"
+    },
+    "infra.http-object": {
+      "producedBy": "HttpObjectAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Infra/Analyzers/HttpObjectAnalyzer.cs",
+      "requiresCapabilities": ["dump.object-fields", "heap.objects"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "shallow.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "One per instance sampled into TopHttpInstances (HttpClient/HttpWebRequest/ServicePoint/handler-tracking entries) — one shared observation type across all sub-kinds.",
+      "addedIn": "1.21.0"
+    },
+    "infra.timer": {
+      "producedBy": "TimerLeakAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Infra/Analyzers/TimerLeakAnalyzer.cs",
+      "requiresCapabilities": ["heap.objects"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "instance.count": { "unit": "count", "semantics": "absolute" },
+        "shallow.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "One per distinct timer-shaped type name (bounded population). Interval histogram deliberately not emitted in this pass.",
+      "addedIn": "1.22.0"
+    },
+    "infra.wcf-channel": {
+      "producedBy": "WcfChannelAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Infra/Analyzers/WcfChannelAnalyzer.cs",
+      "requiresCapabilities": ["dump.object-fields", "heap.objects", "heap.types"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "retained.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "One per faulted channel — the same anomaly-relevant subset TopFaultedChannels already selects. retained.bytes omitted when no dominator tree was available.",
+      "addedIn": "1.23.0"
     }
   }
 }

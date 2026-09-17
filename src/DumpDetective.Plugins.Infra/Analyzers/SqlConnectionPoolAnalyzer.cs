@@ -5,6 +5,8 @@ using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Infra;
 
@@ -84,28 +86,67 @@ public sealed class SqlConnectionPoolAnalyzer :
     }
     private AnalyzerDomainResult? _lastResult;
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         IDumpObjectFieldQuery fields = context.DumpObjectFields
             ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.DumpObjectFields}' capability.");
 
-        LastResult = Analyze(fields, context.HeapObjects);
-        return ValueTask.CompletedTask;
+        LastResult = await Analyze(fields, context.HeapObjects, context, cancellationToken);
     }
 
-    private static SqlConnectionPoolDomainResult Analyze(IDumpObjectFieldQuery fields, IHeapObjectStream? candidates)
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): one
+    /// <c>infra.sql-connection-pool</c> observation per discovered pool-manager instance, inline
+    /// where <see cref="HeapObjectRef.Type"/> is still in scope (no <c>IHeapObjectLookup</c>
+    /// capability on this analyzer to re-resolve it from <c>SqlConnectionPoolSnapshot.Address</c>
+    /// afterwards). Bounded to actual pool-manager objects — a handful per process, never
+    /// heap-scale.
+    /// </summary>
+    private static async ValueTask<SqlConnectionPoolDomainResult> Analyze(
+        IDumpObjectFieldQuery fields, IHeapObjectStream? candidates, AnalysisContext observationContext, CancellationToken cancellationToken)
     {
         if (candidates is null)
             return Empty();
 
+        var observationCapabilities = new HashSet<Capability> { CapabilityVocabulary.DumpObjectFields, CapabilityVocabulary.HeapObjects };
         var pools = new List<SqlConnectionPoolSnapshot>();
         foreach (HeapObjectRef candidate in candidates.EnumerateObjects())
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             SqlConnectionPoolSnapshot? snap = TryReadPoolSnapshot(fields, candidate.Address, candidate.TypeDisplayName);
-            if (snap is not null)
-                pools.Add(snap);
+            if (snap is null)
+                continue;
+
+            pools.Add(snap);
+
+            var measures = new Dictionary<string, Measure>
+            {
+                ["current.size"] = new Measure(snap.CurrentSize, MeasureUnit.Count, MeasureSemantics.Absolute),
+            };
+            if (snap.MaxPoolSize >= 0)
+                measures["max.size"] = new Measure(snap.MaxPoolSize, MeasureUnit.Count, MeasureSemantics.Absolute);
+            if (snap.MinPoolSize >= 0)
+                measures["min.size"] = new Measure(snap.MinPoolSize, MeasureUnit.Count, MeasureSemantics.Absolute);
+
+            await observationContext.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "infra.sql-connection-pool",
+                Subjects = [candidate.Type],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = measures,
+                Provenance = new Provenance
+                {
+                    Artifact = observationContext.ArtifactId!.Value,
+                    AnalyzerKey = "SQL Connection Pool Analysis",
+                    CapabilitiesUsed = observationCapabilities,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
         }
 
         if (pools.Count == 0)

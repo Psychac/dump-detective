@@ -3,6 +3,7 @@ using DumpDetective.Analysis.Analyzers.Infra;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Identity;
 
 using FluentAssertions;
@@ -147,6 +148,7 @@ public sealed class HttpObjectAnalyzerRetypingCharacterizationTests
         HttpObjectAnalyzer analyzer = new();
         DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
+            ArtifactId = new ArtifactId("test"),
             DumpObjectFields = fields,
             HeapSegments = segments,
             HeapTypeStatistics = typeStatistics,

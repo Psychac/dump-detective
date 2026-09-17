@@ -4,6 +4,7 @@ using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Enums;
 using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Identity;
 
 using FluentAssertions;
@@ -174,6 +175,7 @@ public sealed class WcfChannelAnalyzerRetypingCharacterizationTests
         WcfChannelAnalyzer analyzer = new();
         DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
+            ArtifactId = new ArtifactId("test"),
             DumpObjectFields = fields,
             HeapTypeStatistics = typeStatistics,
             HeapDominators = dominators,

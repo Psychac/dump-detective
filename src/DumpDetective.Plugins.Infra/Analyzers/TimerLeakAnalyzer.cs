@@ -7,6 +7,9 @@ using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Infra;
 
@@ -105,7 +108,7 @@ public sealed class TimerLeakAnalyzer :
 
     internal static bool IsCandidateType(string typeName) => ClassifyType(typeName) != TimerObjectCategory.None;
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -118,12 +121,19 @@ public sealed class TimerLeakAnalyzer :
         IHeapRootPathQuery rootPaths = context.HeapRootPaths
             ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.HeapRootPaths}' capability.");
 
-        LastResult = Analyze(fields, segments, objectLookup, rootPaths, context.HeapObjects);
-        return ValueTask.CompletedTask;
+        LastResult = await Analyze(fields, segments, objectLookup, rootPaths, context.HeapObjects, context, cancellationToken);
     }
 
-    private static TimerLeakDomainResult Analyze(
-        IDumpObjectFieldQuery fields, IHeapSegmentQuery segments, IHeapObjectLookup objectLookup, IHeapRootPathQuery rootPaths, IHeapObjectStream? candidates)
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): one
+    /// <c>infra.timer</c> observation per <see cref="TimerLeakDomainResult.ByType"/> entry —
+    /// bounded to distinct timer-shaped type names. Subject resolved via
+    /// <see cref="IHeapObjectLookup"/> from each type's already-tracked <c>SampleAddress</c>
+    /// (real <see cref="Sdk.Identity.TypeRef"/>, not a canonicalized-from-string reconstruction).
+    /// </summary>
+    private static async ValueTask<TimerLeakDomainResult> Analyze(
+        IDumpObjectFieldQuery fields, IHeapSegmentQuery segments, IHeapObjectLookup objectLookup, IHeapRootPathQuery rootPaths, IHeapObjectStream? candidates,
+        AnalysisContext observationContext, CancellationToken cancellationToken)
     {
         if (candidates is null)
             return Empty();
@@ -173,6 +183,36 @@ public sealed class TimerLeakAnalyzer :
         }
 
         byType.Sort(static (a, b) => b.Count.CompareTo(a.Count));
+
+        var observationCapabilities = new HashSet<Capability> { CapabilityVocabulary.HeapObjects };
+        foreach (TimerObjectTypeSummary summary in byType)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!typeStats.TryGetValue(summary.TypeName, out var ts) || !objectLookup.TryGetObject(ts.SampleAddress, out HeapObjectRef sample))
+                continue;
+
+            await observationContext.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "infra.timer",
+                Subjects = [sample.Type],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["instance.count"] = new Measure(summary.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["shallow.bytes"] = new Measure(summary.TotalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = observationContext.ArtifactId!.Value,
+                    AnalyzerKey = "Timer Leak Analysis",
+                    CapabilitiesUsed = observationCapabilities,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
 
         PopulateEvidence(fields, segments, objectLookup, rootPaths, byType, typeStats);
 

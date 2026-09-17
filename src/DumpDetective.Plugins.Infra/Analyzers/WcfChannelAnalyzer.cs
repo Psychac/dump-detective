@@ -6,6 +6,8 @@ using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Infra;
 
@@ -153,7 +155,7 @@ public sealed class WcfChannelAnalyzer :
         !typeName.Contains('+', StringComparison.Ordinal)
         && TypeNamePatternMatcher.HasPrefixAndSuffixOrContains(typeName, FactoryNamespaces, ".ChannelFactory", FactoryContainsTokens);
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -162,12 +164,19 @@ public sealed class WcfChannelAnalyzer :
         IHeapTypeStatisticsQuery typeStatistics = context.HeapTypeStatistics
             ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.HeapTypes}' capability.");
 
-        LastResult = Analyze(fields, typeStatistics, context.HeapObjects, context.HeapDominators);
-        return ValueTask.CompletedTask;
+        LastResult = await Analyze(fields, typeStatistics, context.HeapObjects, context.HeapDominators, context, cancellationToken);
     }
 
-    private static WcfChannelDomainResult Analyze(
-        IDumpObjectFieldQuery fields, IHeapTypeStatisticsQuery typeStatistics, IHeapObjectStream? candidates, IHeapDominatorQuery? dominators)
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): one
+    /// <c>infra.wcf-channel</c> observation per faulted channel — the same anomaly-relevant subset
+    /// <see cref="WcfChannelDomainResult.TopFaultedChannels"/> already selects, emitted inline right
+    /// after <c>topFaulted.Add</c> where <see cref="HeapObjectRef.Type"/> and the already-resolved
+    /// retained-bytes value are both still in scope.
+    /// </summary>
+    private static async ValueTask<WcfChannelDomainResult> Analyze(
+        IDumpObjectFieldQuery fields, IHeapTypeStatisticsQuery typeStatistics, IHeapObjectStream? candidates, IHeapDominatorQuery? dominators,
+        AnalysisContext observationContext, CancellationToken cancellationToken)
     {
         int factoryCount = 0;
         foreach (KeyValuePair<string, HeapTypeStatistics> kv in typeStatistics.GetTypeStatistics())
@@ -179,11 +188,14 @@ public sealed class WcfChannelAnalyzer :
         if (candidates is null)
             return Empty(factoryCount);
 
+        var observationCapabilities = new HashSet<Capability> { CapabilityVocabulary.DumpObjectFields, CapabilityVocabulary.HeapObjects, CapabilityVocabulary.HeapTypes };
         var typeStats = new Dictionary<string, (int Total, int Opening, int Opened, int Faulted, int Closing, int Closed, int Other, int InvalidState, ulong Bytes)>(StringComparer.Ordinal);
         var topFaulted = new List<WcfChannelSnapshot>();
 
         foreach (HeapObjectRef candidate in candidates.EnumerateObjects())
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             int stateVal = TryReadState(fields, candidate.Address);
 
             typeStats.TryGetValue(candidate.TypeDisplayName, out var ts);
@@ -203,9 +215,32 @@ public sealed class WcfChannelAnalyzer :
                 {
                     string? remoteAddress = TryExtractRemoteAddress(fields, candidate.Address);
                     var snap = new WcfChannelSnapshot(candidate.TypeDisplayName, candidate.Address, MapCommunicationState(stateVal), stateVal, remoteAddress);
-                    if (dominators is not null && dominators.TryGetRetainedSize(candidate.Address, out ulong retained))
+                    ulong retained = 0;
+                    bool hasRetained = dominators is not null && dominators.TryGetRetainedSize(candidate.Address, out retained);
+                    if (hasRetained)
                         snap = snap with { RetainedBytes = retained };
                     topFaulted.Add(snap);
+
+                    var measures = new Dictionary<string, Measure>();
+                    if (hasRetained)
+                        measures["retained.bytes"] = new Measure(retained, MeasureUnit.Bytes, MeasureSemantics.Absolute);
+
+                    await observationContext.Observations.EmitAsync(new Observation
+                    {
+                        Id = ObservationId.NewId(),
+                        ObservationType = "infra.wcf-channel",
+                        Subjects = [candidate.Type],
+                        When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                        Measures = measures,
+                        Provenance = new Provenance
+                        {
+                            Artifact = observationContext.ArtifactId!.Value,
+                            AnalyzerKey = "WCF Channel Analysis",
+                            CapabilitiesUsed = observationCapabilities,
+                            Fidelity = hasRetained ? FidelityLevel.Full : FidelityLevel.Degraded,
+                        },
+                        Confidence = hasRetained ? 1.0 : 0.7,
+                    }, cancellationToken);
                 }
             }
 

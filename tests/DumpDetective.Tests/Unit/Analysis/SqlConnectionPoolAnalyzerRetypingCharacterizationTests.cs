@@ -3,6 +3,7 @@ using DumpDetective.Analysis.Analyzers.Infra;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 
 using FluentAssertions;
 
@@ -104,6 +105,7 @@ public sealed class SqlConnectionPoolAnalyzerRetypingCharacterizationTests
         SqlConnectionPoolAnalyzer analyzer = new();
         DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
+            ArtifactId = new ArtifactId("test"),
             DumpObjectFields = new FakeDumpObjectFieldQuery(),
             HeapObjects = null,
         };
@@ -123,6 +125,7 @@ public sealed class SqlConnectionPoolAnalyzerRetypingCharacterizationTests
         SqlConnectionPoolAnalyzer analyzer = new();
         DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
+            ArtifactId = new ArtifactId("test"),
             DumpObjectFields = fields,
             HeapObjects = new PrecomputedHeapObjectStream(candidates),
         };

@@ -5,6 +5,8 @@ using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Infra;
 
@@ -67,7 +69,7 @@ public sealed class HttpObjectAnalyzer :
     }
     private AnalyzerDomainResult? _lastResult;
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -78,22 +80,33 @@ public sealed class HttpObjectAnalyzer :
         IHeapTypeStatisticsQuery typeStatistics = context.HeapTypeStatistics
             ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.HeapTypes}' capability.");
 
-        LastResult = Analyze(fields, segments, typeStatistics, context.HeapObjects);
-        return ValueTask.CompletedTask;
+        LastResult = await Analyze(fields, segments, typeStatistics, context.HeapObjects, context, cancellationToken);
     }
 
-    private static HttpObjectDomainResult Analyze(
-        IDumpObjectFieldQuery fields, IHeapSegmentQuery segments, IHeapTypeStatisticsQuery typeStatistics, IHeapObjectStream? candidates)
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): one
+    /// <c>infra.http-object</c> observation per instance sampled into
+    /// <see cref="HttpObjectDomainResult.TopHttpInstances"/> (HttpClient/HttpWebRequest/
+    /// ServicePoint/handler-tracking entries) — emitted via <see cref="EmitHttpObservationAsync"/>
+    /// right after each <c>topSamples.Add</c>, where <see cref="HeapObjectRef.Type"/> is still in
+    /// scope. One shared observation type across all sub-kinds; raw shallow size only.
+    /// </summary>
+    private static async ValueTask<HttpObjectDomainResult> Analyze(
+        IDumpObjectFieldQuery fields, IHeapSegmentQuery segments, IHeapTypeStatisticsQuery typeStatistics, IHeapObjectStream? candidates,
+        AnalysisContext observationContext, CancellationToken cancellationToken)
     {
         if (candidates is null)
             return Empty();
 
+        var observationCapabilities = new HashSet<Capability> { CapabilityVocabulary.DumpObjectFields, CapabilityVocabulary.HeapObjects };
         var typeStats = new Dictionary<string, (long HttpClient, long HttpWebRequest, long HttpWebResponse, long HttpMessageHandler, long ServicePoint, long ActiveHandlerTrackingEntry, long ExpiredHandlerTrackingEntry, ulong Bytes)>(StringComparer.Ordinal);
         var topSamples = new List<HttpInstanceSnapshot>();
         long httpClientGen0 = 0, httpClientGen1 = 0, httpClientGen2 = 0;
 
         foreach (HeapObjectRef candidate in candidates.EnumerateObjects())
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             HttpObjectCategory category = ClassifyType(candidate.TypeDisplayName);
             if (category == HttpObjectCategory.None) continue;
 
@@ -113,12 +126,20 @@ public sealed class HttpObjectAnalyzer :
                         default: httpClientGen2++; break;
                     }
                     HttpInstanceSnapshot? clientSnap = TrySampleHttpClient(fields, candidate.Address, candidate.TypeDisplayName);
-                    if (clientSnap is not null) topSamples.Add(clientSnap);
+                    if (clientSnap is not null)
+                    {
+                        topSamples.Add(clientSnap);
+                        await EmitHttpObservationAsync(observationContext, candidate, observationCapabilities, cancellationToken);
+                    }
                     break;
                 case HttpObjectCategory.HttpWebRequest:
                     httpWebRequest++;
                     HttpInstanceSnapshot? requestSnap = TrySampleHttpWebRequest(fields, candidate.Address, candidate.TypeDisplayName);
-                    if (requestSnap is not null) topSamples.Add(requestSnap);
+                    if (requestSnap is not null)
+                    {
+                        topSamples.Add(requestSnap);
+                        await EmitHttpObservationAsync(observationContext, candidate, observationCapabilities, cancellationToken);
+                    }
                     break;
                 case HttpObjectCategory.HttpWebResponse:
                     httpWebResponse++;
@@ -129,17 +150,29 @@ public sealed class HttpObjectAnalyzer :
                 case HttpObjectCategory.ServicePoint:
                     servicePoint++;
                     HttpInstanceSnapshot? spSnap = TrySampleServicePoint(fields, candidate.Address, candidate.TypeDisplayName);
-                    if (spSnap is not null) topSamples.Add(spSnap);
+                    if (spSnap is not null)
+                    {
+                        topSamples.Add(spSnap);
+                        await EmitHttpObservationAsync(observationContext, candidate, observationCapabilities, cancellationToken);
+                    }
                     break;
                 case HttpObjectCategory.ActiveHandlerTrackingEntry:
                     activeHandlerTrackingEntry++;
                     HttpInstanceSnapshot? activeSnap = TrySampleHandlerTrackingEntry(fields, candidate.Address, candidate.TypeDisplayName, "ActiveHandlerTrackingEntry");
-                    if (activeSnap is not null) topSamples.Add(activeSnap);
+                    if (activeSnap is not null)
+                    {
+                        topSamples.Add(activeSnap);
+                        await EmitHttpObservationAsync(observationContext, candidate, observationCapabilities, cancellationToken);
+                    }
                     break;
                 case HttpObjectCategory.ExpiredHandlerTrackingEntry:
                     expiredHandlerTrackingEntry++;
                     HttpInstanceSnapshot? expiredSnap = TrySampleHandlerTrackingEntry(fields, candidate.Address, candidate.TypeDisplayName, "ExpiredHandlerTrackingEntry");
-                    if (expiredSnap is not null) topSamples.Add(expiredSnap);
+                    if (expiredSnap is not null)
+                    {
+                        topSamples.Add(expiredSnap);
+                        await EmitHttpObservationAsync(observationContext, candidate, observationCapabilities, cancellationToken);
+                    }
                     break;
             }
 
@@ -208,6 +241,28 @@ public sealed class HttpObjectAnalyzer :
             TopHttpInstances: topSamples,
             HandlerModules: handlerModules);
     }
+
+    private static ValueTask EmitHttpObservationAsync(
+        AnalysisContext observationContext, HeapObjectRef candidate, IReadOnlySet<Capability> observationCapabilities, CancellationToken cancellationToken) =>
+        observationContext.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "infra.http-object",
+            Subjects = [candidate.Type],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["shallow.bytes"] = new Measure(candidate.Size, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = observationContext.ArtifactId!.Value,
+                AnalyzerKey = "HTTP Object Analysis",
+                CapabilitiesUsed = observationCapabilities,
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
 
     private static HttpInstanceSnapshot? TrySampleHttpClient(IDumpObjectFieldQuery fields, ulong address, string typeName)
     {

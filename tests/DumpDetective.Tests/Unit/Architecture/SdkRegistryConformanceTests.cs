@@ -46,6 +46,13 @@ public sealed class SdkRegistryConformanceTests
             ["thread.wait-state"] = ["locks-held.count"],
             ["thread.state"] = ["stack-size.bytes", "locks-held.count", "stack-root.count", "has-exception", "async-chain.depth"],
             ["thread.stack-cluster"] = ["cluster.count", "threadpool-worker.count", "gc.count", "finalizer.count"],
+            ["infra.sql-connection-pool"] = ["current.size", "max.size", "min.size"],
+            ["infra.sql-command"] = ["shallow.bytes"],
+            ["infra.sql-transaction"] = ["shallow.bytes"],
+            ["infra.db-connection"] = ["generation.ordinal", "retained.bytes"],
+            ["infra.http-object"] = ["shallow.bytes"],
+            ["infra.timer"] = ["instance.count", "shallow.bytes"],
+            ["infra.wcf-channel"] = ["retained.bytes"],
         };
 
     [Fact]

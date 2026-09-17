@@ -198,13 +198,8 @@ public sealed class MemoryAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
             SmallObjectCountPercent: projection.TotalObjects == 0 ? 0 : projection.SmallObjectCount * 100.0 / projection.TotalObjects,
             SmallObjectBytesPercent: projection.TotalMemory == 0 ? 0 : projection.SmallObjectBytes * 100.0 / projection.TotalMemory,
             ObjectsPerMb: projection.ObjectsPerMb,
-            MemoryPressureScore: projection.MemoryPressureScore,
             SegmentSummaries: segmentSummaries,
-            LohFragmentationRatio: lohFragmentationRatio,
-            LohPressureScore: projection.LohPressureScore,
-            ConcentrationPressureScore: projection.ConcentrationPressureScore,
-            SmallObjectPressureScore: projection.SmallObjectPressureScore,
-            DensityPressureScore: projection.DensityPressureScore);
+            LohFragmentationRatio: lohFragmentationRatio);
     }
 
     private static Dictionary<string, CachedTypeStatistics> ToCachedTypeStatistics(IReadOnlyDictionary<string, HeapTypeStatistics> stats)

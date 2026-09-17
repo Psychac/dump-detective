@@ -4,6 +4,7 @@ using DumpDetective.Analysis.Analyzers.Threads;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Pipeline;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Abstractions;
 
 using FluentAssertions;
@@ -64,7 +65,7 @@ public sealed class HangAnalyzerRealDumpTests
         result.AnalyzerName.Should().Be("Hang Analysis");
         result.TotalAliveThreads.Should().BeGreaterThan(0, "a real IIS crash dump has alive managed threads");
         result.WaitingPercent.Should().BeInRange(0.0, 100.0);
-        result.HealthScore.Should().BeInRange(0, 100);
+        HangHealthClassifier.ComputeHealthScore(result).Should().BeInRange(0, 100);
 
         for (int i = 1; i < (result.TopWaitingThreads?.Count ?? 0); i++)
             result.TopWaitingThreads![i].LockCount.Should().BeLessThanOrEqualTo(result.TopWaitingThreads[i - 1].LockCount);
@@ -80,10 +81,10 @@ public sealed class HangAnalyzerRealDumpTests
 
         _output.WriteLine(
             $"TotalAliveThreads={result.TotalAliveThreads} WaitingThreadCount={result.WaitingThreadCount} " +
-            $"ThreadsHoldingLocks={result.ThreadsHoldingLocks} HealthScore={result.HealthScore} " +
+            $"ThreadsHoldingLocks={result.ThreadsHoldingLocks} HealthScore={HangHealthClassifier.ComputeHealthScore(result)} " +
             $"TotalTasks={result.TotalTasks} PendingTasks={result.PendingTasks} FaultedTasks={result.FaultedTasks} " +
             $"CanceledTasks={result.CanceledTasks} QueuedWorkItems={result.QueuedWorkItems} " +
             $"TotalTaskContinuations={result.TotalTaskContinuations} RuntimeThreadPoolDataAvailable={result.RuntimeThreadPoolDataAvailable} " +
-            $"IsStarved={result.IsStarved}");
+            $"IsStarved={HangHealthClassifier.IsStarved(result)}");
     }
 }

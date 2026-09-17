@@ -1,8 +1,37 @@
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 
 namespace DumpDetective.Analysis.Models;
 
 // Event Leaks
+
+/// <summary>
+/// Echoes the <see cref="EventLeakOptions"/> severity-scoring knobs actually used for this run —
+/// added once at the top level (not per-instance) so <c>EventLeakSeverityClassifier</c> can
+/// recompute an instance's <c>SeverityScore</c> downstream with the exact weights stage 1 used,
+/// without bloating every snapshot row with 8 duplicate config fields. See
+/// docs/refactor/analyzer-pipeline-stages-and-leadfinding-dedup.md, Smell A.
+/// </summary>
+internal sealed record EventLeakSeverityWeights(
+    double SubscriberLogScale,
+    int StaticPublisherBonus,
+    int RootHintBonus,
+    int Gen2PublisherBonus,
+    int DuplicateSubscriptionBonus,
+    int DisposedButSubscribedBonus,
+    int LifetimeMismatchBonus,
+    int LowIncomingRefsBonus)
+{
+    public static EventLeakSeverityWeights FromOptions(EventLeakOptions options) => new(
+        SubscriberLogScale: options.SeveritySubscriberLogScale,
+        StaticPublisherBonus: options.SeverityStaticPublisherBonus,
+        RootHintBonus: options.SeverityRootHintBonus,
+        Gen2PublisherBonus: options.SeverityGen2PublisherBonus,
+        DuplicateSubscriptionBonus: options.SeverityDuplicateSubscriptionBonus,
+        DisposedButSubscribedBonus: options.SeverityDisposedButSubscribedBonus,
+        LifetimeMismatchBonus: options.SeverityLifetimeMismatchBonus,
+        LowIncomingRefsBonus: options.SeverityLowIncomingRefsBonus);
+}
 
 /// <summary>One row in the "Top Publisher Events" summary table.</summary>
 internal sealed record PublisherEventSummary(
@@ -29,6 +58,11 @@ internal sealed record EventLeakDomainResult(
     // Bumped whenever the severity-scoring formula changes (design §9). Trend comparisons
     // across a version boundary are not meaningful and must be refused, not diffed.
     int ScoringVersion = 2,
+    // The exact weights this run's SeverityScore values were computed with (Smell A fix,
+    // docs/refactor/analyzer-pipeline-stages-and-leadfinding-dedup.md) — lets downstream
+    // consumers recompute EventLeakInstanceSnapshot.SeverityScore exactly via
+    // EventLeakSeverityClassifier instead of a stage-1-baked field.
+    EventLeakSeverityWeights? ScoringWeights = null,
     // Phase E / design §7: cross-group correlation views, folded once over the completed
     // group set. First-class collections, not buried in a per-group breakdown.
     IReadOnlyList<NameCountEntry>? TopSubscriberTypesAcrossGroups = null,
@@ -54,7 +88,13 @@ internal sealed record EventLeakGroupSnapshot(
     string PublisherType,
     string EventFieldName,
     bool IsStatic,
-    int SeverityScore,
+    // Max SeverityScore across every instance the scanner touched for this group — a streaming
+    // reduction, not an independently-computed judgment. The per-instance facts behind most of
+    // those instances aren't retained (only a capped top-K sample is), so this value can't be
+    // re-derived downstream; it's computed once, during the single pass, via the same
+    // EventLeakSeverityClassifier the instance-level path uses. See Smell A discussion,
+    // docs/refactor/analyzer-pipeline-stages-and-leadfinding-dedup.md.
+    int MaxSeverityScore,
     int InstanceCount,
     int TotalSubscribers,
     double AverageSubscribers,
@@ -90,7 +130,6 @@ internal sealed record EventLeakInstanceSnapshot(
     string EventFieldName,
     bool IsStatic,
     ulong PublisherAddress,
-    int SeverityScore,
     int SubscriberCount,
     string? RootHint,
     IReadOnlyList<SubscriberTypeCount>? SubscriberTypes = null,
@@ -98,5 +137,6 @@ internal sealed record EventLeakInstanceSnapshot(
     int DuplicateSubscriptionCount = 0,
     bool IsDisposedButSubscribed = false,
     bool HasLifetimeMismatch = false,
+    bool HasLowIncomingRefs = false,
     IReadOnlyList<SubscriberDetail>? SubscriberDetails = null,
     EventLeakEvidence? Evidence = null);

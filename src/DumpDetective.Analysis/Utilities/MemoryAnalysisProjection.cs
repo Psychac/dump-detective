@@ -20,13 +20,7 @@ internal sealed record MemoryAnalysisProjectionResult(
     ulong Top10Bytes,
     long SmallObjectCount,
     ulong SmallObjectBytes,
-    double ObjectsPerMb,
-    double MemoryPressureScore,
-    double LohFragmentationRatio,
-    double LohPressureScore,
-    double ConcentrationPressureScore,
-    double SmallObjectPressureScore,
-    double DensityPressureScore);
+    double ObjectsPerMb);
 
 internal static class MemoryAnalysisProjection
 {
@@ -77,9 +71,6 @@ internal static class MemoryAnalysisProjection
             histogram = entries;
         }
 
-        static double PercentOf(ulong part, ulong total) => total == 0 ? 0 : part * 100.0 / total;
-        static double PercentOfCount(long part, long total) => total == 0 ? 0 : part * 100.0 / total;
-
         ulong top1Bytes = bySize.Count > 0 ? bySize[0].TotalSize : 0;
         ulong top5Bytes = 0;
         for (int i = 0; i < Math.Min(5, bySize.Count); i++)
@@ -117,26 +108,6 @@ internal static class MemoryAnalysisProjection
 
         double objectsPerMb = totalMemory == 0 ? 0 : totalObjects / (totalMemory / (1024.0 * 1024.0));
 
-        static double Clamp01(double value)
-        {
-            if (value < 0) return 0;
-            if (value > 1) return 1;
-            return value;
-        }
-
-        double lohPressure = Clamp01(lohPct / 35.0);
-        double concentrationPressure = Clamp01(PercentOf(top5Bytes, totalMemory) / 70.0);
-        double smallObjectPressure = Clamp01((0.7 * (PercentOfCount(smallObjectCount, totalObjects) / 85.0))
-                                           + (0.3 * (PercentOf(smallObjectBytes, totalMemory) / 45.0)));
-        double densityPressure = Clamp01(objectsPerMb / 12_000.0);
-
-        double memoryPressureScore = Math.Round(
-            (lohPressure * 0.35
-           + concentrationPressure * 0.30
-           + smallObjectPressure * 0.20
-           + densityPressure * 0.15) * 100.0,
-            1);
-
         return new MemoryAnalysisProjectionResult(
             totalMemory,
             totalLohMemory,
@@ -150,12 +121,6 @@ internal static class MemoryAnalysisProjection
             top10Bytes,
             smallObjectCount,
             smallObjectBytes,
-            objectsPerMb,
-            memoryPressureScore,
-            0,
-            Math.Round(lohPressure * 100.0, 1),
-            Math.Round(concentrationPressure * 100.0, 1),
-            Math.Round(smallObjectPressure * 100.0, 1),
-            Math.Round(densityPressure * 100.0, 1));
+            objectsPerMb);
     }
 }

@@ -1,4 +1,5 @@
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 
@@ -722,8 +723,11 @@ internal sealed class InsightEngine
         if (allocPattern is null)
             return;
 
+        GCPressureLevel gcPressure = AllocationPatternPressureClassifier.ClassifyPressure(allocPattern);
+        double promotionPressureScore = AllocationPatternPressureClassifier.ComputePromotionPressureScore(allocPattern);
+
         // Standalone: GC pressure is Critical
-        if (allocPattern.GCPressure == GCPressureLevel.Critical)
+        if (gcPressure == GCPressureLevel.Critical)
         {
             bool threadImpact = threads is not null &&
                                 threads.AliveThreadCount > 0 &&
@@ -740,17 +744,17 @@ internal sealed class InsightEngine
                 Title: "Critical GC allocation pressure detected",
                 Evidence: $"Allocation pattern: {allocPattern.Profile}. " +
                           $"Gen0: {allocPattern.Gen0CountPct:F1}% of objects ({allocPattern.Gen0SizePct:F1}% of size). " +
-                          $"Promotion pressure score: {allocPattern.PromotionPressureScore:F2}.{crossNote}",
+                          $"Promotion pressure score: {promotionPressureScore:F2}.{crossNote}",
                 Recommendation: "Profile allocations with dotnet-trace. Reduce transient allocations with " +
                                 "object pooling (ArrayPool<T>, ObjectPool<T>), struct types, and Span<T>.",
                 Tags: ["gc-pressure", "allocation", "gen0"],
-                MetricValue: allocPattern.PromotionPressureScore,
+                MetricValue: promotionPressureScore,
                 MetricUnit: "score"));
             return;
         }
 
         // Standalone: GC pressure is High
-        if (allocPattern.GCPressure == GCPressureLevel.High)
+        if (gcPressure == GCPressureLevel.High)
         {
             findings.Add(new InsightFinding(
                 Analyzer: Source,
@@ -759,10 +763,10 @@ internal sealed class InsightEngine
                 Title: "High GC allocation pressure detected",
                 Evidence: $"Allocation pattern: {allocPattern.Profile}. " +
                           $"Gen0: {allocPattern.Gen0CountPct:F1}% of objects. " +
-                          $"Promotion pressure score: {allocPattern.PromotionPressureScore:F2}.",
+                          $"Promotion pressure score: {promotionPressureScore:F2}.",
                 Recommendation: "Consider object pooling and reduced short-lived allocations on hot paths.",
                 Tags: ["gc-pressure", "allocation", "gen0"],
-                MetricValue: allocPattern.PromotionPressureScore,
+                MetricValue: promotionPressureScore,
                 MetricUnit: "score"));
         }
     }

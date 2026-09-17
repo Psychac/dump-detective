@@ -22,7 +22,6 @@ public sealed record RootFinding(
     string TargetTypeName,
     ulong TargetAddress,
     ulong EstimatedRetainedBytes,
-    int SeverityScore,
     bool RetainedBytesIsExact = false);
 
 /// <summary>

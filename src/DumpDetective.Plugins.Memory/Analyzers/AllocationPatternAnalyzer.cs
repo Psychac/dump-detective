@@ -127,11 +127,6 @@ public sealed class AllocationPatternAnalyzer : IAnalyzer, IProducesAnalyzerDoma
         double lohSizePct = totalSize > 0 ? Math.Round(lohBytes * 100.0 / (double)totalSize, 2) : 0.0;
 
         AllocationProfile profile = ClassifyProfile(gen0CountPct, gen2CountPct, options.TransientClassificationThreshold);
-        // Pressure uses inverted gen0 (high Gen0 count = transient = low pressure), gen2 count%
-        // (reflects Gen2 collection frequency), and LOH size% (LOH count% is near-zero on typical heaps).
-        double pressureScore = ((100.0 - gen0CountPct) * 0.3) + (gen2CountPct * 0.5) + (lohSizePct * 0.2);
-        GCPressureLevel pressure = ClassifyPressure(pressureScore);
-        double promotionScore = gen2CountPct + (lohSizePct * 2.0);
 
         // Build a metric list -- CompositeScore is the only selection mode (D7, §11.2): it blends
         // Gen0%/Gen2 ratio/LOH size% into a signal aligned with "interesting allocation pattern,"
@@ -229,7 +224,7 @@ public sealed class AllocationPatternAnalyzer : IAnalyzer, IProducesAnalyzerDoma
             gen0CountPct, gen1CountPct, gen2CountPct, lohCountPct,
             gen0SizePct, gen1SizePct, gen2SizePct, lohSizePct,
             TotalManagedBytes: totalSize, Gen0Bytes: gen0Bytes, Gen1Bytes: gen1Bytes, Gen2Bytes: gen2Bytes, LohBytes: lohBytes,
-            profile, pressure, promotionScore,
+            profile,
             transient, shortish, longLived, topGen1Survivors,
             LohSizeBands: lohSizeBands,
             FinalizableTypeCount: finalizableTypeCount,
@@ -241,8 +236,6 @@ public sealed class AllocationPatternAnalyzer : IAnalyzer, IProducesAnalyzerDoma
         Gen0SizePct: 0, Gen1SizePct: 0, Gen2SizePct: 0, LohSizePct: 0,
         TotalManagedBytes: 0, Gen0Bytes: 0, Gen1Bytes: 0, Gen2Bytes: 0, LohBytes: 0,
         AllocationProfile.Mixed,
-        GCPressure: GCPressureLevel.Low,
-        PromotionPressureScore: 0,
         TopTransientTypes: [],
         TopShortishTypes: [],
         TopLongLivedTypes: [],
@@ -257,14 +250,6 @@ public sealed class AllocationPatternAnalyzer : IAnalyzer, IProducesAnalyzerDoma
         if (gen2Pct > 50.0) return AllocationProfile.Retained;
         if (gen0Pct > 50.0) return AllocationProfile.Steady;
         return AllocationProfile.Mixed;
-    }
-
-    private static GCPressureLevel ClassifyPressure(double score)
-    {
-        if (score > 70.0) return GCPressureLevel.Critical;
-        if (score > 45.0) return GCPressureLevel.High;
-        if (score > 20.0) return GCPressureLevel.Moderate;
-        return GCPressureLevel.Low;
     }
 
     public void Dispose() { }

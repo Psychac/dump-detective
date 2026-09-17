@@ -2,6 +2,7 @@ using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 
@@ -67,11 +68,11 @@ public sealed class MemoryAnalyzerRetypingCharacterizationTests
             result.Top10BytesPercent.Should().BeInRange(result.Top5BytesPercent, 100.0);
             result.SmallObjectCountPercent.Should().BeInRange(0.0, 100.0);
             result.SmallObjectBytesPercent.Should().BeInRange(0.0, 100.0);
-            result.MemoryPressureScore.Should().BeInRange(0.0, 100.0);
-            result.LohPressureScore.Should().BeInRange(0.0, 100.0);
-            result.ConcentrationPressureScore.Should().BeInRange(0.0, 100.0);
-            result.SmallObjectPressureScore.Should().BeInRange(0.0, 100.0);
-            result.DensityPressureScore.Should().BeInRange(0.0, 100.0);
+            MemoryPressureClassifier.ComputeMemoryPressureScore(result).Should().BeInRange(0.0, 100.0);
+            MemoryPressureClassifier.ComputeLohPressureScore(result).Should().BeInRange(0.0, 100.0);
+            MemoryPressureClassifier.ComputeConcentrationPressureScore(result).Should().BeInRange(0.0, 100.0);
+            MemoryPressureClassifier.ComputeSmallObjectPressureScore(result).Should().BeInRange(0.0, 100.0);
+            MemoryPressureClassifier.ComputeDensityPressureScore(result).Should().BeInRange(0.0, 100.0);
             result.LohFragmentationRatio.Should().BeInRange(0.0, 100.0);
 
             // At most TypesToWalkForRetainedSize types get an EstimatedRetainedBytes walk.

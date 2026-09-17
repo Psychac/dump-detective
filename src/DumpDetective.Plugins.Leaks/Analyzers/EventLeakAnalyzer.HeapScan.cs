@@ -530,19 +530,10 @@ public sealed partial class EventLeakAnalyzer : IHeapIndexScanParticipant, IRequ
         internal static int CalculateSeverity(
             bool isStatic, int subscriberCount, string rootHint, EventLeakOptions options,
             int publisherGeneration = -1, int duplicateCount = 0, bool isDisposedButSubscribed = false, bool hasLifetimeMismatch = false,
-            bool hasLowIncomingRefs = false)
-        {
-            int score = subscriberCount;
-            score += (int)(Math.Log2(subscriberCount + 1) * options.SeveritySubscriberLogScale);
-            if (isStatic) score += options.SeverityStaticPublisherBonus;
-            if (!string.IsNullOrEmpty(rootHint)) score += options.SeverityRootHintBonus;
-            if (publisherGeneration == 2) score += options.SeverityGen2PublisherBonus;
-            if (duplicateCount > 0) score += options.SeverityDuplicateSubscriptionBonus;
-            if (isDisposedButSubscribed) score += options.SeverityDisposedButSubscribedBonus;
-            if (hasLifetimeMismatch) score += options.SeverityLifetimeMismatchBonus;
-            if (hasLowIncomingRefs) score += options.SeverityLowIncomingRefsBonus;
-            return score;
-        }
+            bool hasLowIncomingRefs = false) =>
+            EventLeakSeverityClassifier.ComputeSeverity(
+                isStatic, subscriberCount, rootHint, EventLeakSeverityWeights.FromOptions(options),
+                publisherGeneration, duplicateCount, isDisposedButSubscribed, hasLifetimeMismatch, hasLowIncomingRefs);
 
         private static Dictionary<ulong, string> BuildRootHintMap(ClrHeap heap, IHeapAnalysisCache? cache)
         {

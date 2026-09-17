@@ -33,13 +33,24 @@ follow from it**:
 - **Its P0/P1 fixes should already be done** (Hang, Lock Graph, Finalizable Object, Segment
   Reservation, then Crash/Exception, Async Task). They're live correctness bugs and shouldn't wait
   for this migration. Every builder that stops constructing `SectionLeadFinding` inline is one
-  fewer judgment site to migrate here.
+  fewer judgment site to migrate here. **Done, shipped 2026-09-08.**
 - **Stage-1 purity (its Smell A) must land before or with step 1 below.** If domain results still
   carry `MemoryPressureScore`, `GCPressureLevel`, `HealthScore`, `SeverityScore`, `SuspicionScore`,
   or `LeakCandidateRecord.Severity` when analyzers begin emitting observations, judgment exists in
-  two places and this phase bakes in the drift it exists to remove.
+  two places and this phase bakes in the drift it exists to remove. **5 of 6 done, shipped
+  2026-09-17** (Hang, GC Root, Memory, Allocation Pattern, Event Leak — each now has a sole-owner
+  classifier; see the Smell A table in the audit doc for what stayed vs. what moved). **Leak
+  Candidate's `SuspicionScore`/`Severity`/`Classification` deliberately deferred to this phase**,
+  not fixed as a same-shaped extraction: it's cross-analyzer synthesis (needs `GCHandleDomainResult`
+  and `TimerLeakDomainResult`, not just its own raw facts) baked into stage 1 ahead of this phase's
+  machinery. Plan it as part of step 6 below (folding cross-analyzer synthesis into observation
+  rules) rather than bolting a classifier onto `LeakCandidateDomainResult` — see "Leak Candidate —
+  deferred to Phase 5" in the audit doc for the full reasoning.
 - **`ExplainableScoringEngine`** (Reporting layer) is a fourth independent scoring site and must be
-  reconciled here, not left standing.
+  reconciled here, not left standing. **Resolved, not a gate**: confirmed 2026-09-17 that it only
+  reads already-generated `FindingRecord.Severity`/`Category`/`Confidence` — a stage-3 executive
+  rollup over stage-2 output, not an independent copy of any stage-1 judgment. Already satisfies
+  this phase's exit criterion ("reuses synthesis outputs or is gone").
 
 ## Work
 
@@ -61,7 +72,12 @@ follow from it**:
    not thirty; if the count stays high, the measure semantics are under-specified and that's the
    real bug.
 6. **Fold in `InsightEngine`.** Its cross-analyzer synthesis becomes multi-observation synthesis
-   rules — same mechanism, wider match, no separate engine.
+   rules — same mechanism, wider match, no separate engine. **Also picks up Leak Candidate's
+   deferred Stage-1-purity fix here**: `SuspicionScore`/`Severity`/`Classification` join
+   `LeakCandidate`'s own per-type raw facts with `GCHandleDomainResult.TopPinnedTargetTypes` and
+   `TimerLeakDomainResult.LogicalTimerCount` as a synthesis rule, replacing the informal
+   cross-analyzer read `LeakCandidateAnalyzer` does inside its own stage 1 today. See the audit
+   doc's "Leak Candidate — deferred to Phase 5" section.
 6a. **Sections derive from observations, not from domain results.** This resolves the open question
    the earlier draft deferred, and it's the audit's central complaint: as long as
    `IAnalyzerSectionBuilder` reads `AnalyzerDomainResult` independently of the finding path, two

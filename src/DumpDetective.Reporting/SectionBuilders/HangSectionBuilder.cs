@@ -1,4 +1,5 @@
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
@@ -24,6 +25,8 @@ internal sealed class HangSectionBuilder : SectionBuilderBase, IAnalyzerSectionB
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (HangDomainResult)result;
+        int healthScore = HangHealthClassifier.ComputeHealthScore(d);
+        bool isStarved = HangHealthClassifier.IsStarved(d);
         var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
@@ -38,8 +41,8 @@ internal sealed class HangSectionBuilder : SectionBuilderBase, IAnalyzerSectionB
             ["waiting_threads"] = new NumericMetricValue(d.WaitingThreadCount, MetricUnit.Count),
             ["threads_holding_locks"] = new NumericMetricValue(d.ThreadsHoldingLocks, MetricUnit.Count),
             ["waiting_pct"] = new NumericMetricValue(d.WaitingPercent, MetricUnit.Percent, $"{d.WaitingPercent:F1}%"),
-            ["health_score"] = new NumericMetricValue(d.HealthScore, MetricUnit.Count),
-            ["is_starved"] = new TextMetricValue(d.IsStarved ? "Yes" : "No"),
+            ["health_score"] = new NumericMetricValue(healthScore, MetricUnit.Count),
+            ["is_starved"] = new TextMetricValue(isStarved ? "Yes" : "No"),
             ["queued_work_items"] = new NumericMetricValue(d.QueuedWorkItems, MetricUnit.Count),
             ["runtime_tp_data"] = new TextMetricValue(d.RuntimeThreadPoolDataAvailable ? "Available" : "Unavailable"),
         };
@@ -96,7 +99,7 @@ internal sealed class HangSectionBuilder : SectionBuilderBase, IAnalyzerSectionB
                     R("Retired worker threads", d.RuntimeRetiredWorkerThreads.ToString("N0")),
                     R("Runtime queue length", d.RuntimeQueueLength.HasValue ? d.RuntimeQueueLength.Value.ToString("N0") : "Unavailable"),
                     R("CPU utilization", $"{d.RuntimeCpuUtilization:N0}%"),
-                    R("Starvation flag", d.IsStarved ? "Yes" : "No"),
+                    R("Starvation flag", isStarved ? "Yes" : "No"),
                 }));
 
             blocks.Add(T(d.RuntimeQueueLength.HasValue

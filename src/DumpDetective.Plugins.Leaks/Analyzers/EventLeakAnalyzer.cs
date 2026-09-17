@@ -1,5 +1,6 @@
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
@@ -215,7 +216,10 @@ public sealed partial class EventLeakAnalyzer : IAnalyzer, IProducesAnalyzerDoma
             if (topLeakGroups[i].IsPropertyChangedEvent) propertyChangedEventLeakGroupCount++;
         }
 
-        var topLeakInstances = new List<EventLeakInstanceSnapshot>();
+        // (Snapshot, Severity): severity isn't a field on EventLeakInstanceSnapshot (Smell A fix,
+        // docs/refactor/analyzer-pipeline-stages-and-leadfinding-dedup.md) — carried alongside for
+        // sorting only, sourced from EventLeakInfo.SeverityScore before it's dropped.
+        var instanceBuilders = new List<(EventLeakInstanceSnapshot Snapshot, int Severity)>();
         for (int i = 0; i < groupedLeaks.Count; i++)
         {
             var g = groupedLeaks[i];
@@ -250,12 +254,11 @@ public sealed partial class EventLeakAnalyzer : IAnalyzer, IProducesAnalyzerDoma
                 foreach (var kvp in detailKey.OrderByDescending(kv => kv.Value.Count))
                     subDetails.Add(new SubscriberDetail(kvp.Key.Type, kvp.Key.Method, kvp.Value.Size, kvp.Value.Count, kvp.Value.SizeIsExact));
 
-                topLeakInstances.Add(new EventLeakInstanceSnapshot(
+                instanceBuilders.Add((new EventLeakInstanceSnapshot(
                     g.PublisherType,
                     g.EventFieldName,
                     g.IsStatic,
                     inst.PublisherAddress,
-                    inst.SeverityScore,
                     inst.SubscriberCount,
                     string.IsNullOrWhiteSpace(inst.RootHint) ? null : inst.RootHint,
                     subTypeList,
@@ -263,14 +266,18 @@ public sealed partial class EventLeakAnalyzer : IAnalyzer, IProducesAnalyzerDoma
                     DuplicateSubscriptionCount: inst.DuplicateSubscriptionCount,
                     IsDisposedButSubscribed: inst.IsDisposedButSubscribed,
                     HasLifetimeMismatch: inst.HasLifetimeMismatch,
-                    SubscriberDetails: subDetails));
+                    HasLowIncomingRefs: inst.HasLowIncomingRefs,
+                    SubscriberDetails: subDetails), inst.SeverityScore));
             }
         }
-        topLeakInstances.Sort((a, b) =>
+        instanceBuilders.Sort((a, b) =>
         {
-            int cmp = b.SeverityScore.CompareTo(a.SeverityScore);
-            return cmp != 0 ? cmp : b.SubscriberCount.CompareTo(a.SubscriberCount);
+            int cmp = b.Severity.CompareTo(a.Severity);
+            return cmp != 0 ? cmp : b.Snapshot.SubscriberCount.CompareTo(a.Snapshot.SubscriberCount);
         });
+        var topLeakInstances = new List<EventLeakInstanceSnapshot>(instanceBuilders.Count);
+        for (int i = 0; i < instanceBuilders.Count; i++)
+            topLeakInstances.Add(instanceBuilders[i].Snapshot);
 
         ulong totalEstimatedRetainedBytes = 0;
         for (int i = 0; i < topLeakGroups.Count; i++)
@@ -303,7 +310,8 @@ public sealed partial class EventLeakAnalyzer : IAnalyzer, IProducesAnalyzerDoma
             CleanPublisherTypeCount: cleanPublisherTypeCount,
             TimerEventLeakGroupCount: timerEventLeakGroupCount,
             PropertyChangedEventLeakGroupCount: propertyChangedEventLeakGroupCount,
-            SubscriberCountHistogram: subscriberCountHistogram);
+            SubscriberCountHistogram: subscriberCountHistogram,
+            ScoringWeights: EventLeakSeverityWeights.FromOptions(options));
     }
 
     /// <summary>
@@ -400,11 +408,11 @@ public sealed partial class EventLeakAnalyzer : IAnalyzer, IProducesAnalyzerDoma
         return entries;
     }
 
-    private static List<EvidenceSignal> BuildInstanceSignals(EventLeakInstanceSnapshot inst)
+    private static List<EvidenceSignal> BuildInstanceSignals(EventLeakInstanceSnapshot inst, EventLeakSeverityWeights weights)
     {
         var signals = new List<EvidenceSignal>
         {
-            new("SeverityScore", "Composite leak severity score", inst.SeverityScore)
+            new("SeverityScore", "Composite leak severity score", EventLeakSeverityClassifier.ComputeSeverity(inst, weights))
         };
         if (inst.DuplicateSubscriptionCount > 0)
             signals.Add(new EvidenceSignal("DuplicateSubscriptionCount", "Subscribers registered more than once", inst.DuplicateSubscriptionCount));
@@ -435,6 +443,7 @@ public sealed partial class EventLeakAnalyzer : IAnalyzer, IProducesAnalyzerDoma
 
         var budgetSw = System.Diagnostics.Stopwatch.StartNew();
         long maxMs = Math.Max(0, options.MaxEvidenceEnrichmentMs);
+        EventLeakSeverityWeights weights = EventLeakSeverityWeights.FromOptions(options);
 
         for (int i = 0; i < topLeakInstances.Count; i++)
         {
@@ -442,7 +451,7 @@ public sealed partial class EventLeakAnalyzer : IAnalyzer, IProducesAnalyzerDoma
 
             EventLeakInstanceSnapshot inst = topLeakInstances[i];
             string? sampleSubscriberHint = string.IsNullOrWhiteSpace(inst.RootHint) ? null : inst.RootHint;
-            List<EvidenceSignal> signals = BuildInstanceSignals(inst);
+            List<EvidenceSignal> signals = BuildInstanceSignals(inst, weights);
 
             // Global wall-clock budget exhausted: keep RootHint only, marked distinctly from
             // TryFindRootPath's own (BFS-internal) searchTruncated meaning.

@@ -1,4 +1,5 @@
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
@@ -47,11 +48,14 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
         if (gcGen is not null)
             keyMetrics["gen2_pct"] = new NumericMetricValue(gcGen.Gen2Pct, MetricUnit.Percent, gcGen.Gen2Pct.ToString("F1") + "%");
         if (allocation is not null)
-            keyMetrics["gc_pressure"] = new TextMetricValue(allocation.GCPressure.ToString());
+            keyMetrics["gc_pressure"] = new TextMetricValue(AllocationPatternPressureClassifier.ClassifyPressure(allocation).ToString());
         if (leakCandidates is not null)
             keyMetrics["leak_candidates"] = new NumericMetricValue(leakCandidates.TotalCandidates, MetricUnit.Count, leakCandidates.TotalCandidates.ToString("N0"));
         if (hang is not null)
-            keyMetrics["hang_score"] = new NumericMetricValue(hang.HealthScore, MetricUnit.Count, hang.HealthScore.ToString("N0"));
+        {
+            int hangHealthScore = HangHealthClassifier.ComputeHealthScore(hang);
+            keyMetrics["hang_score"] = new NumericMetricValue(hangHealthScore, MetricUnit.Count, hangHealthScore.ToString("N0"));
+        }
         if (threads is not null)
             keyMetrics["blocked_threads"] = new NumericMetricValue(threads.BlockedThreadCount, MetricUnit.Count, threads.BlockedThreadCount.ToString("N0"));
         if (lockGraph is not null)

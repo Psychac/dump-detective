@@ -26,7 +26,6 @@ public sealed class EventLeakSectionBuilderTests
                     EventFieldName: "MyEvent",
                     IsStatic: true,
                     PublisherAddress: 0,
-                    SeverityScore: 90,
                     SubscriberCount: 3,
                     RootHint: rootHint,
                     SubscriberTypes: [new SubscriberTypeCount("App.MySubscriber", 3)],
@@ -90,7 +89,6 @@ public sealed class EventLeakSectionBuilderTests
                     EventFieldName: "MyEvent",
                     IsStatic: false,
                     PublisherAddress: 0x1000,
-                    SeverityScore: 10,
                     SubscriberCount: 2,
                     RootHint: null,
                     SubscriberDetails:
@@ -125,7 +123,7 @@ public sealed class EventLeakSectionBuilderTests
                 PublisherType: $"App.Publisher{i}",
                 EventFieldName: "MyEvent",
                 IsStatic: false,
-                SeverityScore: i,
+                MaxSeverityScore: i,
                 InstanceCount: 1,
                 TotalSubscribers: 1,
                 AverageSubscribers: 1,
@@ -139,7 +137,6 @@ public sealed class EventLeakSectionBuilderTests
                 EventFieldName: "MyEvent",
                 IsStatic: false,
                 PublisherAddress: (ulong)(0x1000 + i),
-                SeverityScore: i,
                 SubscriberCount: 1,
                 RootHint: null))
             .ToList();
@@ -176,7 +173,6 @@ public sealed class EventLeakSectionBuilderTests
                     EventFieldName: "MyEvent",
                     IsStatic: false,
                     PublisherAddress: 0x1000,
-                    SeverityScore: 10,
                     SubscriberCount: 1,
                     RootHint: null)
             ],

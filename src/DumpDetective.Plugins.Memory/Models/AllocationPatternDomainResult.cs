@@ -37,8 +37,6 @@ internal sealed record AllocationPatternDomainResult(
     ulong Gen2Bytes,
     ulong LohBytes,
     AllocationProfile Profile,
-    GCPressureLevel GCPressure,
-    double PromotionPressureScore,
     IReadOnlyList<TypeAllocationProfile> TopTransientTypes,
     IReadOnlyList<TypeAllocationProfile> TopShortishTypes,
     IReadOnlyList<TypeAllocationProfile> TopLongLivedTypes,

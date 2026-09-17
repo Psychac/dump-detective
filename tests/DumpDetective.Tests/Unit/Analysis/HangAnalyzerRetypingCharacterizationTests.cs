@@ -3,6 +3,7 @@ using DumpDetective.Analysis.Indexing;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.SdkBridge;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Identity;
 
@@ -139,7 +140,7 @@ public sealed class HangAnalyzerRetypingCharacterizationTests
         result.RuntimeMaxThreads.Should().Be(32);
         result.RuntimeActiveWorkerThreads.Should().Be(32);
         result.RuntimeQueueLength.Should().Be(50);
-        result.IsStarved.Should().BeTrue("saturated (active >= max) with a non-empty queue");
+        HangHealthClassifier.IsStarved(result).Should().BeTrue("saturated (active >= max) with a non-empty queue");
     }
 
     [Fact]
@@ -148,7 +149,7 @@ public sealed class HangAnalyzerRetypingCharacterizationTests
         HangDomainResult result = await Analyze(threadPool: new FakeRuntimeThreadPoolQuery());
 
         result.RuntimeThreadPoolDataAvailable.Should().BeFalse();
-        result.IsStarved.Should().BeFalse();
+        HangHealthClassifier.IsStarved(result).Should().BeFalse();
     }
 
     [Fact]
@@ -159,7 +160,7 @@ public sealed class HangAnalyzerRetypingCharacterizationTests
 
         HangDomainResult result = await Analyze(threads: threads);
 
-        result.HealthScore.Should().Be(100);
+        HangHealthClassifier.ComputeHealthScore(result).Should().Be(100);
     }
 
     [Fact]
@@ -171,7 +172,7 @@ public sealed class HangAnalyzerRetypingCharacterizationTests
         HangDomainResult result = await Analyze(threads: threads);
 
         // 100% of alive threads waiting -- >= 80% bucket, -40 points.
-        result.HealthScore.Should().Be(60);
+        HangHealthClassifier.ComputeHealthScore(result).Should().Be(60);
     }
 
     [Fact]
@@ -182,7 +183,7 @@ public sealed class HangAnalyzerRetypingCharacterizationTests
         result.TotalAliveThreads.Should().Be(0);
         result.TotalTasks.Should().Be(0);
         result.WaitingPercent.Should().Be(0.0);
-        result.HealthScore.Should().Be(100);
+        HangHealthClassifier.ComputeHealthScore(result).Should().Be(100);
     }
 
     [Fact]

@@ -4,6 +4,7 @@ using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Abstractions;
 
 using FluentAssertions;
@@ -93,7 +94,12 @@ public sealed class GCRootAnalyzerRealDumpTests
             result.ByKind[i].EstimatedRetainedBytes.Should().BeLessThanOrEqualTo(result.ByKind[i - 1].EstimatedRetainedBytes);
 
         for (int i = 1; i < result.TopRootsBySeverity.Count; i++)
-            result.TopRootsBySeverity[i].SeverityScore.Should().BeLessThanOrEqualTo(result.TopRootsBySeverity[i - 1].SeverityScore);
+        {
+            RootFinding prev = result.TopRootsBySeverity[i - 1];
+            RootFinding curr = result.TopRootsBySeverity[i];
+            GCRootSeverityClassifier.ComputeSeverity(curr.EstimatedRetainedBytes, curr.RootKind).Should()
+                .BeLessThanOrEqualTo(GCRootSeverityClassifier.ComputeSeverity(prev.EstimatedRetainedBytes, prev.RootKind));
+        }
 
         foreach (RootFinding finding in result.TopRootsBySeverity)
         {

@@ -230,8 +230,6 @@ namespace DumpDetective.Analysis.Analyzers.Threads
                 threadPoolInfo.RuntimeCpuUtilization = info.CpuUtilization;
             }
 
-            analysis.HealthScore = ComputeHealthScore(analysis, options);
-
             // ── Build output ──────────────────────────────────────────────────────────────
             var waitCategoryBreakdown = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (WaitingThreadInfo wt in analysis.WaitingThreads)
@@ -282,57 +280,9 @@ namespace DumpDetective.Analysis.Analyzers.Threads
                 threadPoolInfo.RuntimeRetiredWorkerThreads,
                 threadPoolInfo.RuntimeQueueLength,
                 threadPoolInfo.RuntimeCpuUtilization,
-                threadPoolInfo.RuntimeInitialized &&
-                    threadPoolInfo.RuntimeMaxThreads > 0 &&
-                    threadPoolInfo.RuntimeQueueLength.GetValueOrDefault() > 0 &&
-                    threadPoolInfo.RuntimeActiveWorkerThreads >= threadPoolInfo.RuntimeMaxThreads,
-                analysis.HealthScore,
+                options.HighThreadPoolThreshold,
                 waitingThreadSnapshots,
                 continuationTypes);
-        }
-
-        /// <summary>
-        /// Produces a 0-100 composite score. Each penalty maps to a named, observable signal
-        /// so the score degrades predictably — not arbitrarily.
-        /// </summary>
-        private static int ComputeHealthScore(HangAnalysis analysis, HangAnalysisOptions options)
-        {
-            int score = 100;
-
-            // Waiting-thread pressure (up to -40)
-            double waitingPct = analysis.TotalAliveThreads == 0 ? 0
-                : analysis.WaitingThreads.Count * 100.0 / analysis.TotalAliveThreads;
-
-            if (waitingPct >= 80) score -= 40;
-            else if (waitingPct >= 50) score -= 25;
-            else if (waitingPct >= 30) score -= 10;
-
-            // Probable deadlock candidates: monitor-wait + holding a lock (up to -30)
-            int circularCandidates = 0;
-            foreach (WaitingThreadInfo t in analysis.WaitingThreads)
-            {
-                if (t.WaitType == WaitType.MonitorWait && t.LockCount > 0)
-                    circularCandidates++;
-            }
-            score -= Math.Min(circularCandidates * 15, 30);
-
-            // Thread pool health (up to -15)
-            ThreadPoolAnalysis tp = analysis.ThreadPoolInfo;
-            bool saturated = tp.RuntimeMaxThreads > 0 && tp.RuntimeActiveWorkerThreads >= tp.RuntimeMaxThreads;
-            bool starvation = saturated && tp.RuntimeCpuUtilization < 20;
-            if (starvation) score -= 15;
-            else if (saturated) score -= 10;
-
-            // Task backpressure (-5)
-            if (tp.PendingTasks > options.HighThreadPoolThreshold) score -= 5;
-
-            // Unobserved task faults (-5)
-            if (tp.FaultedTasks > 0) score -= 5;
-
-            // Async continuation backlog (-5)
-            if (analysis.TotalContinuations > 1000) score -= 5;
-
-            return Math.Max(0, Math.Min(100, score));
         }
 
         private static WaitingThreadInfo? DetectWaitPattern(RuntimeThreadRef thread, ThreadStackFrameRef topFrame)
@@ -429,7 +379,6 @@ namespace DumpDetective.Analysis.Analyzers.Threads
     {
         public int TotalAliveThreads { get; set; }
         public int ThreadsHoldingLocks { get; set; }
-        public int HealthScore { get; set; }
         public List<WaitingThreadInfo> WaitingThreads { get; set; } = new();
         public ThreadPoolAnalysis ThreadPoolInfo { get; set; } = new();
         public int TotalContinuations { get; set; }

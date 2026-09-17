@@ -4,6 +4,7 @@ using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Analyzers.Memory;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Abstractions;
 
 using FluentAssertions;
@@ -68,7 +69,7 @@ public sealed class AllocationPatternAnalyzerRealDumpTests
             t.TotalSize.Should().BeGreaterThan(0UL);
 
         _output.WriteLine(
-            $"TotalManagedBytes={result.TotalManagedBytes:N0} Profile={result.Profile} GCPressure={result.GCPressure} " +
+            $"TotalManagedBytes={result.TotalManagedBytes:N0} Profile={result.Profile} GCPressure={AllocationPatternPressureClassifier.ClassifyPressure(result)} " +
             $"Gen0%={result.Gen0CountPct} Gen2%={result.Gen2CountPct} Loh%={result.LohCountPct} " +
             $"Transient={result.TopTransientTypes.Count} Shortish={result.TopShortishTypes.Count} LongLived={result.TopLongLivedTypes.Count} " +
             $"FinalizableTypeCount={result.FinalizableTypeCount} LohSizeBands={(result.LohSizeBands?.Count ?? 0)}");

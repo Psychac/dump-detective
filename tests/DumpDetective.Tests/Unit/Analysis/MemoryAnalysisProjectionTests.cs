@@ -10,7 +10,7 @@ namespace DumpDetective.Tests.Unit.Analysis;
 public sealed class MemoryAnalysisProjectionTests
 {
     [Fact]
-    public void Build_ShouldReturnAllTypesBySize_AndComputePressureScore()
+    public void Build_ShouldReturnAllTypesBySize_AndRawAggregates()
     {
         Dictionary<string, CachedTypeStatistics> typeStats = new(StringComparer.Ordinal)
         {
@@ -27,12 +27,7 @@ public sealed class MemoryAnalysisProjectionTests
         result.AllTypesBySize[0].TypeName.Should().Be("Gamma");
         result.AllTypesBySize[1].TypeName.Should().Be("Beta");
         result.AllTypesBySize[2].TypeName.Should().Be("Alpha");
-        result.MemoryPressureScore.Should().BeGreaterThan(0);
         result.Top5Bytes.Should().Be(111_000);
         result.SmallObjectCount.Should().Be(100);
-        result.LohPressureScore.Should().BeGreaterThan(0);
-        result.ConcentrationPressureScore.Should().Be(100);
-        result.SmallObjectPressureScore.Should().BeGreaterThan(0);
-        result.DensityPressureScore.Should().BeGreaterThan(0);
     }
 }

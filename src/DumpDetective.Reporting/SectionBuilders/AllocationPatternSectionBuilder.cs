@@ -1,4 +1,5 @@
 ﻿using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Models;
 using System.Linq;
 using DumpDetective.Reporting.Abstractions;
@@ -22,10 +23,13 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
         var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
+        GCPressureLevel gcPressure = AllocationPatternPressureClassifier.ClassifyPressure(d);
+        double promotionPressureScore = AllocationPatternPressureClassifier.ComputePromotionPressureScore(d);
+
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            ["gc_pressure"] = new EnumMetricValue(d.GCPressure.ToString(), nameof(GCPressureLevel)),
-            ["promotion_pressure"] = new NumericMetricValue(d.PromotionPressureScore, MetricUnit.Custom, $"{d.PromotionPressureScore:F1}"),
+            ["gc_pressure"] = new EnumMetricValue(gcPressure.ToString(), nameof(GCPressureLevel)),
+            ["promotion_pressure"] = new NumericMetricValue(promotionPressureScore, MetricUnit.Custom, $"{promotionPressureScore:F1}"),
             ["profile"] = new EnumMetricValue(d.Profile.ToString(), nameof(AllocationProfile)),
             ["total_managed_bytes"] = new NumericMetricValue(d.TotalManagedBytes, MetricUnit.Bytes, FormatBytes(d.TotalManagedBytes)),
             ["gen0_count_pct"] = new NumericMetricValue(d.Gen0CountPct, MetricUnit.Percent, $"{d.Gen0CountPct:F1}%"),
@@ -44,7 +48,7 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
             ["finalizable_bytes"] = new NumericMetricValue(d.FinalizableBytes, MetricUnit.Bytes, FormatBytes(d.FinalizableBytes)),
         };
 
-        blocks.Add(T(d.GCPressure switch
+        blocks.Add(T(gcPressure switch
         {
             GCPressureLevel.Critical => "Critical GC pressure. Large Gen2/LOH retention is already present.",
             GCPressureLevel.High     => "High GC pressure. Gen2 retention is elevated and should be investigated.",
@@ -63,7 +67,7 @@ internal sealed class AllocationPatternSectionBuilder : SectionBuilderBase, IAna
         compactTables.Add(STCompact(
             "Classification summary",
             new[] { CH("Signal"), CH("Value") },
-            new[] { R("Allocation profile", d.Profile.ToString()), R("GC pressure level", d.GCPressure.ToString()) }));
+            new[] { R("Allocation profile", d.Profile.ToString()), R("GC pressure level", gcPressure.ToString()) }));
 
         if (d.LohSizeBands is { Count: > 0 })
         {

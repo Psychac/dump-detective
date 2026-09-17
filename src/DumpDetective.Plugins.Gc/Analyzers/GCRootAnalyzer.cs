@@ -1,5 +1,6 @@
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
@@ -159,8 +160,6 @@ public sealed class GCRootAnalyzer :
             bool retainedBytesIsExact = hasExactDominator && dominatorQuery!.TryGetRetainedSize(root.TargetAddress, out exactRetainedBytes);
             ulong retainedBytes = retainedBytesIsExact ? exactRetainedBytes : targetObj.Size;
 
-            int severity = ComputeSeverity(retainedBytes, kind);
-
             string? fieldDescription = null;
             if (kind is "StaticVar" or "ThreadStaticVar" && root.OwnerTypeName is not null && root.FieldName is not null)
             {
@@ -176,7 +175,6 @@ public sealed class GCRootAnalyzer :
                 TargetTypeName: targetObj.TypeDisplayName,
                 TargetAddress: root.TargetAddress,
                 EstimatedRetainedBytes: retainedBytes,
-                SeverityScore: severity,
                 RetainedBytesIsExact: retainedBytesIsExact));
         }
 
@@ -213,7 +211,8 @@ public sealed class GCRootAnalyzer :
         }
         byKind.Sort(static (a, b) => b.EstimatedRetainedBytes.CompareTo(a.EstimatedRetainedBytes));
 
-        findings.Sort(static (a, b) => b.SeverityScore.CompareTo(a.SeverityScore));
+        findings.Sort(static (a, b) => GCRootSeverityClassifier.ComputeSeverity(b.EstimatedRetainedBytes, b.RootKind)
+            .CompareTo(GCRootSeverityClassifier.ComputeSeverity(a.EstimatedRetainedBytes, a.RootKind)));
 
         // Owner-method attribution for Stack roots, scoped to the severity-ranked top-N only — the
         // per-thread frame walk this triggers on first use is too costly to run for every Stack
@@ -317,30 +316,6 @@ public sealed class GCRootAnalyzer :
             RootOwnedSubgraphs: Array.Empty<RootOwnedSubgraphFinding>(),
             SubgraphWalkCapped: false,
             SubgraphWalkCappedCount: 0);
-
-    private static int ComputeSeverity(ulong retainedBytes, string kind)
-    {
-        int baseScore = retainedBytes switch
-        {
-            >= 100_000_000 => 100,
-            >= 10_000_000 => 80,
-            >= 1_000_000 => 60,
-            >= 100_000 => 40,
-            >= 10_000 => 20,
-            _ => 5
-        };
-
-        int multiplier = kind switch
-        {
-            "StrongHandle" => 3,
-            "FinalizerQueue" => 2,
-            "PinnedHandle" => 2,
-            "Stack" => 1,
-            _ => 1
-        };
-
-        return Math.Min(baseScore * multiplier, 300);
-    }
 
     /// <summary>Port of the pre-retyping <c>DominatorRetainedSetAggregator.ComputeExclusiveRetainedBytes</c>
     /// against <see cref="IHeapDominatorQuery"/> instead of the dump-internal

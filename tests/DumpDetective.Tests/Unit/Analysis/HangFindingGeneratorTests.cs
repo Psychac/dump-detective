@@ -73,6 +73,5 @@ public sealed class HangFindingGeneratorTests
         RuntimeRetiredWorkerThreads: 0,
         RuntimeQueueLength: null,
         RuntimeCpuUtilization: 0,
-        IsStarved: false,
-        HealthScore: 80);
+        HighThreadPoolThreshold: 100);
 }

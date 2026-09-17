@@ -1,5 +1,8 @@
+using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
+using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
@@ -69,6 +72,7 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
         var d = (EventLeakDomainResult)result;
         var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
+        EventLeakSeverityWeights weights = d.ScoringWeights ?? EventLeakSeverityWeights.FromOptions(new());
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
@@ -177,7 +181,7 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     Cell(FormatHelper.TruncateString(g.PublisherType, 70)),
                     Cell(FormatHelper.TruncateString(g.EventFieldName, 40)),
                     Cell(g.IsStatic ? "Yes" : "No"),
-                    Cell($"{g.SeverityScore:N0}", g.SeverityScore),
+                    Cell($"{g.MaxSeverityScore:N0}", g.MaxSeverityScore),
                     Cell($"{g.InstanceCount:N0}", g.InstanceCount),
                     Cell($"{g.TotalSubscribers:N0}", g.TotalSubscribers),
                     Cell($"{g.AverageSubscribers:F1}"),
@@ -200,12 +204,13 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
             for (int i = 0; i < leakInstancesForTable.Count; i++)
             {
                 var inst = leakInstancesForTable[i];
+                int instSeverity = EventLeakSeverityClassifier.ComputeSeverity(inst, weights);
                 instRows.Add(new TableRow([
                     Cell(FormatHelper.TruncateString(inst.PublisherType, 70)),
                     Cell(FormatHelper.TruncateString(inst.EventFieldName, 40)),
                     Cell(inst.IsStatic ? "Yes" : "No"),
                     Cell(FormatPublisherAddress(inst.PublisherAddress, inst.IsStatic)),
-                    Cell($"{inst.SeverityScore:N0}", inst.SeverityScore),
+                    Cell($"{instSeverity:N0}", instSeverity),
                     Cell($"{inst.SubscriberCount:N0}", inst.SubscriberCount),
                     Cell(FormatRootHintDisplay(inst) ?? "-"),
                     Cell(FormatPublisherGeneration(inst.PublisherGeneration, inst.IsStatic)),
@@ -245,7 +250,7 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     PublisherType:               group.PublisherType,
                     EventFieldName:              group.EventFieldName,
                     IsStatic:                    group.IsStatic,
-                    SeverityScore:               group.SeverityScore,
+                    SeverityScore:               group.MaxSeverityScore,
                     InstanceCount:               group.InstanceCount,
                     TotalSubscribers:            group.TotalSubscribers,
                     AverageSubscribers:          group.AverageSubscribers,
@@ -279,7 +284,7 @@ internal sealed class EventLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     EventFieldName:           inst.EventFieldName,
                     IsStatic:                 inst.IsStatic,
                     PublisherAddress:         FormatPublisherAddress(inst.PublisherAddress, inst.IsStatic),
-                    SeverityScore:            inst.SeverityScore,
+                    SeverityScore:            EventLeakSeverityClassifier.ComputeSeverity(inst, weights),
                     SubscriberCount:          inst.SubscriberCount,
                     RootHint:                 FormatRootHintDisplay(inst),
                     PublisherGeneration:      inst.PublisherGeneration,

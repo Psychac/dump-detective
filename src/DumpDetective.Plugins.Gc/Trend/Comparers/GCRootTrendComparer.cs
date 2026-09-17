@@ -1,4 +1,5 @@
-﻿using DumpDetective.Core.Models;
+﻿using DumpDetective.Analysis.Utilities;
+using DumpDetective.Core.Models;
 
 namespace DumpDetective.Analysis.Trend.Comparers
 {
@@ -12,7 +13,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
             var metrics = new List<AnalyzerMetric>
             {
                 new("gcroot.total.roots",           null, r.TotalRoots,                     "roots",  MetricTrendDirection.Neutral),
-                new("gcroot.top.severity.score",    null, r.TopRootsBySeverity.Count > 0 ? r.TopRootsBySeverity[0].SeverityScore : 0, "score", MetricTrendDirection.HigherIsWorse),
+                new("gcroot.top.severity.score",    null, r.TopRootsBySeverity.Count > 0 ? GCRootSeverityClassifier.ComputeSeverity(r.TopRootsBySeverity[0].EstimatedRetainedBytes, r.TopRootsBySeverity[0].RootKind) : 0, "score", MetricTrendDirection.HigherIsWorse),
                 new("gcroot.path.capped.count",     null, r.SubgraphWalkCappedCount,           "paths",  MetricTrendDirection.Neutral),
                 new("gcroot.strong.handle.count",   null, GetKindCount(r, "StrongHandle"),   "roots",  MetricTrendDirection.HigherIsWorse),
                 new("gcroot.finalizer.count",       null, GetKindCount(r, "FinalizerQueue"), "roots",  MetricTrendDirection.HigherIsWorse),
@@ -23,7 +24,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
             foreach (RootFinding root in r.TopRootsBySeverity)
             {
                 metrics.Add(new("gcroot.top.target.bytes", root.TargetTypeName, root.EstimatedRetainedBytes, "bytes", MetricTrendDirection.HigherIsWorse));
-                metrics.Add(new("gcroot.top.target.severity", root.TargetTypeName, root.SeverityScore, "score", MetricTrendDirection.HigherIsWorse));
+                metrics.Add(new("gcroot.top.target.severity", root.TargetTypeName, GCRootSeverityClassifier.ComputeSeverity(root.EstimatedRetainedBytes, root.RootKind), "score", MetricTrendDirection.HigherIsWorse));
             }
 
             return metrics;

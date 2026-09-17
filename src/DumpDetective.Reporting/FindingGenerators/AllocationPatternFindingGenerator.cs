@@ -1,4 +1,5 @@
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
@@ -15,10 +16,13 @@ internal sealed class AllocationPatternFindingGenerator : IFindingGenerator
     {
         if (result is not AllocationPatternDomainResult r) return [];
 
-        // Suppress findings at Low pressure (reduces noise)
-        if (r.GCPressure == GCPressureLevel.Low) return [];
+        GCPressureLevel gcPressure = AllocationPatternPressureClassifier.ClassifyPressure(r);
+        double promotionPressureScore = AllocationPatternPressureClassifier.ComputePromotionPressureScore(r);
 
-        FindingSeverity severity = r.GCPressure switch
+        // Suppress findings at Low pressure (reduces noise)
+        if (gcPressure == GCPressureLevel.Low) return [];
+
+        FindingSeverity severity = gcPressure switch
         {
             GCPressureLevel.Critical => FindingSeverity.Critical,
             GCPressureLevel.High => FindingSeverity.Warning,
@@ -39,9 +43,9 @@ internal sealed class AllocationPatternFindingGenerator : IFindingGenerator
             $"Gen0: {r.Gen0CountPct:F1}% obj / {r.Gen0SizePct:F1}% bytes, " +
             $"Gen2: {r.Gen2CountPct:F1}% obj / {r.Gen2SizePct:F1}% bytes, " +
             $"LOH: {r.LohSizePct:F1}% bytes. " +
-            $"GC pressure: {r.GCPressure} (score: {r.PromotionPressureScore:F1}).{topLongLivedType}{finalizableNote}";
+            $"GC pressure: {gcPressure} (score: {promotionPressureScore:F1}).{topLongLivedType}{finalizableNote}";
 
-        string recommendation = r.GCPressure switch
+        string recommendation = gcPressure switch
         {
             GCPressureLevel.Critical =>
                 "Critical GC pressure. Large Gen2 and/or LOH accumulation detected. Investigate long-lived objects and finalizable types.",
@@ -59,11 +63,11 @@ internal sealed class AllocationPatternFindingGenerator : IFindingGenerator
                 Analyzer: AnalyzerName,
                 Category: "GC",
                 Severity: severity,
-                Title: $"GC allocation pattern: {r.Profile} ({r.GCPressure} pressure)",
+                Title: $"GC allocation pattern: {r.Profile} ({gcPressure} pressure)",
                 Evidence: evidence,
                 Recommendation: recommendation,
                 Tags: ["gc", "allocation", "gen2", "pressure"],
-                MetricValue: r.PromotionPressureScore,
+                MetricValue: promotionPressureScore,
                 MetricUnit: "pressure-score")
         ];
     }

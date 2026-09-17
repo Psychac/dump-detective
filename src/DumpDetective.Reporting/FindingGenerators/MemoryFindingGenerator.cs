@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
@@ -14,19 +15,20 @@ internal sealed class MemoryFindingGenerator : IFindingGenerator
         if (result is not MemoryDomainResult r) return [];
 
         var findings = new List<InsightFinding>();
+        double memoryPressureScore = MemoryPressureClassifier.ComputeMemoryPressureScore(r);
 
         // Finding 1: High memory pressure score (≥ 70)
-        if (r.MemoryPressureScore >= 70)
+        if (memoryPressureScore >= 70)
         {
             findings.Add(new InsightFinding(
                 Analyzer: AnalyzerName,
                 Category: "Memory",
                 Severity: FindingSeverity.Warning,
                 Title: "High memory pressure score",
-                Evidence: $"Memory pressure score: {r.MemoryPressureScore:F1}/100. Total heap: {FormatBytes(r.TotalBytes)}; LOH share: {r.LohPercent:F1}%; top-5 concentration: {r.Top5BytesPercent:F1}%.",
+                Evidence: $"Memory pressure score: {memoryPressureScore:F1}/100. Total heap: {FormatBytes(r.TotalBytes)}; LOH share: {r.LohPercent:F1}%; top-5 concentration: {r.Top5BytesPercent:F1}%.",
                 Recommendation: "Heap shows elevated memory pressure from multiple dimensions. Review dominant type retention patterns and consider heap size baseline.",
                 Tags: ["memory", "heap", "pressure"],
-                MetricValue: r.MemoryPressureScore,
+                MetricValue: memoryPressureScore,
                 MetricUnit: "pressure score"));
         }
 
@@ -101,10 +103,10 @@ internal sealed class MemoryFindingGenerator : IFindingGenerator
                 Category: "Memory",
                 Severity: FindingSeverity.Info,
                 Title: "Managed heap memory snapshot",
-                Evidence: $"Total heap: {FormatBytes(r.TotalBytes)}; LOH: {r.LohPercent:F1}% ({FormatBytes(r.LohBytes)}); unique types: {r.UniqueTypes:N0}; pressure score: {r.MemoryPressureScore:F1}/100.",
+                Evidence: $"Total heap: {FormatBytes(r.TotalBytes)}; LOH: {r.LohPercent:F1}% ({FormatBytes(r.LohBytes)}); unique types: {r.UniqueTypes:N0}; pressure score: {memoryPressureScore:F1}/100.",
                 Recommendation: "Heap composition appears within expected range for this snapshot.",
                 Tags: ["memory", "heap"],
-                MetricValue: r.MemoryPressureScore,
+                MetricValue: memoryPressureScore,
                 MetricUnit: "pressure score"));
         }
 

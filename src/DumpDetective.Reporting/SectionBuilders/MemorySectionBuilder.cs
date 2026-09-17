@@ -1,4 +1,5 @@
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Abstractions;
@@ -24,9 +25,15 @@ internal sealed class MemorySectionBuilder : SectionBuilderBase, IAnalyzerSectio
         var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
+        double memoryPressureScore = MemoryPressureClassifier.ComputeMemoryPressureScore(d);
+        double lohPressureScore = MemoryPressureClassifier.ComputeLohPressureScore(d);
+        double concentrationPressureScore = MemoryPressureClassifier.ComputeConcentrationPressureScore(d);
+        double smallObjectPressureScore = MemoryPressureClassifier.ComputeSmallObjectPressureScore(d);
+        double densityPressureScore = MemoryPressureClassifier.ComputeDensityPressureScore(d);
+
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
-            ["memory_pressure_score"] = new NumericMetricValue(d.MemoryPressureScore, MetricUnit.Custom, d.MemoryPressureScore.ToString("F1")),
+            ["memory_pressure_score"] = new NumericMetricValue(memoryPressureScore, MetricUnit.Custom, memoryPressureScore.ToString("F1")),
             ["total_bytes"] = new NumericMetricValue((double)d.TotalBytes, MetricUnit.Bytes, FormatHelper.FormatBytes(d.TotalBytes)),
             ["total_objects"] = new NumericMetricValue(d.TotalObjects, MetricUnit.Count),
             ["unique_types"] = new NumericMetricValue(d.UniqueTypes, MetricUnit.Count),
@@ -36,16 +43,14 @@ internal sealed class MemorySectionBuilder : SectionBuilderBase, IAnalyzerSectio
             ["top5_share"] = new NumericMetricValue(d.Top5BytesPercent, MetricUnit.Percent, $"{d.Top5BytesPercent:F1}%"),
             ["small_object_pct"] = new NumericMetricValue(d.SmallObjectCountPercent, MetricUnit.Percent, $"{d.SmallObjectCountPercent:F1}%"),
             ["objects_per_mb"] = new NumericMetricValue(d.ObjectsPerMb, MetricUnit.Custom, d.ObjectsPerMb.ToString("F1")),
-            ["loh_pressure_score"] = new NumericMetricValue(d.LohPressureScore, MetricUnit.Custom, d.LohPressureScore.ToString("F1")),
-            ["concentration_pressure_score"] = new NumericMetricValue(d.ConcentrationPressureScore, MetricUnit.Custom, d.ConcentrationPressureScore.ToString("F1")),
-            ["small_object_pressure_score"] = new NumericMetricValue(d.SmallObjectPressureScore, MetricUnit.Custom, d.SmallObjectPressureScore.ToString("F1")),
-            ["density_pressure_score"] = new NumericMetricValue(d.DensityPressureScore, MetricUnit.Custom, d.DensityPressureScore.ToString("F1")),
+            ["loh_pressure_score"] = new NumericMetricValue(lohPressureScore, MetricUnit.Custom, lohPressureScore.ToString("F1")),
+            ["concentration_pressure_score"] = new NumericMetricValue(concentrationPressureScore, MetricUnit.Custom, concentrationPressureScore.ToString("F1")),
+            ["small_object_pressure_score"] = new NumericMetricValue(smallObjectPressureScore, MetricUnit.Custom, smallObjectPressureScore.ToString("F1")),
+            ["density_pressure_score"] = new NumericMetricValue(densityPressureScore, MetricUnit.Custom, densityPressureScore.ToString("F1")),
         };
 
-        string pressureBand = d.MemoryPressureScore >= 75 ? "High"
-            : d.MemoryPressureScore >= 50 ? "Medium"
-            : "Low";
-        blocks.Add(T($"Memory pressure score: {d.MemoryPressureScore:F1}/100 ({pressureBand})."));
+        string pressureBand = MemoryPressureClassifier.ClassifyPressureBand(memoryPressureScore);
+        blocks.Add(T($"Memory pressure score: {memoryPressureScore:F1}/100 ({pressureBand})."));
 
         if (d.TopTypes.Count > 0)
         {

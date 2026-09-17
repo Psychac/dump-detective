@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
@@ -26,7 +27,7 @@ internal sealed class HangFindingGenerator : IFindingGenerator
                 Category: "Hang",
                 Severity: severity,
                 Title: "Hang-risk assessment",
-                Evidence: $"Waiting threads: {r.WaitingThreadCount:N0}/{r.TotalAliveThreads:N0} ({r.WaitingPercent:F1}%); queued work items: {r.QueuedWorkItems:N0}; health score: {r.HealthScore}/100.",
+                Evidence: $"Waiting threads: {r.WaitingThreadCount:N0}/{r.TotalAliveThreads:N0} ({r.WaitingPercent:F1}%); queued work items: {r.QueuedWorkItems:N0}; health score: {HangHealthClassifier.ComputeHealthScore(r)}/100.",
                 Recommendation: severity == FindingSeverity.Critical
                     ? "Investigate wait groups and lock owners immediately for deadlock/contention storms."
                     : "Review waiting-thread categories and thread-pool saturation indicators.",

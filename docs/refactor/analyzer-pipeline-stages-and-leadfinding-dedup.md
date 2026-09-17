@@ -2,7 +2,10 @@
 
 Status: proposal / discussion, not yet executed, except the P0 fix plan (Hang, Lock Graph,
 Finalizable Object, Segment Reservation) and the P1 fix plan (Crash/Exception, Async Task) below,
-both shipped 2026-09-08.
+both shipped 2026-09-08. Stage 1 purity audit (Smell A) also shipped 2026-09-17: 5 of 6 catalogued
+cases fixed (Hang, GC Root, Memory, Allocation Pattern, Event Leak); Leak Candidate deliberately
+deferred to Phase 5 (see its row in the Smell A table below) — it's cross-analyzer synthesis, not a
+same-shaped stage-1 extraction.
 
 ## Current pipeline (as-built, 4 stages)
 
@@ -181,22 +184,47 @@ i.e. stage 1 is already doing some of stage 2's job, before `IFindingGenerator` 
 `grep` for `FindingSeverity`-typed fields and `*Score`/`*Classification`/`*Level` fields across every
 domain model found 6 analyzers computing genuine judgment (not raw facts) inside the Analyzer itself:
 
-| Analyzer | Field(s) | Computed in | Nature |
-|---|---|---|---|
-| Memory | `MemoryPressureScore` | `MemoryAnalysisProjection.cs:174-185` | Weighted composite: `lohPressure*0.35 + concentrationPressure*0.30 + smallObjectPressure*0.20 + densityPressure*0.15`, each sub-score normalized against a hand-picked constant (`/35.0`, `/70.0`, `/85.0`, `/45.0`, `/12_000.0`) |
-| Allocation Pattern | `GCPressureLevel` (enum: Low/Moderate/High/Critical), `PromotionPressureScore` | `AllocationPatternDomainResult.cs:9,40-41`; classified via `AllocationPatternAnalyzer.ClassifyPressure(double)` | Same shape as Memory's pressure score — a classified band derived from a composite score |
-| Event Leak | `SeverityScore` (on both `EventLeakGroupSnapshot` and `EventLeakInstanceSnapshot`) | `EventLeakDomainResult.cs:41,68` | Notably, the domain result already carries a `ScoringVersion` field (`EventLeakDomainResult.cs`) with the comment *"Bumped whenever the severity-scoring formula changes... trend comparisons across a version boundary are not meaningful"* — the team has already recognized this as a versioned scoring **algorithm**, which is exactly the kind of logic that belongs in a single, named, testable stage rather than embedded in the analyzer |
-| GC Root | `SeverityScore` on `RootFinding` | `GCRootAnalysisProjection.cs:89` (`ComputeSeverity`) | Per-row severity baked before any finding generator runs |
-| Hang | `HealthScore` | `HangAnalyzer.cs:370` (`ComputeHealthScore`) | Composite score; note `HangFindingGenerator`'s severity ladder is keyed on `WaitingPercent`/`QueuedWorkItems`, not `HealthScore` — while `HangSectionBuilder`'s (now-being-removed, see P0 above) `LeadFinding` was keyed on `HealthScore < 50`. So this one field alone was already implicated in the P0 Hang divergence bug — the composite score existing in stage 1 at all is *why* the builder had an independent, disagreeing signal to reach for. |
-| Leak Candidate | `SuspicionScore` (int), `Severity` (`Core.Enums.FindingSeverity` — literally `InsightFinding`'s own output type), `Classification` (`LeakClass`) | Somewhere in the Leak Candidate analyzer/scoring path (not yet traced) | Most extreme case: the domain row already carries a `FindingSeverity` value. `LeakCandidateFindingGenerator` and `LeakAnalysisSectionBuilder` both just relay `candidate.Severity` — stage 2 is a pass-through for this analyzer today, not an interpreter |
+| Analyzer | Field(s) | Computed in | Nature | Status |
+|---|---|---|---|---|
+| Hang | `HealthScore` | `HangAnalyzer.cs:370` (`ComputeHealthScore`) | Composite score; note `HangFindingGenerator`'s severity ladder is keyed on `WaitingPercent`/`QueuedWorkItems`, not `HealthScore` — while `HangSectionBuilder`'s (now-removed, see P0 above) `LeadFinding` was keyed on `HealthScore < 50`. So this one field alone was already implicated in the P0 Hang divergence bug — the composite score existing in stage 1 at all is *why* the builder had an independent, disagreeing signal to reach for. | **FIXED.** `HealthScore`/`IsStarved` removed from `HangDomainResult`; sole owner is `HangHealthClassifier` (`Plugins.Threads/Utilities/`), called by generator/builder/trend-comparer/executive-summary. |
+| GC Root | `SeverityScore` on `RootFinding` | `GCRootAnalysisProjection.cs:89` (`ComputeSeverity`) | Per-row severity baked before any finding generator runs | **FIXED.** `SeverityScore` removed from `RootFinding` (re-derivable from `EstimatedRetainedBytes`+`RootKind`, already exposed); sole owner is `GCRootSeverityClassifier`. Bonus find: `GCRootAnalysisProjection.cs` itself was dead code (zero callers) — deleted outright. |
+| Memory | `MemoryPressureScore` | `MemoryAnalysisProjection.cs:174-185` | Weighted composite: `lohPressure*0.35 + concentrationPressure*0.30 + smallObjectPressure*0.20 + densityPressure*0.15`, each sub-score normalized against a hand-picked constant (`/35.0`, `/70.0`, `/85.0`, `/45.0`, `/12_000.0`) | **FIXED.** All five pressure fields (composite + 4 sub-scores) removed from `MemoryDomainResult`; sole owner is `MemoryPressureClassifier`, which also absorbed the separately-flagged `pressureBand` narrative-text smell from `MemorySectionBuilder`. |
+| Allocation Pattern | `GCPressureLevel` (enum: Low/Moderate/High/Critical), `PromotionPressureScore` | `AllocationPatternDomainResult.cs:9,40-41`; classified via `AllocationPatternAnalyzer.ClassifyPressure(double)` | Same shape as Memory's pressure score — a classified band derived from a composite score | **FIXED.** Both fields removed (re-derivable from `Gen0CountPct`/`Gen2CountPct`/`LohSizePct`, no options-dependence); sole owner is `AllocationPatternPressureClassifier`. `AllocationProfile`/`TypeProfile`/the four `Top*TypeProfile` lists deliberately left alone — that's the separately-catalogued Smell B, not this smell. |
+| Event Leak | `SeverityScore` (on both `EventLeakGroupSnapshot` and `EventLeakInstanceSnapshot`) | `EventLeakDomainResult.cs:41,68` | Notably, the domain result already carries a `ScoringVersion` field (`EventLeakDomainResult.cs`) with the comment *"Bumped whenever the severity-scoring formula changes... trend comparisons across a version boundary are not meaningful"* — the team has already recognized this as a versioned scoring **algorithm**, which is exactly the kind of logic that belongs in a single, named, testable stage rather than embedded in the analyzer | **FIXED**, with a nuance. Instance-level `SeverityScore` removed (re-derivable; needed one new raw field, `HasLowIncomingRefs`). Group-level `MaxSeverityScore` (renamed from `SeverityScore`) **kept as a retained field** — it's a genuine streaming max-reduction over every instance the scanner touches, and only a bounded top-K sample is retained, so it's mathematically impossible to re-derive downstream without either keeping the full per-instance population (violates the project's no-materialization rule) or silently maxing over just the sample (a correctness regression). Sole owner of the formula either way is `EventLeakSeverityClassifier`; the 8 configurable `EventLeakOptions` severity weights are echoed once, at the top level of `EventLeakDomainResult` (`ScoringWeights`), not per-row. |
+| Leak Candidate | `SuspicionScore` (int), `Severity` (`Core.Enums.FindingSeverity` — literally `InsightFinding`'s own output type), `Classification` (`LeakClass`) | `LeakCandidateAnalyzer.cs:346-427` (`Classify`/`Score`) | Most extreme case: the domain row already carries a `FindingSeverity` value. `LeakCandidateFindingGenerator` and `LeakAnalysisSectionBuilder` both just relay `candidate.Severity` — stage 2 is a pass-through for this analyzer today, not an interpreter | **Deliberately deferred to Phase 5, not fixed here.** See "Leak Candidate — deferred to Phase 5" below; this isn't a same-shaped fix. |
 
-**A likely-related fifth scoring location, not yet reconciled against the above:**
-`ExplainableScoringEngine.ComputeScores` (`DumpDetective.Reporting/Services/ExplainableScoringEngine.cs:36`)
-computes its own `ScoreBreakdown` for Leak / GcPressure / ThreadContention in the **Reporting** layer —
-a different layer again from both the stage-1 baked scores above and the stage-2 `IFindingGenerator`s.
-Whether it reuses `LeakCandidateRecord.SuspicionScore`/`HangAnalyzer.ComputeHealthScore` or recomputes
-independently from raw findings is unconfirmed and should be checked before any consolidation — if
-independent, it's a sixth drift point on top of the ones already catalogued.
+**The "likely-related fifth scoring location" is resolved — no reconciliation needed.**
+`ExplainableScoringEngine.ComputeScores` (`DumpDetective.Reporting/Services/ExplainableScoringEngine.cs:36-102`)
+reads only already-generated `FindingRecord.Severity`/`Category`/`Confidence` — it never touches
+`LeakCandidateRecord.SuspicionScore`, `HangAnalyzer.ComputeHealthScore`, or any other stage-1 field
+directly. It's a legitimate stage-3 executive rollup over stage-2 output (Leak/GcPressure/ThreadContention
+scores derived from finding severities), not a fourth independent copy of stage-1's judgment. Phase 5's
+exit criterion ("`ExplainableScoringEngine` either reuses synthesis outputs or is gone") is already met —
+it reuses synthesis (stage-2) output today.
+
+### Leak Candidate — deferred to Phase 5, not a same-shaped fix
+
+Unlike the five fixed above, `SuspicionScore`/`Severity`/`Classification`/`RootKind` can't be resolved by
+extracting a shared classifier that domain-result raw facts feed:
+
+- **More missing raw facts than any other case**: `Classify`/`Score` also need `isStaticRooted`,
+  `isPinned`, `isDependent`, `isDelegate`, and raw `Gen2Count` — none exposed on `LeakCandidateRecord`
+  today (only the *derived* `RootKind` string and `Gen2Pct` percentage survive).
+- **Genuine cross-analyzer entanglement, not just missing fields.** `isPinned`/`isDependent` come from
+  `GCHandleDomainResult.TopPinnedTargetTypes`, and `logicalTimerCount` from
+  `TimerLeakDomainResult.LogicalTimerCount` — signals from *other analyzers'* domain results, fed in via
+  the adapter at analysis time. `LeakCandidateAnalyzer` is already doing cross-analyzer synthesis inside
+  its own stage 1, informally, ahead of the machinery Phase 5 step 6 is building for exactly this (folding
+  `InsightEngine`'s cross-analyzer synthesis into multi-observation synthesis rules).
+
+Echoing `GCHandleDomainResult`/`TimerLeakDomainResult`'s current values onto `LeakCandidateDomainResult`
+(the same shape as Event Leak's `ScoringWeights` echo) would trade the current duplication for a new one —
+`LeakCandidateDomainResult` would own a stale copy of data those two analyzers already publish. The
+correct fix is a cross-analyzer synthesis rule that joins `LeakCandidate`'s own per-type raw facts with
+`GCHandleDomainResult` and `TimerLeakDomainResult` directly (the same multi-result join `InsightEngine`/
+`ConfidenceSectionBuilder` already do) — computed once, in the synthesis layer, not baked into any single
+analyzer's output. That's Phase 5's Insight-stage merge, not a classifier extraction. **Plan this
+specifically alongside Phase 5 implementation, not before it.**
 
 ### Smell B — Stage 1 pre-curates ranked/filtered views instead of exposing one raw table
 
@@ -285,8 +313,7 @@ preserved by decomposing *within* the merged stage rather than *between* stages.
 
 - Should `BuildConfidenceBand` narrative blocks (distinct from `SectionLeadFinding`) also be pulled from `InsightFinding.EffectiveConfidenceScore` where a finding exists, rather than an ad-hoc `score` parameter?
 - Do we widen `NormalizeSectionContractSlots`'s single "top severity" pick to expose the full result of the pick (used to have visibility if two findings tie in severity), or is top-1 sufficient long-term?
-- Full audit of `SectionLeadFinding`-constructing builders is complete (8/8, table above). Not yet audited: the ~31 remaining section builders for *other* forms of independent judgment beyond `LeadFinding` (e.g. inline severity coloring on table cells, per-row classification) — the two lower-priority items noted above (Memory `pressureBand`, Leak `GetImpactBand`) were found opportunistically while auditing the 8, not via an exhaustive pass over all 39.
-- Where is `LeakCandidateRecord.SuspicionScore`/`Severity`/`Classification` actually computed? Not yet traced to a source file — needed before Smell A's Leak Candidate row can be acted on.
-- Does `ExplainableScoringEngine.ComputeScores` (`DumpDetective.Reporting/Services/ExplainableScoringEngine.cs:36`) reuse the stage-1 baked scores (`LeakCandidateRecord.SuspicionScore`, `HangAnalyzer.ComputeHealthScore`) or recompute independently? If independent, it's a further drift point beyond the 6 already catalogued in Smell A.
+- Full audit of `SectionLeadFinding`-constructing builders is complete (8/8, table above). Not yet audited: the ~31 remaining section builders for *other* forms of independent judgment beyond `LeadFinding` (e.g. inline severity coloring on table cells, per-row classification) — the two lower-priority items noted above were found opportunistically while auditing the 8, not via an exhaustive pass over all 39. Memory `pressureBand` **resolved** (absorbed into `MemoryPressureClassifier` during the Smell A fix). Leak `GetImpactBand` still open.
+- `LeakCandidateRecord.SuspicionScore`/`Severity`/`Classification` computation site and the `ExplainableScoringEngine` reconciliation question are both **resolved** — see the Smell A table and "Leak Candidate — deferred to Phase 5" section above.
 - Smell A/B audit covered every file in `DumpDetective.Analysis/Models/` at the field-shape level (grep for `FindingSeverity`/`*Score`/`*Classification`/`*Level` fields, and Top* list counts) but only deep-read a sample (Memory, Allocation Pattern, Event Leak, GC Root, Hang, Leak Candidate, Async Task, Infrastructure group, Finalizable Object). The remaining ~20 files with 1-2 `Top*` lists each are lower risk (single list is much harder to have a multi-criteria-merge problem) but haven't been individually confirmed clean.
 - How does "collapse N capped lists into one raw table" (Smell B, milder variant) interact with the project's bounded-memory rule (CLAUDE.md)? A single complete per-entity table with no cap could be large for high-cardinality entities (e.g. all task types, all thread waits) — needs the same exactness-vs-memory reasoning [performance-checklist.md](../performance-checklist.md) already applies to scan caps (disk-backed indexing keeps the *store* bounded even when the row *count* isn't), not a free pass just because it's "one table instead of many."

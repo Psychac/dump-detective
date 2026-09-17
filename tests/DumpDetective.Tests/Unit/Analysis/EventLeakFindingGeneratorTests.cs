@@ -114,7 +114,7 @@ public sealed class EventLeakFindingGeneratorTests
     {
         var gen = new EventLeakFindingGenerator();
         var result = BuildResult(
-            new EventLeakGroupSnapshot("OrderPublisher", "Changed", false, SeverityScore: 22, InstanceCount: 8, TotalSubscribers: 64, AverageSubscribers: 8.0, MinSubscribers: 1, MaxSubscribers: 12));
+            new EventLeakGroupSnapshot("OrderPublisher", "Changed", false, MaxSeverityScore: 22, InstanceCount: 8, TotalSubscribers: 64, AverageSubscribers: 8.0, MinSubscribers: 1, MaxSubscribers: 12));
 
         var findings = gen.Generate(result);
 
@@ -126,7 +126,7 @@ public sealed class EventLeakFindingGeneratorTests
     {
         var gen = new EventLeakFindingGenerator();
         var result = BuildResult(
-            new EventLeakGroupSnapshot("OrderPublisher", "Changed", false, SeverityScore: 10, InstanceCount: 8, TotalSubscribers: 64, AverageSubscribers: 8.0, MinSubscribers: 1, MaxSubscribers: 12));
+            new EventLeakGroupSnapshot("OrderPublisher", "Changed", false, MaxSeverityScore: 10, InstanceCount: 8, TotalSubscribers: 64, AverageSubscribers: 8.0, MinSubscribers: 1, MaxSubscribers: 12));
 
         var findings = gen.Generate(result);
 

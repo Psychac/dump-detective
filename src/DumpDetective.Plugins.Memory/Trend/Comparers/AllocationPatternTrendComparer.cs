@@ -1,4 +1,5 @@
-﻿using DumpDetective.Core.Models;
+﻿using DumpDetective.Analysis.Utilities;
+using DumpDetective.Core.Models;
 
 namespace DumpDetective.Analysis.Trend.Comparers
 {
@@ -19,8 +20,8 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 new("alloc.gen1.size.pct",          null, r.Gen1SizePct,           "%",     MetricTrendDirection.Neutral),
                 new("alloc.gen2.size.pct",          null, r.Gen2SizePct,           "%",     MetricTrendDirection.HigherIsWorse),
                 new("alloc.loh.size.pct",           null, r.LohSizePct,            "%",     MetricTrendDirection.HigherIsWorse),
-                new("alloc.gc.pressure",            null, (double)r.GCPressure,    "level", MetricTrendDirection.HigherIsWorse),
-                new("alloc.promotion.pressure",     null, r.PromotionPressureScore,"score", MetricTrendDirection.HigherIsWorse),
+                new("alloc.gc.pressure",            null, (double)AllocationPatternPressureClassifier.ClassifyPressure(r),    "level", MetricTrendDirection.HigherIsWorse),
+                new("alloc.promotion.pressure",     null, AllocationPatternPressureClassifier.ComputePromotionPressureScore(r),"score", MetricTrendDirection.HigherIsWorse),
                 new("alloc.finalizable.type.count", null, r.FinalizableTypeCount,  "types", MetricTrendDirection.HigherIsWorse),
                 new("alloc.finalizable.bytes",      null, r.FinalizableBytes,      "bytes", MetricTrendDirection.HigherIsWorse),
             };
@@ -57,8 +58,8 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 MetricDeltaHelper.Compute("alloc.gen1.size.pct",      null, b.Gen1SizePct,           c.Gen1SizePct,           "%",     MetricTrendDirection.Neutral),
                 MetricDeltaHelper.Compute("alloc.gen2.size.pct",      null, b.Gen2SizePct,           c.Gen2SizePct,           "%",     MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("alloc.loh.size.pct",       null, b.LohSizePct,            c.LohSizePct,            "%",     MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("alloc.gc.pressure",        null, (double)b.GCPressure,    (double)c.GCPressure,    "level", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("alloc.promotion.pressure", null, b.PromotionPressureScore,c.PromotionPressureScore,"score", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("alloc.gc.pressure",        null, (double)AllocationPatternPressureClassifier.ClassifyPressure(b),    (double)AllocationPatternPressureClassifier.ClassifyPressure(c),    "level", MetricTrendDirection.HigherIsWorse),
+                MetricDeltaHelper.Compute("alloc.promotion.pressure", null, AllocationPatternPressureClassifier.ComputePromotionPressureScore(b),AllocationPatternPressureClassifier.ComputePromotionPressureScore(c),"score", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("alloc.finalizable.type.count", null, b.FinalizableTypeCount, c.FinalizableTypeCount, "types", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("alloc.finalizable.bytes",      null, b.FinalizableBytes,     c.FinalizableBytes,     "bytes", MetricTrendDirection.HigherIsWorse),
             ];

@@ -39,7 +39,10 @@ public sealed class MemoryFindingGeneratorTests
     [Fact]
     public void Generate_MemoryPressureScoreAtOrAboveSeventy_EmitsWarningFinding()
     {
-        MemoryDomainResult result = BuildResult(memoryPressureScore: 85.0);
+        // LohPercent=35 (35 pts) + Top5BytesPercent=70 (30 pts) + SmallObjectCountPercent=85,
+        // SmallObjectBytesPercent=45 (20 pts) + ObjectsPerMb=0 (0 pts) => composite 85.0.
+        MemoryDomainResult result = BuildResult(
+            lohPercent: 35.0, top5BytesPercent: 70.0, smallObjectCountPercent: 85.0, smallObjectBytesPercent: 45.0);
 
         var findings = _gen.Generate(result);
 
@@ -51,7 +54,8 @@ public sealed class MemoryFindingGeneratorTests
     [Fact]
     public void Generate_MemoryPressureScoreBelowSeventy_EmitsNoPressureFinding()
     {
-        MemoryDomainResult result = BuildResult(memoryPressureScore: 69.9);
+        // LohPercent=35 (35 pts) + Top5BytesPercent=70 (30 pts) => composite 65.0, below the 70 gate.
+        MemoryDomainResult result = BuildResult(lohPercent: 35.0, top5BytesPercent: 70.0);
 
         var findings = _gen.Generate(result);
 
@@ -108,8 +112,8 @@ public sealed class MemoryFindingGeneratorTests
     private static MemoryDomainResult BuildResult(
         double top1BytesPercent = 0,
         double top5BytesPercent = 0,
-        double memoryPressureScore = 0,
         double smallObjectCountPercent = 0,
+        double smallObjectBytesPercent = 0,
         double lohPercent = 0)
     {
         return new MemoryDomainResult(
@@ -124,6 +128,6 @@ public sealed class MemoryFindingGeneratorTests
             Top1BytesPercent: top1BytesPercent,
             Top5BytesPercent: top5BytesPercent,
             SmallObjectCountPercent: smallObjectCountPercent,
-            MemoryPressureScore: memoryPressureScore);
+            SmallObjectBytesPercent: smallObjectBytesPercent);
     }
 }

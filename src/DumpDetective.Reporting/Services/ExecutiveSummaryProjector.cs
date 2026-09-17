@@ -1,4 +1,5 @@
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Models;
@@ -139,7 +140,7 @@ internal sealed class ExecutiveSummaryProjector
     {
         for (int i = 0; i < runs.Count; i++)
         {
-            if (runs[i].Result is HangDomainResult hang) return hang.HealthScore;
+            if (runs[i].Result is HangDomainResult hang) return HangHealthClassifier.ComputeHealthScore(hang);
         }
 
         return null;
@@ -211,7 +212,7 @@ internal sealed class ExecutiveSummaryProjector
         for (int i = 0; i < runs.Count; i++)
         {
             if (runs[i].Result is AllocationPatternDomainResult alloc)
-                return alloc.GCPressure.ToString();
+                return AllocationPatternPressureClassifier.ClassifyPressure(alloc).ToString();
         }
 
         return null;

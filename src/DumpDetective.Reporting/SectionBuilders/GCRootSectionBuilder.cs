@@ -1,4 +1,5 @@
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
@@ -72,7 +73,7 @@ internal sealed class GCRootSectionBuilder : SectionBuilderBase, IAnalyzerSectio
             compactTables.Add(STCompact(
                 "Finalizer roots",
                 new[] { CH("Target Type"), CH("Field"), CH("Est. Retained","bytes"), CH("Severity","number"), CH("Root Addr") },
-                finalizerRoots.Select(root => R(new object?[] { root.TargetTypeName, root.FieldDescription ?? "—", root.EstimatedRetainedBytes, root.SeverityScore, $"0x{root.RootAddress:X}" })).ToArray()));
+                finalizerRoots.Select(root => R(new object?[] { root.TargetTypeName, root.FieldDescription ?? "—", root.EstimatedRetainedBytes, GCRootSeverityClassifier.ComputeSeverity(root.EstimatedRetainedBytes, root.RootKind), $"0x{root.RootAddress:X}" })).ToArray()));
 
             // P2-1 (docs/analysis/phase1/gcroot-analyzer-audit.md): per-type breakdown of the same
             // finalizer roots above — complete ranked population, no top-N cap (matches
@@ -305,6 +306,7 @@ internal sealed class GCRootSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         for (int i = 0; i < roots.Count; i++)
         {
             RootFinding root = roots[i];
+            int severity = GCRootSeverityClassifier.ComputeSeverity(root.EstimatedRetainedBytes, root.RootKind);
             rows.Add(Row(
                 Cell(root.RootKind),
                 Cell($"0x{root.RootAddress:X}"),
@@ -312,7 +314,7 @@ internal sealed class GCRootSectionBuilder : SectionBuilderBase, IAnalyzerSectio
                 Cell(root.TargetTypeName),
                 Cell($"0x{root.TargetAddress:X}"),
                 Cell(FormatBytes(root.EstimatedRetainedBytes), (long)Math.Min(root.EstimatedRetainedBytes, long.MaxValue)),
-                Cell(root.SeverityScore.ToString("N0"), root.SeverityScore),
+                Cell(severity.ToString("N0"), severity),
                 Cell(root.RetainedBytesIsExact ? "Yes" : "No")));
         }
 

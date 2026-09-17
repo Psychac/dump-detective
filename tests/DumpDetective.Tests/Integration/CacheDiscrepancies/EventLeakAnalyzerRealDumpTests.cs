@@ -4,7 +4,9 @@ using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Analyzers.Leaks;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Abstractions;
+using DumpDetective.Core.Options;
 
 using FluentAssertions;
 
@@ -71,7 +73,7 @@ public sealed class EventLeakAnalyzerRealDumpTests
         if (result.TopLeakGroups is not null)
         {
             for (int i = 1; i < result.TopLeakGroups.Count; i++)
-                result.TopLeakGroups[i].SeverityScore.Should().BeLessThanOrEqualTo(result.TopLeakGroups[i - 1].SeverityScore + 1_000_000);
+                result.TopLeakGroups[i].MaxSeverityScore.Should().BeLessThanOrEqualTo(result.TopLeakGroups[i - 1].MaxSeverityScore + 1_000_000);
 
             foreach (EventLeakGroupSnapshot group in result.TopLeakGroups)
             {
@@ -82,8 +84,13 @@ public sealed class EventLeakAnalyzerRealDumpTests
 
         if (result.TopLeakInstances is not null)
         {
+            EventLeakSeverityWeights weights = result.ScoringWeights ?? EventLeakSeverityWeights.FromOptions(new EventLeakOptions());
             for (int i = 1; i < result.TopLeakInstances.Count; i++)
-                result.TopLeakInstances[i].SeverityScore.Should().BeLessThanOrEqualTo(result.TopLeakInstances[i - 1].SeverityScore);
+            {
+                int prevSeverity = EventLeakSeverityClassifier.ComputeSeverity(result.TopLeakInstances[i - 1], weights);
+                int currSeverity = EventLeakSeverityClassifier.ComputeSeverity(result.TopLeakInstances[i], weights);
+                currSeverity.Should().BeLessThanOrEqualTo(prevSeverity);
+            }
 
             foreach (EventLeakInstanceSnapshot inst in result.TopLeakInstances)
             {

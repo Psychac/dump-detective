@@ -1,4 +1,5 @@
-﻿using DumpDetective.Core.Models;
+﻿using DumpDetective.Analysis.Utilities;
+using DumpDetective.Core.Models;
 
 namespace DumpDetective.Analysis.Trend.Comparers
 {
@@ -17,7 +18,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 new("hang.queued.work.items", null, r.QueuedWorkItems, "items", MetricTrendDirection.HigherIsWorse),
                 new("hang.pending.tasks", null, r.PendingTasks, "tasks", MetricTrendDirection.HigherIsWorse),
                 new("hang.faulted.tasks", null, r.FaultedTasks, "tasks", MetricTrendDirection.HigherIsWorse),
-                new("hang.health.score", null, r.HealthScore, "score", MetricTrendDirection.LowerIsWorse),
+                new("hang.health.score", null, HangHealthClassifier.ComputeHealthScore(r), "score", MetricTrendDirection.LowerIsWorse),
             };
             foreach (var kv in r.WaitCategoryBreakdown)
                 metrics.Add(new("hang.wait.category", kv.Key, kv.Value, "threads", MetricTrendDirection.HigherIsWorse));
@@ -34,7 +35,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
                 MetricDeltaHelper.Compute("hang.queued.work.items", null, b.QueuedWorkItems, c.QueuedWorkItems, "items", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("hang.pending.tasks", null, b.PendingTasks, c.PendingTasks, "tasks", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("hang.faulted.tasks", null, b.FaultedTasks, c.FaultedTasks, "tasks", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("hang.health.score", null, b.HealthScore, c.HealthScore, "score", MetricTrendDirection.LowerIsWorse),
+                MetricDeltaHelper.Compute("hang.health.score", null, HangHealthClassifier.ComputeHealthScore(b), HangHealthClassifier.ComputeHealthScore(c), "score", MetricTrendDirection.LowerIsWorse),
             };
             foreach (var kv in c.WaitCategoryBreakdown)
             {

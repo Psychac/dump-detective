@@ -75,22 +75,35 @@ public sealed class AllocationPatternFindingGeneratorTests
         findings.Should().ContainSingle().Which.Evidence.Should().Contain("MyApp.Cache.Node");
     }
 
+    // GCPressure is derived (AllocationPatternPressureClassifier) from Gen0CountPct/Gen2CountPct/
+    // LohSizePct, not injected directly — these triples are hand-picked to land in each band via
+    // score = (100 - gen0CountPct) * 0.3 + gen2CountPct * 0.5 + lohSizePct * 0.2.
     private static AllocationPatternDomainResult BuildResult(
         GCPressureLevel pressure,
         int finalizableTypeCount = 0,
         ulong finalizableBytes = 0,
-        IReadOnlyList<TypeAllocationProfile>? topLongLivedTypes = null) => new(
-        Gen0CountPct: 40, Gen1CountPct: 20, Gen2CountPct: 30, LohCountPct: 10,
-        Gen0SizePct: 30, Gen1SizePct: 20, Gen2SizePct: 40, LohSizePct: 10,
-        TotalManagedBytes: 1_000_000_000,
-        Gen0Bytes: 300_000_000, Gen1Bytes: 200_000_000, Gen2Bytes: 400_000_000, LohBytes: 100_000_000,
-        Profile: AllocationProfile.Mixed,
-        GCPressure: pressure,
-        PromotionPressureScore: 55.0,
-        TopTransientTypes: [],
-        TopShortishTypes: [],
-        TopLongLivedTypes: topLongLivedTypes ?? [],
-        TopHighGen1SurvivorTypes: [],
-        FinalizableTypeCount: finalizableTypeCount,
-        FinalizableBytes: finalizableBytes);
+        IReadOnlyList<TypeAllocationProfile>? topLongLivedTypes = null)
+    {
+        (double gen0CountPct, double gen2CountPct, double lohSizePct) = pressure switch
+        {
+            GCPressureLevel.Low => (100.0, 0.0, 0.0),      // score 0
+            GCPressureLevel.Moderate => (40.0, 30.0, 10.0), // score 35
+            GCPressureLevel.High => (0.0, 60.0, 30.0),       // score 66
+            GCPressureLevel.Critical => (0.0, 80.0, 50.0),   // score 80
+            _ => throw new ArgumentOutOfRangeException(nameof(pressure))
+        };
+
+        return new(
+            Gen0CountPct: gen0CountPct, Gen1CountPct: 20, Gen2CountPct: gen2CountPct, LohCountPct: 10,
+            Gen0SizePct: 30, Gen1SizePct: 20, Gen2SizePct: 40, LohSizePct: lohSizePct,
+            TotalManagedBytes: 1_000_000_000,
+            Gen0Bytes: 300_000_000, Gen1Bytes: 200_000_000, Gen2Bytes: 400_000_000, LohBytes: 100_000_000,
+            Profile: AllocationProfile.Mixed,
+            TopTransientTypes: [],
+            TopShortishTypes: [],
+            TopLongLivedTypes: topLongLivedTypes ?? [],
+            TopHighGen1SurvivorTypes: [],
+            FinalizableTypeCount: finalizableTypeCount,
+            FinalizableBytes: finalizableBytes);
+    }
 }

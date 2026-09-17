@@ -126,8 +126,7 @@ public sealed class InsightEngineTests
             RuntimeRetiredWorkerThreads: 0,
             RuntimeQueueLength: null,
             RuntimeCpuUtilization: 0,
-            IsStarved: false,
-            HealthScore: 50,
+            HighThreadPoolThreshold: 100,
             TopWaitingThreads:
             [
                 new WaitingThreadSnapshot(1, 1, "WaitForSingleObject", "Monitor.Wait", 0, "frame1"),
@@ -189,8 +188,7 @@ public sealed class InsightEngineTests
             RuntimeRetiredWorkerThreads: 0,
             RuntimeQueueLength: null,
             RuntimeCpuUtilization: 0,
-            IsStarved: false,
-            HealthScore: 50,
+            HighThreadPoolThreshold: 100,
             TopWaitingThreads:
             [
                 new WaitingThreadSnapshot(1, 1, "WaitForSingleObject", "Monitor.Wait", 0, "frame1"),
@@ -382,8 +380,7 @@ public sealed class InsightEngineTests
             RuntimeRetiredWorkerThreads: 0,
             RuntimeQueueLength: null,
             RuntimeCpuUtilization: 0,
-            IsStarved: false,
-            HealthScore: 50,
+            HighThreadPoolThreshold: 100,
             TopWaitingThreads:
             [
                 new WaitingThreadSnapshot(1, 1, "Monitor", "MonitorWait", 0, "Frame.A"),
@@ -443,8 +440,7 @@ public sealed class InsightEngineTests
             RuntimeRetiredWorkerThreads: 0,
             RuntimeQueueLength: null,
             RuntimeCpuUtilization: 0,
-            IsStarved: false,
-            HealthScore: 50,
+            HighThreadPoolThreshold: 100,
             TopWaitingThreads:
             [
                 new WaitingThreadSnapshot(1, 1, "Monitor", "MonitorWait", 0, "Frame.A"),
@@ -515,8 +511,7 @@ public sealed class InsightEngineTests
             RuntimeRetiredWorkerThreads: 0,
             RuntimeQueueLength: null,
             RuntimeCpuUtilization: 0,
-            IsStarved: false,
-            HealthScore: 50,
+            HighThreadPoolThreshold: 100,
             TopWaitingThreads:
             [
                 new WaitingThreadSnapshot(1, 1, "Monitor", "MonitorWait", 1, "Frame.A"),

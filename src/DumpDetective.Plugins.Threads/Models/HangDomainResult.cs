@@ -24,8 +24,7 @@ internal sealed record HangDomainResult(
     int RuntimeRetiredWorkerThreads,
     int? RuntimeQueueLength,
     int RuntimeCpuUtilization,
-    bool IsStarved,
-    int HealthScore,
+    int HighThreadPoolThreshold,
     IReadOnlyList<WaitingThreadSnapshot>? TopWaitingThreads = null,
     IReadOnlyList<NameCountEntry>? TopContinuationTypes = null) : AnalyzerDomainResult;
 

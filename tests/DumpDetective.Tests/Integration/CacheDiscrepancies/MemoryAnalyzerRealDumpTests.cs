@@ -4,6 +4,7 @@ using Microsoft.Diagnostics.Runtime;
 using DumpDetective.Analysis.Analyzers;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 
@@ -80,7 +81,7 @@ public sealed class MemoryAnalyzerRealDumpTests
         result.Top1BytesPercent.Should().BeInRange(0.0, 100.0);
         result.Top5BytesPercent.Should().BeInRange(result.Top1BytesPercent, 100.0);
         result.Top10BytesPercent.Should().BeInRange(result.Top5BytesPercent, 100.0);
-        result.MemoryPressureScore.Should().BeInRange(0.0, 100.0);
+        MemoryPressureClassifier.ComputeMemoryPressureScore(result).Should().BeInRange(0.0, 100.0);
         result.LohFragmentationRatio.Should().BeInRange(0.0, 100.0);
 
         int walkedCount = 0;
@@ -105,7 +106,7 @@ public sealed class MemoryAnalyzerRealDumpTests
 
         _output.WriteLine(
             $"UniqueTypes={result.UniqueTypes:N0} TotalBytes={result.TotalBytes:N0} TotalObjects={result.TotalObjects:N0} " +
-            $"LohPercent={result.LohPercent:F2}% MemoryPressureScore={result.MemoryPressureScore:F1} " +
+            $"LohPercent={result.LohPercent:F2}% MemoryPressureScore={MemoryPressureClassifier.ComputeMemoryPressureScore(result):F1} " +
             $"LohFragmentationRatio={result.LohFragmentationRatio:F2}% TypesWithModuleName={typesWithModuleName:N0}/{result.UniqueTypes:N0} " +
             $"WalkedForRetainedSize={walkedCount}");
         if (result.TopTypes.Count > 0)

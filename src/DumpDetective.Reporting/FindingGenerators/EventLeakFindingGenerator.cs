@@ -82,8 +82,8 @@ internal sealed class EventLeakFindingGenerator : IFindingGenerator
             if (group.MaxSubscribers > maxSubscribersPerInstance)
                 maxSubscribersPerInstance = group.MaxSubscribers;
 
-            if (group.SeverityScore > maxSeverityScore)
-                maxSeverityScore = group.SeverityScore;
+            if (group.MaxSeverityScore > maxSeverityScore)
+                maxSeverityScore = group.MaxSeverityScore;
 
             if (group.TotalSubscribers > topGroupSubscribers)
             {

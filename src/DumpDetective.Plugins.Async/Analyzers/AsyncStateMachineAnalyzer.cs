@@ -11,6 +11,8 @@ using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Async;
 
@@ -86,7 +88,7 @@ public sealed class AsyncStateMachineAnalyzer :
     }
     private AnalyzerDomainResult? _lastResult;
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -98,16 +100,25 @@ public sealed class AsyncStateMachineAnalyzer :
             ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapObjects}' capability.");
         AsyncStateMachineAnalysisOptions options = context.AnalyzerOptions as AsyncStateMachineAnalysisOptions ?? new AsyncStateMachineAnalysisOptions();
 
-        LastResult = Analyze(typeStatistics, fields, objectLookup, context.HeapObjects, options, cancellationToken);
-        return ValueTask.CompletedTask;
+        LastResult = await Analyze(typeStatistics, fields, objectLookup, context.HeapObjects, options, context, cancellationToken);
     }
 
-    private static AsyncStateMachineDomainResult Analyze(
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): emits
+    /// <c>type.async-state-machine</c> (one per type in <c>topTypes</c>) and
+    /// <c>type.async-captured-closure</c> (one per type in <c>highCaptures</c>, when captured
+    /// bytes &gt; 0) inline in the same loop these lists are already built in — bounded to
+    /// distinct async-state-machine type names (already narrowly scoped by
+    /// <see cref="IsCandidateType"/>'s regex, not the whole-heap type population). Subject resolved
+    /// via <see cref="IHeapObjectLookup"/> from each type's own sample address.
+    /// </summary>
+    private static async ValueTask<AsyncStateMachineDomainResult> Analyze(
         IHeapTypeStatisticsQuery typeStatistics,
         IDumpObjectFieldQuery fields,
         IHeapObjectLookup objectLookup,
         IHeapObjectStream? candidates,
         AsyncStateMachineAnalysisOptions options,
+        AnalysisContext observationContext,
         CancellationToken cancellationToken)
     {
         if (candidates is null)
@@ -161,6 +172,7 @@ public sealed class AsyncStateMachineAnalyzer :
 
         var topTypes = new List<StateMachineTypeProfile>(seenTypes.Count);
         var highCaptures = new List<HighCaptureStateMachine>(seenTypes.Count);
+        var observationCapabilities = new HashSet<Capability> { CapabilityVocabulary.HeapTypes, CapabilityVocabulary.DumpObjectFields, CapabilityVocabulary.HeapObjects };
 
         foreach (string typeName in seenTypes)
         {
@@ -191,7 +203,32 @@ public sealed class AsyncStateMachineAnalyzer :
                 }
 
                 if (capturedBytes > 0)
+                {
                     highCaptures.Add(new HighCaptureStateMachine(sampleAddress, typeName, capturedBytes, largeCaptures));
+
+                    if (objectLookup.TryGetObject(sampleAddress, out HeapObjectRef captureSubject))
+                    {
+                        await observationContext.Observations.EmitAsync(new Observation
+                        {
+                            Id = ObservationId.NewId(),
+                            ObservationType = "type.async-captured-closure",
+                            Subjects = [captureSubject.Type],
+                            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                            Measures = new Dictionary<string, Measure>
+                            {
+                                ["captured.bytes"] = new Measure(capturedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                            },
+                            Provenance = new Provenance
+                            {
+                                Artifact = observationContext.ArtifactId!.Value,
+                                AnalyzerKey = "Async State Machine Analysis",
+                                CapabilitiesUsed = observationCapabilities,
+                                Fidelity = FidelityLevel.Full,
+                            },
+                            Confidence = 1.0,
+                        }, cancellationToken);
+                    }
+                }
             }
 
             (int dominantState, IReadOnlyList<(int State, int Count)> distribution) = BuildStateDistribution(histogramByType, typeName);
@@ -210,6 +247,34 @@ public sealed class AsyncStateMachineAnalyzer :
                 Gen2Count: entry.Gen2Count,
                 Gen2Fraction: gen2Fraction,
                 IsAsyncVoid: isAsyncVoid));
+
+            if (sampleAddress != 0 && objectLookup.TryGetObject(sampleAddress, out HeapObjectRef stateMachineSubject))
+            {
+                await observationContext.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "type.async-state-machine",
+                    Subjects = [stateMachineSubject.Type],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["instance.count"] = new Measure(entry.InstanceCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["shallow.bytes"] = new Measure(entry.TotalSize, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                        ["dominant-state"] = new Measure(dominantState, MeasureUnit.Custom, MeasureSemantics.Absolute),
+                        ["gen2.count"] = new Measure(entry.Gen2Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["gen2.fraction"] = new Measure(gen2Fraction, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                        ["is-async-void"] = new Measure(isAsyncVoid ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = observationContext.ArtifactId!.Value,
+                        AnalyzerKey = "Async State Machine Analysis",
+                        CapabilitiesUsed = observationCapabilities,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                }, cancellationToken);
+            }
         }
 
         topTypes.Sort(static (a, b) => b.Count.CompareTo(a.Count));

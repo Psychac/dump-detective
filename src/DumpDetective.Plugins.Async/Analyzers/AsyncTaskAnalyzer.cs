@@ -3,6 +3,8 @@ using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Async;
 
@@ -102,7 +104,7 @@ public sealed partial class AsyncTaskAnalyzer : IAnalyzer, IProducesAnalyzerDoma
     }
     private AnalyzerDomainResult? _lastResult;
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -119,11 +121,19 @@ public sealed partial class AsyncTaskAnalyzer : IAnalyzer, IProducesAnalyzerDoma
         IDumpArrayShapeQuery arrayShapes = context.DumpArrayShapes
             ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.DumpArrayElements}' capability.");
 
-        LastResult = Analyze(typeStatistics, fields, objectLookup, references, segments, arrayShapes, context.HeapObjects, context.Progress, cancellationToken);
-        return ValueTask.CompletedTask;
+        LastResult = await Analyze(typeStatistics, fields, objectLookup, references, segments, arrayShapes, context.HeapObjects, context.Progress, context, cancellationToken);
     }
 
-    private static AsyncTaskDomainResult Analyze(
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): one
+    /// <c>type.orphaned-task</c> observation per orphaned task, inline where
+    /// <see cref="HeapObjectRef.Type"/> is still in scope — only the orphaned (no continuation, not
+    /// completed/canceled) subset, not every scanned task instance, which really can reach heap
+    /// scale under a genuine leak (unlike the bounded typed-resource candidate streams elsewhere in
+    /// this project). A large emitted count here is itself the honest signal, matching this
+    /// analyzer's own purpose, not a volume mistake.
+    /// </summary>
+    private static async ValueTask<AsyncTaskDomainResult> Analyze(
         IHeapTypeStatisticsQuery typeStatistics,
         IDumpObjectFieldQuery fields,
         IHeapObjectLookup objectLookup,
@@ -132,6 +142,7 @@ public sealed partial class AsyncTaskAnalyzer : IAnalyzer, IProducesAnalyzerDoma
         IDumpArrayShapeQuery arrayShapes,
         IHeapObjectStream? candidates,
         IProgress<AnalyzerProgressReport>? progress,
+        AnalysisContext observationContext,
         CancellationToken ct)
     {
         var taskEntries = new List<HeapObjectRef>();
@@ -284,6 +295,26 @@ public sealed partial class AsyncTaskAnalyzer : IAnalyzer, IProducesAnalyzerDoma
                     string? resultType = ExtractResultType(typeName);
                     (string? exceptionType, string? exceptionMessage) = ExtractFaultedTaskException(fields, objectLookup, references, address);
                     orphanedSnapshots.Add(new OrphanedTaskSnapshot(address, typeName, resultType, task.Size, exceptionType, exceptionMessage));
+
+                    await observationContext.Observations.EmitAsync(new Observation
+                    {
+                        Id = ObservationId.NewId(),
+                        ObservationType = "type.orphaned-task",
+                        Subjects = [task.Type],
+                        When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                        Measures = new Dictionary<string, Measure>
+                        {
+                            ["shallow.bytes"] = new Measure(task.Size, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                        },
+                        Provenance = new Provenance
+                        {
+                            Artifact = observationContext.ArtifactId!.Value,
+                            AnalyzerKey = "Async Task Analysis",
+                            CapabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapObjects, CapabilityVocabulary.DumpObjectFields },
+                            Fidelity = FidelityLevel.Full,
+                        },
+                        Confidence = 1.0,
+                    }, ct);
                 }
 
                 // BFS chain depth -- true branching traversal. If m_continuationObject holds a

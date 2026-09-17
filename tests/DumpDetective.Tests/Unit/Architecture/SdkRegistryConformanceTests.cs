@@ -65,6 +65,9 @@ public sealed class SdkRegistryConformanceTests
             ["heap.sparse-array"] = ["length", "null-or-zero.count", "sparse.ratio", "wasted.bytes"],
             ["collection.wasteful"] = ["count", "capacity", "fill-rate.percent", "wasted.bytes", "retained.bytes"],
             ["heap.long-string"] = ["length", "shallow.bytes"],
+            ["type.async-state-machine"] = ["instance.count", "shallow.bytes", "dominant-state", "gen2.count", "gen2.fraction", "is-async-void"],
+            ["type.async-captured-closure"] = ["captured.bytes"],
+            ["type.orphaned-task"] = ["shallow.bytes"],
         };
 
     [Fact]

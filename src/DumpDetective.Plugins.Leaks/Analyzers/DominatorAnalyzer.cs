@@ -6,6 +6,8 @@ using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Leaks;
 
@@ -127,7 +129,7 @@ public sealed class DominatorAnalyzer :
         (200, int.MaxValue, "≥ 200"),
     ];
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -146,11 +148,18 @@ public sealed class DominatorAnalyzer :
 
         var options = context.AnalyzerOptions as RetentionOptions ?? new RetentionOptions();
 
-        LastResult = Analyze(heapObjects, objectLookup, references, reverseReferences, typeStatistics, dominators, rootPaths, options, cancellationToken);
-        return ValueTask.CompletedTask;
+        LastResult = await Analyze(heapObjects, objectLookup, references, reverseReferences, typeStatistics, dominators, rootPaths, options, context, cancellationToken);
     }
 
-    private static DominatorDomainResult Analyze(
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): one
+    /// <c>type.retention</c> observation per top-by-retained-bytes type — the exact canonical
+    /// example named in observation-and-correlation-model.md § 4's correlation-recipes table
+    /// ("type.retention: T holds 800 MB, 2M instances, static-rooted"). Bounded to
+    /// <c>RetentionOptions</c>'s top-N selection, inline where the sample address is resolved to a
+    /// real <see cref="Sdk.Identity.TypeRef"/> via <see cref="IHeapObjectLookup"/>.
+    /// </summary>
+    private static async ValueTask<DominatorDomainResult> Analyze(
         IHeapObjectStream heapObjects,
         IHeapObjectLookup objectLookup,
         IHeapReferenceQuery references,
@@ -159,6 +168,7 @@ public sealed class DominatorAnalyzer :
         IHeapDominatorQuery? dominators,
         IHeapRootPathQuery rootPaths,
         RetentionOptions options,
+        AnalysisContext observationContext,
         CancellationToken cancellationToken)
     {
         LeakSignals signals = reverseReferences is not null
@@ -190,7 +200,61 @@ public sealed class DominatorAnalyzer :
             }
         }
 
+        await EmitRetentionObservationsAsync(objectLookup, result, observationContext, cancellationToken);
+
         return result;
+    }
+
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): one
+    /// <c>type.retention</c> observation per <see cref="DominatorDomainResult.TopTypes"/> entry —
+    /// the exact canonical example named in observation-and-correlation-model.md § 4's
+    /// correlation-recipes table ("type.retention: T holds 800 MB, 2M instances, static-rooted").
+    /// Runs after <see cref="Analyze"/>'s optional exact-dominator-tree overlay, so
+    /// <c>retained.bytes</c> uses <see cref="DominatorDomainResult.ExactRetainedBytesByTypeName"/>
+    /// when that overlay succeeded for this type, not <see cref="TypeSnapshot.EstimatedRetainedBytes"/>'s
+    /// always-heuristic BFS estimate.
+    /// </summary>
+    private static async ValueTask EmitRetentionObservationsAsync(
+        IHeapObjectLookup objectLookup, DominatorDomainResult result, AnalysisContext observationContext, CancellationToken cancellationToken)
+    {
+        var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapObjects, CapabilityVocabulary.HeapReferences, CapabilityVocabulary.HeapTypes };
+
+        foreach (TypeSnapshot snapshot in result.TopDominatorTypes)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (snapshot.SampleAddress == 0 || !objectLookup.TryGetObject(snapshot.SampleAddress, out HeapObjectRef subject))
+                continue;
+
+            ulong exactRetainedBytes = 0;
+            bool isExact = result.ExactRetainedBytesByTypeName is not null
+                && result.ExactRetainedBytesByTypeName.TryGetValue(snapshot.TypeName, out exactRetainedBytes);
+            ulong retainedBytes = isExact ? exactRetainedBytes : snapshot.EstimatedRetainedBytes;
+
+            await observationContext.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "type.retention",
+                Subjects = [subject.Type],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["instance.count"] = new Measure(snapshot.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["shallow.bytes"] = new Measure(snapshot.TotalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["retained.bytes"] = new Measure(retainedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["gen2.count"] = new Measure(snapshot.Gen2Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = observationContext.ArtifactId!.Value,
+                    AnalyzerKey = "Dominator Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = isExact ? FidelityLevel.Full : FidelityLevel.Degraded,
+                },
+                Confidence = isExact ? 1.0 : 0.7,
+            }, cancellationToken);
+        }
     }
 
     private readonly record struct ExactDominatorData(

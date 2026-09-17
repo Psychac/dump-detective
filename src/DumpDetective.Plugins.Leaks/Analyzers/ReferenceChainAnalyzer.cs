@@ -4,6 +4,8 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Leaks;
 
@@ -110,7 +112,7 @@ public sealed class ReferenceChainAnalyzer : IAnalyzer, IProducesAnalyzerDomainR
         ulong? RootAddress,
         string? LastHopFieldName);
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -130,11 +132,15 @@ public sealed class ReferenceChainAnalyzer : IAnalyzer, IProducesAnalyzerDomainR
 
         var options = context.AnalyzerOptions as ReferenceChainOptions ?? new ReferenceChainOptions();
 
-        LastResult = Analyze(typeStatistics, objectLookup, heapObjects, references, heapRoots, rootPaths, dominators, options, cancellationToken);
-        return ValueTask.CompletedTask;
+        LastResult = await Analyze(typeStatistics, objectLookup, heapObjects, references, heapRoots, rootPaths, dominators, options, context, cancellationToken);
     }
 
-    private static ReferenceChainDomainResult Analyze(
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): one
+    /// <c>type.root-reachability</c> observation per top-by-size type sampled — bounded to
+    /// <c>ReferenceChainOptions.TopCount</c>, inline where <c>sample.Type</c> is still in scope.
+    /// </summary>
+    private static async ValueTask<ReferenceChainDomainResult> Analyze(
         IHeapTypeStatisticsQuery typeStatistics,
         IHeapObjectLookup objectLookup,
         IHeapObjectStream heapObjects,
@@ -143,6 +149,7 @@ public sealed class ReferenceChainAnalyzer : IAnalyzer, IProducesAnalyzerDomainR
         IHeapRootPathQuery rootPaths,
         IHeapDominatorQuery? dominators,
         ReferenceChainOptions options,
+        AnalysisContext observationContext,
         CancellationToken cancellationToken)
     {
         var searchOptions = new RootPathSearchOptions(
@@ -164,6 +171,10 @@ public sealed class ReferenceChainAnalyzer : IAnalyzer, IProducesAnalyzerDomainR
         // Type display name -> primary sample address, for types with a valid primary sample. Feeds
         // the E-7 multi-sample streaming pass below (dedup key + target-type filter).
         var primaryAddressByTypeName = new Dictionary<string, ulong>(topTypes.Length, StringComparer.Ordinal);
+        var observationCapabilities = new HashSet<Capability>
+        {
+            CapabilityVocabulary.HeapTypes, CapabilityVocabulary.HeapObjects, CapabilityVocabulary.HeapReferences, CapabilityVocabulary.HeapRoots,
+        };
 
         foreach (var typeKvp in topTypes)
         {
@@ -213,6 +224,31 @@ public sealed class ReferenceChainAnalyzer : IAnalyzer, IProducesAnalyzerDomainR
 
                 if (dominators is not null && dominators.TryGetRetainedSize(sampleAddress.Value, out ulong exactRetainedBytes))
                     retainedBytes = exactRetainedBytes;
+
+                var measures = new Dictionary<string, Measure>
+                {
+                    ["sample.bytes"] = new Measure(sampleSize, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["has-gc-root"] = new Measure(hasGcRoot ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                };
+                if (retainedBytes is ulong rb)
+                    measures["retained.bytes"] = new Measure(rb, MeasureUnit.Bytes, MeasureSemantics.Absolute);
+
+                await observationContext.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "type.root-reachability",
+                    Subjects = [sample.Type],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = measures,
+                    Provenance = new Provenance
+                    {
+                        Artifact = observationContext.ArtifactId!.Value,
+                        AnalyzerKey = "Reference Chain Analysis",
+                        CapabilitiesUsed = observationCapabilities,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                }, cancellationToken);
             }
             else
             {

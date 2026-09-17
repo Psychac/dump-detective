@@ -4,6 +4,7 @@ using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Identity;
 
 using FluentAssertions;
@@ -260,6 +261,7 @@ public sealed class StaticRootAnalyzerRetypingCharacterizationTests
         StaticRootAnalyzer analyzer = new();
         DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
+            ArtifactId = new ArtifactId("test"),
             HeapRoots = roots,
             HeapDominators = dominators,
             HeapObjectLookup = objectLookup,

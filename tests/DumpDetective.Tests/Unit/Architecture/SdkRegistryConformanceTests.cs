@@ -68,6 +68,10 @@ public sealed class SdkRegistryConformanceTests
             ["type.async-state-machine"] = ["instance.count", "shallow.bytes", "dominant-state", "gen2.count", "gen2.fraction", "is-async-void"],
             ["type.async-captured-closure"] = ["captured.bytes"],
             ["type.orphaned-task"] = ["shallow.bytes"],
+            ["heap.static-root"] = ["retained.bytes", "objects-kept-alive.count", "gen2-or-loh-retained.fraction"],
+            ["type.root-reachability"] = ["sample.bytes", "has-gc-root", "retained.bytes"],
+            ["type.retention"] = ["instance.count", "shallow.bytes", "retained.bytes", "gen2.count"],
+            ["event.publisher-leak"] = ["subscriber.count", "instance.count", "retained.bytes"],
         };
 
     [Fact]

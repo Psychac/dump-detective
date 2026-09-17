@@ -5,6 +5,7 @@ using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Identity;
 
 using FluentAssertions;
@@ -144,6 +145,7 @@ public sealed class EventLeakAnalyzerRetypingCharacterizationTests
         EventLeakAnalyzer analyzer = new();
         DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
+            ArtifactId = new ArtifactId("test"),
             HeapTypeStatistics = typeStatistics,
             HeapDominators = dominators,
             HeapRootPaths = rootPaths,

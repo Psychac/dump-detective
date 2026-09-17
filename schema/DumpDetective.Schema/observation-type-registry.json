@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/observation-type-registry.json",
-  "registryVersion": "1.38.0",
+  "registryVersion": "1.42.0",
   "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
   "observationTypes": {
     "gc.pause": {
@@ -600,6 +600,63 @@
       },
       "note": "One per orphaned task (no continuation, not completed/canceled) — deliberately uncapped; a large count under a real leak is itself the honest signal.",
       "addedIn": "1.38.0"
+    },
+    "heap.static-root": {
+      "producedBy": "StaticRootAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Leaks/Analyzers/StaticRootAnalyzer.cs",
+      "requiresCapabilities": ["heap.roots", "heap.objects", "heap.segments"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "retained.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "objects-kept-alive.count": { "unit": "count", "semantics": "absolute" },
+        "gen2-or-loh-retained.fraction": { "unit": "ratio", "semantics": "ratio" }
+      },
+      "note": "One per analyzed static root. This analyzer has a known, documented upstream bug (HeapRootKind.StaticVar never fires on ClrMD 4) deliberately left unfixed, so this code path is currently unreachable on real dumps — correct for when the fix lands, not exercised today.",
+      "addedIn": "1.39.0"
+    },
+    "type.root-reachability": {
+      "producedBy": "ReferenceChainAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Leaks/Analyzers/ReferenceChainAnalyzer.cs",
+      "requiresCapabilities": ["heap.types", "heap.objects", "heap.references", "heap.roots"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "sample.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "has-gc-root": { "unit": "count", "semantics": "absolute" },
+        "retained.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "One per top-by-size type sampled — bounded to ReferenceChainOptions.TopCount. retained.bytes omitted when no dominator tree was available.",
+      "addedIn": "1.40.0"
+    },
+    "type.retention": {
+      "producedBy": "DominatorAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Leaks/Analyzers/DominatorAnalyzer.cs",
+      "requiresCapabilities": ["heap.objects", "heap.references", "heap.types"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "instance.count": { "unit": "count", "semantics": "absolute" },
+        "shallow.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "retained.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "gen2.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "The canonical type.retention example from observation-and-correlation-model.md § 4. One per TopDominatorTypes entry; retained.bytes uses the exact Lengauer-Tarjan dominator-tree value when the §D9 overlay succeeded for that type, otherwise the heuristic BFS estimate (Confidence 0.7 in that case).",
+      "addedIn": "1.41.0"
+    },
+    "event.publisher-leak": {
+      "producedBy": "EventLeakAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Leaks/Analyzers/EventLeakAnalyzer.cs",
+      "requiresCapabilities": ["heap.types"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "subscriber.count": { "unit": "count", "semantics": "absolute" },
+        "instance.count": { "unit": "count", "semantics": "absolute" },
+        "retained.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "One per publisher/event group in TopPublisherEvents — bounded to the top 50 by subscriber count.",
+      "addedIn": "1.42.0"
     }
   }
 }

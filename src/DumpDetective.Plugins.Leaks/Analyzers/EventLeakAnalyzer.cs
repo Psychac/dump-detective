@@ -5,6 +5,9 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Leaks;
 
@@ -66,7 +69,7 @@ public sealed partial class EventLeakAnalyzer : IAnalyzer, IProducesAnalyzerDoma
     private static readonly RootPathSearchOptions RootPathOptions = new(
         MaxCandidateNodes: 5_000, MaxCandidateDepth: 8, MaxRootExpansionDepth: 12, LargeFanoutThreshold: 100);
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -79,8 +82,51 @@ public sealed partial class EventLeakAnalyzer : IAnalyzer, IProducesAnalyzerDoma
         var analyzerOptions = context.AnalyzerOptions as EventLeakAnalyzerOptions
             ?? throw new InvalidOperationException($"{Name} requires an {nameof(EventLeakAnalyzerOptions)} payload from its adapter.");
 
-        LastResult = Analyze(typeStatistics, dominators, rootPaths, analyzerOptions, cancellationToken);
-        return ValueTask.CompletedTask;
+        var result = Analyze(typeStatistics, dominators, rootPaths, analyzerOptions, cancellationToken);
+        LastResult = result;
+
+        await EmitObservationsAsync(context, result, cancellationToken);
+    }
+
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): one
+    /// <c>event.publisher-leak</c> observation per <see cref="EventLeakDomainResult.TopPublisherEvents"/>
+    /// entry — bounded to the top 50 publisher/event groups by subscriber count, a second pass
+    /// (not inline) since <see cref="Analyze"/> only has the publisher type as a string, not a live
+    /// object to resolve a real <see cref="Sdk.Identity.TypeRef"/> from.
+    /// </summary>
+    private static async ValueTask EmitObservationsAsync(AnalysisContext context, EventLeakDomainResult result, CancellationToken cancellationToken)
+    {
+        var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapTypes };
+
+        foreach (PublisherEventSummary summary in result.TopPublisherEvents ?? [])
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(summary.PublisherType);
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "event.publisher-leak",
+                Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["subscriber.count"] = new Measure(summary.TotalSubscribers, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["instance.count"] = new Measure(summary.InstanceCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["retained.bytes"] = new Measure(summary.EstimatedRetainedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Event Leak Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
     }
 
     private static EventLeakDomainResult Analyze(

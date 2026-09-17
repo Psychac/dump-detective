@@ -5,6 +5,8 @@ using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Leaks;
 
@@ -80,7 +82,7 @@ public sealed class StaticRootAnalyzer : IAnalyzer, IProducesAnalyzerDomainResul
     private static readonly RootPathSearchOptions RootPathOptions = new(
         MaxCandidateNodes: 5_000, MaxCandidateDepth: 8, MaxRootExpansionDepth: 12, LargeFanoutThreshold: 100);
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -100,16 +102,24 @@ public sealed class StaticRootAnalyzer : IAnalyzer, IProducesAnalyzerDomainResul
 
         var options = context.AnalyzerOptions as StaticRootLeakAnalysisOptions ?? new StaticRootLeakAnalysisOptions();
 
-        LastResult = Analyze(heapRoots, dominators, objectLookup, segments, rootPaths, fields, typeStatistics, options, cancellationToken);
-        return ValueTask.CompletedTask;
+        LastResult = await Analyze(heapRoots, dominators, objectLookup, segments, rootPaths, fields, typeStatistics, options, context, cancellationToken);
     }
 
-    private static StaticRootDomainResult Analyze(
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): one
+    /// <c>heap.static-root</c> observation per analyzed static root, inline in
+    /// <see cref="AnalyzeStaticRoots"/> where <c>rootObj.Type</c> is still in scope. Deliberately
+    /// does not fix this analyzer's own known, documented bug (its own class remarks) —
+    /// <see cref="IHeapRootQuery.EnumerateRoots"/> never actually yields
+    /// <see cref="HeapRootKind.StaticVar"/> entries on ClrMD 4, so this code path exists correctly
+    /// for when the upstream fix lands, not to change today's (broken, zero-finding) behavior.
+    /// </summary>
+    private static async ValueTask<StaticRootDomainResult> Analyze(
         IHeapRootQuery heapRoots, IHeapDominatorQuery? dominators, IHeapObjectLookup objectLookup, IHeapSegmentQuery segments,
         IHeapRootPathQuery rootPaths, IDumpObjectFieldQuery fields, IHeapTypeStatisticsQuery typeStatistics,
-        StaticRootLeakAnalysisOptions options, CancellationToken cancellationToken)
+        StaticRootLeakAnalysisOptions options, AnalysisContext observationContext, CancellationToken cancellationToken)
     {
-        List<StaticRootAnalysis> allStaticRootAnalysis = AnalyzeStaticRoots(heapRoots, dominators, objectLookup, segments, fields, cancellationToken);
+        List<StaticRootAnalysis> allStaticRootAnalysis = await AnalyzeStaticRoots(heapRoots, dominators, objectLookup, segments, fields, observationContext, cancellationToken);
 
         StaticRootAnalysis[] significantStaticRoots = allStaticRootAnalysis.Where(a => IsSignificant(a, options)).ToArray();
 
@@ -177,12 +187,16 @@ public sealed class StaticRootAnalyzer : IAnalyzer, IProducesAnalyzerDomainResul
         analysis.TotalMemoryImpact >= options.SignificantMemoryThresholdBytes
         || analysis.ObjectsKeptAlive >= options.SignificantObjectCountThreshold;
 
-    private static List<StaticRootAnalysis> AnalyzeStaticRoots(
+    private static async ValueTask<List<StaticRootAnalysis>> AnalyzeStaticRoots(
         IHeapRootQuery heapRoots, IHeapDominatorQuery? dominators, IHeapObjectLookup objectLookup, IHeapSegmentQuery segments,
-        IDumpObjectFieldQuery fields, CancellationToken cancellationToken)
+        IDumpObjectFieldQuery fields, AnalysisContext observationContext, CancellationToken cancellationToken)
     {
         var results = new List<StaticRootAnalysis>();
         var processedRoots = new HashSet<ulong>();
+        var observationCapabilities = new HashSet<Capability>
+        {
+            CapabilityVocabulary.HeapRoots, CapabilityVocabulary.HeapObjects, CapabilityVocabulary.HeapSegments,
+        };
 
         foreach (HeapRootRef root in heapRoots.EnumerateRoots())
         {
@@ -292,6 +306,28 @@ public sealed class StaticRootAnalyzer : IAnalyzer, IProducesAnalyzerDomainResul
                 AssemblyLoadContextInfo = alcInfo,
                 Gen2OrLohRetainedFraction = gen2OrLohRetainedFraction,
             });
+
+            await observationContext.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "heap.static-root",
+                Subjects = [rootObj.Type],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["retained.bytes"] = new Measure(totalSize, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["objects-kept-alive.count"] = new Measure(objectsKeptAlive, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["gen2-or-loh-retained.fraction"] = new Measure(gen2OrLohRetainedFraction, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = observationContext.ArtifactId!.Value,
+                    AnalyzerKey = "Static Root Leak Detection",
+                    CapabilitiesUsed = observationCapabilities,
+                    Fidelity = dominators is not null ? FidelityLevel.Full : FidelityLevel.Degraded,
+                },
+                Confidence = dominators is not null ? 1.0 : 0.5,
+            }, cancellationToken);
         }
 
         return results;

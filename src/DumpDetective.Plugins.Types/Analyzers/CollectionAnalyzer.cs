@@ -9,6 +9,8 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Types
 {
@@ -119,7 +121,7 @@ namespace DumpDetective.Analysis.Analyzers.Types
                 new CollectionAnalyzerOptions(new CollectionAnalysisOptions(), new ReferenceChainOptions()),
                 heapObjectsOverride: new PrecomputedHeapObjectStream(_scanState.Candidates));
 
-        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -135,11 +137,63 @@ namespace DumpDetective.Analysis.Analyzers.Types
             CollectionAnalyzerOptions options = context.AnalyzerOptions as CollectionAnalyzerOptions
                 ?? new CollectionAnalyzerOptions(new CollectionAnalysisOptions(), null);
 
-            LastResult = Analyze(
+            var result = (CollectionDomainResult)Analyze(
                 context.HeapObjects, fields, objectLookup, arrayShapes, typeStatistics,
                 context.HeapSegments, context.HeapDominators, context.HeapRootPaths, context.HeapReverseReferences,
                 options, cancellationToken);
-            return ValueTask.CompletedTask;
+            LastResult = result;
+
+            await EmitObservationsAsync(context, objectLookup, result, cancellationToken);
+        }
+
+        /// <summary>
+        /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): one
+        /// <c>collection.wasteful</c> observation per <see cref="CollectionDomainResult.TopWastefulCollections"/>
+        /// entry — already-selected as wasteful/capacity-mismatched, bounded by
+        /// <c>CollectionAnalyzerOptions.TopWastefulCollectionsToShow</c>. Subject resolved via
+        /// <see cref="IHeapObjectLookup"/> from the snapshot's own address, as a second pass rather
+        /// than inline — <see cref="BuildDomainResult"/> already re-resolves retained bytes the same
+        /// way, so this mirrors that method's own shape rather than threading the sink through it.
+        /// </summary>
+        private static async ValueTask EmitObservationsAsync(
+            AnalysisContext context, IHeapObjectLookup objectLookup, CollectionDomainResult result, CancellationToken cancellationToken)
+        {
+            var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapObjects, CapabilityVocabulary.DumpObjectFields };
+
+            foreach (WastefulCollectionSnapshot snapshot in result.TopWastefulCollections ?? [])
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (!objectLookup.TryGetObject(snapshot.Address, out HeapObjectRef obj))
+                    continue;
+
+                var measures = new Dictionary<string, Measure>
+                {
+                    ["count"] = new Measure(snapshot.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["capacity"] = new Measure(snapshot.Capacity, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["fill-rate.percent"] = new Measure(snapshot.FillRate, MeasureUnit.Percent, MeasureSemantics.Ratio),
+                    ["wasted.bytes"] = new Measure(snapshot.WastedMemory, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                };
+                if (snapshot.RetainedBytes is ulong retained)
+                    measures["retained.bytes"] = new Measure(retained, MeasureUnit.Bytes, MeasureSemantics.Absolute);
+
+                await context.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "collection.wasteful",
+                    Subjects = [obj.Type],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = measures,
+                    Provenance = new Provenance
+                    {
+                        Artifact = context.ArtifactId!.Value,
+                        AnalyzerKey = "Collection Analysis",
+                        CapabilitiesUsed = capabilitiesUsed,
+                        Fidelity = snapshot.RetainedBytes is not null ? FidelityLevel.Full : FidelityLevel.Degraded,
+                    },
+                    Confidence = snapshot.RetainedBytes is not null ? 1.0 : 0.7,
+                }, cancellationToken);
+            }
         }
 
         private static AnalyzerDomainResult Analyze(

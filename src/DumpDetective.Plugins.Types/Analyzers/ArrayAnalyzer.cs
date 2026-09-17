@@ -4,6 +4,9 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Types;
 
@@ -52,7 +55,7 @@ public sealed class ArrayAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     }
     private AnalyzerDomainResult? _lastResult;
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -68,8 +71,86 @@ public sealed class ArrayAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
             ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.DumpArrayElements}' capability.");
 
         ArrayAnalysisOptions options = context.AnalyzerOptions as ArrayAnalysisOptions ?? new ArrayAnalysisOptions();
-        LastResult = Analyze(typeStatistics, segments, roots, objectLookup, arrayShapes, options, context.Progress, cancellationToken);
-        return ValueTask.CompletedTask;
+        var result = Analyze(typeStatistics, segments, roots, objectLookup, arrayShapes, options, context.Progress, cancellationToken);
+        LastResult = result;
+
+        await EmitObservationsAsync(context, objectLookup, result, cancellationToken);
+    }
+
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): two observation
+    /// types — <c>type.array-composition</c> per <see cref="ArrayDomainResult.TopArrayTypesBySize"/>
+    /// entry (bounded to distinct element-type+rank combinations, unlike the whole-heap type
+    /// population), and <c>heap.sparse-array</c> per <see cref="ArrayDomainResult.TopSparseArrays"/>
+    /// entry (bounded, ≤64, resolved to a real <see cref="Sdk.Identity.TypeRef"/> via
+    /// <see cref="IHeapObjectLookup"/> since each entry retains its sample address).
+    /// <see cref="ArrayDomainResult.TopLargeArrays"/>/<see cref="ArrayDomainResult.TopPinnedArrays"/>
+    /// left out of this pass.
+    /// </summary>
+    private static async ValueTask EmitObservationsAsync(AnalysisContext context, IHeapObjectLookup objectLookup, ArrayDomainResult result, CancellationToken cancellationToken)
+    {
+        var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapTypes, CapabilityVocabulary.HeapObjects };
+
+        foreach (ArrayTypeProfile profile in result.TopArrayTypesBySize)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(profile.ElementTypeName);
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "type.array-composition",
+                Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["instance.count"] = new Measure(profile.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["shallow.bytes"] = new Measure(profile.TotalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["gen2-plus-loh.percent"] = new Measure(profile.Gen2PlusLohPercent, MeasureUnit.Percent, MeasureSemantics.Ratio),
+                    ["avg-size.bytes"] = new Measure(profile.AverageInstanceSize, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Array Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
+
+        foreach (SparseArrayEntry sparse in result.TopSparseArrays)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!objectLookup.TryGetObject(sparse.Address, out HeapObjectRef obj))
+                continue;
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "heap.sparse-array",
+                Subjects = [obj.Type],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["length"] = new Measure(sparse.Length, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["null-or-zero.count"] = new Measure(sparse.NullOrZeroCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["sparse.ratio"] = new Measure(sparse.SparseRatio, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                    ["wasted.bytes"] = new Measure(sparse.WastedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Array Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
     }
 
     private static ArrayDomainResult Analyze(

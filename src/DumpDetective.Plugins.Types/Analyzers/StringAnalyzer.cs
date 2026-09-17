@@ -8,6 +8,8 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 using SdkHeapSegmentKind = DumpDetective.Sdk.Analysis.HeapSegmentKind;
 
@@ -79,7 +81,7 @@ public sealed partial class StringAnalyzer : IAnalyzer, IProducesAnalyzerDomainR
     private static readonly RootPathSearchOptions RootPathOptions = new(
         MaxCandidateNodes: 5_000, MaxCandidateDepth: 8, MaxRootExpansionDepth: 12, LargeFanoutThreshold: 100);
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -94,17 +96,27 @@ public sealed partial class StringAnalyzer : IAnalyzer, IProducesAnalyzerDomainR
 
         var options = context.AnalyzerOptions as StringAnalyzerOptions ?? new StringAnalyzerOptions(new StringAnalysisOptions(), null);
 
-        LastResult = Analyze(typeStatistics, fields, segments, rootPaths, context.HeapObjects, options, cancellationToken);
-        return ValueTask.CompletedTask;
+        LastResult = await Analyze(typeStatistics, fields, segments, rootPaths, context.HeapObjects, options, context, cancellationToken);
     }
 
-    private static StringDomainResult Analyze(
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): one
+    /// <c>heap.long-string</c> observation per candidate added to <c>veryLongStrings</c>, inline
+    /// where <see cref="HeapObjectRef.Type"/> is still in scope — bounded to strings at or above
+    /// <c>StringAnalysisOptions.VeryLongStringThresholdBytes</c>, a small fraction of the whole
+    /// string population. <c>TopDuplicates</c> deliberately left out of this pass: there's no
+    /// <c>stringValue</c> entity kind in the SDK yet (see ReportSystemVision.md § 4.1's aspirational
+    /// list), so a duplicate-string observation has no clean subject beyond the owning type, which
+    /// <c>TopDuplicateTypes</c> already aggregates.
+    /// </summary>
+    private static async ValueTask<StringDomainResult> Analyze(
         IHeapTypeStatisticsQuery typeStatistics,
         IDumpObjectFieldQuery fields,
         IHeapSegmentQuery segments,
         IHeapRootPathQuery rootPaths,
         IHeapObjectStream? candidates,
         StringAnalyzerOptions analyzerOptions,
+        AnalysisContext observationContext,
         CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -149,6 +161,8 @@ public sealed partial class StringAnalyzer : IAnalyzer, IProducesAnalyzerDomainR
         string? dedupSource = null;
         int maxUnique = stringOptions.MaxUniqueStringTracking;
 
+        var observationCapabilities = new HashSet<Capability> { CapabilityVocabulary.HeapTypes, CapabilityVocabulary.HeapObjects };
+
         if (candidates is not null)
         {
             dedupSource = "IndexScan";
@@ -169,6 +183,27 @@ public sealed partial class StringAnalyzer : IAnalyzer, IProducesAnalyzerDomainR
                     veryLongStrings.Add(new LongStringEntry(candidate.Address, estCharLength, candidate.Size,
                         Preview: longPreview is not null ? CreatePreview(longPreview, PreviewLength) : null,
                         TypeName: candidate.TypeDisplayName));
+
+                    await observationContext.Observations.EmitAsync(new Observation
+                    {
+                        Id = ObservationId.NewId(),
+                        ObservationType = "heap.long-string",
+                        Subjects = [candidate.Type],
+                        When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                        Measures = new Dictionary<string, Measure>
+                        {
+                            ["length"] = new Measure(estCharLength, MeasureUnit.Count, MeasureSemantics.Absolute),
+                            ["shallow.bytes"] = new Measure(candidate.Size, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                        },
+                        Provenance = new Provenance
+                        {
+                            Artifact = observationContext.ArtifactId!.Value,
+                            AnalyzerKey = "String Analysis",
+                            CapabilitiesUsed = observationCapabilities,
+                            Fidelity = FidelityLevel.Full,
+                        },
+                        Confidence = 1.0,
+                    }, cancellationToken);
                 }
 
                 if (!IsStringSizeInBounds(candidate.Size, stringOptions)) continue;

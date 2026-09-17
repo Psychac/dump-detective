@@ -3,6 +3,8 @@ using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Types;
 
@@ -43,15 +45,54 @@ public sealed class ObjectShapeAnalyzer : IAnalyzer, IProducesAnalyzerDomainResu
     }
     private AnalyzerDomainResult? _lastResult;
 
-    public ValueTask AnalyzeAsync(Sdk.Analysis.AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(Sdk.Analysis.AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         IHeapTypeStatisticsQuery typeStatistics = context.HeapTypeStatistics
             ?? throw new InvalidOperationException($"{Name} requires '{CapabilityVocabulary.HeapTypes}' capability.");
 
-        LastResult = Analyze(typeStatistics);
-        return ValueTask.CompletedTask;
+        var result = Analyze(typeStatistics);
+        LastResult = result;
+
+        if (result.TotalTypesAnalyzed > 0)
+            await EmitObservationAsync(context, result, cancellationToken);
+    }
+
+    /// <summary>
+    /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): a single
+    /// whole-heap <c>type.shape-composition</c> observation. Deliberately excludes every per-type
+    /// list on this result (<c>TopReferenceHeavyTypes</c>/<c>TopValueHeavyTypes</c>/
+    /// <c>TopBalancedTypes</c>/<c>TopGen2RetainedTypes</c>): each is the *entire* whole-heap type
+    /// population partitioned by <see cref="TypeShapeProfile.Category"/>, a hand-picked-threshold
+    /// classification (refRatio &gt; 0.6 / &lt; 0.2) — both the unbounded-volume risk
+    /// <c>GCGenerationAnalyzer</c>'s remarks flag and the Smell A/B judgment purity rule this phase
+    /// exists to keep out of observations.
+    /// </summary>
+    private static async ValueTask EmitObservationAsync(Sdk.Analysis.AnalysisContext context, ObjectShapeAnalyzerDomainResult result, CancellationToken cancellationToken)
+    {
+        await context.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "type.shape-composition",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["type.count"] = new Measure(result.TotalTypesAnalyzed, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["avg-reference-fields"] = new Measure(result.AvgRefFieldsPerType, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["gc-scan-work"] = new Measure(result.TotalGcScanWork, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["gen2-gc-scan-work"] = new Measure(result.TotalGen2GcScanWork, MeasureUnit.Count, MeasureSemantics.Absolute),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = context.ArtifactId!.Value,
+                AnalyzerKey = "Object Shape Analysis",
+                CapabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapTypes },
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
     }
 
     private static ObjectShapeAnalyzerDomainResult Analyze(IHeapTypeStatisticsQuery typeStatistics)

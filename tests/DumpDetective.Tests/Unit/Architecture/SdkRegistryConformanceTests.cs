@@ -59,6 +59,12 @@ public sealed class SdkRegistryConformanceTests
             ["heap.frozen-type-composition"] = ["instance.count", "shallow.bytes"],
             ["runtime.module-heap-footprint"] = ["unique-type.count", "object.count", "shallow.bytes", "loh.bytes", "gen2.object-count"],
             ["runtime.active-exception"] = ["generation.ordinal", "shallow.bytes"],
+            ["type.shape-composition"] = ["type.count", "avg-reference-fields", "gc-scan-work", "gen2-gc-scan-work"],
+            ["type.boxing"] = ["instance.count", "shallow.bytes", "gen0.count", "gen2.count", "gen2.fraction", "is-enum", "has-reference-fields", "has-iequatable"],
+            ["type.array-composition"] = ["instance.count", "shallow.bytes", "gen2-plus-loh.percent", "avg-size.bytes"],
+            ["heap.sparse-array"] = ["length", "null-or-zero.count", "sparse.ratio", "wasted.bytes"],
+            ["collection.wasteful"] = ["count", "capacity", "fill-rate.percent", "wasted.bytes", "retained.bytes"],
+            ["heap.long-string"] = ["length", "shallow.bytes"],
         };
 
     [Fact]

@@ -4,6 +4,9 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Types
 {
@@ -49,7 +52,7 @@ namespace DumpDetective.Analysis.Analyzers.Types
         }
         private AnalyzerDomainResult? _lastResult;
 
-        public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+        public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -57,8 +60,57 @@ namespace DumpDetective.Analysis.Analyzers.Types
                 ?? throw new InvalidOperationException($"{Name} requires the '{CapabilityVocabulary.HeapTypes}' capability.");
             BoxingAnalysisOptions options = context.AnalyzerOptions as BoxingAnalysisOptions ?? new BoxingAnalysisOptions();
 
-            LastResult = Analyze(statsQuery, options, context.Progress, cancellationToken);
-            return ValueTask.CompletedTask;
+            var result = Analyze(statsQuery, options, context.Progress, cancellationToken);
+            LastResult = result;
+
+            await EmitObservationsAsync(context, result, cancellationToken);
+        }
+
+        /// <summary>
+        /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): one
+        /// <c>type.boxing</c> observation per <see cref="BoxingDomainResult.TopBoxedTypes"/> entry —
+        /// bounded to value types actually found boxed on the heap, a small fraction of the whole
+        /// type population (unlike <c>ObjectShapeAnalyzer</c>'s per-type lists, which cover every
+        /// type). <c>IsEnum</c>/<c>HasRefFields</c>/<c>HasIEquatable</c> are structural facts, not
+        /// judgments, so they're fine as raw 0/1 measures.
+        /// </summary>
+        private static async ValueTask EmitObservationsAsync(AnalysisContext context, BoxingDomainResult result, CancellationToken cancellationToken)
+        {
+            var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapTypes };
+
+            foreach (BoxedTypeEntry entry in result.TopBoxedTypes)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(entry.ValueTypeName);
+
+                await context.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "type.boxing",
+                    Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["instance.count"] = new Measure(entry.BoxCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["shallow.bytes"] = new Measure(entry.TotalBoxBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                        ["gen0.count"] = new Measure(entry.Gen0Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["gen2.count"] = new Measure(entry.Gen2Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["gen2.fraction"] = new Measure(entry.Gen2Fraction, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                        ["is-enum"] = new Measure(entry.IsEnum ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["has-reference-fields"] = new Measure(entry.HasReferenceFields ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["has-iequatable"] = new Measure(entry.HasIEquatable ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = context.ArtifactId!.Value,
+                        AnalyzerKey = "Boxing Analysis",
+                        CapabilitiesUsed = capabilitiesUsed,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                }, cancellationToken);
+            }
         }
 
         private static BoxingDomainResult Analyze(

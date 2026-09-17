@@ -106,6 +106,27 @@ the one before it:
       1 exists to enforce.
    5. Write the `ISynthesisRule`, run it over the same fixtures, diff against this item's baselines.
    6. Only then retire that analyzer's `IFindingGenerator`.
+
+   **`ArrayFindingGenerator` run end to end, 2026-09-18 — first analyzer through the full
+   playbook, steps 1-5 done, step 6 partial.** Step 1's audit found `ArrayAnalyzer` only backed
+   2 of 4 finding branches with observations (LOH pressure, multi-dim, and pinned-array
+   accumulation had none) despite its own doc comment already flagging the gap — fixed by
+   extending `type.array-composition` with exhaustive per-type `loh.*`/`pinned.*` measures
+   (summed in the rule, not a new whole-run scalar) plus two new bounded per-entry types
+   (`heap.large-array`/`heap.pinned-array`). Writing the rule surfaced two more findings not
+   anticipated when this playbook was drafted: `Finding` itself was missing `Analyzer`/`Category`/
+   `Tags`/`MetricValue`/`MetricUnit` — fields the report pipeline (`ActionPriorityService`,
+   `CorrelationBuilder`, several section builders) actually reads, not optional — and the old
+   generator trusted `ArrayDomainResult`'s pre-sorted lists rather than sorting itself, so the
+   rule's own initial explicit re-sort was a real (if invisible-on-real-data) behavior change,
+   caught by the parity test itself. Step 6 is partial: `ArrayFindingGenerator` is still
+   registered, unchanged — `AnalyzerFeatureModule.FindingGeneratorType` is a required field with
+   no per-analyzer opt-out, so literal deletion is a separate, bigger change. Instead
+   `SynthesisFindingEnricher` runs after `FindingGenerationPipeline` and unconditionally
+   overrides Array's findings with the rule's output, wired into `RunAnalyzersNode` — proves the
+   rule's output is what the real report ships, without touching any shared report-pipeline code
+   (the Option 1 shape chosen over touching every `Finding`-consuming section builder, or
+   deferring all retirement to a final cutover).
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until step 6
    (see the Stage-1 purity bullet above), so its `IFindingGenerator` cannot be retired in step 2/3
    with the rest — state this so "retire `IFindingGenerator`" doesn't implicitly assume 36/36.

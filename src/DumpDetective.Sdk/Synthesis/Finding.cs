@@ -28,4 +28,26 @@ public sealed record Finding
     public required ConfidenceBreakdown Confidence { get; init; }
 
     public IReadOnlyList<string> Caveats { get; init; } = [];
+
+    /// <summary>
+    /// Mirror <c>Core.Models.InsightFinding</c>'s <c>Analyzer</c>/<c>Category</c>/<c>Tags</c>/
+    /// <c>MetricValue</c>/<c>MetricUnit</c> — added 2026-09-18 during Phase 5 step 2's first real
+    /// rule migration (<c>ArraySynthesisRule</c>), not speculatively: the report pipeline reads all
+    /// five today (<c>ActionPriorityService</c>/<c>CorrelationBuilder</c> group and score by
+    /// <c>Category</c>/<c>Tags</c>; several section builders render <c>MetricValue</c>/<c>MetricUnit</c>
+    /// on charts), so a rule-produced <see cref="Finding"/> with nowhere to carry them couldn't
+    /// actually replace an <c>IFindingGenerator</c> in the real report, only in an isolated test.
+    /// Unlike the deferred <c>Claim</c>-shaped fields (support/counter/falsifiedBy — see
+    /// docs/refactor/modularity/phase-5-observations-synthesis.md's judgment-call entry), these are
+    /// not forward-looking: they're what today's pipeline already requires.
+    /// </summary>
+    public required string Analyzer { get; init; }
+
+    public required string Category { get; init; }
+
+    public IReadOnlyList<string> Tags { get; init; } = [];
+
+    public double? MetricValue { get; init; }
+
+    public string? MetricUnit { get; init; }
 }

@@ -38,7 +38,8 @@ internal sealed class DumpOrchestrationService(
     AnalyzerExecutionService analyzerExecutionService,
     ReportBuilderFacade reportBuilderFacade,
     TrendAnalyzer trendAnalyzer,
-    ReportOutputWriter outputWriter)
+    ReportOutputWriter outputWriter,
+    SynthesisFindingEnricher synthesisFindingEnricher)
 {
     private const string TemporaryAdaptiveIndexingNotice =
         "TEMP-ADAPTIVE-INDEXING: Auto mode uses a provisional dump-size threshold; tune memory-vs-disk selection with large-dump profiling.";
@@ -110,7 +111,7 @@ internal sealed class DumpOrchestrationService(
 
                 nodes.Add(new LoadDumpNode(dumpLoader, keys, id: $"{fileLabel} Load dump"));
                 nodes.Add(new BuildHeapIndexNode(analyzerExecutionService, keys, id: $"{fileLabel} Scan + Index heap"));
-                nodes.Add(new RunAnalyzersNode(analyzerExecutionService, keys, id: $"{fileLabel} Run analyzers", mode: "Trend"));
+                nodes.Add(new RunAnalyzersNode(analyzerExecutionService, synthesisFindingEnricher, keys, id: $"{fileLabel} Run analyzers", mode: "Trend"));
             }
 
             nodes.Add(new TrendBuildReportNode(reportBuilderFacade, trendAnalyzer, artifactStates));
@@ -123,7 +124,7 @@ internal sealed class DumpOrchestrationService(
             ArtifactPipelineKeys keys = ArtifactPipelineKeys.SingleDump;
             nodes.Add(new LoadDumpNode(dumpLoader, keys, id: "Load dump"));
             nodes.Add(new BuildHeapIndexNode(analyzerExecutionService, keys, id: "Scan + Index heap"));
-            nodes.Add(new RunAnalyzersNode(analyzerExecutionService, keys, id: "Run analyzers", mode: "Single"));
+            nodes.Add(new RunAnalyzersNode(analyzerExecutionService, synthesisFindingEnricher, keys, id: "Run analyzers", mode: "Single"));
             nodes.Add(new BuildReportNode(reportBuilderFacade));
         }
 

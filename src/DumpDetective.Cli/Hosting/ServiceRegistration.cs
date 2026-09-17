@@ -49,6 +49,9 @@ internal static class ServiceRegistration
         services.AddSingleton<TraceOrchestrationService>();
         services.AddSingleton<IAnalyzerFactory, DefaultAnalyzerFactory>();
         services.AddSingleton<ISectionBuilderFactory, DefaultSectionBuilderFactory>();
+        services.AddSingleton<ISynthesisRuleCatalog, DefaultSynthesisRuleCatalog>();
+        services.AddSingleton<ISynthesisRuleFactory, DefaultSynthesisRuleFactory>();
+        services.AddSingleton<SynthesisFindingEnricher>();
 
         foreach (AnalyzerFeatureModule module in moduleCatalog.Modules)
         {

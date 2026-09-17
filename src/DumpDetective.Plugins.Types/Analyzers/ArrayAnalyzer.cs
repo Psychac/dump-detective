@@ -160,6 +160,10 @@ public sealed class ArrayAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
                     Fidelity = FidelityLevel.Full,
                 },
                 Confidence = 1.0,
+                // The sparse-array finding narrative prints the exact sample address ("Array of X at
+                // 0xADDR has..."); nothing else on the observation carries it, so ArraySynthesisRule
+                // needs this to reproduce that text.
+                Evidence = [new EvidenceRef { Artifact = context.ArtifactId!.Value, Locator = sparse.Address.ToString(System.Globalization.CultureInfo.InvariantCulture) }],
             }, cancellationToken);
         }
 

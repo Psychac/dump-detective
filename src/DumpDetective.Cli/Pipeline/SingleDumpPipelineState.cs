@@ -46,8 +46,9 @@ internal sealed class SingleDumpPipelineState : IDisposable
     /// Every <see cref="DumpDetective.Sdk.Observations.Observation"/> emitted by this run's
     /// analyzers, captured from <see cref="Context"/>'s shared <c>ObservationSink</c> once analyzers
     /// finish running (Phase 5 step 1, docs/refactor/modularity/phase-5-observations-synthesis.md).
-    /// Nothing consumes this yet — no synthesis stage exists — so it exists purely to make emission
-    /// inspectable/testable; step 2 wires a real consumer.
+    /// Consumed by <see cref="DumpDetective.Reporting.Services.SynthesisFindingEnricher"/> (Phase 5 step 2) to
+    /// override <see cref="Runs"/>' findings for any analyzer with a migrated <c>ISynthesisRule</c>
+    /// — currently just <c>ArraySynthesisRule</c>/"Array Analysis".
     /// </summary>
     public IReadOnlyList<DumpDetective.Sdk.Observations.Observation> Observations { get; set; } = [];
 

@@ -26,7 +26,8 @@ public sealed class DumpOrchestrationServiceTests
             analyzerExecutionService: null!,
             reportBuilderFacade: null!,
             trendAnalyzer: new TrendAnalyzer(Array.Empty<IAnalyzerTrendComparer>()),
-            outputWriter: null!);
+            outputWriter: null!,
+            synthesisFindingEnricher: null!);
 
     [Fact]
     public async Task ExecuteAsync_SingleDump_PropagatesException_WhenDumpLoadFails()

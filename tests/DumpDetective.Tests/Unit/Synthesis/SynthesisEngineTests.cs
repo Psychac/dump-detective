@@ -97,6 +97,8 @@ public sealed class SynthesisEngineTests
         Recommendation = "test",
         DerivedFrom = [],
         Confidence = ConfidenceBreakdown.MeasurementCertain,
+        Analyzer = "Test Analyzer",
+        Category = "Test",
     };
 
     private sealed class RecordingRule : ISynthesisRule

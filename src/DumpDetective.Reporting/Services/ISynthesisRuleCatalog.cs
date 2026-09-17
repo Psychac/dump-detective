@@ -1,3 +1,4 @@
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Synthesis;
 
 namespace DumpDetective.Reporting.Services;
@@ -8,14 +9,12 @@ internal interface ISynthesisRuleCatalog
 }
 
 /// <summary>
-/// Empty by construction — no <see cref="ISynthesisRule"/> exists anywhere in the codebase yet
-/// (Phase 5 step 2 hasn't migrated a single <c>IFindingGenerator</c> to one; see
-/// docs/refactor/modularity/phase-5-observations-synthesis.md's "Before step 2" prerequisites).
-/// Deliberately not a per-plugin-package aggregation like <c>AnalyzerFeatureModule</c> yet — that
-/// shape should follow real rule authoring, not precede it; wiring it in now would be guessing at
-/// a registration story with nothing real to test it against.
+/// First entry (<see cref="ArraySynthesisRule"/>) added 2026-09-18, Phase 5 step 2's first real
+/// rule migration — see docs/refactor/modularity/phase-5-observations-synthesis.md's per-analyzer
+/// playbook. Still not a per-plugin-package aggregation like <c>AnalyzerFeatureModule</c>; a flat
+/// list stays proportionate until enough rules exist to justify that shape.
 /// </summary>
 internal sealed class DefaultSynthesisRuleCatalog : ISynthesisRuleCatalog
 {
-    public IReadOnlyList<Type> RuleTypes { get; } = [];
+    public IReadOnlyList<Type> RuleTypes { get; } = [typeof(ArraySynthesisRule)];
 }

@@ -8,11 +8,15 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Orchestration.Graph;
+using DumpDetective.Reporting.Services;
 using DumpDetective.Sdk.Analysis;
 
 namespace DumpDetective.Cli.Pipeline.Nodes;
 
-internal sealed class RunAnalyzersNode(AnalyzerExecutionService analyzerExecutionService, ArtifactPipelineKeys keys, string id, string mode) : IPipelineNode
+internal sealed class RunAnalyzersNode(
+    AnalyzerExecutionService analyzerExecutionService,
+    SynthesisFindingEnricher synthesisFindingEnricher,
+    ArtifactPipelineKeys keys, string id, string mode) : IPipelineNode
 {
     public string Id { get; } = id;
     public IReadOnlyCollection<string> Produces { get; } = [keys.AnalyzerRuns];
@@ -54,6 +58,9 @@ internal sealed class RunAnalyzersNode(AnalyzerExecutionService analyzerExecutio
 
         if (runtimeContext.ObservationSink is Sdk.Observations.CollectingObservationSink collectingSink)
             state.Observations = collectingSink.Observations;
+
+        if (state.Observations is { Count: > 0 } observations)
+            state.Runs = await synthesisFindingEnricher.EnrichAsync(state.Runs, observations, cancellationToken);
 
         state.IncidentContext = IncidentContextFactory.Create(
             mode: mode,

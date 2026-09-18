@@ -130,6 +130,32 @@ the one before it:
    | `AsyncTaskFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 7 of 8 signals unobserved, fixed | `AsyncTaskSynthesisRule` |
    | `FinalizableObjectFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 2 of 9 signals unobserved, fixed | `FinalizableObjectSynthesisRule` |
    | `GCHandleFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 5 of 6 signals unobserved, fixed | `GCHandleSynthesisRule` |
+   | `GCRootFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 3 of 4 signals unobserved, fixed | `GCRootSynthesisRule` |
+
+   **`GCRootFindingGenerator` — notable findings:**
+   - Step c's audit found `heap.root` (Phase 5 step 1) deliberately left out `RootFinding.RootKind`
+     as a measure — its own remarks flagged this as a gap to revisit "if a synthesis rule actually
+     needs to group by it," and this is exactly that: 3 of 4 signals (static-root retention,
+     finalizer-queue pressure, pinned-handle accumulation) group `GCRootDomainResult.ByKind` by
+     `Kind` (`StrongHandle`/`FinalizerQueue`/`PinnedHandle`/`AsyncPinnedHandle`), which `heap.root`
+     alone cannot reconstruct.
+   - Step d's fix, two parts: a new `root.kind-summary` observation (one per `ByKind` row, bounded
+     to `HeapRootKind`'s fixed small taxonomy) carrying a `kind.ordinal` measure — the same
+     pattern `heap.loh-fragmentation`/`heap.segment-kind-composition` already established, and the
+     same "no live enum instance, parse the string back" situation `heap.root`'s own remarks
+     anticipated; and a new whole-run `root.population` observation for `TotalRoots` (includes
+     roots dropped before `ByKind`/`heap.root` ever see them — null target, unresolvable metadata,
+     zero-size object — so it can't be reconstructed by summing `root.kind-summary`) and the
+     subgraph-walk-cap signal.
+   - `root.population` is guarded on `TotalRoots > 0`, skipped entirely on the no-heap-index
+     `EmptyResult()` path `Analyze` already returns early for — an unconditional emission would
+     have fabricated an all-zero population observation misrepresenting "no data available" as
+     "zero roots measured," and broke `GCRootAnalyzerObservationTests`'
+     `AnalyzeAsync_WithoutHeapIndex_EmitsNoObservations` (updated alongside the `WithHeapIndex` case
+     to scope its assertions per observation type instead of assuming `heap.root` was the only one).
+   - Trusts `heap.root` emission order for the static-root finding's "top suspect" text
+     (`TopRootsBySeverity[0]`) — same already-sorted-before-emission structure `ArraySynthesisRule`
+     relies on, not `AsyncStateMachineSynthesisRule`'s inline-per-type case.
 
    **`GCHandleFindingGenerator` — notable findings:**
    - Step c's audit found `handle.pinned` (Phase 5 step 1) only backs the debugger-follow-up

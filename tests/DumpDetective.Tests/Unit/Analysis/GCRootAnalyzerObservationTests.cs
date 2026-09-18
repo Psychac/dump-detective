@@ -17,7 +17,8 @@ namespace DumpDetective.Tests.Unit.Analysis;
 
 /// <summary>
 /// Phase 5 step 1's pilot (docs/refactor/modularity/phase-5-observations-synthesis.md): proves
-/// <see cref="GCRootAnalyzer"/> emits <c>heap.root</c> observations alongside its unchanged
+/// <see cref="GCRootAnalyzer"/> emits <c>heap.root</c>, <c>root.kind-summary</c> (step 2), and
+/// <c>root.population</c> (step 2) observations alongside its unchanged
 /// <see cref="GCRootDomainResult"/> — the domain-result assertions in
 /// <see cref="GCRootAnalyzerRetypingCharacterizationTests"/> stay green untouched, so this file only
 /// covers the new observation-emission behavior, not a duplicate of that test's fixture assertions.
@@ -54,10 +55,21 @@ public sealed class GCRootAnalyzerObservationTests
             adapter.AnalyzeAsync(context, CancellationToken.None).GetAwaiter().GetResult();
             var result = (GCRootDomainResult)adapter.LastResult!;
 
-            sink.Observations.Should().HaveCount(result.TopRootsBySeverity.Count);
-            sink.Observations.Should().OnlyContain(o => o.ObservationType == "heap.root");
-            sink.Observations.Should().OnlyContain(o => o.Subjects.Count == 1);
-            sink.Observations.Should().OnlyContain(o => o.Measures.ContainsKey("retained.bytes"));
+            // Three observation types now (Phase 5 step 2 added root.kind-summary/root.population
+            // alongside step 1's heap.root — see GCRootSynthesisRule's own remarks): one heap.root
+            // per finding, one root.kind-summary per ByKind row, one whole-run root.population.
+            IReadOnlyList<Observation> heapRootObservations = sink.Observations.Where(o => o.ObservationType == "heap.root").ToList();
+            IReadOnlyList<Observation> kindSummaryObservations = sink.Observations.Where(o => o.ObservationType == "root.kind-summary").ToList();
+            IReadOnlyList<Observation> populationObservations = sink.Observations.Where(o => o.ObservationType == "root.population").ToList();
+
+            sink.Observations.Should().HaveCount(heapRootObservations.Count + kindSummaryObservations.Count + populationObservations.Count);
+            heapRootObservations.Should().HaveCount(result.TopRootsBySeverity.Count);
+            heapRootObservations.Should().OnlyContain(o => o.Subjects.Count == 1);
+            heapRootObservations.Should().OnlyContain(o => o.Measures.ContainsKey("retained.bytes"));
+            kindSummaryObservations.Should().HaveCount(result.ByKind.Count);
+            kindSummaryObservations.Should().OnlyContain(o => o.Measures.ContainsKey("kind.ordinal") && o.Measures.ContainsKey("count"));
+            populationObservations.Should().ContainSingle();
+            populationObservations.Should().OnlyContain(o => o.Measures.ContainsKey("total.count"));
             sink.Observations.Should().OnlyContain(o => o.Provenance.AnalyzerKey == "GC Root Analysis");
             sink.Observations.Should().OnlyContain(o => o.Provenance.Artifact == runtimeCtx.ArtifactId);
 

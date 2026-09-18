@@ -30,6 +30,8 @@ public sealed class SdkRegistryConformanceTests
             ["contention.episode"] = ["contention.duration"],
             ["cpu.sample-attribution"] = ["cpu.sample-count"],
             ["heap.root"] = ["retained.bytes", "subgraph.node-count"],
+            ["root.kind-summary"] = ["kind.ordinal", "count", "retained.bytes"],
+            ["root.population"] = ["total.count", "subgraph-walk-capped", "subgraph-walk-capped.count"],
             ["handle.pinned"] = ["retained.bytes"],
             ["handle.population"] = [
                 "total.count", "pinned-target.count", "pinned-retained.bytes",

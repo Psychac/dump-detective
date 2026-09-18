@@ -147,6 +147,72 @@ public sealed class GCRootAnalyzer :
                 Confidence = finding.RetainedBytesIsExact ? 1.0 : 0.7,
             }, cancellationToken);
         }
+
+        // Per-kind rows — bounded to HeapRootKind's fixed, small taxonomy (Stack, StaticVar,
+        // FinalizerQueue, StrongHandle, PinnedHandle, ...), not per-root. Same "kind.ordinal
+        // measure, no live enum instance" precedent as heap.loh-fragmentation/
+        // heap.segment-kind-composition — RootKindSummary.Kind is already a string
+        // (root.Kind.ToString()) by the time Analyze returns it, parsed back to the enum here only
+        // to get a stable ordinal, never re-guessed from the string itself.
+        foreach (RootKindSummary ks in result.ByKind)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "root.kind-summary",
+                Subjects = [],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["kind.ordinal"] = new Measure((double)(int)Enum.Parse<HeapRootKind>(ks.Kind), MeasureUnit.Custom, MeasureSemantics.Absolute),
+                    ["count"] = new Measure(ks.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["retained.bytes"] = new Measure(ks.EstimatedRetainedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "GC Root Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = fidelity,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
+
+        // Whole-run scalar — no entity subject, same "no natural per-entity anchor" pattern as
+        // gc.generation-composition. TotalRoots includes roots dropped before ByKind/heap.root ever
+        // see them (null target, unresolvable metadata, zero-size object), so it cannot be
+        // reconstructed by summing root.kind-summary's own count measure. Guarded on TotalRoots > 0
+        // so the no-heap-index EmptyResult() path (see Analyze's own guard) stays observation-free,
+        // matching heap.root/root.kind-summary's own natural emptiness there — a fabricated
+        // all-zero population observation would misrepresent "no data available" as "zero roots
+        // measured".
+        if (result.TotalRoots > 0)
+        {
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "root.population",
+                Subjects = [],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["total.count"] = new Measure(result.TotalRoots, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["subgraph-walk-capped"] = new Measure(result.SubgraphWalkCapped ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["subgraph-walk-capped.count"] = new Measure(result.SubgraphWalkCappedCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "GC Root Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = fidelity,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
     }
 
     private static AnalyzerDomainResult Analyze(

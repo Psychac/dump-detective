@@ -55,7 +55,11 @@ public sealed class SdkRegistryConformanceTests
                 "dependent-dead-key.count", "held-only-detection-available",
             ],
             ["gc.generation-composition"] = ["gen0.bytes", "gen1.bytes", "gen2.bytes", "loh.bytes", "poh.bytes", "gen2.fraction", "loh.fraction"],
-            ["gc.allocation-composition"] = ["gen0.count-fraction", "gen1.count-fraction", "gen2.count-fraction", "loh.count-fraction", "finalizable.type-count", "finalizable.bytes"],
+            ["gc.allocation-composition"] = [
+                "gen0.count-fraction", "gen1.count-fraction", "gen2.count-fraction", "loh.count-fraction",
+                "gen0.size-fraction", "gen2.size-fraction", "loh.size-fraction",
+                "finalizable.type-count", "finalizable.bytes", "transient-classification.threshold",
+            ],
             ["heap.segment-composition"] = ["generation.ordinal", "committed.bytes", "reserved.bytes", "used.bytes", "segment.count"],
             ["heap.loh-fragmentation"] = ["kind.ordinal", "segment.count", "total.bytes", "free.bytes", "used.bytes", "fragmentation.percent", "largest-free-block.bytes"],
             ["heap.loh-type-composition"] = ["loh.count", "loh.bytes"],

@@ -257,10 +257,14 @@
         "gen1.count-fraction": { "unit": "ratio", "semantics": "ratio" },
         "gen2.count-fraction": { "unit": "ratio", "semantics": "ratio" },
         "loh.count-fraction": { "unit": "ratio", "semantics": "ratio" },
+        "gen0.size-fraction": { "unit": "ratio", "semantics": "ratio" },
+        "gen2.size-fraction": { "unit": "ratio", "semantics": "ratio" },
+        "loh.size-fraction": { "unit": "ratio", "semantics": "ratio" },
         "finalizable.type-count": { "unit": "count", "semantics": "absolute" },
-        "finalizable.bytes": { "unit": "bytes", "semantics": "absolute" }
+        "finalizable.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "transient-classification.threshold": { "unit": "ratio", "semantics": "absolute" }
       },
-      "note": "Count-based whole-heap composition, distinct from GCGenerationAnalyzer's byte-based gc.generation-composition — independent corroborating measurement, not duplication (observation-and-correlation-model.md § 4). Excludes AllocationProfile and the four Top*Types lists (Smell B — bucketed by a hand-picked threshold, not a raw fact).",
+      "note": "Count-based whole-heap composition, distinct from GCGenerationAnalyzer's byte-based gc.generation-composition — independent corroborating measurement, not duplication (observation-and-correlation-model.md § 4). Excludes AllocationProfile and the four Top*Types lists (Smell B — bucketed by a hand-picked threshold, not a raw fact) as classifications, but Phase 5 step 2 added the *raw* size-fraction measures (gen0/gen2/loh) the pressure/profile classifiers need, plus transient-classification.threshold — AllocationPatternAnalysisOptions.TransientClassificationThreshold is runtime-configurable, so the synthesis rule reads it here rather than hard-coding the 70.0 default, same choice GCHandleSynthesisRule made for its own thresholds. gen1.size-fraction is deliberately not added: no finding reads it. An EvidenceRef with the single top-by-composite-score long-lived type's name as its Description is present only when TopLongLivedTypes is non-empty — that unbounded, composite-ranked list itself is not observed per-entry (the same volume risk this note's own Smell-B exclusion already flags), only the one identity the old finding generator actually reads.",
       "addedIn": "1.6.0"
     },
     "heap.segment-composition": {

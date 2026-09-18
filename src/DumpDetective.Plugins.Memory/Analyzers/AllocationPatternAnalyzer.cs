@@ -64,7 +64,7 @@ public sealed class AllocationPatternAnalyzer : IAnalyzer, IProducesAnalyzerDoma
         // data — nothing was actually measured, so there's nothing honest to emit (a zero-value,
         // zero-confidence observation would be noise, not a fact).
         if (hasExactGenerationData)
-            await EmitObservationAsync(context, result, cancellationToken);
+            await EmitObservationAsync(context, result, options, cancellationToken);
     }
 
     /// <summary>
@@ -82,9 +82,14 @@ public sealed class AllocationPatternAnalyzer : IAnalyzer, IProducesAnalyzerDoma
     /// them into an observation would smuggle judgment past the purity rule this phase exists to
     /// enforce, on top of being the same unbounded whole-heap-population volume risk
     /// <c>GCGenerationAnalyzer</c>'s own remarks flag.
+    /// Phase 5 step 2 adds the raw size-fraction measures (gen0/gen2/loh) and
+    /// <c>AllocationPatternAnalysisOptions.TransientClassificationThreshold</c> — genuinely raw
+    /// facts/config, not judgment — that <c>AllocationPatternFindingGenerator</c>'s severity/profile
+    /// classification needs, plus a single top-long-lived-type-name evidence entry (bounded to one
+    /// identity, not the unbounded, composite-ranked <c>TopLongLivedTypes</c> list itself).
     /// </summary>
     private static async ValueTask EmitObservationAsync(
-        AnalysisContext context, AllocationPatternDomainResult result, CancellationToken cancellationToken)
+        AnalysisContext context, AllocationPatternDomainResult result, AllocationPatternAnalysisOptions options, CancellationToken cancellationToken)
     {
         await context.Observations.EmitAsync(new Observation
         {
@@ -98,8 +103,12 @@ public sealed class AllocationPatternAnalyzer : IAnalyzer, IProducesAnalyzerDoma
                 ["gen1.count-fraction"] = new Measure(result.Gen1CountPct / 100.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
                 ["gen2.count-fraction"] = new Measure(result.Gen2CountPct / 100.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
                 ["loh.count-fraction"] = new Measure(result.LohCountPct / 100.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                ["gen0.size-fraction"] = new Measure(result.Gen0SizePct / 100.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                ["gen2.size-fraction"] = new Measure(result.Gen2SizePct / 100.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                ["loh.size-fraction"] = new Measure(result.LohSizePct / 100.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
                 ["finalizable.type-count"] = new Measure(result.FinalizableTypeCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["finalizable.bytes"] = new Measure(result.FinalizableBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["transient-classification.threshold"] = new Measure(options.TransientClassificationThreshold, MeasureUnit.Ratio, MeasureSemantics.Absolute),
             },
             Provenance = new Provenance
             {
@@ -109,6 +118,9 @@ public sealed class AllocationPatternAnalyzer : IAnalyzer, IProducesAnalyzerDoma
                 Fidelity = FidelityLevel.Full,
             },
             Confidence = 1.0,
+            Evidence = result.TopLongLivedTypes is { Count: > 0 }
+                ? [new EvidenceRef { Artifact = context.ArtifactId!.Value, Locator = "top-long-lived-type", Description = result.TopLongLivedTypes[0].TypeName }]
+                : [],
         }, cancellationToken);
     }
 

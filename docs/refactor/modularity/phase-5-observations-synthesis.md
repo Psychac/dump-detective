@@ -143,6 +143,7 @@ the one before it:
    | `EventLeakFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — per-group aggregates + whole-run zero/fallback counts unobserved, fixed | `EventLeakSynthesisRule` |
    | `ReferenceChainFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — multi-sample-enriched per-type fields + whole-run scalars + shared-root groups unobserved, fixed | `ReferenceChainSynthesisRule` |
    | `StaticRootFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — significant-subset whole-run scalars unobserved, fixed | `StaticRootSynthesisRule` |
+   | `AllocationPatternFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — size-fraction measures + classification threshold + top-long-lived-type identity unobserved, fixed | `AllocationPatternSynthesisRule` |
 
    ### Per-analyzer notable findings
 
@@ -564,6 +565,47 @@ the one before it:
    - The old generator's single retention finding also computes an evidence-based
      `Finding.ConfidenceScore` override via `EvidenceConfidence.Compute(topEvidence)` — left
      unreproduced, same choice every prior Leaks-plugin rule in this playbook made.
+
+   **`AllocationPatternFindingGenerator` — notable findings:**
+   - First entry where the finding generator's severity/title/evidence text is driven entirely by
+     **re-derived judgment**, not raw facts read directly: `AllocationPatternPressureClassifier`
+     (`AllocationPatternAnalyzer`'s own sole-owner classifier, per the Smell A audit) computes
+     `GCPressureLevel` and two pressure scores from `Gen0CountPct`/`Gen2CountPct`/`LohSizePct`, and
+     the domain result's own `AllocationProfile` field is Stage-1-baked from the same two count
+     percentages (`ClassifyProfile`) — both already excluded from `gc.allocation-composition`
+     (Phase 5 step 1) as the audit's catalogued Smell B/A, so nothing needed un-baking, but the rule
+     still needs the *raw inputs* those formulas run on.
+   - Step c's audit found `gc.allocation-composition` carried the count-fraction inputs
+     (`gen0.count-fraction`/`gen2.count-fraction`) but none of the size-fraction ones
+     (`Gen0SizePct`/`Gen2SizePct`/`LohSizePct` — evidence text and `ComputePressureScore` both need
+     `LohSizePct`), and no whole-run scalar for `TransientClassificationThreshold` (the
+     `AllocationProfile` cutoff, runtime-configurable via `AnalysisContext.AnalyzerOptions`) or the
+     single long-lived-type name the evidence text embeds.
+   - Step d's fix: three new raw measures (`gen0.size-fraction`/`gen2.size-fraction`/
+     `loh.size-fraction` — `gen1.size-fraction` deliberately omitted, no finding reads it);
+     `transient-classification.threshold` as a measure rather than a hard-coded 70.0 default, same
+     wrinkle `GCHandleSynthesisRule` hit; and a single `EvidenceRef` carrying the one
+     top-by-composite-score long-lived type's name — the unbounded, composite-ranked
+     `TopLongLivedTypes` list itself is *not* observed per-entry (Smell B, plus the same real
+     observation-volume risk this observation's own note already flags), only the one identity the
+     old generator actually reads.
+   - **`AllocationPatternPressureClassifier` and `AllocationProfile` are duplicated, not called or
+     imported**: both live in `DumpDetective.Plugins.Memory`, `internal` to that assembly, invisible
+     to `DumpDetective.Reporting`. The rule re-implements `ComputePressureScore`/`ClassifyPressure`/
+     `ComputePromotionPressureScore`/`ClassifyProfile` verbatim as private methods (with a private
+     enum mirroring each domain enum) — the same "re-derive rather than reach into another
+     assembly's internals" choice `TimerLeakSynthesisRule` made for its type-category
+     classification, just applied to arithmetic instead of a name match.
+   - **The old generator's own unit tests hard-code `Profile: AllocationProfile.Mixed` for every
+     pressure fixture**, including High/Critical ones whose real `Gen0CountPct`/`Gen2CountPct` would
+     classify as `Retained` in production (`ClassifyProfile` and `ClassifyPressure` read the same
+     two inputs but are otherwise independent formulas, so the old fixtures decouple them in a way
+     production never can) — the same "achievable only in test fixtures" situation
+     `AsyncStateMachineSynthesisRuleParityTests` hit. The parity fixtures compute `Profile` from the
+     same `ClassifyProfile` logic the rule uses, so both sides render the same (real) profile text
+     instead of reproducing the impossible decoupling.
+   - Unlike every prior playbook entry, Low pressure emits **no finding at all**, not even an
+     info-level one — ported as a bare early return, not a suppressed/gated finding.
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until `## Work`
    step 6 below (see the Stage-1 purity bullet above — distinct from playbook step f just above),
    so its `IFindingGenerator` cannot be retired alongside the rest in this playbook — state this

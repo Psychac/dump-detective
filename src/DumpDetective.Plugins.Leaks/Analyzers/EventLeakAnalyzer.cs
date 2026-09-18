@@ -94,6 +94,13 @@ public sealed partial class EventLeakAnalyzer : IAnalyzer, IProducesAnalyzerDoma
     /// entry — bounded to the top 50 publisher/event groups by subscriber count, a second pass
     /// (not inline) since <see cref="Analyze"/> only has the publisher type as a string, not a live
     /// object to resolve a real <see cref="Sdk.Identity.TypeRef"/> from.
+    /// Also emits, Phase 5 step 2: one <c>event.publisher-leak-group</c> observation per
+    /// <see cref="EventLeakDomainResult.TopLeakGroups"/> entry — a different, unbounded population
+    /// than <c>TopPublisherEvents</c>'s top-50 sample, and the one the old finding generator's
+    /// instance/static aggregate findings actually read — and a single whole-run
+    /// <c>event.publisher-leak-population</c> observation, unconditionally, since
+    /// <c>TotalEventLeakInstances</c>/<c>InstanceEventLeakCount</c>/<c>StaticEventLeakCount</c> are
+    /// exhaustive scalars always computed by <see cref="Analyze"/>, including the zero-leak case.
     /// </summary>
     private static async ValueTask EmitObservationsAsync(AnalysisContext context, EventLeakDomainResult result, CancellationToken cancellationToken)
     {
@@ -127,6 +134,70 @@ public sealed partial class EventLeakAnalyzer : IAnalyzer, IProducesAnalyzerDoma
                 Confidence = 1.0,
             }, cancellationToken);
         }
+
+        foreach (EventLeakGroupSnapshot group in result.TopLeakGroups ?? [])
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(group.PublisherType);
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "event.publisher-leak-group",
+                Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["is-static"] = new Measure(group.IsStatic ? 1 : 0, MeasureUnit.Custom, MeasureSemantics.Absolute),
+                    ["instance.count"] = new Measure(group.InstanceCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["subscriber.count"] = new Measure(group.TotalSubscribers, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["max-subscribers-per-instance.count"] = new Measure(group.MaxSubscribers, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["max-severity.score"] = new Measure(group.MaxSeverityScore, MeasureUnit.Custom, MeasureSemantics.Absolute),
+                    ["is-timer-event"] = new Measure(group.IsTimerEvent ? 1 : 0, MeasureUnit.Custom, MeasureSemantics.Absolute),
+                    ["is-property-changed-event"] = new Measure(group.IsPropertyChangedEvent ? 1 : 0, MeasureUnit.Custom, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Event Leak Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+                // No single object address identifies a group (it spans every publisher instance in
+                // it) — the canonical publisher/event key is the closest stable locator, same
+                // free-text-evidence choice as every prior group/aggregate-level EvidenceRef.
+                Evidence = [new EvidenceRef
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    Locator = $"{canonicalName}.{group.EventFieldName}",
+                    Description = group.EventFieldName,
+                }],
+            }, cancellationToken);
+        }
+
+        await context.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "event.publisher-leak-population",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["total.count"] = new Measure(result.TotalEventLeakInstances, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["instance-leak.count"] = new Measure(result.InstanceEventLeakCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["static-leak.count"] = new Measure(result.StaticEventLeakCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = context.ArtifactId!.Value,
+                AnalyzerKey = "Event Leak Analysis",
+                CapabilitiesUsed = capabilitiesUsed,
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
     }
 
     private static EventLeakDomainResult Analyze(

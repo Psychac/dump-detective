@@ -140,6 +140,7 @@ the one before it:
    | `TimerLeakFindingGenerator` | Done, 2026-09-18 | Partial (see above) | No — no observation gap at all | `TimerLeakSynthesisRule` |
    | `WcfChannelFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — per-type totals + binding hint + endpoints + whole-run counts unobserved, fixed | `WcfChannelSynthesisRule` |
    | `DominatorFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — always-heuristic retained bytes + highly-referenced/capped whole-run counts + type-hotspot aggregate unobserved, fixed | `DominatorSynthesisRule` |
+   | `EventLeakFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — per-group aggregates + whole-run zero/fallback counts unobserved, fixed | `EventLeakSynthesisRule` |
 
    ### Per-analyzer notable findings
 
@@ -469,6 +470,38 @@ the one before it:
    - The old generator's highly-referenced-objects finding also computes an evidence-based
      `Finding.ConfidenceScore` override via `EvidenceConfidence.Compute` — left unreproduced, same
      choice `TimerLeakSynthesisRule`'s own entry made, since no rendered text reads it.
+
+   **`EventLeakFindingGenerator` — notable findings:**
+   - Step c's audit found the existing `event.publisher-leak` observation (Phase 5 step 1) reads
+     from `TopPublisherEvents`, a top-50-by-subscriber-count sample used by a *different* consumer —
+     not the `TopLeakGroups` list this finding generator's instance/static aggregate findings
+     actually read, and not capped the same way. Every per-group field the aggregate findings need
+     (`IsStatic`, `InstanceCount`, `TotalSubscribers`, `MaxSubscribers`, `MaxSeverityScore`,
+     `IsTimerEvent`, `IsPropertyChangedEvent`, `EventFieldName`) had no observation backing, and
+     neither did the whole-run `TotalEventLeakInstances`/`InstanceEventLeakCount`/
+     `StaticEventLeakCount` scalars the zero-leak finding and the groupless-fallback branch both
+     need.
+   - Step d's fix, two parts: a new per-group `event.publisher-leak-group` observation, one per
+     `TopLeakGroups` entry (exhaustive, unlike `event.publisher-leak`'s top-50 sample from a
+     different list) — `EventFieldName` has no home among `Subjects`' typed `EntityRef` kinds (the
+     `TypeRef` subject alone identifies only the publisher type), so it's carried as
+     `EvidenceRef.Description`, the same free-text-evidence choice every prior group/aggregate-level
+     analyzer made; and a new whole-run `event.publisher-leak-population` observation
+     (`total.count`, `instance-leak.count`, `static-leak.count`), emitted unconditionally including
+     the zero-leak case, since `Analyze` always computes these exhaustively.
+   - The rule ports the old generator's `AddAggregateFinding` reduction (max severity, max
+     subscribers, top group by subscriber count, first-two-distinct examples) directly onto matched
+     `event.publisher-leak-group` observations filtered by `is-static` — no re-ranking question
+     arises, since the old generator never sorts `TopLeakGroups` either, it's a single linear-scan
+     reduction. A parity test (`GroupCountFallback_UsedWhenNoGroupsOfKindSampled`) exercises the
+     branch where `TopLeakGroups` samples zero groups of one `IsStatic` value even though the
+     population's own count for that kind is nonzero, falling back to
+     `InstanceEventLeakCount`/`StaticEventLeakCount` exactly as the old generator does.
+   - The old generator's aggregate findings also compute an evidence-based
+     `Finding.ConfidenceScore` override via `EvidenceConfidence.Compute(topEvidence)` — left
+     unreproduced, same choice `TimerLeakSynthesisRule`/`DominatorSynthesisRule` made, since no
+     rendered text reads it; `topEvidence` (the per-instance root-path evidence used only for that
+     override) needed no observation backing as a result.
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until `## Work`
    step 6 below (see the Stage-1 purity bullet above — distinct from playbook step f just above),
    so its `IFindingGenerator` cannot be retired alongside the rest in this playbook — state this

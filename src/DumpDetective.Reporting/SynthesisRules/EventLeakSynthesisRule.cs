@@ -1,0 +1,214 @@
+using DumpDetective.Sdk.Identity;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Synthesis;
+
+namespace DumpDetective.Reporting.SynthesisRules;
+
+/// <summary>
+/// Replaces <c>EventLeakFindingGenerator</c> —
+/// docs/refactor/modularity/phase-5-observations-synthesis.md's per-analyzer playbook.
+/// </summary>
+/// <remarks>
+/// Ports the old generator's <c>AddAggregateFinding</c> reduction loop directly onto
+/// <c>event.publisher-leak-group</c> observations, filtered by the <c>is-static</c> measure — the
+/// old generator doesn't sort or re-rank <c>TopLeakGroups</c> either, it's a single linear
+/// max/first-two-distinct reduction, so no trust-emission-order question arises here.
+/// <c>event.publisher-leak</c> (a different, top-50-by-subscriber-count sample from
+/// <c>TopPublisherEvents</c>) is not part of this rule's query — it backs a different consumer, not
+/// this finding generator.
+/// <para>
+/// The old generator's aggregate findings also compute an evidence-based
+/// <c>Finding.ConfidenceScore</c> override via <c>EvidenceConfidence.Compute(topEvidence)</c> — left
+/// unreproduced, same choice <c>TimerLeakSynthesisRule</c>/<c>DominatorSynthesisRule</c> made, since
+/// no rendered text reads it. <c>topEvidence</c> itself (the per-instance root-path evidence used
+/// only for that override) needed no observation backing as a result.
+/// </para>
+/// </remarks>
+internal sealed class EventLeakSynthesisRule : ISynthesisRule
+{
+    private const long SeverityCriticalThreshold = 35;
+    private const long SeverityWarningThreshold = 20;
+
+    private const string AnalyzerName = "Event Leak Analysis";
+
+    public string RuleId => "event-leak.finding-parity";
+    public int Version => 1;
+
+    public ObservationQuery Query { get; } = new()
+    {
+        ObservationTypes = ["event.publisher-leak-group", "event.publisher-leak-population"],
+    };
+
+    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+        ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
+    {
+        Observation? population = null;
+        var groups = new List<Observation>();
+
+        foreach (Observation observation in matched.Matched)
+        {
+            switch (observation.ObservationType)
+            {
+                case "event.publisher-leak-population":
+                    population = observation;
+                    break;
+                case "event.publisher-leak-group":
+                    groups.Add(observation);
+                    break;
+            }
+        }
+
+        if (population is null)
+            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+
+        long totalEventLeakInstances = (long)population.Measures["total.count"].Value;
+
+        if (totalEventLeakInstances == 0)
+        {
+            return ValueTask.FromResult<IReadOnlyList<Finding>>([new Finding
+            {
+                Fingerprint = Fingerprint("no-signatures"),
+                Analyzer = AnalyzerName,
+                Category = "Leak",
+                Severity = Severity.Info,
+                Title = "No event-leak signatures detected",
+                Narrative = "No significant event subscription patterns were detected.",
+                Recommendation = "No immediate action required for event retention patterns.",
+                Tags = ["event", "leak", "subscriptions"],
+                MetricValue = 0,
+                MetricUnit = "subscribers",
+                DerivedFrom = [population.Id],
+                Confidence = ConfidenceBreakdown.MeasurementCertain,
+            }]);
+        }
+
+        long instanceLeakCount = (long)population.Measures["instance-leak.count"].Value;
+        long staticLeakCount = (long)population.Measures["static-leak.count"].Value;
+
+        var findings = new List<Finding>(2);
+
+        Finding? instanceFinding = BuildAggregateFinding(groups, isStatic: false, instanceLeakCount, population.Id);
+        if (instanceFinding is not null) findings.Add(instanceFinding);
+
+        Finding? staticFinding = BuildAggregateFinding(groups, isStatic: true, staticLeakCount, population.Id);
+        if (staticFinding is not null) findings.Add(staticFinding);
+
+        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+    }
+
+    private static Finding? BuildAggregateFinding(
+        IReadOnlyList<Observation> groups, bool isStatic, long fallbackGroupCount, ObservationId populationId)
+    {
+        int groupCount = 0;
+        long totalPublisherInstances = 0;
+        long totalSubscribers = 0;
+        long maxSubscribersPerInstance = 0;
+        long maxSeverityScore = 0;
+
+        string topPublisherType = string.Empty;
+        string topEventFieldName = string.Empty;
+        long topGroupSubscribers = -1;
+
+        string exampleA = string.Empty;
+        string exampleB = string.Empty;
+
+        bool anyTimerEvent = false;
+        bool anyPropertyChangedEvent = false;
+
+        var contributingIds = new List<ObservationId>();
+
+        foreach (Observation group in groups)
+        {
+            bool groupIsStatic = group.Measures["is-static"].Value >= 1.0;
+            if (groupIsStatic != isStatic) continue;
+
+            groupCount++;
+            contributingIds.Add(group.Id);
+
+            long instanceCount = (long)group.Measures["instance.count"].Value;
+            long subscribers = (long)group.Measures["subscriber.count"].Value;
+            long maxSubscribers = (long)group.Measures["max-subscribers-per-instance.count"].Value;
+            long severityScore = (long)group.Measures["max-severity.score"].Value;
+
+            totalPublisherInstances += instanceCount;
+            totalSubscribers += subscribers;
+            if (group.Measures["is-timer-event"].Value >= 1.0) anyTimerEvent = true;
+            if (group.Measures["is-property-changed-event"].Value >= 1.0) anyPropertyChangedEvent = true;
+
+            if (maxSubscribers > maxSubscribersPerInstance) maxSubscribersPerInstance = maxSubscribers;
+            if (severityScore > maxSeverityScore) maxSeverityScore = severityScore;
+
+            string publisherType = ((TypeRef)group.Subjects[0]).CanonicalName;
+            string eventFieldName = group.Evidence.Count > 0 ? group.Evidence[0].Description ?? string.Empty : string.Empty;
+
+            if (subscribers > topGroupSubscribers)
+            {
+                topGroupSubscribers = subscribers;
+                topPublisherType = publisherType;
+                topEventFieldName = eventFieldName;
+            }
+
+            string example = publisherType + "." + eventFieldName;
+            if (string.IsNullOrEmpty(exampleA)) exampleA = example;
+            else if (string.IsNullOrEmpty(exampleB) && !string.Equals(exampleA, example, StringComparison.Ordinal)) exampleB = example;
+        }
+
+        if (groupCount == 0)
+            groupCount = (int)fallbackGroupCount;
+
+        if (groupCount <= 0) return null;
+
+        Severity severity = maxSeverityScore >= SeverityCriticalThreshold ? Severity.Critical
+            : maxSeverityScore >= SeverityWarningThreshold ? Severity.Warning
+            : Severity.Info;
+
+        string leakKind = isStatic ? "static" : "instance";
+        string title = groupCount == 1
+            ? $"Potential {leakKind} event retention pattern detected"
+            : $"Potential {leakKind} event retention patterns detected ({groupCount:N0})";
+
+        string narrative = $"{groupCount:N0} leak group(s), {totalPublisherInstances:N0} publisher instance(s), {totalSubscribers:N0} total subscribers";
+        if (maxSubscribersPerInstance > 0)
+            narrative += $", max {maxSubscribersPerInstance:N0} per instance";
+
+        if (!string.IsNullOrWhiteSpace(topPublisherType) && !string.IsNullOrWhiteSpace(topEventFieldName))
+            narrative += $". Top group: {topPublisherType}.{topEventFieldName} ({topGroupSubscribers:N0} subscribers).";
+        else
+            narrative += ".";
+
+        if (!string.IsNullOrEmpty(exampleA))
+        {
+            narrative += " Examples: " + exampleA;
+            if (!string.IsNullOrEmpty(exampleB)) narrative += ", " + exampleB;
+            narrative += ".";
+        }
+
+        string recommendation = "Ensure subscribers are unsubscribed and avoid long-lived static event publishers where possible.";
+        if (anyTimerEvent)
+            recommendation += " At least one leaking publisher is a Timer/DispatcherTimer — call Stop() and Dispose() when the owning object is done with it, not just unsubscribing the handler.";
+        if (anyPropertyChangedEvent)
+            recommendation += " At least one leaking publisher is an INotifyPropertyChanged.PropertyChanged event — verify view models unsubscribe on disposal/navigation-away.";
+
+        var tags = new List<string>(capacity: 5) { "event-leak", isStatic ? "static-event" : "instance-event", "retention" };
+        if (anyTimerEvent) tags.Add("timer-leak");
+        if (anyPropertyChangedEvent) tags.Add("property-changed-leak");
+
+        return new Finding
+        {
+            Fingerprint = Fingerprint(isStatic ? "static-retention" : "instance-retention"),
+            Analyzer = AnalyzerName,
+            Category = "Leak",
+            Severity = severity,
+            Title = title,
+            Narrative = narrative,
+            Recommendation = recommendation,
+            Tags = tags,
+            MetricValue = totalSubscribers,
+            MetricUnit = "subscribers",
+            DerivedFrom = contributingIds.Count > 0 ? [populationId, .. contributingIds] : [populationId],
+            Confidence = ConfidenceBreakdown.MeasurementCertain,
+        };
+    }
+
+    private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();
+}

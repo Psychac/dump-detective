@@ -112,6 +112,11 @@ public sealed class SdkRegistryConformanceTests
             ["type.retention-population"] = ["highly-referenced.count", "approximated-reference-addresses.count"],
             ["type.retention-hotspot"] = ["object.count", "total.bytes", "total-incoming-references.count"],
             ["event.publisher-leak"] = ["subscriber.count", "instance.count", "retained.bytes"],
+            ["event.publisher-leak-group"] = [
+                "is-static", "instance.count", "subscriber.count", "max-subscribers-per-instance.count",
+                "max-severity.score", "is-timer-event", "is-property-changed-event",
+            ],
+            ["event.publisher-leak-population"] = ["total.count", "instance-leak.count", "static-leak.count"],
         };
 
     [Fact]

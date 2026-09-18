@@ -982,6 +982,38 @@
       },
       "note": "One per publisher/event group in TopPublisherEvents — bounded to the top 50 by subscriber count.",
       "addedIn": "1.42.0"
+    },
+    "event.publisher-leak-group": {
+      "producedBy": "EventLeakAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Leaks/Analyzers/EventLeakAnalyzer.cs",
+      "requiresCapabilities": ["heap.types"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "is-static": { "unit": "custom", "semantics": "absolute" },
+        "instance.count": { "unit": "count", "semantics": "absolute" },
+        "subscriber.count": { "unit": "count", "semantics": "absolute" },
+        "max-subscribers-per-instance.count": { "unit": "count", "semantics": "absolute" },
+        "max-severity.score": { "unit": "custom", "semantics": "absolute" },
+        "is-timer-event": { "unit": "custom", "semantics": "absolute" },
+        "is-property-changed-event": { "unit": "custom", "semantics": "absolute" }
+      },
+      "note": "One per TopLeakGroups entry — the full, unbounded per-group population (unlike event.publisher-leak's top-50-by-subscriber-count sample from a different list, TopPublisherEvents), and the one the instance/static aggregate findings actually read. Evidence[0].Description carries EventFieldName, which has no home among Subjects' typed EntityRef kinds (Subject alone identifies only the publisher type).",
+      "addedIn": "1.54.0"
+    },
+    "event.publisher-leak-population": {
+      "producedBy": "EventLeakAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Leaks/Analyzers/EventLeakAnalyzer.cs",
+      "requiresCapabilities": ["heap.types"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "total.count": { "unit": "count", "semantics": "absolute" },
+        "instance-leak.count": { "unit": "count", "semantics": "absolute" },
+        "static-leak.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One whole-run observation per analysis — no entity subject, same pattern as gc.generation-composition. Always emitted, including the zero-leak case, since these are exhaustive scalars Analyze always computes. Backs the zero-leak-signature finding and the group-count fallback used when TopLeakGroups happens to contain no group of a given IsStatic value even though the real count is nonzero.",
+      "addedIn": "1.54.0"
     }
   }
 }

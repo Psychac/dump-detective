@@ -144,6 +144,7 @@ the one before it:
    | `ReferenceChainFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — multi-sample-enriched per-type fields + whole-run scalars + shared-root groups unobserved, fixed | `ReferenceChainSynthesisRule` |
    | `StaticRootFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — significant-subset whole-run scalars unobserved, fixed | `StaticRootSynthesisRule` |
    | `AllocationPatternFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — size-fraction measures + classification threshold + top-long-lived-type identity unobserved, fixed | `AllocationPatternSynthesisRule` |
+   | `GCGenerationFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — count-based whole-run scalars + thresholds + bounded top-allocator/top-accumulator types unobserved, fixed | `GCGenerationSynthesisRule` |
 
    ### Per-analyzer notable findings
 
@@ -606,6 +607,45 @@ the one before it:
      instead of reproducing the impossible decoupling.
    - Unlike every prior playbook entry, Low pressure emits **no finding at all**, not even an
      info-level one — ported as a bare early return, not a suppressed/gated finding.
+
+   **`GCGenerationFindingGenerator` — notable findings:**
+   - Step c's audit found `gc.generation-composition` (Phase 5 step 1) already carried the
+     byte-based totals/fractions, but none of the count-based scalars
+     (`TotalObjects`/`PohObjects`/`Gen0Objects`/`Gen2Objects`) the POH/Gen0/Gen2 findings' own
+     percentage math needs, none of the three runtime-configurable thresholds
+     (`LohThresholdPercent`/`Gen0PressureThresholdPercent`/`PohThresholdPercent`), and no
+     finalizable-Gen2 cross-reference totals. `FallbackMode`/`GenBytesAreApproximate` needed nothing
+     new — they're already `Provenance.Fidelity`/`Observation.Confidence` on the existing
+     observation. Two genuinely different-sounding-but-distinct pairs surfaced here for the first
+     time: `loh.percent`/`gen2.percent` (the domain result's own percentages the finding generator
+     reads directly) are **not** the same values as the existing `loh.fraction`/`gen2.fraction`
+     (independently-computed byte-fractions-of-total-managed-bytes) despite the naming similarity —
+     `gen2.percent` in particular is count-based where `gen2.fraction` is byte-based.
+   - The real gap: the Gen0/Gen2 findings' "top types" evidence reads `PerTypeGenerationProfiles` —
+     the exact same up-to-131,568-entry whole-heap population this observation's own Phase 5 step 1
+     remarks already named as the volume risk it deliberately deferred. Emitting it per-entry to
+     back two findings that only ever show 3 types each would reintroduce exactly that risk.
+   - Step d's fix: rather than accept that risk or duplicate the old generator's selection logic
+     (`BuildTopTypeEvidence`/`IsFrameworkType`, which needs the *full* population to run its
+     framework-namespace-deprioritization search) into the rule — which would have needed the rule
+     to see that full population anyway — **the selection itself was ported into the analyzer**
+     (`GCGenerationAnalyzer.SelectTopTypes`/`IsFrameworkType`), and only its ≤3-per-list output is
+     observed, as two new bounded per-type types: `gc.generation-top-allocator` (ranked by
+     `Gen0Count`) and `gc.generation-top-accumulator` (ranked by exact Gen2 bytes when the whole-run
+     `has-gen2-bytes` flag is set, otherwise Gen2 instance count — both raw values carried on every
+     entry so the rule doesn't need a second observation type to pick the right text format). This
+     keeps the analyzer's own per-run observation count at 6, not 131,568 — the first entry in this
+     playbook where selection logic was moved *into* the analyzer specifically to keep an unbounded
+     population from ever becoming observations, rather than trusting emission order or re-deriving
+     a ranking in the rule from data it already has.
+   - The rule accordingly does no ranking or framework-namespace filtering of its own: it only
+     formats and joins the already-selected, already-ordered observations — trusting emission order
+     the same way `ArraySynthesisRule` trusts its own pre-sorted lists, just one level further
+     removed (sorted *and* filtered upstream, not just sorted).
+   - `FormatBytes` (GB/MB at 2 decimal places, KB at 1) is a different formatter from
+     `FormatHelper.FormatBytes` used elsewhere in this playbook, and is duplicated verbatim from the
+     old generator rather than swapped — a real, if minor, text-precision difference between the two
+     that this migration must not silently introduce.
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until `## Work`
    step 6 below (see the Stage-1 purity bullet above — distinct from playbook step f just above),
    so its `IFindingGenerator` cannot be retired alongside the rest in this playbook — state this

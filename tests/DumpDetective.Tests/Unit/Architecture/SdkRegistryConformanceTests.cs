@@ -54,7 +54,14 @@ public sealed class SdkRegistryConformanceTests
                 "total-handles.count", "dead-targets.count", "object.count", "object.bytes",
                 "dependent-dead-key.count", "held-only-detection-available",
             ],
-            ["gc.generation-composition"] = ["gen0.bytes", "gen1.bytes", "gen2.bytes", "loh.bytes", "poh.bytes", "gen2.fraction", "loh.fraction"],
+            ["gc.generation-composition"] = [
+                "gen0.bytes", "gen1.bytes", "gen2.bytes", "loh.bytes", "poh.bytes", "gen2.fraction", "loh.fraction",
+                "gen0.count", "gen2.count", "poh.count", "total.count", "loh.percent", "gen2.percent",
+                "loh-pressure.threshold", "gen0-pressure.threshold", "poh-pressure.threshold",
+                "has-gen2-bytes", "finalizable-gen2.count", "finalizable-gen2.bytes",
+            ],
+            ["gc.generation-top-allocator"] = ["gen0.count"],
+            ["gc.generation-top-accumulator"] = ["gen2.bytes", "gen2.count"],
             ["gc.allocation-composition"] = [
                 "gen0.count-fraction", "gen1.count-fraction", "gen2.count-fraction", "loh.count-fraction",
                 "gen0.size-fraction", "gen2.size-fraction", "loh.size-fraction",

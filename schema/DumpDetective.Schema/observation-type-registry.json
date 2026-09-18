@@ -241,10 +241,47 @@
         "loh.bytes": { "unit": "bytes", "semantics": "absolute" },
         "poh.bytes": { "unit": "bytes", "semantics": "absolute" },
         "gen2.fraction": { "unit": "ratio", "semantics": "ratio" },
-        "loh.fraction": { "unit": "ratio", "semantics": "ratio" }
+        "loh.fraction": { "unit": "ratio", "semantics": "ratio" },
+        "gen0.count": { "unit": "count", "semantics": "absolute" },
+        "gen2.count": { "unit": "count", "semantics": "absolute" },
+        "poh.count": { "unit": "count", "semantics": "absolute" },
+        "total.count": { "unit": "count", "semantics": "absolute" },
+        "loh.percent": { "unit": "percent", "semantics": "ratio" },
+        "gen2.percent": { "unit": "percent", "semantics": "ratio" },
+        "loh-pressure.threshold": { "unit": "percent", "semantics": "absolute" },
+        "gen0-pressure.threshold": { "unit": "percent", "semantics": "absolute" },
+        "poh-pressure.threshold": { "unit": "percent", "semantics": "absolute" },
+        "has-gen2-bytes": { "unit": "custom", "semantics": "absolute" },
+        "finalizable-gen2.count": { "unit": "count", "semantics": "absolute" },
+        "finalizable-gen2.bytes": { "unit": "bytes", "semantics": "absolute" }
       },
-      "note": "Single whole-heap observation per run — the canonical gc.generation-composition example named in observation-and-correlation-model.md § 2a. No entity subject (whole-process scalar). Per-type breakdown deliberately deferred (unbounded volume risk).",
+      "note": "Single whole-heap observation per run — the canonical gc.generation-composition example named in observation-and-correlation-model.md § 2a. No entity subject (whole-process scalar). Per-type breakdown deliberately deferred (unbounded volume risk) — see gc.generation-top-allocator/gc.generation-top-accumulator for the bounded exception Phase 5 step 2 carved out. loh.percent/gen2.percent are genuinely distinct from loh.fraction/gen2.fraction despite the similar names: the *.fraction measures are byte-fraction-of-total-managed-bytes (computed here at emission time), loh.percent is GCGenerationDomainResult.LohPercent (a byte-based percentage with a POH-excluding denominator) and gen2.percent is Gen2Pct (count-based, objects not bytes) — both are what GCGenerationFindingGenerator actually reads. FallbackMode/GenBytesAreApproximate need no measures of their own: they're already Provenance.Fidelity/Observation.Confidence above. The three *-pressure.threshold measures carry GCGenerationAnalysisOptions' runtime-configurable defaults rather than the synthesis rule hard-coding them, same choice GCHandleSynthesisRule made.",
       "addedIn": "1.5.0"
+    },
+    "gc.generation-top-allocator": {
+      "producedBy": "GCGenerationAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Memory/Analyzers/GCGenerationAnalyzer.cs",
+      "requiresCapabilities": ["heap.types"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "gen0.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "Up to 3 types, selected and ranked by the analyzer itself (SelectTopTypes, ported from the old finding generator's BuildTopTypeEvidence) from the full, not-observed PerTypeGenerationProfiles population — framework-namespace types (System.*/Microsoft.*/...) deprioritized behind application types the same way the old generator's evidence text did. Doing the selection analyzer-side, not in the synthesis rule, is what keeps this bounded to ≤3 instead of the full per-type population's volume risk.",
+      "addedIn": "1.55.0"
+    },
+    "gc.generation-top-accumulator": {
+      "producedBy": "GCGenerationAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Memory/Analyzers/GCGenerationAnalyzer.cs",
+      "requiresCapabilities": ["heap.types"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "gen2.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "gen2.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "Up to 3 types, ranked by exact Gen2 bytes when any type in the full population has them (gc.generation-composition's has-gen2-bytes), otherwise by Gen2 instance count — same selection/fallback gc.generation-composition's own note describes for gc.generation-top-allocator. Both gen2.bytes and gen2.count are always carried so the synthesis rule can pick the right text format per has-gen2-bytes without a second observation type.",
+      "addedIn": "1.55.0"
     },
     "gc.allocation-composition": {
       "producedBy": "AllocationPatternAnalyzer",

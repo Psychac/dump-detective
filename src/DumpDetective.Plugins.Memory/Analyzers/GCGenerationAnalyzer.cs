@@ -4,6 +4,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Temporal;
 
@@ -63,12 +64,49 @@ namespace DumpDetective.Analysis.Analyzers.Memory
         /// separately-measured pass rather than emitted here on a guess. No entity subject: this is
         /// a whole-process scalar composition with no natural per-type anchor (see
         /// ReportSystemVision.md § 8's same observation about whole-process scalars).
+        /// <para>
+        /// Phase 5 step 2 adds: the count-based whole-run scalars (<c>gen0.count</c>/<c>gen2.count</c>/
+        /// <c>poh.count</c>/<c>total.count</c>) alongside the existing byte-based ones;
+        /// <c>loh.percent</c>/<c>gen2.percent</c> (count/byte-based percentages
+        /// <c>GCGenerationFindingGenerator</c> reads directly — genuinely distinct from
+        /// <c>loh.fraction</c>/<c>gen2.fraction</c> above despite the similar names: those are
+        /// byte-fraction-of-total-managed-bytes, these are the domain result's own differently-scoped
+        /// percentages); the three configurable thresholds (avoiding the same hard-coded-default
+        /// mistake <c>GCHandleSynthesisRule</c>'s design fixed); <c>has-gen2-bytes</c> (the same
+        /// exact-Gen2-bytes-availability flag the finding generator re-derives by scanning
+        /// <c>PerTypeGenerationProfiles</c> itself); and the finalizable-Gen2 cross-reference totals.
+        /// <c>FallbackMode</c>/<c>GenBytesAreApproximate</c> need no new measures — they're already
+        /// exactly <see cref="Provenance.Fidelity"/>/<see cref="Observation.Confidence"/> below.
+        /// </para>
+        /// <para>
+        /// Also emits two new small, bounded per-type observations —
+        /// <c>gc.generation-top-allocator</c>/<c>gc.generation-top-accumulator</c> — carrying exactly
+        /// the (≤3 each) types <see cref="SelectTopTypes"/> already picks from the full,
+        /// <b>not observed</b> <c>PerTypeGenerationProfiles</c> population, framework-namespace-
+        /// deprioritized the same way the old finding generator's own (now-ported)
+        /// <c>BuildTopTypeEvidence</c> did. Doing the selection here, not in the synthesis rule, is
+        /// what keeps the per-type observation count at 6, not 131,568 — the rule only ever sees the
+        /// already-decided winners, never the full population.
+        /// </para>
         /// </summary>
         private static async ValueTask EmitObservationAsync(AnalysisContext context, GCGenerationDomainResult result, CancellationToken cancellationToken)
         {
             ulong totalManagedBytes = result.Gen0Bytes + result.Gen1Bytes + result.Gen2Bytes + result.LohBytes + result.PohBytes;
             double gen2Fraction = totalManagedBytes == 0 ? 0.0 : result.Gen2Bytes / (double)totalManagedBytes;
             double lohFraction = totalManagedBytes == 0 ? 0.0 : result.LohBytes / (double)totalManagedBytes;
+
+            IReadOnlyList<TypeGenerationProfile> profiles = result.PerTypeGenerationProfiles ?? [];
+            bool anyGen2Bytes = false;
+            for (int i = 0; i < profiles.Count; i++)
+            {
+                if (profiles[i].Gen2Bytes > 0)
+                {
+                    anyGen2Bytes = true;
+                    break;
+                }
+            }
+
+            var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapTypes };
 
             await context.Observations.EmitAsync(new Observation
             {
@@ -85,17 +123,124 @@ namespace DumpDetective.Analysis.Analyzers.Memory
                     ["poh.bytes"] = new Measure(result.PohBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                     ["gen2.fraction"] = new Measure(gen2Fraction, MeasureUnit.Ratio, MeasureSemantics.Ratio),
                     ["loh.fraction"] = new Measure(lohFraction, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                    ["gen0.count"] = new Measure(result.Gen0Objects, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["gen2.count"] = new Measure(result.Gen2Objects, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["poh.count"] = new Measure(result.PohObjects, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["total.count"] = new Measure(result.TotalObjects, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["loh.percent"] = new Measure(result.LohPercent, MeasureUnit.Percent, MeasureSemantics.Ratio),
+                    ["gen2.percent"] = new Measure(result.Gen2Pct, MeasureUnit.Percent, MeasureSemantics.Ratio),
+                    ["loh-pressure.threshold"] = new Measure(result.LohThresholdPercent, MeasureUnit.Percent, MeasureSemantics.Absolute),
+                    ["gen0-pressure.threshold"] = new Measure(result.Gen0PressureThresholdPercent, MeasureUnit.Percent, MeasureSemantics.Absolute),
+                    ["poh-pressure.threshold"] = new Measure(result.PohThresholdPercent, MeasureUnit.Percent, MeasureSemantics.Absolute),
+                    ["has-gen2-bytes"] = new Measure(anyGen2Bytes ? 1 : 0, MeasureUnit.Custom, MeasureSemantics.Absolute),
+                    ["finalizable-gen2.count"] = new Measure(result.FinalizableGen2Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["finalizable-gen2.bytes"] = new Measure(result.FinalizableGen2Bytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                 },
                 Provenance = new Provenance
                 {
                     Artifact = context.ArtifactId!.Value,
                     AnalyzerKey = "GC Generation Analysis",
-                    CapabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapTypes },
+                    CapabilitiesUsed = capabilitiesUsed,
                     Fidelity = result.FallbackMode ? FidelityLevel.Degraded : FidelityLevel.Full,
                 },
                 Confidence = result.GenBytesAreApproximate ? 0.5 : 1.0,
             }, cancellationToken);
+
+            foreach (TypeGenerationProfile type in SelectTopTypes(profiles, p => p.Gen0Count, p => p.Gen0Count))
+            {
+                (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(type.TypeName);
+                await context.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "gc.generation-top-allocator",
+                    Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["gen0.count"] = new Measure(type.Gen0Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = context.ArtifactId!.Value,
+                        AnalyzerKey = "GC Generation Analysis",
+                        CapabilitiesUsed = capabilitiesUsed,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                }, cancellationToken);
+            }
+
+            IReadOnlyList<TypeGenerationProfile> topAccumulators = anyGen2Bytes
+                ? SelectTopTypes(profiles, p => (long)Math.Min(p.Gen2Bytes, long.MaxValue), p => (long)Math.Min(p.Gen2Bytes, long.MaxValue))
+                : SelectTopTypes(profiles, p => p.Gen2Count, p => p.Gen2Count);
+
+            foreach (TypeGenerationProfile type in topAccumulators)
+            {
+                (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(type.TypeName);
+                await context.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "gc.generation-top-accumulator",
+                    Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["gen2.bytes"] = new Measure(type.Gen2Bytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                        ["gen2.count"] = new Measure(type.Gen2Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = context.ArtifactId!.Value,
+                        AnalyzerKey = "GC Generation Analysis",
+                        CapabilitiesUsed = capabilitiesUsed,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                }, cancellationToken);
+            }
         }
+
+        /// <summary>
+        /// Ported from <c>GCGenerationFindingGenerator.BuildTopTypeEvidence</c>'s selection half (not
+        /// its text-formatting half, which stays in the rule): picks up to <paramref name="maxCount"/>
+        /// types with a non-zero <paramref name="hasSignal"/>, ranked descending by
+        /// <paramref name="rankKey"/>, preferring application-namespace types over framework ones
+        /// (<see cref="IsFrameworkType"/>) when both compete for the remaining slots. Runs here, not
+        /// in the synthesis rule, specifically so the full <c>PerTypeGenerationProfiles</c> population
+        /// never has to leave this analyzer as observations.
+        /// </summary>
+        private static List<TypeGenerationProfile> SelectTopTypes(
+            IReadOnlyList<TypeGenerationProfile> profiles,
+            Func<TypeGenerationProfile, long> hasSignal,
+            Func<TypeGenerationProfile, long> rankKey,
+            int maxCount = 3)
+        {
+            var candidates = new List<TypeGenerationProfile>(profiles.Count);
+            for (int i = 0; i < profiles.Count; i++)
+                if (hasSignal(profiles[i]) > 0)
+                    candidates.Add(profiles[i]);
+
+            candidates.Sort((a, b) => rankKey(b).CompareTo(rankKey(a)));
+
+            var selected = new List<TypeGenerationProfile>(maxCount);
+            for (int i = 0; i < candidates.Count && selected.Count < maxCount; i++)
+                if (!IsFrameworkType(candidates[i].TypeName))
+                    selected.Add(candidates[i]);
+            for (int i = 0; i < candidates.Count && selected.Count < maxCount; i++)
+                if (IsFrameworkType(candidates[i].TypeName))
+                    selected.Add(candidates[i]);
+
+            return selected;
+        }
+
+        /// <summary>Ported from <c>GCGenerationFindingGenerator.IsFrameworkType</c> — see
+        /// <see cref="SelectTopTypes"/>.</summary>
+        private static bool IsFrameworkType(string typeName) =>
+            typeName.StartsWith("System.", StringComparison.Ordinal) ||
+            typeName.StartsWith("Microsoft.", StringComparison.Ordinal) ||
+            typeName.StartsWith("Windows.", StringComparison.Ordinal) ||
+            typeName.StartsWith("Mono.", StringComparison.Ordinal) ||
+            typeName is "System" or "Microsoft" or "Windows";
 
         private static GCGenerationDomainResult Analyze(
             IHeapTypeStatisticsQuery statsQuery,

@@ -108,7 +108,9 @@ public sealed class SdkRegistryConformanceTests
             ],
             ["heap.static-root"] = ["retained.bytes", "objects-kept-alive.count", "gen2-or-loh-retained.fraction"],
             ["type.root-reachability"] = ["sample.bytes", "has-gc-root", "retained.bytes"],
-            ["type.retention"] = ["instance.count", "shallow.bytes", "retained.bytes", "gen2.count"],
+            ["type.retention"] = ["instance.count", "shallow.bytes", "retained.bytes", "estimated-retained.bytes", "gen2.count"],
+            ["type.retention-population"] = ["highly-referenced.count", "approximated-reference-addresses.count"],
+            ["type.retention-hotspot"] = ["object.count", "total.bytes", "total-incoming-references.count"],
             ["event.publisher-leak"] = ["subscriber.count", "instance.count", "retained.bytes"],
         };
 

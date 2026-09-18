@@ -936,10 +936,38 @@
         "instance.count": { "unit": "count", "semantics": "absolute" },
         "shallow.bytes": { "unit": "bytes", "semantics": "absolute" },
         "retained.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "estimated-retained.bytes": { "unit": "bytes", "semantics": "absolute" },
         "gen2.count": { "unit": "count", "semantics": "absolute" }
       },
-      "note": "The canonical type.retention example from observation-and-correlation-model.md § 4. One per TopDominatorTypes entry; retained.bytes uses the exact Lengauer-Tarjan dominator-tree value when the §D9 overlay succeeded for that type, otherwise the heuristic BFS estimate (Confidence 0.7 in that case).",
+      "note": "The canonical type.retention example from observation-and-correlation-model.md § 4. One per TopDominatorTypes entry; retained.bytes uses the exact Lengauer-Tarjan dominator-tree value when the §D9 overlay succeeded for that type, otherwise the heuristic BFS estimate (Confidence 0.7 in that case). estimated-retained.bytes (Phase 5 step 2) is always the heuristic BFS estimate, exact or not — the old finding generator's top-suspect finding reads TypeSnapshot.EstimatedRetainedBytes unconditionally, never the exact overlay value, so retained.bytes alone can't back it once the overlay succeeds.",
       "addedIn": "1.41.0"
+    },
+    "type.retention-population": {
+      "producedBy": "DominatorAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Leaks/Analyzers/DominatorAnalyzer.cs",
+      "requiresCapabilities": ["heap.objects", "heap.references", "heap.types"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "highly-referenced.count": { "unit": "count", "semantics": "absolute" },
+        "approximated-reference-addresses.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One whole-run observation per analysis — no entity subject, same pattern as gc.generation-composition. Backs the highly-referenced-objects and reference-tracking-capped findings, neither of which type.retention's per-type stream can provide.",
+      "addedIn": "1.54.0"
+    },
+    "type.retention-hotspot": {
+      "producedBy": "DominatorAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Leaks/Analyzers/DominatorAnalyzer.cs",
+      "requiresCapabilities": ["heap.objects", "heap.references", "heap.types"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "object.count": { "unit": "count", "semantics": "absolute" },
+        "total.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "total-incoming-references.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per TopRetentionTypes entry (aggregated from TopHighlyReferencedObjects by type, bounded by RetentionOptions.TopHighlyReferencedObjectsToShow). Backs the dominant-retained-type-hotspot finding, which picks the entry with the highest total-incoming-references.count — not necessarily the first emitted, since TopRetentionTypes is itself sorted by estimated-retained bytes, not incoming-reference count.",
+      "addedIn": "1.54.0"
     },
     "event.publisher-leak": {
       "producedBy": "EventLeakAnalyzer",

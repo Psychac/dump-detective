@@ -228,6 +228,38 @@ the one before it:
 
    | `WcfChannelFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — per-type totals + binding hint + endpoints + whole-run counts unobserved, fixed | `WcfChannelSynthesisRule` |
 
+   | `DominatorFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — always-heuristic retained bytes + highly-referenced/capped whole-run counts + type-hotspot aggregate unobserved, fixed | `DominatorSynthesisRule` |
+
+   **`DominatorFindingGenerator` — notable findings (first analyzer picked up after the Infra
+   plugin's own 7/7):**
+   - Step c's audit found `type.retention` (Phase 5 step 1) backs the top-dominator-type finding's
+     `TypeName`/`Count` exactly, but not its retained-bytes value: the old finding always reads
+     `TypeSnapshot.EstimatedRetainedBytes` (the heuristic BFS estimate), while `type.retention`'s
+     `retained.bytes` measure uses the exact Lengauer-Tarjan value whenever the §D9 overlay
+     succeeded for that type — a real divergence, not a naming quirk, since the finding's own text
+     and severity thresholds would silently change once the overlay engages. The highly-referenced-
+     objects and reference-tracking-capped findings, and the type-hotspot finding (built from
+     `TopRetentionTypes`, an aggregation over `TopHighlyReferencedObjects` by type — a different
+     population than `TopDominatorTypes`), had no observation backing at all.
+   - Step d's fix, three parts: a new `estimated-retained.bytes` measure added directly to
+     `type.retention` (always the heuristic estimate, alongside the existing possibly-exact
+     `retained.bytes`) so both consumers can be backed from the same observation without either
+     shadowing the other; a new whole-run `type.retention-population` observation
+     (`highly-referenced.count`, `approximated-reference-addresses.count`); and a new per-type
+     `type.retention-hotspot` observation (one per `TopRetentionTypes` entry, canonicalized the same
+     way `DbConnectionAnalyzer`'s type-population observation is).
+   - **Cannot trust `type.retention-hotspot`'s emission order** for the type-hotspot finding, unlike
+     `type.retention`'s: the real analyzer's `TopRetentionTypes` is sorted by estimated-retained
+     bytes, not by incoming-reference count, so the rule scans every matched instance for the
+     highest `total-incoming-references.count` — the old generator's own linear scan translated
+     directly, the same "old generator's own scan, not the emission order" situation
+     `AsyncStateMachineSynthesisRule` hit for its per-type case. A parity test
+     (`TypeHotspot_PicksMaxByTotalIncomingReferences_NotFirstEntry`) exercises a fixture where the
+     winning entry is emitted second, not first.
+   - The old generator's highly-referenced-objects finding also computes an evidence-based
+     `Finding.ConfidenceScore` override via `EvidenceConfidence.Compute` — left unreproduced, same
+     choice `TimerLeakSynthesisRule`'s own entry made, since no rendered text reads it.
+
    **`WcfChannelFindingGenerator` — notable findings (7th and last of the Infra plugin's
    analyzers):**
    - Step c's audit found `infra.wcf-channel` (faulted-only stream) backs `FaultedChannels` by

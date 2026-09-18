@@ -6,6 +6,7 @@ using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Temporal;
 
@@ -214,6 +215,12 @@ public sealed class DominatorAnalyzer :
     /// <c>retained.bytes</c> uses <see cref="DominatorDomainResult.ExactRetainedBytesByTypeName"/>
     /// when that overlay succeeded for this type, not <see cref="TypeSnapshot.EstimatedRetainedBytes"/>'s
     /// always-heuristic BFS estimate.
+    /// Also emits, Phase 5 step 2: a whole-run <c>type.retention-population</c> observation (the
+    /// highly-referenced-object count and the reference-tracking-capped count, neither of which the
+    /// per-type stream above can provide) and a per-type <c>type.retention-hotspot</c> observation
+    /// per <see cref="DominatorDomainResult.TopRetentionTypes"/> entry (an aggregation over
+    /// <see cref="DominatorDomainResult.TopHighlyReferencedObjects"/> by type, a different population
+    /// than <see cref="DominatorDomainResult.TopDominatorTypes"/>).
     /// </summary>
     private static async ValueTask EmitRetentionObservationsAsync(
         IHeapObjectLookup objectLookup, DominatorDomainResult result, AnalysisContext observationContext, CancellationToken cancellationToken)
@@ -243,6 +250,7 @@ public sealed class DominatorAnalyzer :
                     ["instance.count"] = new Measure(snapshot.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
                     ["shallow.bytes"] = new Measure(snapshot.TotalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                     ["retained.bytes"] = new Measure(retainedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["estimated-retained.bytes"] = new Measure(snapshot.EstimatedRetainedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                     ["gen2.count"] = new Measure(snapshot.Gen2Count, MeasureUnit.Count, MeasureSemantics.Absolute),
                 },
                 Provenance = new Provenance
@@ -254,6 +262,59 @@ public sealed class DominatorAnalyzer :
                 },
                 Confidence = isExact ? 1.0 : 0.7,
             }, cancellationToken);
+        }
+
+        await observationContext.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "type.retention-population",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["highly-referenced.count"] = new Measure(result.HighlyReferencedObjectCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["approximated-reference-addresses.count"] = new Measure(result.ApproximatedReferenceAddresses, MeasureUnit.Count, MeasureSemantics.Absolute),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = observationContext.ArtifactId!.Value,
+                AnalyzerKey = "Dominator Analysis",
+                CapabilitiesUsed = capabilitiesUsed,
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
+
+        if (result.TopRetentionTypes is { Count: > 0 } topRetentionTypes)
+        {
+            foreach (RetentionTypeSnapshot type in topRetentionTypes)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(type.TypeName);
+
+                await observationContext.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "type.retention-hotspot",
+                    Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["object.count"] = new Measure(type.ObjectCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["total.bytes"] = new Measure(type.TotalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                        ["total-incoming-references.count"] = new Measure(type.TotalIncomingReferences, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = observationContext.ArtifactId!.Value,
+                        AnalyzerKey = "Dominator Analysis",
+                        CapabilitiesUsed = capabilitiesUsed,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                }, cancellationToken);
+            }
         }
     }
 

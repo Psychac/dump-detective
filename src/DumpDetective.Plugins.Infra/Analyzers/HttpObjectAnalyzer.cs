@@ -5,6 +5,7 @@ using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Temporal;
 
@@ -119,17 +120,18 @@ public sealed class HttpObjectAnalyzer :
             {
                 case HttpObjectCategory.HttpClient:
                     httpClient++;
+                    int generationOrdinal;
                     switch (segments.GetGeneration(candidate.Address))
                     {
-                        case HeapGenerationTag.Gen0: httpClientGen0++; break;
-                        case HeapGenerationTag.Gen1: httpClientGen1++; break;
-                        default: httpClientGen2++; break;
+                        case HeapGenerationTag.Gen0: httpClientGen0++; generationOrdinal = 0; break;
+                        case HeapGenerationTag.Gen1: httpClientGen1++; generationOrdinal = 1; break;
+                        default: httpClientGen2++; generationOrdinal = 2; break;
                     }
                     HttpInstanceSnapshot? clientSnap = TrySampleHttpClient(fields, candidate.Address, candidate.TypeDisplayName);
                     if (clientSnap is not null)
                     {
                         topSamples.Add(clientSnap);
-                        await EmitHttpObservationAsync(observationContext, candidate, observationCapabilities, cancellationToken);
+                        await EmitHttpObservationAsync(observationContext, candidate, observationCapabilities, cancellationToken, generationOrdinal: generationOrdinal);
                     }
                     break;
                 case HttpObjectCategory.HttpWebRequest:
@@ -153,7 +155,7 @@ public sealed class HttpObjectAnalyzer :
                     if (spSnap is not null)
                     {
                         topSamples.Add(spSnap);
-                        await EmitHttpObservationAsync(observationContext, candidate, observationCapabilities, cancellationToken);
+                        await EmitHttpObservationAsync(observationContext, candidate, observationCapabilities, cancellationToken, connectionLimit: spSnap.ConnectionLimit);
                     }
                     break;
                 case HttpObjectCategory.ActiveHandlerTrackingEntry:
@@ -223,6 +225,60 @@ public sealed class HttpObjectAnalyzer :
             + totalHttpMessageHandler + totalServicePoint
             + totalActiveHandlerTrackingEntry + totalExpiredHandlerTrackingEntry;
 
+        // Per-module population — bounded to distinct handler-owning-module count, not per
+        // instance. Backs the old finding generator's "largest contributor" module narrative,
+        // which HttpMessageHandler instances (never individually observed — see below) can't.
+        // Emitted in handlerModules' own already-sorted-descending order (matches ArraySynthesisRule's
+        // trust-emission-order structure), so a synthesis rule can trust index 0 as "the largest".
+        foreach (HttpHandlerModuleSummary module in handlerModules)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await observationContext.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "infra.http-handler-module",
+                Subjects = [new ModuleRef { SimpleName = module.ModuleName, Fidelity = MatchFidelity.Exact }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["instance.count"] = new Measure(module.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = observationContext.ArtifactId!.Value,
+                    AnalyzerKey = "HTTP Object Analysis",
+                    CapabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapTypes },
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
+
+        // Whole-run scalar — no entity subject, same "no natural per-entity anchor" pattern as
+        // gc.generation-composition. HttpWebResponse and HttpMessageHandler instances are counted
+        // but never individually observed (no per-instance field extraction exists for either
+        // category), so their counts can't be reconstructed any other way.
+        await observationContext.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "infra.http-object-population",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["http-web-response.count"] = new Measure(totalHttpWebResponse, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["http-message-handler.count"] = new Measure(totalHttpMessageHandler, MeasureUnit.Count, MeasureSemantics.Absolute),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = observationContext.ArtifactId!.Value,
+                AnalyzerKey = "HTTP Object Analysis",
+                CapabilitiesUsed = observationCapabilities,
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
+
         return new HttpObjectDomainResult(
             HttpObjectsFound: total > 0,
             TotalHttpObjects: total,
@@ -242,18 +298,31 @@ public sealed class HttpObjectAnalyzer :
             HandlerModules: handlerModules);
     }
 
+    /// <summary><paramref name="generationOrdinal"/> (HttpClient only) and
+    /// <paramref name="connectionLimit"/> (ServicePoint only) back the old finding generator's
+    /// Gen0/Gen2 reuse-vs-churn narrative and low-ConnectionLimit-queuing narrative respectively
+    /// (Phase 5 step 2) — both omitted, not zeroed, for every other category, the same "presence
+    /// means resolved" convention <c>shallow.bytes</c>'s sibling optional measures elsewhere use.</summary>
     private static ValueTask EmitHttpObservationAsync(
-        AnalysisContext observationContext, HeapObjectRef candidate, IReadOnlySet<Capability> observationCapabilities, CancellationToken cancellationToken) =>
-        observationContext.Observations.EmitAsync(new Observation
+        AnalysisContext observationContext, HeapObjectRef candidate, IReadOnlySet<Capability> observationCapabilities, CancellationToken cancellationToken,
+        int? generationOrdinal = null, int? connectionLimit = null)
+    {
+        var measures = new Dictionary<string, Measure>
+        {
+            ["shallow.bytes"] = new Measure(candidate.Size, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+        };
+        if (generationOrdinal is int generation)
+            measures["generation.ordinal"] = new Measure(generation, MeasureUnit.Custom, MeasureSemantics.Absolute);
+        if (connectionLimit is int limit)
+            measures["connection-limit"] = new Measure(limit, MeasureUnit.Count, MeasureSemantics.Absolute);
+
+        return observationContext.Observations.EmitAsync(new Observation
         {
             Id = ObservationId.NewId(),
             ObservationType = "infra.http-object",
             Subjects = [candidate.Type],
             When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
-            Measures = new Dictionary<string, Measure>
-            {
-                ["shallow.bytes"] = new Measure(candidate.Size, MeasureUnit.Bytes, MeasureSemantics.Absolute),
-            },
+            Measures = measures,
             Provenance = new Provenance
             {
                 Artifact = observationContext.ArtifactId!.Value,
@@ -263,6 +332,7 @@ public sealed class HttpObjectAnalyzer :
             },
             Confidence = 1.0,
         }, cancellationToken);
+    }
 
     private static HttpInstanceSnapshot? TrySampleHttpClient(IDumpObjectFieldQuery fields, ulong address, string typeName)
     {

@@ -177,6 +177,33 @@ the one before it:
      `DbConnectionAnalyzer.Analyze` already sorts `ByType` descending by `TotalCount` before
      `EmitObservationsAsync`'s loop runs over it, the same structure `ArraySynthesisRule` relies on.
 
+   | `HttpObjectFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 2 whole-run counts + generation split + connection-limit + module breakdown unobserved, fixed | `HttpObjectSynthesisRule` |
+
+   **`HttpObjectFindingGenerator` — notable findings (5th of the Infra plugin's analyzers, largest
+   Infra entry so far):**
+   - Step c's audit found `infra.http-object` covers the full (uncapped) population for 5 of 7
+     categories — `HttpClientCount`/`HttpWebRequestCount`/`ServicePointCount`/
+     `ActiveHandlerTrackingEntryCount`/`ExpiredHandlerTrackingEntryCount` are all exactly
+     reconstructable by counting matched observations grouped by `Subjects[0]`'s canonical type
+     name, since `HttpObjectAnalyzer.ClassifyType` requires an exact type-name match for every one
+     of them — no separate category measure needed. But `HttpWebResponseCount`/
+     `HttpMessageHandlerCount` are never observed at all (no per-instance field extraction exists
+     for either category); the HttpClient Gen0/Gen2 reuse-vs-churn narrative needs a generation
+     split `infra.http-object` never carried; the ServicePoint low-`ConnectionLimit` narrative
+     needs that field; and the HttpMessageHandler "largest contributor" narrative needs a
+     per-module breakdown no per-instance stream can provide (since handler instances themselves
+     aren't observed).
+   - Step d's fix, four parts: `generation.ordinal` and `connection-limit` measures added directly
+     to `infra.http-object` (present only for HttpClient/ServicePoint respectively — same
+     "presence means resolved" convention as `retained.bytes` elsewhere); a new whole-run
+     `infra.http-object-population` observation for the two never-observed category counts; and a
+     new per-module `infra.http-handler-module` observation (first use of `ModuleRef` as a
+     Subject outside `ModuleAnalyzer`) for the "largest contributor" narrative, emitted in already-
+     sorted-descending order like `ArraySynthesisRule`'s per-type lists.
+   - Six independent findings (`AllSignalsFireTogether` exercises all six at once), no aggregation
+     or re-ranking — same "up to N independent findings unconditionally" shape as
+     `FinalizableObjectSynthesisRule`/`GCRootSynthesisRule`.
+
    **`SqlConnectionPoolFindingGenerator` — notable findings (first of the Infra plugin's analyzers,
    picked up one at a time):**
    - Step c's audit found `infra.sql-connection-pool` already backs every numeric field the single

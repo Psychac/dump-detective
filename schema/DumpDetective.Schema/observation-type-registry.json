@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/observation-type-registry.json",
-  "registryVersion": "1.52.0",
+  "registryVersion": "1.53.0",
   "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
   "observationTypes": {
     "gc.pause": {
@@ -526,10 +526,37 @@
       "subjectKind": "type",
       "temporalKind": "point",
       "measures": {
-        "shallow.bytes": { "unit": "bytes", "semantics": "absolute" }
+        "shallow.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "generation.ordinal": { "unit": "custom", "semantics": "absolute" },
+        "connection-limit": { "unit": "count", "semantics": "absolute" }
       },
-      "note": "One per instance sampled into TopHttpInstances (HttpClient/HttpWebRequest/ServicePoint/handler-tracking entries) — one shared observation type across all sub-kinds.",
+      "note": "One per instance sampled into TopHttpInstances (HttpClient/HttpWebRequest/ServicePoint/handler-tracking entries — the full population for these categories, never capped; HttpWebResponse/HttpMessageHandler are counted but never individually observed, see infra.http-object-population). generation.ordinal present only for HttpClient (0/1/2); connection-limit present only for ServicePoint when the field resolved.",
       "addedIn": "1.21.0"
+    },
+    "infra.http-handler-module": {
+      "producedBy": "HttpObjectAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Infra/Analyzers/HttpObjectAnalyzer.cs",
+      "requiresCapabilities": ["heap.types"],
+      "subjectKind": "module",
+      "temporalKind": "point",
+      "measures": {
+        "instance.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per distinct HttpMessageHandler-owning module — bounded by distinct module count, not per instance. Backs the old finding generator's 'largest contributor' module narrative, which HttpMessageHandler instances (never individually observed) cannot. Emitted in already-sorted-descending order.",
+      "addedIn": "1.52.0"
+    },
+    "infra.http-object-population": {
+      "producedBy": "HttpObjectAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Infra/Analyzers/HttpObjectAnalyzer.cs",
+      "requiresCapabilities": ["dump.object-fields", "heap.objects"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "http-web-response.count": { "unit": "count", "semantics": "absolute" },
+        "http-message-handler.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One whole-run observation per analysis — no entity subject, same pattern as gc.generation-composition. HttpWebResponse and HttpMessageHandler instances are counted but never individually observed (no per-instance field extraction exists for either category), so their counts can't be reconstructed any other way.",
+      "addedIn": "1.52.0"
     },
     "infra.timer": {
       "producedBy": "TimerLeakAnalyzer",

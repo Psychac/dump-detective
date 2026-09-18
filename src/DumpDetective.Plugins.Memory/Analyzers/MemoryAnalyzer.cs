@@ -135,6 +135,65 @@ public sealed class MemoryAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
                 Confidence = 1.0,
             }, cancellationToken);
         }
+
+        await EmitMemoryCompositionAsync(context, result, cancellationToken);
+    }
+
+    /// <summary>
+    /// Phase 5 step 2: a single whole-heap <c>heap.memory-composition</c> observation backing
+    /// <c>MemoryFindingGenerator</c>'s pressure-score/concentration/small-object/LOH findings.
+    /// <c>MemoryPressureClassifier</c> itself (internal to a different assembly) is not called —
+    /// its formula is duplicated in <c>MemorySynthesisRule</c>, same choice
+    /// <c>AllocationPatternSynthesisRule</c> made for its own classifier. <c>TopTypes</c> is the
+    /// full, unbounded per-type population (the same volume risk <c>GCGenerationAnalyzer</c>'s own
+    /// <c>PerTypeGenerationProfiles</c> note flags) and is not observed per-entry here; only the
+    /// single top-1 type's identity the finding generator actually reads is, via
+    /// <c>top1-type.bytes</c> and an <see cref="EvidenceRef"/> carrying its name.
+    /// </summary>
+    private static async ValueTask EmitMemoryCompositionAsync(AnalysisContext context, MemoryDomainResult result, CancellationToken cancellationToken)
+    {
+        var measures = new Dictionary<string, Measure>
+        {
+            ["total.bytes"] = new Measure(result.TotalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+            ["loh.bytes"] = new Measure(result.LohBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+            ["loh.percent"] = new Measure(result.LohPercent, MeasureUnit.Percent, MeasureSemantics.Ratio),
+            ["total.count"] = new Measure(result.TotalObjects, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["loh.count"] = new Measure(result.LohObjects, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["unique-types.count"] = new Measure(result.UniqueTypes, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["top1.percent"] = new Measure(result.Top1BytesPercent, MeasureUnit.Percent, MeasureSemantics.Ratio),
+            ["top5.percent"] = new Measure(result.Top5BytesPercent, MeasureUnit.Percent, MeasureSemantics.Ratio),
+            ["small-object.count-percent"] = new Measure(result.SmallObjectCountPercent, MeasureUnit.Percent, MeasureSemantics.Ratio),
+            ["small-object.bytes-percent"] = new Measure(result.SmallObjectBytesPercent, MeasureUnit.Percent, MeasureSemantics.Ratio),
+            ["objects-per-mb"] = new Measure(result.ObjectsPerMb, MeasureUnit.Custom, MeasureSemantics.Absolute),
+        };
+
+        IReadOnlyList<EvidenceRef> evidence = [];
+        if (result.TopTypes.Count > 0)
+        {
+            measures["top1-type.bytes"] = new Measure(result.TopTypes[0].TotalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute);
+            evidence = [new EvidenceRef { Artifact = context.ArtifactId!.Value, Locator = "top1-type", Description = result.TopTypes[0].TypeName }];
+        }
+
+        await context.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "heap.memory-composition",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = measures,
+            Provenance = new Provenance
+            {
+                Artifact = context.ArtifactId!.Value,
+                AnalyzerKey = "Memory Analysis",
+                CapabilitiesUsed = new HashSet<Capability>
+                {
+                    CapabilityVocabulary.HeapTypes, CapabilityVocabulary.HeapSegments, CapabilityVocabulary.HeapObjects, CapabilityVocabulary.HeapReferences,
+                },
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+            Evidence = evidence,
+        }, cancellationToken);
     }
 
     private static MemoryDomainResult Analyze(

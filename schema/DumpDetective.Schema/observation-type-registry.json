@@ -320,6 +320,29 @@
       "note": "One observation per generation label (bounded to at most 6). No segment entity kind exists yet, so generation.ordinal carries which row this is, same convention as gc.suspend-reason.",
       "addedIn": "1.7.0"
     },
+    "heap.memory-composition": {
+      "producedBy": "MemoryAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Memory/Analyzers/MemoryAnalyzer.cs",
+      "requiresCapabilities": ["heap.types", "heap.segments", "heap.objects", "heap.references"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "total.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "loh.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "loh.percent": { "unit": "percent", "semantics": "ratio" },
+        "total.count": { "unit": "count", "semantics": "absolute" },
+        "loh.count": { "unit": "count", "semantics": "absolute" },
+        "unique-types.count": { "unit": "count", "semantics": "absolute" },
+        "top1.percent": { "unit": "percent", "semantics": "ratio" },
+        "top5.percent": { "unit": "percent", "semantics": "ratio" },
+        "small-object.count-percent": { "unit": "percent", "semantics": "ratio" },
+        "small-object.bytes-percent": { "unit": "percent", "semantics": "ratio" },
+        "objects-per-mb": { "unit": "custom", "semantics": "absolute" },
+        "top1-type.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "Single whole-heap observation per run — no entity subject, same pattern as gc.generation-composition. Backs MemoryFindingGenerator's pressure-score/concentration/small-object/LOH findings; MemoryPressureClassifier itself (internal to a different assembly) is not called, its formula is duplicated in MemorySynthesisRule, same choice AllocationPatternSynthesisRule made. top1-type.bytes and the top-1 type's name (as EvidenceRef.Description) are present only when TopTypes is non-empty — TopTypes itself is the full, unbounded per-type population (same volume risk GCGenerationAnalyzer's own PerTypeGenerationProfiles note flags) and is not observed per-entry; only the single top-1 identity the finding generator actually reads is. Top10BytesPercent is deliberately not carried: no finding reads it.",
+      "addedIn": "1.56.0"
+    },
     "heap.loh-fragmentation": {
       "producedBy": "LohFragmentationAnalyzer",
       "sourceFile": "src/DumpDetective.Plugins.Memory/Analyzers/LohFragmentationAnalyzer.cs",

@@ -68,6 +68,11 @@ public sealed class SdkRegistryConformanceTests
                 "finalizable.type-count", "finalizable.bytes", "transient-classification.threshold",
             ],
             ["heap.segment-composition"] = ["generation.ordinal", "committed.bytes", "reserved.bytes", "used.bytes", "segment.count"],
+            ["heap.memory-composition"] = [
+                "total.bytes", "loh.bytes", "loh.percent", "total.count", "loh.count", "unique-types.count",
+                "top1.percent", "top5.percent", "small-object.count-percent", "small-object.bytes-percent",
+                "objects-per-mb", "top1-type.bytes",
+            ],
             ["heap.loh-fragmentation"] = ["kind.ordinal", "segment.count", "total.bytes", "free.bytes", "used.bytes", "fragmentation.percent", "largest-free-block.bytes"],
             ["heap.loh-type-composition"] = ["loh.count", "loh.bytes"],
             ["heap.segment-reservation"] = ["committed.bytes", "reserved.bytes", "reservation-gap.bytes", "reserved-to-committed.ratio", "ephemeral.segment-count", "ephemeral.avg-fill-percent", "segment.count"],

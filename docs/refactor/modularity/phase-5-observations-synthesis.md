@@ -145,6 +145,7 @@ the one before it:
    | `StaticRootFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — significant-subset whole-run scalars unobserved, fixed | `StaticRootSynthesisRule` |
    | `AllocationPatternFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — size-fraction measures + classification threshold + top-long-lived-type identity unobserved, fixed | `AllocationPatternSynthesisRule` |
    | `GCGenerationFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — count-based whole-run scalars + thresholds + bounded top-allocator/top-accumulator types unobserved, fixed | `GCGenerationSynthesisRule` |
+   | `MemoryFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run pressure inputs + single top-1-type identity unobserved, fixed | `MemorySynthesisRule` |
 
    ### Per-analyzer notable findings
 
@@ -646,6 +647,27 @@ the one before it:
      `FormatHelper.FormatBytes` used elsewhere in this playbook, and is duplicated verbatim from the
      old generator rather than swapped — a real, if minor, text-precision difference between the two
      that this migration must not silently introduce.
+
+   **`MemoryFindingGenerator` — notable findings:**
+   - Smallest gap of any whole-run-scalar-driven entry so far: the only existing observation this
+     analyzer produced (`heap.segment-composition`, per-generation-label committed/reserved/used
+     bytes) backs a completely different consumer, so effectively every field this finding generator
+     reads was unobserved. All of it — `TotalBytes`/`LohBytes`/`LohPercent`/`TotalObjects`/
+     `LohObjects`/`UniqueTypes`/`Top1BytesPercent`/`Top5BytesPercent`/`SmallObjectCountPercent`/
+     `SmallObjectBytesPercent`/`ObjectsPerMb` — is a whole-run scalar with no per-type/per-object
+     population risk, so this needed exactly one new observation, `heap.memory-composition`,
+     carrying all of them directly.
+   - The one exception: the dominant-type finding's `TopTypes[0].TypeName`/`TotalBytes`. `TopTypes`
+     is the full, unbounded per-type population (`projection.AllTypesBySize`) — the same volume risk
+     `GCGenerationAnalyzer`'s `PerTypeGenerationProfiles` note flags — but only the single top-1
+     identity is ever read, so (like `AllocationPatternSynthesisRule`'s top-long-lived-type) it's
+     carried as a single `top1-type.bytes` measure plus an `EvidenceRef` for the name, not a
+     per-entry observation.
+   - `MemoryPressureClassifier.ComputeMemoryPressureScore` (`MemoryAnalyzer`'s own sole-owner
+     classifier, per the Smell A audit) is `internal` to a different assembly — its formula is
+     duplicated in `MemorySynthesisRule`, same choice `AllocationPatternSynthesisRule` made for its
+     own classifier; only the composite formula is ported, since the finding generator never calls
+     the four individual component scores or `ClassifyPressureBand`.
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until `## Work`
    step 6 below (see the Stage-1 purity bullet above — distinct from playbook step f just above),
    so its `IFindingGenerator` cannot be retired alongside the rest in this playbook — state this

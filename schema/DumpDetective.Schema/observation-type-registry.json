@@ -777,6 +777,32 @@
       "note": "One per exception instance whose address matches a thread's live current-exception — only the active subset, not the (potentially storm-scale) full scanned exception population.",
       "addedIn": "1.29.0"
     },
+    "runtime.crash-population": {
+      "producedBy": "CrashAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Runtime/Analyzers/CrashAnalyzer.cs",
+      "requiresCapabilities": ["heap.objects", "heap.segments", "runtime.threads"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "total.count": { "unit": "count", "semantics": "absolute" },
+        "active.count": { "unit": "count", "semantics": "absolute" },
+        "unique-types.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One whole-run observation per analysis — no entity subject, same pattern as gc.generation-composition. Always emitted, including the zero-exception case, since these are exhaustive scalars Analyze always computes.",
+      "addedIn": "1.57.0"
+    },
+    "runtime.crash-thread-candidate": {
+      "producedBy": "CrashAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Runtime/Analyzers/CrashAnalyzer.cs",
+      "requiresCapabilities": ["heap.objects", "heap.segments", "runtime.threads"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "active-exception.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per distinct thread carrying an active exception (bounded by thread count, never heap-scale), already sorted descending by active-exception.count before emission — the rule trusts that order for the \"primary exception type\" of the top thread, the same already-sorted-before-emission structure ArraySynthesisRule relies on. Cannot be reconstructed from runtime.active-exception alone: that observation's Subject identifies only the exception type, not which thread it belongs to, so per-thread grouping needs its own observation.",
+      "addedIn": "1.57.0"
+    },
     "type.shape-composition": {
       "producedBy": "ObjectShapeAnalyzer",
       "sourceFile": "src/DumpDetective.Plugins.Types/Analyzers/ObjectShapeAnalyzer.cs",

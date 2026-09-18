@@ -8,6 +8,7 @@ using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Temporal;
 
@@ -173,6 +174,13 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
         /// into the thousands under a genuine exception storm; <c>ExceptionsByType</c> is already
         /// per-type-capped by <c>options.MaxExceptionsPerType</c>, and even that population is left
         /// out of this pass).
+        /// Phase 5 step 2 adds: a whole-run <c>runtime.crash-population</c> observation
+        /// (<c>TotalExceptions</c>/<c>ActiveExceptions</c>/unique-type count — exhaustive scalars,
+        /// emitted unconditionally including the zero-exception case); and one
+        /// <c>runtime.crash-thread-candidate</c> observation per <c>CrashThreadCandidate</c> —
+        /// bounded by distinct thread-with-active-exception count (process-scale, never heap-scale),
+        /// backing <c>CrashFindingGenerator</c>'s "primary exception type" text without needing
+        /// per-object thread identity on <c>runtime.active-exception</c> itself.
         /// </summary>
         private async ValueTask<ExceptionAnalysis> Analyze(
             IHeapObjectStream candidates, IDumpObjectFieldQuery fields, IDumpArrayShapeQuery arrayShapes,
@@ -311,6 +319,64 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
                     sortedExceptionsByType[typeName] = list;
             }
 
+            List<CrashThreadCandidate> topCrashThreadCandidates = crashThreadCandidates.Values
+                .OrderByDescending(c => c.ActiveExceptionCount)
+                .ToList();
+
+            // Phase 5 step 2: one whole-run runtime.crash-population observation (exhaustive
+            // scalars, emitted unconditionally including the zero-exception case) plus one
+            // runtime.crash-thread-candidate observation per candidate — bounded by distinct
+            // thread-with-active-exception count (process-scale, not heap-scale), already sorted
+            // descending by ActiveExceptionCount before this loop runs, same already-sorted-before-
+            // emission structure ArraySynthesisRule relies on.
+            await observationContext.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "runtime.crash-population",
+                Subjects = [],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["total.count"] = new Measure(totalExceptions, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["active.count"] = new Measure(activeExceptionsCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["unique-types.count"] = new Measure(exceptionTypeCounts.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = observationContext.ArtifactId!.Value,
+                    AnalyzerKey = "Crash Analysis",
+                    CapabilitiesUsed = observationCapabilities,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+
+            foreach (CrashThreadCandidate candidate in topCrashThreadCandidates)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(candidate.PrimaryExceptionType);
+                await observationContext.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "runtime.crash-thread-candidate",
+                    Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["active-exception.count"] = new Measure(candidate.ActiveExceptionCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = observationContext.ArtifactId!.Value,
+                        AnalyzerKey = "Crash Analysis",
+                        CapabilitiesUsed = observationCapabilities,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                }, cancellationToken);
+            }
+
             return new ExceptionAnalysis
             {
                 TotalExceptions = totalExceptions,
@@ -318,7 +384,7 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
                 ExceptionTypeCounts = exceptionTypeCounts,
                 ActiveExceptionTypeCounts = activeExceptionTypeCounts,
                 ExceptionsByType = sortedExceptionsByType,
-                CrashThreadCandidates = crashThreadCandidates.Values.OrderByDescending(c => c.ActiveExceptionCount).ToList(),
+                CrashThreadCandidates = topCrashThreadCandidates,
                 ExceptionGen0Counts = exceptionGen0Counts,
                 ExceptionGen1Counts = exceptionGen1Counts,
                 ExceptionGen2Counts = exceptionGen2Counts,

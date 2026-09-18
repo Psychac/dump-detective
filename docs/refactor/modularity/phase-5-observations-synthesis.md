@@ -147,6 +147,7 @@ the one before it:
    | `GCGenerationFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — count-based whole-run scalars + thresholds + bounded top-allocator/top-accumulator types unobserved, fixed | `GCGenerationSynthesisRule` |
    | `MemoryFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run pressure inputs + single top-1-type identity unobserved, fixed | `MemorySynthesisRule` |
    | `SegmentReservationFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — re-derived pressure-risk inputs + thresholds unobserved, fixed | `SegmentReservationSynthesisRule` |
+   | `CrashFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run scalars + per-thread candidate identity unobserved, fixed | `CrashSynthesisRule` |
 
    ### Per-analyzer notable findings
 
@@ -701,6 +702,36 @@ the one before it:
      generator reads the stored fields directly rather than deriving them, the same "test-only
      decoupling" situation `AllocationPatternSynthesisRuleParityTests` hit. The parity fixtures
      compute both fields from the same `EvaluatePressureRisk` logic the rule uses instead.
+
+   **`CrashFindingGenerator` — notable findings:**
+   - Step c's audit found `runtime.active-exception` (Phase 5 step 1, one per active exception
+     instance) backs the fallback path's `ActiveExceptionTypeCounts` reconstruction (count matched
+     Subject types), but nothing else: `TotalExceptions`/`ActiveExceptions`/unique-type count were
+     whole-run scalars with no observation at all, and — the real gap — `TopCrashThreadCandidates`
+     (used for the primary finding's preferred "top thread's exception type" text) groups active
+     exceptions **by thread**, an axis `runtime.active-exception`'s Subject (the exception type
+     alone) structurally cannot recover. Counting matched Subject types gives type-level totals,
+     never which thread a given active exception belongs to.
+   - Step d's fix, two parts: a new whole-run `runtime.crash-population` observation
+     (`total.count`/`active.count`/`unique-types.count`), emitted unconditionally including the
+     zero-exception case; and a new `runtime.crash-thread-candidate` observation, one per
+     `CrashThreadCandidate` — bounded by distinct thread-with-active-exception count (process-scale,
+     never heap-scale, so no volume risk despite being a new per-entity observation), already sorted
+     descending by `ActiveExceptionCount` before the emission loop runs (the sort was hoisted out of
+     the final `return` expression into its own variable, reused by both the observation loop and
+     the domain result, rather than duplicated).
+   - The rule trusts `runtime.crash-thread-candidate` emission order for the top candidate — same
+     already-sorted-before-emission structure `ArraySynthesisRule` relies on — and only falls back
+     to the type-counting reconstruction over `runtime.active-exception` when no candidate
+     observations exist at all, mirroring the old generator's own two-tier fallback
+     (`TopCrashThreadCandidates[0]` → `ActiveExceptionTypeCounts.OrderByDescending(...).First()` →
+     `"Unknown"`).
+   - The old generator's active-exceptions finding also computes a weighted-average
+     `Finding.ConfidenceScore` (candidate `OriginalStackTraceConfidence` tiers, weighted by
+     `ActiveExceptionCount`) plus a `Caveats` tier-distribution summary — left unreproduced, same
+     choice every prior rule in this playbook made for evidence-based confidence overrides, since
+     neither is part of the parity surface these rules verify
+     (Title/Narrative/Recommendation/Severity/Category/Tags/MetricValue/MetricUnit).
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until `## Work`
    step 6 below (see the Stage-1 purity bullet above — distinct from playbook step f just above),
    so its `IFindingGenerator` cannot be retired alongside the rest in this playbook — state this

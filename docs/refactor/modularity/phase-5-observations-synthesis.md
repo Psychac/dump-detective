@@ -128,6 +128,35 @@ the one before it:
    | `LohFragmentationFindingGenerator` | Done, 2026-09-18 | Partial (see above) | No — clean | `LohFragmentationSynthesisRule` |
    | `AsyncStateMachineFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — `type.async-state-machine` had no method identity, fixed | `AsyncStateMachineSynthesisRule` |
    | `AsyncTaskFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 7 of 8 signals unobserved, fixed | `AsyncTaskSynthesisRule` |
+   | `FinalizableObjectFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 2 of 9 signals unobserved, fixed | `FinalizableObjectSynthesisRule` |
+
+   **`FinalizableObjectFindingGenerator` — notable findings:**
+   - Step c's audit found the analyzer emitted only `finalizer.queue-entry` (one per valid queue
+     entry, Phase 5 step 1). That backs 6 of the 9 signals (backlog count via a new whole-run
+     observation below, retained bytes, undisposed-in-queue, and the four known-queue-pattern
+     findings via per-entry Subject grouping) but not the Gen2 accumulation signal, which reads
+     the whole finalizable-*type* population (`TotalFinalizableObjects`/`TotalFinalizableBytes`/
+     `Gen2Count`/top type by Gen2 count) — a different population than the queue.
+   - Step d's fix, two parts:
+     - New per-type `type.finalizable-population` observation (one per finalizable type from
+       `heap.types`, not capped) — backs the Gen2 branch the same way `type.array-composition`
+       backs Array's LOH-pressure branch.
+     - `finalizer.queue-entry` gained `shallow.bytes` and `is-critical-finalizer` measures — the
+       old generator's CriticalFinalizerObject branch read `entry.ShallowSize`/
+       `entry.IsCriticalFinalizerType`, neither of which existed as a measure yet.
+     - New whole-run `finalizer.queue-population` observation (`queue.count`) — the queue backlog
+       signal's `FinalizerQueueCount` counts every queue entry including invalid
+       (`"<unknown>"`-typed) ones that `finalizer.queue-entry` structurally cannot observe
+       individually (no resolvable `Type` for a `Subject`).
+   - Unlike `AsyncTaskSynthesisRule`, no aggregate/top-signal cap: the old generator emits up to
+     nine independent findings unconditionally, so the rule does the same — no re-ranking or
+     severity-comparison logic needed at all, only per-observation-type grouping and summation.
+   - The old generator's own unit tests (`FinalizableObjectFindingGeneratorTests`) set
+     `CriticalFinalizerQueueCount`/`TopQueueTypesByCount`/etc. as independent fields with no
+     backing `TopQueueEntriesByRetainedSize` population — same "possible only because the old
+     generator reads fields independently" situation the `AsyncStateMachineSynthesisRule` parity
+     tests hit. The parity tests here rebuild every aggregate field from a single list of queue
+     entries instead of reusing that fixture shape.
 
    **`AsyncTaskFindingGenerator` — notable findings:**
    - Step c's audit found the analyzer emitted only `type.orphaned-task` (one per orphaned task,

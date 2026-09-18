@@ -4,6 +4,7 @@ using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Temporal;
 
@@ -133,6 +134,7 @@ namespace DumpDetective.Analysis.Analyzers.Gc
 
             finalizableTypes.Sort(static (a, b) => b.Stat.Gen2Count.CompareTo(a.Stat.Gen2Count));
             var topTypesByGen2 = new List<TypeGenerationProfile>(finalizableTypes.Count);
+            var populationCapabilities = new HashSet<Capability> { CapabilityVocabulary.HeapTypes };
             foreach ((string name, HeapTypeStatistics s) in finalizableTypes)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -145,6 +147,29 @@ namespace DumpDetective.Analysis.Analyzers.Gc
                     TotalBytes: s.TotalSize,
                     Gen2Bytes: s.Gen2TotalSize,
                     IsFinalizable: true));
+
+                (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(name);
+                await observationContext.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "type.finalizable-population",
+                    Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["instance.count"] = new Measure(s.InstanceCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["shallow.bytes"] = new Measure(s.TotalSize, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                        ["gen2.count"] = new Measure(s.Gen2Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = observationContext.ArtifactId!.Value,
+                        AnalyzerKey = "Finalizable Object Analysis",
+                        CapabilitiesUsed = populationCapabilities,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                }, cancellationToken);
             }
 
             // ── Step 2: Finalizer queue analysis ─────────────────────────────────────────
@@ -175,6 +200,31 @@ namespace DumpDetective.Analysis.Analyzers.Gc
                     criticalFinalizerTypeCountMap[typeName] = criticalFinalizerTypeCountMap.GetValueOrDefault(typeName) + 1;
                 }
             }
+
+            // Whole-run scalar — no entity subject, same "no natural per-type anchor" pattern as
+            // gc.generation-composition. queueCount includes invalid ("<unknown>"-typed) entries
+            // that finalizer.queue-entry never observes individually (they have no resolvable
+            // Type to use as a Subject), so it cannot be reconstructed by counting those
+            // per-entry observations alone.
+            await observationContext.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "finalizer.queue-population",
+                Subjects = [],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["queue.count"] = new Measure(queueCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = observationContext.ArtifactId!.Value,
+                    AnalyzerKey = "Finalizable Object Analysis",
+                    CapabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapFinalizerQueue },
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
 
             var topQueueTypesByCount = new List<QueueTypeStatistic>(queueTypeCountMap.Count);
             foreach (KeyValuePair<string, int> kv in queueTypeCountMap)
@@ -257,9 +307,11 @@ namespace DumpDetective.Analysis.Analyzers.Gc
                     Measures = new Dictionary<string, Measure>
                     {
                         ["retained.bytes"] = new Measure(retained, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                        ["shallow.bytes"] = new Measure(entry.ShallowSize, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                         // 1.0 = disposed-but-still-queued, 0.0 = not in that state — a raw boolean
                         // fact, not a leak judgment (that's a synthesis-rule call, Phase 5 step 2+).
                         ["disposed-but-live"] = new Measure(entry.IsDisposableType && disposedFound && !disposedValue ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["is-critical-finalizer"] = new Measure(entry.IsCriticalFinalizerType ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
                     },
                     Provenance = new Provenance
                     {

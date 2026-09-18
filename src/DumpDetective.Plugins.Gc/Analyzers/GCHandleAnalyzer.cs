@@ -117,6 +117,92 @@ public sealed class GCHandleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
                 Confidence = result.PinnedRetainedBytesIsExact ? 1.0 : 0.7,
             }, cancellationToken);
         }
+
+        // Whole-run scalar — no entity subject, same "no natural per-entity anchor" pattern as
+        // gc.generation-composition. Backs every finding-generator signal handle.pinned cannot:
+        // it is capped to GCHandleAnalysisOptions.TopPinnedHandleAddressesToShow, while these
+        // aggregates are computed over the *entire* handle population. Also carries the analyzer's
+        // configurable warning thresholds (GCHandleAnalysisOptions, threaded through the domain
+        // result) rather than hard-coding them into the synthesis rule as private consts the way
+        // other rules do — unlike those analyzers' fixed generator constants, these are genuinely
+        // runtime-configurable via AnalysisContext.AnalyzerOptions, and hard-coding defaults into
+        // the rule would silently break that configurability.
+        await context.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "handle.population",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["total.count"] = new Measure(result.TotalHandles, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["pinned-target.count"] = new Measure(result.PinnedHandleTargets, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["pinned-retained.bytes"] = new Measure(result.PinnedRetainedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["pinned-soh.count"] = new Measure(result.PinnedSohObjectCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["async-pinned-soh.count"] = new Measure(result.AsyncPinnedSohObjectCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["pinned-non-soh.count"] = new Measure(result.PinnedNonSohObjectCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["async-pinned-non-soh.count"] = new Measure(result.AsyncPinnedNonSohObjectCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["refcounted.count"] = new Measure(result.RefCountedHandleCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["weakshort-gen0.count"] = new Measure(result.WeakShortGen0Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["weakshort-gen1.count"] = new Measure(result.WeakShortGen1Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["weakshort-gen2.count"] = new Measure(result.WeakShortGen2Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["weakshort-loh.count"] = new Measure(result.WeakShortLohCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["weaklong-gen0.count"] = new Measure(result.WeakLongGen0Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["weaklong-gen1.count"] = new Measure(result.WeakLongGen1Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["weaklong-gen2.count"] = new Measure(result.WeakLongGen2Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["weaklong-loh.count"] = new Measure(result.WeakLongLohCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["dependent.count"] = new Measure(result.DependentHandleCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["dependent-resolved-edge.count"] = new Measure(result.DependentResolvedEdgeCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["dependent-unresolved-target.count"] = new Measure(result.DependentUnresolvedTargetCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["total-handles-warning.threshold"] = new Measure(result.TotalHandlesWarningThreshold, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["pinned-handle-targets-warning.threshold"] = new Measure(result.PinnedHandleTargetsWarningThreshold, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["pinned-retained-bytes-warning.threshold"] = new Measure(result.PinnedRetainedBytesWarningThreshold, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["pinned-soh-warning.threshold"] = new Measure(result.PinnedSohObjectCountWarningThreshold, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["refcounted-warning.threshold"] = new Measure(result.RefCountedHandleCountWarningThreshold, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["weaklong-gen2-fraction-warning.threshold"] = new Measure(result.WeakLongGen2FractionWarningThreshold, MeasureUnit.Percent, MeasureSemantics.Ratio),
+                ["weaklong-gen2-minimum-count.threshold"] = new Measure(result.WeakLongGen2MinimumCountThreshold, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["dependent-unresolved-percent-warning.threshold"] = new Measure(result.DependentUnresolvedPercentWarningThreshold, MeasureUnit.Percent, MeasureSemantics.Ratio),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = context.ArtifactId!.Value,
+                AnalyzerKey = "GC Handle Analysis",
+                CapabilitiesUsed = capabilitiesUsed,
+                Fidelity = fidelity,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
+
+        // Per-type RefCounted (COM interop RCW) target population — bounded by distinct target
+        // type count, not per-handle. Canonicalized from the display name the same way
+        // FinalizableObjectAnalyzer's type.finalizable-population and BoxingAnalyzer's type.boxing
+        // are: no per-handle address survives into TopRefCountedTargetTypes to re-resolve a real
+        // TypeRef from, only a display name.
+        foreach (NameCountEntry entry in result.TopRefCountedTargetTypes ?? [])
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            (string canonicalName, MatchFidelity typeFidelity) = EntityCanonicalizer.CanonicalizeTypeName(entry.Name);
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "handle.refcounted-target",
+                Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = typeFidelity }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["instance.count"] = new Measure(entry.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "GC Handle Analysis",
+                    CapabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapHandles },
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
     }
 
     private static GCHandleDomainResult Analyze(

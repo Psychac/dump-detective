@@ -129,6 +129,33 @@ the one before it:
    | `AsyncStateMachineFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — `type.async-state-machine` had no method identity, fixed | `AsyncStateMachineSynthesisRule` |
    | `AsyncTaskFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 7 of 8 signals unobserved, fixed | `AsyncTaskSynthesisRule` |
    | `FinalizableObjectFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 2 of 9 signals unobserved, fixed | `FinalizableObjectSynthesisRule` |
+   | `GCHandleFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 5 of 6 signals unobserved, fixed | `GCHandleSynthesisRule` |
+
+   **`GCHandleFindingGenerator` — notable findings:**
+   - Step c's audit found `handle.pinned` (Phase 5 step 1) only backs the debugger-follow-up
+     address list — capped to `GCHandleAnalysisOptions.TopPinnedHandleAddressesToShow`, not the
+     whole handle population. 5 of 6 signals read whole-population aggregates (`TotalHandles`,
+     `PinnedRetainedBytes`, SOH/non-SOH pinned counts, `RefCountedHandleCount`,
+     WeakShort/WeakLong generation breakdowns, dependent-handle counts) with no observation
+     backing at all.
+   - Step d's fix, two parts: a new whole-run `handle.population` observation (no entity subject,
+     same pattern as `gc.generation-composition`) carrying every aggregate the six signals need;
+     and a new per-type `handle.refcounted-target` observation (one per distinct RefCounted target
+     type, canonicalized from its display name the same way `type.finalizable-population` and
+     `type.boxing` are, since no per-handle address survives into `TopRefCountedTargetTypes` to
+     re-resolve a real `TypeRef` from) — backs the COM-interop signal's "dominant type" text.
+   - **Genuinely new wrinkle in this playbook entry**: `GCHandleFindingGenerator`'s thresholds
+     aren't private consts baked into the generator the way every prior analyzer's are — they're
+     read from `GCHandleDomainResult`'s own fields, sourced from `GCHandleAnalysisOptions`
+     (runtime-configurable via `AnalysisContext.AnalyzerOptions`). Hard-coding the option defaults
+     into `GCHandleSynthesisRule` as private consts, matching every other rule so far, would have
+     silently dropped that configurability — a real behavior regression, not just a mechanical
+     migration. `handle.population` carries all eight thresholds as measures instead, and the rule
+     reads them from the observation rather than hard-coding defaults.
+   - Emission itself needed no changes to `Analyze()` — unlike `AsyncTaskAnalyzer`/
+     `FinalizableObjectAnalyzer`, `GCHandleDomainResult` already carries every aggregate the new
+     observations need, so both were emitted from the existing `EmitObservationsAsync` step using
+     `result.*` directly, no weaving into the population loop required.
 
    **`FinalizableObjectFindingGenerator` — notable findings:**
    - Step c's audit found the analyzer emitted only `finalizer.queue-entry` (one per valid queue

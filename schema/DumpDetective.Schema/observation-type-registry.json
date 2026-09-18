@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/observation-type-registry.json",
-  "registryVersion": "1.46.0",
+  "registryVersion": "1.47.0",
   "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
   "observationTypes": {
     "gc.pause": {
@@ -66,6 +66,56 @@
       },
       "note": "One observation per already-bounded GCHandleDomainResult.TopPinnedHandleAddresses entry, not per handle.",
       "addedIn": "1.2.0"
+    },
+    "handle.population": {
+      "producedBy": "GCHandleAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Gc/Analyzers/GCHandleAnalyzer.cs",
+      "requiresCapabilities": ["heap.handles", "heap.objects", "heap.segments"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "total.count": { "unit": "count", "semantics": "absolute" },
+        "pinned-target.count": { "unit": "count", "semantics": "absolute" },
+        "pinned-retained.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "pinned-soh.count": { "unit": "count", "semantics": "absolute" },
+        "async-pinned-soh.count": { "unit": "count", "semantics": "absolute" },
+        "pinned-non-soh.count": { "unit": "count", "semantics": "absolute" },
+        "async-pinned-non-soh.count": { "unit": "count", "semantics": "absolute" },
+        "refcounted.count": { "unit": "count", "semantics": "absolute" },
+        "weakshort-gen0.count": { "unit": "count", "semantics": "absolute" },
+        "weakshort-gen1.count": { "unit": "count", "semantics": "absolute" },
+        "weakshort-gen2.count": { "unit": "count", "semantics": "absolute" },
+        "weakshort-loh.count": { "unit": "count", "semantics": "absolute" },
+        "weaklong-gen0.count": { "unit": "count", "semantics": "absolute" },
+        "weaklong-gen1.count": { "unit": "count", "semantics": "absolute" },
+        "weaklong-gen2.count": { "unit": "count", "semantics": "absolute" },
+        "weaklong-loh.count": { "unit": "count", "semantics": "absolute" },
+        "dependent.count": { "unit": "count", "semantics": "absolute" },
+        "dependent-resolved-edge.count": { "unit": "count", "semantics": "absolute" },
+        "dependent-unresolved-target.count": { "unit": "count", "semantics": "absolute" },
+        "total-handles-warning.threshold": { "unit": "count", "semantics": "absolute" },
+        "pinned-handle-targets-warning.threshold": { "unit": "count", "semantics": "absolute" },
+        "pinned-retained-bytes-warning.threshold": { "unit": "bytes", "semantics": "absolute" },
+        "pinned-soh-warning.threshold": { "unit": "count", "semantics": "absolute" },
+        "refcounted-warning.threshold": { "unit": "count", "semantics": "absolute" },
+        "weaklong-gen2-fraction-warning.threshold": { "unit": "percent", "semantics": "ratio" },
+        "weaklong-gen2-minimum-count.threshold": { "unit": "count", "semantics": "absolute" },
+        "dependent-unresolved-percent-warning.threshold": { "unit": "percent", "semantics": "ratio" }
+      },
+      "note": "One whole-run observation per analysis — no entity subject, same pattern as gc.generation-composition. Backs every old finding-generator signal handle.pinned cannot (it is capped to TopPinnedHandleAddressesToShow, not the whole population). Also carries GCHandleAnalysisOptions' warning thresholds as measures rather than hard-coding defaults into the synthesis rule — unlike other analyzers' fixed generator constants, these are genuinely runtime-configurable via AnalysisContext.AnalyzerOptions.",
+      "addedIn": "1.46.0"
+    },
+    "handle.refcounted-target": {
+      "producedBy": "GCHandleAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Gc/Analyzers/GCHandleAnalyzer.cs",
+      "requiresCapabilities": ["heap.handles"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "instance.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per distinct RefCounted (COM interop RCW) handle target type — bounded by distinct type count, not per-handle. Backs the old finding generator's dominant-type narrative text, which handle.pinned (Pinned/AsyncPinned only) cannot.",
+      "addedIn": "1.46.0"
     },
     "finalizer.queue-entry": {
       "producedBy": "FinalizableObjectAnalyzer",

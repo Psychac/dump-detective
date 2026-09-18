@@ -127,6 +127,22 @@ the one before it:
    rule's output is what the real report ships, without touching any shared report-pipeline code
    (the Option 1 shape chosen over touching every `Finding`-consuming section builder, or
    deferring all retirement to a final cutover).
+
+   **`LohFragmentationFindingGenerator` run end to end, 2026-09-18 — second analyzer, playbook
+   steps 1-5 clean (no observation gap, no fixture gap), step 6 partial like Array's.** Chosen
+   deliberately as a contrast to Array: smallest generator in the set (one finding, two fields),
+   picked precisely to check the playbook isn't only exercised by gap-heavy cases. `heap.loh-fragmentation`
+   is emitted per segment-kind row (Large/Pinned, ≤2), each carrying that kind's own
+   `fragmentation.percent` — reconstructing the old generator's combined-total percent means
+   summing `total.bytes`/`free.bytes` across matched rows and recomputing, never averaging the
+   per-kind percentages (a real correctness trap: two kinds with 50%/10% fragmentation and
+   unequal segment counts do not combine to 30%). Added a fixture exercising exactly that
+   (two kinds, different percentages) to prove the weighted combination, not just the trivial
+   single-row case — passed first try, no bug found this time. Confirms the wiring from Array's
+   migration generalizes for free: `SynthesisFindingEnricher` matches purely on
+   `Finding.Analyzer` == `AnalyzerRunResult.AnalyzerName`, so adding this rule to
+   `DefaultSynthesisRuleCatalog` was the *only* wiring change needed — no `RunAnalyzersNode`/
+   `ServiceRegistration.cs` edits this time.
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until step 6
    (see the Stage-1 purity bullet above), so its `IFindingGenerator` cannot be retired in step 2/3
    with the rest — state this so "retire `IFindingGenerator`" doesn't implicitly assume 36/36.

@@ -16,5 +16,5 @@ internal interface ISynthesisRuleCatalog
 /// </summary>
 internal sealed class DefaultSynthesisRuleCatalog : ISynthesisRuleCatalog
 {
-    public IReadOnlyList<Type> RuleTypes { get; } = [typeof(ArraySynthesisRule)];
+    public IReadOnlyList<Type> RuleTypes { get; } = [typeof(ArraySynthesisRule), typeof(LohFragmentationSynthesisRule)];
 }

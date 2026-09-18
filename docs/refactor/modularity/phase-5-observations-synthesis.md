@@ -88,64 +88,74 @@ the one before it:
    infrastructure — both are cheaper, per-analyzer procedures reusing what's there. Replaced by the
    per-analyzer playbook below, run at the moment that analyzer migrates, never in bulk upfront:
 
-   1. Open that analyzer's existing `*FindingGeneratorTests.cs`. Its `BuildResult(...)` calls are
+   Lettered, not numbered — this is a sub-procedure run per analyzer, not one of the numbered
+   steps in `## Work` below or the numbered prerequisites in this list; reusing digits for both
+   made "step 6" ambiguous (item 3 below and step f here used to both claim it).
+
+   a. Open that analyzer's existing `*FindingGeneratorTests.cs`. Its `BuildResult(...)` calls are
       the fixture set — reuse them; only add a new fixture if a threshold constant genuinely has no
       boundary case there yet.
-   2. For each fixture, snapshot the **full** `Finding` list (`Title`, `Evidence`, `Recommendation`,
+   b. For each fixture, snapshot the **full** `Finding` list (`Title`, `Evidence`, `Recommendation`,
       `Tags`, `MetricValue`, `Severity` — not just the subset today's loose
       `Contains`/`Tags`/`Severity` assertions check) through `GoldenTestBase.ApproveGoldenOutput`,
       under `Golden/Baselines/Synthesis/<AnalyzerName>/`. Commit the generated baselines — this is
       the frozen corpus for that analyzer, and only that analyzer, captured from the pre-migration
       generator.
-   3. Cross-check every field the generator reads — branch conditions *and* narrative-interpolated
+   c. Cross-check every field the generator reads — branch conditions *and* narrative-interpolated
       values, both required, not just thresholds — against that analyzer's entry in
       `SdkRegistryConformanceTests.KnownEmittedObservationTypes`.
-   4. Gap found → extend that analyzer's `Observation` emission (and the registry-conformance
+   d. Gap found → extend that analyzer's `Observation` emission (and the registry-conformance
       table) to carry the missing value, before writing the rule. Never have the new rule reach
       back into the old domain result or hardcode the value — either defeats the purity rules step
       1 exists to enforce.
-   5. Write the `ISynthesisRule`, run it over the same fixtures, diff against this item's baselines.
-   6. Only then retire that analyzer's `IFindingGenerator`.
+   e. Write the `ISynthesisRule`, run it over the same fixtures, diff against this item's baselines.
+   f. Only then retire that analyzer's `IFindingGenerator`.
 
-   **`ArrayFindingGenerator` run end to end, 2026-09-18 — first analyzer through the full
-   playbook, steps 1-5 done, step 6 partial.** Step 1's audit found `ArrayAnalyzer` only backed
-   2 of 4 finding branches with observations (LOH pressure, multi-dim, and pinned-array
-   accumulation had none) despite its own doc comment already flagging the gap — fixed by
-   extending `type.array-composition` with exhaustive per-type `loh.*`/`pinned.*` measures
-   (summed in the rule, not a new whole-run scalar) plus two new bounded per-entry types
-   (`heap.large-array`/`heap.pinned-array`). Writing the rule surfaced two more findings not
-   anticipated when this playbook was drafted: `Finding` itself was missing `Analyzer`/`Category`/
-   `Tags`/`MetricValue`/`MetricUnit` — fields the report pipeline (`ActionPriorityService`,
-   `CorrelationBuilder`, several section builders) actually reads, not optional — and the old
-   generator trusted `ArrayDomainResult`'s pre-sorted lists rather than sorting itself, so the
-   rule's own initial explicit re-sort was a real (if invisible-on-real-data) behavior change,
-   caught by the parity test itself. Step 6 is partial: `ArrayFindingGenerator` is still
-   registered, unchanged — `AnalyzerFeatureModule.FindingGeneratorType` is a required field with
-   no per-analyzer opt-out, so literal deletion is a separate, bigger change. Instead
-   `SynthesisFindingEnricher` runs after `FindingGenerationPipeline` and unconditionally
-   overrides Array's findings with the rule's output, wired into `RunAnalyzersNode` — proves the
-   rule's output is what the real report ships, without touching any shared report-pipeline code
-   (the Option 1 shape chosen over touching every `Finding`-consuming section builder, or
-   deferring all retirement to a final cutover).
+   **Why step f reads "Partial" below, for every analyzer, until a separate fix lands:**
+   `AnalyzerFeatureModule.FindingGeneratorType` is a required field with no per-analyzer opt-out,
+   so literally deleting an `IFindingGenerator` needs a bigger, separate change (touching
+   `PluginCatalogBuilder` and every module registration). Until then, `SynthesisFindingEnricher`
+   runs after `FindingGenerationPipeline` and unconditionally overrides that analyzer's findings
+   with the rule's output — proven to reach the real report without touching any shared
+   report-pipeline code (Option 1 from the `Finding`-vs-`InsightFinding` design discussion) —
+   while the old generator stays registered, doing now-discarded work.
 
-   **`LohFragmentationFindingGenerator` run end to end, 2026-09-18 — second analyzer, playbook
-   steps 1-5 clean (no observation gap, no fixture gap), step 6 partial like Array's.** Chosen
-   deliberately as a contrast to Array: smallest generator in the set (one finding, two fields),
-   picked precisely to check the playbook isn't only exercised by gap-heavy cases. `heap.loh-fragmentation`
-   is emitted per segment-kind row (Large/Pinned, ≤2), each carrying that kind's own
-   `fragmentation.percent` — reconstructing the old generator's combined-total percent means
-   summing `total.bytes`/`free.bytes` across matched rows and recomputing, never averaging the
-   per-kind percentages (a real correctness trap: two kinds with 50%/10% fragmentation and
-   unequal segment counts do not combine to 30%). Added a fixture exercising exactly that
-   (two kinds, different percentages) to prove the weighted combination, not just the trivial
-   single-row case — passed first try, no bug found this time. Confirms the wiring from Array's
-   migration generalizes for free: `SynthesisFindingEnricher` matches purely on
-   `Finding.Analyzer` == `AnalyzerRunResult.AnalyzerName`, so adding this rule to
-   `DefaultSynthesisRuleCatalog` was the *only* wiring change needed — no `RunAnalyzersNode`/
-   `ServiceRegistration.cs` edits this time.
-3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until step 6
-   (see the Stage-1 purity bullet above), so its `IFindingGenerator` cannot be retired in step 2/3
-   with the rest — state this so "retire `IFindingGenerator`" doesn't implicitly assume 36/36.
+   ### Per-analyzer migration status
+
+   | Analyzer | Steps a-e | Step f | Observation gap | Rule |
+   |---|---|---|---|---|
+   | `ArrayFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 2 of 4 branches unobserved, fixed | `ArraySynthesisRule` |
+   | `LohFragmentationFindingGenerator` | Done, 2026-09-18 | Partial (see above) | No — clean | `LohFragmentationSynthesisRule` |
+
+   **`ArrayFindingGenerator` — notable findings:**
+   - Step c's audit found `ArrayAnalyzer` only backed 2 of 4 finding branches with observations
+     (LOH pressure, multi-dim, pinned-array accumulation had none) — despite its own doc comment
+     already flagging the gap.
+   - Step d's fix: extended `type.array-composition` with exhaustive per-type `loh.*`/`pinned.*`
+     measures (summed in the rule, not a new whole-run scalar), plus two new bounded per-entry
+     types (`heap.large-array`/`heap.pinned-array`).
+   - Writing the rule surfaced two things this playbook hadn't anticipated: `Finding` itself was
+     missing `Analyzer`/`Category`/`Tags`/`MetricValue`/`MetricUnit` — fields the report pipeline
+     (`ActionPriorityService`, `CorrelationBuilder`, several section builders) actually reads —
+     and the old generator trusted `ArrayDomainResult`'s pre-sorted lists rather than sorting
+     itself, so the rule's initial explicit re-sort was a real (if invisible-on-real-data)
+     behavior change, caught by the parity test itself.
+
+   **`LohFragmentationFindingGenerator` — notable findings:**
+   - Chosen deliberately as a contrast to Array: smallest generator in the set (one finding, two
+     fields), to check the playbook isn't only exercised by gap-heavy cases.
+   - `heap.loh-fragmentation` is emitted per segment-kind row (Large/Pinned, ≤2), each carrying
+     that kind's own `fragmentation.percent` — reconstructing the old generator's combined-total
+     percent means summing `total.bytes`/`free.bytes` across matched rows and recomputing, never
+     averaging the per-kind percentages (two kinds at 50%/10% with unequal segment counts do not
+     average to 30%). A fixture exercises exactly that combination.
+   - Confirmed the enricher wiring generalizes for free: adding the rule to
+     `DefaultSynthesisRuleCatalog` was the only change needed to reach the real report — no
+     `RunAnalyzersNode`/`ServiceRegistration.cs` edits this time.
+3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until `## Work`
+   step 6 below (see the Stage-1 purity bullet above — distinct from playbook step f just above),
+   so its `IFindingGenerator` cannot be retired alongside the rest in this playbook — state this
+   so "retire `IFindingGenerator`" doesn't implicitly assume 36/36.
 
 Judgment call, not a gate — decide before designing `Finding`/`ConfidenceBreakdown` in step 2/7,
 since redesigning after the fact is the expensive path:

@@ -134,6 +134,19 @@ the one before it:
    | `WeakReferenceFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — most of overview + 2 of 4 signals unobserved, fixed | `WeakReferenceSynthesisRule` |
    | `SqlConnectionPoolFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — connection-string label had no home, fixed | `SqlConnectionPoolSynthesisRule` |
 
+   | `SqlCommandFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — TotalCommands/DisposedCount unobserved, fixed | `SqlCommandSynthesisRule` |
+
+   **`SqlCommandFindingGenerator` — notable findings (2nd of the Infra plugin's analyzers):**
+   - Step c's audit found `infra.sql-command` emits only for active commands (one per instance) —
+     `ActiveCount` is exactly reconstructable by counting those. `TotalCommands`/`DisposedCount`
+     cover every scanned candidate, including disposed and unreadable-state ones that never get an
+     observation at all — no way to reconstruct those two without a new observation.
+   - Step d's fix: one new whole-run `infra.sql-command-population` observation carrying
+     `total.count`/`disposed.count` only — `ActiveCount` deliberately not duplicated as a measure,
+     same "count what you can count" choice as `SqlConnectionPoolSynthesisRule`.
+   - Single-finding generator, same shape as `SqlConnectionPoolFindingGenerator`: no aggregation,
+     no re-ranking, no per-type breakdown needed.
+
    **`SqlConnectionPoolFindingGenerator` — notable findings (first of the Infra plugin's analyzers,
    picked up one at a time):**
    - Step c's audit found `infra.sql-connection-pool` already backs every numeric field the single

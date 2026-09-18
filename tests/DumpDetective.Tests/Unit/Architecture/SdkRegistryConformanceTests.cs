@@ -68,6 +68,7 @@ public sealed class SdkRegistryConformanceTests
             ["thread.stack-cluster"] = ["cluster.count", "threadpool-worker.count", "gc.count", "finalizer.count"],
             ["infra.sql-connection-pool"] = ["current.size", "max.size", "min.size"],
             ["infra.sql-command"] = ["shallow.bytes"],
+            ["infra.sql-command-population"] = ["total.count", "disposed.count"],
             ["infra.sql-transaction"] = ["shallow.bytes"],
             ["infra.db-connection"] = ["generation.ordinal", "retained.bytes"],
             ["infra.http-object"] = ["shallow.bytes"],

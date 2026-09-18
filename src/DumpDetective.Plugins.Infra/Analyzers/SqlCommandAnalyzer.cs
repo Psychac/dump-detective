@@ -174,6 +174,33 @@ public sealed class SqlCommandAnalyzer :
 
         byType.Sort(static (a, b) => b.TotalCount.CompareTo(a.TotalCount));
 
+        // Whole-run scalar — no entity subject, same "no natural per-entity anchor" pattern as
+        // gc.generation-composition. TotalCommands/DisposedCount cover every scanned candidate,
+        // including disposed and unreadable-state ones that infra.sql-command never observes
+        // individually (only active commands get one, per this analyzer's own Phase 5 step 1
+        // remarks) — ActiveCount itself is reconstructable by counting those, so it isn't
+        // duplicated here.
+        await observationContext.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "infra.sql-command-population",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["total.count"] = new Measure(totalCommands, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["disposed.count"] = new Measure(totalDisposed, MeasureUnit.Count, MeasureSemantics.Absolute),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = observationContext.ArtifactId!.Value,
+                AnalyzerKey = "SQL Command Analysis",
+                CapabilitiesUsed = observationCapabilities,
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
+
         return new SqlCommandDomainResult(
             CommandsFound: totalCommands > 0,
             TotalCommands: totalCommands,

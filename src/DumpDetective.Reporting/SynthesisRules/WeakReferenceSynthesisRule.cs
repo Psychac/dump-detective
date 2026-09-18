@@ -1,0 +1,258 @@
+using DumpDetective.Core.Utilities;
+using DumpDetective.Sdk.Identity;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Synthesis;
+
+namespace DumpDetective.Reporting.SynthesisRules;
+
+/// <summary>
+/// Replaces <c>WeakReferenceFindingGenerator</c> — see
+/// docs/refactor/modularity/phase-5-observations-synthesis.md's per-analyzer playbook.
+/// </summary>
+/// <remarks>
+/// <c>AliveWeakTargets</c> and <c>StaleWrapperCount</c> are reconstructed by counting matched
+/// <c>weakhandle.target</c>/<c>weakreference.stale-wrapper</c> observations rather than duplicated
+/// as measures on the new <c>weakreference.population</c> observation — same "don't duplicate what
+/// counting already gives you" choice <c>AsyncTaskSynthesisRule</c> made for <c>OrphanedTasks</c>.
+/// <c>StaleWrapperCountIsExact</c> is not read from an observation at all: the retyped analyzer's
+/// own remarks say the degraded (extrapolated) case "can no longer occur by construction," and it
+/// unconditionally constructs <c>StaleWrapperCountIsExact: true</c> — so the qualifier text is
+/// always empty here, matching that structural guarantee rather than a measured fact.
+/// </remarks>
+internal sealed class WeakReferenceSynthesisRule : ISynthesisRule
+{
+    private const double HighDeadRatioWarningThreshold = 0.5;
+    private const double HighDeadRatioCriticalThreshold = 0.8;
+    private const int AbsoluteDeadCountThreshold = 10_000;
+    private const int AbsoluteDeadCountCriticalThreshold = 100_000;
+
+    private const string AnalyzerName = "Weak Reference Analysis";
+
+    public string RuleId => "weak-reference.finding-parity";
+    public int Version => 1;
+
+    public ObservationQuery Query { get; } = new()
+    {
+        ObservationTypes = ["weakhandle.target", "weakreference.stale-wrapper", "weakreference.population"],
+    };
+
+    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+        ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
+    {
+        Observation? population = null;
+        int aliveWeakTargets = 0;
+        int staleWrapperCount = 0;
+        var weakHandleIds = new List<ObservationId>();
+        var staleWrapperIds = new List<ObservationId>();
+        int heldOnlyCount = 0;
+        var heldOnlyIds = new List<ObservationId>();
+        var heldOnlyTypeCounts = new Dictionary<string, (long Count, List<ObservationId> Ids)>(StringComparer.Ordinal);
+
+        foreach (Observation observation in matched.Matched)
+        {
+            switch (observation.ObservationType)
+            {
+                case "weakhandle.target":
+                    aliveWeakTargets++;
+                    weakHandleIds.Add(observation.Id);
+                    if (observation.Measures["held-only-via-weak-reference"].Value >= 1.0)
+                    {
+                        heldOnlyCount++;
+                        heldOnlyIds.Add(observation.Id);
+
+                        string typeName = ((TypeRef)observation.Subjects[0]).CanonicalName;
+                        if (!heldOnlyTypeCounts.TryGetValue(typeName, out var existing))
+                            existing = (0, []);
+                        existing.Count++;
+                        existing.Ids.Add(observation.Id);
+                        heldOnlyTypeCounts[typeName] = existing;
+                    }
+                    break;
+                case "weakreference.stale-wrapper":
+                    staleWrapperCount++;
+                    staleWrapperIds.Add(observation.Id);
+                    break;
+                case "weakreference.population":
+                    population = observation;
+                    break;
+            }
+        }
+
+        if (population is null) return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+
+        IReadOnlyDictionary<string, Measure> m = population.Measures;
+        long totalWeakHandles = (long)m["total-handles.count"].Value;
+        long deadWeakTargets = (long)m["dead-targets.count"].Value;
+        long weakReferenceObjectCount = (long)m["object.count"].Value;
+        ulong weakReferenceObjectBytes = (ulong)m["object.bytes"].Value;
+        long dependentHandleDeadKeyCount = (long)m["dependent-dead-key.count"].Value;
+        bool heldOnlyDetectionAvailable = m["held-only-detection-available"].Value >= 1.0;
+
+        double deadTargetRatio = totalWeakHandles == 0 ? 0.0 : (double)deadWeakTargets / totalWeakHandles;
+        const string staleWrapperQualifier = "";
+
+        var signals = new List<(Finding Finding, int Priority)>(4);
+
+        // High dead-target ratio — stale wrapper accumulation.
+        if (totalWeakHandles > 0 && deadTargetRatio >= HighDeadRatioWarningThreshold)
+        {
+            signals.Add((new Finding
+            {
+                Fingerprint = Fingerprint("high-dead-ratio"),
+                Analyzer = AnalyzerName,
+                Category = "Memory",
+                Severity = deadTargetRatio >= HighDeadRatioCriticalThreshold ? Severity.Critical : Severity.Warning,
+                Title = "High proportion of dead weak handle targets",
+                Narrative = $"{deadWeakTargets:N0} of {totalWeakHandles:N0} weak handles " +
+                            $"({deadTargetRatio:P1}) point to already-collected objects. " +
+                            $"Stale WeakReference wrappers: {staleWrapperCount:N0}{staleWrapperQualifier}.",
+                Recommendation = "Audit caches and event subscriptions that hold WeakReference objects. " +
+                                  "Ensure entries are purged after the target is collected to avoid accumulation.",
+                Tags = ["weak-reference", "handles", "cache", "memory-leak"],
+                MetricValue = deadTargetRatio,
+                MetricUnit = "ratio",
+                DerivedFrom = [population.Id, .. staleWrapperIds],
+                Confidence = ConfidenceBreakdown.MeasurementCertain,
+            }, 200));
+        }
+
+        // Absolute dead-count threshold signal (complementary to ratio).
+        if (deadWeakTargets > AbsoluteDeadCountThreshold)
+        {
+            signals.Add((new Finding
+            {
+                Fingerprint = Fingerprint("high-dead-count"),
+                Analyzer = AnalyzerName,
+                Category = "Memory",
+                Severity = deadWeakTargets > AbsoluteDeadCountCriticalThreshold ? Severity.Critical : Severity.Warning,
+                Title = "High absolute count of dead weak handle targets",
+                Narrative = $"{deadWeakTargets:N0} dead weak handles accumulated. " +
+                            "Large-scale applications with millions of handles can have benign ratios but still accumulate significant dead count.",
+                Recommendation = "Review cache retention patterns and event subscription cleanup. " +
+                                  "Implement periodic purging of dead entries to prevent unbounded growth.",
+                Tags = ["weak-reference", "handles", "cache", "memory-leak"],
+                MetricValue = deadWeakTargets,
+                MetricUnit = "handles",
+                DerivedFrom = [population.Id],
+                Confidence = ConfidenceBreakdown.MeasurementCertain,
+            }, 150));
+        }
+
+        // Dependent handle dead-key signal.
+        if (dependentHandleDeadKeyCount > 0)
+        {
+            signals.Add((new Finding
+            {
+                Fingerprint = Fingerprint("dependent-dead-key"),
+                Analyzer = AnalyzerName,
+                Category = "Memory",
+                Severity = Severity.Info,
+                Title = "Dependent handles with dead primary keys detected",
+                Narrative = $"{dependentHandleDeadKeyCount:N0} dependent handle(s) have a dead primary key, " +
+                            "indicating ConditionalWeakTable entries whose source object has been collected.",
+                Recommendation = "Review ConditionalWeakTable usage; dead-key entries are cleaned up by the GC " +
+                                  "but a high count may indicate object lifecycle issues.",
+                Tags = ["dependent-handle", "conditional-weak-table"],
+                MetricValue = dependentHandleDeadKeyCount,
+                MetricUnit = "handles",
+                DerivedFrom = [population.Id],
+                Confidence = ConfidenceBreakdown.MeasurementCertain,
+            }, 100));
+        }
+
+        // "Held only via weak reference" signal — objects still alive but unreachable from any
+        // GC root, so the weak handle is the only known reference and they'll be collected next GC.
+        if (heldOnlyDetectionAvailable && heldOnlyCount > 0)
+        {
+            string topTypeSuffix = "";
+            long topCount = -1;
+            string topType = "";
+            foreach ((string typeName, (long count, List<ObservationId> _)) in heldOnlyTypeCounts)
+            {
+                if (count > topCount)
+                {
+                    topCount = count;
+                    topType = typeName;
+                }
+            }
+            if (topCount > 0) topTypeSuffix = $" Most common: {topType} ({topCount:N0}).";
+
+            signals.Add((new Finding
+            {
+                Fingerprint = Fingerprint("held-only-via-weak-reference"),
+                Analyzer = AnalyzerName,
+                Category = "Memory",
+                Severity = Severity.Info,
+                Title = "Objects held only via weak reference",
+                Narrative = $"{heldOnlyCount:N0} alive weak target(s) are unreachable from any GC root — " +
+                            $"the weak handle is currently the only known reference to them.{topTypeSuffix}",
+                Recommendation = "Informational: these objects are pending collection on the next GC and are not " +
+                                  "themselves a leak. If this count is unexpectedly large, it may indicate churn in a " +
+                                  "cache or subscription pattern that repeatedly creates short-lived weakly-referenced objects.",
+                Tags = ["weak-reference", "gc-root", "diagnostic"],
+                MetricValue = heldOnlyCount,
+                MetricUnit = "objects",
+                DerivedFrom = heldOnlyIds,
+                Confidence = ConfidenceBreakdown.MeasurementCertain,
+            }, 120));
+        }
+
+        // Summary finding (always).
+        Severity summarySeverity = Severity.Info;
+        foreach ((Finding signal, _) in signals)
+        {
+            if (SeverityRank(signal.Severity) > SeverityRank(summarySeverity))
+                summarySeverity = signal.Severity;
+        }
+
+        var findings = new List<Finding>(signals.Count + 1)
+        {
+            new Finding
+            {
+                Fingerprint = Fingerprint("overview"),
+                Analyzer = AnalyzerName,
+                Category = "Memory",
+                Severity = summarySeverity,
+                Title = "Weak reference overview",
+                Narrative = $"Total weak handles: {totalWeakHandles:N0}. " +
+                            $"Alive targets: {aliveWeakTargets:N0}, dead: {deadWeakTargets:N0} " +
+                            $"({deadTargetRatio:P1}). " +
+                            $"WeakReference objects: {weakReferenceObjectCount:N0} " +
+                            $"({FormatHelper.FormatBytes(weakReferenceObjectBytes)}). " +
+                            $"Stale wrappers: {staleWrapperCount:N0}{staleWrapperQualifier}.",
+                Recommendation = signals.Count > 0
+                    ? $"Review the {signals.Count} weak-reference signal(s) below."
+                    : "Weak handle health is acceptable.",
+                Tags = ["weak-reference", "handles", "overview"],
+                MetricValue = totalWeakHandles,
+                MetricUnit = "handles",
+                DerivedFrom = [population.Id, .. weakHandleIds, .. staleWrapperIds],
+                Confidence = ConfidenceBreakdown.MeasurementCertain,
+            },
+        };
+
+        if (signals.Count > 0)
+        {
+            // Sort by severity (descending) then priority (descending) — mirrors the old
+            // generator's OrderByDescending(severity).ThenByDescending(priority) over its own
+            // fixed-priority WeakRefSignal records (200, 150, 100, 120).
+            IEnumerable<Finding> sortedSignals = signals
+                .OrderByDescending(s => SeverityRank(s.Finding.Severity))
+                .ThenByDescending(s => s.Priority)
+                .Select(s => s.Finding);
+
+            findings.AddRange(sortedSignals);
+        }
+
+        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+    }
+
+    private static int SeverityRank(Severity severity) => severity switch
+    {
+        Severity.Critical => 3,
+        Severity.Warning => 2,
+        _ => 1,
+    };
+
+    private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();
+}

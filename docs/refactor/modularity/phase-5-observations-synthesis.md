@@ -131,6 +131,34 @@ the one before it:
    | `FinalizableObjectFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 2 of 9 signals unobserved, fixed | `FinalizableObjectSynthesisRule` |
    | `GCHandleFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 5 of 6 signals unobserved, fixed | `GCHandleSynthesisRule` |
    | `GCRootFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 3 of 4 signals unobserved, fixed | `GCRootSynthesisRule` |
+   | `WeakReferenceFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — most of overview + 2 of 4 signals unobserved, fixed | `WeakReferenceSynthesisRule` |
+
+   **`WeakReferenceFindingGenerator` — notable findings:**
+   - Step c's audit found `weakhandle.target` (alive targets) and `weakreference.stale-wrapper`
+     (stale wrappers) already back `AliveWeakTargets`/`StaleWrapperCount` by simple count — no gap
+     there. But `TotalWeakHandles`/`DeadWeakTargets` (dead handles never get an observation at all:
+     nothing to point a `Subject` at once the target is collected), `WeakReferenceObjectCount`/
+     `WeakReferenceObjectBytes` (every `WeakReference<T>` instance, not just the stale subset
+     `weakreference.stale-wrapper` observes), `DependentHandleDeadKeyCount`, and the "held only via
+     weak reference" signal (count + top type) had no observation backing.
+   - Step d's fix, two parts: a new whole-run `weakreference.population` observation for the
+     whole-process scalars (`total-handles.count`, `dead-targets.count`, `object.count`,
+     `object.bytes`, `dependent-dead-key.count`) plus `held-only-detection-available` (distinguishes
+     "computed, zero found" from "reachability unavailable, not computed" — same purpose as
+     `HeldOnlyViaWeakReferenceDetectionAvailable`); and a new `held-only-via-weak-reference` boolean
+     measure added directly to the existing `weakhandle.target` observation (not a separate
+     observation type) — since every held-only target is already a `weakhandle.target` with a real
+     `Subject`, grouping matched observations by type reconstructs the "most common type" narrative
+     without a second per-type observation stream.
+   - `StaleWrapperCountIsExact` is not observed at all: the retyped analyzer's own remarks say the
+     one degraded (extrapolated) case that could make it `false` "can no longer occur by
+     construction," and it unconditionally constructs `StaleWrapperCountIsExact: true` — so the
+     rule hard-codes the empty qualifier text as a structural guarantee, not a measured fact,
+     rather than inventing an always-1.0 measure with no real second state.
+   - Unlike every prior playbook entry, the summary/overview finding is not gated on anything — it
+     always fires, aggregating up to four independently-gated signals that are then re-sorted by
+     severity-then-fixed-priority (200/150/120/100) after the fact, mirroring
+     `AsyncTaskSynthesisRule`'s aggregate pattern but without a 2-finding cap.
 
    **`GCRootFindingGenerator` — notable findings:**
    - Step c's audit found `heap.root` (Phase 5 step 1) deliberately left out `RootFinding.RootKind`

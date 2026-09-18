@@ -185,7 +185,8 @@ namespace DumpDetective.Analysis.Analyzers.Gc
                         // strong references, so IsReachableFromRoot == false for a still-alive
                         // object means nothing but the weak handle itself currently points at it --
                         // exactly the signal dotMemory calls "held only via weak reference".
-                        if (reachability is not null && !reachability.IsReachableFromRoot(h.TargetAddress))
+                        bool isHeldOnlyViaWeakReference = reachability is not null && !reachability.IsReachableFromRoot(h.TargetAddress);
+                        if (isHeldOnlyViaWeakReference)
                         {
                             heldOnlyViaWeakReferenceCount++;
                             IncrementDict(heldOnlyViaWeakReferenceTypeHits, target.TypeDisplayName);
@@ -196,7 +197,15 @@ namespace DumpDetective.Analysis.Analyzers.Gc
                         if (hasRetained)
                             aliveWeakTargetsRetainedBytes += retained;
 
-                        var weakHandleMeasures = new Dictionary<string, Measure>();
+                        var weakHandleMeasures = new Dictionary<string, Measure>
+                        {
+                            // Raw fact, not a leak judgment: reachability.IsReachableFromRoot's own
+                            // negative result — see §24.1 P3-2's remarks just above for why that's
+                            // exactly "held only via weak reference," never 1.0 when reachability
+                            // wasn't computed at all (weakreference.population's own
+                            // held-only-detection-available measure carries that distinction).
+                            ["held-only-via-weak-reference"] = new Measure(isHeldOnlyViaWeakReference ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        };
                         if (hasRetained)
                             weakHandleMeasures["retained.bytes"] = new Measure(retained, MeasureUnit.Bytes, MeasureSemantics.Absolute);
                         await observationContext.Observations.EmitAsync(new Observation
@@ -284,6 +293,36 @@ namespace DumpDetective.Analysis.Analyzers.Gc
             var dependentDeadKeyValueTypes = BuildSorted(dependentDeadValueTypeHits);
             var aliveGenerationDistribution = BuildGenerationDistribution(aliveGenerationCounts);
             var heldOnlyViaWeakReferenceTopTypes = BuildSorted(heldOnlyViaWeakReferenceTypeHits);
+
+            // Whole-run scalar — no entity subject, same "no natural per-entity anchor" pattern as
+            // gc.generation-composition. TotalWeakHandles/DeadWeakTargets count dead handles, which
+            // never get a weakhandle.target observation at all (nothing to point Subjects at once
+            // the target is collected); WeakReferenceObjectCount/Bytes cover every WeakReference<T>
+            // instance, not just the stale ones weakreference.stale-wrapper observes.
+            await observationContext.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "weakreference.population",
+                Subjects = [],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["total-handles.count"] = new Measure(totalWeakHandles, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["dead-targets.count"] = new Measure(deadWeakTargets, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["object.count"] = new Measure(weakRefObjCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["object.bytes"] = new Measure(weakRefObjBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["dependent-dead-key.count"] = new Measure(dependentHandleDeadKeyCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["held-only-detection-available"] = new Measure(reachability is not null ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = observationContext.ArtifactId!.Value,
+                    AnalyzerKey = "Weak Reference Analysis",
+                    CapabilitiesUsed = observationCapabilities,
+                    Fidelity = observationFidelity,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
 
             return new WeakReferenceDomainResult(
                 TotalWeakHandles: totalWeakHandles,

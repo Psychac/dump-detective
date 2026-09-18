@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/observation-type-registry.json",
-  "registryVersion": "1.48.0",
+  "registryVersion": "1.49.0",
   "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
   "observationTypes": {
     "gc.pause": {
@@ -193,9 +193,10 @@
       "subjectKind": "type",
       "temporalKind": "point",
       "measures": {
-        "retained.bytes": { "unit": "bytes", "semantics": "absolute" }
+        "retained.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "held-only-via-weak-reference": { "unit": "count", "semantics": "absolute" }
       },
-      "note": "One observation per alive weak-handle target (Phase A). retained.bytes is omitted, not zeroed, when no dominator tree is available.",
+      "note": "One observation per alive weak-handle target (Phase A). retained.bytes is omitted, not zeroed, when no dominator tree is available. held-only-via-weak-reference added Phase 5 step 2 — 1.0 when the target is unreachable from any GC root (the weak handle is its only known reference), 0.0 otherwise; always 0.0, never 1.0, when reachability wasn't computed at all (see weakreference.population's held-only-detection-available).",
       "addedIn": "1.4.0"
     },
     "weakreference.stale-wrapper": {
@@ -209,6 +210,23 @@
       },
       "note": "One observation per WeakReference<T> instance whose m_handle field reads 0 (Phase B) — only the stale subset, not every WeakReference<T> instance.",
       "addedIn": "1.4.0"
+    },
+    "weakreference.population": {
+      "producedBy": "WeakReferenceAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Gc/Analyzers/WeakReferenceAnalyzer.cs",
+      "requiresCapabilities": ["heap.handles", "heap.objects", "heap.segments", "dump.object-fields"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "total-handles.count": { "unit": "count", "semantics": "absolute" },
+        "dead-targets.count": { "unit": "count", "semantics": "absolute" },
+        "object.count": { "unit": "count", "semantics": "absolute" },
+        "object.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "dependent-dead-key.count": { "unit": "count", "semantics": "absolute" },
+        "held-only-detection-available": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One whole-run observation per analysis — no entity subject, same pattern as gc.generation-composition. Dead weak handles never get a weakhandle.target observation at all (nothing to point Subjects at once the target is collected), and WeakReferenceObjectCount/Bytes cover every WeakReference<T> instance, not just the stale subset weakreference.stale-wrapper observes — neither is reconstructable by counting/summing the per-target observations.",
+      "addedIn": "1.48.0"
     },
     "gc.generation-composition": {
       "producedBy": "GCGenerationAnalyzer",

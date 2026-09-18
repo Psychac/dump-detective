@@ -133,8 +133,204 @@ the one before it:
    | `GCRootFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 3 of 4 signals unobserved, fixed | `GCRootSynthesisRule` |
    | `WeakReferenceFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — most of overview + 2 of 4 signals unobserved, fixed | `WeakReferenceSynthesisRule` |
    | `SqlConnectionPoolFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — connection-string label had no home, fixed | `SqlConnectionPoolSynthesisRule` |
-
    | `SqlCommandFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — TotalCommands/DisposedCount unobserved, fixed | `SqlCommandSynthesisRule` |
+   | `SqlTransactionFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — TotalTransactions/DisposedCount/OtherCount unobserved, fixed | `SqlTransactionSynthesisRule` |
+   | `DbConnectionFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — type breakdown + closed/broken/other/unknown counts + root-path label unobserved, fixed | `DbConnectionSynthesisRule` |
+   | `HttpObjectFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 2 whole-run counts + generation split + connection-limit + module breakdown unobserved, fixed | `HttpObjectSynthesisRule` |
+   | `TimerLeakFindingGenerator` | Done, 2026-09-18 | Partial (see above) | No — no observation gap at all | `TimerLeakSynthesisRule` |
+   | `WcfChannelFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — per-type totals + binding hint + endpoints + whole-run counts unobserved, fixed | `WcfChannelSynthesisRule` |
+   | `DominatorFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — always-heuristic retained bytes + highly-referenced/capped whole-run counts + type-hotspot aggregate unobserved, fixed | `DominatorSynthesisRule` |
+
+   ### Per-analyzer notable findings
+
+   In migration order (matches the table above) — each entry records what step c's audit
+   found and step d's fix, not just the pass/fail outcome the table already carries.
+
+   **`ArrayFindingGenerator` — notable findings:**
+   - Step c's audit found `ArrayAnalyzer` only backed 2 of 4 finding branches with observations
+     (LOH pressure, multi-dim, pinned-array accumulation had none) — despite its own doc comment
+     already flagging the gap.
+   - Step d's fix: extended `type.array-composition` with exhaustive per-type `loh.*`/`pinned.*`
+     measures (summed in the rule, not a new whole-run scalar), plus two new bounded per-entry
+     types (`heap.large-array`/`heap.pinned-array`).
+   - Writing the rule surfaced two things this playbook hadn't anticipated: `Finding` itself was
+     missing `Analyzer`/`Category`/`Tags`/`MetricValue`/`MetricUnit` — fields the report pipeline
+     (`ActionPriorityService`, `CorrelationBuilder`, several section builders) actually reads —
+     and the old generator trusted `ArrayDomainResult`'s pre-sorted lists rather than sorting
+     itself, so the rule's initial explicit re-sort was a real (if invisible-on-real-data)
+     behavior change, caught by the parity test itself.
+
+   **`LohFragmentationFindingGenerator` — notable findings:**
+   - Chosen deliberately as a contrast to Array: smallest generator in the set (one finding, two
+     fields), to check the playbook isn't only exercised by gap-heavy cases.
+   - `heap.loh-fragmentation` is emitted per segment-kind row (Large/Pinned, ≤2), each carrying
+     that kind's own `fragmentation.percent` — reconstructing the old generator's combined-total
+     percent means summing `total.bytes`/`free.bytes` across matched rows and recomputing, never
+     averaging the per-kind percentages (two kinds at 50%/10% with unequal segment counts do not
+     average to 30%). A fixture exercises exactly that combination.
+   - Confirmed the enricher wiring generalizes for free: adding the rule to
+     `DefaultSynthesisRuleCatalog` was the only change needed to reach the real report — no
+     `RunAnalyzersNode`/`ServiceRegistration.cs` edits this time.
+
+   **`AsyncStateMachineFindingGenerator` — notable findings:**
+   - Step c's audit found `type.async-state-machine`'s only `Subject` was the state-machine's own
+     `TypeRef` — `DeclaringType`/`OriginatingMethod` existed only inside a private regex parser,
+     never surfaced. That knocked out 3 of 4 branches (high-count's "top method", the entire
+     fire-and-forget branch, async-void's "top method"), since all three need method identity.
+   - Step d's fix: a second `Subject` on the observation — a `Low`-fidelity `MethodRef` (no real
+     parameter signature is derivable from a type name alone, so the signature is left empty
+     rather than guessed) — instead of duplicating the private parser into the rule.
+   - Unlike `ArraySynthesisRule`, this rule **must** re-rank rather than trust emission order:
+     checked (not assumed) that `AsyncStateMachineAnalyzer` emits inline per type, before its own
+     post-loop sorts run — the opposite of `ArrayAnalyzer`'s structure, where emission happens in a
+     separate pass over already-sorted lists. Different analyzers, different order guarantees;
+     each has to be checked on its own.
+   - The parity test surfaced that several of the old generator's own unit-test fixtures set
+     `TotalStateMachines` and `SuspendedMethodMap` to independent, mutually inconsistent values
+     (e.g. 12,000 suspended instances of one method with the total left at 0) — achievable only
+     because the old generator reads them as separate fields. Real production can't produce that
+     combination (both are exhaustive sums over the same type population), so the parity fixtures
+     were rebuilt consistent with that coupling rather than reproducing the impossible combination.
+
+   **`AsyncTaskFindingGenerator` — notable findings:**
+   - Step c's audit found the analyzer emitted only `type.orphaned-task` (one per orphaned task,
+     Phase 5 step 1) — the largest gap found so far in this playbook. Seven of the old generator's
+     eight signals (cycle deadlock, Gen2/LOH pending tasks, unresolved TCS in Gen2/LOH, pending VTS
+     in Gen2/LOH, faulted tasks, continuation-chain depth, high pending count) read
+     `AsyncTaskDomainResult` fields with no observation backing at all.
+   - Step d's fix: one new whole-run `async.task-population` observation (no entity subject — same
+     "whole-process scalar" pattern as `gc.generation-composition`), carrying all thirteen measures
+     those seven signals need. `type.orphaned-task` stays as-is; the rule reconstructs `OrphanedTasks`
+     by counting matched instances rather than summing a measure.
+   - Unlike `AsyncStateMachineSynthesisRule`, no re-ranking question arises: every signal but
+     `orphaned` reads a single observation instance's scalar measures directly, and `orphaned` is a
+     plain count, not a ranked list.
+   - The domain result's own remarks note TCS/VTS analysis runs independent of the task scan (a heap
+     can have TCS/VTS instances with zero `Task` objects), so `async.task-population` is emitted on
+     both the normal path and the `total == 0` early-return (`EmptyWith`) path — omitting it there
+     would have silently dropped the `tcs-unresolved-oldgen`/`vts-pending-oldgen` signals for that
+     case.
+
+   **`FinalizableObjectFindingGenerator` — notable findings:**
+   - Step c's audit found the analyzer emitted only `finalizer.queue-entry` (one per valid queue
+     entry, Phase 5 step 1). That backs 6 of the 9 signals (backlog count via a new whole-run
+     observation below, retained bytes, undisposed-in-queue, and the four known-queue-pattern
+     findings via per-entry Subject grouping) but not the Gen2 accumulation signal, which reads
+     the whole finalizable-*type* population (`TotalFinalizableObjects`/`TotalFinalizableBytes`/
+     `Gen2Count`/top type by Gen2 count) — a different population than the queue.
+   - Step d's fix, two parts:
+     - New per-type `type.finalizable-population` observation (one per finalizable type from
+       `heap.types`, not capped) — backs the Gen2 branch the same way `type.array-composition`
+       backs Array's LOH-pressure branch.
+     - `finalizer.queue-entry` gained `shallow.bytes` and `is-critical-finalizer` measures — the
+       old generator's CriticalFinalizerObject branch read `entry.ShallowSize`/
+       `entry.IsCriticalFinalizerType`, neither of which existed as a measure yet.
+     - New whole-run `finalizer.queue-population` observation (`queue.count`) — the queue backlog
+       signal's `FinalizerQueueCount` counts every queue entry including invalid
+       (`"<unknown>"`-typed) ones that `finalizer.queue-entry` structurally cannot observe
+       individually (no resolvable `Type` for a `Subject`).
+   - Unlike `AsyncTaskSynthesisRule`, no aggregate/top-signal cap: the old generator emits up to
+     nine independent findings unconditionally, so the rule does the same — no re-ranking or
+     severity-comparison logic needed at all, only per-observation-type grouping and summation.
+   - The old generator's own unit tests (`FinalizableObjectFindingGeneratorTests`) set
+     `CriticalFinalizerQueueCount`/`TopQueueTypesByCount`/etc. as independent fields with no
+     backing `TopQueueEntriesByRetainedSize` population — same "possible only because the old
+     generator reads fields independently" situation the `AsyncStateMachineSynthesisRule` parity
+     tests hit. The parity tests here rebuild every aggregate field from a single list of queue
+     entries instead of reusing that fixture shape.
+
+   **`GCHandleFindingGenerator` — notable findings:**
+   - Step c's audit found `handle.pinned` (Phase 5 step 1) only backs the debugger-follow-up
+     address list — capped to `GCHandleAnalysisOptions.TopPinnedHandleAddressesToShow`, not the
+     whole handle population. 5 of 6 signals read whole-population aggregates (`TotalHandles`,
+     `PinnedRetainedBytes`, SOH/non-SOH pinned counts, `RefCountedHandleCount`,
+     WeakShort/WeakLong generation breakdowns, dependent-handle counts) with no observation
+     backing at all.
+   - Step d's fix, two parts: a new whole-run `handle.population` observation (no entity subject,
+     same pattern as `gc.generation-composition`) carrying every aggregate the six signals need;
+     and a new per-type `handle.refcounted-target` observation (one per distinct RefCounted target
+     type, canonicalized from its display name the same way `type.finalizable-population` and
+     `type.boxing` are, since no per-handle address survives into `TopRefCountedTargetTypes` to
+     re-resolve a real `TypeRef` from) — backs the COM-interop signal's "dominant type" text.
+   - **Genuinely new wrinkle in this playbook entry**: `GCHandleFindingGenerator`'s thresholds
+     aren't private consts baked into the generator the way every prior analyzer's are — they're
+     read from `GCHandleDomainResult`'s own fields, sourced from `GCHandleAnalysisOptions`
+     (runtime-configurable via `AnalysisContext.AnalyzerOptions`). Hard-coding the option defaults
+     into `GCHandleSynthesisRule` as private consts, matching every other rule so far, would have
+     silently dropped that configurability — a real behavior regression, not just a mechanical
+     migration. `handle.population` carries all eight thresholds as measures instead, and the rule
+     reads them from the observation rather than hard-coding defaults.
+   - Emission itself needed no changes to `Analyze()` — unlike `AsyncTaskAnalyzer`/
+     `FinalizableObjectAnalyzer`, `GCHandleDomainResult` already carries every aggregate the new
+     observations need, so both were emitted from the existing `EmitObservationsAsync` step using
+     `result.*` directly, no weaving into the population loop required.
+
+   **`GCRootFindingGenerator` — notable findings:**
+   - Step c's audit found `heap.root` (Phase 5 step 1) deliberately left out `RootFinding.RootKind`
+     as a measure — its own remarks flagged this as a gap to revisit "if a synthesis rule actually
+     needs to group by it," and this is exactly that: 3 of 4 signals (static-root retention,
+     finalizer-queue pressure, pinned-handle accumulation) group `GCRootDomainResult.ByKind` by
+     `Kind` (`StrongHandle`/`FinalizerQueue`/`PinnedHandle`/`AsyncPinnedHandle`), which `heap.root`
+     alone cannot reconstruct.
+   - Step d's fix, two parts: a new `root.kind-summary` observation (one per `ByKind` row, bounded
+     to `HeapRootKind`'s fixed small taxonomy) carrying a `kind.ordinal` measure — the same
+     pattern `heap.loh-fragmentation`/`heap.segment-kind-composition` already established, and the
+     same "no live enum instance, parse the string back" situation `heap.root`'s own remarks
+     anticipated; and a new whole-run `root.population` observation for `TotalRoots` (includes
+     roots dropped before `ByKind`/`heap.root` ever see them — null target, unresolvable metadata,
+     zero-size object — so it can't be reconstructed by summing `root.kind-summary`) and the
+     subgraph-walk-cap signal.
+   - `root.population` is guarded on `TotalRoots > 0`, skipped entirely on the no-heap-index
+     `EmptyResult()` path `Analyze` already returns early for — an unconditional emission would
+     have fabricated an all-zero population observation misrepresenting "no data available" as
+     "zero roots measured," and broke `GCRootAnalyzerObservationTests`'
+     `AnalyzeAsync_WithoutHeapIndex_EmitsNoObservations` (updated alongside the `WithHeapIndex` case
+     to scope its assertions per observation type instead of assuming `heap.root` was the only one).
+   - Trusts `heap.root` emission order for the static-root finding's "top suspect" text
+     (`TopRootsBySeverity[0]`) — same already-sorted-before-emission structure `ArraySynthesisRule`
+     relies on, not `AsyncStateMachineSynthesisRule`'s inline-per-type case.
+
+   **`WeakReferenceFindingGenerator` — notable findings:**
+   - Step c's audit found `weakhandle.target` (alive targets) and `weakreference.stale-wrapper`
+     (stale wrappers) already back `AliveWeakTargets`/`StaleWrapperCount` by simple count — no gap
+     there. But `TotalWeakHandles`/`DeadWeakTargets` (dead handles never get an observation at all:
+     nothing to point a `Subject` at once the target is collected), `WeakReferenceObjectCount`/
+     `WeakReferenceObjectBytes` (every `WeakReference<T>` instance, not just the stale subset
+     `weakreference.stale-wrapper` observes), `DependentHandleDeadKeyCount`, and the "held only via
+     weak reference" signal (count + top type) had no observation backing.
+   - Step d's fix, two parts: a new whole-run `weakreference.population` observation for the
+     whole-process scalars (`total-handles.count`, `dead-targets.count`, `object.count`,
+     `object.bytes`, `dependent-dead-key.count`) plus `held-only-detection-available` (distinguishes
+     "computed, zero found" from "reachability unavailable, not computed" — same purpose as
+     `HeldOnlyViaWeakReferenceDetectionAvailable`); and a new `held-only-via-weak-reference` boolean
+     measure added directly to the existing `weakhandle.target` observation (not a separate
+     observation type) — since every held-only target is already a `weakhandle.target` with a real
+     `Subject`, grouping matched observations by type reconstructs the "most common type" narrative
+     without a second per-type observation stream.
+   - `StaleWrapperCountIsExact` is not observed at all: the retyped analyzer's own remarks say the
+     one degraded (extrapolated) case that could make it `false` "can no longer occur by
+     construction," and it unconditionally constructs `StaleWrapperCountIsExact: true` — so the
+     rule hard-codes the empty qualifier text as a structural guarantee, not a measured fact,
+     rather than inventing an always-1.0 measure with no real second state.
+   - Unlike every prior playbook entry, the summary/overview finding is not gated on anything — it
+     always fires, aggregating up to four independently-gated signals that are then re-sorted by
+     severity-then-fixed-priority (200/150/120/100) after the fact, mirroring
+     `AsyncTaskSynthesisRule`'s aggregate pattern but without a 2-finding cap.
+
+   **`SqlConnectionPoolFindingGenerator` — notable findings (first of the Infra plugin's analyzers,
+   picked up one at a time):**
+   - Step c's audit found `infra.sql-connection-pool` already backs every numeric field the single
+     finding reads — `current.size`/`max.size` reconstruct `UtilizationPercent` exactly, and pool
+     count / near-capacity count are both reconstructed by counting/filtering the matched
+     observations. No new observation type or measure was needed for any of that.
+   - The one real gap: the "worst pool" narrative's anonymised connection-string label has no home
+     among `Subjects`' typed `EntityRef` kinds (`TypeRef`/`MethodRef`/`ObjectRef`/... all identify a
+     CLR type, method, or heap address — none carry an arbitrary display string). Fixed by carrying
+     it as `EvidenceRef.Description` on the observation itself — an existing free-text evidence slot,
+     not a new field or observation type.
+   - Smallest playbook entry so far: no whole-run population observation, no per-type breakdown, no
+     re-ranking question — the old generator's own `worst = argmax(UtilizationPercent)` scan over
+     `r.Pools` translates directly into the same scan over matched observations.
 
    **`SqlCommandFindingGenerator` — notable findings (2nd of the Infra plugin's analyzers):**
    - Step c's audit found `infra.sql-command` emits only for active commands (one per instance) —
@@ -147,15 +343,11 @@ the one before it:
    - Single-finding generator, same shape as `SqlConnectionPoolFindingGenerator`: no aggregation,
      no re-ranking, no per-type breakdown needed.
 
-   | `SqlTransactionFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — TotalTransactions/DisposedCount/OtherCount unobserved, fixed | `SqlTransactionSynthesisRule` |
-
    **`SqlTransactionFindingGenerator` — notable findings (3rd of the Infra plugin's analyzers):**
    - Same shape and same fix as `SqlCommandFindingGenerator` one row up, with one extra whole-run
      count (`OtherCount`, transactions in some non-Active/non-Disposed state) alongside
      `TotalTransactions`/`DisposedCount` — all three added to a new `infra.sql-transaction-population`
      observation; `ActiveCount` again reconstructed by counting `infra.sql-transaction` observations.
-
-   | `DbConnectionFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — type breakdown + closed/broken/other/unknown counts + root-path label unobserved, fixed | `DbConnectionSynthesisRule` |
 
    **`DbConnectionFindingGenerator` — notable findings (4th of the Infra plugin's analyzers):**
    - Step c's audit found `infra.db-connection` covers the full Open-state population (not
@@ -176,8 +368,6 @@ the one before it:
    - The type-breakdown loop trusts matched-observation emission order rather than re-ranking —
      `DbConnectionAnalyzer.Analyze` already sorts `ByType` descending by `TotalCount` before
      `EmitObservationsAsync`'s loop runs over it, the same structure `ArraySynthesisRule` relies on.
-
-   | `HttpObjectFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 2 whole-run counts + generation split + connection-limit + module breakdown unobserved, fixed | `HttpObjectSynthesisRule` |
 
    **`HttpObjectFindingGenerator` — notable findings (5th of the Infra plugin's analyzers, largest
    Infra entry so far):**
@@ -204,8 +394,6 @@ the one before it:
      or re-ranking — same "up to N independent findings unconditionally" shape as
      `FinalizableObjectSynthesisRule`/`GCRootSynthesisRule`.
 
-   | `TimerLeakFindingGenerator` | Done, 2026-09-18 | Partial (see above) | No — no observation gap at all | `TimerLeakSynthesisRule` |
-
    **`TimerLeakFindingGenerator` — notable findings (6th of the Infra plugin's analyzers, first
    zero-gap entry in the whole playbook):**
    - Step c's audit found `infra.timer` (one per distinct timer-shaped type name) already backs
@@ -226,9 +414,31 @@ the one before it:
    - Confirms the playbook's step-c audit is genuinely finding real gaps rather than always
      finding *a* gap to fix: sometimes the answer is "already fully backed."
 
-   | `WcfChannelFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — per-type totals + binding hint + endpoints + whole-run counts unobserved, fixed | `WcfChannelSynthesisRule` |
-
-   | `DominatorFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — always-heuristic retained bytes + highly-referenced/capped whole-run counts + type-hotspot aggregate unobserved, fixed | `DominatorSynthesisRule` |
+   **`WcfChannelFindingGenerator` — notable findings (7th and last of the Infra plugin's
+   analyzers):**
+   - Step c's audit found `infra.wcf-channel` (faulted-only stream) backs `FaultedChannels` by
+     simple count, but the faulted-type breakdown iterates types in **TotalCount**-descending
+     order (not FaultedCount order) filtered to non-zero-faulted entries — an order the faulted-
+     only stream can't reproduce without knowing each type's *total* count, not just its faulted
+     count. The binding-specific fault guidance and remote-endpoint summary also had no
+     observation backing at all, and the channel-count finding's five non-Faulted state counts
+     plus Duplex/Session/ChannelFactory counts are never observed (only Faulted channels are).
+   - Step d's fix, four parts: a `binding-hint.ordinal` measure added to `infra.wcf-channel`
+     (always present — `ClassifyBindingHint` never returns null); a remote-endpoint
+     `EvidenceRef.Description` on the same observation; a new per-type
+     `infra.wcf-channel-type-population` observation (`total.count` only, emitted in the real
+     analyzer's own already-sorted-descending order) so the rule can trust iteration order for the
+     breakdown the same way `ArraySynthesisRule` trusts pre-sorted lists; and a new whole-run
+     `infra.wcf-channel-population` observation for every count the faulted-only stream can't
+     provide.
+   - **Second analyzer (after `GCRootAnalyzer`) where an existing early-return path needed a
+     matching fix**: `ChannelFactory<T>` count comes from whole-heap type statistics, independent
+     of the channel-instance scan, so `WcfPresent` can be true with zero channels — the
+     `typeStats.Count == 0` branch now still emits a factory-only `infra.wcf-channel-population`
+     when `factoryCount > 0`, otherwise the `ChannelFactory<T>` finding could never fire under the
+     new observation-based path in that real scenario.
+   - Closes out the Infra plugin: 7/7 analyzers (SqlConnectionPool, SqlCommand, SqlTransaction,
+     DbConnection, HttpObject, TimerLeak, WcfChannel) now have synthesis rules.
 
    **`DominatorFindingGenerator` — notable findings (first analyzer picked up after the Infra
    plugin's own 7/7):**
@@ -259,218 +469,6 @@ the one before it:
    - The old generator's highly-referenced-objects finding also computes an evidence-based
      `Finding.ConfidenceScore` override via `EvidenceConfidence.Compute` — left unreproduced, same
      choice `TimerLeakSynthesisRule`'s own entry made, since no rendered text reads it.
-
-   **`WcfChannelFindingGenerator` — notable findings (7th and last of the Infra plugin's
-   analyzers):**
-   - Step c's audit found `infra.wcf-channel` (faulted-only stream) backs `FaultedChannels` by
-     simple count, but the faulted-type breakdown iterates types in **TotalCount**-descending
-     order (not FaultedCount order) filtered to non-zero-faulted entries — an order the faulted-
-     only stream can't reproduce without knowing each type's *total* count, not just its faulted
-     count. The binding-specific fault guidance and remote-endpoint summary also had no
-     observation backing at all, and the channel-count finding's five non-Faulted state counts
-     plus Duplex/Session/ChannelFactory counts are never observed (only Faulted channels are).
-   - Step d's fix, four parts: a `binding-hint.ordinal` measure added to `infra.wcf-channel`
-     (always present — `ClassifyBindingHint` never returns null); a remote-endpoint
-     `EvidenceRef.Description` on the same observation; a new per-type
-     `infra.wcf-channel-type-population` observation (`total.count` only, emitted in the real
-     analyzer's own already-sorted-descending order) so the rule can trust iteration order for the
-     breakdown the same way `ArraySynthesisRule` trusts pre-sorted lists; and a new whole-run
-     `infra.wcf-channel-population` observation for every count the faulted-only stream can't
-     provide.
-   - **Second analyzer (after `GCRootAnalyzer`) where an existing early-return path needed a
-     matching fix**: `ChannelFactory<T>` count comes from whole-heap type statistics, independent
-     of the channel-instance scan, so `WcfPresent` can be true with zero channels — the
-     `typeStats.Count == 0` branch now still emits a factory-only `infra.wcf-channel-population`
-     when `factoryCount > 0`, otherwise the `ChannelFactory<T>` finding could never fire under the
-     new observation-based path in that real scenario.
-   - Closes out the Infra plugin: 7/7 analyzers (SqlConnectionPool, SqlCommand, SqlTransaction,
-     DbConnection, HttpObject, TimerLeak, WcfChannel) now have synthesis rules.
-
-   **`SqlConnectionPoolFindingGenerator` — notable findings (first of the Infra plugin's analyzers,
-   picked up one at a time):**
-   - Step c's audit found `infra.sql-connection-pool` already backs every numeric field the single
-     finding reads — `current.size`/`max.size` reconstruct `UtilizationPercent` exactly, and pool
-     count / near-capacity count are both reconstructed by counting/filtering the matched
-     observations. No new observation type or measure was needed for any of that.
-   - The one real gap: the "worst pool" narrative's anonymised connection-string label has no home
-     among `Subjects`' typed `EntityRef` kinds (`TypeRef`/`MethodRef`/`ObjectRef`/... all identify a
-     CLR type, method, or heap address — none carry an arbitrary display string). Fixed by carrying
-     it as `EvidenceRef.Description` on the observation itself — an existing free-text evidence slot,
-     not a new field or observation type.
-   - Smallest playbook entry so far: no whole-run population observation, no per-type breakdown, no
-     re-ranking question — the old generator's own `worst = argmax(UtilizationPercent)` scan over
-     `r.Pools` translates directly into the same scan over matched observations.
-
-   **`WeakReferenceFindingGenerator` — notable findings:**
-   - Step c's audit found `weakhandle.target` (alive targets) and `weakreference.stale-wrapper`
-     (stale wrappers) already back `AliveWeakTargets`/`StaleWrapperCount` by simple count — no gap
-     there. But `TotalWeakHandles`/`DeadWeakTargets` (dead handles never get an observation at all:
-     nothing to point a `Subject` at once the target is collected), `WeakReferenceObjectCount`/
-     `WeakReferenceObjectBytes` (every `WeakReference<T>` instance, not just the stale subset
-     `weakreference.stale-wrapper` observes), `DependentHandleDeadKeyCount`, and the "held only via
-     weak reference" signal (count + top type) had no observation backing.
-   - Step d's fix, two parts: a new whole-run `weakreference.population` observation for the
-     whole-process scalars (`total-handles.count`, `dead-targets.count`, `object.count`,
-     `object.bytes`, `dependent-dead-key.count`) plus `held-only-detection-available` (distinguishes
-     "computed, zero found" from "reachability unavailable, not computed" — same purpose as
-     `HeldOnlyViaWeakReferenceDetectionAvailable`); and a new `held-only-via-weak-reference` boolean
-     measure added directly to the existing `weakhandle.target` observation (not a separate
-     observation type) — since every held-only target is already a `weakhandle.target` with a real
-     `Subject`, grouping matched observations by type reconstructs the "most common type" narrative
-     without a second per-type observation stream.
-   - `StaleWrapperCountIsExact` is not observed at all: the retyped analyzer's own remarks say the
-     one degraded (extrapolated) case that could make it `false` "can no longer occur by
-     construction," and it unconditionally constructs `StaleWrapperCountIsExact: true` — so the
-     rule hard-codes the empty qualifier text as a structural guarantee, not a measured fact,
-     rather than inventing an always-1.0 measure with no real second state.
-   - Unlike every prior playbook entry, the summary/overview finding is not gated on anything — it
-     always fires, aggregating up to four independently-gated signals that are then re-sorted by
-     severity-then-fixed-priority (200/150/120/100) after the fact, mirroring
-     `AsyncTaskSynthesisRule`'s aggregate pattern but without a 2-finding cap.
-
-   **`GCRootFindingGenerator` — notable findings:**
-   - Step c's audit found `heap.root` (Phase 5 step 1) deliberately left out `RootFinding.RootKind`
-     as a measure — its own remarks flagged this as a gap to revisit "if a synthesis rule actually
-     needs to group by it," and this is exactly that: 3 of 4 signals (static-root retention,
-     finalizer-queue pressure, pinned-handle accumulation) group `GCRootDomainResult.ByKind` by
-     `Kind` (`StrongHandle`/`FinalizerQueue`/`PinnedHandle`/`AsyncPinnedHandle`), which `heap.root`
-     alone cannot reconstruct.
-   - Step d's fix, two parts: a new `root.kind-summary` observation (one per `ByKind` row, bounded
-     to `HeapRootKind`'s fixed small taxonomy) carrying a `kind.ordinal` measure — the same
-     pattern `heap.loh-fragmentation`/`heap.segment-kind-composition` already established, and the
-     same "no live enum instance, parse the string back" situation `heap.root`'s own remarks
-     anticipated; and a new whole-run `root.population` observation for `TotalRoots` (includes
-     roots dropped before `ByKind`/`heap.root` ever see them — null target, unresolvable metadata,
-     zero-size object — so it can't be reconstructed by summing `root.kind-summary`) and the
-     subgraph-walk-cap signal.
-   - `root.population` is guarded on `TotalRoots > 0`, skipped entirely on the no-heap-index
-     `EmptyResult()` path `Analyze` already returns early for — an unconditional emission would
-     have fabricated an all-zero population observation misrepresenting "no data available" as
-     "zero roots measured," and broke `GCRootAnalyzerObservationTests`'
-     `AnalyzeAsync_WithoutHeapIndex_EmitsNoObservations` (updated alongside the `WithHeapIndex` case
-     to scope its assertions per observation type instead of assuming `heap.root` was the only one).
-   - Trusts `heap.root` emission order for the static-root finding's "top suspect" text
-     (`TopRootsBySeverity[0]`) — same already-sorted-before-emission structure `ArraySynthesisRule`
-     relies on, not `AsyncStateMachineSynthesisRule`'s inline-per-type case.
-
-   **`GCHandleFindingGenerator` — notable findings:**
-   - Step c's audit found `handle.pinned` (Phase 5 step 1) only backs the debugger-follow-up
-     address list — capped to `GCHandleAnalysisOptions.TopPinnedHandleAddressesToShow`, not the
-     whole handle population. 5 of 6 signals read whole-population aggregates (`TotalHandles`,
-     `PinnedRetainedBytes`, SOH/non-SOH pinned counts, `RefCountedHandleCount`,
-     WeakShort/WeakLong generation breakdowns, dependent-handle counts) with no observation
-     backing at all.
-   - Step d's fix, two parts: a new whole-run `handle.population` observation (no entity subject,
-     same pattern as `gc.generation-composition`) carrying every aggregate the six signals need;
-     and a new per-type `handle.refcounted-target` observation (one per distinct RefCounted target
-     type, canonicalized from its display name the same way `type.finalizable-population` and
-     `type.boxing` are, since no per-handle address survives into `TopRefCountedTargetTypes` to
-     re-resolve a real `TypeRef` from) — backs the COM-interop signal's "dominant type" text.
-   - **Genuinely new wrinkle in this playbook entry**: `GCHandleFindingGenerator`'s thresholds
-     aren't private consts baked into the generator the way every prior analyzer's are — they're
-     read from `GCHandleDomainResult`'s own fields, sourced from `GCHandleAnalysisOptions`
-     (runtime-configurable via `AnalysisContext.AnalyzerOptions`). Hard-coding the option defaults
-     into `GCHandleSynthesisRule` as private consts, matching every other rule so far, would have
-     silently dropped that configurability — a real behavior regression, not just a mechanical
-     migration. `handle.population` carries all eight thresholds as measures instead, and the rule
-     reads them from the observation rather than hard-coding defaults.
-   - Emission itself needed no changes to `Analyze()` — unlike `AsyncTaskAnalyzer`/
-     `FinalizableObjectAnalyzer`, `GCHandleDomainResult` already carries every aggregate the new
-     observations need, so both were emitted from the existing `EmitObservationsAsync` step using
-     `result.*` directly, no weaving into the population loop required.
-
-   **`FinalizableObjectFindingGenerator` — notable findings:**
-   - Step c's audit found the analyzer emitted only `finalizer.queue-entry` (one per valid queue
-     entry, Phase 5 step 1). That backs 6 of the 9 signals (backlog count via a new whole-run
-     observation below, retained bytes, undisposed-in-queue, and the four known-queue-pattern
-     findings via per-entry Subject grouping) but not the Gen2 accumulation signal, which reads
-     the whole finalizable-*type* population (`TotalFinalizableObjects`/`TotalFinalizableBytes`/
-     `Gen2Count`/top type by Gen2 count) — a different population than the queue.
-   - Step d's fix, two parts:
-     - New per-type `type.finalizable-population` observation (one per finalizable type from
-       `heap.types`, not capped) — backs the Gen2 branch the same way `type.array-composition`
-       backs Array's LOH-pressure branch.
-     - `finalizer.queue-entry` gained `shallow.bytes` and `is-critical-finalizer` measures — the
-       old generator's CriticalFinalizerObject branch read `entry.ShallowSize`/
-       `entry.IsCriticalFinalizerType`, neither of which existed as a measure yet.
-     - New whole-run `finalizer.queue-population` observation (`queue.count`) — the queue backlog
-       signal's `FinalizerQueueCount` counts every queue entry including invalid
-       (`"<unknown>"`-typed) ones that `finalizer.queue-entry` structurally cannot observe
-       individually (no resolvable `Type` for a `Subject`).
-   - Unlike `AsyncTaskSynthesisRule`, no aggregate/top-signal cap: the old generator emits up to
-     nine independent findings unconditionally, so the rule does the same — no re-ranking or
-     severity-comparison logic needed at all, only per-observation-type grouping and summation.
-   - The old generator's own unit tests (`FinalizableObjectFindingGeneratorTests`) set
-     `CriticalFinalizerQueueCount`/`TopQueueTypesByCount`/etc. as independent fields with no
-     backing `TopQueueEntriesByRetainedSize` population — same "possible only because the old
-     generator reads fields independently" situation the `AsyncStateMachineSynthesisRule` parity
-     tests hit. The parity tests here rebuild every aggregate field from a single list of queue
-     entries instead of reusing that fixture shape.
-
-   **`AsyncTaskFindingGenerator` — notable findings:**
-   - Step c's audit found the analyzer emitted only `type.orphaned-task` (one per orphaned task,
-     Phase 5 step 1) — the largest gap found so far in this playbook. Seven of the old generator's
-     eight signals (cycle deadlock, Gen2/LOH pending tasks, unresolved TCS in Gen2/LOH, pending VTS
-     in Gen2/LOH, faulted tasks, continuation-chain depth, high pending count) read
-     `AsyncTaskDomainResult` fields with no observation backing at all.
-   - Step d's fix: one new whole-run `async.task-population` observation (no entity subject — same
-     "whole-process scalar" pattern as `gc.generation-composition`), carrying all thirteen measures
-     those seven signals need. `type.orphaned-task` stays as-is; the rule reconstructs `OrphanedTasks`
-     by counting matched instances rather than summing a measure.
-   - Unlike `AsyncStateMachineSynthesisRule`, no re-ranking question arises: every signal but
-     `orphaned` reads a single observation instance's scalar measures directly, and `orphaned` is a
-     plain count, not a ranked list.
-   - The domain result's own remarks note TCS/VTS analysis runs independent of the task scan (a heap
-     can have TCS/VTS instances with zero `Task` objects), so `async.task-population` is emitted on
-     both the normal path and the `total == 0` early-return (`EmptyWith`) path — omitting it there
-     would have silently dropped the `tcs-unresolved-oldgen`/`vts-pending-oldgen` signals for that
-     case.
-
-   **`AsyncStateMachineFindingGenerator` — notable findings:**
-   - Step c's audit found `type.async-state-machine`'s only `Subject` was the state-machine's own
-     `TypeRef` — `DeclaringType`/`OriginatingMethod` existed only inside a private regex parser,
-     never surfaced. That knocked out 3 of 4 branches (high-count's "top method", the entire
-     fire-and-forget branch, async-void's "top method"), since all three need method identity.
-   - Step d's fix: a second `Subject` on the observation — a `Low`-fidelity `MethodRef` (no real
-     parameter signature is derivable from a type name alone, so the signature is left empty
-     rather than guessed) — instead of duplicating the private parser into the rule.
-   - Unlike `ArraySynthesisRule`, this rule **must** re-rank rather than trust emission order:
-     checked (not assumed) that `AsyncStateMachineAnalyzer` emits inline per type, before its own
-     post-loop sorts run — the opposite of `ArrayAnalyzer`'s structure, where emission happens in a
-     separate pass over already-sorted lists. Different analyzers, different order guarantees;
-     each has to be checked on its own.
-   - The parity test surfaced that several of the old generator's own unit-test fixtures set
-     `TotalStateMachines` and `SuspendedMethodMap` to independent, mutually inconsistent values
-     (e.g. 12,000 suspended instances of one method with the total left at 0) — achievable only
-     because the old generator reads them as separate fields. Real production can't produce that
-     combination (both are exhaustive sums over the same type population), so the parity fixtures
-     were rebuilt consistent with that coupling rather than reproducing the impossible combination.
-
-   **`ArrayFindingGenerator` — notable findings:**
-   - Step c's audit found `ArrayAnalyzer` only backed 2 of 4 finding branches with observations
-     (LOH pressure, multi-dim, pinned-array accumulation had none) — despite its own doc comment
-     already flagging the gap.
-   - Step d's fix: extended `type.array-composition` with exhaustive per-type `loh.*`/`pinned.*`
-     measures (summed in the rule, not a new whole-run scalar), plus two new bounded per-entry
-     types (`heap.large-array`/`heap.pinned-array`).
-   - Writing the rule surfaced two things this playbook hadn't anticipated: `Finding` itself was
-     missing `Analyzer`/`Category`/`Tags`/`MetricValue`/`MetricUnit` — fields the report pipeline
-     (`ActionPriorityService`, `CorrelationBuilder`, several section builders) actually reads —
-     and the old generator trusted `ArrayDomainResult`'s pre-sorted lists rather than sorting
-     itself, so the rule's initial explicit re-sort was a real (if invisible-on-real-data)
-     behavior change, caught by the parity test itself.
-
-   **`LohFragmentationFindingGenerator` — notable findings:**
-   - Chosen deliberately as a contrast to Array: smallest generator in the set (one finding, two
-     fields), to check the playbook isn't only exercised by gap-heavy cases.
-   - `heap.loh-fragmentation` is emitted per segment-kind row (Large/Pinned, ≤2), each carrying
-     that kind's own `fragmentation.percent` — reconstructing the old generator's combined-total
-     percent means summing `total.bytes`/`free.bytes` across matched rows and recomputing, never
-     averaging the per-kind percentages (two kinds at 50%/10% with unequal segment counts do not
-     average to 30%). A fixture exercises exactly that combination.
-   - Confirmed the enricher wiring generalizes for free: adding the rule to
-     `DefaultSynthesisRuleCatalog` was the only change needed to reach the real report — no
-     `RunAnalyzersNode`/`ServiceRegistration.cs` edits this time.
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until `## Work`
    step 6 below (see the Stage-1 purity bullet above — distinct from playbook step f just above),
    so its `IFindingGenerator` cannot be retired alongside the rest in this playbook — state this

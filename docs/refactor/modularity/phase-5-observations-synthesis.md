@@ -204,6 +204,28 @@ the one before it:
      or re-ranking — same "up to N independent findings unconditionally" shape as
      `FinalizableObjectSynthesisRule`/`GCRootSynthesisRule`.
 
+   | `TimerLeakFindingGenerator` | Done, 2026-09-18 | Partial (see above) | No — no observation gap at all | `TimerLeakSynthesisRule` |
+
+   **`TimerLeakFindingGenerator` — notable findings (6th of the Infra plugin's analyzers, first
+   zero-gap entry in the whole playbook):**
+   - Step c's audit found `infra.timer` (one per distinct timer-shaped type name) already backs
+     every count both findings read — no analyzer change, no new observation type, no new measure.
+     Each of the six timer categories is an exact-type-name classification
+     (`TimerLeakAnalyzer.ClassifyType`), and every `infra.timer` observation's `Subjects[0]`
+     already carries that same type name, so re-deriving the category from the canonical name in
+     the rule reconstructs every count exactly — including the oddly-named `LogicalTimerCount`,
+     which the real analyzer sets equal to `TimerQueueTimerCount` (not a sum of the "real"
+     disposable timer categories, despite the name) — preserved as-is, not "fixed", per the
+     playbook's mandate to reproduce behavior exactly.
+   - The old generator's first finding also computes an evidence-based `Finding.Confidence`
+     override via `EvidenceConfidence.Compute` (root-path presence/truncation, signal count) — not
+     read by any Title/Narrative/Recommendation/Tags/MetricValue/MetricUnit text, and, like every
+     prior rule in this playbook, left as `ConfidenceBreakdown.MeasurementCertain` rather than
+     reconstructed. No observation needed to exist solely to feed a value this pass doesn't
+     reproduce for any other rule either.
+   - Confirms the playbook's step-c audit is genuinely finding real gaps rather than always
+     finding *a* gap to fix: sometimes the answer is "already fully backed."
+
    **`SqlConnectionPoolFindingGenerator` — notable findings (first of the Infra plugin's analyzers,
    picked up one at a time):**
    - Step c's audit found `infra.sql-connection-pool` already backs every numeric field the single

@@ -11,6 +11,7 @@ using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Temporal;
 
@@ -250,11 +251,27 @@ public sealed class AsyncStateMachineAnalyzer :
 
             if (sampleAddress != 0 && objectLookup.TryGetObject(sampleAddress, out HeapObjectRef stateMachineSubject))
             {
+                // Second subject alongside the state-machine's own TypeRef: DeclaringType/
+                // OriginatingMethod only exist via this analyzer's own name-parsing today (see
+                // ParseMethodName below), so without this a synthesis rule would either have to
+                // duplicate that parser or lose method-level grouping entirely (SuspendedMethodMap,
+                // the fire-and-forget/async-void findings). No real parameter signature is
+                // available from a type name alone -- Low fidelity, matching the same "compiler-
+                // generated name, ordinal not stable across builds" case source-model.md already
+                // assigns Low to.
+                MethodRef methodSubject = new()
+                {
+                    DeclaringType = new TypeRef { CanonicalName = declaringType, Fidelity = MatchFidelity.Low },
+                    Name = methodName,
+                    NormalizedSignature = string.Empty,
+                    Fidelity = MatchFidelity.Low,
+                };
+
                 await observationContext.Observations.EmitAsync(new Observation
                 {
                     Id = ObservationId.NewId(),
                     ObservationType = "type.async-state-machine",
-                    Subjects = [stateMachineSubject.Type],
+                    Subjects = [stateMachineSubject.Type, methodSubject],
                     When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
                     Measures = new Dictionary<string, Measure>
                     {

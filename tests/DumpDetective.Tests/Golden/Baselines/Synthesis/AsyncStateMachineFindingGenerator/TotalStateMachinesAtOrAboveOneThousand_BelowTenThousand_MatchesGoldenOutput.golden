@@ -1,0 +1,26 @@
+[
+  {
+    "analyzer": "Async State Machine Analysis",
+    "category": "Memory",
+    "severity": 1,
+    "title": "High async state machine count: 2,000 suspended state machines",
+    "evidence": "2,000 async state machine objects found on heap consuming 1000 B. Top method: N/A.",
+    "recommendation": "Each suspended async method holds an allocation on the heap for the duration of the await. A high count indicates many in-flight async operations. Review for fire-and-forget patterns, unbounded parallelism, or awaited operations that never complete.",
+    "tags": [
+      "async",
+      "state-machine",
+      "memory",
+      "suspend"
+    ],
+    "fingerprint": null,
+    "metricValue": 2000,
+    "metricUnit": "objects",
+    "caveats": null,
+    "evidenceTables": null,
+    "confidenceScore": 0.7,
+    "effectiveCaveats": [],
+    "effectiveEvidenceTables": [],
+    "effectiveConfidenceScore": 0.7,
+    "effectiveFingerprint": "async state machine analysis::memory::high async state machine count 2000 suspended state machines::async|memory|state-machine|suspend"
+  }
+]

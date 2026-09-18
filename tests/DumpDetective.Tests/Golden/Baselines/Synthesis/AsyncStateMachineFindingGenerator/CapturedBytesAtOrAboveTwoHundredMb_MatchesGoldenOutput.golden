@@ -1,0 +1,26 @@
+[
+  {
+    "analyzer": "Async State Machine Analysis",
+    "category": "Memory",
+    "severity": 2,
+    "title": "Async state machines capturing large closures: 238.42 MB total",
+    "evidence": "Top state machine instances retain an estimated 238.42 MB via captured reference fields. Largest: MyApp.Handler\u003C\u003Ed__1 (238.42 MB).",
+    "recommendation": "State machines capture all variables referenced across await boundaries. Avoid capturing large objects (DbContext, HttpClient, large arrays) in async methods. Consider null-ing captured references after use or restructuring the method to reduce capture scope.",
+    "tags": [
+      "async",
+      "closure",
+      "capture",
+      "memory"
+    ],
+    "fingerprint": null,
+    "metricValue": 250000000,
+    "metricUnit": "bytes",
+    "caveats": null,
+    "evidenceTables": null,
+    "confidenceScore": 0.9,
+    "effectiveCaveats": [],
+    "effectiveEvidenceTables": [],
+    "effectiveConfidenceScore": 0.9,
+    "effectiveFingerprint": "async state machine analysis::memory::async state machines capturing large closures 23842 mb total::async|capture|closure|memory"
+  }
+]

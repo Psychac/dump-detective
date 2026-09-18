@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/observation-type-registry.json",
-  "registryVersion": "1.43.0",
+  "registryVersion": "1.44.0",
   "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
   "observationTypes": {
     "gc.pause": {
@@ -597,7 +597,7 @@
       "producedBy": "AsyncStateMachineAnalyzer",
       "sourceFile": "src/DumpDetective.Plugins.Async/Analyzers/AsyncStateMachineAnalyzer.cs",
       "requiresCapabilities": ["heap.types", "dump.object-fields", "heap.objects"],
-      "subjectKind": "type",
+      "subjectKind": "type+method",
       "temporalKind": "point",
       "measures": {
         "instance.count": { "unit": "count", "semantics": "absolute" },
@@ -607,7 +607,7 @@
         "gen2.fraction": { "unit": "ratio", "semantics": "ratio" },
         "is-async-void": { "unit": "count", "semantics": "absolute" }
       },
-      "note": "One per distinct async-state-machine type — already narrowly scoped by IsCandidateType's regex, not the whole-heap type population.",
+      "note": "One per distinct async-state-machine type — already narrowly scoped by IsCandidateType's regex, not the whole-heap type population. Subjects[1] added in 1.44.0 (Phase 5 step 2 audit finding): a Low-fidelity MethodRef (no real parameter signature available from a type name alone) carrying DeclaringType/OriginatingMethod, so a synthesis rule can group by method the same way SuspendedMethodMap already does, without duplicating the analyzer's own name-parsing regex.",
       "addedIn": "1.36.0"
     },
     "type.async-captured-closure": {

@@ -126,6 +126,27 @@ the one before it:
    |---|---|---|---|---|
    | `ArrayFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 2 of 4 branches unobserved, fixed | `ArraySynthesisRule` |
    | `LohFragmentationFindingGenerator` | Done, 2026-09-18 | Partial (see above) | No — clean | `LohFragmentationSynthesisRule` |
+   | `AsyncStateMachineFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — `type.async-state-machine` had no method identity, fixed | `AsyncStateMachineSynthesisRule` |
+
+   **`AsyncStateMachineFindingGenerator` — notable findings:**
+   - Step c's audit found `type.async-state-machine`'s only `Subject` was the state-machine's own
+     `TypeRef` — `DeclaringType`/`OriginatingMethod` existed only inside a private regex parser,
+     never surfaced. That knocked out 3 of 4 branches (high-count's "top method", the entire
+     fire-and-forget branch, async-void's "top method"), since all three need method identity.
+   - Step d's fix: a second `Subject` on the observation — a `Low`-fidelity `MethodRef` (no real
+     parameter signature is derivable from a type name alone, so the signature is left empty
+     rather than guessed) — instead of duplicating the private parser into the rule.
+   - Unlike `ArraySynthesisRule`, this rule **must** re-rank rather than trust emission order:
+     checked (not assumed) that `AsyncStateMachineAnalyzer` emits inline per type, before its own
+     post-loop sorts run — the opposite of `ArrayAnalyzer`'s structure, where emission happens in a
+     separate pass over already-sorted lists. Different analyzers, different order guarantees;
+     each has to be checked on its own.
+   - The parity test surfaced that several of the old generator's own unit-test fixtures set
+     `TotalStateMachines` and `SuspendedMethodMap` to independent, mutually inconsistent values
+     (e.g. 12,000 suspended instances of one method with the total left at 0) — achievable only
+     because the old generator reads them as separate fields. Real production can't produce that
+     combination (both are exhaustive sums over the same type population), so the parity fixtures
+     were rebuilt consistent with that coupling rather than reproducing the impossible combination.
 
    **`ArrayFindingGenerator` — notable findings:**
    - Step c's audit found `ArrayAnalyzer` only backed 2 of 4 finding branches with observations

@@ -131,6 +131,12 @@ public sealed class SqlConnectionPoolAnalyzer :
             if (snap.MinPoolSize >= 0)
                 measures["min.size"] = new Measure(snap.MinPoolSize, MeasureUnit.Count, MeasureSemantics.Absolute);
 
+            // The anonymised connection string has no home among Subjects' typed EntityRef kinds
+            // (it identifies a specific pool instance's target server/database, not a CLR type,
+            // method, or thread) — carried as evidence description instead, the same free-text
+            // slot EvidenceRef already exists for, rather than inventing a new EntityRef subtype
+            // for a single per-analyzer label. Phase 5 step 2: backs the old finding generator's
+            // "worst pool" narrative, which needs this label alongside the numeric measures above.
             await observationContext.Observations.EmitAsync(new Observation
             {
                 Id = ObservationId.NewId(),
@@ -146,6 +152,12 @@ public sealed class SqlConnectionPoolAnalyzer :
                     Fidelity = FidelityLevel.Full,
                 },
                 Confidence = 1.0,
+                Evidence = [new EvidenceRef
+                {
+                    Artifact = observationContext.ArtifactId!.Value,
+                    Locator = snap.Address.ToString("X", System.Globalization.CultureInfo.InvariantCulture),
+                    Description = snap.AnonymisedConnectionString,
+                }],
             }, cancellationToken);
         }
 

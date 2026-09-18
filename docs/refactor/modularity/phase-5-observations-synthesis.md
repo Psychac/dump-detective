@@ -132,6 +132,22 @@ the one before it:
    | `GCHandleFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 5 of 6 signals unobserved, fixed | `GCHandleSynthesisRule` |
    | `GCRootFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 3 of 4 signals unobserved, fixed | `GCRootSynthesisRule` |
    | `WeakReferenceFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — most of overview + 2 of 4 signals unobserved, fixed | `WeakReferenceSynthesisRule` |
+   | `SqlConnectionPoolFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — connection-string label had no home, fixed | `SqlConnectionPoolSynthesisRule` |
+
+   **`SqlConnectionPoolFindingGenerator` — notable findings (first of the Infra plugin's analyzers,
+   picked up one at a time):**
+   - Step c's audit found `infra.sql-connection-pool` already backs every numeric field the single
+     finding reads — `current.size`/`max.size` reconstruct `UtilizationPercent` exactly, and pool
+     count / near-capacity count are both reconstructed by counting/filtering the matched
+     observations. No new observation type or measure was needed for any of that.
+   - The one real gap: the "worst pool" narrative's anonymised connection-string label has no home
+     among `Subjects`' typed `EntityRef` kinds (`TypeRef`/`MethodRef`/`ObjectRef`/... all identify a
+     CLR type, method, or heap address — none carry an arbitrary display string). Fixed by carrying
+     it as `EvidenceRef.Description` on the observation itself — an existing free-text evidence slot,
+     not a new field or observation type.
+   - Smallest playbook entry so far: no whole-run population observation, no per-type breakdown, no
+     re-ranking question — the old generator's own `worst = argmax(UtilizationPercent)` scan over
+     `r.Pools` translates directly into the same scan over matched observations.
 
    **`WeakReferenceFindingGenerator` — notable findings:**
    - Step c's audit found `weakhandle.target` (alive targets) and `weakreference.stale-wrapper`

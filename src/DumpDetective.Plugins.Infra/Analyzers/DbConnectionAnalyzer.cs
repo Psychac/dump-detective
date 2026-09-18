@@ -166,6 +166,15 @@ public sealed class DbConnectionAnalyzer :
             if (snap.RetainedBytes is ulong retained)
                 measures["retained.bytes"] = new Measure(retained, MeasureUnit.Bytes, MeasureSemantics.Absolute);
 
+            // Root path (R12) has no home among Subjects' typed EntityRef kinds — same "free-text
+            // evidence description, not a new EntityRef subtype" choice
+            // SqlConnectionPoolAnalyzer's Phase 5 step 2 pass made for its anonymised connection
+            // string. Only present for the bounded root-path-enrichment subset (Gen2, capped at
+            // MaxRootPathEnrichment) that actually found a path.
+            IReadOnlyList<EvidenceRef> evidence = snap.RootPath is not null
+                ? [new EvidenceRef { Artifact = context.ArtifactId!.Value, Locator = snap.Address.ToString("X", System.Globalization.CultureInfo.InvariantCulture), Description = snap.RootPath }]
+                : [];
+
             await context.Observations.EmitAsync(new Observation
             {
                 Id = ObservationId.NewId(),
@@ -181,8 +190,71 @@ public sealed class DbConnectionAnalyzer :
                     Fidelity = snap.RetainedBytes is not null ? FidelityLevel.Full : FidelityLevel.Degraded,
                 },
                 Confidence = snap.RetainedBytes is not null ? 1.0 : 0.7,
+                Evidence = evidence,
             }, cancellationToken);
         }
+
+        // Per-type population — bounded to distinct connection type count, not per-instance.
+        // Backs the old finding generator's type-breakdown narrative (top-3 types by TotalCount),
+        // which needs every state (Open/Closed/Broken/Other/Unknown), not just the Open subset
+        // infra.db-connection observes.
+        var typeCapabilities = new HashSet<Capability> { CapabilityVocabulary.DumpObjectFields, CapabilityVocabulary.HeapObjects };
+        foreach (DbConnectionTypeSummary type in result.ByType)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(type.TypeName);
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "infra.db-connection-type-population",
+                Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["instance.count"] = new Measure(type.TotalCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "DB Connection Analysis",
+                    CapabilitiesUsed = typeCapabilities,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
+
+        // Whole-run scalar — no entity subject, same "no natural per-entity anchor" pattern as
+        // gc.generation-composition. Closed/Broken/Other/Unknown-state connections never get an
+        // infra.db-connection observation at all (only Open ones do) — TotalConnections and those
+        // four state counts can't be reconstructed from the per-open-connection stream.
+        // OpenConnections/Gen2OpenConnections/Gen0OpenConnections are reconstructable by
+        // counting/filtering infra.db-connection observations, so they aren't duplicated here.
+        await context.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "infra.db-connection-population",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["total.count"] = new Measure(result.TotalConnections, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["closed.count"] = new Measure(result.ClosedConnections, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["broken.count"] = new Measure(result.BrokenConnections, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["other.count"] = new Measure(result.OtherConnections, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["unknown-state.count"] = new Measure(result.UnknownStateConnections, MeasureUnit.Count, MeasureSemantics.Absolute),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = context.ArtifactId!.Value,
+                AnalyzerKey = "DB Connection Analysis",
+                CapabilitiesUsed = capabilitiesUsed,
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
     }
 
     private static DbConnectionDomainResult Analyze(

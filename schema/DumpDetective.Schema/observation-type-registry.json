@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/observation-type-registry.json",
-  "registryVersion": "1.51.0",
+  "registryVersion": "1.52.0",
   "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
   "observationTypes": {
     "gc.pause": {
@@ -488,8 +488,36 @@
         "generation.ordinal": { "unit": "custom", "semantics": "absolute" },
         "retained.bytes": { "unit": "bytes", "semantics": "absolute" }
       },
-      "note": "One per open connection in TopOpenConnections. retained.bytes omitted when no dominator tree was available.",
+      "note": "One per open connection in TopOpenConnections (the full open-connection population, not capped — only its root-path enrichment is bounded). retained.bytes omitted when no dominator tree was available. An evidence entry with the formatted GC root-path as its Description is present only for the bounded root-path-enrichment subset that found a path.",
       "addedIn": "1.20.0"
+    },
+    "infra.db-connection-type-population": {
+      "producedBy": "DbConnectionAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Infra/Analyzers/DbConnectionAnalyzer.cs",
+      "requiresCapabilities": ["dump.object-fields", "heap.objects"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "instance.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per distinct connection type — bounded by distinct type count, not per-instance. Backs the old finding generator's type-breakdown narrative (top-3 types by TotalCount across every state), which infra.db-connection (Open subset only) cannot.",
+      "addedIn": "1.51.0"
+    },
+    "infra.db-connection-population": {
+      "producedBy": "DbConnectionAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Infra/Analyzers/DbConnectionAnalyzer.cs",
+      "requiresCapabilities": ["dump.object-fields", "heap.objects", "heap.segments"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "total.count": { "unit": "count", "semantics": "absolute" },
+        "closed.count": { "unit": "count", "semantics": "absolute" },
+        "broken.count": { "unit": "count", "semantics": "absolute" },
+        "other.count": { "unit": "count", "semantics": "absolute" },
+        "unknown-state.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One whole-run observation per analysis — no entity subject, same pattern as gc.generation-composition. Closed/Broken/Other/Unknown-state connections never get an infra.db-connection observation at all (only Open ones do) — OpenConnections/Gen2OpenConnections/Gen0OpenConnections are reconstructable by counting/filtering that stream instead, so they aren't duplicated here.",
+      "addedIn": "1.51.0"
     },
     "infra.http-object": {
       "producedBy": "HttpObjectAnalyzer",

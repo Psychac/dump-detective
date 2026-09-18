@@ -72,6 +72,8 @@ public sealed class SdkRegistryConformanceTests
             ["infra.sql-transaction"] = ["shallow.bytes"],
             ["infra.sql-transaction-population"] = ["total.count", "disposed.count", "other.count"],
             ["infra.db-connection"] = ["generation.ordinal", "retained.bytes"],
+            ["infra.db-connection-type-population"] = ["instance.count"],
+            ["infra.db-connection-population"] = ["total.count", "closed.count", "broken.count", "other.count", "unknown-state.count"],
             ["infra.http-object"] = ["shallow.bytes"],
             ["infra.timer"] = ["instance.count", "shallow.bytes"],
             ["infra.wcf-channel"] = ["retained.bytes"],

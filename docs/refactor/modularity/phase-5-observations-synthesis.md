@@ -155,6 +155,28 @@ the one before it:
      `TotalTransactions`/`DisposedCount` — all three added to a new `infra.sql-transaction-population`
      observation; `ActiveCount` again reconstructed by counting `infra.sql-transaction` observations.
 
+   | `DbConnectionFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — type breakdown + closed/broken/other/unknown counts + root-path label unobserved, fixed | `DbConnectionSynthesisRule` |
+
+   **`DbConnectionFindingGenerator` — notable findings (4th of the Infra plugin's analyzers):**
+   - Step c's audit found `infra.db-connection` covers the full Open-state population (not
+     capped — only its root-path enrichment is bounded), so `OpenConnections`/`Gen2OpenConnections`
+     are exactly reconstructable by counting/filtering. But `TotalConnections` and the
+     Closed/Broken/Other/Unknown-state counts never get an observation at all (only Open
+     connections do), and the type-breakdown narrative needs per-type totals across *every* state,
+     which the Open-only stream can't provide.
+   - Step d's fix, three parts: a new whole-run `infra.db-connection-population` observation for
+     the four non-Open state counts and the grand total; a new per-type
+     `infra.db-connection-type-population` observation (bounded to distinct connection types) for
+     the type breakdown; and a root-path `EvidenceRef.Description` on `infra.db-connection` itself
+     (same free-text-evidence choice as `SqlConnectionPoolSynthesisRule`'s connection-string label)
+     for the Gen2 finding's "retention path for the largest one" narrative.
+   - `Gen0OpenConnections` deliberately not reconstructed at all: the old generator never reads it,
+     so inventing a way to derive it would be scope creep beyond the playbook's own "back exactly
+     what the generator reads" mandate.
+   - The type-breakdown loop trusts matched-observation emission order rather than re-ranking —
+     `DbConnectionAnalyzer.Analyze` already sorts `ByType` descending by `TotalCount` before
+     `EmitObservationsAsync`'s loop runs over it, the same structure `ArraySynthesisRule` relies on.
+
    **`SqlConnectionPoolFindingGenerator` — notable findings (first of the Infra plugin's analyzers,
    picked up one at a time):**
    - Step c's audit found `infra.sql-connection-pool` already backs every numeric field the single

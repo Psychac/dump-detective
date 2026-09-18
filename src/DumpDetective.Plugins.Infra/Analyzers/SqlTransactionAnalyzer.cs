@@ -170,6 +170,33 @@ public sealed class SqlTransactionAnalyzer :
 
         byType.Sort(static (a, b) => b.TotalCount.CompareTo(a.TotalCount));
 
+        // Whole-run scalar — no entity subject, same "no natural per-entity anchor" pattern as
+        // gc.generation-composition. TotalTransactions/DisposedCount/OtherCount cover every
+        // scanned candidate, including disposed and unresolvable-state ones that
+        // infra.sql-transaction never observes individually (only active transactions get one) —
+        // ActiveCount itself is reconstructable by counting those, so it isn't duplicated here.
+        await observationContext.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "infra.sql-transaction-population",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["total.count"] = new Measure(totalTransactions, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["disposed.count"] = new Measure(totalDisposed, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["other.count"] = new Measure(totalOther, MeasureUnit.Count, MeasureSemantics.Absolute),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = observationContext.ArtifactId!.Value,
+                AnalyzerKey = "SQL Transaction Analysis",
+                CapabilitiesUsed = observationCapabilities,
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
+
         return new SqlTransactionDomainResult(
             TransactionsFound: totalTransactions > 0,
             TotalTransactions: totalTransactions,

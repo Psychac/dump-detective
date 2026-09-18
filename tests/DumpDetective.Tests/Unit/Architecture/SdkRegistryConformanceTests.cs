@@ -70,6 +70,7 @@ public sealed class SdkRegistryConformanceTests
             ["infra.sql-command"] = ["shallow.bytes"],
             ["infra.sql-command-population"] = ["total.count", "disposed.count"],
             ["infra.sql-transaction"] = ["shallow.bytes"],
+            ["infra.sql-transaction-population"] = ["total.count", "disposed.count", "other.count"],
             ["infra.db-connection"] = ["generation.ordinal", "retained.bytes"],
             ["infra.http-object"] = ["shallow.bytes"],
             ["infra.timer"] = ["instance.count", "shallow.bytes"],

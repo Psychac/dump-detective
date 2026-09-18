@@ -147,6 +147,14 @@ the one before it:
    - Single-finding generator, same shape as `SqlConnectionPoolFindingGenerator`: no aggregation,
      no re-ranking, no per-type breakdown needed.
 
+   | `SqlTransactionFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — TotalTransactions/DisposedCount/OtherCount unobserved, fixed | `SqlTransactionSynthesisRule` |
+
+   **`SqlTransactionFindingGenerator` — notable findings (3rd of the Infra plugin's analyzers):**
+   - Same shape and same fix as `SqlCommandFindingGenerator` one row up, with one extra whole-run
+     count (`OtherCount`, transactions in some non-Active/non-Disposed state) alongside
+     `TotalTransactions`/`DisposedCount` — all three added to a new `infra.sql-transaction-population`
+     observation; `ActiveCount` again reconstructed by counting `infra.sql-transaction` observations.
+
    **`SqlConnectionPoolFindingGenerator` — notable findings (first of the Infra plugin's analyzers,
    picked up one at a time):**
    - Step c's audit found `infra.sql-connection-pool` already backs every numeric field the single

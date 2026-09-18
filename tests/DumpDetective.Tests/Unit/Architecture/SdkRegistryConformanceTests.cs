@@ -78,7 +78,12 @@ public sealed class SdkRegistryConformanceTests
             ["infra.http-handler-module"] = ["instance.count"],
             ["infra.http-object-population"] = ["http-web-response.count", "http-message-handler.count"],
             ["infra.timer"] = ["instance.count", "shallow.bytes"],
-            ["infra.wcf-channel"] = ["retained.bytes"],
+            ["infra.wcf-channel"] = ["retained.bytes", "binding-hint.ordinal"],
+            ["infra.wcf-channel-type-population"] = ["total.count"],
+            ["infra.wcf-channel-population"] = [
+                "total.count", "opening.count", "opened.count", "closing.count", "closed.count",
+                "other.count", "invalid-state.count", "duplex.count", "session.count", "factory.count",
+            ],
             ["runtime.jit-activity"] = ["jit-heap.bytes", "active-methods.count", "distinct-methods.count", "tiered-methods.count", "managed-frame.count", "unmanaged-frame.count", "ready-to-run-frame.count", "dynamic-method-frame.count"],
             ["heap.segment-kind-composition"] = ["kind.ordinal", "segment.count", "object.count", "committed.bytes", "reserved.bytes"],
             ["heap.poh-type-composition"] = ["instance.count", "shallow.bytes"],

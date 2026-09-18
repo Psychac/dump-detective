@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/observation-type-registry.json",
-  "registryVersion": "1.53.0",
+  "registryVersion": "1.54.0",
   "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
   "observationTypes": {
     "gc.pause": {
@@ -578,10 +578,44 @@
       "subjectKind": "type",
       "temporalKind": "point",
       "measures": {
-        "retained.bytes": { "unit": "bytes", "semantics": "absolute" }
+        "retained.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "binding-hint.ordinal": { "unit": "custom", "semantics": "absolute" }
       },
-      "note": "One per faulted channel — the same anomaly-relevant subset TopFaultedChannels already selects. retained.bytes omitted when no dominator tree was available.",
+      "note": "One per faulted channel — the same anomaly-relevant subset TopFaultedChannels already selects. retained.bytes omitted when no dominator tree was available. binding-hint.ordinal (WcfBindingHint) always present. An evidence entry with the remote endpoint address as its Description is present when one was read.",
       "addedIn": "1.23.0"
+    },
+    "infra.wcf-channel-type-population": {
+      "producedBy": "WcfChannelAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Infra/Analyzers/WcfChannelAnalyzer.cs",
+      "requiresCapabilities": ["dump.object-fields", "heap.objects", "heap.types"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "total.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per distinct channel type — bounded by distinct type count, not per-instance. Backs the old finding generator's faulted-type breakdown, which iterates types in TotalCount-descending order (not FaultedCount order), an order infra.wcf-channel's faulted-only stream can't reproduce on its own. Emitted in already-sorted-descending order.",
+      "addedIn": "1.53.0"
+    },
+    "infra.wcf-channel-population": {
+      "producedBy": "WcfChannelAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Infra/Analyzers/WcfChannelAnalyzer.cs",
+      "requiresCapabilities": ["dump.object-fields", "heap.objects", "heap.types"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "total.count": { "unit": "count", "semantics": "absolute" },
+        "opening.count": { "unit": "count", "semantics": "absolute" },
+        "opened.count": { "unit": "count", "semantics": "absolute" },
+        "closing.count": { "unit": "count", "semantics": "absolute" },
+        "closed.count": { "unit": "count", "semantics": "absolute" },
+        "other.count": { "unit": "count", "semantics": "absolute" },
+        "invalid-state.count": { "unit": "count", "semantics": "absolute" },
+        "duplex.count": { "unit": "count", "semantics": "absolute" },
+        "session.count": { "unit": "count", "semantics": "absolute" },
+        "factory.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One whole-run observation per analysis — no entity subject, same pattern as gc.generation-composition. Every count here except FaultedChannels covers channels/factories infra.wcf-channel's faulted-only stream never observes individually; FaultedChannels is reconstructable by counting that stream, so it isn't duplicated here. Also emitted (factory-only) when zero channels were found but factories exist — a real measurement, not a missing-capability condition.",
+      "addedIn": "1.53.0"
     },
     "runtime.jit-activity": {
       "producedBy": "JitAnalyzer",

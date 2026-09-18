@@ -226,6 +226,34 @@ the one before it:
    - Confirms the playbook's step-c audit is genuinely finding real gaps rather than always
      finding *a* gap to fix: sometimes the answer is "already fully backed."
 
+   | `WcfChannelFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — per-type totals + binding hint + endpoints + whole-run counts unobserved, fixed | `WcfChannelSynthesisRule` |
+
+   **`WcfChannelFindingGenerator` — notable findings (7th and last of the Infra plugin's
+   analyzers):**
+   - Step c's audit found `infra.wcf-channel` (faulted-only stream) backs `FaultedChannels` by
+     simple count, but the faulted-type breakdown iterates types in **TotalCount**-descending
+     order (not FaultedCount order) filtered to non-zero-faulted entries — an order the faulted-
+     only stream can't reproduce without knowing each type's *total* count, not just its faulted
+     count. The binding-specific fault guidance and remote-endpoint summary also had no
+     observation backing at all, and the channel-count finding's five non-Faulted state counts
+     plus Duplex/Session/ChannelFactory counts are never observed (only Faulted channels are).
+   - Step d's fix, four parts: a `binding-hint.ordinal` measure added to `infra.wcf-channel`
+     (always present — `ClassifyBindingHint` never returns null); a remote-endpoint
+     `EvidenceRef.Description` on the same observation; a new per-type
+     `infra.wcf-channel-type-population` observation (`total.count` only, emitted in the real
+     analyzer's own already-sorted-descending order) so the rule can trust iteration order for the
+     breakdown the same way `ArraySynthesisRule` trusts pre-sorted lists; and a new whole-run
+     `infra.wcf-channel-population` observation for every count the faulted-only stream can't
+     provide.
+   - **Second analyzer (after `GCRootAnalyzer`) where an existing early-return path needed a
+     matching fix**: `ChannelFactory<T>` count comes from whole-heap type statistics, independent
+     of the channel-instance scan, so `WcfPresent` can be true with zero channels — the
+     `typeStats.Count == 0` branch now still emits a factory-only `infra.wcf-channel-population`
+     when `factoryCount > 0`, otherwise the `ChannelFactory<T>` finding could never fire under the
+     new observation-based path in that real scenario.
+   - Closes out the Infra plugin: 7/7 analyzers (SqlConnectionPool, SqlCommand, SqlTransaction,
+     DbConnection, HttpObject, TimerLeak, WcfChannel) now have synthesis rules.
+
    **`SqlConnectionPoolFindingGenerator` — notable findings (first of the Infra plugin's analyzers,
    picked up one at a time):**
    - Step c's audit found `infra.sql-connection-pool` already backs every numeric field the single

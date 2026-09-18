@@ -6,6 +6,7 @@ using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Temporal;
 
@@ -221,9 +222,25 @@ public sealed class WcfChannelAnalyzer :
                         snap = snap with { RetainedBytes = retained };
                     topFaulted.Add(snap);
 
-                    var measures = new Dictionary<string, Measure>();
+                    var measures = new Dictionary<string, Measure>
+                    {
+                        // Always present — ClassifyBindingHint never returns null, only
+                        // WcfBindingHint.Unknown when no token matches. Backs the old finding
+                        // generator's binding-specific fault guidance, which needed the type-name
+                        // classification this per-instance observation's Subject alone can't carry
+                        // (a measure, not a second EntityRef kind, since it's a derived
+                        // classification of the type name, not a distinct identity).
+                        ["binding-hint.ordinal"] = new Measure((double)(int)ClassifyBindingHint(candidate.TypeDisplayName), MeasureUnit.Custom, MeasureSemantics.Absolute),
+                    };
                     if (hasRetained)
                         measures["retained.bytes"] = new Measure(retained, MeasureUnit.Bytes, MeasureSemantics.Absolute);
+
+                    // Remote endpoint address has no home among Subjects' typed EntityRef kinds —
+                    // same free-text-evidence choice SqlConnectionPoolAnalyzer/DbConnectionAnalyzer
+                    // made for their own per-instance labels.
+                    IReadOnlyList<EvidenceRef> evidence = !string.IsNullOrEmpty(remoteAddress)
+                        ? [new EvidenceRef { Artifact = observationContext.ArtifactId!.Value, Locator = candidate.Address.ToString("X", System.Globalization.CultureInfo.InvariantCulture), Description = remoteAddress }]
+                        : [];
 
                     await observationContext.Observations.EmitAsync(new Observation
                     {
@@ -240,6 +257,7 @@ public sealed class WcfChannelAnalyzer :
                             Fidelity = hasRetained ? FidelityLevel.Full : FidelityLevel.Degraded,
                         },
                         Confidence = hasRetained ? 1.0 : 0.7,
+                        Evidence = evidence,
                     }, cancellationToken);
                 }
             }
@@ -248,7 +266,14 @@ public sealed class WcfChannelAnalyzer :
         }
 
         if (typeStats.Count == 0)
+        {
+            // Factories can genuinely exist with zero channels (e.g. created but no channel
+            // opened yet, or channels already collected) — a real measurement, not a missing-
+            // capability condition, so still worth a population observation when non-empty.
+            if (factoryCount > 0)
+                await EmitPopulationObservationAsync(observationContext, 0, 0, 0, 0, 0, 0, 0, 0, 0, factoryCount, observationCapabilities, cancellationToken);
             return Empty(factoryCount);
+        }
 
         int totalChannels = 0, totalOpening = 0, totalOpened = 0, totalFaulted = 0, totalClosing = 0, totalClosed = 0, totalOther = 0, totalInvalidState = 0;
         int totalDuplex = 0, totalSession = 0;
@@ -272,6 +297,41 @@ public sealed class WcfChannelAnalyzer :
         }
 
         byType.Sort(static (a, b) => b.TotalCount.CompareTo(a.TotalCount));
+
+        // Per-type population — emitted in byType's own already-sorted-descending (by TotalCount)
+        // order, so a synthesis rule can trust order the same way ArraySynthesisRule trusts
+        // ArrayDomainResult's pre-sorted lists. Backs the old finding generator's faulted-type
+        // breakdown, which iterates types in TotalCount-descending order (not FaultedCount order)
+        // filtering to those with a non-zero fault count — order infra.wcf-channel's own
+        // faulted-only stream can't reproduce on its own, since it never observes total count per
+        // type, only the faulted subset.
+        foreach (WcfChannelTypeSummary summary in byType)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await observationContext.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "infra.wcf-channel-type-population",
+                Subjects = [new TypeRef { CanonicalName = summary.TypeName, Fidelity = MatchFidelity.Exact }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["total.count"] = new Measure(summary.TotalCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = observationContext.ArtifactId!.Value,
+                    AnalyzerKey = "WCF Channel Analysis",
+                    CapabilitiesUsed = observationCapabilities,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
+
+        await EmitPopulationObservationAsync(
+            observationContext, totalChannels, totalOpening, totalOpened, totalClosing, totalClosed, totalOther,
+            totalInvalidState, totalDuplex, totalSession, factoryCount, observationCapabilities, cancellationToken);
 
         return new WcfChannelDomainResult(
             WcfPresent: totalChannels > 0 || factoryCount > 0,
@@ -402,6 +462,42 @@ public sealed class WcfChannelAnalyzer :
 
     private static WcfChannelDomainResult Empty(int factoryCount) =>
         new(factoryCount > 0, 0, 0, 0, 0, 0, 0, 0, [], [], factoryCount, 0, 0, 0, 0);
+
+    // Whole-run scalar — no entity subject, same "no natural per-entity anchor" pattern as
+    // gc.generation-composition. Every count here except FaultedChannels covers channels/factories
+    // infra.wcf-channel's faulted-only stream never observes individually; FaultedChannels itself
+    // is reconstructable by counting that stream, so it isn't duplicated here.
+    private static ValueTask EmitPopulationObservationAsync(
+        AnalysisContext observationContext, int total, int opening, int opened, int closing, int closed, int other,
+        int invalidState, int duplex, int session, int factoryCount, IReadOnlySet<Capability> capabilitiesUsed, CancellationToken cancellationToken) =>
+        observationContext.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "infra.wcf-channel-population",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["total.count"] = new Measure(total, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["opening.count"] = new Measure(opening, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["opened.count"] = new Measure(opened, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["closing.count"] = new Measure(closing, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["closed.count"] = new Measure(closed, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["other.count"] = new Measure(other, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["invalid-state.count"] = new Measure(invalidState, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["duplex.count"] = new Measure(duplex, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["session.count"] = new Measure(session, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["factory.count"] = new Measure(factoryCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = observationContext.ArtifactId!.Value,
+                AnalyzerKey = "WCF Channel Analysis",
+                CapabilitiesUsed = capabilitiesUsed,
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
 
     public void Dispose() { }
 }

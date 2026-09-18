@@ -107,6 +107,7 @@ public sealed class SdkRegistryConformanceTests
                 "unresolved-tcs-oldgen.count", "total-vts.count", "pending-vts.count", "pending-vts-oldgen.count",
             ],
             ["heap.static-root"] = ["retained.bytes", "objects-kept-alive.count", "gen2-or-loh-retained.fraction"],
+            ["static-root.population"] = ["root.count", "retained.bytes"],
             ["type.root-reachability"] = ["sample.bytes", "has-gc-root", "retained.bytes"],
             ["reference-chain.type-sample"] = ["instance.count", "sample.count", "retained-sample.count", "dominant-root-kind.count"],
             ["reference-chain.population"] = ["analyzed.count", "retained.count", "retained.percent", "traversal-limited.count"],

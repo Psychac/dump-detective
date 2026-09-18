@@ -130,12 +130,41 @@ public sealed class StaticRootAnalyzer : IAnalyzer, IProducesAnalyzerDomainResul
 
         ulong totalManagedHeapBytes = GetTotalManagedBytes(typeStatistics);
 
-        if (significantStaticRoots.Length == 0)
-            return new StaticRootDomainResult(0, 0, topRoots, totalManagedHeapBytes);
-
         ulong totalImpact = 0;
         foreach (StaticRootAnalysis item in significantStaticRoots)
             totalImpact += item.TotalMemoryImpact;
+
+        // Phase 5 step 2: whole-run scalars over the *significant* subset — heap.static-root above
+        // covers every analyzed root, significant or not, so RootCount/TotalRetainedBytes (scoped to
+        // IsSignificant, a config-threshold filter no observation carries) can't be reconstructed by
+        // counting/summing that stream. Emitted unconditionally, including the zero-significant-
+        // roots case, since both scalars are exhaustively computed either way. The severity check's
+        // topRoots[0].TotalMemoryImpact needs no new field: it's the max heap.static-root
+        // retained.bytes across *all* analyzed roots by construction (a root large enough to be the
+        // overall max is always >= SignificantMemoryThresholdBytes, hence always significant).
+        await observationContext.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "static-root.population",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["root.count"] = new Measure(significantStaticRoots.Length, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["retained.bytes"] = new Measure(totalImpact, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = observationContext.ArtifactId!.Value,
+                AnalyzerKey = "Static Root Leak Detection",
+                CapabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapRoots, CapabilityVocabulary.HeapObjects, CapabilityVocabulary.HeapSegments },
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
+
+        if (significantStaticRoots.Length == 0)
+            return new StaticRootDomainResult(0, 0, topRoots, totalManagedHeapBytes);
 
         return new StaticRootDomainResult(significantStaticRoots.Length, totalImpact, topRoots, totalManagedHeapBytes);
     }

@@ -142,6 +142,7 @@ the one before it:
    | `DominatorFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — always-heuristic retained bytes + highly-referenced/capped whole-run counts + type-hotspot aggregate unobserved, fixed | `DominatorSynthesisRule` |
    | `EventLeakFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — per-group aggregates + whole-run zero/fallback counts unobserved, fixed | `EventLeakSynthesisRule` |
    | `ReferenceChainFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — multi-sample-enriched per-type fields + whole-run scalars + shared-root groups unobserved, fixed | `ReferenceChainSynthesisRule` |
+   | `StaticRootFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — significant-subset whole-run scalars unobserved, fixed | `StaticRootSynthesisRule` |
 
    ### Per-analyzer notable findings
 
@@ -535,6 +536,34 @@ the one before it:
      constant genuinely has none yet" rule): `TraversalLimitedSamplesBelowWarningThreshold` (10%,
      Info) and `TraversalLimitedSamplesAtWarningThreshold` (exactly 20%, Warning) — the 0-traversal-
      limited case was covered, but not the >0-and-around-the-threshold cases.
+
+   **`StaticRootFindingGenerator` — notable findings:**
+   - **Deliberately does not fix `StaticRootAnalyzer`'s own known, documented bug**
+     (`HeapRootKind.StaticVar` never fires on ClrMD 4, so this analyzer produces zero findings on
+     every real dump today) — same "port the consumption logic, not the fix" choice the analyzer's
+     own retyping made, and the same choice `StaticRootLeakDetector`'s retyping made per user call.
+     Nearly a zero-gap entry like `TimerLeakFindingGenerator`: the existing `heap.static-root`
+     (Phase 5 step 1) already backs everything except the whole-run scalars.
+   - Step c's audit found `heap.static-root` covers *every* analyzed root, while
+     `RootCount`/`TotalRetainedBytes` are scoped to the *significant* subset (`IsSignificant`, a
+     config-threshold filter no observation carries) — not reconstructable by counting/summing that
+     stream. The severity check's `topRoots[0].TotalMemoryImpact` needed no new field, though: a
+     root large enough to be the overall max is always >= `SignificantMemoryThresholdBytes`, hence
+     always significant, so it's exactly the max `heap.static-root` `retained.bytes` across all
+     analyzed roots.
+   - Step d's fix: one new whole-run `static-root.population` observation (`root.count`,
+     `retained.bytes`), emitted unconditionally including the zero-significant-roots case (also
+     currently unreachable, same bug), since both scalars are exhaustively computed either way.
+   - **Cannot trust observation order for the "largest root" reconstruction**, unlike several prior
+     rules' per-type lists: `TopRootsByRetainedBytes` is explicitly sorted descending before the old
+     generator ever reads it, but `heap.static-root` is emitted inline during root enumeration — an
+     arbitrary, not size-sorted, order. The rule scans every matched `heap.static-root` observation
+     for the max `retained.bytes` rather than trusting first-emitted, and a parity test
+     (`LargestRootObservedOutOfOrder_StillEmitsCriticalFinding`) exercises observations emitted in
+     the reverse of the sorted-list order to prove it.
+   - The old generator's single retention finding also computes an evidence-based
+     `Finding.ConfidenceScore` override via `EvidenceConfidence.Compute(topEvidence)` — left
+     unreproduced, same choice every prior Leaks-plugin rule in this playbook made.
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until `## Work`
    step 6 below (see the Stage-1 purity bullet above — distinct from playbook step f just above),
    so its `IFindingGenerator` cannot be retired alongside the rest in this playbook — state this

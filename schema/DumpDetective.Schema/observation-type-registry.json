@@ -912,6 +912,19 @@
       "note": "One per analyzed static root. This analyzer has a known, documented upstream bug (HeapRootKind.StaticVar never fires on ClrMD 4) deliberately left unfixed, so this code path is currently unreachable on real dumps — correct for when the fix lands, not exercised today.",
       "addedIn": "1.39.0"
     },
+    "static-root.population": {
+      "producedBy": "StaticRootAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Leaks/Analyzers/StaticRootAnalyzer.cs",
+      "requiresCapabilities": ["heap.roots", "heap.objects", "heap.segments"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "root.count": { "unit": "count", "semantics": "absolute" },
+        "retained.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "One whole-run observation per analysis — no entity subject, same pattern as gc.generation-composition. Scoped to the *significant* subset (a config-threshold filter, IsSignificant) unlike heap.static-root's every-analyzed-root population, so root.count/retained.bytes can't be reconstructed by counting/summing that stream. Always emitted, including the zero-significant-roots case (also currently unreachable, same known bug as heap.static-root), since both scalars are exhaustively computed either way.",
+      "addedIn": "1.54.0"
+    },
     "type.root-reachability": {
       "producedBy": "ReferenceChainAnalyzer",
       "sourceFile": "src/DumpDetective.Plugins.Leaks/Analyzers/ReferenceChainAnalyzer.cs",

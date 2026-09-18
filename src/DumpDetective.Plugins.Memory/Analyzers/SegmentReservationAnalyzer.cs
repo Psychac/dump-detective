@@ -54,7 +54,7 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer, IProducesAnalyzerDom
         var result = (SegmentReservationDomainResult)Analyze(segmentQuery, options, context.Progress, cancellationToken);
         LastResult = result;
 
-        await EmitObservationsAsync(context, result, cancellationToken);
+        await EmitObservationsAsync(context, result, options, cancellationToken);
     }
 
     /// <summary>
@@ -68,8 +68,17 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer, IProducesAnalyzerDom
     /// classification, the same Smell A shape already fixed on the other four Memory analyzers — and
     /// <see cref="SegmentReservationDomainResult.SegmentTable"/>, for the same "no <c>segment</c>
     /// entity kind yet" reason <c>MemoryAnalyzer</c>/<c>LohFragmentationAnalyzer</c> skip theirs.
+    /// Phase 5 step 2 adds <c>dump-pointer-size</c>/<c>logical-heap.count</c> (raw facts) and the
+    /// three threshold measures (genuinely runtime-configurable, same choice
+    /// <c>GCHandleSynthesisRule</c> made) so <c>SegmentReservationSynthesisRule</c> can re-derive
+    /// <c>AddressSpacePressureRisk</c>/<c>PressureRiskReason</c> itself rather than read a stored
+    /// classification — <c>ThirtyTwoBitPressureThresholdBytes</c> lives only in
+    /// <see cref="SegmentReservationAnalysisOptions"/>, never on the domain result, so it's read
+    /// from the <paramref name="options"/> parameter threaded in here rather than added to the
+    /// model, the same fix <c>AllocationPatternAnalyzer</c>'s own emission needed.
     /// </summary>
-    private static async ValueTask EmitObservationsAsync(AnalysisContext context, SegmentReservationDomainResult result, CancellationToken cancellationToken)
+    private static async ValueTask EmitObservationsAsync(
+        AnalysisContext context, SegmentReservationDomainResult result, SegmentReservationAnalysisOptions options, CancellationToken cancellationToken)
     {
         var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapSegments };
 
@@ -88,6 +97,12 @@ public sealed class SegmentReservationAnalyzer : IAnalyzer, IProducesAnalyzerDom
                 ["ephemeral.segment-count"] = new Measure(result.EphemeralSegmentCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["ephemeral.avg-fill-percent"] = new Measure(result.AvgEphemeralFillPct, MeasureUnit.Percent, MeasureSemantics.Ratio),
                 ["segment.count"] = new Measure(result.TotalSegmentCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["dump-pointer-size"] = new Measure(result.DumpPointerSize, MeasureUnit.Custom, MeasureSemantics.Absolute),
+                ["logical-heap.count"] = new Measure(result.LogicalHeapCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["ratio-high-pressure.threshold"] = new Measure(result.RatioHighPressureThreshold, MeasureUnit.Ratio, MeasureSemantics.Absolute),
+                ["ratio-medium-pressure.threshold"] = new Measure(result.RatioMediumPressureThreshold, MeasureUnit.Ratio, MeasureSemantics.Absolute),
+                ["thirty-two-bit-pressure.threshold-bytes"] = new Measure(options.ThirtyTwoBitPressureThresholdBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["near-empty-region-fill-percent.threshold"] = new Measure(result.NearEmptyRegionFillPctThreshold, MeasureUnit.Percent, MeasureSemantics.Absolute),
             },
             Provenance = new Provenance
             {

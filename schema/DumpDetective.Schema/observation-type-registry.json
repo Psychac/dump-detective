@@ -387,9 +387,15 @@
         "reserved-to-committed.ratio": { "unit": "ratio", "semantics": "ratio" },
         "ephemeral.segment-count": { "unit": "count", "semantics": "absolute" },
         "ephemeral.avg-fill-percent": { "unit": "percent", "semantics": "ratio" },
-        "segment.count": { "unit": "count", "semantics": "absolute" }
+        "segment.count": { "unit": "count", "semantics": "absolute" },
+        "dump-pointer-size": { "unit": "custom", "semantics": "absolute" },
+        "logical-heap.count": { "unit": "count", "semantics": "absolute" },
+        "ratio-high-pressure.threshold": { "unit": "ratio", "semantics": "absolute" },
+        "ratio-medium-pressure.threshold": { "unit": "ratio", "semantics": "absolute" },
+        "thirty-two-bit-pressure.threshold-bytes": { "unit": "bytes", "semantics": "absolute" },
+        "near-empty-region-fill-percent.threshold": { "unit": "percent", "semantics": "absolute" }
       },
-      "note": "Single whole-heap observation per run. Excludes AddressSpacePressureRisk/PressureRiskReason — a hand-picked-threshold classification (Smell A).",
+      "note": "Single whole-heap observation per run. Excludes AddressSpacePressureRisk/PressureRiskReason — a hand-picked-threshold classification (Smell A); SegmentReservationSynthesisRule (Phase 5 step 2) re-derives both from dump-pointer-size/reserved.bytes/reserved-to-committed.ratio and the three threshold measures below, the same re-derive-don't-store choice AllocationPatternSynthesisRule made for AllocationProfile. The three threshold measures and dump-pointer-size/logical-heap.count are genuinely raw config/facts, not judgment, so they were safe to add directly. NearEmptyRegionCount/NearEmptyRegionCommittedBytes need no measures here: when IsRegionsBased, they're exact sums over heap.region-composition's own near-empty.count/near-empty.committed-bytes (already emitted for every region-generation bucket, not a capped sample); IsRegionsBased itself is reconstructed as \"did any heap.region-composition arrive\".",
       "addedIn": "1.10.0"
     },
     "heap.region-composition": {

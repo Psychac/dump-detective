@@ -146,6 +146,7 @@ the one before it:
    | `AllocationPatternFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — size-fraction measures + classification threshold + top-long-lived-type identity unobserved, fixed | `AllocationPatternSynthesisRule` |
    | `GCGenerationFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — count-based whole-run scalars + thresholds + bounded top-allocator/top-accumulator types unobserved, fixed | `GCGenerationSynthesisRule` |
    | `MemoryFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run pressure inputs + single top-1-type identity unobserved, fixed | `MemorySynthesisRule` |
+   | `SegmentReservationFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — re-derived pressure-risk inputs + thresholds unobserved, fixed | `SegmentReservationSynthesisRule` |
 
    ### Per-analyzer notable findings
 
@@ -668,6 +669,38 @@ the one before it:
      duplicated in `MemorySynthesisRule`, same choice `AllocationPatternSynthesisRule` made for its
      own classifier; only the composite formula is ported, since the finding generator never calls
      the four individual component scores or `ClassifyPressureBand`.
+
+   **`SegmentReservationFindingGenerator` — notable findings:**
+   - Step c's audit found `heap.segment-reservation` (Phase 5 step 1) already deliberately excludes
+     `AddressSpacePressureRisk`/`PressureRiskReason` as Smell A judgment — but the finding generator
+     reads both directly, and unlike `AllocationProfile` (a plain enum re-derivable from two
+     percentages already on the observation), `PressureRiskReason` is a pre-formatted natural-
+     language string embedding a threshold value (`ThirtyTwoBitPressureThresholdBytes`) that wasn't
+     on the domain result *or* the observation at all — it lives only in
+     `SegmentReservationAnalysisOptions`, read directly from `options` inside `Analyze`, never
+     persisted anywhere the emission code could reach.
+   - Step d's fix, two parts: `EmitObservationsAsync` now takes `options` as a parameter (the same
+     fix `AllocationPatternAnalyzer`'s own emission needed for its threshold) so
+     `thirty-two-bit-pressure.threshold-bytes` can be a measure; and `dump-pointer-size`/
+     `logical-heap.count`/the two ratio thresholds were added alongside it — all five are raw
+     facts/config, not judgment, so carrying them directly (rather than a stored classification) is
+     what let the rule re-derive `AddressSpacePressureRisk`/`PressureRiskReason` itself via a
+     verbatim-ported `EvaluatePressureRisk`, the same choice `AllocationPatternSynthesisRule`/
+     `MemorySynthesisRule` made for their own classifiers.
+   - `NearEmptyRegionCount`/`NearEmptyRegionCommittedBytes` needed no new measures at all: when the
+     dump is regions-based, they're exact sums over every matched `heap.region-composition`
+     observation's own `near-empty.count`/`near-empty.committed-bytes` (already emitted for every
+     region-generation bucket, never a capped sample) — the same "don't duplicate what summing
+     already gives you" choice `DbConnectionSynthesisRule` made for `OpenConnections`. `IsRegionsBased`
+     itself needed no measure either: it's reconstructed as "did any `heap.region-composition`
+     arrive," since that type is only ever emitted when the dump is regions-based.
+   - **The old generator's own unit tests set `AddressSpacePressureRisk`/`PressureRiskReason` as
+     independent fixture fields**, including reason text that doesn't match the real formula's
+     message shape at all (e.g. "Reserved address space is within 10% of the 2 GB 32-bit limit."
+     versus production's "has X MB reserved (>Y MB threshold)") — achievable only because the old
+     generator reads the stored fields directly rather than deriving them, the same "test-only
+     decoupling" situation `AllocationPatternSynthesisRuleParityTests` hit. The parity fixtures
+     compute both fields from the same `EvaluatePressureRisk` logic the rule uses instead.
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until `## Work`
    step 6 below (see the Stage-1 purity bullet above — distinct from playbook step f just above),
    so its `IFindingGenerator` cannot be retired alongside the rest in this playbook — state this

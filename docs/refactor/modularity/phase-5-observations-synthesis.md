@@ -127,6 +127,26 @@ the one before it:
    | `ArrayFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 2 of 4 branches unobserved, fixed | `ArraySynthesisRule` |
    | `LohFragmentationFindingGenerator` | Done, 2026-09-18 | Partial (see above) | No — clean | `LohFragmentationSynthesisRule` |
    | `AsyncStateMachineFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — `type.async-state-machine` had no method identity, fixed | `AsyncStateMachineSynthesisRule` |
+   | `AsyncTaskFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 7 of 8 signals unobserved, fixed | `AsyncTaskSynthesisRule` |
+
+   **`AsyncTaskFindingGenerator` — notable findings:**
+   - Step c's audit found the analyzer emitted only `type.orphaned-task` (one per orphaned task,
+     Phase 5 step 1) — the largest gap found so far in this playbook. Seven of the old generator's
+     eight signals (cycle deadlock, Gen2/LOH pending tasks, unresolved TCS in Gen2/LOH, pending VTS
+     in Gen2/LOH, faulted tasks, continuation-chain depth, high pending count) read
+     `AsyncTaskDomainResult` fields with no observation backing at all.
+   - Step d's fix: one new whole-run `async.task-population` observation (no entity subject — same
+     "whole-process scalar" pattern as `gc.generation-composition`), carrying all thirteen measures
+     those seven signals need. `type.orphaned-task` stays as-is; the rule reconstructs `OrphanedTasks`
+     by counting matched instances rather than summing a measure.
+   - Unlike `AsyncStateMachineSynthesisRule`, no re-ranking question arises: every signal but
+     `orphaned` reads a single observation instance's scalar measures directly, and `orphaned` is a
+     plain count, not a ranked list.
+   - The domain result's own remarks note TCS/VTS analysis runs independent of the task scan (a heap
+     can have TCS/VTS instances with zero `Task` objects), so `async.task-population` is emitted on
+     both the normal path and the `total == 0` early-return (`EmptyWith`) path — omitting it there
+     would have silently dropped the `tcs-unresolved-oldgen`/`vts-pending-oldgen` signals for that
+     case.
 
    **`AsyncStateMachineFindingGenerator` — notable findings:**
    - Step c's audit found `type.async-state-machine`'s only `Subject` was the state-machine's own

@@ -176,7 +176,12 @@ public sealed partial class AsyncTaskAnalyzer : IAnalyzer, IProducesAnalyzerDoma
         VtsAnalysisResult vtsResult = AnalyzeValueTaskSources(fields, segments, vtsEntries, ct);
 
         if (total == 0)
+        {
+            await EmitTaskPopulationObservationAsync(
+                observationContext, total: 0, pending: 0, faulted: 0, pendingGen2: 0, pendingLOH: 0,
+                maxDepth: 0, avgDepth: 0.0, cycleDetected: false, tcsResult, vtsResult, ct);
             return EmptyWith(tcsResult, vtsResult);
+        }
 
         // ── Classify task states ─────────────────────────────────────────────────
         progress?.Report(new AnalyzerProgressReport(0, "classifying task states", $"0 / {total:N0} tasks"));
@@ -382,6 +387,10 @@ public sealed partial class AsyncTaskAnalyzer : IAnalyzer, IProducesAnalyzerDoma
 
         IReadOnlyList<FaultedTaskTypeProfile> faultedProfiles = BuildFaultedTaskTypeProfiles(faultedTypeCount, faultedTypeExceptions);
 
+        await EmitTaskPopulationObservationAsync(
+            observationContext, total, pending, faulted, pendingGen2, pendingLOH, maxDepth, avgDepth, cycleDetected,
+            tcsResult, vtsResult, ct);
+
         return new AsyncTaskDomainResult(
             TotalTasks: total,
             PendingTasks: pending,
@@ -417,6 +426,61 @@ public sealed partial class AsyncTaskAnalyzer : IAnalyzer, IProducesAnalyzerDoma
             PendingValueTaskSources: vtsResult.PendingVts,
             PendingVtsGen2Count: vtsResult.PendingVtsGen2Count,
             TopPendingValueTaskSources: vtsResult.TopPending);
+    }
+
+    /// <summary>
+    /// One whole-run <c>async.task-population</c> observation per analysis, alongside the
+    /// per-orphan <c>type.orphaned-task</c> stream above — same "no entity subject" pattern as
+    /// <c>gc.generation-composition</c> (see its own remarks): the remaining task/TCS/VTS health
+    /// signals (cycle detection, old-generation pending/unresolved counts, fault count,
+    /// continuation-chain depth) are whole-process scalars with no natural per-type anchor, not
+    /// per-object facts.
+    /// </summary>
+    private static async ValueTask EmitTaskPopulationObservationAsync(
+        AnalysisContext observationContext,
+        int total,
+        int pending,
+        int faulted,
+        int pendingGen2,
+        int pendingLOH,
+        int maxDepth,
+        double avgDepth,
+        bool cycleDetected,
+        TcsAnalysisResult tcsResult,
+        VtsAnalysisResult vtsResult,
+        CancellationToken ct)
+    {
+        await observationContext.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "async.task-population",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["total.count"] = new Measure(total, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["pending.count"] = new Measure(pending, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["pending-oldgen.count"] = new Measure(pendingGen2 + pendingLOH, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["faulted.count"] = new Measure(faulted, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["cycle-detected"] = new Measure(cycleDetected ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["max-continuation-depth"] = new Measure(maxDepth, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["avg-continuation-depth"] = new Measure(avgDepth, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["total-tcs.count"] = new Measure(tcsResult.TotalTcs, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["unresolved-tcs.count"] = new Measure(tcsResult.UnresolvedTcs, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["unresolved-tcs-oldgen.count"] = new Measure(tcsResult.UnresolvedTcsGen2Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["total-vts.count"] = new Measure(vtsResult.TotalVts, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["pending-vts.count"] = new Measure(vtsResult.PendingVts, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["pending-vts-oldgen.count"] = new Measure(vtsResult.PendingVtsGen2Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = observationContext.ArtifactId!.Value,
+                AnalyzerKey = "Async Task Analysis",
+                CapabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapObjects, CapabilityVocabulary.DumpObjectFields },
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, ct);
     }
 
     // ── TaskCompletionSource analysis ────────────────────────────────────────────

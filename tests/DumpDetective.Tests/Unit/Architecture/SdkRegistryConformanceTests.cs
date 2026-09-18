@@ -70,6 +70,11 @@ public sealed class SdkRegistryConformanceTests
             ["type.async-state-machine"] = ["instance.count", "shallow.bytes", "dominant-state", "gen2.count", "gen2.fraction", "is-async-void"],
             ["type.async-captured-closure"] = ["captured.bytes"],
             ["type.orphaned-task"] = ["shallow.bytes"],
+            ["async.task-population"] = [
+                "total.count", "pending.count", "pending-oldgen.count", "faulted.count", "cycle-detected",
+                "max-continuation-depth", "avg-continuation-depth", "total-tcs.count", "unresolved-tcs.count",
+                "unresolved-tcs-oldgen.count", "total-vts.count", "pending-vts.count", "pending-vts-oldgen.count",
+            ],
             ["heap.static-root"] = ["retained.bytes", "objects-kept-alive.count", "gen2-or-loh-retained.fraction"],
             ["type.root-reachability"] = ["sample.bytes", "has-gc-root", "retained.bytes"],
             ["type.retention"] = ["instance.count", "shallow.bytes", "retained.bytes", "gen2.count"],

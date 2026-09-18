@@ -141,6 +141,7 @@ the one before it:
    | `WcfChannelFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — per-type totals + binding hint + endpoints + whole-run counts unobserved, fixed | `WcfChannelSynthesisRule` |
    | `DominatorFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — always-heuristic retained bytes + highly-referenced/capped whole-run counts + type-hotspot aggregate unobserved, fixed | `DominatorSynthesisRule` |
    | `EventLeakFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — per-group aggregates + whole-run zero/fallback counts unobserved, fixed | `EventLeakSynthesisRule` |
+   | `ReferenceChainFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — multi-sample-enriched per-type fields + whole-run scalars + shared-root groups unobserved, fixed | `ReferenceChainSynthesisRule` |
 
    ### Per-analyzer notable findings
 
@@ -502,6 +503,38 @@ the one before it:
      unreproduced, same choice `TimerLeakSynthesisRule`/`DominatorSynthesisRule` made, since no
      rendered text reads it; `topEvidence` (the per-instance root-path evidence used only for that
      override) needed no observation backing as a result.
+
+   **`ReferenceChainFindingGenerator` — notable findings:**
+   - Step c's audit found the existing `type.root-reachability` observation (Phase 5 step 1) is
+     emitted inline in the first per-type pass, before the multi-sample-enrichment pass that
+     computes `SampleCount`/`RetainedSampleCount`/`DominantSampleRootKind` — and only for types with
+     a resolvable sample address, skipping the ones `NoSampleAddressCount` counts. None of the
+     enrichment fields the finalizer-only-retention finding needs existed as observations, and
+     neither did the whole-run `AnalyzedSamples`/`RetainedSamples`/`RetainedPercent`/
+     `TraversalLimitedSamples` scalars three other findings read, nor `SharedRootGroups` (a
+     cross-type join over `TopTypeSampleTraces`, computed after both per-type passes).
+   - Step d's fix, three parts: a new per-type `reference-chain.type-sample` observation, emitted
+     from the second (enrichment) pass over the same `TopTypeSampleTraces` population — a
+     genuinely different, richer set than `type.root-reachability`'s (covers every pending type,
+     not just ones with a sample address) — carrying the enrichment fields, with
+     `DominantSampleRootKind` (a free-form string, not a fixed enum like `HeapRootKind`) as
+     `EvidenceRef.Description`; a new whole-run `reference-chain.population` observation, emitted
+     unconditionally including the no-samples case since `Analyze` always computes these
+     exhaustively; and a new `reference-chain.shared-root-group` observation, one per
+     `SharedRootGroups` entry, the **first per-analyzer observation to use `ObjectRef` (a heap
+     address) as its sole `Subject`** rather than a `TypeRef` — the shared root is an object, not a
+     type — with `RootKind` and the comma-joined type-name list as two separate `EvidenceRef`
+     entries (neither has a home among `Subjects`' typed `EntityRef` kinds or a numeric `Measure`).
+   - Both list-shaped findings trust emission order rather than re-ranking: `TopTypeSampleTraces` is
+     already sorted descending by type size before either pass runs (the old generator's own filter
+     loop doesn't re-sort it either), and `BuildSharedRootGroups` already sorts its output
+     (type-count desc, then address asc) before this analyzer's emission loop runs over it — same
+     already-sorted-before-emission structure `ArraySynthesisRule` relies on.
+   - Two boundary fixtures had no prior test coverage and were added to the parity test suite (not
+     the old generator's own unit tests, per the playbook's "only add a fixture if a threshold
+     constant genuinely has none yet" rule): `TraversalLimitedSamplesBelowWarningThreshold` (10%,
+     Info) and `TraversalLimitedSamplesAtWarningThreshold` (exactly 20%, Warning) — the 0-traversal-
+     limited case was covered, but not the >0-and-around-the-threshold cases.
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until `## Work`
    step 6 below (see the Stage-1 purity bullet above — distinct from playbook step f just above),
    so its `IFindingGenerator` cannot be retired alongside the rest in this playbook — state this

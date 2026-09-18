@@ -926,6 +926,48 @@
       "note": "One per top-by-size type sampled — bounded to ReferenceChainOptions.TopCount. retained.bytes omitted when no dominator tree was available.",
       "addedIn": "1.40.0"
     },
+    "reference-chain.type-sample": {
+      "producedBy": "ReferenceChainAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Leaks/Analyzers/ReferenceChainAnalyzer.cs",
+      "requiresCapabilities": ["heap.types", "heap.objects", "heap.references", "heap.roots"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "instance.count": { "unit": "count", "semantics": "absolute" },
+        "sample.count": { "unit": "count", "semantics": "absolute" },
+        "retained-sample.count": { "unit": "count", "semantics": "absolute" },
+        "dominant-root-kind.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per TopTypeSampleTraces entry — a different, richer population than type.root-reachability (which is skipped when a type has no sample address, and predates the multi-sample enrichment pass this observation reads from). Evidence[0].Description carries the dominant root-kind string (e.g. \"Finalizer\"), which has no home among the fixed-count Measures — null/absent when no retained sample resolved a root kind. Backs the finalizer-only-retention finding.",
+      "addedIn": "1.54.0"
+    },
+    "reference-chain.population": {
+      "producedBy": "ReferenceChainAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Leaks/Analyzers/ReferenceChainAnalyzer.cs",
+      "requiresCapabilities": ["heap.types", "heap.objects", "heap.references", "heap.roots"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "analyzed.count": { "unit": "count", "semantics": "absolute" },
+        "retained.count": { "unit": "count", "semantics": "absolute" },
+        "retained.percent": { "unit": "ratio", "semantics": "ratio" },
+        "traversal-limited.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One whole-run observation per analysis — no entity subject, same pattern as gc.generation-composition. Always emitted, including the no-samples case, since these are exhaustive scalars Analyze always computes. Backs the no-samples finding, the retention-coverage finding, and the traversal-limit finding.",
+      "addedIn": "1.54.0"
+    },
+    "reference-chain.shared-root-group": {
+      "producedBy": "ReferenceChainAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Leaks/Analyzers/ReferenceChainAnalyzer.cs",
+      "requiresCapabilities": ["heap.types", "heap.objects", "heap.references", "heap.roots"],
+      "subjectKind": "object",
+      "temporalKind": "point",
+      "measures": {
+        "type.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per SharedRootGroups entry (already sorted descending by type count, then ascending by root address, before emission — the rule trusts that order the same way ArraySynthesisRule trusts pre-sorted lists). Subject is the shared root object's own address (an ObjectRef, the first per-analyzer observation to use it as the sole Subject rather than a TypeRef). Evidence[0].Description carries the root kind string, Evidence[1].Description the comma-joined type-name list — neither has a home among Measures or a single typed EntityRef.",
+      "addedIn": "1.54.0"
+    },
     "type.retention": {
       "producedBy": "DominatorAnalyzer",
       "sourceFile": "src/DumpDetective.Plugins.Leaks/Analyzers/DominatorAnalyzer.cs",

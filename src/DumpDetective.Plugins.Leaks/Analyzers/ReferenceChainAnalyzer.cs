@@ -4,6 +4,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Temporal;
 
@@ -335,9 +336,72 @@ public sealed class ReferenceChainAnalyzer : IAnalyzer, IProducesAnalyzerDomainR
                 pending.RootAddress,
                 rootFieldNamesByTypeName.TryGetValue(pending.TypeName, out string? rootFieldName) ? rootFieldName : null,
                 pending.LastHopFieldName));
+
+            // Phase 5 step 2: a different, richer population than type.root-reachability above —
+            // this one carries the multi-sample-enrichment fields (SampleCount/RetainedSampleCount/
+            // DominantSampleRootKind) that finalizer-only-retention detection needs, and covers
+            // every pending type (not just the ones with a resolvable sample address).
+            (string canonicalTypeName, MatchFidelity typeFidelity) = EntityCanonicalizer.CanonicalizeTypeName(pending.TypeName);
+            await observationContext.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "reference-chain.type-sample",
+                Subjects = [new TypeRef { CanonicalName = canonicalTypeName, Fidelity = typeFidelity }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["instance.count"] = new Measure(pending.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["sample.count"] = new Measure(sampleCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["retained-sample.count"] = new Measure(retainedSampleCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["dominant-root-kind.count"] = new Measure(dominantRootKindCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = observationContext.ArtifactId!.Value,
+                    AnalyzerKey = "Reference Chain Analysis",
+                    CapabilitiesUsed = observationCapabilities,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+                Evidence = dominantRootKind is not null
+                    ? [new EvidenceRef { Artifact = observationContext.ArtifactId!.Value, Locator = "dominant-root-kind", Description = dominantRootKind }]
+                    : [],
+            }, cancellationToken);
         }
 
         List<ReferenceChainSharedRootGroup> sharedRootGroups = BuildSharedRootGroups(topTypeSampleTraces);
+
+        // Phase 5 step 2: one per SharedRootGroups entry, already sorted descending by type count
+        // then ascending by root address before this loop runs — the rule trusts that order.
+        foreach (ReferenceChainSharedRootGroup group in sharedRootGroups)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            await observationContext.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "reference-chain.shared-root-group",
+                Subjects = [new ObjectRef { Address = group.RootAddress, Artifact = observationContext.ArtifactId!.Value, Fidelity = MatchFidelity.Exact }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["type.count"] = new Measure(group.TypeNames.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = observationContext.ArtifactId!.Value,
+                    AnalyzerKey = "Reference Chain Analysis",
+                    CapabilitiesUsed = observationCapabilities,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+                Evidence =
+                [
+                    new EvidenceRef { Artifact = observationContext.ArtifactId!.Value, Locator = "root-kind", Description = group.RootKind },
+                    new EvidenceRef { Artifact = observationContext.ArtifactId!.Value, Locator = "type-names", Description = string.Join(", ", group.TypeNames) },
+                ],
+            }, cancellationToken);
+        }
 
         double retainedPct = analyzedSamples == 0 ? 0 : retainedSamples * 100.0 / analyzedSamples;
         var retainedTypeList = retainedTypeNames.OrderBy(name => name, StringComparer.Ordinal).ToArray();
@@ -350,6 +414,31 @@ public sealed class ReferenceChainAnalyzer : IAnalyzer, IProducesAnalyzerDomainR
             int byCount = b.RetainedTypeCount.CompareTo(a.RetainedTypeCount);
             return byCount != 0 ? byCount : string.CompareOrdinal(a.RootKind, b.RootKind);
         });
+
+        // Phase 5 step 2: whole-run scalars, emitted unconditionally (including the no-samples
+        // case) since Analyze always computes these exhaustively.
+        await observationContext.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "reference-chain.population",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["analyzed.count"] = new Measure(analyzedSamples, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["retained.count"] = new Measure(retainedSamples, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["retained.percent"] = new Measure(retainedPct, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                ["traversal-limited.count"] = new Measure(traversalLimitedSamples, MeasureUnit.Count, MeasureSemantics.Absolute),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = observationContext.ArtifactId!.Value,
+                AnalyzerKey = "Reference Chain Analysis",
+                CapabilitiesUsed = observationCapabilities,
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
 
         return new ReferenceChainDomainResult(
             analyzedSamples,

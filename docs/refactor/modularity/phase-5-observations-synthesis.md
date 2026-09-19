@@ -153,6 +153,7 @@ the one before it:
    | `ModuleFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run population + 5 new bounded per-module observation types unobserved, fixed | `ModuleSynthesisRule` |
    | `HangFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run thread-pool/task-backpressure scalars + a per-thread deadlock-candidate flag unobserved, fixed | `HangSynthesisRule` |
    | `LockGraphFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run total-held-locks scalar unobserved, fixed | `LockGraphSynthesisRule` |
+   | `ThreadFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run triage scalars + finalizer-thread detail unobserved, fixed | `ThreadSynthesisRule` |
 
    ### Per-analyzer notable findings
 
@@ -880,6 +881,37 @@ the one before it:
      assertion from "2 deadlock candidates" beyond the `>= 2` recommendation threshold itself; added
      one new fixture (`SingleDeadlockCandidate_StillWarningNotCritical`) confirming a single
      candidate still gets the "reduce lock scope" recommendation, not the cycle-detection one.
+
+   **`ThreadFindingGenerator` — notable findings:**
+   - Unlike `LockGraphFindingGenerator`'s counting move, `BlockedThreadCount`/
+     `LockHoldingThreadCount`/`ActiveProcessingThreadCount` were *not* reconstructed by counting
+     matched `thread.state` observations, even though `thread.state` is also unbounded/per-entry.
+     Reason: `ThreadsWithActiveExceptionsCount` is incremented for every thread — alive or not —
+     while `thread.state` is only ever emitted for alive threads (`ProcessThread`'s exception
+     counter sits above its `IsAlive` check). Since that one field can't be derived by counting
+     `thread.state` matches, all the summary-finding scalars were kept together in a single new
+     whole-run `runtime.thread-triage` observation instead of splitting derivation strategy
+     per-field — one dead thread with a lingering exception record would otherwise silently
+     undercount a real production run without a test ever catching it.
+   - `ActiveProcessingThreadCount` (needed for the "zero active threads" hang finding) has no
+     existing field at all pre-migration — the old generator computes it by summing
+     `TopActiveThreadHotspots`' per-frame counts. Ported the running total into
+     `ThreadCategorization` itself, incremented in lockstep with `TrackTopFrameHotspot`'s own
+     early-return (a thread with zero captured frames is tracked in neither), so it always equals
+     that sum exactly, including the old code's own "no frames → not counted" quirk — preserved,
+     not fixed, consistent with the `StaticRootLeakDetector` migration's precedent for
+     pre-existing analyzer quirks.
+   - The finalizer thread's detail (`FinalizerThreadBlocked`/`FinalizerManagedThreadId`/
+     `FinalizerLockCount`) got its own single-subject `runtime.finalizer-thread` observation
+     (emitted at most once, only when a finalizer thread was found) rather than new whole-run
+     measures — `FinalizerManagedThreadId` needs a real `ThreadRef` identity for the "managed
+     thread N" evidence text, not a bare nullable int a whole-run measure can't carry.
+   - Old test suite's eleven fixtures set domain-result scalars directly, with no matching
+     per-thread snapshot data — same "no underlying detail list" gap `LockGraphFindingGenerator`'s
+     fixtures had for `ContestedLockCount`. Added one new fixture
+     (`FinalizerPresentButNotBlocked_NoFinalizerFinding`) proving a present-but-unblocked finalizer
+     thread (an observation exists, but `is-blocked` is 0) correctly suppresses the finalizer
+     finding — the old fixtures only ever tested "no finalizer at all" vs. "finalizer blocked."
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until `## Work`
    step 6 below (see the Stage-1 purity bullet above — distinct from playbook step f just above),
    so its `IFindingGenerator` cannot be retired alongside the rest in this playbook — state this

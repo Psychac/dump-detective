@@ -503,6 +503,37 @@
       "note": "One per alive thread — bounded by real thread count, never heap-scale.",
       "addedIn": "1.15.0"
     },
+    "runtime.thread-triage": {
+      "producedBy": "ThreadAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Threads/Analyzers/ThreadAnalyzer.cs",
+      "requiresCapabilities": ["runtime.threads"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "alive-thread.count": { "unit": "count", "semantics": "absolute" },
+        "blocked-thread.count": { "unit": "count", "semantics": "absolute" },
+        "lock-holding-thread.count": { "unit": "count", "semantics": "absolute" },
+        "active-exception-thread.count": { "unit": "count", "semantics": "absolute" },
+        "active-processing-thread.count": { "unit": "count", "semantics": "absolute" },
+        "async-chain-thread.count": { "unit": "count", "semantics": "absolute" },
+        "max-async-chain.depth": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "Whole-run. active-exception-thread.count spans every thread, alive or not, unlike thread.state (alive-only), so it can't be reconstructed by counting matched thread.state observations.",
+      "addedIn": "1.62.0"
+    },
+    "runtime.finalizer-thread": {
+      "producedBy": "ThreadAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Threads/Analyzers/ThreadAnalyzer.cs",
+      "requiresCapabilities": ["runtime.threads"],
+      "subjectKind": "thread",
+      "temporalKind": "point",
+      "measures": {
+        "is-blocked": { "unit": "count", "semantics": "absolute" },
+        "locks-held.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "At most one — only emitted when a finalizer thread was found. A dedicated observation rather than new thread.state measures, since it needs the finalizer thread's own ThreadRef identity (ManagedThreadId), not a bare int.",
+      "addedIn": "1.62.0"
+    },
     "thread.stack-cluster": {
       "producedBy": "ThreadStackClusterAnalyzer",
       "sourceFile": "src/DumpDetective.Plugins.Threads/Analyzers/ThreadStackClusterAnalyzer.cs",

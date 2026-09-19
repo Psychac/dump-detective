@@ -135,7 +135,73 @@ namespace DumpDetective.Analysis.Analyzers.Threads
             }
 
             FinalizeCategorization(categorization, threadsWithLocks, blockedThreads, threadsWithExceptions, otherThreads);
+            await EmitSummaryObservationsAsync(categorization, observationContext, observationCapabilities, cancellationToken);
             return BuildDomainResult(categorization);
+        }
+
+        /// <summary>
+        /// Phase 5 step 1: the whole-run scalars <c>ThreadFindingGenerator</c>'s replacement reads
+        /// that have no per-thread <c>thread.state</c> stand-in. <c>ThreadsWithActiveExceptionsCount</c>
+        /// spans every thread (alive or not — incremented above <c>IsAlive</c> in
+        /// <see cref="ProcessThread"/>), while <c>thread.state</c> is alive-only, so it can't be
+        /// reconstructed by counting matched observations the way <c>LockGraphSynthesisRule</c>
+        /// counts <c>lock.contested</c>/<c>thread.blocked</c>. The finalizer thread's own detail
+        /// gets a separate single-subject observation rather than new whole-run measures, since
+        /// <c>FinalizerManagedThreadId</c> needs a real <c>ThreadRef</c> identity, not a bare int.
+        /// </summary>
+        private static async ValueTask EmitSummaryObservationsAsync(
+            ThreadCategorization categorization, AnalysisContext observationContext,
+            IReadOnlySet<Capability> observationCapabilities, CancellationToken cancellationToken)
+        {
+            await observationContext.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "runtime.thread-triage",
+                Subjects = [],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["alive-thread.count"] = new Measure(categorization.AliveCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["blocked-thread.count"] = new Measure(categorization.PotentiallyBlockedThreads.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["lock-holding-thread.count"] = new Measure(categorization.ThreadsWithLocks.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["active-exception-thread.count"] = new Measure(categorization.ThreadsWithActiveExceptionsCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["active-processing-thread.count"] = new Measure(categorization.ActiveProcessingThreadCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["async-chain-thread.count"] = new Measure(categorization.AsyncChainThreadCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["max-async-chain.depth"] = new Measure(categorization.MaxAsyncChainDepth, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = observationContext.ArtifactId!.Value,
+                    AnalyzerKey = "Thread Analysis",
+                    CapabilitiesUsed = observationCapabilities,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+
+            if (categorization.FinalizerThread is { } finalizerThread)
+            {
+                await observationContext.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "runtime.finalizer-thread",
+                    Subjects = [finalizerThread.Thread],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["is-blocked"] = new Measure(categorization.FinalizerIsBlocked ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["locks-held.count"] = new Measure(finalizerThread.LockCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = observationContext.ArtifactId!.Value,
+                        AnalyzerKey = "Thread Analysis",
+                        CapabilitiesUsed = observationCapabilities,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                }, cancellationToken);
+            }
         }
 
         // Shared per-thread categorization body.
@@ -216,7 +282,8 @@ namespace DumpDetective.Analysis.Analyzers.Threads
                 else if (!thread.IsGc && !thread.IsFinalizer)
                 {
                     // Non-blocked user thread — track top frame for the Active Processing group
-                    TrackTopFrameHotspot(result.ActiveThreadHotspots, availableFrames);
+                    if (TrackTopFrameHotspot(result.ActiveThreadHotspots, availableFrames))
+                        result.ActiveProcessingThreadCount++;
                 }
 
                 // ThreadPool worker threads surface a recognisable dispatch frame;
@@ -508,10 +575,10 @@ namespace DumpDetective.Analysis.Analyzers.Threads
         private static string GetFrameSignatureOrUnknown(ThreadStackFrameRef frame) =>
             frame.RawMethodSignature ?? frame.FrameName ?? frame.MethodDisplayName ?? StringConstants.UnknownType;
 
-        private static void TrackTopFrameHotspot(Dictionary<string, int> hotspots, IReadOnlyList<ThreadStackFrameRef> frames)
+        private static bool TrackTopFrameHotspot(Dictionary<string, int> hotspots, IReadOnlyList<ThreadStackFrameRef> frames)
         {
             if (frames.Count == 0)
-                return;
+                return false;
 
             // Find first non-framework frame for better hotspot signal
             for (int i = 0; i < frames.Count; i++)
@@ -520,14 +587,19 @@ namespace DumpDetective.Analysis.Analyzers.Threads
                 if (!IsFrameworkFrameSignature(sig))
                 {
                     IncrementCount(hotspots, sig);
-                    return;
+                    return true;
                 }
             }
 
             // Fall back to first frame if all are framework frames
             string fallback = GetFrameSignature(frames[0]);
             if (!string.IsNullOrWhiteSpace(fallback))
+            {
                 IncrementCount(hotspots, fallback);
+                return true;
+            }
+
+            return false;
         }
 
         private static bool IsFrameworkFrameSignature(string signature)
@@ -583,8 +655,12 @@ namespace DumpDetective.Analysis.Analyzers.Threads
         public int ThreadPoolMinWorkers { get; set; }
         public int ThreadPoolMaxWorkers { get; set; }
 
-        // Non-blocked user thread top-frame hotspots (Active Processing group)
+        // Non-blocked user thread top-frame hotspots (Active Processing group). Incremented in
+        // lockstep with ActiveThreadHotspots itself — a thread with no frames at all is tracked in
+        // neither, matching TrackTopFrameHotspot's own early-return, so this always equals
+        // ActiveThreadHotspots.Values.Sum() (what ThreadFindingGenerator's replacement needs).
         public Dictionary<string, int> ActiveThreadHotspots { get; set; } = new(StringComparer.Ordinal);
+        public int ActiveProcessingThreadCount { get; set; }
 
         public List<ThreadWithStackTrace> ThreadsWithLocks { get; set; } = new();
         public List<ThreadWithStackTrace> PotentiallyBlockedThreads { get; set; } = new();

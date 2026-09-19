@@ -717,9 +717,10 @@
         "segment.count": { "unit": "count", "semantics": "absolute" },
         "object.count": { "unit": "count", "semantics": "absolute" },
         "committed.bytes": { "unit": "bytes", "semantics": "absolute" },
-        "reserved.bytes": { "unit": "bytes", "semantics": "absolute" }
+        "reserved.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "fragmented.bytes": { "unit": "bytes", "semantics": "absolute" }
       },
-      "note": "One per segment-kind row (bounded to 5: SOH/LOH/POH/Frozen/Unknown) — distinct taxonomy from MemoryAnalyzer's generation-labeled heap.segment-composition.",
+      "note": "One per segment-kind row (bounded to 5: SOH/LOH/POH/Frozen/Unknown) — distinct taxonomy from MemoryAnalyzer's generation-labeled heap.segment-composition. fragmented.bytes (Phase 5 step 2) is present on the SOH/LOH/POH/Frozen rows only — HeapTopologyDomainResult carries no UnknownFragmentedBytes field (the Unknown-kind local accumulator is computed but never returned), so the Unknown row's measure would have to be fabricated, not read. TotalCommittedBytes/TotalSegments/SohBytes/SohSegmentCount/LohBytes/LohSegmentCount/PohBytes/PohSegmentCount/FrozenBytes/LohPercent/PohPercent all need no whole-run measures either: they're exact sums (or, for the two percentages, sum-then-divide using the same formula HeapTopologyAnalyzer.Analyze itself uses) over this observation's 5 rows.",
       "addedIn": "1.25.0"
     },
     "heap.poh-type-composition": {
@@ -747,6 +748,21 @@
       },
       "note": "One per type in TopFrozenTypes (capped by HeapTopologyAnalyzerOptions.TopSegmentsCount).",
       "addedIn": "1.27.0"
+    },
+    "heap.topology-population": {
+      "producedBy": "HeapTopologyAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Runtime/Analyzers/HeapTopologyAnalyzer.cs",
+      "requiresCapabilities": ["heap.segments", "heap.types"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "is-server-gc": { "unit": "custom", "semantics": "absolute" },
+        "logical-heap.count": { "unit": "count", "semantics": "absolute" },
+        "logical-heap.max-bytes": { "unit": "bytes", "semantics": "absolute" },
+        "logical-heap.min-bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "One whole-run observation per analysis — no entity subject, same pattern as gc.generation-composition. logical-heap.max-bytes/min-bytes are the extremes across PerLogicalHeapSummaries, computed here rather than observed per-heap: the logical-heap-skew finding only ever reads the two extremes, never any individual heap's identity, and PerLogicalHeapSummaries itself has no natural EntityRef (a logical heap index, not a type/thread/object).",
+      "addedIn": "1.58.0"
     },
     "runtime.module-heap-footprint": {
       "producedBy": "ModuleAnalyzer",

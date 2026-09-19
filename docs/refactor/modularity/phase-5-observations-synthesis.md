@@ -148,6 +148,7 @@ the one before it:
    | `MemoryFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run pressure inputs + single top-1-type identity unobserved, fixed | `MemorySynthesisRule` |
    | `SegmentReservationFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — re-derived pressure-risk inputs + thresholds unobserved, fixed | `SegmentReservationSynthesisRule` |
    | `CrashFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run scalars + per-thread candidate identity unobserved, fixed | `CrashSynthesisRule` |
+   | `HeapTopologyFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — per-kind fragmentation + whole-run server-GC/logical-heap-skew scalars unobserved, fixed | `HeapTopologySynthesisRule` |
 
    ### Per-analyzer notable findings
 
@@ -732,6 +733,36 @@ the one before it:
      choice every prior rule in this playbook made for evidence-based confidence overrides, since
      neither is part of the parity surface these rules verify
      (Title/Narrative/Recommendation/Severity/Category/Tags/MetricValue/MetricUnit).
+
+   **`HeapTopologyFindingGenerator` — notable findings:**
+   - Step c's audit found `heap.segment-kind-composition` (Phase 5 step 1, one per SOH/LOH/POH/
+     Frozen/Unknown row) already backs `TotalCommittedBytes`/`TotalSegments`/every per-kind
+     bytes-and-segment-count/`LohPercent`/`PohPercent` by summing (or sum-then-divide) across its 5
+     rows — no gap there at all, the largest zero-new-whole-run-measure entry in this playbook so
+     far. The real gaps: per-kind fragmentation (`SohFragmentedBytes`/`LohFragmentedBytes`/
+     `PohFragmentedBytes`/`FrozenFragmentedBytes` — a genuinely different metric from
+     `committed.bytes`/`reserved.bytes`, computed from a per-segment `committed − used` sum this
+     observation never carried), and two whole-run facts with no per-kind home at all:
+     `IsServerGc` and the logical-heap-skew finding's max/min extremes over
+     `PerLogicalHeapSummaries`.
+   - Step d's fix, two parts: `fragmented.bytes` added to the SOH/LOH/POH/Frozen rows only — no
+     `UnknownFragmentedBytes` field exists on the domain result to read for the fifth (the local
+     accumulator is computed in `Analyze` but never returned), so that row's measure is omitted
+     rather than fabricated as zero; and a new whole-run `heap.topology-population` observation for
+     `is-server-gc`/`logical-heap.count` plus `logical-heap.max-bytes`/`min-bytes` — the two extremes
+     computed by the analyzer itself from the full `PerLogicalHeapSummaries` list, not observed per
+     logical heap, since the finding only ever reads the two extremes and never any individual
+     heap's identity (no natural `EntityRef` fits a logical-heap-index anyway).
+   - **The old generator's own unit tests set `TotalCommittedBytes`/`LohPercent`/`PohPercent` as
+     independent fixture fields, decoupled from `KindSummaries`** (most fixtures leave
+     `KindSummaries` empty entirely while asserting on percentages/severities) — achievable only
+     because the old generator reads the given whole-run fields directly rather than deriving them
+     from the per-kind rows, the same "test-only decoupling" situation
+     `AllocationPatternSynthesisRuleParityTests`/`SegmentReservationSynthesisRuleParityTests` hit.
+     The parity fixtures derive every whole-run scalar from the same per-kind bytes the rule
+     reconstructs its own totals from, and always populate all 5 `KindSummaries` rows (matching
+     `HeapTopologyAnalyzer.Analyze`'s own always-5-rows shape) rather than the old fixtures'
+     sometimes-single-row shortcut.
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until `## Work`
    step 6 below (see the Stage-1 purity bullet above — distinct from playbook step f just above),
    so its `IFindingGenerator` cannot be retired alongside the rest in this playbook — state this

@@ -72,6 +72,11 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer, IProducesAnalyzerDomainRes
     /// <see cref="HeapTopologyDomainResult.TopFrozenTypes"/> entry (already capped by
     /// <c>HeapTopologyAnalyzerOptions.TopSegmentsCount</c>). <see cref="HeapTopologyDomainResult.TopSegmentsBySize"/>
     /// left out — same "no segment entity kind yet" gap as <c>MemoryAnalyzer</c>.
+    /// Phase 5 step 2 adds <c>fragmented.bytes</c> to the SOH/LOH/POH/Frozen rows (no
+    /// <c>UnknownFragmentedBytes</c> field exists to read for the fifth), and a new whole-run
+    /// <c>heap.topology-population</c> observation for <c>IsServerGc</c>/<c>LogicalHeapCount</c> and
+    /// the logical-heap-skew finding's own two extremes — computed here, not observed per logical
+    /// heap, since the finding never reads any individual heap's identity.
     /// </summary>
     private static async ValueTask EmitObservationsAsync(AnalysisContext context, HeapTopologyDomainResult result, CancellationToken cancellationToken)
     {
@@ -81,20 +86,33 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer, IProducesAnalyzerDomainRes
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            var measures = new Dictionary<string, Measure>
+            {
+                ["kind.ordinal"] = new Measure((double)kind.Kind, MeasureUnit.Custom, MeasureSemantics.Absolute),
+                ["segment.count"] = new Measure(kind.SegmentCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["object.count"] = new Measure(kind.ObjectCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["committed.bytes"] = new Measure(kind.TotalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["reserved.bytes"] = new Measure(kind.ReservedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+            };
+
+            ulong? fragmentedBytes = kind.Kind switch
+            {
+                DumpHeapSegmentKind.SmallObjectHeap => result.SohFragmentedBytes,
+                DumpHeapSegmentKind.LargeObjectHeap => result.LohFragmentedBytes,
+                DumpHeapSegmentKind.PinnedObjectHeap => result.PohFragmentedBytes,
+                DumpHeapSegmentKind.Frozen => result.FrozenFragmentedBytes,
+                _ => null,
+            };
+            if (fragmentedBytes is ulong fb)
+                measures["fragmented.bytes"] = new Measure(fb, MeasureUnit.Bytes, MeasureSemantics.Absolute);
+
             await context.Observations.EmitAsync(new Observation
             {
                 Id = ObservationId.NewId(),
                 ObservationType = "heap.segment-kind-composition",
                 Subjects = [],
                 When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
-                Measures = new Dictionary<string, Measure>
-                {
-                    ["kind.ordinal"] = new Measure((double)kind.Kind, MeasureUnit.Custom, MeasureSemantics.Absolute),
-                    ["segment.count"] = new Measure(kind.SegmentCount, MeasureUnit.Count, MeasureSemantics.Absolute),
-                    ["object.count"] = new Measure(kind.ObjectCount, MeasureUnit.Count, MeasureSemantics.Absolute),
-                    ["committed.bytes"] = new Measure(kind.TotalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
-                    ["reserved.bytes"] = new Measure(kind.ReservedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
-                },
+                Measures = measures,
                 Provenance = new Provenance
                 {
                     Artifact = context.ArtifactId!.Value,
@@ -108,6 +126,37 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer, IProducesAnalyzerDomainRes
 
         await EmitTypeCompositionAsync(context, "heap.poh-type-composition", result.TopPohTypes, capabilitiesUsed, cancellationToken);
         await EmitTypeCompositionAsync(context, "heap.frozen-type-composition", result.TopFrozenTypes, capabilitiesUsed, cancellationToken);
+
+        ulong maxLogicalHeapBytes = 0, minLogicalHeapBytes = 0;
+        for (int i = 0; i < result.PerLogicalHeapSummaries.Count; i++)
+        {
+            ulong bytes = result.PerLogicalHeapSummaries[i].Bytes;
+            if (i == 0 || bytes > maxLogicalHeapBytes) maxLogicalHeapBytes = bytes;
+            if (i == 0 || bytes < minLogicalHeapBytes) minLogicalHeapBytes = bytes;
+        }
+
+        await context.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "heap.topology-population",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["is-server-gc"] = new Measure(result.IsServerGc ? 1 : 0, MeasureUnit.Custom, MeasureSemantics.Absolute),
+                ["logical-heap.count"] = new Measure(result.LogicalHeapCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["logical-heap.max-bytes"] = new Measure(maxLogicalHeapBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["logical-heap.min-bytes"] = new Measure(minLogicalHeapBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = context.ArtifactId!.Value,
+                AnalyzerKey = "Heap Topology",
+                CapabilitiesUsed = capabilitiesUsed,
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
     }
 
     private static async ValueTask EmitTypeCompositionAsync(

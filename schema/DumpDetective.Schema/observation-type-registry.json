@@ -447,10 +447,33 @@
       "subjectKind": "thread",
       "temporalKind": "point",
       "measures": {
-        "locks-held.count": { "unit": "count", "semantics": "absolute" }
+        "locks-held.count": { "unit": "count", "semantics": "absolute" },
+        "circular-wait-candidate.count": { "unit": "count", "semantics": "absolute" }
       },
-      "note": "One per alive thread that is actually waiting — a proper subset of all alive threads. WaitType/WaitReason omitted (categorical, no enum instance left in scope by the time the domain result exists).",
+      "note": "One per alive thread that is actually waiting — a proper subset of all alive threads. WaitType/WaitReason omitted (categorical, no enum instance left in scope by the time the domain result exists); circular-wait-candidate.count is the raw per-thread fact (MonitorWait + holding a lock) HangHealthClassifier's deadlock-candidate penalty needs.",
       "addedIn": "1.14.0"
+    },
+    "runtime.hang-pressure": {
+      "producedBy": "HangAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Threads/Analyzers/HangAnalyzer.cs",
+      "requiresCapabilities": ["runtime.threads"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "alive-thread.count": { "unit": "count", "semantics": "absolute" },
+        "waiting-thread.count": { "unit": "count", "semantics": "absolute" },
+        "waiting.percent": { "unit": "percent", "semantics": "ratio" },
+        "queued-work-items.count": { "unit": "count", "semantics": "absolute" },
+        "pending-task.count": { "unit": "count", "semantics": "absolute" },
+        "faulted-task.count": { "unit": "count", "semantics": "absolute" },
+        "task-continuation.count": { "unit": "count", "semantics": "absolute" },
+        "threadpool-max.count": { "unit": "count", "semantics": "absolute" },
+        "threadpool-active.count": { "unit": "count", "semantics": "absolute" },
+        "threadpool-cpu.percent": { "unit": "percent", "semantics": "absolute" },
+        "high-threadpool-threshold.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "Whole-run — thread-pool saturation/backpressure counters have no natural per-entity subject, same shape as gc.generation-composition.",
+      "addedIn": "1.60.0"
     },
     "thread.state": {
       "producedBy": "ThreadAnalyzer",

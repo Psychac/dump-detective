@@ -151,6 +151,7 @@ the one before it:
    | `HeapTopologyFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — per-kind fragmentation + whole-run server-GC/logical-heap-skew scalars unobserved, fixed | `HeapTopologySynthesisRule` |
    | `JitFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run scalars + single top-method identity unobserved, fixed | `JitSynthesisRule` |
    | `ModuleFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run population + 5 new bounded per-module observation types unobserved, fixed | `ModuleSynthesisRule` |
+   | `HangFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run thread-pool/task-backpressure scalars + a per-thread deadlock-candidate flag unobserved, fixed | `HangSynthesisRule` |
 
    ### Per-analyzer notable findings
 
@@ -827,6 +828,36 @@ the one before it:
      `versionConflictGroups`-only fixture left `ConflictDetails: []`, meaning the finding's own
      "Conflicts: ..." detail-listing branch had never actually been exercised by any test before
      this migration.
+
+   **`HangFindingGenerator` — notable findings:**
+   - `thread.wait-state` (Phase 5 step 1, one per `TopWaitingThreads` entry) only backed the
+     per-thread `locks-held.count` measure; every scalar the generator's one finding actually reads
+     — `WaitingThreadCount`, `TotalAliveThreads`, `WaitingPercent`, `QueuedWorkItems`, and every
+     input `HangHealthClassifier.ComputeHealthScore` needs (`PendingTasks`, `FaultedTasks`,
+     `TotalTaskContinuations`, the runtime thread-pool max/active/CPU counters, and
+     `HighThreadPoolThreshold`) — was unobserved.
+   - Step c/d's fix: one new whole-run `runtime.hang-pressure` observation carrying all of the
+     above (same whole-run shape as `gc.generation-composition`), plus one new per-thread measure,
+     `circular-wait-candidate.count`, added to the existing `thread.wait-state` observation.
+   - `HangHealthClassifier.ComputeHealthScore` is a genuine Stage-1 "sole owner" classifier
+     (`internal` in `DumpDetective.Plugins.Threads`, inaccessible from Reporting) — its formula is
+     duplicated verbatim in `HangSynthesisRule`, the same precedent as
+     `AllocationPatternPressureClassifier`/`MemoryPressureClassifier`. The one input the classifier
+     reads that has no natural whole-run measure — how many of `TopWaitingThreads` are "MonitorWait
+     while holding a lock" (its deadlock-candidate signal) — is *not* re-derived from a leaked
+     `WaitType` string at synthesis time; `circular-wait-candidate.count` is a raw per-thread fact
+     the analyzer itself computes at emission time (it still has the real `WaitType` enum in scope),
+     and the rule just sums the flag across matched observations. This keeps the categorical
+     `WaitType` string itself out of `Measures`, consistent with the pre-existing
+     `thread.wait-state` registry note, while still letting the classifier's own arithmetic run
+     unmodified.
+   - Old test suite's four fixtures (waiting-percent Critical/Warning/Info, queued-work-items
+     Warning) all carried zeroed-out health-score inputs — no fixture ever exercised the circular-
+     wait, thread-pool-saturation, or task-backpressure penalty branches. Added five new fixtures
+     covering each: circular-wait candidates (and a non-circular-wait control proving the flag,
+     not just wait-count, gates the penalty), saturation with/without CPU starvation, task
+     backpressure above `HighThreadPoolThreshold`, faulted tasks, continuation backlog, and one
+     all-signals-firing-together case.
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until `## Work`
    step 6 below (see the Stage-1 purity bullet above — distinct from playbook step f just above),
    so its `IFindingGenerator` cannot be retired alongside the rest in this playbook — state this

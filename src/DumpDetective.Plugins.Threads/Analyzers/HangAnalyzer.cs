@@ -149,7 +149,17 @@ namespace DumpDetective.Analysis.Analyzers.Threads
         /// threads. <c>WaitType</c>/<c>WaitReason</c>/<c>TopStackFrame</c> are left out of
         /// <c>Measures</c> (categorical strings, and by the time this domain result exists the
         /// original <c>WaitType</c> enum instance is gone — same "no enum in scope" gap
-        /// <c>GCRootAnalyzer</c>'s <c>RootKind</c> omission documents).
+        /// <c>GCRootAnalyzer</c>'s <c>RootKind</c> omission documents). A
+        /// <c>circular-wait-candidate.count</c> flag is kept, though — it's a raw per-thread fact
+        /// ("MonitorWait" while holding a lock), not the categorical string itself, and it's what
+        /// <c>HangHealthClassifier.ComputeHealthScore</c> needs to reproduce its deadlock-candidate
+        /// penalty without WaitType ever crossing into Reporting.
+        ///
+        /// A single whole-run <c>runtime.hang-pressure</c> observation carries the remaining raw
+        /// facts <c>HangHealthClassifier.ComputeHealthScore</c> and <c>HangFindingGenerator</c> read
+        /// straight off <see cref="HangDomainResult"/> — thread-pool saturation/backpressure
+        /// counters have no natural per-entity subject, so they're whole-run measures like
+        /// <c>gc.generation-composition</c>.
         /// </summary>
         private static async ValueTask EmitObservationsAsync(AnalysisContext context, HangDomainResult result, CancellationToken cancellationToken)
         {
@@ -158,6 +168,8 @@ namespace DumpDetective.Analysis.Analyzers.Threads
             foreach (WaitingThreadSnapshot wt in result.TopWaitingThreads ?? [])
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
+                bool isCircularWaitCandidate = wt.WaitType == "MonitorWait" && wt.LockCount > 0;
 
                 await context.Observations.EmitAsync(new Observation
                 {
@@ -168,6 +180,7 @@ namespace DumpDetective.Analysis.Analyzers.Threads
                     Measures = new Dictionary<string, Measure>
                     {
                         ["locks-held.count"] = new Measure(wt.LockCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["circular-wait-candidate.count"] = new Measure(isCircularWaitCandidate ? 1 : 0, MeasureUnit.Count, MeasureSemantics.Absolute),
                     },
                     Provenance = new Provenance
                     {
@@ -179,6 +192,36 @@ namespace DumpDetective.Analysis.Analyzers.Threads
                     Confidence = 1.0,
                 }, cancellationToken);
             }
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "runtime.hang-pressure",
+                Subjects = [],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["alive-thread.count"] = new Measure(result.TotalAliveThreads, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["waiting-thread.count"] = new Measure(result.WaitingThreadCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["waiting.percent"] = new Measure(result.WaitingPercent, MeasureUnit.Percent, MeasureSemantics.Ratio),
+                    ["queued-work-items.count"] = new Measure(result.QueuedWorkItems, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["pending-task.count"] = new Measure(result.PendingTasks, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["faulted-task.count"] = new Measure(result.FaultedTasks, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["task-continuation.count"] = new Measure(result.TotalTaskContinuations, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["threadpool-max.count"] = new Measure(result.RuntimeMaxThreads, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["threadpool-active.count"] = new Measure(result.RuntimeActiveWorkerThreads, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["threadpool-cpu.percent"] = new Measure(result.RuntimeCpuUtilization, MeasureUnit.Percent, MeasureSemantics.Absolute),
+                    ["high-threadpool-threshold.count"] = new Measure(result.HighThreadPoolThreshold, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Hang Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
         }
 
         private static HangDomainResult Analyze(

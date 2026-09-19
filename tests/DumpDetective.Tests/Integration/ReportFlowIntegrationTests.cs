@@ -143,13 +143,13 @@ public sealed class ReportFlowIntegrationTests
         TrendReportData trendData = new(
             Steps: [],
             Overall: [],
-            NewLeakSignalsByAnalyzer: new Dictionary<string, IReadOnlyList<DumpDetective.Analysis.Models.NewLeakSignal>>(StringComparer.Ordinal),
             Timeline: [],
             ScopedTimeline: [],
             Snapshots: [baseline, current],
             NewFindings: [finding],
             PersistentFindings: [],
-            ResolvedFindings: []);
+            ResolvedFindings: [],
+            SeverityChanges: []);
 
         ReportBuilderFacade facade = new(
         [

@@ -7,6 +7,7 @@ using DumpDetective.Core.Utilities;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
+using DumpDetective.Reporting.Trend;
 using DumpDetective.Core.Enums;
 
 internal sealed class TrendReportComposer(
@@ -28,7 +29,8 @@ internal sealed class TrendReportComposer(
         FindingLifecycleResult lifecycle = new(
             trendData.NewFindings,
             trendData.PersistentFindings,
-            trendData.ResolvedFindings);
+            trendData.ResolvedFindings,
+            trendData.SeverityChanges);
 
         var trendFindings = new List<InsightFinding>();
         foreach (InsightFinding f in BuildTrendFindings(trendData.Overall, lifecycle))
@@ -107,12 +109,9 @@ internal sealed class TrendReportComposer(
         }
 
         // T3 — Regression Dashboard (when there is anything to report)
-        bool hasEscalations = trendData.Snapshots.Count >= 2 &&
-            trendData.Snapshots[0].Findings.Any(f => trendData.Snapshots[^1].Findings
-                .Any(c => c.EffectiveFingerprint == f.EffectiveFingerprint &&
-                          f.Severity == FindingSeverity.Warning && c.Severity == FindingSeverity.Critical));
-        if (trendData.NewFindings.Count > 0 || hasEscalations || trendData.NewLeakSignalsByAnalyzer.Values.Any(v => v.Count > 0))
-            analyzerSections.Add(TrendRegressionDashboardBuilder.Build(trendData, trendData.Snapshots, mappedFindings));
+        bool hasEscalations = trendData.SeverityChanges.Any(c => c.IsEscalation);
+        if (trendData.NewFindings.Count > 0 || hasEscalations)
+            analyzerSections.Add(TrendRegressionDashboardBuilder.Build(trendData, mappedFindings));
 
         // T4 — Metric Timeline
         if (trendData.Timeline.Count > 0)
@@ -556,19 +555,15 @@ internal sealed class TrendReportComposer(
             .ToArray();
     }
 
-    private sealed record FindingLifecycleResult(
-        IReadOnlyList<InsightFinding> NewFindings,
-        IReadOnlyList<InsightFinding> PersistentFindings,
-        IReadOnlyList<InsightFinding> ResolvedFindings);
 }
 
 internal sealed record TrendReportData(
     IReadOnlyList<IReadOnlyList<AnalyzerTrendResult>> Steps,
     IReadOnlyList<AnalyzerTrendResult> Overall,
-    IReadOnlyDictionary<string, IReadOnlyList<NewLeakSignal>> NewLeakSignalsByAnalyzer,
     IReadOnlyList<AnalyzerMetricTimeline> Timeline,
     IReadOnlyList<AnalyzerMetricTimeline> ScopedTimeline,
     IReadOnlyList<AnalysisSnapshot> Snapshots,
     IReadOnlyList<InsightFinding> NewFindings,
     IReadOnlyList<InsightFinding> PersistentFindings,
-    IReadOnlyList<InsightFinding> ResolvedFindings);
+    IReadOnlyList<InsightFinding> ResolvedFindings,
+    IReadOnlyList<FindingSeverityChange> SeverityChanges);

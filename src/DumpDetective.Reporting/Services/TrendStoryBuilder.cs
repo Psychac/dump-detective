@@ -133,7 +133,10 @@ internal static class TrendStoryBuilder
             couplingHints.Add("Memory and GC both worsen in the same window, which usually points to retention or LOH pressure rather than one isolated analyzer.");
         }
 
-        if (trendData.NewLeakSignalsByAnalyzer.Values.Any(signals => signals.Count > 0))
+        // Generic tag-based check, not a leak-specific field: any newly-appeared finding tagged
+        // as leak-shaped counts, for every analyzer, not the 3 that a since-removed hand-picked
+        // "new leak signal" mechanism used to hard-code.
+        if (trendData.NewFindings.Any(f => f.Tags.Any(t => t.Contains("leak", StringComparison.OrdinalIgnoreCase))))
         {
             couplingHints.Add("Leak signals line up with the same regression window, so shared roots or type churn are worth checking first.");
         }

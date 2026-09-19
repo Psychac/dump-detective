@@ -27,13 +27,13 @@ namespace DumpDetective.Tests
             var trendData = new TrendReportData(
                 Steps: new[] { new AnalyzerTrendResult[0] },
                 Overall: new AnalyzerTrendResult[0],
-                NewLeakSignalsByAnalyzer: new System.Collections.Generic.Dictionary<string, System.Collections.Generic.IReadOnlyList<NewLeakSignal>>(System.StringComparer.Ordinal),
                 Timeline: new[] { timelineA },
                 ScopedTimeline: System.Array.Empty<AnalyzerMetricTimeline>(),
                 Snapshots: new[] { snap0, snap1 },
                 NewFindings: System.Array.Empty<InsightFinding>(),
                 PersistentFindings: System.Array.Empty<InsightFinding>(),
-                ResolvedFindings: System.Array.Empty<InsightFinding>());
+                ResolvedFindings: System.Array.Empty<InsightFinding>(),
+                SeverityChanges: System.Array.Empty<DumpDetective.Reporting.Trend.FindingSeverityChange>());
 
             var events = CorrelationBuilder.BuildFrom(trendData);
             events.Should().NotBeEmpty();

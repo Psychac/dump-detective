@@ -1,3 +1,4 @@
+using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 
 namespace DumpDetective.Reporting.Trend;
@@ -5,7 +6,22 @@ namespace DumpDetective.Reporting.Trend;
 internal sealed record FindingLifecycleResult(
     IReadOnlyList<InsightFinding> NewFindings,
     IReadOnlyList<InsightFinding> PersistentFindings,
-    IReadOnlyList<InsightFinding> ResolvedFindings);
+    IReadOnlyList<InsightFinding> ResolvedFindings,
+    IReadOnlyList<FindingSeverityChange> SeverityChanges);
+
+/// <summary>
+/// A persistent finding (same <see cref="InsightFinding.EffectiveFingerprint"/> in both snapshots)
+/// whose severity differs between them — in either direction, not just escalation. Consolidates
+/// what used to be three separate hand-rolled fingerprint joins doing the same Warning→Critical-only
+/// check: <c>TrendRegressionDashboardBuilder.BuildSeverityEscalations</c>,
+/// <c>TrendReportComposer</c>'s inline <c>hasEscalations</c> gate, and (for the
+/// growth-rather-than-severity case) <c>TrendAnalyzer.ComputeNewLeakSignals</c>. One generic
+/// mechanism, computed once here.
+/// </summary>
+internal sealed record FindingSeverityChange(InsightFinding Current, FindingSeverity BaselineSeverity)
+{
+    public bool IsEscalation => (int)Current.Severity > (int)BaselineSeverity;
+}
 
 internal static class FindingLifecycleComparer
 {
@@ -25,17 +41,32 @@ internal static class FindingLifecycleComparer
         var newFindings = new List<InsightFinding>();
         var persistentFindings = new List<InsightFinding>();
         var resolvedFindings = new List<InsightFinding>();
+        var severityChanges = new List<FindingSeverityChange>();
 
         foreach (string key in allKeys)
         {
             bool inBaseline = baselineByKey.ContainsKey(key);
             bool inCurrent = currentByKey.ContainsKey(key);
 
-            if (inCurrent && !inBaseline) newFindings.Add(currentByKey[key]);
-            else if (inCurrent && inBaseline) persistentFindings.Add(currentByKey[key]);
-            else resolvedFindings.Add(baselineByKey[key]);
+            if (inCurrent && !inBaseline)
+            {
+                newFindings.Add(currentByKey[key]);
+            }
+            else if (inCurrent && inBaseline)
+            {
+                InsightFinding currentFinding = currentByKey[key];
+                InsightFinding baselineFinding = baselineByKey[key];
+                persistentFindings.Add(currentFinding);
+
+                if (currentFinding.Severity != baselineFinding.Severity)
+                    severityChanges.Add(new FindingSeverityChange(currentFinding, baselineFinding.Severity));
+            }
+            else
+            {
+                resolvedFindings.Add(baselineByKey[key]);
+            }
         }
 
-        return new FindingLifecycleResult(newFindings, persistentFindings, resolvedFindings);
+        return new FindingLifecycleResult(newFindings, persistentFindings, resolvedFindings, severityChanges);
     }
 }

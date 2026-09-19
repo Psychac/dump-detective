@@ -255,9 +255,9 @@ public sealed class P0SmokeTests
 
         TrendReportData trendData = new(
             Steps: [], Overall: [],
-            NewLeakSignalsByAnalyzer: new Dictionary<string, IReadOnlyList<DumpDetective.Analysis.Models.NewLeakSignal>>(StringComparer.Ordinal),
             Timeline: [], ScopedTimeline: [], Snapshots: [baseline, current],
-            NewFindings: [finding], PersistentFindings: [], ResolvedFindings: []);
+            NewFindings: [finding], PersistentFindings: [], ResolvedFindings: [],
+            SeverityChanges: []);
 
         TrendReportComposer composer = new(new ReportSerializer());
         AnalysisReportDocument trendDoc = composer.ComposeCanonicalTrendReport(

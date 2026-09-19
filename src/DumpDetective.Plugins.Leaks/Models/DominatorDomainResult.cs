@@ -126,13 +126,7 @@ internal sealed record DominatorDomainResult(
     /// root to that type's sample was found within the search's own bounds — see
     /// <see cref="RootChainSummary.Truncated"/>.
     /// </summary>
-    IReadOnlyDictionary<string, RootChainSummary>? RootChainsByTypeName = null) : AnalyzerDomainResult, IRetainedObjectsByTypeSignal
-{
-    IReadOnlyList<NameBytesEntry> IRetainedObjectsByTypeSignal.TopHighlyReferencedObjectsByType =>
-        (TopHighlyReferencedObjects ?? Array.Empty<HighlyReferencedObjectSnapshot>())
-            .Select(o => new NameBytesEntry(o.TypeName, o.Size))
-            .ToArray();
-}
+    IReadOnlyDictionary<string, RootChainSummary>? RootChainsByTypeName = null) : AnalyzerDomainResult;
 
 internal sealed record HighlyReferencedObjectSnapshot(ulong Address, string TypeName, ulong Size, int IncomingReferences, ulong EstimatedRetainedBytes = 0, Evidence? Evidence = null);
 

@@ -1,4 +1,3 @@
-using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Models;
 
 namespace DumpDetective.Analysis.Trend
@@ -7,7 +6,6 @@ namespace DumpDetective.Analysis.Trend
     {
         private const string RetentionAnalyzerName = "Dominator Analysis";
         private const string LegacyLeakAnalyzerName = "Memory Leak Analysis";
-        private const string LeakCandidateAnalyzerName = "Leak Candidate Analysis";
 
         private readonly IReadOnlyDictionary<string, IAnalyzerTrendComparer> _comparers =
             comparers.ToDictionary(c => c.AnalyzerName, StringComparer.Ordinal);
@@ -42,115 +40,6 @@ namespace DumpDetective.Analysis.Trend
             }
 
             return results;
-        }
-
-        public IReadOnlyDictionary<string, IReadOnlyList<NewLeakSignal>> ComputeNewLeakSignals(AnalysisSnapshot baseline, AnalysisSnapshot current)
-        {
-            return ComputeNewLeakSignalsCore(baseline, current);
-        }
-
-        private static Dictionary<string, IReadOnlyList<NewLeakSignal>> ComputeNewLeakSignalsCore(
-            AnalysisSnapshot baseline,
-            AnalysisSnapshot current)
-        {
-            var result = new Dictionary<string, IReadOnlyList<NewLeakSignal>>(StringComparer.Ordinal);
-
-            // Dominator Analysis (legacy alias: Memory Leak Analysis) — compare TopHighlyReferencedObjects by type.
-            if (TryGetRetentionResult(baseline, out IRetainedObjectsByTypeSignal? bLeak) &&
-                TryGetRetentionResult(current, out IRetainedObjectsByTypeSignal? cLeak))
-            {
-                var baselineByType = new Dictionary<string, double>(StringComparer.Ordinal);
-                foreach (NameBytesEntry obj in bLeak.TopHighlyReferencedObjectsByType)
-                {
-                    baselineByType.TryGetValue(obj.Name, out double prev);
-                    baselineByType[obj.Name] = prev + obj.Bytes;
-                }
-
-                var currentByType = new Dictionary<string, double>(StringComparer.Ordinal);
-                foreach (NameBytesEntry obj in cLeak.TopHighlyReferencedObjectsByType)
-                {
-                    currentByType.TryGetValue(obj.Name, out double prev);
-                    currentByType[obj.Name] = prev + obj.Bytes;
-                }
-
-                var signals = new List<NewLeakSignal>();
-                foreach (var (typeName, currentBytes) in currentByType)
-                {
-                    baselineByType.TryGetValue(typeName, out double baseBytes);
-                    if (currentBytes > baseBytes * 1.5 + 1024)
-                        signals.Add(new NewLeakSignal(typeName, baseBytes, currentBytes, "RetentionAnalyzer"));
-                }
-
-                if (signals.Count > 0)
-                    result[RetentionAnalyzerName] = signals;
-            }
-
-            // Static Root Leak Detection — compare TopRootsByRetainedBytes
-            if (baseline.DomainResults.TryGetValue("Static Root Leak Detection", out var bStaticRaw) &&
-                current.DomainResults.TryGetValue("Static Root Leak Detection", out var cStaticRaw) &&
-                bStaticRaw is IStaticRootsByDescriptionSignal bStatic && cStaticRaw is IStaticRootsByDescriptionSignal cStatic)
-            {
-                var baselineByName = new Dictionary<string, double>(StringComparer.Ordinal);
-                foreach (NameBytesEntry entry in bStatic.TopRootsByRetainedBytes)
-                    baselineByName[entry.Name] = entry.Bytes;
-
-                var signals = new List<NewLeakSignal>();
-                foreach (NameBytesEntry entry in cStatic.TopRootsByRetainedBytes)
-                {
-                    double currentBytes = entry.Bytes;
-                    baselineByName.TryGetValue(entry.Name, out double baseBytes);
-                    if (currentBytes > baseBytes * 1.5 + 1024)
-                        signals.Add(new NewLeakSignal(entry.Name, baseBytes, currentBytes, "StaticRootAnalyzer"));
-                }
-
-                if (signals.Count > 0)
-                    result["Static Root Leak Detection"] = signals;
-            }
-
-            // Leak Candidate Analysis — compare current candidate footprint by type.
-            if (baseline.DomainResults.TryGetValue(LeakCandidateAnalyzerName, out AnalyzerDomainResult? bLeakCandidateRaw) &&
-                current.DomainResults.TryGetValue(LeakCandidateAnalyzerName, out AnalyzerDomainResult? cLeakCandidateRaw) &&
-                bLeakCandidateRaw is ILeakCandidatesByTypeSignal bLeakCandidates &&
-                cLeakCandidateRaw is ILeakCandidatesByTypeSignal cLeakCandidates)
-            {
-                var baselineByType = new Dictionary<string, double>(StringComparer.Ordinal);
-                foreach (NameBytesEntry candidate in bLeakCandidates.TopCandidatesByType)
-                    baselineByType[candidate.Name] = candidate.Bytes;
-
-                var signals = new List<NewLeakSignal>();
-                foreach (NameBytesEntry candidate in cLeakCandidates.TopCandidatesByType)
-                {
-                    double currentBytes = candidate.Bytes;
-                    baselineByType.TryGetValue(candidate.Name, out double baseBytes);
-                    if (currentBytes > baseBytes * 1.5 + 1024)
-                        signals.Add(new NewLeakSignal(candidate.Name, baseBytes, currentBytes, "LeakCandidateAnalyzer"));
-                }
-
-                if (signals.Count > 0)
-                    result[LeakCandidateAnalyzerName] = signals;
-            }
-
-            return result;
-        }
-
-        private static bool TryGetRetentionResult(AnalysisSnapshot snapshot, out IRetainedObjectsByTypeSignal? result)
-        {
-            if (snapshot.DomainResults.TryGetValue(RetentionAnalyzerName, out AnalyzerDomainResult? retentionRaw) &&
-                retentionRaw is IRetainedObjectsByTypeSignal retention)
-            {
-                result = retention;
-                return true;
-            }
-
-            if (snapshot.DomainResults.TryGetValue(LegacyLeakAnalyzerName, out AnalyzerDomainResult? leakRaw) &&
-                leakRaw is IRetainedObjectsByTypeSignal leak)
-            {
-                result = leak;
-                return true;
-            }
-
-            result = null;
-            return false;
         }
 
         public IReadOnlyList<IReadOnlyList<AnalyzerTrendResult>> CompareSeries(IReadOnlyList<AnalysisSnapshot> snapshots)

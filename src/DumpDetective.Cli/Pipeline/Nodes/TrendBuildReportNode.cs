@@ -65,13 +65,13 @@ internal sealed class TrendBuildReportNode(
         TrendReportData trendData = new(
             Steps: trendAnalyzer.CompareSeries(snapshots),
             Overall: trendAnalyzer.CompareAll(baseline, current),
-            NewLeakSignalsByAnalyzer: trendAnalyzer.ComputeNewLeakSignals(baseline, current),
             Timeline: trendAnalyzer.ExtractTimeline(snapshots),
             ScopedTimeline: trendAnalyzer.ExtractScopedTimeline(snapshots),
             Snapshots: snapshots,
             NewFindings: lifecycle.NewFindings,
             PersistentFindings: lifecycle.PersistentFindings,
-            ResolvedFindings: lifecycle.ResolvedFindings);
+            ResolvedFindings: lifecycle.ResolvedFindings,
+            SeverityChanges: lifecycle.SeverityChanges);
 
         if (sessionState.Resolved.DiagnosticMode)
             TrendConsolePresenter.PrintTrendOverallSummary(trendData, sessionState.Resolved.DiagnosticMode);

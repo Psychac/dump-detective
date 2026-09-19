@@ -1,25 +1,26 @@
-using DumpDetective.Analysis.Models;
-using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
-using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Models;
+using DumpDetective.Reporting.Trend;
 
 namespace DumpDetective.Reporting.Services;
 
 /// <summary>
-/// Builds the T3 Regression Dashboard <see cref="AnalyzerDetailSection"/>:
-/// severity escalations, new findings, and new leak signals.
+/// Builds the T3 Regression Dashboard <see cref="AnalyzerDetailSection"/>: severity escalations and
+/// new findings. Both are read directly off <see cref="FindingLifecycleComparer"/>'s output
+/// (via <see cref="TrendReportData"/>) rather than recomputed here — this used to independently
+/// re-join baseline/current findings by fingerprint just for the Warning→Critical case, duplicating
+/// what <c>FindingLifecycleComparer</c> and <c>TrendReportComposer</c>'s own escalation check each
+/// did too. One computation, three former call sites.
 /// </summary>
 internal static class TrendRegressionDashboardBuilder
 {
-    private sealed record SeverityEscalationEntry(string Analyzer, string Title, FindingSeverity BaselineSeverity, FindingSeverity CurrentSeverity);
-
     public static AnalyzerDetailSection Build(
         TrendReportData trendData,
-        IReadOnlyList<AnalysisSnapshot> snapshots,
         IReadOnlyList<FindingRecord>? mappedFindings = null)
     {
-        var escalations = BuildSeverityEscalations(snapshots);
+        IReadOnlyList<FindingSeverityChange> escalations = trendData.SeverityChanges
+            .Where(c => c.IsEscalation)
+            .ToArray();
         var blocks = new List<SectionBlock>();
 
         blocks.Add(new HeadingBlock("Regression Dashboard"));
@@ -40,18 +41,18 @@ internal static class TrendRegressionDashboardBuilder
         if (escalations.Count > 0)
         {
             var rows = new List<TableRow>(escalations.Count);
-            foreach (var esc in escalations)
+            foreach (FindingSeverityChange esc in escalations)
             {
                 rows.Add(new TableRow(new[]
                 {
-                    new TableCell(esc.Analyzer),
-                    new TableCell(esc.Title),
+                    new TableCell(esc.Current.Analyzer),
+                    new TableCell(esc.Current.Title),
                     new TableCell(esc.BaselineSeverity.ToString()),
-                    new TableCell(esc.CurrentSeverity.ToString())
+                    new TableCell(esc.Current.Severity.ToString())
                 }));
             }
             blocks.Add(new TableBlock(
-                Caption: "Findings that escalated from Warning to Critical",
+                Caption: "Findings whose severity increased since the baseline",
                 Headers: new[] { "Analyzer", "Title", "Baseline", "Current" },
                 Rows: rows));
         }
@@ -97,42 +98,10 @@ internal static class TrendRegressionDashboardBuilder
             blocks.Add(new TextBlock("No new findings detected."));
         }
 
-        // ── T3c: New Leak Signals ────────────────────────────────────────────
-        blocks.Add(new HeadingBlock("New Leak Signals", 1));
-        var allLeakSignals = trendData.NewLeakSignalsByAnalyzer
-            .SelectMany(kvp => kvp.Value.Select(s => (AnalyzerName: kvp.Key, Signal: s)))
-            .OrderByDescending(x => x.Signal.CurrentBytes)
-            .Take(10)
-            .ToArray();
-
-        if (allLeakSignals.Length > 0)
-        {
-            var rows = new List<TableRow>(allLeakSignals.Length);
-            foreach (var (analyzerName, signal) in allLeakSignals)
-            {
-                double growthPct = signal.BaselineBytes > 0
-                    ? (signal.CurrentBytes - signal.BaselineBytes) / signal.BaselineBytes * 100.0
-                    : double.NaN;
-                string growthStr = double.IsNaN(growthPct) ? "N/A" : $"{growthPct:+0.0;-0.0}%";
-
-                rows.Add(new TableRow(new[]
-                {
-                    new TableCell(signal.TypeName),
-                    new TableCell(analyzerName),
-                    new TableCell(FormatHelper.FormatMetricValue(signal.BaselineBytes, "bytes")),
-                    new TableCell(FormatHelper.FormatMetricValue(signal.CurrentBytes, "bytes")),
-                    new TableCell(growthStr)
-                }));
-            }
-            blocks.Add(new TableBlock(
-                Caption: "Types newly appearing or significantly growing in leak candidates",
-                Headers: new[] { "TypeName", "Source Analyzer", "Baseline", "Current", "Growth%" },
-                Rows: rows));
-        }
-        else
-        {
-            blocks.Add(new TextBlock("No new leak signals detected."));
-        }
+        // T3c "New Leak Signals" removed - it duplicated T3a/T3b (a leak-shaped finding that's new
+        // or escalated already shows up there, generically, for every analyzer, not just the 3
+        // this used to hand-pick). See docs/refactor/modularity/phase-5-observations-synthesis.md
+        // ## Work step 4.
 
         // T3b Correlation Timeline: replaced by client-side compact timeline renderer
         // Correlation events are emitted in the trend JSON by TrendReportComposer
@@ -145,27 +114,5 @@ internal static class TrendRegressionDashboardBuilder
             Blocks:        blocks,
             SectionId:     "T3",
             Domain:        "Trend");
-    }
-
-    private static IReadOnlyList<SeverityEscalationEntry> BuildSeverityEscalations(IReadOnlyList<AnalysisSnapshot> snapshots)
-    {
-        if (snapshots.Count < 2)
-            return [];
-
-        var baselineByFingerprint = snapshots[0].Findings
-            .GroupBy(f => f.EffectiveFingerprint, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
-
-        var escalations = new List<SeverityEscalationEntry>();
-        foreach (InsightFinding current in snapshots[^1].Findings)
-        {
-            if (!baselineByFingerprint.TryGetValue(current.EffectiveFingerprint, out InsightFinding? baseline))
-                continue;
-
-            if (baseline.Severity == FindingSeverity.Warning && current.Severity == FindingSeverity.Critical)
-                escalations.Add(new SeverityEscalationEntry(current.Analyzer, current.Title, baseline.Severity, current.Severity));
-        }
-
-        return escalations;
     }
 }

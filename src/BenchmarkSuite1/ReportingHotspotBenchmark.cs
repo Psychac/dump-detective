@@ -7,6 +7,7 @@ using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Formatters;
 using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.Services;
+using DumpDetective.Reporting.Trend;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -121,7 +122,6 @@ public class ReportingHotspotBenchmark
         List<AnalysisSnapshot> snapshots = new(snapshotCount);
         List<IReadOnlyList<AnalyzerTrendResult>> steps = new(snapshotCount > 0 ? snapshotCount - 1 : 0);
         List<AnalyzerTrendResult> overall = new(10);
-        Dictionary<string, IReadOnlyList<NewLeakSignal>> leakSignalsByAnalyzer = new(StringComparer.Ordinal);
         List<AnalyzerMetricTimeline> timeline = new(10);
         List<AnalyzerMetricTimeline> scopedTimeline = new(10);
         List<InsightFinding> newFindings = new();
@@ -138,7 +138,6 @@ public class ReportingHotspotBenchmark
             };
 
             overall.Add(new AnalyzerTrendResult(analyzerName, deltas));
-            leakSignalsByAnalyzer[analyzerName] = Array.Empty<NewLeakSignal>();
                 timeline.Add(new AnalyzerMetricTimeline(
                 analyzerName,
                 new[]
@@ -218,12 +217,12 @@ public class ReportingHotspotBenchmark
         return new TrendReportData(
             Steps: steps,
             Overall: overall,
-            NewLeakSignalsByAnalyzer: leakSignalsByAnalyzer,
             Timeline: timeline,
             ScopedTimeline: scopedTimeline,
             Snapshots: snapshots,
             NewFindings: newFindings,
             PersistentFindings: persistentFindings,
-            ResolvedFindings: resolvedFindings);
+            ResolvedFindings: resolvedFindings,
+            SeverityChanges: Array.Empty<FindingSeverityChange>());
     }
 }

@@ -992,10 +992,54 @@
         "type.count": { "unit": "count", "semantics": "absolute" },
         "avg-reference-fields": { "unit": "count", "semantics": "absolute" },
         "gc-scan-work": { "unit": "count", "semantics": "absolute" },
-        "gen2-gc-scan-work": { "unit": "count", "semantics": "absolute" }
+        "gen2-gc-scan-work": { "unit": "count", "semantics": "absolute" },
+        "reference-heavy-type.count": { "unit": "count", "semantics": "absolute" },
+        "value-heavy-type.count": { "unit": "count", "semantics": "absolute" }
       },
-      "note": "Single whole-heap observation. Per-type Top*Types lists excluded — Category is a hand-picked-threshold classification over the entire type population (Smell A/B + volume risk).",
+      "note": "Single whole-heap observation. Per-type Top*Types lists excluded — Category is a hand-picked-threshold classification over the entire type population (Smell A/B + volume risk). reference-heavy-type.count/value-heavy-type.count (added for the synthesis migration) are the exact totals of those two classification populations — not derivable by counting type.reference-heavy/type.value-heavy observations, which are capped to a display-only top 3/top 1.",
       "addedIn": "1.30.0"
+    },
+    "type.reference-heavy": {
+      "producedBy": "ObjectShapeAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Types/Analyzers/ObjectShapeAnalyzer.cs",
+      "requiresCapabilities": ["heap.types"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "reference-field.count": { "unit": "count", "semantics": "absolute" },
+        "total-field.count": { "unit": "count", "semantics": "absolute" },
+        "instance.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "Top 3 of TopReferenceHeavyTypes by GC-scan-cost score (refRatio x instanceCount) — the analyzer's own pre-existing sort order, not re-derived. The full TopReferenceHeavyTypes population itself stays excluded (Smell A/B + volume risk); only this already-selected handful crosses into observations, same 'port the selection, not the population' move GCGenerationAnalyzer.SelectTopTypes made.",
+      "addedIn": "1.67.0"
+    },
+    "type.value-heavy": {
+      "producedBy": "ObjectShapeAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Types/Analyzers/ObjectShapeAnalyzer.cs",
+      "requiresCapabilities": ["heap.types"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "reference-field.count": { "unit": "count", "semantics": "absolute" },
+        "total-field.count": { "unit": "count", "semantics": "absolute" },
+        "instance.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "At most one — the single top entry of TopValueHeavyTypes by total heap size, the analyzer's own pre-existing sort order.",
+      "addedIn": "1.67.0"
+    },
+    "type.finalizable-reference-heavy": {
+      "producedBy": "ObjectShapeAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Types/Analyzers/ObjectShapeAnalyzer.cs",
+      "requiresCapabilities": ["heap.types"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "reference-field.count": { "unit": "count", "semantics": "absolute" },
+        "total-field.count": { "unit": "count", "semantics": "absolute" },
+        "instance.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "Every TopReferenceHeavyTypes entry with IsFinalizable and instance.count >= 10,000 — filtered, not top-N-capped, since the old generator needs an exact count of this narrow population (same 'exact accumulator, not a capped derivation' reasoning CollectionAnalyzer's waste dictionaries needed). Bounded by distinct-type count, same population-size guarantee type.boxing relies on.",
+      "addedIn": "1.67.0"
     },
     "type.boxing-pressure": {
       "producedBy": "BoxingAnalyzer",

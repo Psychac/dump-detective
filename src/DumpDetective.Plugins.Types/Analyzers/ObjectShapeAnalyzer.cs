@@ -3,6 +3,7 @@ using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Temporal;
 
@@ -61,16 +62,30 @@ public sealed class ObjectShapeAnalyzer : IAnalyzer, IProducesAnalyzerDomainResu
 
     /// <summary>
     /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): a single
-    /// whole-heap <c>type.shape-composition</c> observation. Deliberately excludes every per-type
-    /// list on this result (<c>TopReferenceHeavyTypes</c>/<c>TopValueHeavyTypes</c>/
-    /// <c>TopBalancedTypes</c>/<c>TopGen2RetainedTypes</c>): each is the *entire* whole-heap type
-    /// population partitioned by <see cref="TypeShapeProfile.Category"/>, a hand-picked-threshold
-    /// classification (refRatio &gt; 0.6 / &lt; 0.2) — both the unbounded-volume risk
-    /// <c>GCGenerationAnalyzer</c>'s remarks flag and the Smell A/B judgment purity rule this phase
-    /// exists to keep out of observations.
+    /// whole-heap <c>type.shape-composition</c> observation carries the plain scalars.
+    /// <c>TopReferenceHeavyTypes</c>/<c>TopValueHeavyTypes</c>/<c>TopBalancedTypes</c>/
+    /// <c>TopGen2RetainedTypes</c> themselves are still excluded wholesale: each is the *entire*
+    /// whole-heap type population partitioned by <see cref="TypeShapeProfile.Category"/>, a
+    /// hand-picked-threshold classification (refRatio &gt; 0.6 / &lt; 0.2) — both the
+    /// unbounded-volume risk <c>GCGenerationAnalyzer</c>'s remarks flag and the Smell A/B judgment
+    /// purity rule this phase exists to keep out of observations.
+    ///
+    /// What the old finding generator actually reads off those lists, though, is a handful of
+    /// specific, already-selected entries — the same "port the selection, not the raw population"
+    /// move <c>GCGenerationAnalyzer.SelectTopTypes</c> made. Three new per-type observation types
+    /// carry exactly that selection, each reusing <c>TopReferenceHeavyTypes</c>/<c>TopValueHeavyTypes</c>'s
+    /// own pre-existing sort order (already the analyzer's own ranking, not re-derived here):
+    /// <c>type.reference-heavy</c> (top 3 by GC-scan-cost score), <c>type.value-heavy</c> (the single
+    /// top type by total heap size), and <c>type.finalizable-reference-heavy</c> (every finalizable
+    /// reference-heavy type with ≥10K instances — filtered, not top-N-capped, since the old
+    /// generator needs an *exact* count of this narrow, distinct-type-scale population, the same
+    /// "exact accumulator, not a capped derivation" reasoning <c>CollectionAnalyzer</c>'s waste
+    /// dictionaries needed).
     /// </summary>
     private static async ValueTask EmitObservationAsync(Sdk.Analysis.AnalysisContext context, ObjectShapeAnalyzerDomainResult result, CancellationToken cancellationToken)
     {
+        var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapTypes };
+
         await context.Observations.EmitAsync(new Observation
         {
             Id = ObservationId.NewId(),
@@ -83,12 +98,63 @@ public sealed class ObjectShapeAnalyzer : IAnalyzer, IProducesAnalyzerDomainResu
                 ["avg-reference-fields"] = new Measure(result.AvgRefFieldsPerType, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["gc-scan-work"] = new Measure(result.TotalGcScanWork, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["gen2-gc-scan-work"] = new Measure(result.TotalGen2GcScanWork, MeasureUnit.Count, MeasureSemantics.Absolute),
+                // Exact totals for the two classification populations — not derivable by counting
+                // matched type.reference-heavy/type.value-heavy observations, which are capped to
+                // the top 3/top 1 (see EmitTypeShapeObservationAsync below), unlike the old
+                // generator's own "{Count} reference-heavy types found" text.
+                ["reference-heavy-type.count"] = new Measure(result.TopReferenceHeavyTypes.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["value-heavy-type.count"] = new Measure(result.TopValueHeavyTypes.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
             },
             Provenance = new Provenance
             {
                 Artifact = context.ArtifactId!.Value,
                 AnalyzerKey = "Object Shape Analysis",
-                CapabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapTypes },
+                CapabilitiesUsed = capabilitiesUsed,
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
+
+        foreach (TypeShapeProfile profile in result.TopReferenceHeavyTypes.Take(3))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await EmitTypeShapeObservationAsync(context, "type.reference-heavy", profile, capabilitiesUsed, cancellationToken);
+        }
+
+        if (result.TopValueHeavyTypes.Count > 0)
+            await EmitTypeShapeObservationAsync(context, "type.value-heavy", result.TopValueHeavyTypes[0], capabilitiesUsed, cancellationToken);
+
+        foreach (TypeShapeProfile profile in result.TopReferenceHeavyTypes)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (profile.IsFinalizable && profile.InstanceCount >= 10_000)
+                await EmitTypeShapeObservationAsync(context, "type.finalizable-reference-heavy", profile, capabilitiesUsed, cancellationToken);
+        }
+    }
+
+    private static async ValueTask EmitTypeShapeObservationAsync(
+        Sdk.Analysis.AnalysisContext context, string observationType, TypeShapeProfile profile,
+        HashSet<Capability> capabilitiesUsed, CancellationToken cancellationToken)
+    {
+        (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(profile.TypeName);
+
+        await context.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = observationType,
+            Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["reference-field.count"] = new Measure(profile.ReferenceFields, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["total-field.count"] = new Measure(profile.TotalFields, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["instance.count"] = new Measure(profile.InstanceCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = context.ArtifactId!.Value,
+                AnalyzerKey = "Object Shape Analysis",
+                CapabilitiesUsed = capabilitiesUsed,
                 Fidelity = FidelityLevel.Full,
             },
             Confidence = 1.0,

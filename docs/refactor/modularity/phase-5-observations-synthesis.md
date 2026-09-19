@@ -157,6 +157,7 @@ the one before it:
    | `ThreadStackClusterFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run diversity scalars + per-cluster signature/framework-pattern text unobserved, fixed | `ThreadStackClusterSynthesisRule` |
    | `BoxingFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run pressure scalars + oversized-value/struct-padding-waste per-type aggregations unobserved, fixed | `BoxingSynthesisRule` |
    | `CollectionFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run waste scalars + exact per-kind/per-element-type waste breakdowns unobserved, fixed | `CollectionSynthesisRule` |
+   | `ObjectShapeFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — three already-selected per-type entries + two exact classification-population totals unobserved, fixed | `ObjectShapeSynthesisRule` |
 
    ### Per-analyzer notable findings
 
@@ -990,6 +991,35 @@ the one before it:
    - Old test suite's fixtures already passed `WasteCountsByKind`/`WasteBytesByKind`/etc. directly,
      with no `TopWastefulCollections`/other-field coupling to break — unlike Boxing, no fixture
      rebuild was needed; `ToObservations` just mirrors the dictionaries directly into observations.
+
+   **`ObjectShapeFindingGenerator` — notable findings:**
+   - The most novel gap of any migration so far: `type.shape-composition`'s own Phase 5 step 1 doc
+     comment *already* deliberately excludes every per-type `Top*Types` list (misleadingly named —
+     each is actually the entire whole-heap type population partitioned by a hand-picked-threshold
+     `Category`, unlike every other analyzer's genuinely-capped "Top" lists), citing the same
+     unbounded-volume risk `GCGenerationAnalyzer`'s remarks flag. But the old finding generator reads
+     exactly three small, already-selected slices of those lists — `TopReferenceHeavyTypes.Take(3)`,
+     `TopValueHeavyTypes[0]`, and a filtered finalizable-and-heavy subset — never the full
+     populations themselves. Three new per-type observation types carry only that selection,
+     reusing the analyzer's own pre-existing sort order (never re-derived): `type.reference-heavy`
+     (top 3 by GC-scan-cost score), `type.value-heavy` (the single top type by heap size), and
+     `type.finalizable-reference-heavy` (every `IsFinalizable` + ≥10K-instance entry — filtered, not
+     capped, since the old generator needs an *exact* count of this one, narrow, distinct-type-scale
+     population).
+   - Real parity bug caught mid-migration, not just a gap: the old generator's evidence text uses
+     `TopReferenceHeavyTypes.Count`/`TopValueHeavyTypes.Count` — the full classification population
+     size — while the new per-type observations are capped to a display-only top 3/top 1. Counting
+     matched observations (the `LockGraphSynthesisRule` move) would have silently shown "3" instead
+     of the true count whenever more than 3 reference-heavy types exist. Fixed by adding two exact
+     whole-run counts, `reference-heavy-type.count`/`value-heavy-type.count`, to
+     `type.shape-composition` instead — caught by a new fixture,
+     `MoreThanThreeReferenceHeavyTypes_EvidenceCountUsesFullTotalNotJustTop3`, before it could reach
+     the old test suite's blind spot (its own fixtures never exercised more than one reference-heavy
+     type at a time).
+   - Old test suite covered only the reference-field-density finding; added six new fixtures for the
+     value-heavy and finalizable-reference-heavy findings (above/below their respective 10K-instance
+     thresholds), plus a "no reference-heavy types at all" case and one all-signals-firing-together
+     case, none of which the old suite exercised.
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until `## Work`
    step 6 below (see the Stage-1 purity bullet above — distinct from playbook step f just above),
    so its `IFindingGenerator` cannot be retired alongside the rest in this playbook — state this

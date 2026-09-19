@@ -152,6 +152,7 @@ public sealed class SdkRegistryConformanceTests
             ["collection.kind-waste"] = ["waste.count", "waste.bytes"],
             ["collection.element-type-waste"] = ["waste.count", "waste.bytes"],
             ["heap.long-string"] = ["length", "shallow.bytes"],
+            ["type.string-composition"] = ["duplication.ratio", "duplicate-pattern.count", "duplicate-wasted.bytes", "loh-string.bytes", "very-long-string.count", "very-long-string.bytes", "pct-of-managed-heap.percent", "total-string-memory.bytes", "sampling-coverage.ratio", "strings-sampled.count"],
             ["type.async-state-machine"] = ["instance.count", "shallow.bytes", "dominant-state", "gen2.count", "gen2.fraction", "is-async-void"],
             ["type.async-captured-closure"] = ["captured.bytes"],
             ["type.orphaned-task"] = ["shallow.bytes"],

@@ -250,6 +250,48 @@ public sealed partial class StringAnalyzer : IAnalyzer, IProducesAnalyzerDomainR
 
         stopwatch.Stop();
 
+        ulong veryLongStringBytes = 0;
+        foreach (LongStringEntry entry in veryLongStrings)
+            veryLongStringBytes += entry.SizeBytes;
+
+        // Phase 5 step 1: whole-run scalars StringFindingGenerator's replacement reads that have no
+        // per-entry stand-in — DuplicatePatternCount/DuplicateWastedBytes/DuplicationRatio come from
+        // stringStats, a sampled hash structure with no "duplicate string" entity kind in the SDK
+        // yet (per the heap.long-string doc comment above). very-long-string.count/.bytes are the
+        // *exact* post-truncation totals (veryLongStrings is capped to maxVeryLongStringsToKeep
+        // above) — deliberately not derived by counting/summing heap.long-string observations,
+        // which are emitted uncapped during the scan and would silently overcount whenever more
+        // than maxVeryLongStringsToKeep candidates exist, the same capped-vs-exact trap
+        // ObjectShapeAnalyzer's migration caught for its own Top*Types counts.
+        await observationContext.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "type.string-composition",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["duplication.ratio"] = new Measure(duplicationRatio, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                ["duplicate-pattern.count"] = new Measure(duplicatePatternCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["duplicate-wasted.bytes"] = new Measure(duplicateWastedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["loh-string.bytes"] = new Measure(lohStringBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["very-long-string.count"] = new Measure(veryLongStrings.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["very-long-string.bytes"] = new Measure(veryLongStringBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["pct-of-managed-heap.percent"] = new Measure(pctOfManagedHeap, MeasureUnit.Percent, MeasureSemantics.Ratio),
+                ["total-string-memory.bytes"] = new Measure(totalStringMemory, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["sampling-coverage.ratio"] = new Measure(samplingCoverage, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                ["strings-sampled.count"] = new Measure(stringsSampled, MeasureUnit.Count, MeasureSemantics.Absolute),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = observationContext.ArtifactId!.Value,
+                AnalyzerKey = "String Analysis",
+                CapabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapTypes },
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
+
         return new StringDomainResult(
             TotalStrings: totalStrings,
             TotalStringMemoryBytes: totalStringMemory,

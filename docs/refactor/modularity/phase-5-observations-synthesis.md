@@ -158,6 +158,7 @@ the one before it:
    | `BoxingFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run pressure scalars + oversized-value/struct-padding-waste per-type aggregations unobserved, fixed | `BoxingSynthesisRule` |
    | `CollectionFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run waste scalars + exact per-kind/per-element-type waste breakdowns unobserved, fixed | `CollectionSynthesisRule` |
    | `ObjectShapeFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — three already-selected per-type entries + two exact classification-population totals unobserved, fixed | `ObjectShapeSynthesisRule` |
+   | `StringFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run duplication/LOH/very-long-string/sampling scalars unobserved, fixed | `StringSynthesisRule` |
 
    ### Per-analyzer notable findings
 
@@ -1020,6 +1021,23 @@ the one before it:
      value-heavy and finalizable-reference-heavy findings (above/below their respective 10K-instance
      thresholds), plus a "no reference-heavy types at all" case and one all-signals-firing-together
      case, none of which the old suite exercised.
+
+   **`StringFindingGenerator` — notable findings:**
+   - Same capped-vs-exact trap `ObjectShapeSynthesisRule`'s migration caught, found again here:
+     `heap.long-string` is emitted uncapped, inline, during the heap scan, but the domain result's
+     own `VeryLongStrings` list gets truncated to `maxVeryLongStringsToKeep` *after* that scan
+     completes — so counting/summing matched `heap.long-string` observations would silently
+     overcount whenever more than the cap exists. Closed by putting `very-long-string.count`/`.bytes`
+     on a new whole-run `type.string-composition` observation instead, computed from the
+     already-truncated list at the exact point the domain result itself is built.
+   - `DuplicationRatio`/`DuplicatePatternCount`/`DuplicateWastedBytes` have no per-entry stand-in at
+     all — they come from `stringStats`, a sampled hash structure with no "duplicate string" entity
+     kind in the SDK yet (the pre-existing `heap.long-string` doc comment already noted this same gap
+     for `TopDuplicates`). All three, plus `LohStringBytes`/`PctOfManagedHeap`/
+     `TotalStringMemoryBytes`/`SamplingCoverage`/`StringsSampled`, went onto the same
+     `type.string-composition` observation alongside the two very-long-string totals — one whole-run
+     observation covering every scalar this generator's six findings need, none requiring per-entry
+     identity data.
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until `## Work`
    step 6 below (see the Stage-1 purity bullet above — distinct from playbook step f just above),
    so its `IFindingGenerator` cannot be retired alongside the rest in this playbook — state this

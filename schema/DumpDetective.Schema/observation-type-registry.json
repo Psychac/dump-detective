@@ -1238,8 +1238,29 @@
         "length": { "unit": "count", "semantics": "absolute" },
         "shallow.bytes": { "unit": "bytes", "semantics": "absolute" }
       },
-      "note": "One per string at or above VeryLongStringThresholdBytes — a small fraction of the whole string population. TopDuplicates excluded (no stringValue entity kind in the SDK yet).",
+      "note": "One per string at or above VeryLongStringThresholdBytes — a small fraction of the whole string population. TopDuplicates excluded (no stringValue entity kind in the SDK yet). Emitted uncapped during the scan, before VeryLongStrings' own post-scan truncation to maxVeryLongStringsToKeep — so its match count can exceed the domain result's VeryLongStrings.Count; see type.string-composition's very-long-string.count for the exact, truncation-consistent total.",
       "addedIn": "1.35.0"
+    },
+    "type.string-composition": {
+      "producedBy": "StringAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Types/Analyzers/StringAnalyzer.cs",
+      "requiresCapabilities": ["heap.types"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "duplication.ratio": { "unit": "ratio", "semantics": "ratio" },
+        "duplicate-pattern.count": { "unit": "count", "semantics": "absolute" },
+        "duplicate-wasted.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "loh-string.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "very-long-string.count": { "unit": "count", "semantics": "absolute" },
+        "very-long-string.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "pct-of-managed-heap.percent": { "unit": "percent", "semantics": "ratio" },
+        "total-string-memory.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "sampling-coverage.ratio": { "unit": "ratio", "semantics": "ratio" },
+        "strings-sampled.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "Whole-run scalars with no per-entry stand-in. very-long-string.count/.bytes are the exact post-truncation totals over VeryLongStrings (capped to maxVeryLongStringsToKeep), deliberately not derived by counting/summing heap.long-string observations, which are emitted uncapped and would overcount past that cap.",
+      "addedIn": "1.68.0"
     },
     "type.async-state-machine": {
       "producedBy": "AsyncStateMachineAnalyzer",

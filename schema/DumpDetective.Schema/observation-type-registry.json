@@ -440,6 +440,18 @@
       "note": "One per contested lock. Subjects carries the lock's type, plus the owning thread as a second subject when resolved (a relation, per observation-and-correlation-model.md § 1's Subjects remarks).",
       "addedIn": "1.13.0"
     },
+    "runtime.lock-pressure": {
+      "producedBy": "LockGraphAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Threads/Analyzers/LockGraphAnalyzer.cs",
+      "requiresCapabilities": ["runtime.locks", "heap.objects", "runtime.threads"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "held-lock.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "Whole-run — total monitor-held locks, including uncontested ones that get no per-lock observation at all (only contested locks emit lock.contested).",
+      "addedIn": "1.61.0"
+    },
     "thread.wait-state": {
       "producedBy": "HangAnalyzer",
       "sourceFile": "src/DumpDetective.Plugins.Threads/Analyzers/HangAnalyzer.cs",

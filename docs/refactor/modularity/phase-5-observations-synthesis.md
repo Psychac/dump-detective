@@ -152,6 +152,7 @@ the one before it:
    | `JitFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run scalars + single top-method identity unobserved, fixed | `JitSynthesisRule` |
    | `ModuleFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run population + 5 new bounded per-module observation types unobserved, fixed | `ModuleSynthesisRule` |
    | `HangFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run thread-pool/task-backpressure scalars + a per-thread deadlock-candidate flag unobserved, fixed | `HangSynthesisRule` |
+   | `LockGraphFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run total-held-locks scalar unobserved, fixed | `LockGraphSynthesisRule` |
 
    ### Per-analyzer notable findings
 
@@ -858,6 +859,27 @@ the one before it:
      not just wait-count, gates the penalty), saturation with/without CPU starvation, task
      backpressure above `HighThreadPoolThreshold`, faulted tasks, continuation backlog, and one
      all-signals-firing-together case.
+
+   **`LockGraphFindingGenerator` — notable findings:**
+   - Both `lock.contested` and `thread.blocked` (Phase 5 step 1) already emit one observation per
+     entry with no cap, covering every contested lock and every deadlock candidate — so
+     `ContestedLockCount`/`DeadlockCandidateCount` don't need dedicated measures at all;
+     `LockGraphSynthesisRule` reconstructs both by counting matched observations of each type. This
+     is the same "count instead of duplicate" move `ArraySynthesisRule`'s pre-sorted-list trust
+     established, one step further: no data at all needs re-emitting when the observation is
+     already unbounded and per-entry.
+   - `TotalHeldLocks` is the one scalar with no observation to stand in for it — uncontested locks
+     (the majority of `TotalHeldLocks` in a healthy dump) get no per-lock observation, only
+     contested ones do. Step c/d's fix: one new whole-run `runtime.lock-pressure` observation
+     carrying just that one measure, `held-lock.count`.
+   - `DeadlockCandidateDetails`' `ManagedThreadId`/`OsThreadId` pair (used to build the "Candidate
+     thread(s): thread N (OS: M)" evidence suffix) already has a home: `thread.blocked`'s own
+     `Subjects[0]` is the full `ThreadRef`, so no new measure was needed for it either — this
+     migration's only real gap was the whole-run scalar above.
+   - Old test suite's five fixtures never combined "1 deadlock candidate" with a distinguishing
+     assertion from "2 deadlock candidates" beyond the `>= 2` recommendation threshold itself; added
+     one new fixture (`SingleDeadlockCandidate_StillWarningNotCritical`) confirming a single
+     candidate still gets the "reduce lock scope" recommendation, not the cycle-detection one.
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until `## Work`
    step 6 below (see the Stage-1 purity bullet above — distinct from playbook step f just above),
    so its `IFindingGenerator` cannot be retired alongside the rest in this playbook — state this

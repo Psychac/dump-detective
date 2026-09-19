@@ -85,6 +85,7 @@ public sealed class SdkRegistryConformanceTests
             ["heap.region-composition"] = ["region-kind.ordinal", "region.count", "reserved.bytes", "committed.bytes", "near-empty.count", "near-empty.committed-bytes"],
             ["thread.blocked"] = ["locks-held.count"],
             ["lock.contested"] = ["waiting.count", "recursion.count"],
+            ["runtime.lock-pressure"] = ["held-lock.count"],
             ["thread.wait-state"] = ["locks-held.count", "circular-wait-candidate.count"],
             ["runtime.hang-pressure"] = ["alive-thread.count", "waiting-thread.count", "waiting.percent", "queued-work-items.count", "pending-task.count", "faulted-task.count", "task-continuation.count", "threadpool-max.count", "threadpool-active.count", "threadpool-cpu.percent", "high-threadpool-threshold.count"],
             ["thread.state"] = ["stack-size.bytes", "locks-held.count", "stack-root.count", "has-exception", "async-chain.depth"],

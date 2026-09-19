@@ -275,6 +275,30 @@ public sealed class LockGraphAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
             }, cancellationToken);
         }
 
+        // Phase 5 step 1: the only scalar HangFindingGenerator's replacement reads that isn't
+        // already reconstructible by counting matched lock.contested/thread.blocked observations
+        // (both fully emitted above, one per entry, never capped) — total held locks includes
+        // uncontested ones, which get no per-lock observation at all.
+        await observationContext.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "runtime.lock-pressure",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["held-lock.count"] = new Measure(allHeldLocks.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = observationContext.ArtifactId!.Value,
+                AnalyzerKey = "Lock Graph Analysis",
+                CapabilitiesUsed = observationCapabilities,
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
+
         return new LockGraphDomainResult(
             allHeldLocks.Count,
             contestedLocks.Count,

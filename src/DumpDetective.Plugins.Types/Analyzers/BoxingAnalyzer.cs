@@ -71,12 +71,61 @@ namespace DumpDetective.Analysis.Analyzers.Types
         /// <c>type.boxing</c> observation per <see cref="BoxingDomainResult.TopBoxedTypes"/> entry —
         /// bounded to value types actually found boxed on the heap, a small fraction of the whole
         /// type population (unlike <c>ObjectShapeAnalyzer</c>'s per-type lists, which cover every
-        /// type). <c>IsEnum</c>/<c>HasRefFields</c>/<c>HasIEquatable</c> are structural facts, not
-        /// judgments, so they're fine as raw 0/1 measures.
+        /// type). <c>IsEnum</c>/<c>HasRefFields</c>/<c>HasIEquatable</c>/<c>IsNullable</c> (the last
+        /// added this migration, via the same <c>IsNullableTypeName</c> name-pattern check
+        /// <c>Analyze</c> already used) are structural facts, not judgments, so they're fine as raw
+        /// 0/1 measures — used by <c>BoxingSynthesisRule</c> for per-type identity/ranking lookups
+        /// (top boxed enum type, types missing <c>IEquatable&lt;T&gt;</c>), not for whole-run totals.
+        ///
+        /// <c>type.oversized-value</c> (one per <see cref="BoxingDomainResult.TopOversizedTypes"/>
+        /// entry, already sorted descending by instance count) and
+        /// <c>type.struct-padding-waste</c> (one per <see cref="BoxingDomainResult.TopPaddingWasteTypes"/>
+        /// entry, already sorted descending by wasted bytes) are both new: neither aggregation
+        /// shares <c>TopBoxedTypes</c>' population (oversized types are filtered by
+        /// <c>OversizedThresholdBytes</c>; padding-waste types are filtered by nonzero waste), and
+        /// both are bounded by distinct-type count, same population-size guarantee as
+        /// <c>TopBoxedTypes</c> itself.
+        ///
+        /// A whole-run <c>type.boxing-pressure</c> observation, unconditionally emitted even when
+        /// every per-type list above is empty (e.g. <c>Analyze</c>'s <c>Empty()</c> early-return when
+        /// generation data isn't exact), carries every scalar the old generator's always-present
+        /// summary finding needs — deliberately *not* re-derived by summing the per-type
+        /// observations, both to avoid a float-sum/edge-case mismatch with the domain result's own
+        /// arithmetic and, more importantly, to guarantee <c>BoxingFindingGenerator</c>'s summary
+        /// finding (which fires unconditionally, even over an all-zero result) always has a
+        /// non-empty <c>DerivedFrom</c> to attach to.
         /// </summary>
         private static async ValueTask EmitObservationsAsync(AnalysisContext context, BoxingDomainResult result, CancellationToken cancellationToken)
         {
             var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapTypes };
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "type.boxing-pressure",
+                Subjects = [],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["total-boxed.count"] = new Measure(result.TotalBoxedObjects, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["total-boxed.bytes"] = new Measure(result.TotalBoxedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["boxed-enum.count"] = new Measure(result.BoxedEnumCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["boxed-enum.bytes"] = new Measure(result.BoxedEnumBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["nullable-boxed.count"] = new Measure(result.NullableBoxedCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["nullable-boxed.bytes"] = new Measure(result.NullableBoxedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["oversized-value.count"] = new Measure(result.OversizedValueTypeInstanceCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["padding-waste-type.count"] = new Measure(result.TopPaddingWasteTypes.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["gen2-boxed.count"] = new Measure(result.TotalGen2BoxedCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Boxing Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
 
             foreach (BoxedTypeEntry entry in result.TopBoxedTypes)
             {
@@ -100,6 +149,65 @@ namespace DumpDetective.Analysis.Analyzers.Types
                         ["is-enum"] = new Measure(entry.IsEnum ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
                         ["has-reference-fields"] = new Measure(entry.HasReferenceFields ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
                         ["has-iequatable"] = new Measure(entry.HasIEquatable ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["is-nullable"] = new Measure(IsNullableTypeName(entry.ValueTypeName) ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = context.ArtifactId!.Value,
+                        AnalyzerKey = "Boxing Analysis",
+                        CapabilitiesUsed = capabilitiesUsed,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                }, cancellationToken);
+            }
+
+            foreach (OversizedTypeEntry entry in result.TopOversizedTypes)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(entry.TypeName);
+
+                await context.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "type.oversized-value",
+                    Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["static-size.bytes"] = new Measure(entry.StaticSize, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                        ["instance.count"] = new Measure(entry.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = context.ArtifactId!.Value,
+                        AnalyzerKey = "Boxing Analysis",
+                        CapabilitiesUsed = capabilitiesUsed,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                }, cancellationToken);
+            }
+
+            foreach (StructPaddingEntry entry in result.TopPaddingWasteTypes)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(entry.TypeName);
+
+                await context.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "type.struct-padding-waste",
+                    Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["field.bytes"] = new Measure(entry.TotalFieldBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                        ["struct-size.bytes"] = new Measure(entry.StructSize, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                        ["wasted-padding.bytes"] = new Measure(entry.WastedPaddingBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                        ["waste.ratio"] = new Measure(entry.WasteRatio, MeasureUnit.Ratio, MeasureSemantics.Ratio),
                     },
                     Provenance = new Provenance
                     {

@@ -155,6 +155,7 @@ the one before it:
    | `LockGraphFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run total-held-locks scalar unobserved, fixed | `LockGraphSynthesisRule` |
    | `ThreadFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run triage scalars + finalizer-thread detail unobserved, fixed | `ThreadSynthesisRule` |
    | `ThreadStackClusterFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run diversity scalars + per-cluster signature/framework-pattern text unobserved, fixed | `ThreadStackClusterSynthesisRule` |
+   | `BoxingFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run pressure scalars + oversized-value/struct-padding-waste per-type aggregations unobserved, fixed | `BoxingSynthesisRule` |
 
    ### Per-analyzer notable findings
 
@@ -939,6 +940,35 @@ the one before it:
      50%" cases; added `NoClusters_OnlyEmitsSummaryFinding`,
      `DominantClusterBelowFiftyPercent_NoWarningEvenWithoutFrameworkPattern`, and
      `HighDiversity_SummaryIsInfo` to round those boundary cases out.
+
+   **`BoxingFindingGenerator` — notable findings:**
+   - `type.boxing` is the complete, unfiltered boxed-type population (bounded by distinct-type
+     count, never heap-object-scale), so `TotalBoxedObjects`/`TotalBoxedBytes`/`BoxedEnumCount`/
+     `BoxedEnumBytes`/`NullableBoxedCount`/`NullableBoxedBytes`/`TotalGen2BoxedCount` are all, in
+     principle, re-derivable by summing matched `type.boxing` observations. Deliberately *not* done
+     that way, though: `BoxingFindingGenerator`'s summary finding fires unconditionally, even over
+     `Analyze`'s all-zero `Empty()` result (returned when generation data isn't exact) — a case with
+     zero `type.boxing` observations to sum at all. A new whole-run `type.boxing-pressure`
+     observation, unconditionally emitted regardless of whether any per-type list is empty, carries
+     these scalars directly from the domain result's own arithmetic instead, guaranteeing the
+     always-present summary finding a non-empty `DerivedFrom` even over a fully empty dump.
+   - `is-nullable` (new per-type flag on `type.boxing`) is the same `System.Nullable<...>`
+     name-pattern check `Analyze` already ran internally — surfaced as a raw structural fact, same
+     treatment as the pre-existing `is-enum`/`has-reference-fields`/`has-iequatable` flags.
+   - `OversizedValueTypeInstanceCount`/`TopOversizedTypes` and `TopPaddingWasteTypes` are each a
+     separate, differently-filtered aggregation over the same underlying per-type stats scan —
+     neither shares `type.boxing`'s population. Two new observation types close the gap:
+     `type.oversized-value` (one per type over `OversizedThresholdBytes`, already sorted descending
+     by instance count) and `type.struct-padding-waste` (one per type with nonzero padding waste,
+     already sorted descending by wasted bytes) — both bounded by distinct-type count, the same
+     population-size guarantee `type.boxing` itself relies on.
+   - Old test suite's fixtures set `TotalBoxedObjects`/`BoxedEnumCount`/`NullableBoxedCount`/etc. as
+     independent scalars with `TopBoxedTypes` usually left empty — the same test-only decoupling
+     `AllocationPatternSynthesisRuleParityTests` fixed for its own analyzer. Rebuilt every fixture
+     from a single per-type entry list (`BuildFromEntries`), deriving every aggregate scalar from
+     that list for both the old and new sides, plus one new fixture
+     (`AllZero_NoPerTypeObservationsAtAll_StillEmitsSummaryFinding`) exercising the zero-observations
+     edge case `type.boxing-pressure` exists to cover.
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until `## Work`
    step 6 below (see the Stage-1 purity bullet above — distinct from playbook step f just above),
    so its `IFindingGenerator` cannot be retired alongside the rest in this playbook — state this

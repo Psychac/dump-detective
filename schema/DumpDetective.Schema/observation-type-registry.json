@@ -997,6 +997,26 @@
       "note": "Single whole-heap observation. Per-type Top*Types lists excluded — Category is a hand-picked-threshold classification over the entire type population (Smell A/B + volume risk).",
       "addedIn": "1.30.0"
     },
+    "type.boxing-pressure": {
+      "producedBy": "BoxingAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Types/Analyzers/BoxingAnalyzer.cs",
+      "requiresCapabilities": ["heap.types"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "total-boxed.count": { "unit": "count", "semantics": "absolute" },
+        "total-boxed.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "boxed-enum.count": { "unit": "count", "semantics": "absolute" },
+        "boxed-enum.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "nullable-boxed.count": { "unit": "count", "semantics": "absolute" },
+        "nullable-boxed.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "oversized-value.count": { "unit": "count", "semantics": "absolute" },
+        "padding-waste-type.count": { "unit": "count", "semantics": "absolute" },
+        "gen2-boxed.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "Whole-run, unconditionally emitted even when every per-type list (type.boxing/type.oversized-value/type.struct-padding-waste) is empty — guarantees the always-present summary finding a non-empty DerivedFrom even over an all-zero result (e.g. Analyze's Empty() early-return).",
+      "addedIn": "1.65.0"
+    },
     "type.boxing": {
       "producedBy": "BoxingAnalyzer",
       "sourceFile": "src/DumpDetective.Plugins.Types/Analyzers/BoxingAnalyzer.cs",
@@ -1011,10 +1031,39 @@
         "gen2.fraction": { "unit": "ratio", "semantics": "ratio" },
         "is-enum": { "unit": "count", "semantics": "absolute" },
         "has-reference-fields": { "unit": "count", "semantics": "absolute" },
-        "has-iequatable": { "unit": "count", "semantics": "absolute" }
+        "has-iequatable": { "unit": "count", "semantics": "absolute" },
+        "is-nullable": { "unit": "count", "semantics": "absolute" }
       },
-      "note": "One per boxed value type found on the heap — a small fraction of the whole type population, unlike ObjectShapeAnalyzer's lists.",
+      "note": "One per boxed value type found on the heap — a small fraction of the whole type population, unlike ObjectShapeAnalyzer's lists. is-nullable (added for the synthesis migration) is the same System.Nullable<...> name-pattern check Analyze already used internally, now surfaced as a raw structural fact.",
       "addedIn": "1.31.0"
+    },
+    "type.oversized-value": {
+      "producedBy": "BoxingAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Types/Analyzers/BoxingAnalyzer.cs",
+      "requiresCapabilities": ["heap.types"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "static-size.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "instance.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per distinct value type whose StaticSize exceeds OversizedThresholdBytes — a separate, filtered aggregation from type.boxing, bounded by distinct-type count. Already sorted descending by instance.count before emission.",
+      "addedIn": "1.64.0"
+    },
+    "type.struct-padding-waste": {
+      "producedBy": "BoxingAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Types/Analyzers/BoxingAnalyzer.cs",
+      "requiresCapabilities": ["heap.types"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "field.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "struct-size.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "wasted-padding.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "waste.ratio": { "unit": "ratio", "semantics": "ratio" }
+      },
+      "note": "One per distinct struct type with nonzero field-alignment padding waste — a separate, filtered aggregation from type.boxing, bounded by distinct-type count. Already sorted descending by wasted-padding.bytes before emission.",
+      "addedIn": "1.64.0"
     },
     "type.array-composition": {
       "producedBy": "ArrayAnalyzer",

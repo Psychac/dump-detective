@@ -787,6 +787,82 @@
       "note": "One per module in TopModulesByHeapMemory — first real module-subject observation type.",
       "addedIn": "1.28.0"
     },
+    "runtime.module-population": {
+      "producedBy": "ModuleAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Runtime/Analyzers/ModuleAnalyzer.cs",
+      "requiresCapabilities": ["dump.object-fields", "heap.types", "runtime.modules"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "total.count": { "unit": "count", "semantics": "absolute" },
+        "dynamic.count": { "unit": "count", "semantics": "absolute" },
+        "version-conflict.count": { "unit": "count", "semantics": "absolute" },
+        "heavy-module-warning.threshold-bytes": { "unit": "bytes", "semantics": "absolute" },
+        "total-dynamic.count": { "unit": "count", "semantics": "absolute" },
+        "total-domains.count": { "unit": "count", "semantics": "absolute" },
+        "anonymous-module.count": { "unit": "count", "semantics": "absolute" },
+        "unknown-identity-duplicate.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One whole-run observation per analysis — no entity subject, same pattern as gc.generation-composition. dynamic.count (DynamicModules, from the single global EnumerateModules() pass) is genuinely distinct from total-dynamic.count (TotalDynamicModules, summed across a separate per-AppDomain enumeration pass — the same physical dynamic module counted once per domain it's loaded into) despite the similar names.",
+      "addedIn": "1.59.0"
+    },
+    "runtime.module-conflict-group": {
+      "producedBy": "ModuleAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Runtime/Analyzers/ModuleAnalyzer.cs",
+      "requiresCapabilities": ["dump.object-fields", "runtime.modules"],
+      "subjectKind": "module",
+      "temporalKind": "point",
+      "measures": {},
+      "note": "One per ConflictDetails entry (bounded by distinct-module-with-a-version-conflict count, process-scale not heap-scale). Evidence[0].Description carries the comma-joined Versions list — no home among Measures for a string list.",
+      "addedIn": "1.59.0"
+    },
+    "runtime.module-type-density": {
+      "producedBy": "ModuleAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Runtime/Analyzers/ModuleAnalyzer.cs",
+      "requiresCapabilities": ["heap.types", "runtime.modules"],
+      "subjectKind": "module",
+      "temporalKind": "point",
+      "measures": {
+        "unique-type.count": { "unit": "count", "semantics": "absolute" },
+        "shallow.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "bytes-per-type.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "One per HeavyTypeDensityModules entry, already sorted descending by bytes-per-type.bytes before emission — the rule trusts that order for the \"worst\" module, same already-sorted-before-emission structure ArraySynthesisRule relies on. A different, filtered population than runtime.module-heap-footprint (DensityAnomalyMaxTypes/MinBytes-gated, not top-by-total-bytes).",
+      "addedIn": "1.59.0"
+    },
+    "runtime.module-cross-domain-load": {
+      "producedBy": "ModuleAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Runtime/Analyzers/ModuleAnalyzer.cs",
+      "requiresCapabilities": ["runtime.modules"],
+      "subjectKind": "module",
+      "temporalKind": "point",
+      "measures": {
+        "domain.count": { "unit": "count", "semantics": "absolute" },
+        "shallow.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "One per CrossDomainModuleLoads entry (bounded by MaxCrossDomainModulesToReport), already sorted before emission — the rule trusts that order.",
+      "addedIn": "1.59.0"
+    },
+    "runtime.module-assemblyref-mismatch": {
+      "producedBy": "ModuleAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Runtime/Analyzers/ModuleAnalyzer.cs",
+      "requiresCapabilities": ["dump.object-fields", "runtime.modules"],
+      "subjectKind": "module",
+      "temporalKind": "point",
+      "measures": {},
+      "note": "One per AssemblyRefVersionMismatches entry (bounded by MaxAssemblyRefMismatchesToReport). Subject identifies RequiringModule; Evidence[0].Description carries \"{RequiredAssemblyName} {RequiredVersion} (loaded: {LoadedVersions})\" — three string fields with no home among Measures, combined into the one free-text slot since the finding text always renders them together.",
+      "addedIn": "1.59.0"
+    },
+    "runtime.module-unknown-identity": {
+      "producedBy": "ModuleAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Runtime/Analyzers/ModuleAnalyzer.cs",
+      "requiresCapabilities": ["runtime.modules"],
+      "subjectKind": "module",
+      "temporalKind": "point",
+      "measures": {},
+      "note": "One per UnknownIdentityDuplicateModules entry (a HashSet<string>, process-scale not heap-scale) — emitted in that set's own enumeration order, the same order the old finding generator's Take(5) read directly from the (unordered-by-contract, but stable-in-practice) set.",
+      "addedIn": "1.59.0"
+    },
     "runtime.active-exception": {
       "producedBy": "CrashAnalyzer",
       "sourceFile": "src/DumpDetective.Plugins.Runtime/Analyzers/CrashAnalyzer.cs",

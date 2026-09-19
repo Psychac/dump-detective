@@ -150,6 +150,7 @@ the one before it:
    | `CrashFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run scalars + per-thread candidate identity unobserved, fixed | `CrashSynthesisRule` |
    | `HeapTopologyFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — per-kind fragmentation + whole-run server-GC/logical-heap-skew scalars unobserved, fixed | `HeapTopologySynthesisRule` |
    | `JitFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run scalars + single top-method identity unobserved, fixed | `JitSynthesisRule` |
+   | `ModuleFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run population + 5 new bounded per-module observation types unobserved, fixed | `ModuleSynthesisRule` |
 
    ### Per-analyzer notable findings
 
@@ -790,6 +791,42 @@ the one before it:
      → deep stack), which is *not* priority-descending (400, 120, 80, 140, 100, 160). The rule
      preserves the real (stale-comment-contradicting) behavior — insertion order — not the
      documented-but-never-implemented sorted order.
+
+   **`ModuleFindingGenerator` — notable findings:**
+   - Largest observation-count entry so far by type count, not by volume: only
+     `runtime.module-heap-footprint` (Phase 5 step 1, one per `TopModulesByHeapMemory` entry)
+     existed, backing exactly one of the finding generator's eight signals (heavy modules) in full.
+     The other seven — version conflicts (+ per-conflict-group version details), type-density
+     anomalies, dynamic/anonymous module accumulation, cross-domain loads, AssemblyRef mismatches,
+     and unknown-identity duplicates — were all unobserved.
+   - Step c/d's fix: one new whole-run `runtime.module-population` observation (module/conflict/
+     dynamic/domain/anonymous/unknown-identity counts plus the heavy-module-warning byte threshold),
+     plus **five new per-module observation types** — `runtime.module-conflict-group`,
+     `-type-density`, `-cross-domain-load`, `-assemblyref-mismatch`, and `-unknown-identity`.
+     **None of these needed a bounded-selection-in-the-analyzer trick, a single-top-identity
+     shortcut, or emission-order caution** the way several prior playbook entries did: every list
+     `ModuleFindingGenerator` reads is module-scale (loaded-assembly count, typically tens to low
+     hundreds in a real process), never heap-object-scale, so each was safe to observe fully,
+     per-entry — the same reasoning that already justified the pre-existing, uncapped
+     `runtime.module-heap-footprint`.
+   - `DynamicModules` (from a single global `EnumerateModules()` pass) and `TotalDynamicModules`
+     (summed across a separate per-AppDomain enumeration — the same physical dynamic module counted
+     once per domain it's loaded into) are genuinely different fields despite the similar names,
+     both carried as distinct measures on `runtime.module-population` — the same "similar name,
+     different formula" trap `GCGenerationSynthesisRule` hit for `loh.fraction` vs. `loh.percent`.
+   - Free-text `EvidenceRef` carries string data with no home among `Subjects`/`Measures`:
+     `runtime.module-conflict-group`'s comma-joined `Versions` list, and
+     `runtime.module-assemblyref-mismatch`'s combined `"{RequiredAssemblyName} {RequiredVersion}
+     (loaded: {LoadedVersions})"` text (three string fields the finding always renders together, so
+     one evidence slot suffices) — same pattern used throughout this playbook for string data a
+     typed `EntityRef` can't carry.
+   - Added five new boundary fixtures the old generator's own tests never exercised (all using
+     empty lists/zero counts by default): heavy modules above/below threshold, type-density
+     anomaly, anonymous-module accumulation, unknown-identity duplicates, and — most notably —
+     version conflicts *with* `ConflictDetails` populated, since every existing
+     `versionConflictGroups`-only fixture left `ConflictDetails: []`, meaning the finding's own
+     "Conflicts: ..." detail-listing branch had never actually been exercised by any test before
+     this migration.
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until `## Work`
    step 6 below (see the Stage-1 purity bullet above — distinct from playbook step f just above),
    so its `IFindingGenerator` cannot be retired alongside the rest in this playbook — state this

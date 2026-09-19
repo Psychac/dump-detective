@@ -95,6 +95,12 @@ public sealed class ModuleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     /// entry — a real per-module aggregate, bounded to the modules the pipeline already ranked.
     /// Subject uses <see cref="Sdk.Identity.ModuleRef"/> directly (just a simple name, no
     /// canonicalization needed, unlike types).
+    /// Phase 5 step 2 adds a whole-run <c>runtime.module-population</c> observation, plus four new
+    /// bounded per-module observation types (<c>runtime.module-conflict-group</c>/
+    /// <c>-type-density</c>/<c>-cross-domain-load</c>/<c>-assemblyref-mismatch</c>/
+    /// <c>-unknown-identity</c>) — every list here is module-scale (typically tens to low hundreds
+    /// of loaded assemblies), never heap-object-scale, so observing each fully carries none of the
+    /// per-object volume risk this project guards against elsewhere.
     /// </summary>
     private static async ValueTask EmitObservationsAsync(AnalysisContext context, ModuleDomainResult result, CancellationToken cancellationToken)
     {
@@ -118,6 +124,154 @@ public sealed class ModuleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
                     ["loh.bytes"] = new Measure(module.LohBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                     ["gen2.object-count"] = new Measure(module.Gen2ObjectCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                 },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Module Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
+
+        await context.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "runtime.module-population",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["total.count"] = new Measure(result.TotalModules, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["dynamic.count"] = new Measure(result.DynamicModules, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["version-conflict.count"] = new Measure(result.VersionConflictGroups, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["heavy-module-warning.threshold-bytes"] = new Measure(result.HeavyModuleWarningThresholdBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["total-dynamic.count"] = new Measure(result.TotalDynamicModules, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["total-domains.count"] = new Measure(result.TotalDomains, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["anonymous-module.count"] = new Measure(result.AnonymousModuleCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["unknown-identity-duplicate.count"] = new Measure(result.UnknownIdentityDuplicateModules.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = context.ArtifactId!.Value,
+                AnalyzerKey = "Module Analysis",
+                CapabilitiesUsed = capabilitiesUsed,
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
+
+        foreach (ModuleConflictGroup group in result.ConflictDetails)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "runtime.module-conflict-group",
+                Subjects = [new ModuleRef { SimpleName = group.ModuleName, Fidelity = MatchFidelity.Exact }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>(),
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Module Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+                Evidence = [new EvidenceRef { Artifact = context.ArtifactId!.Value, Locator = "versions", Description = string.Join(", ", group.Versions) }],
+            }, cancellationToken);
+        }
+
+        foreach (ModuleTypeDensity density in result.HeavyTypeDensityModules ?? [])
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "runtime.module-type-density",
+                Subjects = [new ModuleRef { SimpleName = density.ModuleName, Fidelity = MatchFidelity.Exact }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["unique-type.count"] = new Measure(density.UniqueTypeCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["shallow.bytes"] = new Measure(density.TotalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["bytes-per-type.bytes"] = new Measure(density.BytesPerType, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Module Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
+
+        foreach (CrossDomainModuleLoad load in result.CrossDomainModuleLoads ?? [])
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "runtime.module-cross-domain-load",
+                Subjects = [new ModuleRef { SimpleName = load.ModuleName, Fidelity = MatchFidelity.Exact }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["domain.count"] = new Measure(load.DomainCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["shallow.bytes"] = new Measure(load.Size, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Module Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
+
+        foreach (AssemblyRefVersionMismatch mismatch in result.AssemblyRefVersionMismatches ?? [])
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "runtime.module-assemblyref-mismatch",
+                Subjects = [new ModuleRef { SimpleName = mismatch.RequiringModule, Fidelity = MatchFidelity.Exact }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>(),
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Module Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+                Evidence = [new EvidenceRef
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    Locator = "required-version",
+                    Description = $"{mismatch.RequiredAssemblyName} {mismatch.RequiredVersion} (loaded: {mismatch.LoadedVersions})",
+                }],
+            }, cancellationToken);
+        }
+
+        foreach (string moduleName in result.UnknownIdentityDuplicateModules)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "runtime.module-unknown-identity",
+                Subjects = [new ModuleRef { SimpleName = moduleName, Fidelity = MatchFidelity.Exact }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>(),
                 Provenance = new Provenance
                 {
                     Artifact = context.ArtifactId!.Value,

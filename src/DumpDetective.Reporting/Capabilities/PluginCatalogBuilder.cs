@@ -87,8 +87,14 @@ internal sealed class PluginCatalogBuilder
 
         Assembly reportingAssembly = typeof(PluginCatalogBuilder).Assembly;
 
-        Type findingGeneratorType = ResolveCompanionType(
-            analyzerType, reportingAssembly, "DumpDetective.Reporting.FindingGenerators", $"{baseName}FindingGenerator");
+        // FindingGeneratorType is resolved tolerantly (null when absent), not required like the
+        // other two companions: Phase 5 step 3 retires an analyzer's IFindingGenerator once its
+        // SynthesisRule ships, so "no companion class found" is the expected steady state for a
+        // migrated analyzer, not a naming-convention violation.
+        Type? findingGeneratorType = TryResolveCompanionType(
+            reportingAssembly, "DumpDetective.Reporting.FindingGenerators", $"{baseName}FindingGenerator");
+        Type? synthesisRuleType = TryResolveCompanionType(
+            reportingAssembly, "DumpDetective.Reporting.SynthesisRules", $"{baseName}SynthesisRule");
         Type trendComparerType = ResolveCompanionType(
             analyzerType, analyzerType.Assembly, "DumpDetective.Analysis.Trend.Comparers", $"{baseName}TrendComparer");
         Type sectionBuilderType = ResolveCompanionType(
@@ -99,11 +105,20 @@ internal sealed class PluginCatalogBuilder
             DisplayName: moduleAttribute.DisplayName,
             AnalyzerType: analyzerType,
             FindingGeneratorType: findingGeneratorType,
+            SynthesisRuleType: synthesisRuleType,
             TrendComparerType: trendComparerType,
             AnalyzerSectionBuilderType: sectionBuilderType,
             ReportSectionContributionTypes: [],
             Order: moduleAttribute.Order,
             Tags: moduleAttribute.Tags);
+
+        if (findingGeneratorType is null && synthesisRuleType is null)
+        {
+            throw new InvalidOperationException(
+                $"Analyzer '{analyzerType.FullName}' has neither a '{baseName}FindingGenerator' nor a " +
+                $"'{baseName}SynthesisRule' companion type — every analyzer needs at least one live path " +
+                "to a Finding.");
+        }
 
         if (!module.IsShapeValid())
         {
@@ -132,6 +147,9 @@ internal sealed class PluginCatalogBuilder
 
         return companionType;
     }
+
+    private static Type? TryResolveCompanionType(Assembly assembly, string @namespace, string typeName) =>
+        assembly.GetType($"{@namespace}.{typeName}", throwOnError: false);
 
     private sealed class BuiltAnalyzerFeatureModuleCatalog(
         IReadOnlyList<AnalyzerFeatureModule> modules,

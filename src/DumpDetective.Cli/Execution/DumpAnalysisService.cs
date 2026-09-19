@@ -5,6 +5,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Orchestration.Discovery;
 using DumpDetective.Orchestration.Session;
 using DumpDetective.Reporting.Abstractions;
+using DumpDetective.Reporting.Capabilities;
 using DumpDetective.Reporting.Services;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
@@ -21,6 +22,7 @@ internal sealed class DumpAnalysisService
     private readonly ConfigurationResolver _configurationResolver;
     private readonly StartupValidator _startupValidator;
     private readonly IAnalyzerFactory _analyzerFactory;
+    private readonly IAnalyzerFeatureModuleCatalog _moduleCatalog;
     private readonly IEnumerable<IFindingGenerator> _findingGenerators;
     private readonly IEnumerable<IAnalyzerTrendComparer> _trendComparers;
     private readonly ISectionBuilderFactory _sectionBuilderFactory;
@@ -41,6 +43,7 @@ internal sealed class DumpAnalysisService
         ConfigurationResolver configurationResolver,
         StartupValidator startupValidator,
         IAnalyzerFactory analyzerFactory,
+        IAnalyzerFeatureModuleCatalog moduleCatalog,
         IEnumerable<IFindingGenerator> findingGenerators,
         IEnumerable<IAnalyzerTrendComparer> trendComparers,
         ISectionBuilderFactory sectionBuilderFactory,
@@ -50,6 +53,7 @@ internal sealed class DumpAnalysisService
         _configurationResolver = configurationResolver;
         _startupValidator = startupValidator;
         _analyzerFactory = analyzerFactory;
+        _moduleCatalog = moduleCatalog;
         _findingGenerators = findingGenerators;
         _trendComparers = trendComparers;
         _sectionBuilderFactory = sectionBuilderFactory;
@@ -71,7 +75,7 @@ internal sealed class DumpAnalysisService
 
         IReadOnlyList<IAnalyzer> analyzers = _analyzerFactory.CreateAnalyzers();
 
-        _startupValidator.ValidateRegistrations(analyzers, _findingGenerators, _trendComparers, _sectionBuilderFactory);
+        _startupValidator.ValidateRegistrations(analyzers, _moduleCatalog, _findingGenerators, _trendComparers, _sectionBuilderFactory);
 
         bool isTrend = TryResolveTrendSequence(resolved, out IReadOnlyList<string>? trendDumpPaths);
         IReadOnlyList<string> sessionDumpPaths = isTrend ? trendDumpPaths! : [resolved.DumpPath];

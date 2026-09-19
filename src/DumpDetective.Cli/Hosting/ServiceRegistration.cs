@@ -55,7 +55,14 @@ internal static class ServiceRegistration
 
         foreach (AnalyzerFeatureModule module in moduleCatalog.Modules)
         {
-            services.AddSingleton(typeof(IFindingGenerator), sp => ActivatorUtilities.CreateInstance(sp, module.FindingGeneratorType));
+            // Retired generators (Phase 5 step 3 — FindingGeneratorType null once a SynthesisRule
+            // ships) have nothing left to register here; SynthesisFindingEnricher supplies their
+            // findings instead.
+            if (module.FindingGeneratorType is null)
+                continue;
+
+            Type findingGeneratorType = module.FindingGeneratorType;
+            services.AddSingleton(typeof(IFindingGenerator), sp => ActivatorUtilities.CreateInstance(sp, findingGeneratorType));
         }
 
         services.AddSingleton<FindingGenerationPipeline>();

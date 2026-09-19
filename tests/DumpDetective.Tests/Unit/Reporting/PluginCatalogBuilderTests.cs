@@ -103,10 +103,21 @@ public sealed class PluginCatalogBuilderTests
                 ? module.AnalyzerType.Name[..^"Analyzer".Length]
                 : module.AnalyzerType.Name;
 
-            module.FindingGeneratorType.Name.Should().Be($"{baseName}FindingGenerator", "analyzer {0}", module.AnalyzerType.Name);
+            // FindingGeneratorType is retired (null) once its SynthesisRuleType ships — Phase 5
+            // step 3. Whichever companion is present must still follow the naming convention.
+            module.FindingGeneratorType?.Name.Should().Be($"{baseName}FindingGenerator", "analyzer {0}", module.AnalyzerType.Name);
+            module.SynthesisRuleType?.Name.Should().Be($"{baseName}SynthesisRule", "analyzer {0}", module.AnalyzerType.Name);
             module.TrendComparerType.Name.Should().Be($"{baseName}TrendComparer", "analyzer {0}", module.AnalyzerType.Name);
             module.AnalyzerSectionBuilderType.Name.Should().Be($"{baseName}SectionBuilder", "analyzer {0}", module.AnalyzerType.Name);
         }
+    }
+
+    [Fact]
+    public void Build_EveryModuleHasAFindingGeneratorOrASynthesisRule()
+    {
+        IAnalyzerFeatureModuleCatalog actual = BuildScannedCatalog();
+
+        actual.Modules.Should().OnlyContain(m => m.FindingGeneratorType != null || m.SynthesisRuleType != null);
     }
 
     [Fact]

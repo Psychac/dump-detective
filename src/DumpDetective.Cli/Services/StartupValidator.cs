@@ -2,6 +2,7 @@ using DumpDetective.Cli.Models;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
+using DumpDetective.Reporting.Capabilities;
 using DumpDetective.Reporting.Services;
 using DumpDetective.Sdk.Analysis;
 
@@ -13,6 +14,7 @@ internal sealed class StartupValidator
 {
     public void ValidateRegistrations(
         IReadOnlyList<IAnalyzer> analyzers,
+        IAnalyzerFeatureModuleCatalog moduleCatalog,
         IEnumerable<IFindingGenerator> findingGenerators,
         IEnumerable<IAnalyzerTrendComparer> trendComparers,
         ISectionBuilderFactory sectionBuilderFactory)
@@ -25,10 +27,19 @@ internal sealed class StartupValidator
         if (reportSectionBuilders.Count == 0)
             errors.Add("No report section builders are registered.");
 
+        // A retired analyzer (Phase 5 step 3) has no IFindingGenerator at all — its module's
+        // SynthesisRuleType is its only path to a Finding, via SynthesisFindingEnricher rather
+        // than this DI-registered set. AnalyzerFeatureModule.DisplayName is what both
+        // IAnalyzer.Name and IFindingGenerator.AnalyzerName are conventionally set to (verified by
+        // PluginCatalogBuilderTests), so it's the right key to join on here.
+        IEnumerable<string> retiredButSynthesisCovered = moduleCatalog.Modules
+            .Where(m => m.FindingGeneratorType is null && m.SynthesisRuleType is not null)
+            .Select(m => m.DisplayName);
+
         ValidateNameCoverage(
             "finding generators",
             analyzers.Select(a => a.Name),
-            findingGenerators.Select(g => g.AnalyzerName),
+            findingGenerators.Select(g => g.AnalyzerName).Concat(retiredButSynthesisCovered),
             errors,
             requireEveryAnalyzer: true);
 

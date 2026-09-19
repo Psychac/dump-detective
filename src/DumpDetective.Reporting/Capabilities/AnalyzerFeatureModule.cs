@@ -2,6 +2,7 @@ using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Synthesis;
 
 namespace DumpDetective.Reporting.Capabilities;
 
@@ -15,7 +16,8 @@ internal sealed record AnalyzerFeatureModule(
     string Key,
     string DisplayName,
     Type AnalyzerType,
-    Type FindingGeneratorType,
+    Type? FindingGeneratorType,
+    Type? SynthesisRuleType,
     Type TrendComparerType,
     Type AnalyzerSectionBuilderType,
     IReadOnlyList<Type> ReportSectionContributionTypes,
@@ -27,7 +29,12 @@ internal sealed record AnalyzerFeatureModule(
         return !string.IsNullOrWhiteSpace(Key)
             && !string.IsNullOrWhiteSpace(DisplayName)
             && typeof(IAnalyzer).IsAssignableFrom(AnalyzerType)
-            && typeof(IFindingGenerator).IsAssignableFrom(FindingGeneratorType)
+            && (FindingGeneratorType is null || typeof(IFindingGenerator).IsAssignableFrom(FindingGeneratorType))
+            && (SynthesisRuleType is null || typeof(ISynthesisRule).IsAssignableFrom(SynthesisRuleType))
+            // Phase 5 step 3 (docs/refactor/modularity/phase-5-observations-synthesis.md, "## Work"
+            // step 3): a retired analyzer drops FindingGeneratorType once its rule ships, but every
+            // analyzer must keep at least one live path to a Finding — never both null at once.
+            && (FindingGeneratorType is not null || SynthesisRuleType is not null)
             && typeof(IAnalyzerTrendComparer).IsAssignableFrom(TrendComparerType)
             && typeof(IAnalyzerSectionBuilder).IsAssignableFrom(AnalyzerSectionBuilderType)
             && ReportSectionContributionTypes.All(t => typeof(IReportSectionBuilder).IsAssignableFrom(t))

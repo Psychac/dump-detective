@@ -5,6 +5,7 @@ using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Identity;
 
 using FluentAssertions;
@@ -376,6 +377,7 @@ public sealed class CollectionAnalyzerRetypingCharacterizationTests
         var analyzer = new CollectionAnalyzer();
         DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
+            ArtifactId = new ArtifactId("test"),
             DumpObjectFields = new FakeDumpObjectFieldQuery(),
             HeapObjectLookup = new FakeHeapObjectLookup(),
             DumpArrayShapes = new FakeDumpArrayShapeQuery(),
@@ -401,6 +403,7 @@ public sealed class CollectionAnalyzerRetypingCharacterizationTests
         CollectionAnalyzer analyzer = new();
         DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
+            ArtifactId = new ArtifactId("test"),
             AnalyzerOptions = new CollectionAnalyzerOptions(
                 new CollectionAnalysisOptions { WasteThresholdBytes = 0 },
                 disableReferenceChainOptions ? null : new ReferenceChainOptions()),

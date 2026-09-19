@@ -9,6 +9,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Temporal;
 
@@ -154,6 +155,20 @@ namespace DumpDetective.Analysis.Analyzers.Types
         /// <see cref="IHeapObjectLookup"/> from the snapshot's own address, as a second pass rather
         /// than inline — <see cref="BuildDomainResult"/> already re-resolves retained bytes the same
         /// way, so this mirrors that method's own shape rather than threading the sink through it.
+        /// <c>Kind</c> goes into <c>Evidence</c> (categorical, no home among <c>Measures</c>) —
+        /// needed as a fallback identity when <see cref="CollectionDomainResult.WasteCountsByKind"/>
+        /// is empty.
+        ///
+        /// <see cref="CollectionDomainResult.WasteCountsByKind"/>/<c>WasteBytesByKind</c> and
+        /// <c>WasteCountsByElementType</c>/<c>WasteBytesByElementType</c> are both exact scan-time
+        /// accumulators over the *entire* wasteful-collection population — deliberately not derived
+        /// from a capped top-N list, per their own doc comments — so neither has a
+        /// <c>collection.wasteful</c> stand-in. Two new observation types close the gap: whole-run
+        /// <c>collection.waste-summary</c> for the plain scalars, <c>collection.kind-waste</c> (one
+        /// per <see cref="Core.Enums.CollectionKind"/> present — at most 11 values, no entity subject,
+        /// kind name carried as <c>Evidence</c> same as <c>collection.wasteful</c>'s own) and
+        /// <c>collection.element-type-waste</c> (one per distinct element type, bounded by
+        /// distinct-type count like <c>type.boxing</c>).
         /// </summary>
         private static async ValueTask EmitObservationsAsync(
             AnalysisContext context, IHeapObjectLookup objectLookup, CollectionDomainResult result, CancellationToken cancellationToken)
@@ -184,6 +199,7 @@ namespace DumpDetective.Analysis.Analyzers.Types
                     Subjects = [obj.Type],
                     When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
                     Measures = measures,
+                    Evidence = [new EvidenceRef { Artifact = context.ArtifactId!.Value, Locator = "kind", Description = snapshot.Kind.ToString() }],
                     Provenance = new Provenance
                     {
                         Artifact = context.ArtifactId!.Value,
@@ -192,6 +208,89 @@ namespace DumpDetective.Analysis.Analyzers.Types
                         Fidelity = snapshot.RetainedBytes is not null ? FidelityLevel.Full : FidelityLevel.Degraded,
                     },
                     Confidence = snapshot.RetainedBytes is not null ? 1.0 : 0.7,
+                }, cancellationToken);
+            }
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "collection.waste-summary",
+                Subjects = [],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["total-collection.count"] = new Measure(result.TotalCollections, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["total-wasted.bytes"] = new Measure(result.TotalWastedMemory, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["wasteful-collection.count"] = new Measure(result.WastefulCollectionCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Collection Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+
+            IReadOnlyDictionary<CollectionKind, int> wasteCountsByKind = result.WasteCountsByKind ?? new Dictionary<CollectionKind, int>();
+            IReadOnlyDictionary<CollectionKind, ulong> wasteBytesByKind = result.WasteBytesByKind ?? new Dictionary<CollectionKind, ulong>();
+            foreach (KeyValuePair<CollectionKind, int> kv in wasteCountsByKind)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                wasteBytesByKind.TryGetValue(kv.Key, out ulong bytes);
+
+                await context.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "collection.kind-waste",
+                    Subjects = [],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["waste.count"] = new Measure(kv.Value, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["waste.bytes"] = new Measure(bytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    },
+                    Evidence = [new EvidenceRef { Artifact = context.ArtifactId!.Value, Locator = "kind", Description = kv.Key.ToString() }],
+                    Provenance = new Provenance
+                    {
+                        Artifact = context.ArtifactId!.Value,
+                        AnalyzerKey = "Collection Analysis",
+                        CapabilitiesUsed = capabilitiesUsed,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                }, cancellationToken);
+            }
+
+            IReadOnlyDictionary<string, int> wasteCountsByElementType = result.WasteCountsByElementType ?? new Dictionary<string, int>();
+            IReadOnlyDictionary<string, ulong> wasteBytesByElementType = result.WasteBytesByElementType ?? new Dictionary<string, ulong>();
+            foreach (KeyValuePair<string, int> kv in wasteCountsByElementType)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                wasteBytesByElementType.TryGetValue(kv.Key, out ulong bytes);
+
+                (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(kv.Key);
+
+                await context.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "collection.element-type-waste",
+                    Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["waste.count"] = new Measure(kv.Value, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["waste.bytes"] = new Measure(bytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = context.ArtifactId!.Value,
+                        AnalyzerKey = "Collection Analysis",
+                        CapabilitiesUsed = capabilitiesUsed,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
                 }, cancellationToken);
             }
         }

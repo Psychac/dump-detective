@@ -156,6 +156,7 @@ the one before it:
    | `ThreadFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run triage scalars + finalizer-thread detail unobserved, fixed | `ThreadSynthesisRule` |
    | `ThreadStackClusterFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run diversity scalars + per-cluster signature/framework-pattern text unobserved, fixed | `ThreadStackClusterSynthesisRule` |
    | `BoxingFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run pressure scalars + oversized-value/struct-padding-waste per-type aggregations unobserved, fixed | `BoxingSynthesisRule` |
+   | `CollectionFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run waste scalars + exact per-kind/per-element-type waste breakdowns unobserved, fixed | `CollectionSynthesisRule` |
 
    ### Per-analyzer notable findings
 
@@ -969,6 +970,26 @@ the one before it:
      that list for both the old and new sides, plus one new fixture
      (`AllZero_NoPerTypeObservationsAtAll_StillEmitsSummaryFinding`) exercising the zero-observations
      edge case `type.boxing-pressure` exists to cover.
+
+   **`CollectionFindingGenerator` — notable findings:**
+   - `collection.wasteful` is capped by `CollectionAnalyzerOptions.TopWastefulCollectionsToShow`,
+     but `WasteCountsByKind`/`WasteBytesByKind`/`WasteCountsByElementType`/`WasteBytesByElementType`
+     are exact scan-time accumulators over the *entire* wasteful-collection population — the domain
+     model's own doc comments say deriving them from a capped top-N list "would undercount every
+     element type," so none of the four can be reconstructed from `collection.wasteful`. Closed with
+     a new whole-run `collection.waste-summary` (the plain scalars: `TotalCollections`/
+     `TotalWastedMemory`/`WastefulCollectionCount`) plus two new per-entry observation types,
+     `collection.kind-waste` (one per `CollectionKind` present, at most 11 values, no entity
+     subject) and `collection.element-type-waste` (one per distinct element type, bounded by
+     distinct-type count like `type.boxing`).
+   - `CollectionKind` has no natural entity subject, so its name goes into `Evidence[0].Description`
+     on both the new `collection.kind-waste` observation and the existing `collection.wasteful`
+     (which needed it too, as the old generator's fallback identity when `WasteCountsByKind` is
+     empty but `TopWastefulCollections` isn't) — first migration to reuse the same categorical-text
+     Evidence idiom across two different observation types for the same underlying fact.
+   - Old test suite's fixtures already passed `WasteCountsByKind`/`WasteBytesByKind`/etc. directly,
+     with no `TopWastefulCollections`/other-field coupling to break — unlike Boxing, no fixture
+     rebuild was needed; `ToObservations` just mirrors the dictionaries directly into observations.
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until `## Work`
    step 6 below (see the Stage-1 purity bullet above — distinct from playbook step f just above),
    so its `IFindingGenerator` cannot be retired alongside the rest in this playbook — state this

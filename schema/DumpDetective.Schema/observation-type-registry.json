@@ -1141,8 +1141,48 @@
         "wasted.bytes": { "unit": "bytes", "semantics": "absolute" },
         "retained.bytes": { "unit": "bytes", "semantics": "absolute" }
       },
-      "note": "One per TopWastefulCollections entry — already-selected as capacity-mismatched, bounded by TopWastefulCollectionsToShow. retained.bytes omitted when no dominator tree was available.",
+      "note": "One per TopWastefulCollections entry — already-selected as capacity-mismatched, bounded by TopWastefulCollectionsToShow. retained.bytes omitted when no dominator tree was available. Evidence[0].Description carries the CollectionKind name (categorical, no home among Measures) — used as a fallback identity when WasteCountsByKind is empty.",
       "addedIn": "1.34.0"
+    },
+    "collection.waste-summary": {
+      "producedBy": "CollectionAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Types/Analyzers/CollectionAnalyzer.cs",
+      "requiresCapabilities": ["heap.objects", "dump.object-fields"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "total-collection.count": { "unit": "count", "semantics": "absolute" },
+        "total-wasted.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "wasteful-collection.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "Whole-run scalars the old generator reads directly off CollectionDomainResult — no per-collection stand-in since collection.wasteful is capped by TopWastefulCollectionsToShow.",
+      "addedIn": "1.66.0"
+    },
+    "collection.kind-waste": {
+      "producedBy": "CollectionAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Types/Analyzers/CollectionAnalyzer.cs",
+      "requiresCapabilities": ["heap.objects", "dump.object-fields"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "waste.count": { "unit": "count", "semantics": "absolute" },
+        "waste.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "One per CollectionKind present in WasteCountsByKind — an exact scan-time accumulator over the entire wasteful-collection population, not derivable from the capped collection.wasteful list (would undercount, per the domain result's own doc comment). At most 11 distinct kinds. No entity subject; kind name carried in Evidence[0].Description, same treatment as collection.wasteful's own Kind evidence.",
+      "addedIn": "1.66.0"
+    },
+    "collection.element-type-waste": {
+      "producedBy": "CollectionAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Types/Analyzers/CollectionAnalyzer.cs",
+      "requiresCapabilities": ["heap.objects", "dump.object-fields"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "waste.count": { "unit": "count", "semantics": "absolute" },
+        "waste.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "One per distinct element type present in WasteCountsByElementType — same exact-accumulator reasoning as collection.kind-waste, bounded by distinct-type count like type.boxing.",
+      "addedIn": "1.66.0"
     },
     "heap.long-string": {
       "producedBy": "StringAnalyzer",

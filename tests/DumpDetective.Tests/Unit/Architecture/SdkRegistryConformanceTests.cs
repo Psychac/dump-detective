@@ -92,6 +92,7 @@ public sealed class SdkRegistryConformanceTests
             ["runtime.thread-triage"] = ["alive-thread.count", "blocked-thread.count", "lock-holding-thread.count", "active-exception-thread.count", "active-processing-thread.count", "async-chain-thread.count", "max-async-chain.depth"],
             ["runtime.finalizer-thread"] = ["is-blocked", "locks-held.count"],
             ["thread.stack-cluster"] = ["cluster.count", "threadpool-worker.count", "gc.count", "finalizer.count"],
+            ["runtime.thread-cluster-diversity"] = ["alive-thread.count", "unique-cluster.count", "diversity.percent"],
             ["infra.sql-connection-pool"] = ["current.size", "max.size", "min.size"],
             ["infra.sql-command"] = ["shallow.bytes"],
             ["infra.sql-command-population"] = ["total.count", "disposed.count"],

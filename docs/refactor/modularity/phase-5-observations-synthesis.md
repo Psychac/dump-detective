@@ -154,6 +154,7 @@ the one before it:
    | `HangFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run thread-pool/task-backpressure scalars + a per-thread deadlock-candidate flag unobserved, fixed | `HangSynthesisRule` |
    | `LockGraphFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run total-held-locks scalar unobserved, fixed | `LockGraphSynthesisRule` |
    | `ThreadFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run triage scalars + finalizer-thread detail unobserved, fixed | `ThreadSynthesisRule` |
+   | `ThreadStackClusterFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run diversity scalars + per-cluster signature/framework-pattern text unobserved, fixed | `ThreadStackClusterSynthesisRule` |
 
    ### Per-analyzer notable findings
 
@@ -912,6 +913,32 @@ the one before it:
      (`FinalizerPresentButNotBlocked_NoFinalizerFinding`) proving a present-but-unblocked finalizer
      thread (an observation exists, but `is-blocked` is 0) correctly suppresses the finalizer
      finding — the old fixtures only ever tested "no finalizer at all" vs. "finalizer blocked."
+
+   **`ThreadStackClusterFindingGenerator` — notable findings:**
+   - `thread.stack-cluster` already existed but is filtered by `MinClusterSize`, so
+     `AliveThreadCount`/`UniqueClusters`/`DiversityPercent` — all computed from the *unfiltered*
+     cluster population — have no per-cluster stand-in. Closed with one new whole-run
+     `runtime.thread-cluster-diversity` observation.
+   - The dominant-cluster finding needed the raw `Signature` string and, when present, the
+     `FrameworkPattern` classification name — both free-text with no home among numeric `Measures`.
+     Rather than add measures, both went into `thread.stack-cluster`'s own `Evidence` list
+     (`Evidence[0]` = signature, always present; `Evidence[1]` = framework-pattern name, only when
+     `ClassifyFrameworkPattern` matched) — first observation type in this project to carry evidence
+     text for something other than a mismatch/conflict message.
+   - `ClassifyFrameworkPattern` is `internal` to `ThreadStackClusterAnalyzer` itself (not even a
+     separate classifier class) and backed by a private lookup table (`FrameworkPatterns`) —
+     inaccessible from Reporting either way. Rather than duplicate the lookup table (the
+     `AllocationPatternPressureClassifier` precedent), `ThreadStackClusterSynthesisRule`
+     reconstructs only the boolean fact it actually needs (`FrameworkPattern != null`) from
+     `Evidence.Count > 1` — the classifier's actual pattern-matching logic never crosses into
+     Reporting at all, a narrower move than every prior "duplicate the classifier" migration.
+   - `thread.stack-cluster` observations are emitted in `TopClusters`' own already-sorted-descending
+     order, so the rule trusts the first matched observation as the dominant cluster — same
+     already-sorted-before-emission structure `ArraySynthesisRule` relies on.
+   - Old test suite's two fixtures never covered the "no clusters at all" or "dominant cluster below
+     50%" cases; added `NoClusters_OnlyEmitsSummaryFinding`,
+     `DominantClusterBelowFiftyPercent_NoWarningEvenWithoutFrameworkPattern`, and
+     `HighDiversity_SummaryIsInfo` to round those boundary cases out.
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until `## Work`
    step 6 below (see the Stage-1 purity bullet above — distinct from playbook step f just above),
    so its `IFindingGenerator` cannot be retired alongside the rest in this playbook — state this

@@ -546,8 +546,22 @@
         "gc.count": { "unit": "count", "semantics": "absolute" },
         "finalizer.count": { "unit": "count", "semantics": "absolute" }
       },
-      "note": "One per distinct call-stack-shape cluster among alive threads (filtered by MinClusterSize). No entity subject — a cluster spans many threads; SampleOsThreadIds is a sample, not full membership.",
+      "note": "One per distinct call-stack-shape cluster among alive threads (filtered by MinClusterSize). No entity subject — a cluster spans many threads; SampleOsThreadIds is a sample, not full membership. Evidence[0].Description carries the signature string; Evidence[1] (framework-pattern), only present when classified, is what lets a synthesis rule tell framework-idle clusters apart from application-level ones without reimplementing the internal classifier lookup table.",
       "addedIn": "1.16.0"
+    },
+    "runtime.thread-cluster-diversity": {
+      "producedBy": "ThreadStackClusterAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Threads/Analyzers/ThreadStackClusterAnalyzer.cs",
+      "requiresCapabilities": ["runtime.threads"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "alive-thread.count": { "unit": "count", "semantics": "absolute" },
+        "unique-cluster.count": { "unit": "count", "semantics": "absolute" },
+        "diversity.percent": { "unit": "percent", "semantics": "ratio" }
+      },
+      "note": "Whole-run, unfiltered — every thread.stack-cluster observation is filtered by MinClusterSize, so these three scalars have no per-cluster stand-in.",
+      "addedIn": "1.63.0"
     },
     "infra.sql-connection-pool": {
       "producedBy": "SqlConnectionPoolAnalyzer",

@@ -106,8 +106,19 @@ namespace DumpDetective.Analysis.Analyzers.Threads
         /// threads, and <c>SampleOsThreadIds</c> is only a sample, not the full membership, so
         /// attributing the observation to one sampled thread would misrepresent its cardinality —
         /// same "no natural anchor" reasoning as <c>MemoryAnalyzer</c>'s segment-composition.
-        /// <see cref="ThreadClusterSnapshot.FrameworkPattern"/> (a lookup-table classification) is
-        /// left out, matching the project's existing "no categorical judgment in Measures" scoping.
+        /// <see cref="ThreadClusterSnapshot.FrameworkPattern"/> (a lookup-table classification) and
+        /// the raw <c>Signature</c> string are both free-text with no home among <c>Measures</c> —
+        /// each gets its own <c>Evidence</c> entry, framework-pattern only present when classified,
+        /// the same "no categorical judgment in Measures" scoping every other analyzer follows,
+        /// while still letting <c>ThreadStackClusterSynthesisRule</c> reconstruct
+        /// <c>ThreadClusterSnapshot.FrameworkPattern != null</c> from evidence-entry count instead
+        /// of re-implementing <c>ClassifyFrameworkPattern</c>'s lookup table (internal, inaccessible
+        /// from Reporting) — the boolean fact, not the classifier, is what crosses the boundary.
+        ///
+        /// A whole-run <c>runtime.thread-cluster-diversity</c> observation carries the three
+        /// unfiltered scalars (<c>AliveThreadCount</c>/<c>UniqueClusters</c>/<c>DiversityPercent</c>)
+        /// no per-cluster observation could stand in for, since <c>TopClusters</c> — and therefore
+        /// every emitted <c>thread.stack-cluster</c> — is filtered by <c>MinClusterSize</c>.
         /// </summary>
         private static async ValueTask EmitObservationsAsync(Sdk.Analysis.AnalysisContext context, ThreadStackClusterDomainResult result, CancellationToken cancellationToken)
         {
@@ -116,6 +127,13 @@ namespace DumpDetective.Analysis.Analyzers.Threads
             foreach (ThreadClusterSnapshot cluster in result.TopClusters ?? [])
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
+                var evidence = new List<EvidenceRef>
+                {
+                    new() { Artifact = context.ArtifactId!.Value, Locator = "signature", Description = cluster.Signature },
+                };
+                if (cluster.FrameworkPattern is not null)
+                    evidence.Add(new EvidenceRef { Artifact = context.ArtifactId!.Value, Locator = "framework-pattern", Description = cluster.FrameworkPattern });
 
                 await context.Observations.EmitAsync(new Observation
                 {
@@ -130,6 +148,7 @@ namespace DumpDetective.Analysis.Analyzers.Threads
                         ["gc.count"] = new Measure(cluster.GcCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                         ["finalizer.count"] = new Measure(cluster.FinalizerCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                     },
+                    Evidence = evidence,
                     Provenance = new Provenance
                     {
                         Artifact = context.ArtifactId!.Value,
@@ -140,6 +159,28 @@ namespace DumpDetective.Analysis.Analyzers.Threads
                     Confidence = 1.0,
                 }, cancellationToken);
             }
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "runtime.thread-cluster-diversity",
+                Subjects = [],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["alive-thread.count"] = new Measure(result.AliveThreadCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["unique-cluster.count"] = new Measure(result.UniqueClusters, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["diversity.percent"] = new Measure(result.DiversityPercent, MeasureUnit.Percent, MeasureSemantics.Ratio),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Thread Stack Signature Clustering",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
         }
 
         private static ThreadStackClusterDomainResult Analyze(

@@ -149,6 +149,7 @@ the one before it:
    | `SegmentReservationFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — re-derived pressure-risk inputs + thresholds unobserved, fixed | `SegmentReservationSynthesisRule` |
    | `CrashFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run scalars + per-thread candidate identity unobserved, fixed | `CrashSynthesisRule` |
    | `HeapTopologyFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — per-kind fragmentation + whole-run server-GC/logical-heap-skew scalars unobserved, fixed | `HeapTopologySynthesisRule` |
+   | `JitFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run scalars + single top-method identity unobserved, fixed | `JitSynthesisRule` |
 
    ### Per-analyzer notable findings
 
@@ -763,6 +764,32 @@ the one before it:
      reconstructs its own totals from, and always populate all 5 `KindSummaries` rows (matching
      `HeapTopologyAnalyzer.Analyze`'s own always-5-rows shape) rather than the old fixtures'
      sometimes-single-row shortcut.
+
+   **`JitFindingGenerator` — notable findings:**
+   - Step c's audit found `runtime.jit-activity` (Phase 5 step 1) already backed 6 of the finding
+     generator's signals in full (JIT heap bytes, JIT manager count already missing though, tiered/
+     managed/unmanaged/dynamic-method frame counts). Missing: `JitManagerCount`,
+     `LargeMethodThresholdBytes` (already a domain-result field, just not yet a measure),
+     `MaxThreadFrameDepth`/`MaxThreadFrameDepthOSThreadId`, and the large-methods finding's
+     `TopLargestMethods[0]` (`Signature`/`HotSize`/`ColdSize`) plus `TopLargestMethods.Count`.
+   - Step d's fix: `jit-manager.count`/`large-method.count`/`large-method.threshold-bytes`/
+     `max-thread-frame-depth.count`/`max-thread-frame-depth.os-thread-id` added as plain whole-run
+     measures (no gap-closing subtlety — straightforward raw facts); and, for the single top
+     method, `top-method.hot-size-bytes`/`cold-size-bytes` as measures plus an `EvidenceRef`
+     carrying its pre-formatted `Signature` string. **Still no per-method observation and no
+     `MethodRef`** — `JitAnalyzer`'s own Phase 5 step 1 remarks already ruled that out (no SDK
+     helper splits a `ThreadStackFrameRef`'s display string into name/parameter-types the way
+     `EntityCanonicalizer` does for bare type names, and hand-rolling one risks the exact
+     "regex-drift" bug class the `AsyncStateMachineAnalyzer` re-audit already hit) — evidence text
+     doesn't need identity resolution the way a `Subject` would, so the free-text description was
+     sufficient without revisiting that decision.
+   - **The old generator's own code comment claims signals are "sorted by severity descending, then
+     priority descending" before being appended — the actual code never sorts them.** Each signal
+     carries an unused `Priority` field, but the final loop just iterates `signals` in the order the
+     six if-checks ran (JIT heap bloat → unmanaged ratio → tiered → large methods → dynamic codegen
+     → deep stack), which is *not* priority-descending (400, 120, 80, 140, 100, 160). The rule
+     preserves the real (stale-comment-contradicting) behavior — insertion order — not the
+     documented-but-never-implemented sorted order.
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until `## Work`
    step 6 below (see the Stage-1 purity bullet above — distinct from playbook step f just above),
    so its `IFindingGenerator` cannot be retired alongside the rest in this playbook — state this

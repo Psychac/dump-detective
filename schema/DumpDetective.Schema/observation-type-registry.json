@@ -701,9 +701,16 @@
         "managed-frame.count": { "unit": "count", "semantics": "absolute" },
         "unmanaged-frame.count": { "unit": "count", "semantics": "absolute" },
         "ready-to-run-frame.count": { "unit": "count", "semantics": "absolute" },
-        "dynamic-method-frame.count": { "unit": "count", "semantics": "absolute" }
+        "dynamic-method-frame.count": { "unit": "count", "semantics": "absolute" },
+        "jit-manager.count": { "unit": "count", "semantics": "absolute" },
+        "large-method.count": { "unit": "count", "semantics": "absolute" },
+        "large-method.threshold-bytes": { "unit": "bytes", "semantics": "absolute" },
+        "top-method.hot-size-bytes": { "unit": "bytes", "semantics": "absolute" },
+        "top-method.cold-size-bytes": { "unit": "bytes", "semantics": "absolute" },
+        "max-thread-frame-depth.count": { "unit": "count", "semantics": "absolute" },
+        "max-thread-frame-depth.os-thread-id": { "unit": "custom", "semantics": "absolute" }
       },
-      "note": "Single whole-run observation. No per-method observation yet — building a real MethodRef needs name/signature splitting ThreadStackFrameRef doesn't expose structurally.",
+      "note": "Single whole-run observation. No per-method observation yet — building a real MethodRef needs name/signature splitting ThreadStackFrameRef doesn't expose structurally, so Phase 5 step 2 didn't attempt one either: top-method.hot-size-bytes/cold-size-bytes are TopLargestMethods[0]'s sizes, and an EvidenceRef carries its pre-formatted Signature string as free text (no identity resolution needed for evidence, unlike a Subject) — large-method.count is TopLargestMethods.Count (every method already over LargeMethodThresholdBytes), not a second, different count.",
       "addedIn": "1.24.0"
     },
     "heap.segment-kind-composition": {

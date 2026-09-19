@@ -72,26 +72,48 @@ public sealed class JitAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     /// names, and hand-rolling one here risks the exact "regex drift" bug class already seen
     /// elsewhere in this project (project_asyncstatemachine-reaudit memory). Left for a real
     /// MethodRef-construction pass, not guessed at.
+    /// Phase 5 step 2 adds <c>jit-manager.count</c>/<c>large-method.count</c>/
+    /// <c>large-method.threshold-bytes</c>/<c>max-thread-frame-depth.count</c>/
+    /// <c>max-thread-frame-depth.os-thread-id</c> (whole-run scalars/config, no gap) and the single
+    /// top-largest-method's sizes (<c>top-method.hot-size-bytes</c>/<c>cold-size-bytes</c>) plus its
+    /// pre-formatted <c>Signature</c> as an <see cref="EvidenceRef"/> — still not a per-method
+    /// observation, and not a <c>MethodRef</c>, for the same reason named above.
     /// </summary>
     private static async ValueTask EmitObservationAsync(AnalysisContext context, JitDomainResult result, CancellationToken cancellationToken)
     {
+        var measures = new Dictionary<string, Measure>
+        {
+            ["jit-heap.bytes"] = new Measure(result.TotalJitHeapBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+            ["active-methods.count"] = new Measure(result.ActiveMethodsOnStacks, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["distinct-methods.count"] = new Measure(result.DistinctMethodsOnStacks, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["tiered-methods.count"] = new Measure(result.TieredMethodCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["managed-frame.count"] = new Measure(result.ManagedFrameCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["unmanaged-frame.count"] = new Measure(result.UnmanagedFrameCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["ready-to-run-frame.count"] = new Measure(result.ReadyToRunFrameCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["dynamic-method-frame.count"] = new Measure(result.DynamicMethodFrameCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["jit-manager.count"] = new Measure(result.JitManagerCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["large-method.count"] = new Measure(result.TopLargestMethods.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["large-method.threshold-bytes"] = new Measure(result.LargeMethodThresholdBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+            ["max-thread-frame-depth.count"] = new Measure(result.MaxThreadFrameDepth, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["max-thread-frame-depth.os-thread-id"] = new Measure(result.MaxThreadFrameDepthOSThreadId, MeasureUnit.Custom, MeasureSemantics.Absolute),
+        };
+
+        IReadOnlyList<EvidenceRef> evidence = [];
+        if (result.TopLargestMethods.Count > 0)
+        {
+            JitMethodSnapshot top = result.TopLargestMethods[0];
+            measures["top-method.hot-size-bytes"] = new Measure(top.HotSize, MeasureUnit.Bytes, MeasureSemantics.Absolute);
+            measures["top-method.cold-size-bytes"] = new Measure(top.ColdSize, MeasureUnit.Bytes, MeasureSemantics.Absolute);
+            evidence = [new EvidenceRef { Artifact = context.ArtifactId!.Value, Locator = "top-method", Description = top.Signature }];
+        }
+
         await context.Observations.EmitAsync(new Observation
         {
             Id = ObservationId.NewId(),
             ObservationType = "runtime.jit-activity",
             Subjects = [],
             When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
-            Measures = new Dictionary<string, Measure>
-            {
-                ["jit-heap.bytes"] = new Measure(result.TotalJitHeapBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
-                ["active-methods.count"] = new Measure(result.ActiveMethodsOnStacks, MeasureUnit.Count, MeasureSemantics.Absolute),
-                ["distinct-methods.count"] = new Measure(result.DistinctMethodsOnStacks, MeasureUnit.Count, MeasureSemantics.Absolute),
-                ["tiered-methods.count"] = new Measure(result.TieredMethodCount, MeasureUnit.Count, MeasureSemantics.Absolute),
-                ["managed-frame.count"] = new Measure(result.ManagedFrameCount, MeasureUnit.Count, MeasureSemantics.Absolute),
-                ["unmanaged-frame.count"] = new Measure(result.UnmanagedFrameCount, MeasureUnit.Count, MeasureSemantics.Absolute),
-                ["ready-to-run-frame.count"] = new Measure(result.ReadyToRunFrameCount, MeasureUnit.Count, MeasureSemantics.Absolute),
-                ["dynamic-method-frame.count"] = new Measure(result.DynamicMethodFrameCount, MeasureUnit.Count, MeasureSemantics.Absolute),
-            },
+            Measures = measures,
             Provenance = new Provenance
             {
                 Artifact = context.ArtifactId!.Value,
@@ -100,6 +122,7 @@ public sealed class JitAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
                 Fidelity = FidelityLevel.Full,
             },
             Confidence = 1.0,
+            Evidence = evidence,
         }, cancellationToken);
     }
 

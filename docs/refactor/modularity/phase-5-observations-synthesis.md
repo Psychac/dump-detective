@@ -111,54 +111,64 @@ the one before it:
    e. Write the `ISynthesisRule`, run it over the same fixtures, diff against this item's baselines.
    f. Only then retire that analyzer's `IFindingGenerator`.
 
-   **Why step f reads "Partial" below, for every analyzer, until a separate fix lands:**
-   `AnalyzerFeatureModule.FindingGeneratorType` is a required field with no per-analyzer opt-out,
-   so literally deleting an `IFindingGenerator` needs a bigger, separate change (touching
-   `PluginCatalogBuilder` and every module registration). Until then, `SynthesisFindingEnricher`
-   runs after `FindingGenerationPipeline` and unconditionally overrides that analyzer's findings
-   with the rule's output — proven to reach the real report without touching any shared
-   report-pipeline code (Option 1 from the `Finding`-vs-`InsightFinding` design discussion) —
-   while the old generator stays registered, doing now-discarded work.
+   **Step f read "Partial" below, for every analyzer, until 2026-09-19, when the blocking gap
+   closed:** `AnalyzerFeatureModule.FindingGeneratorType` was a required field with no
+   per-analyzer opt-out, so literally deleting an `IFindingGenerator` needed a bigger, separate
+   change — `FindingGeneratorType` is now nullable, `PluginCatalogBuilder` resolves it tolerantly
+   instead of throwing when the companion class is gone, and a new `SynthesisRuleType` (also
+   convention-resolved) lets `StartupValidator`'s "every analyzer needs a finding path" check
+   accept a retired generator as long as a rule covers it. Until that gap closed,
+   `SynthesisFindingEnricher` ran after `FindingGenerationPipeline` and unconditionally overrode
+   that analyzer's findings with the rule's output — proven to reach the real report without
+   touching any shared report-pipeline code (Option 1 from the `Finding`-vs-`InsightFinding`
+   design discussion) — while the old generator stayed registered, doing now-discarded work. With
+   the gap closed, step f is real retirement, done package-wise (one commit per `Plugins.*`
+   package, same order as the earlier observation-emission commits): the old generator class, its
+   own unit tests, and its `SynthesisRuleParityTests` are deleted together — the parity test's job
+   (proving the rule reproduces the old generator exactly) is done and recorded in git history, so
+   it doesn't need to keep exercising the live class. `LeakCandidateFindingGenerator` is the one
+   exception still standing: `LeakCandidateAnalyzer` has no rule yet (deferred to step 6 below),
+   so it has nothing to retire to.
 
    ### Per-analyzer migration status
 
    | Analyzer | Steps a-e | Step f | Observation gap | Rule |
    |---|---|---|---|---|
-   | `ArrayFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 2 of 4 branches unobserved, fixed | `ArraySynthesisRule` |
-   | `LohFragmentationFindingGenerator` | Done, 2026-09-18 | Partial (see above) | No — clean | `LohFragmentationSynthesisRule` |
-   | `AsyncStateMachineFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — `type.async-state-machine` had no method identity, fixed | `AsyncStateMachineSynthesisRule` |
-   | `AsyncTaskFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 7 of 8 signals unobserved, fixed | `AsyncTaskSynthesisRule` |
-   | `FinalizableObjectFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 2 of 9 signals unobserved, fixed | `FinalizableObjectSynthesisRule` |
-   | `GCHandleFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 5 of 6 signals unobserved, fixed | `GCHandleSynthesisRule` |
-   | `GCRootFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 3 of 4 signals unobserved, fixed | `GCRootSynthesisRule` |
-   | `WeakReferenceFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — most of overview + 2 of 4 signals unobserved, fixed | `WeakReferenceSynthesisRule` |
-   | `SqlConnectionPoolFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — connection-string label had no home, fixed | `SqlConnectionPoolSynthesisRule` |
-   | `SqlCommandFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — TotalCommands/DisposedCount unobserved, fixed | `SqlCommandSynthesisRule` |
-   | `SqlTransactionFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — TotalTransactions/DisposedCount/OtherCount unobserved, fixed | `SqlTransactionSynthesisRule` |
-   | `DbConnectionFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — type breakdown + closed/broken/other/unknown counts + root-path label unobserved, fixed | `DbConnectionSynthesisRule` |
-   | `HttpObjectFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — 2 whole-run counts + generation split + connection-limit + module breakdown unobserved, fixed | `HttpObjectSynthesisRule` |
-   | `TimerLeakFindingGenerator` | Done, 2026-09-18 | Partial (see above) | No — no observation gap at all | `TimerLeakSynthesisRule` |
-   | `WcfChannelFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — per-type totals + binding hint + endpoints + whole-run counts unobserved, fixed | `WcfChannelSynthesisRule` |
-   | `DominatorFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — always-heuristic retained bytes + highly-referenced/capped whole-run counts + type-hotspot aggregate unobserved, fixed | `DominatorSynthesisRule` |
-   | `EventLeakFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — per-group aggregates + whole-run zero/fallback counts unobserved, fixed | `EventLeakSynthesisRule` |
-   | `ReferenceChainFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — multi-sample-enriched per-type fields + whole-run scalars + shared-root groups unobserved, fixed | `ReferenceChainSynthesisRule` |
-   | `StaticRootFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — significant-subset whole-run scalars unobserved, fixed | `StaticRootSynthesisRule` |
-   | `AllocationPatternFindingGenerator` | Done, 2026-09-18 | Partial (see above) | Yes — size-fraction measures + classification threshold + top-long-lived-type identity unobserved, fixed | `AllocationPatternSynthesisRule` |
-   | `GCGenerationFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — count-based whole-run scalars + thresholds + bounded top-allocator/top-accumulator types unobserved, fixed | `GCGenerationSynthesisRule` |
-   | `MemoryFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run pressure inputs + single top-1-type identity unobserved, fixed | `MemorySynthesisRule` |
-   | `SegmentReservationFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — re-derived pressure-risk inputs + thresholds unobserved, fixed | `SegmentReservationSynthesisRule` |
-   | `CrashFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run scalars + per-thread candidate identity unobserved, fixed | `CrashSynthesisRule` |
-   | `HeapTopologyFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — per-kind fragmentation + whole-run server-GC/logical-heap-skew scalars unobserved, fixed | `HeapTopologySynthesisRule` |
-   | `JitFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run scalars + single top-method identity unobserved, fixed | `JitSynthesisRule` |
-   | `ModuleFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run population + 5 new bounded per-module observation types unobserved, fixed | `ModuleSynthesisRule` |
-   | `HangFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run thread-pool/task-backpressure scalars + a per-thread deadlock-candidate flag unobserved, fixed | `HangSynthesisRule` |
-   | `LockGraphFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run total-held-locks scalar unobserved, fixed | `LockGraphSynthesisRule` |
-   | `ThreadFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run triage scalars + finalizer-thread detail unobserved, fixed | `ThreadSynthesisRule` |
-   | `ThreadStackClusterFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run diversity scalars + per-cluster signature/framework-pattern text unobserved, fixed | `ThreadStackClusterSynthesisRule` |
-   | `BoxingFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run pressure scalars + oversized-value/struct-padding-waste per-type aggregations unobserved, fixed | `BoxingSynthesisRule` |
-   | `CollectionFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run waste scalars + exact per-kind/per-element-type waste breakdowns unobserved, fixed | `CollectionSynthesisRule` |
-   | `ObjectShapeFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — three already-selected per-type entries + two exact classification-population totals unobserved, fixed | `ObjectShapeSynthesisRule` |
-   | `StringFindingGenerator` | Done, 2026-09-19 | Partial (see above) | Yes — whole-run duplication/LOH/very-long-string/sampling scalars unobserved, fixed | `StringSynthesisRule` |
+   | `ArrayFindingGenerator` | Done, 2026-09-18 | Done, 2026-09-19 | Yes — 2 of 4 branches unobserved, fixed | `ArraySynthesisRule` |
+   | `LohFragmentationFindingGenerator` | Done, 2026-09-18 | Done, 2026-09-19 | No — clean | `LohFragmentationSynthesisRule` |
+   | `AsyncStateMachineFindingGenerator` | Done, 2026-09-18 | Done, 2026-09-19 | Yes — `type.async-state-machine` had no method identity, fixed | `AsyncStateMachineSynthesisRule` |
+   | `AsyncTaskFindingGenerator` | Done, 2026-09-18 | Done, 2026-09-19 | Yes — 7 of 8 signals unobserved, fixed | `AsyncTaskSynthesisRule` |
+   | `FinalizableObjectFindingGenerator` | Done, 2026-09-18 | Done, 2026-09-19 | Yes — 2 of 9 signals unobserved, fixed | `FinalizableObjectSynthesisRule` |
+   | `GCHandleFindingGenerator` | Done, 2026-09-18 | Done, 2026-09-19 | Yes — 5 of 6 signals unobserved, fixed | `GCHandleSynthesisRule` |
+   | `GCRootFindingGenerator` | Done, 2026-09-18 | Done, 2026-09-19 | Yes — 3 of 4 signals unobserved, fixed | `GCRootSynthesisRule` |
+   | `WeakReferenceFindingGenerator` | Done, 2026-09-18 | Done, 2026-09-19 | Yes — most of overview + 2 of 4 signals unobserved, fixed | `WeakReferenceSynthesisRule` |
+   | `SqlConnectionPoolFindingGenerator` | Done, 2026-09-18 | Done, 2026-09-19 | Yes — connection-string label had no home, fixed | `SqlConnectionPoolSynthesisRule` |
+   | `SqlCommandFindingGenerator` | Done, 2026-09-18 | Done, 2026-09-19 | Yes — TotalCommands/DisposedCount unobserved, fixed | `SqlCommandSynthesisRule` |
+   | `SqlTransactionFindingGenerator` | Done, 2026-09-18 | Done, 2026-09-19 | Yes — TotalTransactions/DisposedCount/OtherCount unobserved, fixed | `SqlTransactionSynthesisRule` |
+   | `DbConnectionFindingGenerator` | Done, 2026-09-18 | Done, 2026-09-19 | Yes — type breakdown + closed/broken/other/unknown counts + root-path label unobserved, fixed | `DbConnectionSynthesisRule` |
+   | `HttpObjectFindingGenerator` | Done, 2026-09-18 | Done, 2026-09-19 | Yes — 2 whole-run counts + generation split + connection-limit + module breakdown unobserved, fixed | `HttpObjectSynthesisRule` |
+   | `TimerLeakFindingGenerator` | Done, 2026-09-18 | Done, 2026-09-19 | No — no observation gap at all | `TimerLeakSynthesisRule` |
+   | `WcfChannelFindingGenerator` | Done, 2026-09-18 | Done, 2026-09-19 | Yes — per-type totals + binding hint + endpoints + whole-run counts unobserved, fixed | `WcfChannelSynthesisRule` |
+   | `DominatorFindingGenerator` | Done, 2026-09-18 | Done, 2026-09-19 | Yes — always-heuristic retained bytes + highly-referenced/capped whole-run counts + type-hotspot aggregate unobserved, fixed | `DominatorSynthesisRule` |
+   | `EventLeakFindingGenerator` | Done, 2026-09-18 | Done, 2026-09-19 | Yes — per-group aggregates + whole-run zero/fallback counts unobserved, fixed | `EventLeakSynthesisRule` |
+   | `ReferenceChainFindingGenerator` | Done, 2026-09-18 | Done, 2026-09-19 | Yes — multi-sample-enriched per-type fields + whole-run scalars + shared-root groups unobserved, fixed | `ReferenceChainSynthesisRule` |
+   | `StaticRootFindingGenerator` | Done, 2026-09-18 | Done, 2026-09-19 | Yes — significant-subset whole-run scalars unobserved, fixed | `StaticRootSynthesisRule` |
+   | `AllocationPatternFindingGenerator` | Done, 2026-09-18 | Done, 2026-09-19 | Yes — size-fraction measures + classification threshold + top-long-lived-type identity unobserved, fixed | `AllocationPatternSynthesisRule` |
+   | `GCGenerationFindingGenerator` | Done, 2026-09-19 | Done, 2026-09-19 | Yes — count-based whole-run scalars + thresholds + bounded top-allocator/top-accumulator types unobserved, fixed | `GCGenerationSynthesisRule` |
+   | `MemoryFindingGenerator` | Done, 2026-09-19 | Done, 2026-09-19 | Yes — whole-run pressure inputs + single top-1-type identity unobserved, fixed | `MemorySynthesisRule` |
+   | `SegmentReservationFindingGenerator` | Done, 2026-09-19 | Done, 2026-09-19 | Yes — re-derived pressure-risk inputs + thresholds unobserved, fixed | `SegmentReservationSynthesisRule` |
+   | `CrashFindingGenerator` | Done, 2026-09-19 | Done, 2026-09-19 | Yes — whole-run scalars + per-thread candidate identity unobserved, fixed | `CrashSynthesisRule` |
+   | `HeapTopologyFindingGenerator` | Done, 2026-09-19 | Done, 2026-09-19 | Yes — per-kind fragmentation + whole-run server-GC/logical-heap-skew scalars unobserved, fixed | `HeapTopologySynthesisRule` |
+   | `JitFindingGenerator` | Done, 2026-09-19 | Done, 2026-09-19 | Yes — whole-run scalars + single top-method identity unobserved, fixed | `JitSynthesisRule` |
+   | `ModuleFindingGenerator` | Done, 2026-09-19 | Done, 2026-09-19 | Yes — whole-run population + 5 new bounded per-module observation types unobserved, fixed | `ModuleSynthesisRule` |
+   | `HangFindingGenerator` | Done, 2026-09-19 | Done, 2026-09-19 | Yes — whole-run thread-pool/task-backpressure scalars + a per-thread deadlock-candidate flag unobserved, fixed | `HangSynthesisRule` |
+   | `LockGraphFindingGenerator` | Done, 2026-09-19 | Done, 2026-09-19 | Yes — whole-run total-held-locks scalar unobserved, fixed | `LockGraphSynthesisRule` |
+   | `ThreadFindingGenerator` | Done, 2026-09-19 | Done, 2026-09-19 | Yes — whole-run triage scalars + finalizer-thread detail unobserved, fixed | `ThreadSynthesisRule` |
+   | `ThreadStackClusterFindingGenerator` | Done, 2026-09-19 | Done, 2026-09-19 | Yes — whole-run diversity scalars + per-cluster signature/framework-pattern text unobserved, fixed | `ThreadStackClusterSynthesisRule` |
+   | `BoxingFindingGenerator` | Done, 2026-09-19 | Done, 2026-09-19 | Yes — whole-run pressure scalars + oversized-value/struct-padding-waste per-type aggregations unobserved, fixed | `BoxingSynthesisRule` |
+   | `CollectionFindingGenerator` | Done, 2026-09-19 | Done, 2026-09-19 | Yes — whole-run waste scalars + exact per-kind/per-element-type waste breakdowns unobserved, fixed | `CollectionSynthesisRule` |
+   | `ObjectShapeFindingGenerator` | Done, 2026-09-19 | Done, 2026-09-19 | Yes — three already-selected per-type entries + two exact classification-population totals unobserved, fixed | `ObjectShapeSynthesisRule` |
+   | `StringFindingGenerator` | Done, 2026-09-19 | Done, 2026-09-19 | Yes — whole-run duplication/LOH/very-long-string/sampling scalars unobserved, fixed | `StringSynthesisRule` |
 
    ### Per-analyzer notable findings
 
@@ -1083,7 +1093,13 @@ actually starts, not before.
 2. **Author synthesis rules** replacing each `IFindingGenerator`. Verified by golden-file equality
    against today's findings for the full test corpus — a finding that changes text or severity is a
    bug in this phase, not an improvement.
-3. **Retire `IFindingGenerator`** once every generator has an equivalent rule.
+3. **Retire `IFindingGenerator`** once every generator has an equivalent rule. **Done, 2026-09-19,
+   package-wise (8 commits, one per `Plugins.*` package) — 35/36 analyzers.** Mechanism gap closed
+   first (`FindingGeneratorType` made nullable, `SynthesisRuleType` added, `PluginCatalogBuilder`/
+   `ServiceRegistration`/`StartupValidator` updated to allow and validate the null case — see the
+   per-analyzer playbook's step f note above), then the old generator class + its own unit tests +
+   its `SynthesisRuleParityTests` deleted together per package. `LeakCandidateFindingGenerator`
+   stays registered — no rule exists yet, deferred to step 6.
 4. **Generic trend differ.** Implement diffing over `(ObservationType, Subjects)` keyed by
    `TemporalExtent`, dispatching on `MeasureSemantics` (Absolute → delta/%; Rate → acceleration;
    Ratio → point difference; Count → growth-curve fit; Duration → distribution shift). Migrate

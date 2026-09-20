@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/observation-type-registry.json",
-  "registryVersion": "1.58.0",
+  "registryVersion": "1.59.0",
   "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
   "observationTypes": {
     "gc.pause": {
@@ -989,12 +989,12 @@
       "subjectKind": null,
       "temporalKind": "point",
       "measures": {
-        "type.count": { "unit": "count", "semantics": "absolute" },
-        "avg-reference-fields": { "unit": "count", "semantics": "absolute" },
-        "gc-scan-work": { "unit": "count", "semantics": "absolute" },
-        "gen2-gc-scan-work": { "unit": "count", "semantics": "absolute" },
-        "reference-heavy-type.count": { "unit": "count", "semantics": "absolute" },
-        "value-heavy-type.count": { "unit": "count", "semantics": "absolute" }
+        "type.count": { "unit": "count", "semantics": "absolute", "direction": "neutral" },
+        "avg-reference-fields": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
+        "gc-scan-work": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
+        "gen2-gc-scan-work": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
+        "reference-heavy-type.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
+        "value-heavy-type.count": { "unit": "count", "semantics": "absolute", "direction": "neutral" }
       },
       "note": "Single whole-heap observation. Per-type Top*Types lists excluded — Category is a hand-picked-threshold classification over the entire type population (Smell A/B + volume risk). reference-heavy-type.count/value-heavy-type.count (added for the synthesis migration) are the exact totals of those two classification populations — not derivable by counting type.reference-heavy/type.value-heavy observations, which are capped to a display-only top 3/top 1.",
       "addedIn": "1.30.0"
@@ -1048,15 +1048,15 @@
       "subjectKind": null,
       "temporalKind": "point",
       "measures": {
-        "total-boxed.count": { "unit": "count", "semantics": "absolute" },
-        "total-boxed.bytes": { "unit": "bytes", "semantics": "absolute" },
-        "boxed-enum.count": { "unit": "count", "semantics": "absolute" },
-        "boxed-enum.bytes": { "unit": "bytes", "semantics": "absolute" },
-        "nullable-boxed.count": { "unit": "count", "semantics": "absolute" },
-        "nullable-boxed.bytes": { "unit": "bytes", "semantics": "absolute" },
-        "oversized-value.count": { "unit": "count", "semantics": "absolute" },
+        "total-boxed.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
+        "total-boxed.bytes": { "unit": "bytes", "semantics": "absolute", "direction": "higherIsWorse" },
+        "boxed-enum.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
+        "boxed-enum.bytes": { "unit": "bytes", "semantics": "absolute", "direction": "higherIsWorse" },
+        "nullable-boxed.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
+        "nullable-boxed.bytes": { "unit": "bytes", "semantics": "absolute", "direction": "higherIsWorse" },
+        "oversized-value.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
         "padding-waste-type.count": { "unit": "count", "semantics": "absolute" },
-        "gen2-boxed.count": { "unit": "count", "semantics": "absolute" }
+        "gen2-boxed.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" }
       },
       "note": "Whole-run, unconditionally emitted even when every per-type list (type.boxing/type.oversized-value/type.struct-padding-waste) is empty — guarantees the always-present summary finding a non-empty DerivedFrom even over an all-zero result (e.g. Analyze's Empty() early-return).",
       "addedIn": "1.65.0"
@@ -1195,9 +1195,9 @@
       "subjectKind": null,
       "temporalKind": "point",
       "measures": {
-        "total-collection.count": { "unit": "count", "semantics": "absolute" },
-        "total-wasted.bytes": { "unit": "bytes", "semantics": "absolute" },
-        "wasteful-collection.count": { "unit": "count", "semantics": "absolute" }
+        "total-collection.count": { "unit": "count", "semantics": "absolute", "direction": "neutral" },
+        "total-wasted.bytes": { "unit": "bytes", "semantics": "absolute", "direction": "higherIsWorse" },
+        "wasteful-collection.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" }
       },
       "note": "Whole-run scalars the old generator reads directly off CollectionDomainResult — no per-collection stand-in since collection.wasteful is capped by TopWastefulCollectionsToShow.",
       "addedIn": "1.66.0"
@@ -1248,14 +1248,14 @@
       "subjectKind": null,
       "temporalKind": "point",
       "measures": {
-        "duplication.ratio": { "unit": "ratio", "semantics": "ratio" },
-        "duplicate-pattern.count": { "unit": "count", "semantics": "absolute" },
-        "duplicate-wasted.bytes": { "unit": "bytes", "semantics": "absolute" },
-        "loh-string.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "duplication.ratio": { "unit": "ratio", "semantics": "ratio", "direction": "higherIsWorse" },
+        "duplicate-pattern.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
+        "duplicate-wasted.bytes": { "unit": "bytes", "semantics": "absolute", "direction": "higherIsWorse" },
+        "loh-string.bytes": { "unit": "bytes", "semantics": "absolute", "direction": "higherIsWorse" },
         "very-long-string.count": { "unit": "count", "semantics": "absolute" },
         "very-long-string.bytes": { "unit": "bytes", "semantics": "absolute" },
-        "pct-of-managed-heap.percent": { "unit": "percent", "semantics": "ratio" },
-        "total-string-memory.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "pct-of-managed-heap.percent": { "unit": "percent", "semantics": "ratio", "direction": "higherIsWorse" },
+        "total-string-memory.bytes": { "unit": "bytes", "semantics": "absolute", "direction": "higherIsWorse" },
         "sampling-coverage.ratio": { "unit": "ratio", "semantics": "ratio" },
         "strings-sampled.count": { "unit": "count", "semantics": "absolute" }
       },

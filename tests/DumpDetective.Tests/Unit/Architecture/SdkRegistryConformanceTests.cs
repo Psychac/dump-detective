@@ -344,6 +344,41 @@ public sealed class SdkRegistryConformanceTests
                 ["max-continuation-depth"] = "higherIsWorse",
                 ["avg-continuation-depth"] = "higherIsWorse",
             },
+            ["type.boxing-pressure"] = new Dictionary<string, string>
+            {
+                ["total-boxed.count"] = "higherIsWorse",
+                ["total-boxed.bytes"] = "higherIsWorse",
+                ["boxed-enum.count"] = "higherIsWorse",
+                ["boxed-enum.bytes"] = "higherIsWorse",
+                ["nullable-boxed.count"] = "higherIsWorse",
+                ["nullable-boxed.bytes"] = "higherIsWorse",
+                ["oversized-value.count"] = "higherIsWorse",
+                ["gen2-boxed.count"] = "higherIsWorse",
+            },
+            ["collection.waste-summary"] = new Dictionary<string, string>
+            {
+                ["total-collection.count"] = "neutral",
+                ["total-wasted.bytes"] = "higherIsWorse",
+                ["wasteful-collection.count"] = "higherIsWorse",
+            },
+            ["type.shape-composition"] = new Dictionary<string, string>
+            {
+                ["type.count"] = "neutral",
+                ["avg-reference-fields"] = "higherIsWorse",
+                ["gc-scan-work"] = "higherIsWorse",
+                ["gen2-gc-scan-work"] = "higherIsWorse",
+                ["reference-heavy-type.count"] = "higherIsWorse",
+                ["value-heavy-type.count"] = "neutral",
+            },
+            ["type.string-composition"] = new Dictionary<string, string>
+            {
+                ["total-string-memory.bytes"] = "higherIsWorse",
+                ["duplicate-pattern.count"] = "higherIsWorse",
+                ["duplicate-wasted.bytes"] = "higherIsWorse",
+                ["duplication.ratio"] = "higherIsWorse",
+                ["loh-string.bytes"] = "higherIsWorse",
+                ["pct-of-managed-heap.percent"] = "higherIsWorse",
+            },
         };
 
     [Fact]

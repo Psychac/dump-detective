@@ -15,6 +15,17 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.59.0 — 2026-09-20
+
+Fifth package — `Plugins.Types`: 23 headline measures across `type.boxing-pressure` (8),
+`collection.waste-summary` (3, full coverage — every measure that type declares now has a
+direction), `type.shape-composition` (6), and `type.string-composition` (6), mined from
+`Boxing`/`Collection`/`ObjectShape`/`String`'s trend comparers. `ArrayTrendComparer` is the second
+case (after `AsyncStateMachine` in 1.58.0) of a comparer that's 100% headline by `Scope` convention
+but backs zero registry measures — verified against `ArrayAnalyzer.cs`: its sole composition
+observation type (`type.array-composition`) is emitted per array element type
+(`foreach (... in result.TopArrayTypesBySize)`), never as a whole-run aggregate.
+
 ## `observation-type-registry.json` 1.58.0 — 2026-09-20
 
 Fourth package — `Plugins.Async`: only 5 headline measures, all under `async.task-population`,

@@ -1174,6 +1174,29 @@ actually starts, not before.
      comparison time, values only reachable by summing scoped per-type data). See the CHANGELOG
      entries in `schema/DumpDetective.Schema/CHANGELOG.md` (1.55.0 through 1.62.0) for the
      per-package detail.
+   - **The differ itself, done 2026-09-20** — `ObservationTrendDiffer`
+     (`src/DumpDetective.Analysis/Trend/ObservationTrendDiffer.cs`), pairwise over headline
+     Observations, dispatching on `MeasureSemantics`, direction sourced from
+     `MeasureDirectionRegistry`. One real behavioral difference implemented so far: `Ratio`
+     measures diff as a point difference, never percent-of-a-percent — the concrete,
+     now-demonstrated-in-a-test bug fix (`AllocationPatternTrendComparer.Compare`'s
+     `gen2.count-fraction`: 10%→15% reports "+50%" today via `Absolute`-shaped math, should be "+5
+     points"). `Rate`/`Count`/`Duration`'s richer per-`MeasureSemantics` treatment (rate-of-rate
+     acceleration, growth-curve fit across ≥ 3 anchors, distribution shift) needs a real temporal
+     series, not two snapshots — honestly out of reach for a *pairwise* differ, so those three fall
+     back to `Absolute`-shaped delta+percent rather than faking series-aware math; a genuinely
+     series-aware differ over `TrendAnalyzer.ExtractTimeline`'s shape is separate, not-yet-built
+     work, not scoped into this step. `MeasureDirectionRegistry`
+     (`src/DumpDetective.Sdk/Observations/MeasureDirectionRegistry.cs`) is the new runtime
+     companion the registry rollout above needed all along — same split as `CapabilityVocabulary`/
+     `capability-registry.json` (a JSON file can't be queried without a loader this project has no
+     precedent for building), so the C# table is what the differ actually reads and the JSON stays
+     the checked-in, test-cross-checked mirror. Proven in isolation
+     (`tests/DumpDetective.Tests/Unit/Analysis/ObservationTrendDifferTests.cs`, 7 tests) — **not yet
+     wired into `TrendAnalyzer`/`TrendReportComposer`**, matching this phase's mechanism-first
+     discipline (same shape as step 3 landing `FindingGeneratorType` nullability before any
+     generator was actually deleted). Migrating the 11 all-headline comparers onto it, and trimming
+     the other 25 to their scoped-only remainder, is the next piece of this step.
 5. **Keep the genuine exceptions.** Distinct from the headline/scoped split above — this is about
    *headline* metrics where "worse" still isn't monotonic in the measure (thread count, handle
    count, where both directions can be bad in context), not about scoped metrics (which are handled

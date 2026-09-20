@@ -8,6 +8,7 @@ using DumpDetective.Reporting.Formatters;
 using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.Services;
 using DumpDetective.Reporting.Trend;
+using DumpDetective.Sdk.Observations;
 
 namespace DumpDetective.Cli.Pipeline.Nodes;
 
@@ -51,21 +52,24 @@ internal sealed class TrendBuildReportNode(
                 state.IncidentContext!,
                 DateTime.UtcNow,
                 state.StageMemoryStats,
-                MemoryStats: null));
+                MemoryStats: null,
+                Observations: state.Observations));
         }
 
         AnalysisSnapshot[] snapshots = executions
             .Select((execution, index) => BuildSnapshot(index, execution))
             .ToArray();
 
+        IReadOnlyList<Observation>[] observationsPerSnapshot = executions.Select(e => e.Observations).ToArray();
+
         AnalysisSnapshot baseline = snapshots[0];
         AnalysisSnapshot current = snapshots[^1];
         FindingLifecycleResult lifecycle = FindingLifecycleComparer.Compare(baseline, current);
 
         TrendReportData trendData = new(
-            Steps: trendAnalyzer.CompareSeries(snapshots),
-            Overall: trendAnalyzer.CompareAll(baseline, current),
-            Timeline: trendAnalyzer.ExtractTimeline(snapshots),
+            Steps: trendAnalyzer.CompareSeries(snapshots, observationsPerSnapshot),
+            Overall: trendAnalyzer.CompareAll(baseline, current, observationsPerSnapshot[0], observationsPerSnapshot[^1]),
+            Timeline: trendAnalyzer.ExtractTimeline(snapshots, observationsPerSnapshot),
             ScopedTimeline: trendAnalyzer.ExtractScopedTimeline(snapshots),
             Snapshots: snapshots,
             NewFindings: lifecycle.NewFindings,

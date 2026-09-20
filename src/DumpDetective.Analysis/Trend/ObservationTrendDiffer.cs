@@ -88,7 +88,7 @@ internal static class ObservationTrendDiffer
         return result;
     }
 
-    private static bool TryToLegacyDirection(MeasureDirection direction, out MetricTrendDirection legacyDirection)
+    internal static bool TryToLegacyDirection(MeasureDirection direction, out MetricTrendDirection legacyDirection)
     {
         switch (direction)
         {
@@ -107,7 +107,7 @@ internal static class ObservationTrendDiffer
         }
     }
 
-    private static string ToUnitLabel(MeasureUnit unit) => unit switch
+    internal static string ToUnitLabel(MeasureUnit unit) => unit switch
     {
         MeasureUnit.Count => "count",
         MeasureUnit.Bytes => "bytes",

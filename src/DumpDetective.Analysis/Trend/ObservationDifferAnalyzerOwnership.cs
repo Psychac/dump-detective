@@ -1,0 +1,28 @@
+namespace DumpDetective.Analysis.Trend;
+
+/// <summary>
+/// Which analyzer owns each headline <c>ObservationType</c> that <see cref="ObservationTrendDiffer"/>
+/// covers — needed to attribute the differ's flat <c>(ObservationType, measure key)</c>-keyed
+/// output back to a per-analyzer <see cref="AnalyzerTrendResult"/>, the shape
+/// <c>TrendReportComposer</c> and everything downstream of it already consumes. Hand-maintained,
+/// same style as <see cref="Sdk.Observations.MeasureDirectionRegistry"/> — only lists the 8
+/// analyzers whose trend comparer has fully retired onto the generic differ (all-headline, and
+/// with at least one registry-backed measure; see
+/// docs/refactor/modularity/phase-5-observations-synthesis.md ## Work step 4's per-package
+/// CHANGELOG entries for which of the 11 all-headline comparers those are and which 3 aren't).
+/// </summary>
+internal static class ObservationDifferAnalyzerOwnership
+{
+    public static readonly IReadOnlyDictionary<string, string> ObservationTypeToAnalyzerName =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["weakreference.population"] = "Weak Reference Analysis",
+            ["event.publisher-leak-population"] = "Event Leak Analysis",
+            ["reference-chain.population"] = "Reference Chain Analysis",
+            ["heap.loh-fragmentation"] = "LOH & POH Fragmentation Analysis",
+            ["heap.segment-reservation"] = "Segment Reservation Analysis",
+            ["runtime.jit-activity"] = "JIT Analysis",
+            ["runtime.lock-pressure"] = "Lock Graph Analysis",
+            ["runtime.thread-cluster-diversity"] = "Thread Stack Signature Clustering",
+        };
+}

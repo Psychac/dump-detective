@@ -1,5 +1,6 @@
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
+using DumpDetective.Sdk.Observations;
 
 namespace DumpDetective.Cli.Execution;
 
@@ -10,4 +11,5 @@ internal sealed record TrendDumpExecution(
     AnalysisIncidentContext IncidentContext,
     DateTime GeneratedAtUtc,
     IReadOnlyList<(string StageName, AnalyzerMemoryStats Stats)> StageMemoryStats,
-    AnalyzerMemoryStats? MemoryStats);
+    AnalyzerMemoryStats? MemoryStats,
+    IReadOnlyList<Observation> Observations);

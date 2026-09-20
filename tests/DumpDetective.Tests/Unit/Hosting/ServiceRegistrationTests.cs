@@ -55,6 +55,33 @@ public sealed class ServiceRegistrationTests
         services.GetServices<IAnalyzerTrendComparer>().Should().NotBeEmpty();
     }
 
+    /// <summary>
+    /// StartupValidator.ValidateRegistrations had zero direct test coverage before this — exactly
+    /// how a real bug (AnalyzerFeatureModule.DisplayName used as the join key for retired-analyzer
+    /// coverage, silently wrong for ThreadStackClusterAnalyzer, whose DisplayName "Thread Stack
+    /// Cluster Analysis" differs from its Name "Thread Stack Signature Clustering") went uncaught
+    /// until a stricter PluginCatalogBuilderTests check surfaced it. This exercises the real,
+    /// production DI graph end to end, not a synthetic scenario, so it would have caught that.
+    /// </summary>
+    [Fact]
+    public void ValidateRegistrations_DoesNotThrow_ForTheRealProductionCatalog()
+    {
+        using IHost host = ServiceRegistration.BuildHost(Array.Empty<string>());
+        IServiceProvider services = host.Services;
+
+        IReadOnlyList<DumpDetective.Sdk.Analysis.IAnalyzer> analyzers = services.GetRequiredService<IAnalyzerFactory>().CreateAnalyzers();
+        IAnalyzerFeatureModuleCatalog moduleCatalog = services.GetRequiredService<IAnalyzerFeatureModuleCatalog>();
+        IEnumerable<IFindingGenerator> findingGenerators = services.GetServices<IFindingGenerator>();
+        IEnumerable<IAnalyzerTrendComparer> trendComparers = services.GetServices<IAnalyzerTrendComparer>();
+        ISectionBuilderFactory sectionBuilderFactory = services.GetRequiredService<ISectionBuilderFactory>();
+        StartupValidator validator = services.GetRequiredService<StartupValidator>();
+
+        Action act = () => validator.ValidateRegistrations(
+            analyzers, moduleCatalog, findingGenerators, trendComparers, sectionBuilderFactory);
+
+        act.Should().NotThrow();
+    }
+
     [Fact]
     public void BuildHost_RegistersEverythingAsSingleton()
     {

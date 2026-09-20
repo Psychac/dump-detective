@@ -69,7 +69,14 @@ internal static class ServiceRegistration
 
         foreach (AnalyzerFeatureModule module in moduleCatalog.Modules)
         {
-            services.AddSingleton(typeof(IAnalyzerTrendComparer), sp => ActivatorUtilities.CreateInstance(sp, module.TrendComparerType));
+            // Retired comparers (Phase 5 step 4 — TrendComparerType null once fully covered by
+            // ObservationTrendDiffer) have nothing left to register here; TrendAnalyzer's
+            // observation-differ-driven path supplies their trend deltas instead.
+            if (module.TrendComparerType is null)
+                continue;
+
+            Type trendComparerType = module.TrendComparerType;
+            services.AddSingleton(typeof(IAnalyzerTrendComparer), sp => ActivatorUtilities.CreateInstance(sp, trendComparerType));
         }
 
         services.AddSingleton<TrendAnalyzer>();

@@ -95,8 +95,17 @@ internal sealed class PluginCatalogBuilder
             reportingAssembly, "DumpDetective.Reporting.FindingGenerators", $"{baseName}FindingGenerator");
         Type? synthesisRuleType = TryResolveCompanionType(
             reportingAssembly, "DumpDetective.Reporting.SynthesisRules", $"{baseName}SynthesisRule");
-        Type trendComparerType = ResolveCompanionType(
-            analyzerType, analyzerType.Assembly, "DumpDetective.Analysis.Trend.Comparers", $"{baseName}TrendComparer");
+        // TrendComparerType is resolved tolerantly too, same reasoning as FindingGeneratorType:
+        // Phase 5 step 4 retires an analyzer's IAnalyzerTrendComparer once its headline metrics are
+        // fully covered by the generic ObservationTrendDiffer (see ObservationDifferAnalyzerOwnership),
+        // so "no companion class found" is the expected steady state for a migrated analyzer. Unlike
+        // FindingGeneratorType there's no per-analyzer replacement to require here — one shared
+        // differ instance covers every retired analyzer, so IsShapeValid() doesn't (and can't)
+        // enforce an "or" companion the way it does for FindingGeneratorType/SynthesisRuleType;
+        // StartupValidator's trend-comparer coverage check is the real backstop against an analyzer
+        // silently losing trend output.
+        Type? trendComparerType = TryResolveCompanionType(
+            analyzerType.Assembly, "DumpDetective.Analysis.Trend.Comparers", $"{baseName}TrendComparer");
         Type sectionBuilderType = ResolveCompanionType(
             analyzerType, reportingAssembly, "DumpDetective.Reporting.SectionBuilders", $"{baseName}SectionBuilder");
 

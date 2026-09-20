@@ -104,10 +104,12 @@ public sealed class PluginCatalogBuilderTests
                 : module.AnalyzerType.Name;
 
             // FindingGeneratorType is retired (null) once its SynthesisRuleType ships — Phase 5
-            // step 3. Whichever companion is present must still follow the naming convention.
+            // step 3. TrendComparerType is retired (null) once its analyzer is fully covered by
+            // ObservationTrendDiffer — Phase 5 step 4. Whichever companion is present must still
+            // follow the naming convention.
             module.FindingGeneratorType?.Name.Should().Be($"{baseName}FindingGenerator", "analyzer {0}", module.AnalyzerType.Name);
             module.SynthesisRuleType?.Name.Should().Be($"{baseName}SynthesisRule", "analyzer {0}", module.AnalyzerType.Name);
-            module.TrendComparerType.Name.Should().Be($"{baseName}TrendComparer", "analyzer {0}", module.AnalyzerType.Name);
+            module.TrendComparerType?.Name.Should().Be($"{baseName}TrendComparer", "analyzer {0}", module.AnalyzerType.Name);
             module.AnalyzerSectionBuilderType.Name.Should().Be($"{baseName}SectionBuilder", "analyzer {0}", module.AnalyzerType.Name);
         }
     }
@@ -118,6 +120,39 @@ public sealed class PluginCatalogBuilderTests
         IAnalyzerFeatureModuleCatalog actual = BuildScannedCatalog();
 
         actual.Modules.Should().OnlyContain(m => m.FindingGeneratorType != null || m.SynthesisRuleType != null);
+    }
+
+    /// <summary>
+    /// Unlike FindingGeneratorType/SynthesisRuleType there's no per-module companion recording
+    /// "what covers this analyzer's trend now" — <c>ObservationDifferAnalyzerOwnership</c> is the
+    /// real answer, so this is the fast, DI-free guard against retiring a comparer without also
+    /// registering its analyzer there (StartupValidator catches the same gap at CLI startup, this
+    /// catches it at build time). Matched by <see cref="AnalyzerFeatureModule.AnalyzerType"/>, not
+    /// <see cref="AnalyzerFeatureModule.DisplayName"/> — the two aren't guaranteed to agree
+    /// (<c>ThreadStackClusterAnalyzer</c>'s DisplayName "Thread Stack Cluster Analysis" differs
+    /// from its <c>Name</c>/<c>AnalyzerName</c> "Thread Stack Signature Clustering", a real case
+    /// this exact test caught before the fix in
+    /// <c>StartupValidator.ValidateRegistrations</c>'s equivalent finding-generator join).
+    /// </summary>
+    private static readonly Type[] ExpectedObservationDifferCoveredAnalyzerTypes =
+    [
+        typeof(DumpDetective.Analysis.Analyzers.Gc.WeakReferenceAnalyzer),
+        typeof(DumpDetective.Analysis.Analyzers.Leaks.EventLeakAnalyzer),
+        typeof(DumpDetective.Analysis.Analyzers.Leaks.ReferenceChainAnalyzer),
+        typeof(DumpDetective.Analysis.Analyzers.Memory.LohFragmentationAnalyzer),
+        typeof(DumpDetective.Analysis.Analyzers.Memory.SegmentReservationAnalyzer),
+        typeof(DumpDetective.Analysis.Analyzers.Runtime.JitAnalyzer),
+        typeof(DumpDetective.Analysis.Analyzers.Threads.LockGraphAnalyzer),
+        typeof(DumpDetective.Analysis.Analyzers.Threads.ThreadStackClusterAnalyzer),
+    ];
+
+    [Fact]
+    public void Build_EveryModuleWithNoTrendComparer_IsObservationDifferCovered()
+    {
+        IAnalyzerFeatureModuleCatalog actual = BuildScannedCatalog();
+
+        actual.Modules.Should().OnlyContain(
+            m => m.TrendComparerType != null || ExpectedObservationDifferCoveredAnalyzerTypes.Contains(m.AnalyzerType));
     }
 
     [Fact]

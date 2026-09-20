@@ -29,12 +29,15 @@ internal sealed class StartupValidator
 
         // A retired analyzer (Phase 5 step 3) has no IFindingGenerator at all — its module's
         // SynthesisRuleType is its only path to a Finding, via SynthesisFindingEnricher rather
-        // than this DI-registered set. AnalyzerFeatureModule.DisplayName is what both
-        // IAnalyzer.Name and IFindingGenerator.AnalyzerName are conventionally set to (verified by
-        // PluginCatalogBuilderTests), so it's the right key to join on here.
+        // than this DI-registered set. Joined against the real IAnalyzer instances by AnalyzerType,
+        // not AnalyzerFeatureModule.DisplayName — DisplayName is a report-facing label
+        // ([AnalyzerModule(displayName: ...)]) that can legitimately differ from IAnalyzer.Name
+        // (e.g. ThreadStackClusterAnalyzer: DisplayName "Thread Stack Cluster Analysis" vs. Name
+        // "Thread Stack Signature Clustering" — a real, live case, not hypothetical). The two match
+        // for most analyzers but nothing guarantees it, so don't rely on it holding.
         IEnumerable<string> retiredButSynthesisCovered = moduleCatalog.Modules
             .Where(m => m.FindingGeneratorType is null && m.SynthesisRuleType is not null)
-            .Select(m => m.DisplayName);
+            .Join(analyzers, m => m.AnalyzerType, a => a.GetType(), (_, a) => a.Name);
 
         ValidateNameCoverage(
             "finding generators",
@@ -43,10 +46,19 @@ internal sealed class StartupValidator
             errors,
             requireEveryAnalyzer: true);
 
+        // A retired trend comparer (Phase 5 step 4) has no IAnalyzerTrendComparer at all — its
+        // headline metrics are covered by TrendAnalyzer's ObservationTrendDiffer-driven path
+        // instead, via ObservationDifferAnalyzerOwnership. Unlike the FindingGenerator/SynthesisRule
+        // case there's no per-analyzer companion type recorded on the module to check here, so this
+        // reads DisplayName directly off Analysis.Trend.ObservationDifferAnalyzerOwnership rather
+        // than off moduleCatalog.
+        IEnumerable<string> retiredButObservationDifferCovered =
+            DumpDetective.Analysis.Trend.ObservationDifferAnalyzerOwnership.ObservationTypeToAnalyzerName.Values.Distinct(StringComparer.Ordinal);
+
         ValidateNameCoverage(
             "trend comparers",
             analyzers.Select(a => a.Name),
-            trendComparers.Select(c => c.AnalyzerName),
+            trendComparers.Select(c => c.AnalyzerName).Concat(retiredButObservationDifferCovered),
             errors,
             requireEveryAnalyzer: true);
 

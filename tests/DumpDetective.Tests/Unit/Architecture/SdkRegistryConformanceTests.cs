@@ -278,6 +278,38 @@ public sealed class SdkRegistryConformanceTests
                 ["thirty-two-bit-pressure.threshold-bytes"] = "neutral",
                 ["near-empty-region-fill-percent.threshold"] = "neutral",
             },
+            ["finalizer.queue-population"] = new Dictionary<string, string>
+            {
+                ["queue.count"] = "higherIsWorse",
+            },
+            ["handle.population"] = new Dictionary<string, string>
+            {
+                ["total.count"] = "higherIsWorse",
+                ["pinned-target.count"] = "higherIsWorse",
+                ["pinned-retained.bytes"] = "higherIsWorse",
+                ["dependent.count"] = "neutral",
+                ["dependent-unresolved-target.count"] = "higherIsWorse",
+                ["total-handles-warning.threshold"] = "neutral",
+                ["pinned-handle-targets-warning.threshold"] = "neutral",
+                ["pinned-retained-bytes-warning.threshold"] = "neutral",
+                ["pinned-soh-warning.threshold"] = "neutral",
+                ["refcounted-warning.threshold"] = "neutral",
+                ["weaklong-gen2-fraction-warning.threshold"] = "neutral",
+                ["weaklong-gen2-minimum-count.threshold"] = "neutral",
+                ["dependent-unresolved-percent-warning.threshold"] = "neutral",
+            },
+            ["root.population"] = new Dictionary<string, string>
+            {
+                ["total.count"] = "neutral",
+                ["subgraph-walk-capped.count"] = "neutral",
+            },
+            ["weakreference.population"] = new Dictionary<string, string>
+            {
+                ["total-handles.count"] = "higherIsWorse",
+                ["dead-targets.count"] = "higherIsWorse",
+                ["object.bytes"] = "higherIsWorse",
+                ["dependent-dead-key.count"] = "higherIsWorse",
+            },
         };
 
     [Fact]

@@ -15,6 +15,17 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.56.0 — 2026-09-20
+
+Second package in the `direction` rollout started in 1.55.0 — `Plugins.Gc`'s headline measures: 20
+across `finalizer.queue-population`, `handle.population`, `root.population`, and
+`weakreference.population`, mined from `FinalizableObject`/`GCHandle`/`GCRoot`/`WeakReference`'s
+trend comparers. Same rule as before: only measures with a real comparer opinion got a value; a
+substantial fraction of these 4 analyzers' comparer metrics (finalizer queue retained bytes,
+GC-handle "strong" count, GC-root severity score, weak-reference dead ratio) had no exact raw
+measure to attach to — either derived/composite at comparison time or only available as scoped
+per-entity data — and are left unclassified, same as Memory's gaps in 1.55.0.
+
 ## `observation-type-registry.json` 1.55.0 — 2026-09-20
 
 Adds an optional `direction` field (`higherIsWorse` / `lowerIsWorse` / `neutral` /

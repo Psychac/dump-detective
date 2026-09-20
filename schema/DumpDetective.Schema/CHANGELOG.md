@@ -15,6 +15,17 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.61.0 — 2026-09-20
+
+Seventh package — `Plugins.Runtime`: 16 headline measures across `runtime.crash-population` (2),
+`runtime.jit-activity` (8 — every one of `JitTrendComparer`'s headline metrics maps cleanly, the
+cleanest single comparer covered so far), and `runtime.module-population` (6), mined from
+`Crash`/`Jit`/`Module`'s trend comparers. `HeapTopologyTrendComparer` backs zero registry measures
+- its only whole-run observation type, `heap.topology-population`, carries `logical-heap`/
+`is-server-gc` measures unrelated to the comparer's `segment.*` metrics, which are all sums over
+the *scoped*, per-kind `heap.segment-kind-composition` type instead. Third case of "100% headline
+by Scope convention, 0% backed", after `AsyncStateMachine` (1.58.0) and `Array` (1.59.0).
+
 ## `observation-type-registry.json` 1.60.0 — 2026-09-20
 
 Sixth package — `Plugins.Leaks`: 8 headline measures across `type.retention-population` (1),

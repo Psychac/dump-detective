@@ -399,6 +399,31 @@ public sealed class SdkRegistryConformanceTests
                 ["root.count"] = "higherIsWorse",
                 ["retained.bytes"] = "higherIsWorse",
             },
+            ["runtime.crash-population"] = new Dictionary<string, string>
+            {
+                ["total.count"] = "higherIsWorse",
+                ["active.count"] = "higherIsWorse",
+            },
+            ["runtime.jit-activity"] = new Dictionary<string, string>
+            {
+                ["jit-heap.bytes"] = "higherIsWorse",
+                ["jit-manager.count"] = "neutral",
+                ["active-methods.count"] = "neutral",
+                ["distinct-methods.count"] = "neutral",
+                ["tiered-methods.count"] = "neutral",
+                ["unmanaged-frame.count"] = "higherIsWorse",
+                ["ready-to-run-frame.count"] = "neutral",
+                ["dynamic-method-frame.count"] = "higherIsWorse",
+            },
+            ["runtime.module-population"] = new Dictionary<string, string>
+            {
+                ["total.count"] = "neutral",
+                ["dynamic.count"] = "neutral",
+                ["version-conflict.count"] = "higherIsWorse",
+                ["total-domains.count"] = "neutral",
+                ["total-dynamic.count"] = "higherIsWorse",
+                ["heavy-module-warning.threshold-bytes"] = "neutral",
+            },
         };
 
     [Fact]

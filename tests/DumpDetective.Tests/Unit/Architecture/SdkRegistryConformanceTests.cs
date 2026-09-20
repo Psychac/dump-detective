@@ -336,6 +336,14 @@ public sealed class SdkRegistryConformanceTests
                 ["lock-holding-thread.count"] = "higherIsWorse",
                 ["active-exception-thread.count"] = "higherIsWorse",
             },
+            ["async.task-population"] = new Dictionary<string, string>
+            {
+                ["total.count"] = "neutral",
+                ["pending.count"] = "higherIsWorse",
+                ["faulted.count"] = "higherIsWorse",
+                ["max-continuation-depth"] = "higherIsWorse",
+                ["avg-continuation-depth"] = "higherIsWorse",
+            },
         };
 
     [Fact]

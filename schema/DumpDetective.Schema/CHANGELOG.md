@@ -15,6 +15,18 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.58.0 — 2026-09-20
+
+Fourth package — `Plugins.Async`: only 5 headline measures, all under `async.task-population`,
+mined from `AsyncTaskTrendComparer`. `AsyncStateMachineTrendComparer` is 100% headline by the
+comparer's own `AnalyzerMetric.Scope` convention (it trends run-wide totals: `statemachine.total`,
+`.gen2.count`, `.gen2.fraction`, `.total.bytes`) but contributes zero registry measures — verified
+against `AsyncStateMachineAnalyzer.cs` directly: its only two observation types
+(`type.async-state-machine`, `type.async-captured-closure`) are both emitted per state-machine
+type/method (`MethodRef`-subject, inside a loop), never as a whole-run aggregate. "Headline by the
+comparer's Scope convention" and "backed by a headline Observation" are different claims — this is
+the sharpest case of that gap found so far.
+
 ## `observation-type-registry.json` 1.57.0 — 2026-09-20
 
 Third package in the `direction` rollout — `Plugins.Threads`'s headline measures: 14 across

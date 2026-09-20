@@ -1,3 +1,5 @@
+using System.Linq;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 using DumpDetective.Sdk.Artifacts;
@@ -207,6 +209,124 @@ public sealed class SdkRegistryConformanceTests
 
             measures.Select(kvp => kvp.Key).Should().BeEquivalentTo(expectedMeasureKeys,
                 $"'{observationType}''s registered measure keys must match what the analyzer actually populates");
+        }
+    }
+
+    /// <summary>
+    /// Hand-maintained, mined from the 36 <c>IAnalyzerTrendComparer</c> implementations'
+    /// <c>MetricTrendDirection</c> values, one observation type at a time — see
+    /// docs/refactor/modularity/phase-5-observations-synthesis.md ## Work step 4. Only headline
+    /// (unscoped) measures with a real comparer opinion are listed; a measure absent here (and
+    /// absent from the registry's own `direction` field) is deliberately unclassified, not
+    /// implicitly neutral. Grows package by package alongside the trend differ migration.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> KnownMeasureDirections =
+        new Dictionary<string, IReadOnlyDictionary<string, string>>
+        {
+            ["gc.allocation-composition"] = new Dictionary<string, string>
+            {
+                ["gen0.count-fraction"] = "neutral",
+                ["gen1.count-fraction"] = "neutral",
+                ["gen2.count-fraction"] = "higherIsWorse",
+                ["loh.count-fraction"] = "higherIsWorse",
+                ["gen0.size-fraction"] = "neutral",
+                ["gen2.size-fraction"] = "higherIsWorse",
+                ["loh.size-fraction"] = "higherIsWorse",
+                ["finalizable.type-count"] = "higherIsWorse",
+                ["finalizable.bytes"] = "higherIsWorse",
+                ["transient-classification.threshold"] = "neutral",
+            },
+            ["gc.generation-composition"] = new Dictionary<string, string>
+            {
+                ["gen0.bytes"] = "higherIsWorse",
+                ["gen1.bytes"] = "higherIsWorse",
+                ["gen2.bytes"] = "higherIsWorse",
+                ["loh.bytes"] = "higherIsWorse",
+                ["poh.bytes"] = "higherIsWorse",
+                ["gen0.count"] = "higherIsWorse",
+                ["poh.count"] = "higherIsWorse",
+                ["total.count"] = "neutral",
+                ["loh.percent"] = "higherIsWorse",
+                ["loh-pressure.threshold"] = "neutral",
+                ["gen0-pressure.threshold"] = "neutral",
+                ["poh-pressure.threshold"] = "neutral",
+            },
+            ["heap.loh-fragmentation"] = new Dictionary<string, string>
+            {
+                ["fragmentation.percent"] = "higherIsWorse",
+                ["free.bytes"] = "higherIsWorse",
+                ["total.bytes"] = "higherIsWorse",
+                ["largest-free-block.bytes"] = "lowerIsWorse",
+                ["segment.count"] = "neutral",
+            },
+            ["heap.memory-composition"] = new Dictionary<string, string>
+            {
+                ["total.bytes"] = "higherIsWorse",
+                ["loh.bytes"] = "higherIsWorse",
+                ["loh.percent"] = "higherIsWorse",
+                ["unique-types.count"] = "neutral",
+            },
+            ["heap.segment-reservation"] = new Dictionary<string, string>
+            {
+                ["committed.bytes"] = "higherIsWorse",
+                ["reserved.bytes"] = "higherIsWorse",
+                ["reservation-gap.bytes"] = "higherIsWorse",
+                ["reserved-to-committed.ratio"] = "higherIsWorse",
+                ["ephemeral.avg-fill-percent"] = "higherIsWorse",
+                ["ratio-high-pressure.threshold"] = "neutral",
+                ["ratio-medium-pressure.threshold"] = "neutral",
+                ["thirty-two-bit-pressure.threshold-bytes"] = "neutral",
+                ["near-empty-region-fill-percent.threshold"] = "neutral",
+            },
+        };
+
+    [Fact]
+    public void ObservationTypeRegistry_MeasureDirections_MatchMinedComparerTruth()
+    {
+        JsonObject registry = LoadJsonObject("observation-type-registry.json");
+        JsonObject observationTypes = registry["observationTypes"]!.AsObject();
+
+        foreach ((string observationType, IReadOnlyDictionary<string, string> expectedDirections) in KnownMeasureDirections)
+        {
+            JsonObject measures = observationTypes[observationType]!.AsObject()["measures"]!.AsObject();
+
+            foreach ((string measureKey, string expectedDirection) in expectedDirections)
+            {
+                measures.ContainsKey(measureKey).Should().BeTrue(
+                    $"'{observationType}' must still declare measure '{measureKey}'");
+
+                JsonObject measureEntry = measures[measureKey]!.AsObject();
+                measureEntry.ContainsKey("direction").Should().BeTrue(
+                    $"'{observationType}'.'{measureKey}' has a mined comparer direction but no 'direction' key in the registry");
+
+                measureEntry["direction"]!.GetValue<string>().Should().Be(expectedDirection,
+                    $"'{observationType}'.'{measureKey}' direction must match what was mined from its trend comparer");
+            }
+        }
+    }
+
+    [Fact]
+    public void ObservationTypeRegistry_EveryDeclaredDirection_IsAKnownMeasureDirectionValue()
+    {
+        JsonObject registry = LoadJsonObject("observation-type-registry.json");
+        JsonObject observationTypes = registry["observationTypes"]!.AsObject();
+
+        string[] knownValues = Enum.GetValues<DumpDetective.Sdk.Observations.MeasureDirection>()
+            .Select(v => JsonNamingPolicy.CamelCase.ConvertName(v.ToString()))
+            .ToArray();
+
+        foreach ((string observationType, JsonNode? entryNode) in observationTypes)
+        {
+            JsonObject measures = entryNode!.AsObject()["measures"]!.AsObject();
+            foreach ((string measureKey, JsonNode? measureNode) in measures)
+            {
+                JsonObject measureEntry = measureNode!.AsObject();
+                if (!measureEntry.TryGetPropertyValue("direction", out JsonNode? directionNode))
+                    continue;
+
+                knownValues.Should().Contain(directionNode!.GetValue<string>(),
+                    $"'{observationType}'.'{measureKey}' declares an unrecognized direction value");
+            }
         }
     }
 

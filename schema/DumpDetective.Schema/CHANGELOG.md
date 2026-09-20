@@ -15,6 +15,23 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.55.0 — 2026-09-20
+
+Adds an optional `direction` field (`higherIsWorse` / `lowerIsWorse` / `neutral` /
+`contextDependent`, backing the new public `DumpDetective.Sdk.Observations.MeasureDirection` enum)
+alongside each measure's existing `unit`/`semantics`, for Phase 5 step 4's generic trend differ
+(docs/refactor/modularity/phase-5-observations-synthesis.md ## Work step 4) — the differ needs to
+know whether a growing value is bad without asking 36 hand-written comparers. Mined from those same
+36 comparers' existing `MetricTrendDirection` per metric key, not guessed: a measure with no
+matching comparer metric today is left without a `direction` key rather than defaulted, since an
+absent key means "not yet classified" and `neutral` is itself an assertion. Rolling out headline
+(unscoped) measures only, package by package, alongside the differ's own migration — scoped
+(per-type) measures are explicitly out of this step's scope per the same doc entry. First package:
+`Plugins.Memory`'s 5 owned observation types (`gc.allocation-composition`,
+`gc.generation-composition`, `heap.loh-fragmentation`, `heap.memory-composition`,
+`heap.segment-reservation`) — 40 of their measures annotated, the rest left unclassified pending
+either a real comparer opinion to mine or a deliberate call once the differ exists to make one.
+
 ## `observation.schema.json` 2.0.0 — 2026-09-10
 
 Scoped to `observation.schema.json` only — `capability-registry.json`/`observation-type-registry.json`

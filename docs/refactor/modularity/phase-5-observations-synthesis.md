@@ -1195,8 +1195,39 @@ actually starts, not before.
      (`tests/DumpDetective.Tests/Unit/Analysis/ObservationTrendDifferTests.cs`, 7 tests) — **not yet
      wired into `TrendAnalyzer`/`TrendReportComposer`**, matching this phase's mechanism-first
      discipline (same shape as step 3 landing `FindingGeneratorType` nullability before any
-     generator was actually deleted). Migrating the 11 all-headline comparers onto it, and trimming
-     the other 25 to their scoped-only remainder, is the next piece of this step.
+     generator was actually deleted).
+   - **Wired in, 8 of the 11 all-headline comparers retired, done 2026-09-20.** `TrendDumpExecution`/
+     `TrendBuildReportNode` now thread each artifact's Observations alongside its
+     `AnalysisSnapshot` (not added as a new field on `AnalysisSnapshot` itself — `Core.Models` has
+     zero project references today, not even to `Sdk`, and this wasn't the moment to start that);
+     `TrendAnalyzer.CompareAll`/`CompareSeries`/`ExtractTimeline` all gained optional
+     Observation-list parameters routing through `ObservationTrendDiffer` via new
+     `ObservationDifferAnalyzerOwnership` (the `ObservationType → AnalyzerName` map the flat differ
+     output needs, since one shared differ instance covers every retired analyzer — unlike
+     `FindingGeneratorType`/`SynthesisRuleType` there's no per-analyzer companion type to record on
+     the module for this). `AnalyzerFeatureModule.TrendComparerType` is nullable now, same shape as
+     step 3, `IsShapeValid()` allowing null with no "or" requirement (nothing per-module to check —
+     `StartupValidator`'s coverage check is the real backstop). WeakReference/EventLeak/
+     ReferenceChain/LohFragmentation/SegmentReservation/Jit/LockGraph/ThreadStackCluster deleted —
+     class, DI registration, and dedicated tests together.
+   - **The other 3 all-headline comparers are explicitly NOT retired.** AsyncStateMachine,
+     HeapTopology, and SqlConnectionPool were each found during the registry rollout to back zero
+     registry measures — their analyzer never promoted a whole-run aggregate to an `Observation` at
+     all. Retiring them now would silently drop real trend signal, not relocate it; left as-is,
+     blocked on a real Stage-1-emission decision (extend emission vs. accept a permanent gap),
+     which this step doesn't make unilaterally.
+   - **Found and fixed a live, unrelated CLI-startup bug along the way**: `StartupValidator`'s
+     step-3 finding-generator coverage check joined retired analyzers to real `IAnalyzer.Name` via
+     `AnalyzerFeatureModule.DisplayName` — not guaranteed to match (`ThreadStackClusterAnalyzer`:
+     DisplayName "Thread Stack Cluster Analysis" vs. Name "Thread Stack Signature Clustering", a
+     real, live divergence, not hypothetical). The real CLI would throw "Missing finding generators
+     for analyzers: Thread Stack Signature Clustering" at startup today — never caught, since
+     `ValidateRegistrations` had zero direct test coverage before this. Fixed by joining on
+     `AnalyzerType` (real `Type` identity) instead of the display string, same fix applied to the
+     new trend-comparer check before it shipped with the identical bug.
+     `ServiceRegistrationTests.ValidateRegistrations_DoesNotThrow_ForTheRealProductionCatalog` now
+     exercises the real production DI graph end to end — the test that would have caught this the
+     first time.
 5. **Keep the genuine exceptions.** Distinct from the headline/scoped split above — this is about
    *headline* metrics where "worse" still isn't monotonic in the measure (thread count, handle
    count, where both directions can be bad in context), not about scoped metrics (which are handled

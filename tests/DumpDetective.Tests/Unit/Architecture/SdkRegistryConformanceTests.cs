@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Observations;
 
 using FluentAssertions;
 
@@ -213,297 +214,38 @@ public sealed class SdkRegistryConformanceTests
     }
 
     /// <summary>
-    /// Hand-maintained, mined from the 36 <c>IAnalyzerTrendComparer</c> implementations'
-    /// <c>MetricTrendDirection</c> values, one observation type at a time — see
-    /// docs/refactor/modularity/phase-5-observations-synthesis.md ## Work step 4. Only headline
-    /// (unscoped) measures with a real comparer opinion are listed; a measure absent here (and
-    /// absent from the registry's own `direction` field) is deliberately unclassified, not
-    /// implicitly neutral. Grows package by package alongside the trend differ migration.
+    /// Bidirectional: every <see cref="MeasureDirectionRegistry"/> entry (the runtime source of
+    /// truth the differ actually reads) must appear in the JSON with the same value, and every
+    /// <c>direction</c> the JSON declares must appear in <see cref="MeasureDirectionRegistry"/> —
+    /// same shape as <see cref="CapabilityRegistry_ShouldMatchCapabilityVocabularyExactly"/>'s check
+    /// against <see cref="CapabilityVocabulary"/>. Catches drift in either direction: a registry
+    /// entry added without updating the JSON mirror, or a JSON edit that didn't update the registry
+    /// the differ actually consults.
     /// </summary>
-    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> KnownMeasureDirections =
-        new Dictionary<string, IReadOnlyDictionary<string, string>>
-        {
-            ["gc.allocation-composition"] = new Dictionary<string, string>
-            {
-                ["gen0.count-fraction"] = "neutral",
-                ["gen1.count-fraction"] = "neutral",
-                ["gen2.count-fraction"] = "higherIsWorse",
-                ["loh.count-fraction"] = "higherIsWorse",
-                ["gen0.size-fraction"] = "neutral",
-                ["gen2.size-fraction"] = "higherIsWorse",
-                ["loh.size-fraction"] = "higherIsWorse",
-                ["finalizable.type-count"] = "higherIsWorse",
-                ["finalizable.bytes"] = "higherIsWorse",
-                ["transient-classification.threshold"] = "neutral",
-            },
-            ["gc.generation-composition"] = new Dictionary<string, string>
-            {
-                ["gen0.bytes"] = "higherIsWorse",
-                ["gen1.bytes"] = "higherIsWorse",
-                ["gen2.bytes"] = "higherIsWorse",
-                ["loh.bytes"] = "higherIsWorse",
-                ["poh.bytes"] = "higherIsWorse",
-                ["gen0.count"] = "higherIsWorse",
-                ["poh.count"] = "higherIsWorse",
-                ["total.count"] = "neutral",
-                ["loh.percent"] = "higherIsWorse",
-                ["loh-pressure.threshold"] = "neutral",
-                ["gen0-pressure.threshold"] = "neutral",
-                ["poh-pressure.threshold"] = "neutral",
-            },
-            ["heap.loh-fragmentation"] = new Dictionary<string, string>
-            {
-                ["fragmentation.percent"] = "higherIsWorse",
-                ["free.bytes"] = "higherIsWorse",
-                ["total.bytes"] = "higherIsWorse",
-                ["largest-free-block.bytes"] = "lowerIsWorse",
-                ["segment.count"] = "neutral",
-            },
-            ["heap.memory-composition"] = new Dictionary<string, string>
-            {
-                ["total.bytes"] = "higherIsWorse",
-                ["loh.bytes"] = "higherIsWorse",
-                ["loh.percent"] = "higherIsWorse",
-                ["unique-types.count"] = "neutral",
-            },
-            ["heap.segment-reservation"] = new Dictionary<string, string>
-            {
-                ["committed.bytes"] = "higherIsWorse",
-                ["reserved.bytes"] = "higherIsWorse",
-                ["reservation-gap.bytes"] = "higherIsWorse",
-                ["reserved-to-committed.ratio"] = "higherIsWorse",
-                ["ephemeral.avg-fill-percent"] = "higherIsWorse",
-                ["ratio-high-pressure.threshold"] = "neutral",
-                ["ratio-medium-pressure.threshold"] = "neutral",
-                ["thirty-two-bit-pressure.threshold-bytes"] = "neutral",
-                ["near-empty-region-fill-percent.threshold"] = "neutral",
-            },
-            ["finalizer.queue-population"] = new Dictionary<string, string>
-            {
-                ["queue.count"] = "higherIsWorse",
-            },
-            ["handle.population"] = new Dictionary<string, string>
-            {
-                ["total.count"] = "higherIsWorse",
-                ["pinned-target.count"] = "higherIsWorse",
-                ["pinned-retained.bytes"] = "higherIsWorse",
-                ["dependent.count"] = "neutral",
-                ["dependent-unresolved-target.count"] = "higherIsWorse",
-                ["total-handles-warning.threshold"] = "neutral",
-                ["pinned-handle-targets-warning.threshold"] = "neutral",
-                ["pinned-retained-bytes-warning.threshold"] = "neutral",
-                ["pinned-soh-warning.threshold"] = "neutral",
-                ["refcounted-warning.threshold"] = "neutral",
-                ["weaklong-gen2-fraction-warning.threshold"] = "neutral",
-                ["weaklong-gen2-minimum-count.threshold"] = "neutral",
-                ["dependent-unresolved-percent-warning.threshold"] = "neutral",
-            },
-            ["root.population"] = new Dictionary<string, string>
-            {
-                ["total.count"] = "neutral",
-                ["subgraph-walk-capped.count"] = "neutral",
-            },
-            ["weakreference.population"] = new Dictionary<string, string>
-            {
-                ["total-handles.count"] = "higherIsWorse",
-                ["dead-targets.count"] = "higherIsWorse",
-                ["object.bytes"] = "higherIsWorse",
-                ["dependent-dead-key.count"] = "higherIsWorse",
-            },
-            ["runtime.hang-pressure"] = new Dictionary<string, string>
-            {
-                ["alive-thread.count"] = "neutral",
-                ["waiting-thread.count"] = "higherIsWorse",
-                ["waiting.percent"] = "higherIsWorse",
-                ["queued-work-items.count"] = "higherIsWorse",
-                ["pending-task.count"] = "higherIsWorse",
-                ["faulted-task.count"] = "higherIsWorse",
-            },
-            ["runtime.lock-pressure"] = new Dictionary<string, string>
-            {
-                ["held-lock.count"] = "neutral",
-            },
-            ["runtime.thread-cluster-diversity"] = new Dictionary<string, string>
-            {
-                ["alive-thread.count"] = "neutral",
-                ["unique-cluster.count"] = "neutral",
-                ["diversity.percent"] = "lowerIsWorse",
-            },
-            ["runtime.thread-triage"] = new Dictionary<string, string>
-            {
-                ["alive-thread.count"] = "neutral",
-                ["blocked-thread.count"] = "higherIsWorse",
-                ["lock-holding-thread.count"] = "higherIsWorse",
-                ["active-exception-thread.count"] = "higherIsWorse",
-            },
-            ["async.task-population"] = new Dictionary<string, string>
-            {
-                ["total.count"] = "neutral",
-                ["pending.count"] = "higherIsWorse",
-                ["faulted.count"] = "higherIsWorse",
-                ["max-continuation-depth"] = "higherIsWorse",
-                ["avg-continuation-depth"] = "higherIsWorse",
-            },
-            ["type.boxing-pressure"] = new Dictionary<string, string>
-            {
-                ["total-boxed.count"] = "higherIsWorse",
-                ["total-boxed.bytes"] = "higherIsWorse",
-                ["boxed-enum.count"] = "higherIsWorse",
-                ["boxed-enum.bytes"] = "higherIsWorse",
-                ["nullable-boxed.count"] = "higherIsWorse",
-                ["nullable-boxed.bytes"] = "higherIsWorse",
-                ["oversized-value.count"] = "higherIsWorse",
-                ["gen2-boxed.count"] = "higherIsWorse",
-            },
-            ["collection.waste-summary"] = new Dictionary<string, string>
-            {
-                ["total-collection.count"] = "neutral",
-                ["total-wasted.bytes"] = "higherIsWorse",
-                ["wasteful-collection.count"] = "higherIsWorse",
-            },
-            ["type.shape-composition"] = new Dictionary<string, string>
-            {
-                ["type.count"] = "neutral",
-                ["avg-reference-fields"] = "higherIsWorse",
-                ["gc-scan-work"] = "higherIsWorse",
-                ["gen2-gc-scan-work"] = "higherIsWorse",
-                ["reference-heavy-type.count"] = "higherIsWorse",
-                ["value-heavy-type.count"] = "neutral",
-            },
-            ["type.string-composition"] = new Dictionary<string, string>
-            {
-                ["total-string-memory.bytes"] = "higherIsWorse",
-                ["duplicate-pattern.count"] = "higherIsWorse",
-                ["duplicate-wasted.bytes"] = "higherIsWorse",
-                ["duplication.ratio"] = "higherIsWorse",
-                ["loh-string.bytes"] = "higherIsWorse",
-                ["pct-of-managed-heap.percent"] = "higherIsWorse",
-            },
-            ["type.retention-population"] = new Dictionary<string, string>
-            {
-                ["highly-referenced.count"] = "higherIsWorse",
-            },
-            ["event.publisher-leak-population"] = new Dictionary<string, string>
-            {
-                ["total.count"] = "higherIsWorse",
-                ["instance-leak.count"] = "higherIsWorse",
-                ["static-leak.count"] = "higherIsWorse",
-            },
-            ["reference-chain.population"] = new Dictionary<string, string>
-            {
-                ["retained.percent"] = "higherIsWorse",
-                ["retained.count"] = "higherIsWorse",
-            },
-            ["static-root.population"] = new Dictionary<string, string>
-            {
-                ["root.count"] = "higherIsWorse",
-                ["retained.bytes"] = "higherIsWorse",
-            },
-            ["runtime.crash-population"] = new Dictionary<string, string>
-            {
-                ["total.count"] = "higherIsWorse",
-                ["active.count"] = "higherIsWorse",
-            },
-            ["runtime.jit-activity"] = new Dictionary<string, string>
-            {
-                ["jit-heap.bytes"] = "higherIsWorse",
-                ["jit-manager.count"] = "neutral",
-                ["active-methods.count"] = "neutral",
-                ["distinct-methods.count"] = "neutral",
-                ["tiered-methods.count"] = "neutral",
-                ["unmanaged-frame.count"] = "higherIsWorse",
-                ["ready-to-run-frame.count"] = "neutral",
-                ["dynamic-method-frame.count"] = "higherIsWorse",
-            },
-            ["runtime.module-population"] = new Dictionary<string, string>
-            {
-                ["total.count"] = "neutral",
-                ["dynamic.count"] = "neutral",
-                ["version-conflict.count"] = "higherIsWorse",
-                ["total-domains.count"] = "neutral",
-                ["total-dynamic.count"] = "higherIsWorse",
-                ["heavy-module-warning.threshold-bytes"] = "neutral",
-            },
-            ["infra.db-connection-population"] = new Dictionary<string, string>
-            {
-                ["total.count"] = "higherIsWorse",
-                ["closed.count"] = "neutral",
-                ["broken.count"] = "higherIsWorse",
-                ["unknown-state.count"] = "higherIsWorse",
-            },
-            ["infra.http-object-population"] = new Dictionary<string, string>
-            {
-                ["http-web-response.count"] = "higherIsWorse",
-                ["http-message-handler.count"] = "higherIsWorse",
-            },
-            ["infra.sql-command-population"] = new Dictionary<string, string>
-            {
-                ["total.count"] = "higherIsWorse",
-                ["disposed.count"] = "neutral",
-            },
-            ["infra.sql-transaction-population"] = new Dictionary<string, string>
-            {
-                ["total.count"] = "higherIsWorse",
-                ["disposed.count"] = "neutral",
-                ["other.count"] = "higherIsWorse",
-            },
-            ["infra.wcf-channel-population"] = new Dictionary<string, string>
-            {
-                ["total.count"] = "higherIsWorse",
-                ["opening.count"] = "higherIsWorse",
-                ["opened.count"] = "neutral",
-                ["closing.count"] = "higherIsWorse",
-            },
-        };
-
     [Fact]
-    public void ObservationTypeRegistry_MeasureDirections_MatchMinedComparerTruth()
+    public void ObservationTypeRegistry_MeasureDirectionRegistry_MatchesJsonExactly()
     {
         JsonObject registry = LoadJsonObject("observation-type-registry.json");
         JsonObject observationTypes = registry["observationTypes"]!.AsObject();
 
-        foreach ((string observationType, IReadOnlyDictionary<string, string> expectedDirections) in KnownMeasureDirections)
-        {
-            JsonObject measures = observationTypes[observationType]!.AsObject()["measures"]!.AsObject();
-
-            foreach ((string measureKey, string expectedDirection) in expectedDirections)
-            {
-                measures.ContainsKey(measureKey).Should().BeTrue(
-                    $"'{observationType}' must still declare measure '{measureKey}'");
-
-                JsonObject measureEntry = measures[measureKey]!.AsObject();
-                measureEntry.ContainsKey("direction").Should().BeTrue(
-                    $"'{observationType}'.'{measureKey}' has a mined comparer direction but no 'direction' key in the registry");
-
-                measureEntry["direction"]!.GetValue<string>().Should().Be(expectedDirection,
-                    $"'{observationType}'.'{measureKey}' direction must match what was mined from its trend comparer");
-            }
-        }
-    }
-
-    [Fact]
-    public void ObservationTypeRegistry_EveryDeclaredDirection_IsAKnownMeasureDirectionValue()
-    {
-        JsonObject registry = LoadJsonObject("observation-type-registry.json");
-        JsonObject observationTypes = registry["observationTypes"]!.AsObject();
-
-        string[] knownValues = Enum.GetValues<DumpDetective.Sdk.Observations.MeasureDirection>()
-            .Select(v => JsonNamingPolicy.CamelCase.ConvertName(v.ToString()))
-            .ToArray();
-
+        var jsonDirections = new Dictionary<(string ObservationType, string MeasureKey), string>();
         foreach ((string observationType, JsonNode? entryNode) in observationTypes)
         {
             JsonObject measures = entryNode!.AsObject()["measures"]!.AsObject();
             foreach ((string measureKey, JsonNode? measureNode) in measures)
             {
-                JsonObject measureEntry = measureNode!.AsObject();
-                if (!measureEntry.TryGetPropertyValue("direction", out JsonNode? directionNode))
-                    continue;
-
-                knownValues.Should().Contain(directionNode!.GetValue<string>(),
-                    $"'{observationType}'.'{measureKey}' declares an unrecognized direction value");
+                if (measureNode!.AsObject().TryGetPropertyValue("direction", out JsonNode? directionNode))
+                    jsonDirections[(observationType, measureKey)] = directionNode!.GetValue<string>();
             }
         }
+
+        var registryDirections = MeasureDirectionRegistry.Known.ToDictionary(
+            kvp => kvp.Key,
+            kvp => JsonNamingPolicy.CamelCase.ConvertName(kvp.Value.ToString()));
+
+        registryDirections.Should().BeEquivalentTo(jsonDirections,
+            "MeasureDirectionRegistry.Known and observation-type-registry.json's per-measure 'direction' " +
+            "fields must declare exactly the same set, with the same values");
     }
 
     [Fact]

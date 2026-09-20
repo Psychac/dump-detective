@@ -15,6 +15,31 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.62.0 — 2026-09-20
+
+Eighth and last package in the `direction` rollout — `Plugins.Infra`: 15 headline measures across
+`infra.db-connection-population` (4), `infra.http-object-population` (2 of only 2 keys that type
+declares — full coverage, though `HttpObjectTrendComparer` has 13 headline metrics total, so 11 of
+them are unbacked), `infra.sql-command-population` (2), `infra.sql-transaction-population` (3, full
+coverage), and `infra.wcf-channel-population` (4). `SqlConnectionPoolTrendComparer` and
+`TimerLeakTrendComparer` both back zero registry measures — `SqlConnectionPoolAnalyzer` never
+emits a whole-run aggregate at all (`infra.sql-connection-pool`'s `current.size`/`max.size`/
+`min.size` are per-pool), and `TimerLeakAnalyzer`'s only observation type (`infra.timer`) is
+emitted per timer type inside a loop, same as `TimerLeakTrendComparer`'s own scoped metrics.
+Fifth and sixth cases of "100% headline by Scope convention, 0% backed", after `AsyncStateMachine`,
+`Array`, and `HeapTopology`.
+
+This completes the headline `direction` rollout across all 8 `Plugins.*` packages started in
+1.55.0. Running total: 149 measures annotated (40 + 20 + 14 + 5 + 23 + 8 + 16 + 15) across the 25
+observation types that turned out to carry a genuine whole-run headline aggregate with at least one
+comparer opinion to mine. 6 comparers across the whole codebase
+(`AsyncStateMachine`/`Array`/`HeapTopology`/`SqlConnectionPool`/`TimerLeak`, all "headline by Scope
+convention, 0% backed") back nothing at all, and every package left a residue of registry measures
+with no comparer ground truth to mine, or comparer metrics with no registry measure to attach to
+(derived/composite scores, percent-of-total figures, values only available via scoped aggregation).
+Both are left as-is rather than guessed - see docs/refactor/modularity/phase-5-observations-synthesis.md
+## Work step 4 for what happens next (the differ itself, then per-package comparer retirement).
+
 ## `observation-type-registry.json` 1.61.0 — 2026-09-20
 
 Seventh package — `Plugins.Runtime`: 16 headline measures across `runtime.crash-population` (2),

@@ -424,6 +424,36 @@ public sealed class SdkRegistryConformanceTests
                 ["total-dynamic.count"] = "higherIsWorse",
                 ["heavy-module-warning.threshold-bytes"] = "neutral",
             },
+            ["infra.db-connection-population"] = new Dictionary<string, string>
+            {
+                ["total.count"] = "higherIsWorse",
+                ["closed.count"] = "neutral",
+                ["broken.count"] = "higherIsWorse",
+                ["unknown-state.count"] = "higherIsWorse",
+            },
+            ["infra.http-object-population"] = new Dictionary<string, string>
+            {
+                ["http-web-response.count"] = "higherIsWorse",
+                ["http-message-handler.count"] = "higherIsWorse",
+            },
+            ["infra.sql-command-population"] = new Dictionary<string, string>
+            {
+                ["total.count"] = "higherIsWorse",
+                ["disposed.count"] = "neutral",
+            },
+            ["infra.sql-transaction-population"] = new Dictionary<string, string>
+            {
+                ["total.count"] = "higherIsWorse",
+                ["disposed.count"] = "neutral",
+                ["other.count"] = "higherIsWorse",
+            },
+            ["infra.wcf-channel-population"] = new Dictionary<string, string>
+            {
+                ["total.count"] = "higherIsWorse",
+                ["opening.count"] = "higherIsWorse",
+                ["opened.count"] = "neutral",
+                ["closing.count"] = "higherIsWorse",
+            },
         };
 
     [Fact]

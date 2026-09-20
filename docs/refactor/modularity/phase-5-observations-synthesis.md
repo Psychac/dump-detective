@@ -1146,6 +1146,34 @@ actually starts, not before.
      `ExtractMetrics`/`Compare` branches once their headline branches are reproduced by the generic
      differ and verified equal — a partial retirement, mirroring step 3's `FindingGeneratorType`
      nullability pattern (a comparer with only scoped work left is not a bug, it has a real job).
+   - **Registry `direction` field added and rolled out across all 8 packages, done 2026-09-20** —
+     new public `DumpDetective.Sdk.Observations.MeasureDirection` enum (`HigherIsWorse`/
+     `LowerIsWorse`/`Neutral`/`ContextDependent`), declared per `(ObservationType, measure key)` in
+     `observation-type-registry.json` next to that key's existing `unit`/`semantics` (not a field on
+     `Measure` itself — direction is domain knowledge about a measure's meaning, not per-instance
+     data). Mined from the 36 comparers' existing `MetricTrendDirection` values, not guessed: a
+     measure with no matching comparer metric is left without a `direction` key rather than
+     defaulted, since an absent key means "not yet classified" and `neutral` is itself an assertion.
+     `SdkRegistryConformanceTests` guards it two ways — a hand-maintained expected table
+     (`KnownMeasureDirections`, same style as the existing `KnownEmittedObservationTypes`) catches
+     drift, and a second fact asserts every declared `direction` anywhere in the registry parses as
+     a real `MeasureDirection`. registryVersion 1.54.0 → 1.62.0 (one bump per package: Memory → Gc →
+     Threads → Async → Types → Leaks → Runtime → Infra, same order as the earlier
+     observation-emission and step-3 retirement commits). Final count: 149 measures annotated across
+     25 observation types. Sharper finding than the scoping work above anticipated: **6 comparers
+     back zero registry measures despite being 100% headline by `AnalyzerMetric.Scope` convention**
+     — `AsyncStateMachineTrendComparer`, `ArrayTrendComparer`, `HeapTopologyTrendComparer`,
+     `SqlConnectionPoolTrendComparer`, and `TimerLeakTrendComparer` each trend run-wide totals whose
+     analyzer never actually promoted a matching whole-run aggregate to an `Observation` — verified
+     directly against each analyzer's source, not assumed; `LeakCandidateTrendComparer` is a 7th,
+     already-known case (zero observations emitted at all, deferred to step 6). "Headline by the
+     comparer's `Scope` convention" and "backed by a headline `Observation`" turned out to be
+     different claims throughout — every package left some residue of registry measures with no
+     comparer opinion to mine, and comparer metrics with no registry measure to attach to (derived/
+     composite scores like `alloc.gc.pressure`, percent-of-total figures computed only at
+     comparison time, values only reachable by summing scoped per-type data). See the CHANGELOG
+     entries in `schema/DumpDetective.Schema/CHANGELOG.md` (1.55.0 through 1.62.0) for the
+     per-package detail.
 5. **Keep the genuine exceptions.** Distinct from the headline/scoped split above — this is about
    *headline* metrics where "worse" still isn't monotonic in the measure (thread count, handle
    count, where both directions can be bad in context), not about scoped metrics (which are handled

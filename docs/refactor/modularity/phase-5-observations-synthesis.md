@@ -1104,11 +1104,54 @@ actually starts, not before.
    `TemporalExtent`, dispatching on `MeasureSemantics` (Absolute → delta/%; Rate → acceleration;
    Ratio → point difference; Count → growth-curve fit; Duration → distribution shift). Migrate
    trend comparers one domain at a time, verifying trend-report equality per domain.
-5. **Keep the genuine exceptions.** Some comparers encode domain knowledge the generic differ
-   can't — cases where "worse" isn't monotonic in the measure (thread count, handle count, where
-   both directions can be bad in context). These stay as explicit rules. Expect roughly a handful,
-   not thirty; if the count stays high, the measure semantics are under-specified and that's the
-   real bug.
+
+   **In progress, 2026-09-20.** Scoping work done before writing the differ itself surfaced real
+   findings that narrowed this step's target — recorded here so the eventual differ isn't judged
+   against the original one-line description above:
+
+   - **Judgment-trend prep shipped first, ahead of the differ**: `FindingLifecycleComparer` (used
+     for the New/Persistent/Resolved lifecycle buckets) gained `SeverityChanges` — every persistent
+     finding whose severity moved between snapshots, either direction, not just Warning→Critical.
+     This retired three independent hand-rolled mechanisms that were each computing some version of
+     "did this get worse": `TrendAnalyzer.ComputeNewLeakSignals`/`NewLeakSignal` (hardcoded to 3
+     analyzers via now-deleted marker interfaces `IRetainedObjectsByTypeSignal`/
+     `IStaticRootsByDescriptionSignal`/`ILeakCandidatesByTypeSignal`), `TrendRegressionDashboardBuilder`'s
+     private `BuildSeverityEscalations` re-join, and `TrendReportComposer`'s inline `hasEscalations`
+     LINQ. `TrendRegressionDashboardBuilder`'s T3c "New Leak Signals" table is gone outright — it
+     was a strict subset of what the now-generic T3a/T3b already show for every analyzer.
+     `FindingLifecycleComparer` had zero test coverage before this; it has real coverage now
+     (`tests/DumpDetective.Tests/Unit/Reporting/FindingLifecycleComparerTests.cs`).
+   - **Every one of the 36 comparers' metrics was mechanically classified headline (unscoped,
+     `AnalyzerMetric.Scope is null`) vs. scoped (per-type/per-entity)**: 11 comparers
+     (`AsyncStateMachine`, `WeakReference`, `SqlConnectionPool`, `EventLeak`, `ReferenceChain`,
+     `LohFragmentation`, `SegmentReservation`, `HeapTopology`, `Jit`, `LockGraph`,
+     `ThreadStackCluster`) are 100% headline. The other 25 mix both; none are pure-scoped.
+   - **Scoped metrics are not one problem.** Spot-checking what backs them today split into three
+     structurally different cases: (a) a per-type `Observation` already exists (e.g.
+     `GCGenerationAnalyzer`'s `gc.generation-top-allocator`/`-top-accumulator`) — a future generic
+     scoped differ could reach these via `Subjects`; (b) only a per-*object* `Observation` exists
+     (e.g. `GCHandleAnalyzer`'s `handle.pinned`, one per pinned handle) and the comparer sums by
+     type name at comparison time — a materially different, harder mechanism (grouping, not lookup)
+     than the headline case; (c) no `Observation` backs it at all (`MemoryAnalyzer`'s per-type
+     top-10 and size-bucket histogram — a Stage-1 gap, not a differ problem).
+   - **Decision: this step's generic differ targets headline metrics only.** Scoped/per-entity
+     trending (all three sub-cases above) is real, separately-scheduled follow-up work, not folded
+     into step 4 and not a "step 5 exception" either — forcing it in here is exactly how a bounded
+     step becomes an open-ended one. This also isn't a new split invented for this decision: the
+     codebase already treats headline and scoped metrics as two different mechanisms today
+     (`TrendAnalyzer.ExtractTimeline` vs. `ExtractScopedTimeline`), so the migration follows an
+     existing seam rather than cutting a new one.
+   - **Consequence for "migrate comparers one domain at a time" above**: only the 11 all-headline
+     comparers retire completely. The other 25 keep existing, trimmed to just their scoped
+     `ExtractMetrics`/`Compare` branches once their headline branches are reproduced by the generic
+     differ and verified equal — a partial retirement, mirroring step 3's `FindingGeneratorType`
+     nullability pattern (a comparer with only scoped work left is not a bug, it has a real job).
+5. **Keep the genuine exceptions.** Distinct from the headline/scoped split above — this is about
+   *headline* metrics where "worse" still isn't monotonic in the measure (thread count, handle
+   count, where both directions can be bad in context), not about scoped metrics (which are handled
+   by whatever the scoped-trending follow-up becomes, not by this step at all). These stay as
+   explicit rules. Expect roughly a handful, not thirty; if the count stays high, the measure
+   semantics are under-specified and that's the real bug.
 6. **Fold in `InsightEngine`.** Its cross-analyzer synthesis becomes multi-observation synthesis
    rules — same mechanism, wider match, no separate engine. **Also picks up Leak Candidate's
    deferred Stage-1-purity fix here**: `SuspicionScore`/`Severity`/`Classification` join

@@ -310,6 +310,32 @@ public sealed class SdkRegistryConformanceTests
                 ["object.bytes"] = "higherIsWorse",
                 ["dependent-dead-key.count"] = "higherIsWorse",
             },
+            ["runtime.hang-pressure"] = new Dictionary<string, string>
+            {
+                ["alive-thread.count"] = "neutral",
+                ["waiting-thread.count"] = "higherIsWorse",
+                ["waiting.percent"] = "higherIsWorse",
+                ["queued-work-items.count"] = "higherIsWorse",
+                ["pending-task.count"] = "higherIsWorse",
+                ["faulted-task.count"] = "higherIsWorse",
+            },
+            ["runtime.lock-pressure"] = new Dictionary<string, string>
+            {
+                ["held-lock.count"] = "neutral",
+            },
+            ["runtime.thread-cluster-diversity"] = new Dictionary<string, string>
+            {
+                ["alive-thread.count"] = "neutral",
+                ["unique-cluster.count"] = "neutral",
+                ["diversity.percent"] = "lowerIsWorse",
+            },
+            ["runtime.thread-triage"] = new Dictionary<string, string>
+            {
+                ["alive-thread.count"] = "neutral",
+                ["blocked-thread.count"] = "higherIsWorse",
+                ["lock-holding-thread.count"] = "higherIsWorse",
+                ["active-exception-thread.count"] = "higherIsWorse",
+            },
         };
 
     [Fact]

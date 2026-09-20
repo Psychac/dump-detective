@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/observation-type-registry.json",
-  "registryVersion": "1.56.0",
+  "registryVersion": "1.57.0",
   "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
   "observationTypes": {
     "gc.pause": {
@@ -447,7 +447,7 @@
       "subjectKind": null,
       "temporalKind": "point",
       "measures": {
-        "held-lock.count": { "unit": "count", "semantics": "absolute" }
+        "held-lock.count": { "unit": "count", "semantics": "absolute", "direction": "neutral" }
       },
       "note": "Whole-run — total monitor-held locks, including uncontested ones that get no per-lock observation at all (only contested locks emit lock.contested).",
       "addedIn": "1.61.0"
@@ -472,12 +472,12 @@
       "subjectKind": null,
       "temporalKind": "point",
       "measures": {
-        "alive-thread.count": { "unit": "count", "semantics": "absolute" },
-        "waiting-thread.count": { "unit": "count", "semantics": "absolute" },
-        "waiting.percent": { "unit": "percent", "semantics": "ratio" },
-        "queued-work-items.count": { "unit": "count", "semantics": "absolute" },
-        "pending-task.count": { "unit": "count", "semantics": "absolute" },
-        "faulted-task.count": { "unit": "count", "semantics": "absolute" },
+        "alive-thread.count": { "unit": "count", "semantics": "absolute", "direction": "neutral" },
+        "waiting-thread.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
+        "waiting.percent": { "unit": "percent", "semantics": "ratio", "direction": "higherIsWorse" },
+        "queued-work-items.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
+        "pending-task.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
+        "faulted-task.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
         "task-continuation.count": { "unit": "count", "semantics": "absolute" },
         "threadpool-max.count": { "unit": "count", "semantics": "absolute" },
         "threadpool-active.count": { "unit": "count", "semantics": "absolute" },
@@ -510,10 +510,10 @@
       "subjectKind": null,
       "temporalKind": "point",
       "measures": {
-        "alive-thread.count": { "unit": "count", "semantics": "absolute" },
-        "blocked-thread.count": { "unit": "count", "semantics": "absolute" },
-        "lock-holding-thread.count": { "unit": "count", "semantics": "absolute" },
-        "active-exception-thread.count": { "unit": "count", "semantics": "absolute" },
+        "alive-thread.count": { "unit": "count", "semantics": "absolute", "direction": "neutral" },
+        "blocked-thread.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
+        "lock-holding-thread.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
+        "active-exception-thread.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
         "active-processing-thread.count": { "unit": "count", "semantics": "absolute" },
         "async-chain-thread.count": { "unit": "count", "semantics": "absolute" },
         "max-async-chain.depth": { "unit": "count", "semantics": "absolute" }
@@ -556,9 +556,9 @@
       "subjectKind": null,
       "temporalKind": "point",
       "measures": {
-        "alive-thread.count": { "unit": "count", "semantics": "absolute" },
-        "unique-cluster.count": { "unit": "count", "semantics": "absolute" },
-        "diversity.percent": { "unit": "percent", "semantics": "ratio" }
+        "alive-thread.count": { "unit": "count", "semantics": "absolute", "direction": "neutral" },
+        "unique-cluster.count": { "unit": "count", "semantics": "absolute", "direction": "neutral" },
+        "diversity.percent": { "unit": "percent", "semantics": "ratio", "direction": "lowerIsWorse" }
       },
       "note": "Whole-run, unfiltered — every thread.stack-cluster observation is filtered by MinClusterSize, so these three scalars have no per-cluster stand-in.",
       "addedIn": "1.63.0"

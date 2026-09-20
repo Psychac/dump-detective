@@ -15,6 +15,19 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.57.0 — 2026-09-20
+
+Third package in the `direction` rollout — `Plugins.Threads`'s headline measures: 14 across
+`runtime.hang-pressure`, `runtime.lock-pressure`, `runtime.thread-cluster-diversity`, and
+`runtime.thread-triage`, mined from `Hang`/`LockGraph`/`ThreadStackCluster`/`Thread`'s trend
+comparers. `LockGraphTrendComparer` is the sparsest yet — 3 of its 4 headline metrics
+(`lock.contested`, `lock.max.waiters`, `lock.deadlock.candidates`) have no raw whole-run measure at
+all; the registry's own `lock.contested` observation type is per-lock (scoped), a naming
+coincidence with the comparer metric of the same name, not the same data. Only `lock.held` (→
+`held-lock.count`) is backed. `ThreadStackClusterTrendComparer`'s `cluster.top5.stability.percent`
+is explicitly a cross-snapshot-only derived value per its own doc comment — never a single-snapshot
+fact, so it was never a direction candidate at all, not merely unclassified.
+
 ## `observation-type-registry.json` 1.56.0 — 2026-09-20
 
 Second package in the `direction` rollout started in 1.55.0 — `Plugins.Gc`'s headline measures: 20

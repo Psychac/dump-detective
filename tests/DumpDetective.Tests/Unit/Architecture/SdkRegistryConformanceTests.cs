@@ -379,6 +379,26 @@ public sealed class SdkRegistryConformanceTests
                 ["loh-string.bytes"] = "higherIsWorse",
                 ["pct-of-managed-heap.percent"] = "higherIsWorse",
             },
+            ["type.retention-population"] = new Dictionary<string, string>
+            {
+                ["highly-referenced.count"] = "higherIsWorse",
+            },
+            ["event.publisher-leak-population"] = new Dictionary<string, string>
+            {
+                ["total.count"] = "higherIsWorse",
+                ["instance-leak.count"] = "higherIsWorse",
+                ["static-leak.count"] = "higherIsWorse",
+            },
+            ["reference-chain.population"] = new Dictionary<string, string>
+            {
+                ["retained.percent"] = "higherIsWorse",
+                ["retained.count"] = "higherIsWorse",
+            },
+            ["static-root.population"] = new Dictionary<string, string>
+            {
+                ["root.count"] = "higherIsWorse",
+                ["retained.bytes"] = "higherIsWorse",
+            },
         };
 
     [Fact]

@@ -15,6 +15,18 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.60.0 — 2026-09-20
+
+Sixth package — `Plugins.Leaks`: 8 headline measures across `type.retention-population` (1),
+`event.publisher-leak-population` (3, full coverage), `reference-chain.population` (2), and
+`static-root.population` (2, full coverage), mined from
+`Dominator`/`EventLeak`/`ReferenceChain`/`StaticRoot`'s trend comparers.
+`DominatorTrendComparer` is the sparsest single comparer covered so far — 6 of its 7 headline
+metrics (candidates, analyzed count, retained bytes, retention-pressure ratio, top-type count,
+highly-referenced bytes) have no whole-run registry measure; only `leak.highly.referenced` matches.
+`LeakCandidateAnalyzer` contributes nothing at all - it emits no observations yet, still deferred to
+step 6 per the per-analyzer playbook.
+
 ## `observation-type-registry.json` 1.59.0 — 2026-09-20
 
 Fifth package — `Plugins.Types`: 23 headline measures across `type.boxing-pressure` (8),

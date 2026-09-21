@@ -178,6 +178,11 @@ public static class MeasureDirectionRegistry
             [("type.string-composition", "duplication.ratio")] = MeasureDirection.HigherIsWorse,
             [("type.string-composition", "loh-string.bytes")] = MeasureDirection.HigherIsWorse,
             [("type.string-composition", "pct-of-managed-heap.percent")] = MeasureDirection.HigherIsWorse,
+            [("type.string-composition", "total-string.count")] = MeasureDirection.HigherIsWorse,
+            [("type.string-composition", "unique-pattern.count")] = MeasureDirection.Neutral,
+            [("type.string-composition", "gen0.count")] = MeasureDirection.Neutral,
+            [("type.string-composition", "gen1.count")] = MeasureDirection.Neutral,
+            [("type.string-composition", "gen2.count")] = MeasureDirection.HigherIsWorse,
 
             // Plugins.Leaks
             [("type.retention-population", "highly-referenced.count")] = MeasureDirection.HigherIsWorse,

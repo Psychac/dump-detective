@@ -15,6 +15,15 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.84.0 — 2026-09-22
+
+Phase 5 step 4, Bucket D (sixth item): `type.string-composition` gains `total-string.count`
+(`higherIsWorse`), `unique-pattern.count`, `gen0.count`, `gen1.count` (all `neutral`), and
+`gen2.count` (`higherIsWorse`) — `StringAnalyzer` already accumulated all 5 as locals earlier in the
+same scan that builds this observation's existing 10 measures, no new heap traversal. No field
+duplication to collapse. Closes `StringTrendComparer`'s 5 headline gaps (6/11 → 11/11), the sixth
+Bucket D comparer retired.
+
 ## `observation-type-registry.json` 1.83.0 — 2026-09-22
 
 Phase 5 step 4, Bucket D (fifth item): `infra.http-object-population` gains 11 measures —

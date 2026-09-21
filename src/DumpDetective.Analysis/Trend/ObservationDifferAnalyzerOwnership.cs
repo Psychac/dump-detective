@@ -57,5 +57,6 @@ internal static class ObservationDifferAnalyzerOwnership
             ["finalizer.queue-population"] = "Finalizable Object Analysis",
             ["type.retention-population"] = "Dominator Analysis",
             ["infra.http-object-population"] = "HTTP Object Analysis",
+            ["type.string-composition"] = "String Analysis",
         };
 }

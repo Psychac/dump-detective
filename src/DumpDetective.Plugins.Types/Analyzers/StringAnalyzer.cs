@@ -263,6 +263,10 @@ public sealed partial class StringAnalyzer : IAnalyzer, IProducesAnalyzerDomainR
         // which are emitted uncapped during the scan and would silently overcount whenever more
         // than maxVeryLongStringsToKeep candidates exist, the same capped-vs-exact trap
         // ObjectShapeAnalyzer's migration caught for its own Top*Types counts.
+        // total-string.count/unique-pattern.count/gen0.count/gen1.count/gen2.count added Phase 5
+        // step 4 for StringTrendComparer's headline metrics (Bucket D of
+        // docs/refactor/modularity/phase-5-step4-comparer-retirement-audit.md) — all already
+        // accumulated as locals earlier in this same scan, no new heap traversal.
         await observationContext.Observations.EmitAsync(new Observation
         {
             Id = ObservationId.NewId(),
@@ -281,6 +285,11 @@ public sealed partial class StringAnalyzer : IAnalyzer, IProducesAnalyzerDomainR
                 ["total-string-memory.bytes"] = new Measure(totalStringMemory, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                 ["sampling-coverage.ratio"] = new Measure(samplingCoverage, MeasureUnit.Ratio, MeasureSemantics.Ratio),
                 ["strings-sampled.count"] = new Measure(stringsSampled, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["total-string.count"] = new Measure(totalStrings, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["unique-pattern.count"] = new Measure(sampledUniquePatterns, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["gen0.count"] = new Measure(gen0StringCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["gen1.count"] = new Measure(gen1StringCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["gen2.count"] = new Measure(gen2StringCount, MeasureUnit.Count, MeasureSemantics.Absolute),
             },
             Provenance = new Provenance
             {

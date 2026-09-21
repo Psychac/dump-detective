@@ -257,7 +257,12 @@ public sealed class HttpObjectAnalyzer :
         // Whole-run scalar — no entity subject, same "no natural per-entity anchor" pattern as
         // gc.generation-composition. HttpWebResponse and HttpMessageHandler instances are counted
         // but never individually observed (no per-instance field extraction exists for either
-        // category), so their counts can't be reconstructed any other way.
+        // category), so their counts can't be reconstructed any other way. The other 11 measures
+        // (added Phase 5 step 4 for HttpObjectTrendComparer's headline metrics, Bucket D of
+        // docs/refactor/modularity/phase-5-step4-comparer-retirement-audit.md) were already
+        // accumulated as locals here too, just never promoted. handler-client.ratio is a plain
+        // derived ratio (HttpMessageHandlerCount / HttpClientCount, same formula as
+        // HttpObjectTrendComparer's own HandlerClientRatio), not a classifier composite.
         await observationContext.Observations.EmitAsync(new Observation
         {
             Id = ObservationId.NewId(),
@@ -266,8 +271,20 @@ public sealed class HttpObjectAnalyzer :
             When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
             Measures = new Dictionary<string, Measure>
             {
+                ["total.count"] = new Measure(total, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["http-client.count"] = new Measure(totalHttpClient, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["http-web-request.count"] = new Measure(totalHttpWebRequest, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["http-web-response.count"] = new Measure(totalHttpWebResponse, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["http-message-handler.count"] = new Measure(totalHttpMessageHandler, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["service-point.count"] = new Measure(totalServicePoint, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["active-handler-tracking-entry.count"] = new Measure(totalActiveHandlerTrackingEntry, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["expired-handler-tracking-entry.count"] = new Measure(totalExpiredHandlerTrackingEntry, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["http-client-gen0.count"] = new Measure(httpClientGen0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["http-client-gen1.count"] = new Measure(httpClientGen1, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["http-client-gen2.count"] = new Measure(httpClientGen2, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["handler-client.ratio"] = new Measure(
+                    totalHttpClient > 0 ? totalHttpMessageHandler / (double)totalHttpClient : 0.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                ["total.bytes"] = new Measure(totalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
             },
             Provenance = new Provenance
             {

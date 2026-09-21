@@ -109,7 +109,12 @@ public sealed class SdkRegistryConformanceTests
             ["infra.db-connection-population"] = ["total.count", "open.count", "closed.count", "broken.count", "other.count", "unknown-state.count", "gen2-open.count", "gen0-open.count"],
             ["infra.http-object"] = ["shallow.bytes", "generation.ordinal", "connection-limit"],
             ["infra.http-handler-module"] = ["instance.count"],
-            ["infra.http-object-population"] = ["http-web-response.count", "http-message-handler.count"],
+            ["infra.http-object-population"] = [
+                "total.count", "http-client.count", "http-web-request.count", "http-web-response.count",
+                "http-message-handler.count", "service-point.count", "active-handler-tracking-entry.count",
+                "expired-handler-tracking-entry.count", "http-client-gen0.count", "http-client-gen1.count",
+                "http-client-gen2.count", "handler-client.ratio", "total.bytes",
+            ],
             ["infra.timer"] = ["instance.count", "shallow.bytes"],
             ["infra.timer-population"] = [
                 "total.count", "total.bytes", "threading.count", "timers-timer.count",

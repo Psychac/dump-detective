@@ -15,6 +15,19 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.83.0 — 2026-09-22
+
+Phase 5 step 4, Bucket D (fifth item): `infra.http-object-population` gains 11 measures —
+`total.count`, `http-client.count`, `http-web-request.count`, `service-point.count`,
+`active-handler-tracking-entry.count`, `expired-handler-tracking-entry.count`,
+`http-client-gen0.count`, `http-client-gen1.count`, `http-client-gen2.count` (`neutral`),
+`handler-client.ratio`, `total.bytes` (rest `higherIsWorse`) — `HttpObjectAnalyzer` already
+accumulated every one of these as locals right before the existing 2-measure emission, no new heap
+traversal. `handler-client.ratio` is a plain derived ratio (`http-message-handler.count /
+http-client.count`, the same formula `HttpObjectTrendComparer.HandlerClientRatio` already computed),
+not a classifier composite. Closes `HttpObjectTrendComparer`'s 11 headline gaps (2/13 → 13/13), the
+fifth Bucket D comparer retired — no field duplication to collapse this time, unlike the last two.
+
 ## `observation-type-registry.json` 1.82.0 — 2026-09-21
 
 Phase 5 step 4, Bucket D (fourth item): `type.retention-population` gains `candidate.count`,

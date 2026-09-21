@@ -56,5 +56,6 @@ internal static class ObservationDifferAnalyzerOwnership
             ["gc.finalizable-composition"] = "Finalizable Object Analysis",
             ["finalizer.queue-population"] = "Finalizable Object Analysis",
             ["type.retention-population"] = "Dominator Analysis",
+            ["infra.http-object-population"] = "HTTP Object Analysis",
         };
 }

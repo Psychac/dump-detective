@@ -29,33 +29,29 @@ public sealed class HttpObjectTrendComparerTests
             HandlerModules: []);
 
     [Fact]
-    public void ExtractMetrics_EmitsHandlerRatio()
+    public void ExtractMetrics_NoTypeBreakdown_EmitsNothing()
     {
+        // Headline metrics (including http.handlerratio, HttpObjectAnalyzer.HandlerClientRatio's
+        // own formula) retired onto ObservationTrendDiffer — see ObservationDifferAnalyzerOwnership.
+        // With an empty ByType, the comparer now has nothing scoped left to emit either.
         var result = MakeResult(httpClients: 5, handlers: 15);
 
         var metrics = new HttpObjectTrendComparer().ExtractMetrics(result);
 
-        metrics.Should().Contain(m => m.Key == "http.handlerratio" && m.Value == 3.0);
+        metrics.Should().BeEmpty();
     }
 
     [Fact]
-    public void ExtractMetrics_HandlerRatioIsZero_WhenNoHttpClients()
+    public void Compare_AlwaysEmitsNothing()
     {
-        var result = MakeResult(httpClients: 0, handlers: 15);
-
-        var metrics = new HttpObjectTrendComparer().ExtractMetrics(result);
-
-        metrics.Should().Contain(m => m.Key == "http.handlerratio" && m.Value == 0.0);
-    }
-
-    [Fact]
-    public void Compare_HandlerRatio_DetectsRisingChurn()
-    {
+        // Compare() had no pre-existing scoped delta branches (only ExtractMetrics fed per-type
+        // counts/bytes into the timeline), so it always returns empty now that the headline
+        // branches are gone — covered by the differ instead.
         var baseline = MakeResult(httpClients: 5, handlers: 5);
         var current = MakeResult(httpClients: 5, handlers: 25);
 
         var deltas = new HttpObjectTrendComparer().Compare(baseline, current);
 
-        deltas.Should().Contain(d => d.Key == "http.handlerratio" && d.Delta == 4.0);
+        deltas.Should().BeEmpty();
     }
 }

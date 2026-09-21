@@ -3,6 +3,7 @@ using DumpDetective.Analysis.Analyzers.Async;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Sdk.Analysis;
+using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Identity;
 
 using FluentAssertions;
@@ -221,6 +222,7 @@ public sealed class AsyncStateMachineAnalyzerRetypingCharacterizationTests
     {
         AsyncStateMachineAnalyzer analyzer = new();
         DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
+            ArtifactId = new ArtifactId("test"),
             Observations = NoOpObservationSink.Instance,
             DumpObjectFields = fields,
             HeapObjectLookup = objectLookup,

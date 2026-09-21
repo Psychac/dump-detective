@@ -165,11 +165,40 @@ public sealed class SqlConnectionPoolAnalyzer :
             return Empty();
 
         int nearCapacity = 0;
+        double maxUtilizationPct = 0;
         foreach (SqlConnectionPoolSnapshot pool in pools)
         {
-            if (UtilizationPercent(pool) >= NearCapacityUtilizationPct)
+            double pct = UtilizationPercent(pool);
+            if (pct >= NearCapacityUtilizationPct)
                 nearCapacity++;
+            if (pct > maxUtilizationPct)
+                maxUtilizationPct = pct;
         }
+
+        // Phase 5 step 4 (docs/refactor/modularity/phase-5-observations-synthesis.md): whole-run
+        // totals SqlConnectionPoolTrendComparer needs — no entity subject, same
+        // gc.generation-composition pattern, computed from the pools list already built above.
+        await observationContext.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "infra.sql-connection-pool-population",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["total.count"] = new Measure(pools.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["near-capacity.count"] = new Measure(nearCapacity, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["max-utilization.percent"] = new Measure(maxUtilizationPct, MeasureUnit.Percent, MeasureSemantics.Ratio),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = observationContext.ArtifactId!.Value,
+                AnalyzerKey = "SQL Connection Pool Analysis",
+                CapabilitiesUsed = observationCapabilities,
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
 
         return new SqlConnectionPoolDomainResult(
             PoolsFound: true,

@@ -15,6 +15,24 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.69.0 — 2026-09-21
+
+Phase 5 step 4 (docs/refactor/modularity/phase-5-observations-synthesis.md): extends emission for
+the 3 comparers left stranded by the `direction` rollout — `AsyncStateMachineTrendComparer`,
+`HeapTopologyTrendComparer`, `SqlConnectionPoolTrendComparer` — each 100% headline by `Scope`
+convention but backed by zero registry measures, because their analyzer never promoted a whole-run
+aggregate to an `Observation`. New whole-run, no-entity-subject types (`gc.generation-composition`
+pattern): `type.async-state-machine-population` (4 measures, `AsyncStateMachineAnalyzer` summed
+once over its existing `IsAsyncStateMachineType` totals loop) and
+`infra.sql-connection-pool-population` (3 measures, `SqlConnectionPoolAnalyzer` computed from the
+pool list it already builds — first whole-run aggregate this analyzer has ever emitted).
+`heap.topology-population` (existing, 1.58.0) gains 9 measures instead of a new type, since
+`HeapTopologyDomainResult` already carries the exact totals as sums over the 5
+`heap.segment-kind-composition` rows — no additional heap traversal needed. All 9 new measures'
+`direction`s added inline, mined from each comparer's existing `MetricTrendDirection` the same way
+the rollout itself was mined. Unblocks all 3 comparers to retire onto `ObservationTrendDiffer`
+next, closing the "3 comparers explicitly NOT retired" gap step 4 left open on 2026-09-20.
+
 ## `observation-type-registry.json` 1.62.0 — 2026-09-20
 
 Eighth and last package in the `direction` rollout — `Plugins.Infra`: 15 headline measures across

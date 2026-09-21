@@ -97,6 +97,7 @@ public sealed class SdkRegistryConformanceTests
             ["thread.stack-cluster"] = ["cluster.count", "threadpool-worker.count", "gc.count", "finalizer.count"],
             ["runtime.thread-cluster-diversity"] = ["alive-thread.count", "unique-cluster.count", "diversity.percent"],
             ["infra.sql-connection-pool"] = ["current.size", "max.size", "min.size"],
+            ["infra.sql-connection-pool-population"] = ["total.count", "near-capacity.count", "max-utilization.percent"],
             ["infra.sql-command"] = ["shallow.bytes"],
             ["infra.sql-command-population"] = ["total.count", "disposed.count"],
             ["infra.sql-transaction"] = ["shallow.bytes"],
@@ -124,7 +125,10 @@ public sealed class SdkRegistryConformanceTests
             ["heap.segment-kind-composition"] = ["kind.ordinal", "segment.count", "object.count", "committed.bytes", "reserved.bytes", "fragmented.bytes"],
             ["heap.poh-type-composition"] = ["instance.count", "shallow.bytes"],
             ["heap.frozen-type-composition"] = ["instance.count", "shallow.bytes"],
-            ["heap.topology-population"] = ["is-server-gc", "logical-heap.count", "logical-heap.max-bytes", "logical-heap.min-bytes"],
+            ["heap.topology-population"] = [
+                "is-server-gc", "logical-heap.count", "logical-heap.max-bytes", "logical-heap.min-bytes",
+                "segment.count", "committed.bytes", "reserved.bytes", "reservation-gap.bytes",
+                "soh.bytes", "loh.bytes", "loh.percent", "poh.bytes", "poh.percent"],
             ["runtime.module-heap-footprint"] = ["unique-type.count", "object.count", "shallow.bytes", "loh.bytes", "gen2.object-count"],
             ["runtime.module-population"] = [
                 "total.count", "dynamic.count", "version-conflict.count", "heavy-module-warning.threshold-bytes",
@@ -157,6 +161,7 @@ public sealed class SdkRegistryConformanceTests
             ["heap.long-string"] = ["length", "shallow.bytes"],
             ["type.string-composition"] = ["duplication.ratio", "duplicate-pattern.count", "duplicate-wasted.bytes", "loh-string.bytes", "very-long-string.count", "very-long-string.bytes", "pct-of-managed-heap.percent", "total-string-memory.bytes", "sampling-coverage.ratio", "strings-sampled.count"],
             ["type.async-state-machine"] = ["instance.count", "shallow.bytes", "dominant-state", "gen2.count", "gen2.fraction", "is-async-void"],
+            ["type.async-state-machine-population"] = ["total.count", "total.bytes", "gen2.count", "gen2.percent"],
             ["type.async-captured-closure"] = ["captured.bytes"],
             ["type.orphaned-task"] = ["shallow.bytes"],
             ["async.task-population"] = [

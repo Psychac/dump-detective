@@ -121,6 +121,11 @@ public static class MeasureDirectionRegistry
             [("async.task-population", "max-continuation-depth")] = MeasureDirection.HigherIsWorse,
             [("async.task-population", "avg-continuation-depth")] = MeasureDirection.HigherIsWorse,
 
+            [("type.async-state-machine-population", "total.count")] = MeasureDirection.HigherIsWorse,
+            [("type.async-state-machine-population", "total.bytes")] = MeasureDirection.HigherIsWorse,
+            [("type.async-state-machine-population", "gen2.count")] = MeasureDirection.HigherIsWorse,
+            [("type.async-state-machine-population", "gen2.percent")] = MeasureDirection.HigherIsWorse,
+
             // Plugins.Types
             [("type.boxing-pressure", "total-boxed.count")] = MeasureDirection.HigherIsWorse,
             [("type.boxing-pressure", "total-boxed.bytes")] = MeasureDirection.HigherIsWorse,
@@ -182,6 +187,16 @@ public static class MeasureDirectionRegistry
             [("runtime.module-population", "total-dynamic.count")] = MeasureDirection.HigherIsWorse,
             [("runtime.module-population", "heavy-module-warning.threshold-bytes")] = MeasureDirection.Neutral,
 
+            [("heap.topology-population", "segment.count")] = MeasureDirection.Neutral,
+            [("heap.topology-population", "committed.bytes")] = MeasureDirection.HigherIsWorse,
+            [("heap.topology-population", "reserved.bytes")] = MeasureDirection.HigherIsWorse,
+            [("heap.topology-population", "reservation-gap.bytes")] = MeasureDirection.HigherIsWorse,
+            [("heap.topology-population", "soh.bytes")] = MeasureDirection.HigherIsWorse,
+            [("heap.topology-population", "loh.bytes")] = MeasureDirection.HigherIsWorse,
+            [("heap.topology-population", "loh.percent")] = MeasureDirection.HigherIsWorse,
+            [("heap.topology-population", "poh.bytes")] = MeasureDirection.HigherIsWorse,
+            [("heap.topology-population", "poh.percent")] = MeasureDirection.HigherIsWorse,
+
             // Plugins.Infra
             [("infra.db-connection-population", "total.count")] = MeasureDirection.HigherIsWorse,
             [("infra.db-connection-population", "closed.count")] = MeasureDirection.Neutral,
@@ -202,6 +217,10 @@ public static class MeasureDirectionRegistry
             [("infra.wcf-channel-population", "opening.count")] = MeasureDirection.HigherIsWorse,
             [("infra.wcf-channel-population", "opened.count")] = MeasureDirection.Neutral,
             [("infra.wcf-channel-population", "closing.count")] = MeasureDirection.HigherIsWorse,
+
+            [("infra.sql-connection-pool-population", "total.count")] = MeasureDirection.Neutral,
+            [("infra.sql-connection-pool-population", "near-capacity.count")] = MeasureDirection.HigherIsWorse,
+            [("infra.sql-connection-pool-population", "max-utilization.percent")] = MeasureDirection.HigherIsWorse,
         };
 
     /// <summary>Looks up a measure's direction. False (with <paramref name="direction"/> unset) for

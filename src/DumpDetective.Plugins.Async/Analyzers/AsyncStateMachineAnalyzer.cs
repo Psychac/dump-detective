@@ -171,6 +171,34 @@ public sealed class AsyncStateMachineAnalyzer :
         if (totalCount == 0)
             return Empty();
 
+        // Phase 5 step 4 (docs/refactor/modularity/phase-5-observations-synthesis.md): whole-run
+        // totals AsyncStateMachineTrendComparer needs — mirrors gc.generation-composition's
+        // no-entity-subject pattern. Percent, matching the comparer's own *100.0 formula, not the
+        // 0-1 ratio the per-type type.async-state-machine observation's gen2.fraction uses.
+        double totalGen2Percent = totalCount == 0 ? 0.0 : totalGen2Count * 100.0 / totalCount;
+        await observationContext.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "type.async-state-machine-population",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["total.count"] = new Measure(totalCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["total.bytes"] = new Measure(totalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["gen2.count"] = new Measure(totalGen2Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["gen2.percent"] = new Measure(totalGen2Percent, MeasureUnit.Percent, MeasureSemantics.Ratio),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = observationContext.ArtifactId!.Value,
+                AnalyzerKey = "Async State Machine Analysis",
+                CapabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapTypes },
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
+
         var topTypes = new List<StateMachineTypeProfile>(seenTypes.Count);
         var highCaptures = new List<HighCaptureStateMachine>(seenTypes.Count);
         var observationCapabilities = new HashSet<Capability> { CapabilityVocabulary.HeapTypes, CapabilityVocabulary.DumpObjectFields, CapabilityVocabulary.HeapObjects };

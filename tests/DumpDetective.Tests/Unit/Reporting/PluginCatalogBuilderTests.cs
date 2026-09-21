@@ -144,6 +144,9 @@ public sealed class PluginCatalogBuilderTests
         typeof(DumpDetective.Analysis.Analyzers.Runtime.JitAnalyzer),
         typeof(DumpDetective.Analysis.Analyzers.Threads.LockGraphAnalyzer),
         typeof(DumpDetective.Analysis.Analyzers.Threads.ThreadStackClusterAnalyzer),
+        typeof(DumpDetective.Analysis.Analyzers.Async.AsyncStateMachineAnalyzer),
+        typeof(DumpDetective.Analysis.Analyzers.Runtime.HeapTopologyAnalyzer),
+        typeof(DumpDetective.Analysis.Analyzers.Infra.SqlConnectionPoolAnalyzer),
     ];
 
     [Fact]

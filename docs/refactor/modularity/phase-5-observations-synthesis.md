@@ -338,12 +338,19 @@ actually starts, not before.
      `StartupValidator`'s coverage check is the real backstop). WeakReference/EventLeak/
      ReferenceChain/LohFragmentation/SegmentReservation/Jit/LockGraph/ThreadStackCluster deleted —
      class, DI registration, and dedicated tests together.
-   - **The other 3 all-headline comparers are explicitly NOT retired.** AsyncStateMachine,
+   - **The remaining 3 all-headline comparers — retired 2026-09-21.** AsyncStateMachine,
      HeapTopology, and SqlConnectionPool were each found during the registry rollout to back zero
      registry measures — their analyzer never promoted a whole-run aggregate to an `Observation` at
-     all. Retiring them now would silently drop real trend signal, not relocate it; left as-is,
-     blocked on a real Stage-1-emission decision (extend emission vs. accept a permanent gap),
-     which this step doesn't make unilaterally.
+     all. Resolved by extending emission rather than accepting the gap
+     (schema/DumpDetective.Schema/CHANGELOG.md 1.69.0): `AsyncStateMachineAnalyzer` and
+     `SqlConnectionPoolAnalyzer` each gained a new whole-run, no-entity-subject observation type
+     (`type.async-state-machine-population`, `infra.sql-connection-pool-population`) built from
+     totals each analyzer already computed; `HeapTopologyAnalyzer`'s existing `heap.topology-population`
+     gained 9 measures, all exact sums over the 5 `heap.segment-kind-composition` rows it already
+     emits — no new heap traversal in any of the three. All 3 comparer classes (and
+     `AsyncStateMachineTrendComparer`'s dedicated test, the only one of the three with one) deleted;
+     `ObservationDifferAnalyzerOwnership` and `PluginCatalogBuilderTests`'s expected-coverage list
+     extended to match. 11 of 11 all-headline comparers now retired.
    - **Found and fixed a live, unrelated CLI-startup bug along the way**: `StartupValidator`'s
      step-3 finding-generator coverage check joined retired analyzers to real `IAnalyzer.Name` via
      `AnalyzerFeatureModule.DisplayName` — not guaranteed to match (`ThreadStackClusterAnalyzer`:

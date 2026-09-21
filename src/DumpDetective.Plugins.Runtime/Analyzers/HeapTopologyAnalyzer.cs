@@ -147,6 +147,18 @@ public sealed class HeapTopologyAnalyzer : IAnalyzer, IProducesAnalyzerDomainRes
                 ["logical-heap.count"] = new Measure(result.LogicalHeapCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["logical-heap.max-bytes"] = new Measure(maxLogicalHeapBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                 ["logical-heap.min-bytes"] = new Measure(minLogicalHeapBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                // Phase 5 step 4: whole-run totals HeapTopologyTrendComparer needs — already exact
+                // fields on the domain result (sums over the 5 heap.segment-kind-composition rows
+                // above), no additional heap traversal.
+                ["segment.count"] = new Measure(result.TotalSegments, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["committed.bytes"] = new Measure(result.TotalCommittedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["reserved.bytes"] = new Measure(result.TotalReservedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["reservation-gap.bytes"] = new Measure(result.ReservationGapBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["soh.bytes"] = new Measure(result.SohBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["loh.bytes"] = new Measure(result.LohBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["loh.percent"] = new Measure(result.LohPercent, MeasureUnit.Percent, MeasureSemantics.Ratio),
+                ["poh.bytes"] = new Measure(result.PohBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["poh.percent"] = new Measure(result.PohPercent, MeasureUnit.Percent, MeasureSemantics.Ratio),
             },
             Provenance = new Provenance
             {

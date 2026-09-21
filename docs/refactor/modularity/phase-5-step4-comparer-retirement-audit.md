@@ -94,7 +94,7 @@ write-up landing, since the code-level work is independent of it.
 | Comparer | Backed / Headline | Gap (needs emission) |
 |---|---|---|
 | `WcfChannelTrendComparer` | 5/5 ✅ **done (2026-09-21)** | `faulted.count` — `infra.wcf-channel-population` gained `faulted.count` (registry 1.70.0); comparer's headline branches trimmed and registered in `ObservationDifferAnalyzerOwnership` |
-| `ObjectShapeTrendComparer` | 6/7 | `balanced-type.count` (no measure exists for `TopBalancedTypes.Count`) |
+| `ObjectShapeTrendComparer` | 7/7 ✅ **done (2026-09-21)** | `balanced-type.count` — `type.shape-composition` gained it (registry 1.71.0); comparer's headline branches trimmed and registered in `ObservationDifferAnalyzerOwnership` |
 | `GCHandleTrendComparer` | 5/7 | `strong` (`StrongLikeHandles`), `dependent.unresolved.percent` |
 | `AsyncTaskTrendComparer` | 5/7 | `canceled` (`CanceledTasks`), `orphaned` (`OrphanedTasks`) |
 | `DbConnectionTrendComparer` | 4/7 | `open` (`OpenConnections`), `gen2.open`, `gen0.open` |

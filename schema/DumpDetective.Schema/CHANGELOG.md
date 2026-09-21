@@ -15,6 +15,15 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.71.0 — 2026-09-21
+
+Phase 5 step 4, Bucket B: `type.shape-composition` gains `balanced-type.count` (`neutral`) —
+`ObjectShapeAnalyzer` already computed `TopBalancedTypes.Count` for the domain result but never
+promoted it, unlike its `reference-heavy-type.count`/`value-heavy-type.count` siblings; balanced
+types have no per-type observation to reconstruct the count from either. Closes
+`ObjectShapeTrendComparer`'s last headline gap (6/7 → 7/7), unblocking its retirement onto the
+differ.
+
 ## `observation-type-registry.json` 1.70.0 — 2026-09-21
 
 Phase 5 step 4, Bucket B (docs/refactor/modularity/phase-5-step4-comparer-retirement-audit.md):

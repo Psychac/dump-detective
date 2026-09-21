@@ -98,12 +98,14 @@ public sealed class ObjectShapeAnalyzer : IAnalyzer, IProducesAnalyzerDomainResu
                 ["avg-reference-fields"] = new Measure(result.AvgRefFieldsPerType, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["gc-scan-work"] = new Measure(result.TotalGcScanWork, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["gen2-gc-scan-work"] = new Measure(result.TotalGen2GcScanWork, MeasureUnit.Count, MeasureSemantics.Absolute),
-                // Exact totals for the two classification populations — not derivable by counting
+                // Exact totals for the three classification populations — not derivable by counting
                 // matched type.reference-heavy/type.value-heavy observations, which are capped to
                 // the top 3/top 1 (see EmitTypeShapeObservationAsync below), unlike the old
-                // generator's own "{Count} reference-heavy types found" text.
+                // generator's own "{Count} reference-heavy types found" text. balanced-type.count
+                // has no matching per-type observation at all to reconstruct it from.
                 ["reference-heavy-type.count"] = new Measure(result.TopReferenceHeavyTypes.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["value-heavy-type.count"] = new Measure(result.TopValueHeavyTypes.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["balanced-type.count"] = new Measure(result.TopBalancedTypes.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
             },
             Provenance = new Provenance
             {

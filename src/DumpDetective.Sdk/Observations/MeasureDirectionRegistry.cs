@@ -146,6 +146,7 @@ public static class MeasureDirectionRegistry
             [("type.shape-composition", "gen2-gc-scan-work")] = MeasureDirection.HigherIsWorse,
             [("type.shape-composition", "reference-heavy-type.count")] = MeasureDirection.HigherIsWorse,
             [("type.shape-composition", "value-heavy-type.count")] = MeasureDirection.Neutral,
+            [("type.shape-composition", "balanced-type.count")] = MeasureDirection.Neutral,
 
             [("type.string-composition", "total-string-memory.bytes")] = MeasureDirection.HigherIsWorse,
             [("type.string-composition", "duplicate-pattern.count")] = MeasureDirection.HigherIsWorse,

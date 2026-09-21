@@ -42,5 +42,6 @@ internal static class ObservationDifferAnalyzerOwnership
             ["heap.memory-composition"] = "Memory Analysis",
             ["runtime.hang-pressure"] = "Hang Analysis",
             ["infra.wcf-channel-population"] = "WCF Channel Analysis",
+            ["type.shape-composition"] = "Object Shape Analysis",
         };
 }

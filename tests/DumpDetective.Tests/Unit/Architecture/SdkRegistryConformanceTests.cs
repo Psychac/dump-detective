@@ -142,7 +142,7 @@ public sealed class SdkRegistryConformanceTests
             ["runtime.active-exception"] = ["generation.ordinal", "shallow.bytes"],
             ["runtime.crash-population"] = ["total.count", "active.count", "unique-types.count"],
             ["runtime.crash-thread-candidate"] = ["active-exception.count"],
-            ["type.shape-composition"] = ["type.count", "avg-reference-fields", "gc-scan-work", "gen2-gc-scan-work", "reference-heavy-type.count", "value-heavy-type.count"],
+            ["type.shape-composition"] = ["type.count", "avg-reference-fields", "gc-scan-work", "gen2-gc-scan-work", "reference-heavy-type.count", "value-heavy-type.count", "balanced-type.count"],
             ["type.reference-heavy"] = ["reference-field.count", "total-field.count", "instance.count"],
             ["type.value-heavy"] = ["reference-field.count", "total-field.count", "instance.count"],
             ["type.finalizable-reference-heavy"] = ["reference-field.count", "total-field.count", "instance.count"],

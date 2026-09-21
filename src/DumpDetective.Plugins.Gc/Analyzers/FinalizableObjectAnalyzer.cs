@@ -172,6 +172,34 @@ namespace DumpDetective.Analysis.Analyzers.Gc
                 }, cancellationToken);
             }
 
+            // Whole-run scalar — no entity subject, same "no natural per-entity anchor" pattern as
+            // gc.generation-composition. total.count/total.bytes/gen2.count are reconstructable by
+            // summing type.finalizable-population's own per-type measures above (that stream is
+            // exhaustive, not capped), but the differ can't do that grouping — same pragmatic
+            // direct-emit call made throughout Phase 5 step 4's Bucket D work (e.g.
+            // type.array-population, infra.timer-population).
+            await observationContext.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "gc.finalizable-composition",
+                Subjects = [],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["total.count"] = new Measure(totalObjects, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["total.bytes"] = new Measure(totalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["gen2.count"] = new Measure(gen2, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = observationContext.ArtifactId!.Value,
+                    AnalyzerKey = "Finalizable Object Analysis",
+                    CapabilitiesUsed = populationCapabilities,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+
             // ── Step 2: Finalizer queue analysis ─────────────────────────────────────────
             int queueCount = 0;
             var queueTypeCountMap = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -200,31 +228,6 @@ namespace DumpDetective.Analysis.Analyzers.Gc
                     criticalFinalizerTypeCountMap[typeName] = criticalFinalizerTypeCountMap.GetValueOrDefault(typeName) + 1;
                 }
             }
-
-            // Whole-run scalar — no entity subject, same "no natural per-type anchor" pattern as
-            // gc.generation-composition. queueCount includes invalid ("<unknown>"-typed) entries
-            // that finalizer.queue-entry never observes individually (they have no resolvable
-            // Type to use as a Subject), so it cannot be reconstructed by counting those
-            // per-entry observations alone.
-            await observationContext.Observations.EmitAsync(new Observation
-            {
-                Id = ObservationId.NewId(),
-                ObservationType = "finalizer.queue-population",
-                Subjects = [],
-                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
-                Measures = new Dictionary<string, Measure>
-                {
-                    ["queue.count"] = new Measure(queueCount, MeasureUnit.Count, MeasureSemantics.Absolute),
-                },
-                Provenance = new Provenance
-                {
-                    Artifact = observationContext.ArtifactId!.Value,
-                    AnalyzerKey = "Finalizable Object Analysis",
-                    CapabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapFinalizerQueue },
-                    Fidelity = FidelityLevel.Full,
-                },
-                Confidence = 1.0,
-            }, cancellationToken);
 
             var topQueueTypesByCount = new List<QueueTypeStatistic>(queueTypeCountMap.Count);
             foreach (KeyValuePair<string, int> kv in queueTypeCountMap)
@@ -339,6 +342,48 @@ namespace DumpDetective.Analysis.Analyzers.Gc
             topEntries.Sort(static (a, b) => b.EstimatedRetainedBytes.CompareTo(a.EstimatedRetainedBytes));
 
             PopulateRootPaths(rootPaths, topEntries, cancellationToken);
+
+            // Whole-run scalar — no entity subject, same "no natural per-type anchor" pattern as
+            // gc.generation-composition. queue.count includes invalid ("<unknown>"-typed) entries
+            // that finalizer.queue-entry never observes individually (they have no resolvable Type
+            // to use as a Subject), so it cannot be reconstructed by counting those per-entry
+            // observations alone; retained.bytes/critical.count/critical.bytes/pressure.ratio (added
+            // Phase 5 step 4 for FinalizableObjectTrendComparer, Bucket D of
+            // docs/refactor/modularity/phase-5-step4-comparer-retirement-audit.md) have the same
+            // problem — retained.bytes in particular is per-entry Full/Degraded fidelity depending on
+            // dominator availability, exact totals only, not summable from a capped display list.
+            // pressure.ratio mirrors FinalizableObjectDomainResult.QueuePressureRatio's own formula
+            // exactly (FinalizerQueueCount / TotalFinalizableObjects) rather than reading the
+            // not-yet-constructed record.
+            await observationContext.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "finalizer.queue-population",
+                Subjects = [],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["queue.count"] = new Measure(queueCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["retained.bytes"] = new Measure(totalQueueRetained, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["critical.count"] = new Measure(criticalFinalizerQueueCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["critical.bytes"] = new Measure(criticalFinalizerQueueBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["pressure.ratio"] = new Measure(
+                        totalObjects > 0 ? (double)queueCount / totalObjects : 0.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = observationContext.ArtifactId!.Value,
+                    AnalyzerKey = "Finalizable Object Analysis",
+                    CapabilitiesUsed = observationCapabilities,
+                    Fidelity = observationFidelity,
+                },
+                // Mirrors finalizer.queue-entry's own exact-vs-estimated split: retained.bytes here
+                // is an aggregate over the same per-entry values, so it inherits the same partial
+                // uncertainty isRetainedEstimatePartial already tracks (queue.count/critical.count/
+                // pressure.ratio don't depend on dominators at all, but one shared Confidence for the
+                // whole observation is the existing convention, same as finalizer.queue-entry itself).
+                Confidence = isRetainedEstimatePartial ? 0.7 : 1.0,
+            }, cancellationToken);
 
             return new FinalizableObjectDomainResult(
                 TotalFinalizableObjects: (int)Math.Min(totalObjects, int.MaxValue),

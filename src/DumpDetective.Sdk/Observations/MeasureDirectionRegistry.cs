@@ -72,7 +72,15 @@ public static class MeasureDirectionRegistry
             [("heap.segment-reservation", "near-empty-region-fill-percent.threshold")] = MeasureDirection.Neutral,
 
             // Plugins.Gc
+            [("gc.finalizable-composition", "total.count")] = MeasureDirection.HigherIsWorse,
+            [("gc.finalizable-composition", "total.bytes")] = MeasureDirection.HigherIsWorse,
+            [("gc.finalizable-composition", "gen2.count")] = MeasureDirection.HigherIsWorse,
+
             [("finalizer.queue-population", "queue.count")] = MeasureDirection.HigherIsWorse,
+            [("finalizer.queue-population", "retained.bytes")] = MeasureDirection.HigherIsWorse,
+            [("finalizer.queue-population", "critical.count")] = MeasureDirection.HigherIsWorse,
+            [("finalizer.queue-population", "critical.bytes")] = MeasureDirection.HigherIsWorse,
+            [("finalizer.queue-population", "pressure.ratio")] = MeasureDirection.HigherIsWorse,
 
             [("handle.population", "total.count")] = MeasureDirection.HigherIsWorse,
             [("handle.population", "strong-like.count")] = MeasureDirection.HigherIsWorse,

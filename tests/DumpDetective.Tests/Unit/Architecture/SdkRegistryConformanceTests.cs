@@ -51,7 +51,8 @@ public sealed class SdkRegistryConformanceTests
             ["handle.refcounted-target"] = ["instance.count"],
             ["finalizer.queue-entry"] = ["retained.bytes", "shallow.bytes", "disposed-but-live", "is-critical-finalizer"],
             ["type.finalizable-population"] = ["instance.count", "shallow.bytes", "gen2.count"],
-            ["finalizer.queue-population"] = ["queue.count"],
+            ["gc.finalizable-composition"] = ["total.count", "total.bytes", "gen2.count"],
+            ["finalizer.queue-population"] = ["queue.count", "retained.bytes", "critical.count", "critical.bytes", "pressure.ratio"],
             ["weakhandle.target"] = ["retained.bytes", "held-only-via-weak-reference"],
             ["weakreference.stale-wrapper"] = ["shallow.bytes"],
             ["weakreference.population"] = [

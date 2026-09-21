@@ -53,5 +53,7 @@ internal static class ObservationDifferAnalyzerOwnership
             ["gc.allocation-composition"] = "Allocation Pattern Analysis",
             ["type.array-population"] = "Array Analysis",
             ["infra.timer-population"] = "Timer Leak Analysis",
+            ["gc.finalizable-composition"] = "Finalizable Object Analysis",
+            ["finalizer.queue-population"] = "Finalizable Object Analysis",
         };
 }

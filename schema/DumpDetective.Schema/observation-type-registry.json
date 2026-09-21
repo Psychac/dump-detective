@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/observation-type-registry.json",
-  "registryVersion": "1.80.0",
+  "registryVersion": "1.81.0",
   "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
   "observationTypes": {
     "gc.pause": {
@@ -178,16 +178,34 @@
       "note": "One per finalizable type from heap.types' per-type aggregates (§21.1 population sweep) — every finalizable type, not capped. Backs the old finding generator's Gen2 accumulation signal (total count/bytes, top type by Gen2 count), which finalizer.queue-entry (queue population only) cannot.",
       "addedIn": "1.45.0"
     },
-    "finalizer.queue-population": {
+    "gc.finalizable-composition": {
       "producedBy": "FinalizableObjectAnalyzer",
       "sourceFile": "src/DumpDetective.Plugins.Gc/Analyzers/FinalizableObjectAnalyzer.cs",
-      "requiresCapabilities": ["heap.finalizer-queue"],
+      "requiresCapabilities": ["heap.types"],
       "subjectKind": null,
       "temporalKind": "point",
       "measures": {
-        "queue.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" }
+        "total.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
+        "total.bytes": { "unit": "bytes", "semantics": "absolute", "direction": "higherIsWorse" },
+        "gen2.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" }
       },
-      "note": "One whole-run observation per analysis — no entity subject, same pattern as gc.generation-composition. Carries the full finalizer-queue count including invalid (\"<unknown>\"-typed) entries, which finalizer.queue-entry never observes individually since they have no resolvable Type for a Subject.",
+      "note": "Whole-run scalar — no entity subject, same pattern as gc.generation-composition. Added Phase 5 step 4 for FinalizableObjectTrendComparer's headline metrics (Bucket D). All 3 totals are reconstructable by summing type.finalizable-population's own per-type measures (that stream is exhaustive, not capped), but ObservationTrendDiffer can't do that grouping, so they're also emitted directly here — same pragmatic direct-emit call as type.array-population/infra.timer-population.",
+      "addedIn": "1.81.0"
+    },
+    "finalizer.queue-population": {
+      "producedBy": "FinalizableObjectAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Gc/Analyzers/FinalizableObjectAnalyzer.cs",
+      "requiresCapabilities": ["heap.finalizer-queue", "heap.segments", "heap.types"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "queue.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
+        "retained.bytes": { "unit": "bytes", "semantics": "absolute", "direction": "higherIsWorse" },
+        "critical.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
+        "critical.bytes": { "unit": "bytes", "semantics": "absolute", "direction": "higherIsWorse" },
+        "pressure.ratio": { "unit": "ratio", "semantics": "ratio", "direction": "higherIsWorse" }
+      },
+      "note": "One whole-run observation per analysis — no entity subject, same pattern as gc.generation-composition. Carries the full finalizer-queue count including invalid (\"<unknown>\"-typed) entries, which finalizer.queue-entry never observes individually since they have no resolvable Type for a Subject. retained.bytes/critical.count/critical.bytes/pressure.ratio added Phase 5 step 4 (Bucket D) — retained.bytes is an exact aggregate over finalizer.queue-entry's own per-entry values (Confidence drops to 0.7 when any entry fell back to shallow size instead of a real dominator-tree retained size, mirroring that observation type's own exact-vs-estimated split); pressure.ratio mirrors FinalizableObjectDomainResult.QueuePressureRatio's own formula (FinalizerQueueCount / TotalFinalizableObjects) computed inline rather than read from the not-yet-constructed record.",
       "addedIn": "1.45.0"
     },
     "weakhandle.target": {

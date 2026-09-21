@@ -15,6 +15,23 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.81.0 — 2026-09-21
+
+Phase 5 step 4, Bucket D (third item), `FinalizableObjectTrendComparer`:
+- New whole-run `gc.finalizable-composition` type — `total.count`/`total.bytes`/`gen2.count`, the
+  same pragmatic direct-emit shape as `type.array-population`/`infra.timer-population`
+  (reconstructable by summing `type.finalizable-population`'s exhaustive per-type stream, but the
+  differ can't do that grouping).
+- `finalizer.queue-population` gains `retained.bytes`, `critical.count`, `critical.bytes`,
+  `pressure.ratio` (all `higherIsWorse`) — moved from its original emission point (right after the
+  queue-scan loop) to after the per-entry retained-bytes loop, since `retained.bytes` needs that
+  loop's exact totals; `pressure.ratio` mirrors `FinalizableObjectDomainResult.QueuePressureRatio`'s
+  own plain-ratio formula computed inline (a simple derived ratio, not a classifier composite —
+  same category as `BoxingTrendComparer`'s `gen2.percent`, not a Bucket C exception).
+
+Closes `FinalizableObjectTrendComparer`'s 8 headline gaps (1/8 → 8/8), the third Bucket D
+comparer retired.
+
 ## `observation-type-registry.json` 1.80.0 — 2026-09-21
 
 Phase 5 step 4, Bucket D: new `infra.timer-population` whole-run observation type —

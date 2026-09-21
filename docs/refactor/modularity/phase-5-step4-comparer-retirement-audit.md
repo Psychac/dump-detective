@@ -106,8 +106,9 @@ landed in), then the same mechanical trim as Bucket A.
 | `SqlTransactionTrendComparer` | 4/4 ✅ **done (2026-09-21)** | `active` — same pattern as `SqlCommand` above; `infra.sql-transaction-population` gained `active.count` (registry 1.76.0); comparer's headline branches trimmed and registered in `ObservationDifferAnalyzerOwnership` |
 | `BoxingTrendComparer` | 11/11 ✅ **done (2026-09-21)** | `avg.instance.bytes`, `padding.aggregate`, `gen2.fraction` — `type.boxing-pressure` gained `avg-instance.bytes`/`padding-aggregate.bytes`/`gen2.percent` (registry 1.77.0); comparer's headline branches trimmed and registered in `ObservationDifferAnalyzerOwnership` |
 
-`GCRootTrendComparer` and `AllocationPatternTrendComparer` also have a Bucket B component — see
-Bucket C, which covers both buckets for each of those two comparers together.
+`GCRootTrendComparer` and `AllocationPatternTrendComparer` also had a Bucket B component —
+**done (2026-09-21)**, see the Bucket C table below for the detail; their composite headline
+metrics remain permanent Bucket C exceptions.
 
 ## Bucket C — composite/classifier-derived exceptions
 
@@ -120,8 +121,8 @@ written up there rather than chased as an emission gap:
 | Comparer | Composite metric | Classifier | Comparer's other headline metrics |
 |---|---|---|---|
 | `HangTrendComparer` | `hang.health.score` | `HangHealthClassifier.ComputeHealthScore` (also `LowerIsWorse`, unlike the rest of the comparer) | 6/6 backed — Bucket A |
-| `GCRootTrendComparer` | `gcroot.top.severity.score` | `GCRootSeverityClassifier.ComputeSeverity` | 2/4 backed (`total.roots`, `path.capped.count`); `strong.handle.count`/`finalizer.count` are Bucket B gaps |
-| `AllocationPatternTrendComparer` | `alloc.gc.pressure`, `alloc.promotion.pressure` | `AllocationPatternPressureClassifier.ClassifyPressure`/`ComputePromotionPressureScore` | 9/10 backed; `alloc.gen1.size.pct` is a Bucket B gap (the registry has `gen1.count-fraction` but not `gen1.size-fraction` — a genuine one-key hole next to nine matches) |
+| `GCRootTrendComparer` | `gcroot.top.severity.score` | `GCRootSeverityClassifier.ComputeSeverity` | 4/4 non-composite ✅ **done (2026-09-21)** — `root.population` gained `strong-handle.count`/`finalizer-queue.count` (registry 1.78.0); non-composite headline branches trimmed, `gcroot.top.severity.score` stays hand-written, registered in `ObservationDifferAnalyzerOwnership` |
+| `AllocationPatternTrendComparer` | `alloc.gc.pressure`, `alloc.promotion.pressure` | `AllocationPatternPressureClassifier.ClassifyPressure`/`ComputePromotionPressureScore` | 10/10 non-composite ✅ **done (2026-09-21)** — `gc.allocation-composition` gained `gen1.size-fraction` (registry 1.78.0); non-composite headline branches trimmed, both composite metrics stay hand-written, registered in `ObservationDifferAnalyzerOwnership` |
 
 ## Bucket D — needs a real new whole-run Observation type
 
@@ -147,8 +148,9 @@ Same-sized work as this phase's `AsyncStateMachineAnalyzer`/`HeapTopologyAnalyze
    never partially).
 2. **Bucket B (8 comparers, some sharing a row with Bucket C) — done 2026-09-21.** Small, contained
    emission extensions, one comparer at a time, same recipe as this phase's 3 stranded comparers.
-   `GCRootTrendComparer` and `AllocationPatternTrendComparer`'s Bucket B components remain open —
-   see Bucket C below, which covers both buckets for those two together.
+   `GCRootTrendComparer` and `AllocationPatternTrendComparer`'s Bucket B components are done too
+   (2026-09-21) — see the Bucket C table below for detail; only their composite metrics remain as
+   genuine Bucket C exceptions.
 3. **Bucket C (3 comparers' worth of exceptions)** — no code beyond what Bucket A/B already did to
    those comparers' other metrics; write these up in step 5 as the explicit kept exceptions once
    A/B land for them.

@@ -191,6 +191,17 @@ public sealed class GCRootAnalyzer :
         // measured".
         if (result.TotalRoots > 0)
         {
+            // strong-handle.count/finalizer-queue.count: root.kind-summary carries the same counts
+            // per-kind, but it's scoped (out of ObservationTrendDiffer's scope — see
+            // docs/refactor/modularity/phase-5-observations-synthesis.md ## Work step 4), so these
+            // two specific kinds are also promoted here as whole-run scalars (Phase 5 step 4).
+            int strongHandleCount = 0, finalizerQueueCount = 0;
+            foreach (RootKindSummary ks in result.ByKind)
+            {
+                if (ks.Kind == "StrongHandle") strongHandleCount = ks.Count;
+                else if (ks.Kind == "FinalizerQueue") finalizerQueueCount = ks.Count;
+            }
+
             await context.Observations.EmitAsync(new Observation
             {
                 Id = ObservationId.NewId(),
@@ -202,6 +213,8 @@ public sealed class GCRootAnalyzer :
                     ["total.count"] = new Measure(result.TotalRoots, MeasureUnit.Count, MeasureSemantics.Absolute),
                     ["subgraph-walk-capped"] = new Measure(result.SubgraphWalkCapped ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
                     ["subgraph-walk-capped.count"] = new Measure(result.SubgraphWalkCappedCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["strong-handle.count"] = new Measure(strongHandleCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["finalizer-queue.count"] = new Measure(finalizerQueueCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                 },
                 Provenance = new Provenance
                 {

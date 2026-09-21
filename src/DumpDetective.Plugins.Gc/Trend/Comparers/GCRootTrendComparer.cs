@@ -7,16 +7,18 @@ namespace DumpDetective.Analysis.Trend.Comparers
     {
         public string AnalyzerName => "GC Root Analysis";
 
+        // total.roots/strong.handle.count/finalizer.count/path.capped.count retired onto
+        // ObservationTrendDiffer, backed by root.population — see ObservationDifferAnalyzerOwnership
+        // and docs/refactor/modularity/phase-5-step4-comparer-retirement-audit.md Bucket B.
+        // gcroot.top.severity.score stays hand-written permanently — it's a
+        // GCRootSeverityClassifier composite score, banned from raw Observations by the purity rule
+        // (Bucket C genuine exception).
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not GCRootDomainResult r) return [];
             var metrics = new List<AnalyzerMetric>
             {
-                new("gcroot.total.roots",           null, r.TotalRoots,                     "roots",  MetricTrendDirection.Neutral),
-                new("gcroot.top.severity.score",    null, r.TopRootsBySeverity.Count > 0 ? GCRootSeverityClassifier.ComputeSeverity(r.TopRootsBySeverity[0].EstimatedRetainedBytes, r.TopRootsBySeverity[0].RootKind) : 0, "score", MetricTrendDirection.HigherIsWorse),
-                new("gcroot.path.capped.count",     null, r.SubgraphWalkCappedCount,           "paths",  MetricTrendDirection.Neutral),
-                new("gcroot.strong.handle.count",   null, GetKindCount(r, "StrongHandle"),   "roots",  MetricTrendDirection.HigherIsWorse),
-                new("gcroot.finalizer.count",       null, GetKindCount(r, "FinalizerQueue"), "roots",  MetricTrendDirection.HigherIsWorse),
+                new("gcroot.top.severity.score", null, r.TopRootsBySeverity.Count > 0 ? GCRootSeverityClassifier.ComputeSeverity(r.TopRootsBySeverity[0].EstimatedRetainedBytes, r.TopRootsBySeverity[0].RootKind) : 0, "score", MetricTrendDirection.HigherIsWorse),
             };
 
             foreach (RootKindSummary kind in r.ByKind)
@@ -30,24 +32,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
             return metrics;
         }
 
-        public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
-        {
-            if (baseline is not GCRootDomainResult b || current is not GCRootDomainResult c) return [];
-            return
-            [
-                MetricDeltaHelper.Compute("gcroot.total.roots",         null, b.TotalRoots,                                                                   c.TotalRoots,                                                                   "roots",  MetricTrendDirection.Neutral),
-                MetricDeltaHelper.Compute("gcroot.strong.handle.count", null, (double)GetKindCount(b, "StrongHandle"),   (double)GetKindCount(c, "StrongHandle"),   "roots",  MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("gcroot.finalizer.count",     null, (double)GetKindCount(b, "FinalizerQueue"), (double)GetKindCount(c, "FinalizerQueue"), "roots",  MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("gcroot.path.capped.count",   null, (double)b.SubgraphWalkCappedCount,         (double)c.SubgraphWalkCappedCount,           "paths",  MetricTrendDirection.Neutral),
-            ];
-        }
-
-        private static int GetKindCount(GCRootDomainResult r, string kind)
-        {
-            foreach (RootKindSummary ks in r.ByKind)
-                if (ks.Kind == kind) return ks.Count;
-            return 0;
-        }
+        public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current) => [];
     }
 }
 

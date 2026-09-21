@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/observation-type-registry.json",
-  "registryVersion": "1.77.0",
+  "registryVersion": "1.78.0",
   "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
   "observationTypes": {
     "gc.pause": {
@@ -78,9 +78,11 @@
       "measures": {
         "total.count": { "unit": "count", "semantics": "absolute", "direction": "neutral" },
         "subgraph-walk-capped": { "unit": "count", "semantics": "absolute" },
-        "subgraph-walk-capped.count": { "unit": "count", "semantics": "absolute", "direction": "neutral" }
+        "subgraph-walk-capped.count": { "unit": "count", "semantics": "absolute", "direction": "neutral" },
+        "strong-handle.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
+        "finalizer-queue.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" }
       },
-      "note": "One whole-run observation per analysis — no entity subject, same pattern as gc.generation-composition. TotalRoots includes roots dropped before ByKind/heap.root ever see them (null target, unresolvable metadata, zero-size object), so it cannot be reconstructed by summing root.kind-summary's own count measure.",
+      "note": "One whole-run observation per analysis — no entity subject, same pattern as gc.generation-composition. TotalRoots includes roots dropped before ByKind/heap.root ever see them (null target, unresolvable metadata, zero-size object), so it cannot be reconstructed by summing root.kind-summary's own count measure. strong-handle.count/finalizer-queue.count (added Phase 5 step 4) single out those two ByKind counts as whole-run scalars — root.kind-summary carries the same counts per-kind but is scoped, out of ObservationTrendDiffer's reach.",
       "addedIn": "1.47.0"
     },
     "handle.pinned": {
@@ -297,13 +299,14 @@
         "gen2.count-fraction": { "unit": "ratio", "semantics": "ratio", "direction": "higherIsWorse" },
         "loh.count-fraction": { "unit": "ratio", "semantics": "ratio", "direction": "higherIsWorse" },
         "gen0.size-fraction": { "unit": "ratio", "semantics": "ratio", "direction": "neutral" },
+        "gen1.size-fraction": { "unit": "ratio", "semantics": "ratio", "direction": "neutral" },
         "gen2.size-fraction": { "unit": "ratio", "semantics": "ratio", "direction": "higherIsWorse" },
         "loh.size-fraction": { "unit": "ratio", "semantics": "ratio", "direction": "higherIsWorse" },
         "finalizable.type-count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
         "finalizable.bytes": { "unit": "bytes", "semantics": "absolute", "direction": "higherIsWorse" },
         "transient-classification.threshold": { "unit": "ratio", "semantics": "absolute", "direction": "neutral" }
       },
-      "note": "Count-based whole-heap composition, distinct from GCGenerationAnalyzer's byte-based gc.generation-composition — independent corroborating measurement, not duplication (observation-and-correlation-model.md § 4). Excludes AllocationProfile and the four Top*Types lists (Smell B — bucketed by a hand-picked threshold, not a raw fact) as classifications, but Phase 5 step 2 added the *raw* size-fraction measures (gen0/gen2/loh) the pressure/profile classifiers need, plus transient-classification.threshold — AllocationPatternAnalysisOptions.TransientClassificationThreshold is runtime-configurable, so the synthesis rule reads it here rather than hard-coding the 70.0 default, same choice GCHandleSynthesisRule made for its own thresholds. gen1.size-fraction is deliberately not added: no finding reads it. An EvidenceRef with the single top-by-composite-score long-lived type's name as its Description is present only when TopLongLivedTypes is non-empty — that unbounded, composite-ranked list itself is not observed per-entry (the same volume risk this note's own Smell-B exclusion already flags), only the one identity the old finding generator actually reads.",
+      "note": "Count-based whole-heap composition, distinct from GCGenerationAnalyzer's byte-based gc.generation-composition — independent corroborating measurement, not duplication (observation-and-correlation-model.md § 4). Excludes AllocationProfile and the four Top*Types lists (Smell B — bucketed by a hand-picked threshold, not a raw fact) as classifications, but Phase 5 step 2 added the *raw* size-fraction measures (gen0/gen2/loh) the pressure/profile classifiers need, plus transient-classification.threshold — AllocationPatternAnalysisOptions.TransientClassificationThreshold is runtime-configurable, so the synthesis rule reads it here rather than hard-coding the 70.0 default, same choice GCHandleSynthesisRule made for its own thresholds. gen1.size-fraction was originally left out since no finding reads it, but Phase 5 step 4 added it anyway — AllocationPatternTrendComparer's alloc.gen1.size.pct headline metric needs it, even though no finding does. An EvidenceRef with the single top-by-composite-score long-lived type's name as its Description is present only when TopLongLivedTypes is non-empty — that unbounded, composite-ranked list itself is not observed per-entry (the same volume risk this note's own Smell-B exclusion already flags), only the one identity the old finding generator actually reads.",
       "addedIn": "1.6.0"
     },
     "heap.segment-composition": {

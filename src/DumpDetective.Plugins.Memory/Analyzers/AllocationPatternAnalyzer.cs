@@ -104,6 +104,7 @@ public sealed class AllocationPatternAnalyzer : IAnalyzer, IProducesAnalyzerDoma
                 ["gen2.count-fraction"] = new Measure(result.Gen2CountPct / 100.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
                 ["loh.count-fraction"] = new Measure(result.LohCountPct / 100.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
                 ["gen0.size-fraction"] = new Measure(result.Gen0SizePct / 100.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                ["gen1.size-fraction"] = new Measure(result.Gen1SizePct / 100.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
                 ["gen2.size-fraction"] = new Measure(result.Gen2SizePct / 100.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
                 ["loh.size-fraction"] = new Measure(result.LohSizePct / 100.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
                 ["finalizable.type-count"] = new Measure(result.FinalizableTypeCount, MeasureUnit.Count, MeasureSemantics.Absolute),

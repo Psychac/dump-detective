@@ -34,7 +34,7 @@ public sealed class SdkRegistryConformanceTests
             ["cpu.sample-attribution"] = ["cpu.sample-count"],
             ["heap.root"] = ["retained.bytes", "subgraph.node-count"],
             ["root.kind-summary"] = ["kind.ordinal", "count", "retained.bytes"],
-            ["root.population"] = ["total.count", "subgraph-walk-capped", "subgraph-walk-capped.count"],
+            ["root.population"] = ["total.count", "subgraph-walk-capped", "subgraph-walk-capped.count", "strong-handle.count", "finalizer-queue.count"],
             ["handle.pinned"] = ["retained.bytes"],
             ["handle.population"] = [
                 "total.count", "strong-like.count", "pinned-target.count", "pinned-retained.bytes",
@@ -68,7 +68,7 @@ public sealed class SdkRegistryConformanceTests
             ["gc.generation-top-accumulator"] = ["gen2.bytes", "gen2.count"],
             ["gc.allocation-composition"] = [
                 "gen0.count-fraction", "gen1.count-fraction", "gen2.count-fraction", "loh.count-fraction",
-                "gen0.size-fraction", "gen2.size-fraction", "loh.size-fraction",
+                "gen0.size-fraction", "gen1.size-fraction", "gen2.size-fraction", "loh.size-fraction",
                 "finalizable.type-count", "finalizable.bytes", "transient-classification.threshold",
             ],
             ["heap.segment-composition"] = ["generation.ordinal", "committed.bytes", "reserved.bytes", "used.bytes", "segment.count"],

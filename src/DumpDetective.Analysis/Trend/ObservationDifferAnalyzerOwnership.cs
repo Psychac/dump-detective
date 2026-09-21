@@ -49,5 +49,7 @@ internal static class ObservationDifferAnalyzerOwnership
             ["infra.sql-command-population"] = "SQL Command Analysis",
             ["infra.sql-transaction-population"] = "SQL Transaction Analysis",
             ["type.boxing-pressure"] = "Boxing Analysis",
+            ["root.population"] = "GC Root Analysis",
+            ["gc.allocation-composition"] = "Allocation Pattern Analysis",
         };
 }

@@ -15,6 +15,20 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.78.0 — 2026-09-21
+
+Phase 5 step 4, closing `GCRootTrendComparer`/`AllocationPatternTrendComparer`'s Bucket B
+components (the two comparers' composite headline metrics — `gcroot.top.severity.score`,
+`alloc.gc.pressure`, `alloc.promotion.pressure` — remain Bucket C exceptions, untouched here):
+- `root.population` gains `strong-handle.count`/`finalizer-queue.count` (both `higherIsWorse`) —
+  `GCRootAnalyzer`'s `ByKind` already carries these two counts per-kind via `root.kind-summary`,
+  but that observation is scoped, out of `ObservationTrendDiffer`'s reach, so both are promoted to
+  whole-run scalars here too. Closes `GCRootTrendComparer`'s 2 non-composite gaps (2/4 → 4/4
+  non-composite headline metrics backed).
+- `gc.allocation-composition` gains `gen1.size-fraction` (`neutral`) — previously left out
+  deliberately since no finding reads it, but `AllocationPatternTrendComparer`'s
+  `alloc.gen1.size.pct` headline metric does. Closes its last non-composite gap (9/10 → 10/10).
+
 ## `observation-type-registry.json` 1.77.0 — 2026-09-21
 
 Phase 5 step 4, Bucket B (last item — closes the bucket): `type.boxing-pressure` gains

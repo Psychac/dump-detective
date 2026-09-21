@@ -7,23 +7,20 @@ namespace DumpDetective.Analysis.Trend.Comparers
     {
         public string AnalyzerName => "Allocation Pattern Analysis";
 
+        // The 8 gen/loh count/size percentages and finalizable.type.count/.bytes retired onto
+        // ObservationTrendDiffer, backed by gc.allocation-composition — see
+        // ObservationDifferAnalyzerOwnership and
+        // docs/refactor/modularity/phase-5-step4-comparer-retirement-audit.md Bucket B.
+        // alloc.gc.pressure/alloc.promotion.pressure stay hand-written permanently — both are
+        // AllocationPatternPressureClassifier composite scores, banned from raw Observations by the
+        // purity rule (Bucket C genuine exceptions).
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not AllocationPatternDomainResult r) return [];
             var metrics = new List<AnalyzerMetric>
             {
-                new("alloc.gen0.count.pct",         null, r.Gen0CountPct,          "%",     MetricTrendDirection.Neutral),
-                new("alloc.gen1.count.pct",         null, r.Gen1CountPct,          "%",     MetricTrendDirection.Neutral),
-                new("alloc.gen2.count.pct",         null, r.Gen2CountPct,          "%",     MetricTrendDirection.HigherIsWorse),
-                new("alloc.loh.count.pct",          null, r.LohCountPct,           "%",     MetricTrendDirection.HigherIsWorse),
-                new("alloc.gen0.size.pct",          null, r.Gen0SizePct,           "%",     MetricTrendDirection.Neutral),
-                new("alloc.gen1.size.pct",          null, r.Gen1SizePct,           "%",     MetricTrendDirection.Neutral),
-                new("alloc.gen2.size.pct",          null, r.Gen2SizePct,           "%",     MetricTrendDirection.HigherIsWorse),
-                new("alloc.loh.size.pct",           null, r.LohSizePct,            "%",     MetricTrendDirection.HigherIsWorse),
-                new("alloc.gc.pressure",            null, (double)AllocationPatternPressureClassifier.ClassifyPressure(r),    "level", MetricTrendDirection.HigherIsWorse),
-                new("alloc.promotion.pressure",     null, AllocationPatternPressureClassifier.ComputePromotionPressureScore(r),"score", MetricTrendDirection.HigherIsWorse),
-                new("alloc.finalizable.type.count", null, r.FinalizableTypeCount,  "types", MetricTrendDirection.HigherIsWorse),
-                new("alloc.finalizable.bytes",      null, r.FinalizableBytes,      "bytes", MetricTrendDirection.HigherIsWorse),
+                new("alloc.gc.pressure",        null, (double)AllocationPatternPressureClassifier.ClassifyPressure(r),    "level", MetricTrendDirection.HigherIsWorse),
+                new("alloc.promotion.pressure", null, AllocationPatternPressureClassifier.ComputePromotionPressureScore(r),"score", MetricTrendDirection.HigherIsWorse),
             };
 
             if (r.LohSizeBands is not null)
@@ -50,18 +47,8 @@ namespace DumpDetective.Analysis.Trend.Comparers
             if (baseline is not AllocationPatternDomainResult b || current is not AllocationPatternDomainResult c) return [];
             return
             [
-                MetricDeltaHelper.Compute("alloc.gen0.count.pct",     null, b.Gen0CountPct,          c.Gen0CountPct,          "%",     MetricTrendDirection.Neutral),
-                MetricDeltaHelper.Compute("alloc.gen1.count.pct",     null, b.Gen1CountPct,          c.Gen1CountPct,          "%",     MetricTrendDirection.Neutral),
-                MetricDeltaHelper.Compute("alloc.gen2.count.pct",     null, b.Gen2CountPct,          c.Gen2CountPct,          "%",     MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("alloc.loh.count.pct",      null, b.LohCountPct,           c.LohCountPct,           "%",     MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("alloc.gen0.size.pct",      null, b.Gen0SizePct,           c.Gen0SizePct,           "%",     MetricTrendDirection.Neutral),
-                MetricDeltaHelper.Compute("alloc.gen1.size.pct",      null, b.Gen1SizePct,           c.Gen1SizePct,           "%",     MetricTrendDirection.Neutral),
-                MetricDeltaHelper.Compute("alloc.gen2.size.pct",      null, b.Gen2SizePct,           c.Gen2SizePct,           "%",     MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("alloc.loh.size.pct",       null, b.LohSizePct,            c.LohSizePct,            "%",     MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("alloc.gc.pressure",        null, (double)AllocationPatternPressureClassifier.ClassifyPressure(b),    (double)AllocationPatternPressureClassifier.ClassifyPressure(c),    "level", MetricTrendDirection.HigherIsWorse),
                 MetricDeltaHelper.Compute("alloc.promotion.pressure", null, AllocationPatternPressureClassifier.ComputePromotionPressureScore(b),AllocationPatternPressureClassifier.ComputePromotionPressureScore(c),"score", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("alloc.finalizable.type.count", null, b.FinalizableTypeCount, c.FinalizableTypeCount, "types", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("alloc.finalizable.bytes",      null, b.FinalizableBytes,     c.FinalizableBytes,     "bytes", MetricTrendDirection.HigherIsWorse),
             ];
         }
     }

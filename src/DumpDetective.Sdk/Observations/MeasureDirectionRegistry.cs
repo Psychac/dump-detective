@@ -30,6 +30,7 @@ public static class MeasureDirectionRegistry
             [("gc.allocation-composition", "gen2.count-fraction")] = MeasureDirection.HigherIsWorse,
             [("gc.allocation-composition", "loh.count-fraction")] = MeasureDirection.HigherIsWorse,
             [("gc.allocation-composition", "gen0.size-fraction")] = MeasureDirection.Neutral,
+            [("gc.allocation-composition", "gen1.size-fraction")] = MeasureDirection.Neutral,
             [("gc.allocation-composition", "gen2.size-fraction")] = MeasureDirection.HigherIsWorse,
             [("gc.allocation-composition", "loh.size-fraction")] = MeasureDirection.HigherIsWorse,
             [("gc.allocation-composition", "finalizable.type-count")] = MeasureDirection.HigherIsWorse,
@@ -91,6 +92,8 @@ public static class MeasureDirectionRegistry
 
             [("root.population", "total.count")] = MeasureDirection.Neutral,
             [("root.population", "subgraph-walk-capped.count")] = MeasureDirection.Neutral,
+            [("root.population", "strong-handle.count")] = MeasureDirection.HigherIsWorse,
+            [("root.population", "finalizer-queue.count")] = MeasureDirection.HigherIsWorse,
 
             [("weakreference.population", "total-handles.count")] = MeasureDirection.HigherIsWorse,
             [("weakreference.population", "dead-targets.count")] = MeasureDirection.HigherIsWorse,

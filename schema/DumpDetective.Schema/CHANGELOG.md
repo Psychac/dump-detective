@@ -15,6 +15,18 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.79.0 — 2026-09-21
+
+Phase 5 step 4, Bucket D (first item): new `type.array-population` whole-run observation type —
+`ArrayAnalyzer` already accumulated `TotalArrayObjects`/`TotalArrayBytes`/`LohArrayBytes`/
+`PinnedArrayCount`/`PinnedArrayBytes` as independent locals during the same scan that builds
+`type.array-composition`'s per-type+rank entries, but never promoted them; no new heap traversal.
+Same pragmatic direct-emit shape as the Bucket B fixes (e.g.
+`infra.sql-connection-pool-population.near-capacity.count`) since the underlying totals are
+reconstructable by summing `type.array-composition`'s exhaustive stream, but the differ can't do
+that grouping. Closes `ArrayTrendComparer`'s 5 headline gaps (0/5 → 5/5), the first Bucket D
+comparer retired.
+
 ## `observation-type-registry.json` 1.78.0 — 2026-09-21
 
 Phase 5 step 4, closing `GCRootTrendComparer`/`AllocationPatternTrendComparer`'s Bucket B

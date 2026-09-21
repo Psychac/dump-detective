@@ -6,17 +6,13 @@ namespace DumpDetective.Analysis.Trend.Comparers
     {
         public string AnalyzerName => "Array Analysis";
 
+        // Headline metrics retired onto ObservationTrendDiffer, backed by type.array-population —
+        // see ObservationDifferAnalyzerOwnership and
+        // docs/refactor/modularity/phase-5-step4-comparer-retirement-audit.md Bucket D.
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not ArrayDomainResult r) return [];
-            var metrics = new List<AnalyzerMetric>
-            {
-                new("array.total",       null, r.TotalArrayObjects, "objects", MetricTrendDirection.HigherIsWorse),
-                new("array.total.bytes", null, r.TotalArrayBytes,   "bytes",   MetricTrendDirection.HigherIsWorse),
-                new("array.loh.bytes",   null, r.LohArrayBytes,     "bytes",   MetricTrendDirection.HigherIsWorse),
-                new("array.pinned.count", null, r.PinnedArrayCount, "objects", MetricTrendDirection.HigherIsWorse),
-                new("array.pinned.bytes", null, r.PinnedArrayBytes, "bytes",   MetricTrendDirection.HigherIsWorse),
-            };
+            var metrics = new List<AnalyzerMetric>();
 
             foreach (ArrayTypeProfile p in r.TopArrayTypesBySize)
             {
@@ -27,18 +23,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
             return metrics;
         }
 
-        public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
-        {
-            if (baseline is not ArrayDomainResult b || current is not ArrayDomainResult c) return [];
-            return
-            [
-                MetricDeltaHelper.Compute("array.total",       null, b.TotalArrayObjects, c.TotalArrayObjects, "objects", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("array.total.bytes", null, b.TotalArrayBytes,   c.TotalArrayBytes,   "bytes",   MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("array.loh.bytes",   null, b.LohArrayBytes,     c.LohArrayBytes,     "bytes",   MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("array.pinned.count", null, b.PinnedArrayCount, c.PinnedArrayCount, "objects", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("array.pinned.bytes", null, b.PinnedArrayBytes, c.PinnedArrayBytes, "bytes",   MetricTrendDirection.HigherIsWorse),
-            ];
-        }
+        public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current) => [];
     }
 }
 

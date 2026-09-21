@@ -150,6 +150,12 @@ public static class MeasureDirectionRegistry
             [("collection.waste-summary", "total-wasted.bytes")] = MeasureDirection.HigherIsWorse,
             [("collection.waste-summary", "wasteful-collection.count")] = MeasureDirection.HigherIsWorse,
 
+            [("type.array-population", "total.count")] = MeasureDirection.HigherIsWorse,
+            [("type.array-population", "total.bytes")] = MeasureDirection.HigherIsWorse,
+            [("type.array-population", "loh.bytes")] = MeasureDirection.HigherIsWorse,
+            [("type.array-population", "pinned.count")] = MeasureDirection.HigherIsWorse,
+            [("type.array-population", "pinned.bytes")] = MeasureDirection.HigherIsWorse,
+
             [("type.shape-composition", "type.count")] = MeasureDirection.Neutral,
             [("type.shape-composition", "avg-reference-fields")] = MeasureDirection.HigherIsWorse,
             [("type.shape-composition", "gc-scan-work")] = MeasureDirection.HigherIsWorse,

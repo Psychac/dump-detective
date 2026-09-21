@@ -135,7 +135,7 @@ Same-sized work as this phase's `AsyncStateMachineAnalyzer`/`HeapTopologyAnalyze
 
 | Comparer | Backed / Headline | Notes |
 |---|---|---|
-| `ArrayTrendComparer` | 0/5 | Already named in the parent doc's step 4 log as one of the "100% headline by Scope convention, 0% backed" cases found during the `direction` rollout — this was already known, not a new finding here. |
+| `ArrayTrendComparer` | 5/5 ✅ **done (2026-09-21)** | Turned out smaller than the Bucket D framing implied: `ArrayAnalyzer` already computed all 5 totals as independent locals during the scan that builds the existing, uncapped `type.array-composition` stream — no new heap traversal needed. New whole-run `type.array-population` observation type (registry 1.79.0), same shape as the Bucket B fixes; comparer's headline branches trimmed and registered in `ObservationDifferAnalyzerOwnership`. |
 | `TimerLeakTrendComparer` | 0/7 | `TimerLeakAnalyzer` currently emits only the per-timer-type `infra.timer` — zero whole-run aggregate exists at all, same starting point `SqlConnectionPoolAnalyzer` was at before this phase's work. |
 | `FinalizableObjectTrendComparer` | 1/8 | Only `queue.count` (`finalizer.queue-population`) is backed; `total`, `total.bytes`, `gen2.count`, `queue.retained`, `queue.pressure.ratio`, `queue.critical.count`, `queue.critical.bytes` are all gaps. |
 | `DominatorTrendComparer` | 1/7 | Only `leak.highly.referenced` (`type.retention-population.highly-referenced.count`) is backed; no `dominator.*` whole-run Observation type exists at all for the other 6. |

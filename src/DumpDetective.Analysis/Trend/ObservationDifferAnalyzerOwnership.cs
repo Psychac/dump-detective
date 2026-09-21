@@ -51,5 +51,6 @@ internal static class ObservationDifferAnalyzerOwnership
             ["type.boxing-pressure"] = "Boxing Analysis",
             ["root.population"] = "GC Root Analysis",
             ["gc.allocation-composition"] = "Allocation Pattern Analysis",
+            ["type.array-population"] = "Array Analysis",
         };
 }

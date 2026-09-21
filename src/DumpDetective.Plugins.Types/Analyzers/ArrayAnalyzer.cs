@@ -79,7 +79,15 @@ public sealed class ArrayAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
 
     /// <summary>
     /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): four observation
-    /// types. <c>type.array-composition</c> is emitted per <see cref="ArrayDomainResult.TopArrayTypesBySize"/>
+    /// types, plus a fifth (<c>type.array-population</c>) added Phase 5 step 4 for
+    /// <c>ArrayTrendComparer</c>'s headline metrics (Bucket D of
+    /// docs/refactor/modularity/phase-5-step4-comparer-retirement-audit.md) — the same 5 totals
+    /// <see cref="ArrayDomainResult.TotalArrayObjects"/>/<see cref="ArrayDomainResult.TotalArrayBytes"/>/
+    /// <see cref="ArrayDomainResult.LohArrayBytes"/>/<see cref="ArrayDomainResult.PinnedArrayCount"/>/
+    /// <see cref="ArrayDomainResult.PinnedArrayBytes"/> that back the domain result, promoted as a
+    /// whole-run, no-entity-subject observation — no new heap traversal, they're already accumulated
+    /// once during the same scan that builds <see cref="ArrayDomainResult.TopArrayTypesBySize"/>.
+    /// <c>type.array-composition</c> is emitted per <see cref="ArrayDomainResult.TopArrayTypesBySize"/>
     /// entry (exhaustive over distinct element-type+rank combinations, despite the "Top" name — no
     /// cap) and carries raw <c>loh.count</c>/<c>loh.bytes</c>/<c>pinned.count</c>/<c>pinned.bytes</c>
     /// per type+rank, not just the blended <c>gen2-plus-loh.percent</c>, specifically so a synthesis
@@ -131,6 +139,36 @@ public sealed class ArrayAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
                 Confidence = 1.0,
             }, cancellationToken);
         }
+
+        // Whole-run scalar — no entity subject, same "no natural per-entity anchor" pattern as
+        // gc.generation-composition. All 5 totals are reconstructable by summing
+        // type.array-composition's own per-type+rank measures above (that stream is exhaustive,
+        // not capped, unlike TopSparseArrays/TopLargeArrays/TopPinnedArrays), but the differ can't
+        // do that grouping — same pragmatic direct-emit call made throughout Phase 5 step 4's
+        // Bucket B work for infra.sql-connection-pool-population.near-capacity.count and others.
+        await context.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "type.array-population",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["total.count"] = new Measure(result.TotalArrayObjects, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["total.bytes"] = new Measure(result.TotalArrayBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["loh.bytes"] = new Measure(result.LohArrayBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["pinned.count"] = new Measure(result.PinnedArrayCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["pinned.bytes"] = new Measure(result.PinnedArrayBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = context.ArtifactId!.Value,
+                AnalyzerKey = "Array Analysis",
+                CapabilitiesUsed = capabilitiesUsed,
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
 
         foreach (SparseArrayEntry sparse in result.TopSparseArrays)
         {

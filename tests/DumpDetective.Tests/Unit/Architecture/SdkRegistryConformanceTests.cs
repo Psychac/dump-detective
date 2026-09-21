@@ -152,6 +152,7 @@ public sealed class SdkRegistryConformanceTests
             ["type.oversized-value"] = ["static-size.bytes", "instance.count"],
             ["type.struct-padding-waste"] = ["field.bytes", "struct-size.bytes", "wasted-padding.bytes", "waste.ratio"],
             ["type.array-composition"] = ["instance.count", "shallow.bytes", "gen2-plus-loh.percent", "avg-size.bytes", "array.rank", "loh.count", "loh.bytes", "pinned.count", "pinned.bytes"],
+            ["type.array-population"] = ["total.count", "total.bytes", "loh.bytes", "pinned.count", "pinned.bytes"],
             ["heap.sparse-array"] = ["length", "null-or-zero.count", "sparse.ratio", "wasted.bytes"],
             ["heap.large-array"] = ["length", "shallow.bytes", "array.rank"],
             ["heap.pinned-array"] = ["length", "shallow.bytes", "array.rank"],

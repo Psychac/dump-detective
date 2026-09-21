@@ -15,6 +15,15 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.75.0 — 2026-09-21
+
+Phase 5 step 4, Bucket B: `infra.sql-command-population` gains `active.count` (`higherIsWorse`) —
+`SqlCommandAnalyzer` already computed `totalActive` for the domain result but left it
+reconstructable-only (counting `infra.sql-command`'s per-active-command stream); emitted directly
+now since `ObservationTrendDiffer` can't do that grouping — same pragmatic direct-emit call as
+`infra.sql-connection-pool-population.near-capacity.count`. Closes `SqlCommandTrendComparer`'s last
+headline gap (2/3 → 3/3), unblocking its retirement onto the differ.
+
 ## `observation-type-registry.json` 1.74.0 — 2026-09-21
 
 Phase 5 step 4, Bucket B: `infra.db-connection-population` gains `open.count`, `gen2-open.count`,

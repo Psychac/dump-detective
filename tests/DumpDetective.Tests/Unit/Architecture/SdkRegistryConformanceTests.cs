@@ -100,7 +100,7 @@ public sealed class SdkRegistryConformanceTests
             ["infra.sql-connection-pool"] = ["current.size", "max.size", "min.size"],
             ["infra.sql-connection-pool-population"] = ["total.count", "near-capacity.count", "max-utilization.percent"],
             ["infra.sql-command"] = ["shallow.bytes"],
-            ["infra.sql-command-population"] = ["total.count", "disposed.count"],
+            ["infra.sql-command-population"] = ["total.count", "active.count", "disposed.count"],
             ["infra.sql-transaction"] = ["shallow.bytes"],
             ["infra.sql-transaction-population"] = ["total.count", "disposed.count", "other.count"],
             ["infra.db-connection"] = ["generation.ordinal", "retained.bytes"],

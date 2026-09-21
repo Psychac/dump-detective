@@ -178,8 +178,9 @@ public sealed class SqlCommandAnalyzer :
         // gc.generation-composition. TotalCommands/DisposedCount cover every scanned candidate,
         // including disposed and unreadable-state ones that infra.sql-command never observes
         // individually (only active commands get one, per this analyzer's own Phase 5 step 1
-        // remarks) — ActiveCount itself is reconstructable by counting those, so it isn't
-        // duplicated here.
+        // remarks). active.count is reconstructable by counting those, but is also emitted
+        // directly here (Phase 5 step 4) since ObservationTrendDiffer can't do that grouping —
+        // same pragmatic direct-emit call as infra.sql-connection-pool-population.near-capacity.count.
         await observationContext.Observations.EmitAsync(new Observation
         {
             Id = ObservationId.NewId(),
@@ -189,6 +190,7 @@ public sealed class SqlCommandAnalyzer :
             Measures = new Dictionary<string, Measure>
             {
                 ["total.count"] = new Measure(totalCommands, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["active.count"] = new Measure(totalActive, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["disposed.count"] = new Measure(totalDisposed, MeasureUnit.Count, MeasureSemantics.Absolute),
             },
             Provenance = new Provenance

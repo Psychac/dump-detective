@@ -215,6 +215,7 @@ public static class MeasureDirectionRegistry
             [("infra.http-object-population", "http-message-handler.count")] = MeasureDirection.HigherIsWorse,
 
             [("infra.sql-command-population", "total.count")] = MeasureDirection.HigherIsWorse,
+            [("infra.sql-command-population", "active.count")] = MeasureDirection.HigherIsWorse,
             [("infra.sql-command-population", "disposed.count")] = MeasureDirection.Neutral,
 
             [("infra.sql-transaction-population", "total.count")] = MeasureDirection.HigherIsWorse,

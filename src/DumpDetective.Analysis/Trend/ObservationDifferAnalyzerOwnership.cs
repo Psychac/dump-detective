@@ -46,5 +46,6 @@ internal static class ObservationDifferAnalyzerOwnership
             ["handle.population"] = "GC Handle Analysis",
             ["async.task-population"] = "Async Task Analysis",
             ["infra.db-connection-population"] = "DB Connection Analysis",
+            ["infra.sql-command-population"] = "SQL Command Analysis",
         };
 }

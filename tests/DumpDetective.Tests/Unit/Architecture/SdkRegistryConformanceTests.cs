@@ -102,7 +102,7 @@ public sealed class SdkRegistryConformanceTests
             ["infra.sql-command"] = ["shallow.bytes"],
             ["infra.sql-command-population"] = ["total.count", "active.count", "disposed.count"],
             ["infra.sql-transaction"] = ["shallow.bytes"],
-            ["infra.sql-transaction-population"] = ["total.count", "disposed.count", "other.count"],
+            ["infra.sql-transaction-population"] = ["total.count", "active.count", "disposed.count", "other.count"],
             ["infra.db-connection"] = ["generation.ordinal", "retained.bytes"],
             ["infra.db-connection-type-population"] = ["instance.count"],
             ["infra.db-connection-population"] = ["total.count", "open.count", "closed.count", "broken.count", "other.count", "unknown-state.count", "gen2-open.count", "gen0-open.count"],

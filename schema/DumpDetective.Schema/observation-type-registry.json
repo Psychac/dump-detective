@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/observation-type-registry.json",
-  "registryVersion": "1.75.0",
+  "registryVersion": "1.76.0",
   "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
   "observationTypes": {
     "gc.pause": {
@@ -639,10 +639,11 @@
       "temporalKind": "point",
       "measures": {
         "total.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
+        "active.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
         "disposed.count": { "unit": "count", "semantics": "absolute", "direction": "neutral" },
         "other.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" }
       },
-      "note": "One whole-run observation per analysis — no entity subject, same pattern as gc.generation-composition. Covers every scanned candidate, including disposed and unresolvable-state ones infra.sql-transaction never observes individually (only active transactions get one) — ActiveCount itself is reconstructable by counting those, so it isn't duplicated here.",
+      "note": "One whole-run observation per analysis — no entity subject, same pattern as gc.generation-composition. Covers every scanned candidate, including disposed and unresolvable-state ones infra.sql-transaction never observes individually (only active transactions get one). active.count is reconstructable by counting those, but is also emitted directly (Phase 5 step 4) since ObservationTrendDiffer can't do that grouping — same pragmatic direct-emit call as infra.sql-connection-pool-population.near-capacity.count.",
       "addedIn": "1.50.0"
     },
     "infra.db-connection": {

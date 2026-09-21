@@ -173,8 +173,10 @@ public sealed class SqlTransactionAnalyzer :
         // Whole-run scalar — no entity subject, same "no natural per-entity anchor" pattern as
         // gc.generation-composition. TotalTransactions/DisposedCount/OtherCount cover every
         // scanned candidate, including disposed and unresolvable-state ones that
-        // infra.sql-transaction never observes individually (only active transactions get one) —
-        // ActiveCount itself is reconstructable by counting those, so it isn't duplicated here.
+        // infra.sql-transaction never observes individually (only active transactions get one).
+        // active.count is reconstructable by counting those, but is also emitted directly here
+        // (Phase 5 step 4) since ObservationTrendDiffer can't do that grouping — same pragmatic
+        // direct-emit call as infra.sql-connection-pool-population.near-capacity.count.
         await observationContext.Observations.EmitAsync(new Observation
         {
             Id = ObservationId.NewId(),
@@ -184,6 +186,7 @@ public sealed class SqlTransactionAnalyzer :
             Measures = new Dictionary<string, Measure>
             {
                 ["total.count"] = new Measure(totalTransactions, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["active.count"] = new Measure(totalActive, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["disposed.count"] = new Measure(totalDisposed, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["other.count"] = new Measure(totalOther, MeasureUnit.Count, MeasureSemantics.Absolute),
             },

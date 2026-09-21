@@ -219,6 +219,7 @@ public static class MeasureDirectionRegistry
             [("infra.sql-command-population", "disposed.count")] = MeasureDirection.Neutral,
 
             [("infra.sql-transaction-population", "total.count")] = MeasureDirection.HigherIsWorse,
+            [("infra.sql-transaction-population", "active.count")] = MeasureDirection.HigherIsWorse,
             [("infra.sql-transaction-population", "disposed.count")] = MeasureDirection.Neutral,
             [("infra.sql-transaction-population", "other.count")] = MeasureDirection.HigherIsWorse,
 

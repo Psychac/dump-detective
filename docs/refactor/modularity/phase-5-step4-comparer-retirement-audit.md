@@ -99,7 +99,7 @@ write-up landing, since the code-level work is independent of it.
 | `AsyncTaskTrendComparer` | 7/7 ✅ **done (2026-09-21)** | `canceled` (`CanceledTasks`), `orphaned` (`OrphanedTasks`) — `async.task-population` gained `canceled.count`/`orphaned.count` (registry 1.73.0); comparer's headline branches trimmed and registered in `ObservationDifferAnalyzerOwnership` |
 | `DbConnectionTrendComparer` | 7/7 ✅ **done (2026-09-21)** | `open` (`OpenConnections`), `gen2.open`, `gen0.open` — `infra.db-connection-population` gained `open.count`/`gen2-open.count`/`gen0-open.count` (registry 1.74.0); comparer's headline branches trimmed and registered in `ObservationDifferAnalyzerOwnership` |
 | `SqlCommandTrendComparer` | 3/3 ✅ **done (2026-09-21)** | `active` — `infra.sql-command-population` gained `active.count` (registry 1.75.0); comparer's headline branches trimmed and registered in `ObservationDifferAnalyzerOwnership` |
-| `SqlTransactionTrendComparer` | 3/4 | `active` — same reconstructable-but-not-emitted pattern as `SqlCommand` above |
+| `SqlTransactionTrendComparer` | 4/4 ✅ **done (2026-09-21)** | `active` — same pattern as `SqlCommand` above; `infra.sql-transaction-population` gained `active.count` (registry 1.76.0); comparer's headline branches trimmed and registered in `ObservationDifferAnalyzerOwnership` |
 | `BoxingTrendComparer` | 8/11 | `avg.instance.bytes`, `padding.aggregate` (both plain raw sums/averages already computed), `gen2.fraction` (a simple derived ratio — same shape as `AsyncStateMachineAnalyzer`'s `gen2.percent` added this session, not a classifier composite) |
 
 `GCRootTrendComparer` and `AllocationPatternTrendComparer` also have a Bucket B component — see

@@ -112,11 +112,15 @@ metrics remain permanent Bucket C exceptions.
 
 ## Bucket C — composite/classifier-derived exceptions
 
+**Written up (2026-09-21)** as step 5's explicit "genuine exceptions" list — see
+[phase-5-observations-synthesis.md](phase-5-observations-synthesis.md) ## Work step 5. No code
+changes of its own: all 3 comparers' non-composite headline metrics were already trimmed as part
+of Bucket A/B; this just records the 4 composite metrics below as permanent, not a to-do.
+
 These headline metrics can never be closed by more emission — they're derived scores, banned from
 raw Observations by the purity rule. Each belongs to a comparer that is otherwise Bucket A or B for
 its remaining headline metrics; only the composite metric itself needs to stay a hand-written
-`Compare`/`ExtractMetrics` branch permanently, is a real step 5 "genuine exception," and should be
-written up there rather than chased as an emission gap:
+`Compare`/`ExtractMetrics` branch permanently:
 
 | Comparer | Composite metric | Classifier | Comparer's other headline metrics |
 |---|---|---|---|
@@ -151,9 +155,9 @@ Same-sized work as this phase's `AsyncStateMachineAnalyzer`/`HeapTopologyAnalyze
    `GCRootTrendComparer` and `AllocationPatternTrendComparer`'s Bucket B components are done too
    (2026-09-21) — see the Bucket C table below for detail; only their composite metrics remain as
    genuine Bucket C exceptions.
-3. **Bucket C (3 comparers' worth of exceptions)** — no code beyond what Bucket A/B already did to
-   those comparers' other metrics; write these up in step 5 as the explicit kept exceptions once
-   A/B land for them.
+3. **Bucket C (3 comparers' worth of exceptions) — done 2026-09-21.** No code beyond what Bucket
+   A/B already did to those comparers' other metrics; written up in step 5 as the explicit kept
+   exceptions.
 4. **Bucket D (7 comparers)** — the biggest remaining work, deliberately last: each needs its own
    analyzer-specific emission design decision the way `AsyncStateMachineAnalyzer`/
    `HeapTopologyAnalyzer`/`SqlConnectionPoolAnalyzer` did this phase, not a mechanical pass.

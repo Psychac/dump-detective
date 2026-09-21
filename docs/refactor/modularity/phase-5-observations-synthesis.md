@@ -377,6 +377,35 @@ actually starts, not before.
    by whatever the scoped-trending follow-up becomes, not by this step at all). These stay as
    explicit rules. Expect roughly a handful, not thirty; if the count stays high, the measure
    semantics are under-specified and that's the real bug.
+   - **Done, 2026-09-21 — Bucket C of the step 4 mixed-comparer audit.** The genuine exceptions
+     Bucket A/B's mechanical work actually turned up weren't the anticipated "non-monotonic
+     direction" case above (no comparer in the 24-mixed-comparer audit needed that treatment) —
+     they were a narrower, different category: **classifier-derived composite scores**, banned from
+     raw `Observation` measures outright by the purity rule (§2a of
+     observation-and-correlation-model.md), not just hard to classify a direction for. A composite
+     score computed from other fields (e.g. a weighted severity/pressure formula) isn't itself a raw
+     domain fact, so `ObservationTrendDiffer` can never diff it no matter how emission is extended —
+     unlike the headline/scoped split, more emission work can't close this one. 3 comparers, 4
+     metrics total, all confirmed during
+     [phase-5-step4-comparer-retirement-audit.md](phase-5-step4-comparer-retirement-audit.md)'s
+     Bucket A/B mechanical trims (the comparer stays registered in the DI comparer list, keeps only
+     the composite branch hand-written in `Compare`/`ExtractMetrics`, while
+     `ObservationDifferAnalyzerOwnership` routes every other now-backed headline metric through the
+     differ — same "comparer + differ share one analyzer name" composition Bucket A first proved):
+     - `HangTrendComparer.hang.health.score` — `HangHealthClassifier.ComputeHealthScore` (also the
+       comparer's only `LowerIsWorse` metric, unlike the rest of `runtime.hang-pressure`).
+     - `GCRootTrendComparer.gcroot.top.severity.score` — `GCRootSeverityClassifier.ComputeSeverity`.
+     - `AllocationPatternTrendComparer.alloc.gc.pressure` /
+       `AllocationPatternTrendComparer.alloc.promotion.pressure` —
+       `AllocationPatternPressureClassifier.ClassifyPressure` /
+       `.ComputePromotionPressureScore`.
+
+     No code changes from this step itself — the trims that made each comparer's composite branch
+     the *only* one left were already done as part of step 4's Bucket A/B work; this is the explicit
+     write-up marking all 4 as permanent, not a to-do. If a future analyzer's headline metric turns
+     out to be genuinely non-monotonic (the case this step was originally scoped for) rather than
+     classifier-derived, it belongs in this same exceptions list — the mechanism (comparer keeps a
+     hand-written branch, stays registered for it) is identical either way, only the *reason* differs.
 6. **Fold in `InsightEngine`.** Its cross-analyzer synthesis becomes multi-observation synthesis
    rules — same mechanism, wider match, no separate engine. **Also picks up Leak Candidate's
    deferred Stage-1-purity fix here**: `SuspicionScore`/`Severity`/`Classification` join

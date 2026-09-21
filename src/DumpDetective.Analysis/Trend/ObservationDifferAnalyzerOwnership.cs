@@ -44,5 +44,6 @@ internal static class ObservationDifferAnalyzerOwnership
             ["infra.wcf-channel-population"] = "WCF Channel Analysis",
             ["type.shape-composition"] = "Object Shape Analysis",
             ["handle.population"] = "GC Handle Analysis",
+            ["async.task-population"] = "Async Task Analysis",
         };
 }

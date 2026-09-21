@@ -178,7 +178,7 @@ public sealed partial class AsyncTaskAnalyzer : IAnalyzer, IProducesAnalyzerDoma
         if (total == 0)
         {
             await EmitTaskPopulationObservationAsync(
-                observationContext, total: 0, pending: 0, faulted: 0, pendingGen2: 0, pendingLOH: 0,
+                observationContext, total: 0, pending: 0, faulted: 0, canceled: 0, orphaned: 0, pendingGen2: 0, pendingLOH: 0,
                 maxDepth: 0, avgDepth: 0.0, cycleDetected: false, tcsResult, vtsResult, ct);
             return EmptyWith(tcsResult, vtsResult);
         }
@@ -388,7 +388,7 @@ public sealed partial class AsyncTaskAnalyzer : IAnalyzer, IProducesAnalyzerDoma
         IReadOnlyList<FaultedTaskTypeProfile> faultedProfiles = BuildFaultedTaskTypeProfiles(faultedTypeCount, faultedTypeExceptions);
 
         await EmitTaskPopulationObservationAsync(
-            observationContext, total, pending, faulted, pendingGen2, pendingLOH, maxDepth, avgDepth, cycleDetected,
+            observationContext, total, pending, faulted, canceled, orphaned, pendingGen2, pendingLOH, maxDepth, avgDepth, cycleDetected,
             tcsResult, vtsResult, ct);
 
         return new AsyncTaskDomainResult(
@@ -441,6 +441,8 @@ public sealed partial class AsyncTaskAnalyzer : IAnalyzer, IProducesAnalyzerDoma
         int total,
         int pending,
         int faulted,
+        int canceled,
+        int orphaned,
         int pendingGen2,
         int pendingLOH,
         int maxDepth,
@@ -462,6 +464,8 @@ public sealed partial class AsyncTaskAnalyzer : IAnalyzer, IProducesAnalyzerDoma
                 ["pending.count"] = new Measure(pending, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["pending-oldgen.count"] = new Measure(pendingGen2 + pendingLOH, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["faulted.count"] = new Measure(faulted, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["canceled.count"] = new Measure(canceled, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["orphaned.count"] = new Measure(orphaned, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["cycle-detected"] = new Measure(cycleDetected ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["max-continuation-depth"] = new Measure(maxDepth, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["avg-continuation-depth"] = new Measure(avgDepth, MeasureUnit.Count, MeasureSemantics.Absolute),

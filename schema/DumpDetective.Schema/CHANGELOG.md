@@ -15,6 +15,14 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.73.0 — 2026-09-21
+
+Phase 5 step 4, Bucket B: `async.task-population` gains `canceled.count` (`neutral`) and
+`orphaned.count` (`higherIsWorse`) — `AsyncTaskAnalyzer` already computed both locals (`canceled`,
+`orphaned`) for the domain result but never threaded them into
+`EmitTaskPopulationObservationAsync`. Closes `AsyncTaskTrendComparer`'s last 2 headline gaps
+(5/7 → 7/7), unblocking its retirement onto the differ.
+
 ## `observation-type-registry.json` 1.72.0 — 2026-09-21
 
 Phase 5 step 4, Bucket B: `handle.population` gains `strong-like.count` and

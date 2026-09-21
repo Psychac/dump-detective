@@ -120,6 +120,8 @@ public static class MeasureDirectionRegistry
             [("async.task-population", "total.count")] = MeasureDirection.Neutral,
             [("async.task-population", "pending.count")] = MeasureDirection.HigherIsWorse,
             [("async.task-population", "faulted.count")] = MeasureDirection.HigherIsWorse,
+            [("async.task-population", "canceled.count")] = MeasureDirection.Neutral,
+            [("async.task-population", "orphaned.count")] = MeasureDirection.HigherIsWorse,
             [("async.task-population", "max-continuation-depth")] = MeasureDirection.HigherIsWorse,
             [("async.task-population", "avg-continuation-depth")] = MeasureDirection.HigherIsWorse,
 

@@ -166,7 +166,7 @@ public sealed class SdkRegistryConformanceTests
             ["type.async-captured-closure"] = ["captured.bytes"],
             ["type.orphaned-task"] = ["shallow.bytes"],
             ["async.task-population"] = [
-                "total.count", "pending.count", "pending-oldgen.count", "faulted.count", "cycle-detected",
+                "total.count", "pending.count", "pending-oldgen.count", "faulted.count", "canceled.count", "orphaned.count", "cycle-detected",
                 "max-continuation-depth", "avg-continuation-depth", "total-tcs.count", "unresolved-tcs.count",
                 "unresolved-tcs-oldgen.count", "total-vts.count", "pending-vts.count", "pending-vts-oldgen.count",
             ],

@@ -58,5 +58,6 @@ internal static class ObservationDifferAnalyzerOwnership
             ["type.retention-population"] = "Dominator Analysis",
             ["infra.http-object-population"] = "HTTP Object Analysis",
             ["type.string-composition"] = "String Analysis",
+            ["gc.generation-composition"] = "GC Generation Analysis",
         };
 }

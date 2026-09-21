@@ -15,6 +15,16 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.85.0 — 2026-09-22
+
+Phase 5 step 4, Bucket D (seventh and last item): `gc.generation-composition` gains `gen1.count`,
+`loh.count` (plain promotions of already-existing `GCGenerationDomainResult` fields) and
+`gen0.percent`, `gen1.percent`, `poh.percent` (mirroring `gen2.percent`'s own count-based formula,
+`objects * 100.0 / TotalObjects`) — all `higherIsWorse` except `gen1.percent`'s sibling
+`gen2.percent`, which stays unclassified as before. Closes `GCGenerationTrendComparer`'s 5 headline
+gaps (9/14 → 14/14), the seventh and final Bucket D comparer retired — closing out the entire
+Phase 5 step 4 mixed-comparer audit (Buckets A/B/C/D all done).
+
 ## `observation-type-registry.json` 1.84.0 — 2026-09-22
 
 Phase 5 step 4, Bucket D (sixth item): `type.string-composition` gains `total-string.count`

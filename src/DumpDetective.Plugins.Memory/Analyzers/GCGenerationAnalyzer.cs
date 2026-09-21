@@ -95,6 +95,14 @@ namespace DumpDetective.Analysis.Analyzers.Memory
             double gen2Fraction = totalManagedBytes == 0 ? 0.0 : result.Gen2Bytes / (double)totalManagedBytes;
             double lohFraction = totalManagedBytes == 0 ? 0.0 : result.LohBytes / (double)totalManagedBytes;
 
+            // gen0.percent/gen1.percent/poh.percent mirror gen2.percent's own formula
+            // (objects * 100.0 / total, 0 when TotalObjects is 0) — added Phase 5 step 4 for
+            // GCGenerationTrendComparer's headline metrics (Bucket D of
+            // docs/refactor/modularity/phase-5-step4-comparer-retirement-audit.md).
+            double gen0Pct = result.TotalObjects == 0 ? 0.0 : result.Gen0Objects * 100.0 / result.TotalObjects;
+            double gen1Pct = result.TotalObjects == 0 ? 0.0 : result.Gen1Objects * 100.0 / result.TotalObjects;
+            double pohPct = result.TotalObjects == 0 ? 0.0 : result.PohObjects * 100.0 / result.TotalObjects;
+
             IReadOnlyList<TypeGenerationProfile> profiles = result.PerTypeGenerationProfiles ?? [];
             bool anyGen2Bytes = false;
             for (int i = 0; i < profiles.Count; i++)
@@ -124,11 +132,16 @@ namespace DumpDetective.Analysis.Analyzers.Memory
                     ["gen2.fraction"] = new Measure(gen2Fraction, MeasureUnit.Ratio, MeasureSemantics.Ratio),
                     ["loh.fraction"] = new Measure(lohFraction, MeasureUnit.Ratio, MeasureSemantics.Ratio),
                     ["gen0.count"] = new Measure(result.Gen0Objects, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["gen1.count"] = new Measure(result.Gen1Objects, MeasureUnit.Count, MeasureSemantics.Absolute),
                     ["gen2.count"] = new Measure(result.Gen2Objects, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["loh.count"] = new Measure(result.LohObjects, MeasureUnit.Count, MeasureSemantics.Absolute),
                     ["poh.count"] = new Measure(result.PohObjects, MeasureUnit.Count, MeasureSemantics.Absolute),
                     ["total.count"] = new Measure(result.TotalObjects, MeasureUnit.Count, MeasureSemantics.Absolute),
                     ["loh.percent"] = new Measure(result.LohPercent, MeasureUnit.Percent, MeasureSemantics.Ratio),
+                    ["gen0.percent"] = new Measure(gen0Pct, MeasureUnit.Percent, MeasureSemantics.Ratio),
+                    ["gen1.percent"] = new Measure(gen1Pct, MeasureUnit.Percent, MeasureSemantics.Ratio),
                     ["gen2.percent"] = new Measure(result.Gen2Pct, MeasureUnit.Percent, MeasureSemantics.Ratio),
+                    ["poh.percent"] = new Measure(pohPct, MeasureUnit.Percent, MeasureSemantics.Ratio),
                     ["loh-pressure.threshold"] = new Measure(result.LohThresholdPercent, MeasureUnit.Percent, MeasureSemantics.Absolute),
                     ["gen0-pressure.threshold"] = new Measure(result.Gen0PressureThresholdPercent, MeasureUnit.Percent, MeasureSemantics.Absolute),
                     ["poh-pressure.threshold"] = new Measure(result.PohThresholdPercent, MeasureUnit.Percent, MeasureSemantics.Absolute),

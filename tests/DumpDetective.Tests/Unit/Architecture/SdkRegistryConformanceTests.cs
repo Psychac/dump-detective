@@ -61,7 +61,8 @@ public sealed class SdkRegistryConformanceTests
             ],
             ["gc.generation-composition"] = [
                 "gen0.bytes", "gen1.bytes", "gen2.bytes", "loh.bytes", "poh.bytes", "gen2.fraction", "loh.fraction",
-                "gen0.count", "gen2.count", "poh.count", "total.count", "loh.percent", "gen2.percent",
+                "gen0.count", "gen1.count", "gen2.count", "loh.count", "poh.count", "total.count",
+                "loh.percent", "gen0.percent", "gen1.percent", "gen2.percent", "poh.percent",
                 "loh-pressure.threshold", "gen0-pressure.threshold", "poh-pressure.threshold",
                 "has-gen2-bytes", "finalizable-gen2.count", "finalizable-gen2.bytes",
             ],

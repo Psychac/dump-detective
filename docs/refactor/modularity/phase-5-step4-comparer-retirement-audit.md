@@ -130,8 +130,13 @@ its remaining headline metrics; only the composite metric itself needs to stay a
 
 ## Bucket D — needs a real new whole-run Observation type
 
-Same-sized work as this phase's `AsyncStateMachineAnalyzer`/`HeapTopologyAnalyzer`/
-`SqlConnectionPoolAnalyzer` extensions — tackle one analyzer at a time, not as a batch:
+**Done (2026-09-22).** All 7 comparers retired, one analyzer at a time. In practice this turned out
+lighter than the "same-sized as `AsyncStateMachineAnalyzer`/`HeapTopologyAnalyzer`/
+`SqlConnectionPoolAnalyzer`" framing anticipated — every item's missing totals were already sitting
+in locals or on the fully-constructed domain result, just never promoted; only one item
+(`FinalizableObjectTrendComparer`) needed a mid-method emission reorder, and none needed genuinely
+new heap traversal. Two items (`TimerLeakTrendComparer`, `DominatorTrendComparer`) surfaced
+always-identical field pairs, collapsed into one measure rather than two.
 
 | Comparer | Backed / Headline | Notes |
 |---|---|---|
@@ -141,7 +146,7 @@ Same-sized work as this phase's `AsyncStateMachineAnalyzer`/`HeapTopologyAnalyze
 | `DominatorTrendComparer` | 6/6 ✅ **done (2026-09-21)** | Simplest Bucket D item yet — every value was already sitting on the fully-constructed `DominatorDomainResult` by the time `EmitRetentionObservationsAsync` runs; just extended the existing whole-run `type.retention-population` (registry 1.82.0). Deliberately collapses `dominator.analyzed`/`dominator.top.count` (always-identical fields, both from the same `topTypes.Count`) into one `analyzed.count` measure, so 7 headline metrics land as 6 backed. `pressure.ratio` is a plain derived ratio, not a classifier composite. Comparer's headline branches trimmed and registered in `ObservationDifferAnalyzerOwnership`. |
 | `HttpObjectTrendComparer` | 13/13 ✅ **done (2026-09-22)** | Largest gap by headline-metric count, but same shape as the rest of Bucket D — all 11 missing totals were already accumulated as locals right before the existing 2-measure `infra.http-object-population` emission (registry 1.83.0). `http.handlerratio` is a plain derived ratio (`HandlerClientRatio`'s own formula), not a classifier composite. No field duplication to collapse this time. Comparer's headline branches trimmed and registered in `ObservationDifferAnalyzerOwnership`; its dedicated `HttpObjectTrendComparerTests` (all 3 tests only covered the retired ratio) updated to assert the new empty behavior. |
 | `StringTrendComparer` | 11/11 ✅ **done (2026-09-22)** | `total`, `unique`, `gen0.count`, `gen1.count`, `gen2.count` — all 5 were already accumulated as locals earlier in the same scan that builds `type.string-composition`'s existing 10 measures (registry 1.84.0); no new heap traversal, no field duplication to collapse. Comparer's headline branches trimmed and registered in `ObservationDifferAnalyzerOwnership`. |
-| `GCGenerationTrendComparer` | 9/14 | `gen0.percent`, `gen1.objects`, `gen1.percent`, `loh.objects`, `poh.percent` are gaps; the other 9 already match `gc.generation-composition` measures. |
+| `GCGenerationTrendComparer` | 14/14 ✅ **done (2026-09-22)** | `gen0.percent`, `gen1.objects`, `gen1.percent`, `loh.objects`, `poh.percent` — `gc.generation-composition` gained `gen1.count`/`loh.count` (plain field promotions) and `gen0.percent`/`gen1.percent`/`poh.percent` (mirroring `gen2.percent`'s own formula, registry 1.85.0). No field duplication to collapse. Comparer's headline branches trimmed and registered in `ObservationDifferAnalyzerOwnership` — the last Bucket D comparer, closing the entire step 4 mixed-comparer audit. |
 
 ## Suggested execution order
 
@@ -158,6 +163,10 @@ Same-sized work as this phase's `AsyncStateMachineAnalyzer`/`HeapTopologyAnalyze
 3. **Bucket C (3 comparers' worth of exceptions) — done 2026-09-21.** No code beyond what Bucket
    A/B already did to those comparers' other metrics; written up in step 5 as the explicit kept
    exceptions.
-4. **Bucket D (7 comparers)** — the biggest remaining work, deliberately last: each needs its own
-   analyzer-specific emission design decision the way `AsyncStateMachineAnalyzer`/
-   `HeapTopologyAnalyzer`/`SqlConnectionPoolAnalyzer` did this phase, not a mechanical pass.
+4. **Bucket D (7 comparers) — done 2026-09-22.** The biggest remaining work, deliberately last:
+   each needed its own analyzer-specific emission design decision the way
+   `AsyncStateMachineAnalyzer`/`HeapTopologyAnalyzer`/`SqlConnectionPoolAnalyzer` did this phase,
+   not a mechanical pass — in practice, lighter than that framing anticipated (see Bucket D's own
+   summary above). This closes the entire step 4 mixed-comparer audit: all 24 comparers across
+   Buckets A/B/C/D are retired or, for Bucket C's 4 composite metrics, explicitly recorded as
+   permanent exceptions.

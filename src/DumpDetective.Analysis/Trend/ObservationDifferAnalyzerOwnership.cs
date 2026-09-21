@@ -41,5 +41,6 @@ internal static class ObservationDifferAnalyzerOwnership
             ["runtime.thread-triage"] = "Thread Analysis",
             ["heap.memory-composition"] = "Memory Analysis",
             ["runtime.hang-pressure"] = "Hang Analysis",
+            ["infra.wcf-channel-population"] = "WCF Channel Analysis",
         };
 }

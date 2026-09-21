@@ -15,6 +15,17 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.70.0 — 2026-09-21
+
+Phase 5 step 4, Bucket B (docs/refactor/modularity/phase-5-step4-comparer-retirement-audit.md):
+`infra.wcf-channel-population` gains `faulted.count` (`higherIsWorse`) — `WcfChannelAnalyzer`
+already computed `totalFaulted` for the domain result but never promoted it to the whole-run
+observation, since it's reconstructable by counting `infra.wcf-channel`'s faulted-only per-instance
+stream. `ObservationTrendDiffer` can't do that grouping, so it's emitted directly instead — the
+same pragmatic call already made this phase for `infra.sql-connection-pool-population.near-capacity.count`.
+Closes `WcfChannelTrendComparer`'s last headline gap (4/5 → 5/5), unblocking its retirement onto
+the differ.
+
 ## `observation-type-registry.json` 1.69.0 — 2026-09-21
 
 Phase 5 step 4 (docs/refactor/modularity/phase-5-observations-synthesis.md): extends emission for

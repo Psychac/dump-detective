@@ -112,7 +112,7 @@ public sealed class SdkRegistryConformanceTests
             ["infra.wcf-channel"] = ["retained.bytes", "binding-hint.ordinal"],
             ["infra.wcf-channel-type-population"] = ["total.count"],
             ["infra.wcf-channel-population"] = [
-                "total.count", "opening.count", "opened.count", "closing.count", "closed.count",
+                "total.count", "opening.count", "opened.count", "faulted.count", "closing.count", "closed.count",
                 "other.count", "invalid-state.count", "duplex.count", "session.count", "factory.count",
             ],
             ["runtime.jit-activity"] = [

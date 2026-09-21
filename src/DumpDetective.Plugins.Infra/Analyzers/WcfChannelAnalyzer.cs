@@ -271,7 +271,7 @@ public sealed class WcfChannelAnalyzer :
             // opened yet, or channels already collected) — a real measurement, not a missing-
             // capability condition, so still worth a population observation when non-empty.
             if (factoryCount > 0)
-                await EmitPopulationObservationAsync(observationContext, 0, 0, 0, 0, 0, 0, 0, 0, 0, factoryCount, observationCapabilities, cancellationToken);
+                await EmitPopulationObservationAsync(observationContext, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, factoryCount, observationCapabilities, cancellationToken);
             return Empty(factoryCount);
         }
 
@@ -330,7 +330,7 @@ public sealed class WcfChannelAnalyzer :
         }
 
         await EmitPopulationObservationAsync(
-            observationContext, totalChannels, totalOpening, totalOpened, totalClosing, totalClosed, totalOther,
+            observationContext, totalChannels, totalOpening, totalOpened, totalFaulted, totalClosing, totalClosed, totalOther,
             totalInvalidState, totalDuplex, totalSession, factoryCount, observationCapabilities, cancellationToken);
 
         return new WcfChannelDomainResult(
@@ -464,11 +464,12 @@ public sealed class WcfChannelAnalyzer :
         new(factoryCount > 0, 0, 0, 0, 0, 0, 0, 0, [], [], factoryCount, 0, 0, 0, 0);
 
     // Whole-run scalar — no entity subject, same "no natural per-entity anchor" pattern as
-    // gc.generation-composition. Every count here except FaultedChannels covers channels/factories
-    // infra.wcf-channel's faulted-only stream never observes individually; FaultedChannels itself
-    // is reconstructable by counting that stream, so it isn't duplicated here.
+    // gc.generation-composition. FaultedChannels is reconstructable by counting infra.wcf-channel's
+    // faulted-only per-instance stream, but the differ can't do that grouping — same pragmatic
+    // direct-emit call already made for infra.sql-connection-pool-population.near-capacity.count
+    // (Phase 5 step 4), so faulted.count is emitted here too rather than left as a differ gap.
     private static ValueTask EmitPopulationObservationAsync(
-        AnalysisContext observationContext, int total, int opening, int opened, int closing, int closed, int other,
+        AnalysisContext observationContext, int total, int opening, int opened, int faulted, int closing, int closed, int other,
         int invalidState, int duplex, int session, int factoryCount, IReadOnlySet<Capability> capabilitiesUsed, CancellationToken cancellationToken) =>
         observationContext.Observations.EmitAsync(new Observation
         {
@@ -481,6 +482,7 @@ public sealed class WcfChannelAnalyzer :
                 ["total.count"] = new Measure(total, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["opening.count"] = new Measure(opening, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["opened.count"] = new Measure(opened, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["faulted.count"] = new Measure(faulted, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["closing.count"] = new Measure(closing, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["closed.count"] = new Measure(closed, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["other.count"] = new Measure(other, MeasureUnit.Count, MeasureSemantics.Absolute),

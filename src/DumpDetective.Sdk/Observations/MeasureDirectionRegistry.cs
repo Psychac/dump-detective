@@ -216,6 +216,7 @@ public static class MeasureDirectionRegistry
             [("infra.wcf-channel-population", "total.count")] = MeasureDirection.HigherIsWorse,
             [("infra.wcf-channel-population", "opening.count")] = MeasureDirection.HigherIsWorse,
             [("infra.wcf-channel-population", "opened.count")] = MeasureDirection.Neutral,
+            [("infra.wcf-channel-population", "faulted.count")] = MeasureDirection.HigherIsWorse,
             [("infra.wcf-channel-population", "closing.count")] = MeasureDirection.HigherIsWorse,
 
             [("infra.sql-connection-pool-population", "total.count")] = MeasureDirection.Neutral,

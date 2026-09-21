@@ -15,6 +15,16 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.74.0 — 2026-09-21
+
+Phase 5 step 4, Bucket B: `infra.db-connection-population` gains `open.count`, `gen2-open.count`,
+`gen0-open.count` (all `higherIsWorse`) — `DbConnectionAnalyzer`'s domain result already carried
+`OpenConnections`/`Gen2OpenConnections`/`Gen0OpenConnections`, reconstructable by
+counting/filtering `infra.db-connection`'s per-open-connection stream, but `ObservationTrendDiffer`
+can't do that grouping — same pragmatic direct-emit call as
+`infra.sql-connection-pool-population.near-capacity.count`. Closes `DbConnectionTrendComparer`'s
+last 3 headline gaps (4/7 → 7/7), unblocking its retirement onto the differ.
+
 ## `observation-type-registry.json` 1.73.0 — 2026-09-21
 
 Phase 5 step 4, Bucket B: `async.task-population` gains `canceled.count` (`neutral`) and

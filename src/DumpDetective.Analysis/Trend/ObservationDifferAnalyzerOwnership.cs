@@ -45,5 +45,6 @@ internal static class ObservationDifferAnalyzerOwnership
             ["type.shape-composition"] = "Object Shape Analysis",
             ["handle.population"] = "GC Handle Analysis",
             ["async.task-population"] = "Async Task Analysis",
+            ["infra.db-connection-population"] = "DB Connection Analysis",
         };
 }

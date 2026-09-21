@@ -231,7 +231,9 @@ public sealed class DbConnectionAnalyzer :
         // infra.db-connection observation at all (only Open ones do) — TotalConnections and those
         // four state counts can't be reconstructed from the per-open-connection stream.
         // OpenConnections/Gen2OpenConnections/Gen0OpenConnections are reconstructable by
-        // counting/filtering infra.db-connection observations, so they aren't duplicated here.
+        // counting/filtering infra.db-connection observations, but the differ can't do that
+        // grouping — same pragmatic direct-emit call already made this phase for
+        // infra.sql-connection-pool-population.near-capacity.count, so they're emitted directly too.
         await context.Observations.EmitAsync(new Observation
         {
             Id = ObservationId.NewId(),
@@ -241,10 +243,13 @@ public sealed class DbConnectionAnalyzer :
             Measures = new Dictionary<string, Measure>
             {
                 ["total.count"] = new Measure(result.TotalConnections, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["open.count"] = new Measure(result.OpenConnections, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["closed.count"] = new Measure(result.ClosedConnections, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["broken.count"] = new Measure(result.BrokenConnections, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["other.count"] = new Measure(result.OtherConnections, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["unknown-state.count"] = new Measure(result.UnknownStateConnections, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["gen2-open.count"] = new Measure(result.Gen2OpenConnections, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["gen0-open.count"] = new Measure(result.Gen0OpenConnections, MeasureUnit.Count, MeasureSemantics.Absolute),
             },
             Provenance = new Provenance
             {

@@ -204,9 +204,12 @@ public static class MeasureDirectionRegistry
 
             // Plugins.Infra
             [("infra.db-connection-population", "total.count")] = MeasureDirection.HigherIsWorse,
+            [("infra.db-connection-population", "open.count")] = MeasureDirection.HigherIsWorse,
             [("infra.db-connection-population", "closed.count")] = MeasureDirection.Neutral,
             [("infra.db-connection-population", "broken.count")] = MeasureDirection.HigherIsWorse,
             [("infra.db-connection-population", "unknown-state.count")] = MeasureDirection.HigherIsWorse,
+            [("infra.db-connection-population", "gen2-open.count")] = MeasureDirection.HigherIsWorse,
+            [("infra.db-connection-population", "gen0-open.count")] = MeasureDirection.HigherIsWorse,
 
             [("infra.http-object-population", "http-web-response.count")] = MeasureDirection.HigherIsWorse,
             [("infra.http-object-population", "http-message-handler.count")] = MeasureDirection.HigherIsWorse,

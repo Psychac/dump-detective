@@ -6,19 +6,16 @@ namespace DumpDetective.Analysis.Trend.Comparers
     {
         public string AnalyzerName => "Dominator Analysis";
 
+        // Headline metrics retired onto ObservationTrendDiffer, backed by type.retention-population
+        // — see ObservationDifferAnalyzerOwnership and
+        // docs/refactor/modularity/phase-5-step4-comparer-retirement-audit.md Bucket D.
+        // dominator.analyzed/dominator.top.count were always identical (AnalyzedCount and
+        // TopDominatorTypes.Count are both assigned from the same topTypes.Count), so they now
+        // both come from the differ's single analyzed.count measure, not two.
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not DominatorDomainResult r) return [];
-            var metrics = new List<AnalyzerMetric>
-            {
-                new("dominator.candidates", null, r.CandidateCount, "candidates", MetricTrendDirection.HigherIsWorse),
-                new("dominator.analyzed", null, r.AnalyzedCount, "types", MetricTrendDirection.Neutral),
-                new("dominator.retained.bytes", null, r.TotalEstimatedRetainedBytes, "bytes", MetricTrendDirection.HigherIsWorse),
-                new("dominator.retention.pressure.ratio", null, r.TotalHeapBytes > 0 ? (double)r.TotalEstimatedRetainedBytes / r.TotalHeapBytes : 0, "ratio", MetricTrendDirection.HigherIsWorse),
-                new("dominator.top.count", null, r.TopDominatorTypes.Count, "types", MetricTrendDirection.Neutral),
-                new("leak.highly.referenced", null, r.HighlyReferencedObjectCount, "objects", MetricTrendDirection.HigherIsWorse),
-                new("leak.highly.referenced.bytes", null, r.TopHighlyReferencedTotalBytes, "bytes", MetricTrendDirection.HigherIsWorse)
-            };
+            var metrics = new List<AnalyzerMetric>();
 
             foreach (TypeSnapshot t in r.TopDominatorTypes)
             {
@@ -36,21 +33,6 @@ namespace DumpDetective.Analysis.Trend.Comparers
             return metrics;
         }
 
-        public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
-        {
-            if (baseline is not DominatorDomainResult b || current is not DominatorDomainResult c) return [];
-            double bRatio = b.TotalHeapBytes > 0 ? (double)b.TotalEstimatedRetainedBytes / b.TotalHeapBytes : 0;
-            double cRatio = c.TotalHeapBytes > 0 ? (double)c.TotalEstimatedRetainedBytes / c.TotalHeapBytes : 0;
-            return
-            [
-                MetricDeltaHelper.Compute("dominator.candidates", null, b.CandidateCount, c.CandidateCount, "candidates", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("dominator.analyzed", null, b.AnalyzedCount, c.AnalyzedCount, "types", MetricTrendDirection.Neutral),
-                MetricDeltaHelper.Compute("dominator.retained.bytes", null, b.TotalEstimatedRetainedBytes, c.TotalEstimatedRetainedBytes, "bytes", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("dominator.retention.pressure.ratio", null, bRatio, cRatio, "ratio", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("dominator.top.count", null, b.TopDominatorTypes.Count, c.TopDominatorTypes.Count, "types", MetricTrendDirection.Neutral),
-                MetricDeltaHelper.Compute("leak.highly.referenced", null, b.HighlyReferencedObjectCount, c.HighlyReferencedObjectCount, "objects", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("leak.highly.referenced.bytes", null, b.TopHighlyReferencedTotalBytes, c.TopHighlyReferencedTotalBytes, "bytes", MetricTrendDirection.HigherIsWorse)
-            ];
-        }
+        public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current) => [];
     }
 }

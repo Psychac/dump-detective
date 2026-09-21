@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/observation-type-registry.json",
-  "registryVersion": "1.81.0",
+  "registryVersion": "1.82.0",
   "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
   "observationTypes": {
     "gc.pause": {
@@ -1542,9 +1542,14 @@
       "temporalKind": "point",
       "measures": {
         "highly-referenced.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
-        "approximated-reference-addresses.count": { "unit": "count", "semantics": "absolute" }
+        "highly-referenced.bytes": { "unit": "bytes", "semantics": "absolute", "direction": "higherIsWorse" },
+        "approximated-reference-addresses.count": { "unit": "count", "semantics": "absolute" },
+        "candidate.count": { "unit": "count", "semantics": "absolute", "direction": "higherIsWorse" },
+        "analyzed.count": { "unit": "count", "semantics": "absolute", "direction": "neutral" },
+        "retained.bytes": { "unit": "bytes", "semantics": "absolute", "direction": "higherIsWorse" },
+        "pressure.ratio": { "unit": "ratio", "semantics": "ratio", "direction": "higherIsWorse" }
       },
-      "note": "One whole-run observation per analysis — no entity subject, same pattern as gc.generation-composition. Backs the highly-referenced-objects and reference-tracking-capped findings, neither of which type.retention's per-type stream can provide.",
+      "note": "One whole-run observation per analysis — no entity subject, same pattern as gc.generation-composition. Backs the highly-referenced-objects and reference-tracking-capped findings, neither of which type.retention's per-type stream can provide. candidate.count/analyzed.count/retained.bytes/pressure.ratio/highly-referenced.bytes added Phase 5 step 4 for DominatorTrendComparer's headline metrics (Bucket D). analyzed.count deliberately backs two of the comparer's old metrics (dominator.analyzed and dominator.top.count) — DominatorDomainResult.AnalyzedCount and TopDominatorTypes.Count are always identical, both assigned from the same topTypes.Count at the one construction site, so one measure rather than two. pressure.ratio is TotalEstimatedRetainedBytes / TotalHeapBytes, a plain derived ratio, not a classifier composite.",
       "addedIn": "1.54.0"
     },
     "type.retention-hotspot": {

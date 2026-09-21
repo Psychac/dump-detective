@@ -183,7 +183,10 @@ public sealed class SdkRegistryConformanceTests
             ["reference-chain.population"] = ["analyzed.count", "retained.count", "retained.percent", "traversal-limited.count"],
             ["reference-chain.shared-root-group"] = ["type.count"],
             ["type.retention"] = ["instance.count", "shallow.bytes", "retained.bytes", "estimated-retained.bytes", "gen2.count"],
-            ["type.retention-population"] = ["highly-referenced.count", "approximated-reference-addresses.count"],
+            ["type.retention-population"] = [
+                "highly-referenced.count", "highly-referenced.bytes", "approximated-reference-addresses.count",
+                "candidate.count", "analyzed.count", "retained.bytes", "pressure.ratio",
+            ],
             ["type.retention-hotspot"] = ["object.count", "total.bytes", "total-incoming-references.count"],
             ["event.publisher-leak"] = ["subscriber.count", "instance.count", "retained.bytes"],
             ["event.publisher-leak-group"] = [

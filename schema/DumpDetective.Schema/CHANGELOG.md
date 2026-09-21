@@ -15,6 +15,19 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.82.0 — 2026-09-21
+
+Phase 5 step 4, Bucket D (fourth item): `type.retention-population` gains `candidate.count`,
+`analyzed.count` (`neutral`), `retained.bytes`, `pressure.ratio`, and `highly-referenced.bytes` (all
+others `higherIsWorse`) — every value was already sitting on `DominatorDomainResult` by the time
+`EmitRetentionObservationsAsync` runs, no new heap traversal. Deliberately collapses two always-
+identical fields — `AnalyzedCount`/`TopDominatorTypes.Count`, both assigned from the same
+`topTypes.Count` at the one construction site — into one measure, `analyzed.count`, same dedup call
+as `infra.timer-population.timer-queue.count` last item. `pressure.ratio`
+(`TotalEstimatedRetainedBytes / TotalHeapBytes`) is a plain derived ratio, not a classifier
+composite. Closes `DominatorTrendComparer`'s 7 headline gaps as 6 backed measures (1/7 → 6/6), the
+fourth Bucket D comparer retired.
+
 ## `observation-type-registry.json` 1.81.0 — 2026-09-21
 
 Phase 5 step 4, Bucket D (third item), `FinalizableObjectTrendComparer`:

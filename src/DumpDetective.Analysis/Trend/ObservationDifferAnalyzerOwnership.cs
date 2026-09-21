@@ -55,5 +55,6 @@ internal static class ObservationDifferAnalyzerOwnership
             ["infra.timer-population"] = "Timer Leak Analysis",
             ["gc.finalizable-composition"] = "Finalizable Object Analysis",
             ["finalizer.queue-population"] = "Finalizable Object Analysis",
+            ["type.retention-population"] = "Dominator Analysis",
         };
 }

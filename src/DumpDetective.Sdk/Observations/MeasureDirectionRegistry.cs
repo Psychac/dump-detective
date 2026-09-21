@@ -181,6 +181,11 @@ public static class MeasureDirectionRegistry
 
             // Plugins.Leaks
             [("type.retention-population", "highly-referenced.count")] = MeasureDirection.HigherIsWorse,
+            [("type.retention-population", "highly-referenced.bytes")] = MeasureDirection.HigherIsWorse,
+            [("type.retention-population", "candidate.count")] = MeasureDirection.HigherIsWorse,
+            [("type.retention-population", "analyzed.count")] = MeasureDirection.Neutral,
+            [("type.retention-population", "retained.bytes")] = MeasureDirection.HigherIsWorse,
+            [("type.retention-population", "pressure.ratio")] = MeasureDirection.HigherIsWorse,
 
             [("event.publisher-leak-population", "total.count")] = MeasureDirection.HigherIsWorse,
             [("event.publisher-leak-population", "instance-leak.count")] = MeasureDirection.HigherIsWorse,

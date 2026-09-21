@@ -217,7 +217,11 @@ public sealed class DominatorAnalyzer :
     /// always-heuristic BFS estimate.
     /// Also emits, Phase 5 step 2: a whole-run <c>type.retention-population</c> observation (the
     /// highly-referenced-object count and the reference-tracking-capped count, neither of which the
-    /// per-type stream above can provide) and a per-type <c>type.retention-hotspot</c> observation
+    /// per-type stream above can provide — since extended Phase 5 step 4 with
+    /// <see cref="DominatorDomainResult.CandidateCount"/>/<see cref="DominatorDomainResult.AnalyzedCount"/>/
+    /// <see cref="DominatorDomainResult.TotalEstimatedRetainedBytes"/>/a retention-pressure ratio/
+    /// <see cref="DominatorDomainResult.TopHighlyReferencedTotalBytes"/> for
+    /// <c>DominatorTrendComparer</c>'s headline metrics) and a per-type <c>type.retention-hotspot</c> observation
     /// per <see cref="DominatorDomainResult.TopRetentionTypes"/> entry (an aggregation over
     /// <see cref="DominatorDomainResult.TopHighlyReferencedObjects"/> by type, a different population
     /// than <see cref="DominatorDomainResult.TopDominatorTypes"/>).
@@ -264,6 +268,14 @@ public sealed class DominatorAnalyzer :
             }, cancellationToken);
         }
 
+        // candidate.count/analyzed.count/retained.bytes/pressure.ratio/highly-referenced.bytes
+        // added Phase 5 step 4 for DominatorTrendComparer's headline metrics (Bucket D of
+        // docs/refactor/modularity/phase-5-step4-comparer-retirement-audit.md). analyzed.count
+        // deliberately backs both the comparer's old dominator.analyzed and dominator.top.count
+        // metrics — AnalyzedCount and TopDominatorTypes.Count are always identical (both assigned
+        // from the same topTypes.Count at DominatorDomainResult's one construction site), so one
+        // measure, not two. pressure.ratio is a plain derived ratio
+        // (TotalEstimatedRetainedBytes / TotalHeapBytes), not a classifier composite.
         await observationContext.Observations.EmitAsync(new Observation
         {
             Id = ObservationId.NewId(),
@@ -273,7 +285,13 @@ public sealed class DominatorAnalyzer :
             Measures = new Dictionary<string, Measure>
             {
                 ["highly-referenced.count"] = new Measure(result.HighlyReferencedObjectCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["highly-referenced.bytes"] = new Measure(result.TopHighlyReferencedTotalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                 ["approximated-reference-addresses.count"] = new Measure(result.ApproximatedReferenceAddresses, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["candidate.count"] = new Measure(result.CandidateCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["analyzed.count"] = new Measure(result.AnalyzedCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["retained.bytes"] = new Measure(result.TotalEstimatedRetainedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["pressure.ratio"] = new Measure(
+                    result.TotalHeapBytes > 0 ? (double)result.TotalEstimatedRetainedBytes / result.TotalHeapBytes : 0.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
             },
             Provenance = new Provenance
             {

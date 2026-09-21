@@ -351,6 +351,14 @@ actually starts, not before.
      `AsyncStateMachineTrendComparer`'s dedicated test, the only one of the three with one) deleted;
      `ObservationDifferAnalyzerOwnership` and `PluginCatalogBuilderTests`'s expected-coverage list
      extended to match. 11 of 11 all-headline comparers now retired.
+   - **Next up — the 24 mixed comparers (headline + scoped metrics), audited 2026-09-21.** Full
+     per-comparer headline/scoped split and Observation-registry backing status moved to
+     [phase-5-step4-comparer-retirement-audit.md](phase-5-step4-comparer-retirement-audit.md) once
+     it didn't fit inline — 6 are fully backed and ready for the same mechanical
+     trim-and-retire treatment right now, 8 need a small (1–3 measure) emission extension, 3 host a
+     classifier-derived headline metric that can never retire (real step 5 exceptions, not an
+     emission gap), and 7 need a real new whole-run Observation type each. That doc's own
+     "Suggested execution order" section is the plan for working through them.
    - **Found and fixed a live, unrelated CLI-startup bug along the way**: `StartupValidator`'s
      step-3 finding-generator coverage check joined retired analyzers to real `IAnalyzer.Name` via
      `AnalyzerFeatureModule.DisplayName` — not guaranteed to match (`ThreadStackClusterAnalyzer`:

@@ -136,6 +136,7 @@ public sealed class GCHandleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
             Measures = new Dictionary<string, Measure>
             {
                 ["total.count"] = new Measure(result.TotalHandles, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["strong-like.count"] = new Measure(result.StrongLikeHandles, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["pinned-target.count"] = new Measure(result.PinnedHandleTargets, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["pinned-retained.bytes"] = new Measure(result.PinnedRetainedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                 ["pinned-soh.count"] = new Measure(result.PinnedSohObjectCount, MeasureUnit.Count, MeasureSemantics.Absolute),
@@ -154,6 +155,7 @@ public sealed class GCHandleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
                 ["dependent.count"] = new Measure(result.DependentHandleCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["dependent-resolved-edge.count"] = new Measure(result.DependentResolvedEdgeCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["dependent-unresolved-target.count"] = new Measure(result.DependentUnresolvedTargetCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["dependent-unresolved.percent"] = new Measure(result.DependentUnresolvedPercent, MeasureUnit.Percent, MeasureSemantics.Ratio),
                 ["total-handles-warning.threshold"] = new Measure(result.TotalHandlesWarningThreshold, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["pinned-handle-targets-warning.threshold"] = new Measure(result.PinnedHandleTargetsWarningThreshold, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["pinned-retained-bytes-warning.threshold"] = new Measure(result.PinnedRetainedBytesWarningThreshold, MeasureUnit.Bytes, MeasureSemantics.Absolute),

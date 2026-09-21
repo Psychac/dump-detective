@@ -6,19 +6,13 @@ namespace DumpDetective.Analysis.Trend.Comparers
     {
         public string AnalyzerName => "GC Handle Analysis";
 
+        // Headline metrics retired onto ObservationTrendDiffer, backed by handle.population — see
+        // ObservationDifferAnalyzerOwnership and
+        // docs/refactor/modularity/phase-5-step4-comparer-retirement-audit.md Bucket B.
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not GCHandleDomainResult r) return [];
-            var metrics = new List<AnalyzerMetric>
-            {
-                new("gchandle.total", null, r.TotalHandles, "handles", MetricTrendDirection.HigherIsWorse),
-                new("gchandle.strong", null, r.StrongLikeHandles, "handles", MetricTrendDirection.HigherIsWorse),
-                new("gchandle.pinned.targets", null, r.PinnedHandleTargets, "targets", MetricTrendDirection.HigherIsWorse),
-                new("gchandle.pinned.bytes", null, r.PinnedRetainedBytes, "bytes", MetricTrendDirection.HigherIsWorse),
-                new("gchandle.dependent.total", null, r.DependentHandleCount, "handles", MetricTrendDirection.Neutral),
-                new("gchandle.dependent.unresolved.percent", null, r.DependentUnresolvedPercent, "%", MetricTrendDirection.HigherIsWorse),
-                new("gchandle.dependent.unresolved.count", null, r.DependentUnresolvedTargetCount, "targets", MetricTrendDirection.HigherIsWorse)
-            };
+            var metrics = new List<AnalyzerMetric>();
 
             foreach (NameCountEntry entry in r.HandlesByKind ?? [])
                 metrics.Add(new("gchandle.kind.count", entry.Name, entry.Count, "handles", MetricTrendDirection.HigherIsWorse));
@@ -38,18 +32,6 @@ namespace DumpDetective.Analysis.Trend.Comparers
             return metrics;
         }
 
-        public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
-        {
-            if (baseline is not GCHandleDomainResult b || current is not GCHandleDomainResult c) return [];
-            return
-            [
-                MetricDeltaHelper.Compute("gchandle.total",          null, b.TotalHandles,        c.TotalHandles,        "handles", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("gchandle.strong",         null, b.StrongLikeHandles,   c.StrongLikeHandles,   "handles", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("gchandle.pinned.targets", null, b.PinnedHandleTargets, c.PinnedHandleTargets, "targets", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("gchandle.pinned.bytes",   null, b.PinnedRetainedBytes, c.PinnedRetainedBytes, "bytes",   MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("gchandle.dependent.total", null, b.DependentHandleCount, c.DependentHandleCount, "handles", MetricTrendDirection.Neutral),
-                MetricDeltaHelper.Compute("gchandle.dependent.unresolved.percent", null, b.DependentUnresolvedPercent, c.DependentUnresolvedPercent, "%", MetricTrendDirection.HigherIsWorse)
-            ];
-        }
+        public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current) => [];
     }
 }

@@ -37,11 +37,12 @@ public sealed class SdkRegistryConformanceTests
             ["root.population"] = ["total.count", "subgraph-walk-capped", "subgraph-walk-capped.count"],
             ["handle.pinned"] = ["retained.bytes"],
             ["handle.population"] = [
-                "total.count", "pinned-target.count", "pinned-retained.bytes",
+                "total.count", "strong-like.count", "pinned-target.count", "pinned-retained.bytes",
                 "pinned-soh.count", "async-pinned-soh.count", "pinned-non-soh.count", "async-pinned-non-soh.count",
                 "refcounted.count", "weakshort-gen0.count", "weakshort-gen1.count", "weakshort-gen2.count",
                 "weakshort-loh.count", "weaklong-gen0.count", "weaklong-gen1.count", "weaklong-gen2.count",
                 "weaklong-loh.count", "dependent.count", "dependent-resolved-edge.count", "dependent-unresolved-target.count",
+                "dependent-unresolved.percent",
                 "total-handles-warning.threshold", "pinned-handle-targets-warning.threshold",
                 "pinned-retained-bytes-warning.threshold", "pinned-soh-warning.threshold", "refcounted-warning.threshold",
                 "weaklong-gen2-fraction-warning.threshold", "weaklong-gen2-minimum-count.threshold",

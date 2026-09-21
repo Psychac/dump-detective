@@ -95,7 +95,7 @@ write-up landing, since the code-level work is independent of it.
 |---|---|---|
 | `WcfChannelTrendComparer` | 5/5 ✅ **done (2026-09-21)** | `faulted.count` — `infra.wcf-channel-population` gained `faulted.count` (registry 1.70.0); comparer's headline branches trimmed and registered in `ObservationDifferAnalyzerOwnership` |
 | `ObjectShapeTrendComparer` | 7/7 ✅ **done (2026-09-21)** | `balanced-type.count` — `type.shape-composition` gained it (registry 1.71.0); comparer's headline branches trimmed and registered in `ObservationDifferAnalyzerOwnership` |
-| `GCHandleTrendComparer` | 5/7 | `strong` (`StrongLikeHandles`), `dependent.unresolved.percent` |
+| `GCHandleTrendComparer` | 7/7 ✅ **done (2026-09-21)** | `strong` (`StrongLikeHandles`), `dependent.unresolved.percent` — `handle.population` gained `strong-like.count`/`dependent-unresolved.percent` (registry 1.72.0); comparer's headline branches trimmed and registered in `ObservationDifferAnalyzerOwnership` |
 | `AsyncTaskTrendComparer` | 5/7 | `canceled` (`CanceledTasks`), `orphaned` (`OrphanedTasks`) |
 | `DbConnectionTrendComparer` | 4/7 | `open` (`OpenConnections`), `gen2.open`, `gen0.open` |
 | `SqlCommandTrendComparer` | 2/3 | `active` — `ActiveCount` is currently deliberately *not* raw-emitted (registry note: reconstructable by counting `infra.sql-command` per-command observations); the differ can't do that grouping, so the pragmatic fix is to just emit it directly, same call already made for `infra.sql-connection-pool-population.near-capacity.count` this session |

@@ -74,10 +74,12 @@ public static class MeasureDirectionRegistry
             [("finalizer.queue-population", "queue.count")] = MeasureDirection.HigherIsWorse,
 
             [("handle.population", "total.count")] = MeasureDirection.HigherIsWorse,
+            [("handle.population", "strong-like.count")] = MeasureDirection.HigherIsWorse,
             [("handle.population", "pinned-target.count")] = MeasureDirection.HigherIsWorse,
             [("handle.population", "pinned-retained.bytes")] = MeasureDirection.HigherIsWorse,
             [("handle.population", "dependent.count")] = MeasureDirection.Neutral,
             [("handle.population", "dependent-unresolved-target.count")] = MeasureDirection.HigherIsWorse,
+            [("handle.population", "dependent-unresolved.percent")] = MeasureDirection.HigherIsWorse,
             [("handle.population", "total-handles-warning.threshold")] = MeasureDirection.Neutral,
             [("handle.population", "pinned-handle-targets-warning.threshold")] = MeasureDirection.Neutral,
             [("handle.population", "pinned-retained-bytes-warning.threshold")] = MeasureDirection.Neutral,

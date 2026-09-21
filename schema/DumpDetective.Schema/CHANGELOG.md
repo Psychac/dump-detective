@@ -15,6 +15,15 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.72.0 — 2026-09-21
+
+Phase 5 step 4, Bucket B: `handle.population` gains `strong-like.count` and
+`dependent-unresolved.percent` (both `higherIsWorse`) — `GCHandleAnalyzer` already computed both
+locals (`strongLikeHandles`, `dependentUnresolvedPercent`) for the domain result but never promoted
+either to the whole-run observation, unlike the raw counts backing `dependent-unresolved-target.count`
+and its own warning threshold. Closes `GCHandleTrendComparer`'s last 2 headline gaps (5/7 → 7/7),
+unblocking its retirement onto the differ.
+
 ## `observation-type-registry.json` 1.71.0 — 2026-09-21
 
 Phase 5 step 4, Bucket B: `type.shape-composition` gains `balanced-type.count` (`neutral`) —

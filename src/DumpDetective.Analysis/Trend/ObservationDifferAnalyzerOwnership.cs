@@ -43,5 +43,6 @@ internal static class ObservationDifferAnalyzerOwnership
             ["runtime.hang-pressure"] = "Hang Analysis",
             ["infra.wcf-channel-population"] = "WCF Channel Analysis",
             ["type.shape-composition"] = "Object Shape Analysis",
+            ["handle.population"] = "GC Handle Analysis",
         };
 }

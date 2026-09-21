@@ -15,6 +15,15 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.77.0 — 2026-09-21
+
+Phase 5 step 4, Bucket B (last item — closes the bucket): `type.boxing-pressure` gains
+`avg-instance.bytes`, `padding-aggregate.bytes` (both `higherIsWorse` raw sums/averages
+`BoxingAnalyzer` already computed but never emitted) and `gen2.percent` (`higherIsWorse`, a plain
+derived ratio — same shape as `AsyncStateMachineAnalyzer`'s own `gen2.percent`, not a classifier
+composite). Closes `BoxingTrendComparer`'s last 3 headline gaps (8/11 → 11/11), unblocking its
+retirement onto the differ and completing all 8 Bucket B comparers.
+
 ## `observation-type-registry.json` 1.76.0 — 2026-09-21
 
 Phase 5 step 4, Bucket B: `infra.sql-transaction-population` gains `active.count` (`higherIsWorse`)

@@ -48,5 +48,6 @@ internal static class ObservationDifferAnalyzerOwnership
             ["infra.db-connection-population"] = "DB Connection Analysis",
             ["infra.sql-command-population"] = "SQL Command Analysis",
             ["infra.sql-transaction-population"] = "SQL Transaction Analysis",
+            ["type.boxing-pressure"] = "Boxing Analysis",
         };
 }

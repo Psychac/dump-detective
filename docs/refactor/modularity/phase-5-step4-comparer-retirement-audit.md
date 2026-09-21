@@ -91,6 +91,10 @@ write-up landing, since the code-level work is independent of it.
 
 ## Bucket B — small emission extension needed
 
+**Done (2026-09-21).** All 8 comparers retired: each gap closed by a small Stage-1 emission
+extension (see the schema CHANGELOG entries below the table for the exact registry version each
+landed in), then the same mechanical trim as Bucket A.
+
 | Comparer | Backed / Headline | Gap (needs emission) |
 |---|---|---|
 | `WcfChannelTrendComparer` | 5/5 ✅ **done (2026-09-21)** | `faulted.count` — `infra.wcf-channel-population` gained `faulted.count` (registry 1.70.0); comparer's headline branches trimmed and registered in `ObservationDifferAnalyzerOwnership` |
@@ -100,7 +104,7 @@ write-up landing, since the code-level work is independent of it.
 | `DbConnectionTrendComparer` | 7/7 ✅ **done (2026-09-21)** | `open` (`OpenConnections`), `gen2.open`, `gen0.open` — `infra.db-connection-population` gained `open.count`/`gen2-open.count`/`gen0-open.count` (registry 1.74.0); comparer's headline branches trimmed and registered in `ObservationDifferAnalyzerOwnership` |
 | `SqlCommandTrendComparer` | 3/3 ✅ **done (2026-09-21)** | `active` — `infra.sql-command-population` gained `active.count` (registry 1.75.0); comparer's headline branches trimmed and registered in `ObservationDifferAnalyzerOwnership` |
 | `SqlTransactionTrendComparer` | 4/4 ✅ **done (2026-09-21)** | `active` — same pattern as `SqlCommand` above; `infra.sql-transaction-population` gained `active.count` (registry 1.76.0); comparer's headline branches trimmed and registered in `ObservationDifferAnalyzerOwnership` |
-| `BoxingTrendComparer` | 8/11 | `avg.instance.bytes`, `padding.aggregate` (both plain raw sums/averages already computed), `gen2.fraction` (a simple derived ratio — same shape as `AsyncStateMachineAnalyzer`'s `gen2.percent` added this session, not a classifier composite) |
+| `BoxingTrendComparer` | 11/11 ✅ **done (2026-09-21)** | `avg.instance.bytes`, `padding.aggregate`, `gen2.fraction` — `type.boxing-pressure` gained `avg-instance.bytes`/`padding-aggregate.bytes`/`gen2.percent` (registry 1.77.0); comparer's headline branches trimmed and registered in `ObservationDifferAnalyzerOwnership` |
 
 `GCRootTrendComparer` and `AllocationPatternTrendComparer` also have a Bucket B component — see
 Bucket C, which covers both buckets for each of those two comparers together.
@@ -141,8 +145,10 @@ Same-sized work as this phase's `AsyncStateMachineAnalyzer`/`HeapTopologyAnalyze
    "comparer stays registered for its scoped branches, differ covers its headline ones" composition
    path in production for the first time — the 3 retired earlier this phase were all fully retired,
    never partially).
-2. **Bucket B (8 comparers, some sharing a row with Bucket C)** — small, contained emission
-   extensions, one comparer at a time, same recipe as this phase's 3 stranded comparers.
+2. **Bucket B (8 comparers, some sharing a row with Bucket C) — done 2026-09-21.** Small, contained
+   emission extensions, one comparer at a time, same recipe as this phase's 3 stranded comparers.
+   `GCRootTrendComparer` and `AllocationPatternTrendComparer`'s Bucket B components remain open —
+   see Bucket C below, which covers both buckets for those two together.
 3. **Bucket C (3 comparers' worth of exceptions)** — no code beyond what Bucket A/B already did to
    those comparers' other metrics; write these up in step 5 as the explicit kept exceptions once
    A/B land for them.

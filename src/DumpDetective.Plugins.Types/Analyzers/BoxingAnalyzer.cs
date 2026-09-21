@@ -99,6 +99,11 @@ namespace DumpDetective.Analysis.Analyzers.Types
         {
             var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapTypes };
 
+            // TotalGen2BoxedCount is summed over the same population as TotalBoxedObjects (every
+            // boxed instance in the type aggregate index), so this fraction is exact — same
+            // 0-100 whole-run percent shape as AsyncStateMachineAnalyzer's own gen2.percent.
+            double gen2Percent = result.TotalBoxedObjects == 0 ? 0.0 : result.TotalGen2BoxedCount * 100.0 / result.TotalBoxedObjects;
+
             await context.Observations.EmitAsync(new Observation
             {
                 Id = ObservationId.NewId(),
@@ -109,13 +114,16 @@ namespace DumpDetective.Analysis.Analyzers.Types
                 {
                     ["total-boxed.count"] = new Measure(result.TotalBoxedObjects, MeasureUnit.Count, MeasureSemantics.Absolute),
                     ["total-boxed.bytes"] = new Measure(result.TotalBoxedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["avg-instance.bytes"] = new Measure(result.AvgBoxedInstanceBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                     ["boxed-enum.count"] = new Measure(result.BoxedEnumCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                     ["boxed-enum.bytes"] = new Measure(result.BoxedEnumBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                     ["nullable-boxed.count"] = new Measure(result.NullableBoxedCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                     ["nullable-boxed.bytes"] = new Measure(result.NullableBoxedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                     ["oversized-value.count"] = new Measure(result.OversizedValueTypeInstanceCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                     ["padding-waste-type.count"] = new Measure(result.TopPaddingWasteTypes.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["padding-aggregate.bytes"] = new Measure(result.AggregatePaddingWasteBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                     ["gen2-boxed.count"] = new Measure(result.TotalGen2BoxedCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["gen2.percent"] = new Measure(gen2Percent, MeasureUnit.Percent, MeasureSemantics.Ratio),
                 },
                 Provenance = new Provenance
                 {

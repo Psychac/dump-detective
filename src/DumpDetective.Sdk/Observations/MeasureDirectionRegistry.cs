@@ -133,12 +133,15 @@ public static class MeasureDirectionRegistry
             // Plugins.Types
             [("type.boxing-pressure", "total-boxed.count")] = MeasureDirection.HigherIsWorse,
             [("type.boxing-pressure", "total-boxed.bytes")] = MeasureDirection.HigherIsWorse,
+            [("type.boxing-pressure", "avg-instance.bytes")] = MeasureDirection.HigherIsWorse,
             [("type.boxing-pressure", "boxed-enum.count")] = MeasureDirection.HigherIsWorse,
             [("type.boxing-pressure", "boxed-enum.bytes")] = MeasureDirection.HigherIsWorse,
             [("type.boxing-pressure", "nullable-boxed.count")] = MeasureDirection.HigherIsWorse,
             [("type.boxing-pressure", "nullable-boxed.bytes")] = MeasureDirection.HigherIsWorse,
             [("type.boxing-pressure", "oversized-value.count")] = MeasureDirection.HigherIsWorse,
+            [("type.boxing-pressure", "padding-aggregate.bytes")] = MeasureDirection.HigherIsWorse,
             [("type.boxing-pressure", "gen2-boxed.count")] = MeasureDirection.HigherIsWorse,
+            [("type.boxing-pressure", "gen2.percent")] = MeasureDirection.HigherIsWorse,
 
             [("collection.waste-summary", "total-collection.count")] = MeasureDirection.Neutral,
             [("collection.waste-summary", "total-wasted.bytes")] = MeasureDirection.HigherIsWorse,

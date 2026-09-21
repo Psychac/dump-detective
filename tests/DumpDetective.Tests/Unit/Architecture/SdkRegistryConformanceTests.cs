@@ -147,7 +147,7 @@ public sealed class SdkRegistryConformanceTests
             ["type.reference-heavy"] = ["reference-field.count", "total-field.count", "instance.count"],
             ["type.value-heavy"] = ["reference-field.count", "total-field.count", "instance.count"],
             ["type.finalizable-reference-heavy"] = ["reference-field.count", "total-field.count", "instance.count"],
-            ["type.boxing-pressure"] = ["total-boxed.count", "total-boxed.bytes", "boxed-enum.count", "boxed-enum.bytes", "nullable-boxed.count", "nullable-boxed.bytes", "oversized-value.count", "padding-waste-type.count", "gen2-boxed.count"],
+            ["type.boxing-pressure"] = ["total-boxed.count", "total-boxed.bytes", "avg-instance.bytes", "boxed-enum.count", "boxed-enum.bytes", "nullable-boxed.count", "nullable-boxed.bytes", "oversized-value.count", "padding-waste-type.count", "padding-aggregate.bytes", "gen2-boxed.count", "gen2.percent"],
             ["type.boxing"] = ["instance.count", "shallow.bytes", "gen0.count", "gen2.count", "gen2.fraction", "is-enum", "has-reference-fields", "has-iequatable", "is-nullable"],
             ["type.oversized-value"] = ["static-size.bytes", "instance.count"],
             ["type.struct-padding-waste"] = ["field.bytes", "struct-size.bytes", "wasted-padding.bytes", "waste.ratio"],

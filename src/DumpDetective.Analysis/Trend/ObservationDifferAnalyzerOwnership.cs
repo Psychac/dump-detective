@@ -52,5 +52,6 @@ internal static class ObservationDifferAnalyzerOwnership
             ["root.population"] = "GC Root Analysis",
             ["gc.allocation-composition"] = "Allocation Pattern Analysis",
             ["type.array-population"] = "Array Analysis",
+            ["infra.timer-population"] = "Timer Leak Analysis",
         };
 }

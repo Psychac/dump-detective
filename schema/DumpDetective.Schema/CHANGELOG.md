@@ -15,6 +15,18 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.80.0 — 2026-09-21
+
+Phase 5 step 4, Bucket D: new `infra.timer-population` whole-run observation type —
+`TimerLeakAnalyzer` already accumulated all 6 category counts plus total count/bytes as
+independent locals during the same scan that builds `infra.timer`'s per-type entries, but never
+promoted them; no new heap traversal. Deliberately collapses `TimerLeakDomainResult`'s two
+identical fields — `LogicalTimerCount`/`TimerQueueTimerCount`, confirmed by
+`TimerLeakSynthesisRule`'s own remarks to always hold the same value (a legacy alias, not an
+independent total) — into one measure, `timer-queue.count`, rather than duplicating it. Closes
+`TimerLeakTrendComparer`'s 7 headline gaps as 6 backed measures (0/7 → 6/6), the second Bucket D
+comparer retired.
+
 ## `observation-type-registry.json` 1.79.0 — 2026-09-21
 
 Phase 5 step 4, Bucket D (first item): new `type.array-population` whole-run observation type —

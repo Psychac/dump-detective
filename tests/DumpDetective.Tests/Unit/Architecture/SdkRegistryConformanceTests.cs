@@ -110,6 +110,10 @@ public sealed class SdkRegistryConformanceTests
             ["infra.http-handler-module"] = ["instance.count"],
             ["infra.http-object-population"] = ["http-web-response.count", "http-message-handler.count"],
             ["infra.timer"] = ["instance.count", "shallow.bytes"],
+            ["infra.timer-population"] = [
+                "total.count", "total.bytes", "threading.count", "timers-timer.count",
+                "timer-queue.count", "holder.count", "periodic.count", "other.count",
+            ],
             ["infra.wcf-channel"] = ["retained.bytes", "binding-hint.ordinal"],
             ["infra.wcf-channel-type-population"] = ["total.count"],
             ["infra.wcf-channel-population"] = [

@@ -235,6 +235,13 @@ public static class MeasureDirectionRegistry
             [("infra.sql-transaction-population", "disposed.count")] = MeasureDirection.Neutral,
             [("infra.sql-transaction-population", "other.count")] = MeasureDirection.HigherIsWorse,
 
+            [("infra.timer-population", "total.count")] = MeasureDirection.HigherIsWorse,
+            [("infra.timer-population", "total.bytes")] = MeasureDirection.HigherIsWorse,
+            [("infra.timer-population", "threading.count")] = MeasureDirection.HigherIsWorse,
+            [("infra.timer-population", "timer-queue.count")] = MeasureDirection.HigherIsWorse,
+            [("infra.timer-population", "holder.count")] = MeasureDirection.HigherIsWorse,
+            [("infra.timer-population", "periodic.count")] = MeasureDirection.HigherIsWorse,
+
             [("infra.wcf-channel-population", "total.count")] = MeasureDirection.HigherIsWorse,
             [("infra.wcf-channel-population", "opening.count")] = MeasureDirection.HigherIsWorse,
             [("infra.wcf-channel-population", "opened.count")] = MeasureDirection.Neutral,

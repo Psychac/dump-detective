@@ -130,6 +130,10 @@ public sealed class TimerLeakAnalyzer :
     /// bounded to distinct timer-shaped type names. Subject resolved via
     /// <see cref="IHeapObjectLookup"/> from each type's already-tracked <c>SampleAddress</c>
     /// (real <see cref="Sdk.Identity.TypeRef"/>, not a canonicalized-from-string reconstruction).
+    /// Plus a second, whole-run <c>infra.timer-population</c> observation added Phase 5 step 4 for
+    /// <c>TimerLeakTrendComparer</c>'s headline metrics (Bucket D of
+    /// docs/refactor/modularity/phase-5-step4-comparer-retirement-audit.md) — every category total
+    /// this method already accumulates, promoted with no new heap traversal.
     /// </summary>
     private static async ValueTask<TimerLeakDomainResult> Analyze(
         IDumpObjectFieldQuery fields, IHeapSegmentQuery segments, IHeapObjectLookup objectLookup, IHeapRootPathQuery rootPaths, IHeapObjectStream? candidates,
@@ -225,6 +229,40 @@ public sealed class TimerLeakAnalyzer :
         ];
 
         int total = threadingTimerCount + timersTimerCount + timerQueueTimerCount + timerHolderCount + periodicTimerCount + otherTimerCount;
+
+        // Whole-run scalar — no entity subject, same "no natural per-entity anchor" pattern as
+        // gc.generation-composition. Deliberately one measure for TimerQueueTimer's count, not two:
+        // TimerLeakDomainResult.LogicalTimerCount is the exact same value under a legacy alias (see
+        // TimerLeakSynthesisRule's own remarks — "the real analyzer sets equal to
+        // TimerQueueTimerCount, not a sum of the 'real' disposable timer categories, despite the
+        // name"), so timer-queue.count backs both TimerLeakTrendComparer's old timer.logical and
+        // timer.queue headline metrics rather than duplicating the same total under two measures.
+        await observationContext.Observations.EmitAsync(new Observation
+        {
+            Id = ObservationId.NewId(),
+            ObservationType = "infra.timer-population",
+            Subjects = [],
+            When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+            Measures = new Dictionary<string, Measure>
+            {
+                ["total.count"] = new Measure(total, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["total.bytes"] = new Measure(totalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                ["threading.count"] = new Measure(threadingTimerCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["timers-timer.count"] = new Measure(timersTimerCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["timer-queue.count"] = new Measure(timerQueueTimerCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["holder.count"] = new Measure(timerHolderCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["periodic.count"] = new Measure(periodicTimerCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["other.count"] = new Measure(otherTimerCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            },
+            Provenance = new Provenance
+            {
+                Artifact = observationContext.ArtifactId!.Value,
+                AnalyzerKey = "Timer Leak Analysis",
+                CapabilitiesUsed = observationCapabilities,
+                Fidelity = FidelityLevel.Full,
+            },
+            Confidence = 1.0,
+        }, cancellationToken);
 
         return new TimerLeakDomainResult(
             TimersFound: total > 0,

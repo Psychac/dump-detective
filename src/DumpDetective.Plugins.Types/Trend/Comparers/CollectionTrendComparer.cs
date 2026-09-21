@@ -7,15 +7,13 @@ namespace DumpDetective.Analysis.Trend.Comparers
     {
         public string AnalyzerName => "Collection Analysis";
 
+        // Headline metrics (total, wasted.bytes, wasteful.count) retired onto ObservationTrendDiffer,
+        // backed by collection.waste-summary — see ObservationDifferAnalyzerOwnership and
+        // docs/refactor/modularity/phase-5-step4-comparer-retirement-audit.md Bucket A.
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not CollectionDomainResult r) return [];
-            var metrics = new List<AnalyzerMetric>
-            {
-                new("collection.total", null, r.TotalCollections, "collections", MetricTrendDirection.Neutral),
-                new("collection.wasted.bytes", null, r.TotalWastedMemory, "bytes", MetricTrendDirection.HigherIsWorse),
-                new("collection.wasteful.count", null, r.WastefulCollectionCount, "collections", MetricTrendDirection.HigherIsWorse)
-            };
+            var metrics = new List<AnalyzerMetric>();
 
             foreach (var kv in r.WasteCountsByKind ?? new Dictionary<CollectionKind, int>())
                 metrics.Add(new("collection.waste.kind.count", kv.Key.ToString(), kv.Value, "collections", MetricTrendDirection.HigherIsWorse));
@@ -30,11 +28,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
         {
             if (baseline is not CollectionDomainResult b || current is not CollectionDomainResult c) return [];
 
-            var deltas = new List<MetricDelta>
-            {
-                MetricDeltaHelper.Compute("collection.wasted.bytes", null, b.TotalWastedMemory, c.TotalWastedMemory, "bytes", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("collection.wasteful.count", null, b.WastefulCollectionCount, c.WastefulCollectionCount, "collections", MetricTrendDirection.HigherIsWorse)
-            };
+            var deltas = new List<MetricDelta>();
 
             // A kind present in only one snapshot still needs a delta — a kind that appeared or
             // vanished between runs is exactly the regression signal per-kind trending exists for.

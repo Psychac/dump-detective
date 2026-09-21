@@ -6,14 +6,13 @@ namespace DumpDetective.Analysis.Trend.Comparers
     {
         public string AnalyzerName => "Static Root Leak Detection";
 
+        // Headline metrics (root.count, retained.bytes) retired onto ObservationTrendDiffer, backed
+        // by static-root.population — see ObservationDifferAnalyzerOwnership and
+        // docs/refactor/modularity/phase-5-step4-comparer-retirement-audit.md Bucket A.
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not StaticRootDomainResult r) return [];
-            var metrics = new List<AnalyzerMetric>
-            {
-                new("static.root.count", null, r.RootCount, "roots", MetricTrendDirection.HigherIsWorse),
-                new("static.root.retained.bytes", null, r.TotalRetainedBytes, "bytes", MetricTrendDirection.HigherIsWorse)
-            };
+            var metrics = new List<AnalyzerMetric>();
 
             foreach (StaticRootSnapshot root in r.TopRootsByRetainedBytes ?? [])
                 metrics.Add(new("static.root.byname.bytes", root.RootDescription, root.TotalMemoryImpact, "bytes", MetricTrendDirection.HigherIsWorse));
@@ -21,15 +20,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
             return metrics;
         }
 
-        public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
-        {
-            if (baseline is not StaticRootDomainResult b || current is not StaticRootDomainResult c) return [];
-            return
-            [
-                MetricDeltaHelper.Compute("static.root.count", null, b.RootCount, c.RootCount, "roots", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("static.root.retained.bytes", null, b.TotalRetainedBytes, c.TotalRetainedBytes, "bytes", MetricTrendDirection.HigherIsWorse)
-            ];
-        }
+        public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current) => [];
     }
 }
 

@@ -6,17 +6,14 @@ namespace DumpDetective.Analysis.Trend.Comparers
     {
         public string AnalyzerName => "Module Analysis";
 
+        // Headline metrics (modules.total/.dynamic/.conflicts, appdomain.count/.dynamic.modules)
+        // retired onto ObservationTrendDiffer, backed by runtime.module-population — see
+        // ObservationDifferAnalyzerOwnership and
+        // docs/refactor/modularity/phase-5-step4-comparer-retirement-audit.md Bucket A.
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not ModuleDomainResult r) return [];
-            var metrics = new List<AnalyzerMetric>
-            {
-                new("modules.total", null, r.TotalModules, "modules", MetricTrendDirection.Neutral),
-                new("modules.dynamic", null, r.DynamicModules, "modules", MetricTrendDirection.Neutral),
-                new("modules.conflicts", null, r.VersionConflictGroups, "conflicts", MetricTrendDirection.HigherIsWorse),
-                new("appdomain.count", null, r.TotalDomains, "domains", MetricTrendDirection.Neutral),
-                new("appdomain.dynamic.modules", null, r.TotalDynamicModules, "modules", MetricTrendDirection.HigherIsWorse),
-            };
+            var metrics = new List<AnalyzerMetric>();
 
             foreach (ModuleHeapStats m in r.TopModulesByHeapMemory ?? [])
             {
@@ -33,17 +30,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
             return metrics;
         }
 
-        public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
-        {
-            if (baseline is not ModuleDomainResult b || current is not ModuleDomainResult c) return [];
-            return
-            [
-                MetricDeltaHelper.Compute("modules.total", null, b.TotalModules, c.TotalModules, "modules", MetricTrendDirection.Neutral),
-                MetricDeltaHelper.Compute("modules.conflicts", null, b.VersionConflictGroups, c.VersionConflictGroups, "conflicts", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("appdomain.count", null, b.TotalDomains, c.TotalDomains, "domains", MetricTrendDirection.Neutral),
-                MetricDeltaHelper.Compute("appdomain.dynamic.modules", null, b.TotalDynamicModules, c.TotalDynamicModules, "modules", MetricTrendDirection.HigherIsWorse),
-            ];
-        }
+        public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current) => [];
     }
 }
 

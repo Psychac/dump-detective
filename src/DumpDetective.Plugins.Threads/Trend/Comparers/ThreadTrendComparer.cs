@@ -6,16 +6,13 @@ namespace DumpDetective.Analysis.Trend.Comparers
     {
         public string AnalyzerName => "Thread Analysis";
 
+        // Headline metrics (alive/blocked/lock.holding/exceptions) retired onto ObservationTrendDiffer,
+        // backed by runtime.thread-triage — see ObservationDifferAnalyzerOwnership and
+        // docs/refactor/modularity/phase-5-step4-comparer-retirement-audit.md Bucket A.
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not ThreadDomainResult r) return [];
-            var metrics = new List<AnalyzerMetric>
-            {
-                new("thread.alive", null, r.AliveThreadCount, "threads", MetricTrendDirection.Neutral),
-                new("thread.blocked", null, r.BlockedThreadCount, "threads", MetricTrendDirection.HigherIsWorse),
-                new("thread.lock.holding", null, r.LockHoldingThreadCount, "threads", MetricTrendDirection.HigherIsWorse),
-                new("thread.exceptions", null, r.ThreadsWithActiveExceptionsCount, "threads", MetricTrendDirection.HigherIsWorse)
-            };
+            var metrics = new List<AnalyzerMetric>();
             foreach (var kv in r.WaitPatternBreakdown)
                 metrics.Add(new("thread.wait.category", kv.Key, kv.Value, "threads", MetricTrendDirection.HigherIsWorse));
             return metrics;
@@ -24,12 +21,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
         {
             if (baseline is not ThreadDomainResult b || current is not ThreadDomainResult c) return [];
-            var deltas = new List<MetricDelta>
-            {
-                MetricDeltaHelper.Compute("thread.blocked", null, b.BlockedThreadCount, c.BlockedThreadCount, "threads", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("thread.lock.holding", null, b.LockHoldingThreadCount, c.LockHoldingThreadCount, "threads", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("thread.exceptions", null, b.ThreadsWithActiveExceptionsCount, c.ThreadsWithActiveExceptionsCount, "threads", MetricTrendDirection.HigherIsWorse)
-            };
+            var deltas = new List<MetricDelta>();
             foreach (var kv in c.WaitPatternBreakdown)
             {
                 b.WaitPatternBreakdown.TryGetValue(kv.Key, out int bCount);

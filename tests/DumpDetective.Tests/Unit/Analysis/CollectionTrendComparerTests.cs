@@ -80,11 +80,13 @@ public sealed class CollectionTrendComparerTests
     }
 
     [Fact]
-    public void Compare_NoPerKindData_EmitsOnlyTotals()
+    public void Compare_NoPerKindData_EmitsNothing()
     {
+        // Headline totals (collection.wasted.bytes, .wasteful.count) retired onto
+        // ObservationTrendDiffer — see ObservationDifferAnalyzerOwnership. The comparer now only
+        // ever emits per-kind scoped deltas.
         var deltas = new CollectionTrendComparer().Compare(MakeResult(1_000), MakeResult(2_000));
 
-        deltas.Should().NotContain(d => d.Key.StartsWith("collection.waste.kind."));
-        deltas.Should().Contain(d => d.Key == "collection.wasted.bytes" && d.Delta == 1_000);
+        deltas.Should().BeEmpty();
     }
 }

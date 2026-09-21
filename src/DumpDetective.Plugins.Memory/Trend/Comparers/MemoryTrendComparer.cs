@@ -6,16 +6,14 @@ namespace DumpDetective.Analysis.Trend.Comparers
     {
         public string AnalyzerName => "Memory Analysis";
 
+        // Headline metrics (total.bytes, loh.bytes, loh.percent, unique.types) retired onto
+        // ObservationTrendDiffer, backed by heap.memory-composition — see
+        // ObservationDifferAnalyzerOwnership and
+        // docs/refactor/modularity/phase-5-step4-comparer-retirement-audit.md Bucket A.
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not MemoryDomainResult r) return [];
-            var metrics = new List<AnalyzerMetric>
-            {
-                new("memory.total.bytes", null, r.TotalBytes, "bytes", MetricTrendDirection.HigherIsWorse),
-                new("memory.loh.bytes", null, r.LohBytes, "bytes", MetricTrendDirection.HigherIsWorse),
-                new("memory.loh.percent", null, r.LohPercent, "%", MetricTrendDirection.HigherIsWorse),
-                new("memory.unique.types", null, r.UniqueTypes, "types", MetricTrendDirection.Neutral)
-            };
+            var metrics = new List<AnalyzerMetric>();
             foreach (var t in r.TopTypes.OrderByDescending(t => t.TotalBytes).Take(10))
                 metrics.Add(new("type.bytes", t.TypeName, t.TotalBytes, "bytes", MetricTrendDirection.HigherIsWorse));
             foreach (var t in r.TopTypes.OrderByDescending(t => t.Count).Take(10))
@@ -35,13 +33,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
         {
             if (baseline is not MemoryDomainResult b || current is not MemoryDomainResult c) return [];
-            var deltas = new List<MetricDelta>
-            {
-                MetricDeltaHelper.Compute("memory.total.bytes", null, b.TotalBytes, c.TotalBytes, "bytes", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("memory.loh.bytes", null, b.LohBytes, c.LohBytes, "bytes", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("memory.loh.percent", null, b.LohPercent, c.LohPercent, "%", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("memory.unique.types", null, b.UniqueTypes, c.UniqueTypes, "types", MetricTrendDirection.Neutral)
-            };
+            var deltas = new List<MetricDelta>();
             var baseTypeMap = b.TopTypes.OrderByDescending(t => t.TotalBytes).ToDictionary(t => t.TypeName, StringComparer.Ordinal);
             foreach (var t in c.TopTypes.OrderByDescending(t => t.TotalBytes))
             {

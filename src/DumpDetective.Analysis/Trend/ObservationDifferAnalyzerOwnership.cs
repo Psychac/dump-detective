@@ -12,6 +12,11 @@ namespace DumpDetective.Analysis.Trend;
 /// and SqlConnectionPool joined last, once their analyzer started emitting the whole-run aggregate
 /// each had been missing (schema/DumpDetective.Schema/CHANGELOG.md 1.69.0) — the last 3 of the 11
 /// all-headline comparers, closing that gap.
+///
+/// The 6 comparers below are the first "mixed" retirements (Bucket A of
+/// docs/refactor/modularity/phase-5-step4-comparer-retirement-audit.md): only their headline
+/// branches moved here — each comparer stays registered in the DI-resolved
+/// <c>IAnalyzerTrendComparer</c> list for its remaining scoped (per-type/per-entity) branches.
 /// </summary>
 internal static class ObservationDifferAnalyzerOwnership
 {
@@ -29,5 +34,12 @@ internal static class ObservationDifferAnalyzerOwnership
             ["type.async-state-machine-population"] = "Async State Machine Analysis",
             ["heap.topology-population"] = "Heap Topology",
             ["infra.sql-connection-pool-population"] = "SQL Connection Pool Analysis",
+            ["static-root.population"] = "Static Root Leak Detection",
+            ["collection.waste-summary"] = "Collection Analysis",
+            ["runtime.crash-population"] = "Crash Analysis",
+            ["runtime.module-population"] = "Module Analysis",
+            ["runtime.thread-triage"] = "Thread Analysis",
+            ["heap.memory-composition"] = "Memory Analysis",
+            ["runtime.hang-pressure"] = "Hang Analysis",
         };
 }

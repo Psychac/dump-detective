@@ -6,14 +6,13 @@ namespace DumpDetective.Analysis.Trend.Comparers
     {
         public string AnalyzerName => "Crash Analysis";
 
+        // Headline metrics (exceptions.total, exceptions.active) retired onto ObservationTrendDiffer,
+        // backed by runtime.crash-population — see ObservationDifferAnalyzerOwnership and
+        // docs/refactor/modularity/phase-5-step4-comparer-retirement-audit.md Bucket A.
         public IReadOnlyList<AnalyzerMetric> ExtractMetrics(AnalyzerDomainResult result)
         {
             if (result is not CrashDomainResult r) return [];
-            var metrics = new List<AnalyzerMetric>
-            {
-                new("crash.exceptions.total", null, r.TotalExceptions, "exceptions", MetricTrendDirection.HigherIsWorse),
-                new("crash.exceptions.active", null, r.ActiveExceptions, "exceptions", MetricTrendDirection.HigherIsWorse)
-            };
+            var metrics = new List<AnalyzerMetric>();
             foreach (var kv in r.ExceptionTypeCounts)
                 metrics.Add(new("crash.exception.type", kv.Key, kv.Value, "count", MetricTrendDirection.HigherIsWorse));
             return metrics;
@@ -22,11 +21,7 @@ namespace DumpDetective.Analysis.Trend.Comparers
         public IReadOnlyList<MetricDelta> Compare(AnalyzerDomainResult baseline, AnalyzerDomainResult current)
         {
             if (baseline is not CrashDomainResult b || current is not CrashDomainResult c) return [];
-            var deltas = new List<MetricDelta>
-            {
-                MetricDeltaHelper.Compute("crash.exceptions.total", null, b.TotalExceptions, c.TotalExceptions, "exceptions", MetricTrendDirection.HigherIsWorse),
-                MetricDeltaHelper.Compute("crash.exceptions.active", null, b.ActiveExceptions, c.ActiveExceptions, "exceptions", MetricTrendDirection.HigherIsWorse)
-            };
+            var deltas = new List<MetricDelta>();
             foreach (var kv in c.ExceptionTypeCounts)
             {
                 b.ExceptionTypeCounts.TryGetValue(kv.Key, out int baseCount);

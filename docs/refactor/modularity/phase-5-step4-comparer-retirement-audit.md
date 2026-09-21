@@ -58,25 +58,36 @@ single label per comparer.
 
 ## Bucket A — ready for mechanical retirement now
 
-No emission work needed. All headline metrics on these 6 comparers are already backed:
+**Done (2026-09-21).** All headline metrics on these 6 comparers were already backed, so no
+emission work was needed. Their headline `ExtractMetrics`/`Compare` branches are removed, each
+analyzer is registered in `ObservationDifferAnalyzerOwnership`, and the comparer classes stay
+registered for their scoped branches:
 
 | Comparer | Headline | Backing Observation | Scoped branches kept |
 |---|---|---|---|
-| `StaticRootTrendComparer` | 2/2 | `static-root.population` (`root.count`, `retained.bytes`) | `static.root.byname.bytes` (by root description) |
-| `CollectionTrendComparer` | 3/3 | `collection.waste-summary` (`total-collection.count`, `total-wasted.bytes`, `wasteful-collection.count`) | `collection.waste.kind.count`/`.bytes` (by `CollectionKind`) |
-| `CrashTrendComparer` | 2/2 | `runtime.crash-population` (`total.count`, `active.count`) | `crash.exception.type` (by exception type) |
-| `ModuleTrendComparer` | 5/5 | `runtime.module-population` (`total.count`, `dynamic.count`, `version-conflict.count`, `total-domains.count`, `total-dynamic.count`) | `modules.heap.bytes`/`.objects`, `appdomain.module.type.count`/`.bytes` (by module name) |
-| `ThreadTrendComparer` | 4/4 | `runtime.thread-triage` (`alive-thread.count`, `blocked-thread.count`, `lock-holding-thread.count`, `active-exception-thread.count`) | `thread.wait.category` (by wait category) |
-| `MemoryTrendComparer` | 4/4 | `heap.memory-composition` (`total.bytes`, `loh.bytes`, `loh.percent`, `unique-types.count`) | `type.bytes`/`.count` (by type name, top 10 each), `memory.bucket.N.count` (by size bucket) |
+| `StaticRootTrendComparer` | 2/2 ✅ | `static-root.population` (`root.count`, `retained.bytes`) | `static.root.byname.bytes` (by root description) |
+| `CollectionTrendComparer` | 3/3 ✅ | `collection.waste-summary` (`total-collection.count`, `total-wasted.bytes`, `wasteful-collection.count`) | `collection.waste.kind.count`/`.bytes` (by `CollectionKind`) |
+| `CrashTrendComparer` | 2/2 ✅ | `runtime.crash-population` (`total.count`, `active.count`) | `crash.exception.type` (by exception type) |
+| `ModuleTrendComparer` | 5/5 ✅ | `runtime.module-population` (`total.count`, `dynamic.count`, `version-conflict.count`, `total-domains.count`, `total-dynamic.count`) | `modules.heap.bytes`/`.objects`, `appdomain.module.type.count`/`.bytes` (by module name) |
+| `ThreadTrendComparer` | 4/4 ✅ | `runtime.thread-triage` (`alive-thread.count`, `blocked-thread.count`, `lock-holding-thread.count`, `active-exception-thread.count`) | `thread.wait.category` (by wait category) |
+| `MemoryTrendComparer` | 4/4 ✅ | `heap.memory-composition` (`total.bytes`, `loh.bytes`, `loh.percent`, `unique-types.count`) | `type.bytes`/`.count` (by type name, top 10 each), `memory.bucket.N.count` (by size bucket) |
+
+`ModuleTrendComparer` and `StaticRootTrendComparer`'s `Compare` had no pre-existing scoped delta
+branches (only `ExtractMetrics` fed their scoped metrics into the timeline), so their `Compare` now
+always returns `[]` — expected, not a regression: `TrendAnalyzer.CompareAll` already skips
+zero-delta comparer results, and the observation differ now supplies their headline deltas.
 
 `ThreadTrendComparer.alive` is a useful precedent for the differ's Neutral handling: it's extracted
 for the timeline but never appears in `Compare`'s regression/improvement list (Neutral direction
 correctly excludes it there already) — the same behavior `ObservationTrendDiffer` needs to
 reproduce, not a special case to design for.
 
-`HangTrendComparer` belongs here for 6 of its 7 headline metrics too (`alive-thread.count`,
-`waiting-thread.count`, `waiting.percent`, `queued-work-items.count`, `pending-task.count`,
-`faulted-task.count`, all backed by `runtime.hang-pressure`) — see Bucket C below for its 7th.
+`HangTrendComparer` belongs here too — **done (2026-09-21)** — for 6 of its 7 headline metrics
+(`alive-thread.count`, `waiting-thread.count`, `waiting.percent`, `queued-work-items.count`,
+`pending-task.count`, `faulted-task.count`, all backed by `runtime.hang-pressure`, now registered in
+`ObservationDifferAnalyzerOwnership`). Its 7th, `hang.health.score`, stays hand-written permanently
+as the Bucket C composite exception below — trimming the 6 backed metrics didn't wait on that
+write-up landing, since the code-level work is independent of it.
 
 ## Bucket B — small emission extension needed
 
@@ -125,11 +136,11 @@ Same-sized work as this phase's `AsyncStateMachineAnalyzer`/`HeapTopologyAnalyze
 
 ## Suggested execution order
 
-1. **Bucket A (6 comparers)** — zero emission risk, re-proves the exact retirement mechanism used
-   for the 3 stranded comparers on ordinary mixed comparers (i.e. also verifies the "comparer stays
-   registered for its scoped branches, differ covers its headline ones" composition path actually
-   used in production for the first time — the 3 retired earlier this phase were all fully
-   retired, never partially).
+1. **Bucket A (6 comparers) — done 2026-09-21.** Zero emission risk, re-proved the exact retirement
+   mechanism used for the 3 stranded comparers on ordinary mixed comparers (i.e. also verified the
+   "comparer stays registered for its scoped branches, differ covers its headline ones" composition
+   path in production for the first time — the 3 retired earlier this phase were all fully retired,
+   never partially).
 2. **Bucket B (8 comparers, some sharing a row with Bucket C)** — small, contained emission
    extensions, one comparer at a time, same recipe as this phase's 3 stranded comparers.
 3. **Bucket C (3 comparers' worth of exceptions)** — no code beyond what Bucket A/B already did to

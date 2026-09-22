@@ -181,7 +181,38 @@ to match whatever the migrated rules actually set.
       outside the observation model (the same shape as step 5's "genuine exception" bucket, just for
       pipeline health instead of a domain composite). Left in `InsightEngine.BaselineRuleGroup` for
       now — it's the sole remaining method in that group.
-- [ ] **`MemoryAndRuntimeRuleGroup` (11 methods)** — not started.
+- [x] **`MemoryAndRuntimeRuleGroup`: 10 of 11 done, shipped 2026-09-22.** Migrated:
+      `GCRootLargeRetentionInsightRule`, `AllocationPressureCrossCorrelationInsightRule`,
+      `StringDuplicationRatioInsightRule`, `LohArrayPressureInsightRule`,
+      `AsyncStateMachineFireAndForgetInsightRule`, `StaleWeakReferenceAccumulationInsightRule`,
+      `AddressSpacePressureInsightRule`, `DynamicAssemblyAccumulationInsightRule`,
+      `JitHeapBloatInsightRule`, `BoxingGCCorrelationInsightRule`. Same gap-rate as the first
+      slice — 6 of 10 needed zero new emission, and two rules (`AllocationPressureCrossCorrelation`,
+      `AddressSpacePressure`) needed no new emission either, just their classifier formulas
+      duplicated locally (`AllocationPatternPressureClassifier`/the pressure-risk formula
+      `SegmentReservationAnalyzer` already computes — both `internal` to a different assembly, so
+      re-derived from raw measures the same way `AllocationPatternSynthesisRule`/
+      `SegmentReservationSynthesisRule` already did for their own findings). Two real small gaps,
+      each closed with one new measure: `heap.root` gained `root-kind.ordinal` (per-root
+      `RootKind` was deliberately left off when that observation type was first designed, with a
+      "revisit if a synthesis rule needs to group by it" note — this is that); `type.array-population`
+      gained `loh.count` (it had `loh.bytes` but not the paired count). `weakreference.population`
+      gained `stale-wrapper.count`/`stale-wrapper.is-exact` (the per-candidate
+      `weakreference.stale-wrapper` observation is bounded, so summing it wouldn't reconstruct the
+      true whole-run count). `DetectAsyncStateMachineFireAndForget` needed no new emission at
+      all — `type.async-state-machine`'s `MethodRef` subject (already added specifically to let a
+      consumer reconstruct `SuspendedMethodMap`'s coarser grouping) is grouped by `JoinKey` in the
+      rule, summing `instance.count` across every state-machine-type sharing a declaring method.
+      Tests: `tests/DumpDetective.Tests/Unit/Synthesis/InsightMemoryAndRuntimeRulesTests.cs` (15
+      tests). Full suite: 1372 passed, 0 failed, 4 skipped (real-dump/trace integration, expected)
+      after this batch.
+- [ ] **`DetectJitModuleHotspot` — held, not migrated.** Needs a genuinely new capability, not a
+      routine gap: `JitDomainResult.TopActiveModulesByFrameHits` (a per-module frame-hit ranking)
+      has no observation of its own today, and this rule cross-references it against
+      `ModuleAnalyzer`'s per-module size/conflict data (`TopModulesBySize`/
+      `ConflictingAssemblyNames`), which also has no clean per-module join target yet. Left in
+      `InsightEngine.MemoryAndRuntimeRuleGroup` for now — it's the sole remaining method in that
+      group.
 - [ ] **`CorrelationRuleGroup` (17 methods)** — not started.
 - [ ] **Retire `InsightEngine` only once every rule is ported (except the held
       `DetectAnalyzerFailures`, whose fate is a separate decision).** Delete the class down to
@@ -215,12 +246,18 @@ to match whatever the migrated rules actually set.
 ## Sizing note
 
 6.1 is done (see § 6.1). 6.2 is the large item: 39 rule methods, ~1,300 lines of detection logic.
-The first slice (`BaselineRuleGroup`, 11 methods) is done too — 10 migrated, 1 held — and its own
-observation-gap audit found only 1 real gap (shared by 2 rules), closed with one new whole-run
-observation; 8 of the 11 needed no new emission at all. Whether that gap-rate holds for the
-remaining 28 methods (`MemoryAndRuntimeRuleGroup` + `CorrelationRuleGroup`) is not yet known — several
-of those reach into fields the parent doc's original audit flagged as likely gaps (e.g.
-`MemoryDomainResult.TopTypes`, `ModuleDomainResult.ConflictingAssemblyNames`,
-`CrashDomainResult.TopCrashThreadCandidates`) that `BaselineRuleGroup` didn't happen to touch. Treat
-each remaining group's own observation-gap audit as its own checkpoint, the same way this one was,
-before assuming the same low gap-rate carries over.
+Two of three groups are done now: `BaselineRuleGroup` (10 of 11 migrated, 1 held) and
+`MemoryAndRuntimeRuleGroup` (10 of 11 migrated, 1 held) — 20 of 39 methods total. Both groups'
+observation-gap audits found a low gap rate: 8 of 11 and 6 of 10 respectively needed zero new
+emission, most of the remainder needed one new measure on an existing observation rather than a new
+observation type, and two rules needed no new emission at all, just a classifier formula duplicated
+locally (the same "re-derive from raw measures, don't reach into another assembly's internals"
+choice several already-migrated per-analyzer rules made). Two methods are held rather than migrated
+— `DetectAnalyzerFailures` (needs pipeline run-status, not a heap/runtime fact) and
+`DetectJitModuleHotspot` (needs a genuinely new per-module JIT observation, not a routine gap).
+`CorrelationRuleGroup` (17 methods, not started) is the last and largest group — whether the same
+low gap rate holds there is not yet known; several of its methods reach into fields the parent doc's
+original audit flagged as likely gaps (e.g. `MemoryDomainResult.TopTypes`,
+`ModuleDomainResult.ConflictingAssemblyNames`, `CrashDomainResult.TopCrashThreadCandidates`) that
+neither group so far happened to touch. Treat its own observation-gap audit as its own checkpoint,
+the same way the first two were, before assuming the same low gap-rate carries over.

@@ -313,6 +313,12 @@ namespace DumpDetective.Analysis.Analyzers.Gc
                     ["object.bytes"] = new Measure(weakRefObjBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                     ["dependent-dead-key.count"] = new Measure(dependentHandleDeadKeyCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                     ["held-only-detection-available"] = new Measure(reachability is not null ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    // Added phase 5 step 6.2 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md)
+                    // for StaleWeakReferenceAccumulationInsightRule — weakreference.stale-wrapper is
+                    // per-candidate and bounded, so summing its observations wouldn't reconstruct the
+                    // true whole-run count when the scan itself was capped.
+                    ["stale-wrapper.count"] = new Measure(staleWrapperCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["stale-wrapper.is-exact"] = new Measure(1.0, MeasureUnit.Count, MeasureSemantics.Absolute),
                 },
                 Provenance = new Provenance
                 {

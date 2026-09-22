@@ -157,6 +157,10 @@ public sealed class ArrayAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
                 ["total.count"] = new Measure(result.TotalArrayObjects, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["total.bytes"] = new Measure(result.TotalArrayBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                 ["loh.bytes"] = new Measure(result.LohArrayBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                // Added phase 5 step 6.2 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md)
+                // for LohArrayPressureInsightRule — loh.bytes alone was here before; the rule also
+                // needs the object count for its evidence text.
+                ["loh.count"] = new Measure(result.LohArrayCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["pinned.count"] = new Measure(result.PinnedArrayCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["pinned.bytes"] = new Measure(result.PinnedArrayBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
             },

@@ -124,6 +124,12 @@ public sealed class GCRootAnalyzer :
             var measures = new Dictionary<string, Measure>
             {
                 ["retained.bytes"] = new Measure(finding.EstimatedRetainedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                // Added phase 5 step 6.2 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md)
+                // for GCRootLargeRetentionInsightRule — same "kind.ordinal, no live enum instance
+                // left by the time Analyze returns" precedent as root.kind-summary below; this
+                // remarks block's own "revisit if a synthesis rule actually needs group by it" note
+                // is exactly what happened.
+                ["root-kind.ordinal"] = new Measure((double)(int)Enum.Parse<HeapRootKind>(finding.RootKind), MeasureUnit.Custom, MeasureSemantics.Absolute),
             };
             if (i < result.RootOwnedSubgraphs.Count)
                 measures["subgraph.node-count"] = new Measure(result.RootOwnedSubgraphs[i].SubgraphNodeCount, MeasureUnit.Count, MeasureSemantics.Absolute);

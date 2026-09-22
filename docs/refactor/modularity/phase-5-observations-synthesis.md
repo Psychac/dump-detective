@@ -425,10 +425,14 @@ actually starts, not before.
    doc's "Leak Candidate — deferred to Phase 5" section. **Full implementation plan, split out
    2026-09-22 once it stopped fitting inline (same reason step 2 and step 4 got their own docs):
    [phase-5-step6-insight-engine-plan.md](phase-5-step6-insight-engine-plan.md). 6.1 (LeakCandidate)
-   shipped 2026-09-22; 6.2 (folding `InsightEngine` itself) in progress — 27 of 39 `Detect*`
+   shipped 2026-09-22; 6.2 (folding `InsightEngine` itself) in progress — 28 of 39 `Detect*`
    methods migrated 2026-09-22 across all three rule groups (`BaselineRuleGroup` 10/11,
-   `MemoryAndRuntimeRuleGroup` 10/11, `CorrelationRuleGroup` 7/17), 12 held for documented reasons
-   (a real `Sdk.Synthesis.Finding` gap — no `EvidenceTables` field — among them).**
+   `MemoryAndRuntimeRuleGroup` 10/11, `CorrelationRuleGroup` 8/17), 11 held for documented reasons.
+   One of those reasons was a real design question — `Sdk.Synthesis.Finding` has no
+   `InsightFinding.EvidenceTables` equivalent — resolved by checking
+   [ReportSystemVision.md](../ReportStructure/ReportSystemVision.md) § 6.2/Appendix C rather than
+   extending the SDK: `Finding` stays as-is, and each blocked rule was judged on whether its table
+   was optional (migrate without it) or core to the finding (stay held).**
 6a. **Sections derive from observations, not from domain results.** This resolves the open question
    the earlier draft deferred, and it's the audit's central complaint: as long as
    `IAnalyzerSectionBuilder` reads `AnalyzerDomainResult` independently of the finding path, two

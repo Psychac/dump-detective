@@ -213,12 +213,13 @@ to match whatever the migrated rules actually set.
       `ConflictingAssemblyNames`), which also has no clean per-module join target yet. Left in
       `InsightEngine.MemoryAndRuntimeRuleGroup` for now — it's the sole remaining method in that
       group.
-- [x] **`CorrelationRuleGroup`: 7 of 17 done, shipped 2026-09-22.** Migrated:
+- [x] **`CorrelationRuleGroup`: 8 of 17 done, shipped 2026-09-22.** Migrated:
       `FatalExceptionOnHeapInsightRule`, `EventLeakPatternInsightRule`,
       `RecurringTimeoutPatternInsightRule`, `DbConnectionLeakInsightRule`,
       `WcfChannelFaultInsightRule`, `WcfOpeningTimeoutCorrelationInsightRule`,
-      `HttpClientAccumulationInsightRule`. This group's gap profile is different from the first
-      two — fewer clean single-measure gaps, more structural blockers:
+      `HttpClientAccumulationInsightRule`, `ReferenceChainDominatorCorrelationInsightRule`. This
+      group's gap profile is different from the first two — fewer clean single-measure gaps, more
+      structural blockers:
       - **One gap unblocked 5 rules at once.** `CrashDomainResult.ExceptionTypeCounts` (every
         exception type on heap, not just active ones) had no observation at all — only
         `runtime.active-exception` (per-instance, active-only) existed. `CrashAnalyzer` now also
@@ -235,39 +236,59 @@ to match whatever the migrated rules actually set.
         (same) needed zero further emission work — their own whole-run population observations
         already carried everything needed.
       - **Also closed groundwork gaps for `ReferenceChainDominatorCorrelation` while in the
-        neighborhood**, even though that rule itself stayed held (see below):
-        `type.retention-population` gained `total.bytes` (only had the derived `pressure.ratio`
-        before); `reference-chain.type-sample` gained an optional `retained.bytes` measure
-        (present only when the dominator tree was available, mirroring the domain record's own
-        nullable field). Both are real, tested additions — not wasted work, just not enough to
-        unblock the rule on their own (see the `Finding.EvidenceTables` gap below).
+        neighborhood**: `type.retention-population` gained `total.bytes` (only had the derived
+        `pressure.ratio` before); `reference-chain.type-sample` gained an optional
+        `retained.bytes` measure (present only when the dominator tree was available, mirroring
+        the domain record's own nullable field). Both were real, tested additions on their own —
+        and, per the decision below, turned out to be *all* that rule needed.
       Tests: `tests/DumpDetective.Tests/Unit/Synthesis/InsightCorrelationRulesTests.cs` (13 tests).
       Removed 5 now-stale `InsightEngineTests.cs` tests that exercised the migrated methods via
       `InsightEngine.Analyze` directly (`FatalExceptionTypePresent` and 4 WCF-opening-timeout
       tests), plus the `BuildWcfResult` helper that only they used. Full suite: 1379 passed, 0
       failed, 4 skipped (real-dump/trace integration, expected) after this batch.
-- [ ] **10 of 17 `CorrelationRuleGroup` methods held, for three distinct reasons** — none are a
-      routine "add one measure" gap the way most of steps 6.2's earlier work was:
-      1. **`Finding` has no `EvidenceTables` equivalent at all — a real SDK-level gap, not a
-         per-rule one.** `InsightFinding.EvidenceTables` has no field on `Sdk.Synthesis.Finding`,
-         and nothing in `FindingSynthesisAdapter`/the report pipeline carries one through even if a
-         rule tried to attach it. Confirmed zero existing `*SynthesisRule` in this codebase uses
-         evidence tables today — this was never exercised by steps 2/3's single-analyzer rules
-         either. Blocks `DetectReferenceChainDominatorCorrelation`,
-         `DetectMemoryTypeGenerationCorrelation`, `DetectStringMemoryConcentration`, and (jointly
-         with reason 3) `DetectJitModuleHotspot`/`DetectCrashModuleHotspot`. Extending `Finding`
-         and the adapter/pipeline to carry evidence tables is a prerequisite for all of these, not
-         something to solve inside one rule.
+- [x] **`Finding.EvidenceTables` question resolved 2026-09-22 — not an SDK extension.** The gap
+      (`Sdk.Synthesis.Finding` has no equivalent of `InsightFinding.EvidenceTables`, and nothing in
+      `FindingSynthesisAdapter`/the report pipeline would carry one through even if a rule tried)
+      blocked `DetectReferenceChainDominatorCorrelation`, `DetectMemoryTypeGenerationCorrelation`,
+      `DetectStringMemoryConcentration`, `DetectJitModuleHotspot`, and `DetectCrashModuleHotspot`.
+      Ran the fix against [ReportSystemVision.md](../../ReportStructure/ReportSystemVision.md)
+      before building it: § 6.2 already decided **not** to pre-add `Claim`-shaped/report-rendering
+      fields to `Finding` ahead of the report phase ("no real synthesis rule exists yet to design
+      those fields against... revisit when this report phase actually starts"), and Appendix C
+      lists `CompactTable` — what an `EvidenceTable` becomes downstream — as exactly what the
+      future `dd-table` widget replaces, rendered live from observations a `Claim` cites rather
+      than carried as data on the finding. Adding an `EvidenceTables` field to `Finding` now would
+      mean building, and then discarding, the structure that decision already deferred.
+      **Resolution: don't extend `Finding`.** Per rule, decide whether the table is optional
+      supplementary detail or the finding's entire payload:
+      - `ReferenceChainDominatorCorrelationInsightRule` **migrated without its table** — the
+        original's own `Evidence` prose already stated the headline (offender count, the single
+        worst offender's name/bytes/%); only the full ranked list beyond the top offender is lost,
+        and every offending type is still individually cited via `Finding.DerivedFrom` as a
+        `reference-chain.type-sample` observation, so a future `dd-table` can render the exact same
+        list without this rule changing. Shipped 2026-09-22 alongside the other 7 — see its own
+        `<remarks>` for the full reasoning.
+      - `MemoryTypeGenerationCorrelation`/`StringMemoryConcentration`/`CrashModuleHotspot`/
+        `JitModuleHotspot` stay held — their tables aren't optional supplementary detail the way
+        `ReferenceChainDominatorCorrelation`'s was (see the per-method reasons below), so dropping
+        the table would mean dropping most of the finding's value, not a disclosed simplification.
+- [ ] **9 of 17 `CorrelationRuleGroup` methods held, for three distinct reasons, several methods
+      held on more than one** — none are a routine "add one measure" gap the way most of steps
+      6.2's earlier work was:
+      1. **The `EvidenceTables` decision above** holds `DetectMemoryTypeGenerationCorrelation`,
+         `DetectStringMemoryConcentration`, `DetectCrashModuleHotspot`, and `DetectJitModuleHotspot`
+         — for all four, the table is the finding's main payload, not supplementary detail the way
+         `ReferenceChainDominatorCorrelation`'s was, so dropping it isn't a reasonable disclosed
+         simplification.
       2. **`MemoryDomainResult.TopTypes` is an unbounded per-type list deliberately never promoted
          to an observation** (the same volume-risk reasoning `GCGenerationAnalyzer`'s own per-type
          list already got flagged for). `DetectDataTableLifecyclePattern`, `DetectKnownLeakPatterns`,
-         and `DetectMemoryTypeGenerationCorrelation` all scan it for known substrings
-         (DataColumn/DataTable/DataRow, TdsParser-closures, reflection-metadata types) or cross-join
-         it against another unbounded per-type list. A bounded, known-vocabulary observation (the
-         same shape as `TimerWrapperTypeNames`) could close the substring-scan cases; the full
-         cross-join case (`MemoryTypeGenerationCorrelation`) needs a bigger design decision, not a
-         quick fix. `DetectStringMemoryConcentration` also needs `TopTypes` (for `System.String`'s
-         size rank) and independently needs the `EvidenceTables` fix above.
+         `DetectMemoryTypeGenerationCorrelation`, and `DetectStringMemoryConcentration` all scan it
+         for known substrings (DataColumn/DataTable/DataRow, TdsParser-closures, reflection-metadata
+         types) or cross-join it against another unbounded per-type list. A bounded, known-vocabulary
+         observation (the same shape as `TimerWrapperTypeNames`) could close the substring-scan
+         cases; the full cross-join case (`MemoryTypeGenerationCorrelation`) needs a bigger design
+         decision, not a quick fix.
       3. **Large/complex enough to need a dedicated audit pass, not a quick fix squeezed into this
          batch**: `DetectClusterHangCorrelation` (four-way cross-reference —
          `ThreadStackClusterDomainResult`/`HangDomainResult`/`ThreadDomainResult`/
@@ -285,7 +306,7 @@ to match whatever the migrated rules actually set.
          carries counts, and `TopPinnedObjectsBySize`/`TopPinnedTargetTypes` are two independently-
          sorted rankings that may not share membership, so aligning them needs care, not a blind
          index-zip).
-      All 10 stay in `InsightEngine.CorrelationRuleGroup` for now, each with its own reason
+      All 9 stay in `InsightEngine.CorrelationRuleGroup` for now, each with its own reason
       documented inline in that class's leading comment.
 - [ ] **Retire `InsightEngine` only once every rule is ported (except the held
       `DetectAnalyzerFailures`, whose fate is a separate decision).** Delete the class down to
@@ -319,22 +340,35 @@ to match whatever the migrated rules actually set.
 ## Sizing note
 
 6.1 is done (see § 6.1). 6.2 is the large item: 39 rule methods, ~1,300 lines of detection logic.
-All three groups have started; 27 of 39 methods are migrated, 12 held. `BaselineRuleGroup` (10/11)
+All three groups have started; 28 of 39 methods are migrated, 11 held. `BaselineRuleGroup` (10/11)
 and `MemoryAndRuntimeRuleGroup` (10/11) had a low gap rate — 8/11 and 6/10 needed zero new emission,
 most of the rest needed one new measure on an existing observation, and two needed only a classifier
-formula duplicated locally. `CorrelationRuleGroup` (7/17 so far) confirmed the sizing note's own
+formula duplicated locally. `CorrelationRuleGroup` (8/17 so far) confirmed the sizing note's own
 warning: its gap profile is different and harder — fewer single-measure gaps, more structural
-blockers. The two biggest surprises there: one shared gap (`CrashDomainResult.ExceptionTypeCounts`
-never observed) unblocked 5 rules at once when closed, which is worth checking for again in any
-future group before auditing rule-by-rule; and a real SDK-level gap surfaced —
-`Sdk.Synthesis.Finding` has no `EvidenceTables` equivalent at all, blocking every remaining rule
-that renders a supplementary table (`ReferenceChainDominatorCorrelation`,
-`MemoryTypeGenerationCorrelation`, `StringMemoryConcentration`, and `CrashModuleHotspot`, plus
-`MemoryAndRuntimeRuleGroup`'s already-held `JitModuleHotspot`, which shares the same
-`EvidenceTables` need on top of its own separate per-module-JIT-observation gap). The other held
-`CorrelationRuleGroup` methods split into "needs `MemoryDomainResult.TopTypes`, an unbounded
-per-type list deliberately never observed" (4 methods) and "large/complex enough to need its own
-dedicated audit pass" (`ClusterHangCorrelation`, `StaticRootFinalizableCorrelation`,
+blockers.
+
+Two things surfaced there worth remembering for future groups:
+
+- **One shared gap can unblock several rules at once.** `CrashDomainResult.ExceptionTypeCounts`
+  had never been observed at all; closing it once unblocked 5 rules together. Worth checking for a
+  shared dependency like this before auditing method-by-method next time.
+- **A real SDK-level question surfaced, and got resolved by checking the report vision, not by
+  extending the SDK.** `Sdk.Synthesis.Finding` has no equivalent of `InsightFinding.EvidenceTables`,
+  which several rules' original methods used to attach a supplementary table. Ran that question
+  against [ReportSystemVision.md](../../ReportStructure/ReportSystemVision.md) before building
+  anything — § 6.2 already decided not to grow `Finding` toward `Claim`/report-rendering shape
+  ahead of the report phase, and Appendix C marks `CompactTable` (what an `EvidenceTable` becomes)
+  as exactly what the future `dd-table` widget replaces. So the SDK stays untouched; instead, each
+  blocked rule was judged individually on whether its table was optional supplementary detail or
+  the finding's whole payload. `ReferenceChainDominatorCorrelation` was the former — migrated
+  without its table, headline preserved in `Narrative`, every offending type still individually
+  cited via `DerivedFrom` for whenever a future `dd-table` wants to render the same list from
+  observations directly. `MemoryTypeGenerationCorrelation`/`StringMemoryConcentration`/
+  `CrashModuleHotspot`/`JitModuleHotspot` were the latter — stay held.
+
+The remaining held `CorrelationRuleGroup` methods split into "needs `MemoryDomainResult.TopTypes`,
+an unbounded per-type list deliberately never observed" (4 methods) and "large/complex enough to
+need its own dedicated audit pass" (`ClusterHangCorrelation`, `StaticRootFinalizableCorrelation`,
 `LongHeldTransactionOnOpenConnection`, `PinnedStringLeak`, `CrashModuleHotspot` — the last also
 needs a genuinely new per-module `LoadedModuleSnapshot.Size` observation, the same gap
 `JitModuleHotspot` needs). See § "CorrelationRuleGroup" above for the full per-method breakdown.

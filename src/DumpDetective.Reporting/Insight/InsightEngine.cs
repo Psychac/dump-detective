@@ -56,8 +56,10 @@ internal sealed class InsightEngine
     private const ulong PinnedStringLeakCriticalBytes = 20UL * 1024 * 1024; // 20 MB
     private const int CrashModuleHotspotMinActiveExceptions = 3;
     private const double CrashModuleHotspotDominantSharePct = 50.0;
-    private const double ReferenceChainDominatorWarningPct = 10.0;
-    private const double ReferenceChainDominatorCriticalPct = 25.0;
+    // ReferenceChainDominatorWarningPct/CriticalPct were removed here (phase 5 step 6.2,
+    // docs/refactor/modularity/phase-5-step6-insight-engine-plan.md) alongside
+    // DetectReferenceChainDominatorCorrelation, migrated without its evidence table — see
+    // ReferenceChainDominatorCorrelationInsightRule's own remarks for why.
 
     private const string Source = "InsightEngine";
 
@@ -219,18 +221,25 @@ internal sealed class InsightEngine
         }
     }
 
-    // 7 of this group's original 17 methods were migrated to *InsightRule ISynthesisRule classes
+    // 8 of this group's original 17 methods were migrated to *InsightRule ISynthesisRule classes
     // (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md § 6.2) and removed from here to
-    // avoid double-firing. The remaining 10 are held for various reasons documented in that doc:
+    // avoid double-firing. The remaining 9 are held for reasons documented in that doc:
     // DataTableLifecyclePattern/KnownLeakPatterns/MemoryTypeGenerationCorrelation/
     // StringMemoryConcentration need MemoryDomainResult.TopTypes, an unbounded per-type list
     // deliberately never promoted to an observation; StaticRootFinalizableCorrelation and
     // LongHeldTransactionOnOpenConnection need per-entity cross joins with no clean observation
     // shape yet; ClusterHangCorrelation and CrashModuleHotspot are large/complex enough to need
     // their own dedicated pass; PinnedStringLeak needs a per-type pinned-bytes measure that doesn't
-    // exist yet; ReferenceChainDominatorCorrelation, MemoryTypeGenerationCorrelation, and
-    // StringMemoryConcentration all also use InsightFinding.EvidenceTables, which
-    // Sdk.Synthesis.Finding has no equivalent field for at all — a real SDK gap, not a per-rule one.
+    // exist yet. ReferenceChainDominatorCorrelation (migrated) and the still-held
+    // MemoryTypeGenerationCorrelation/StringMemoryConcentration/CrashModuleHotspot/JitModuleHotspot
+    // all used InsightFinding.EvidenceTables, which Sdk.Synthesis.Finding has no equivalent field
+    // for — ran that question against docs/ReportStructure/ReportSystemVision.md § 6.2/Appendix C,
+    // which already decided not to grow Finding toward Claim/report-rendering shape ahead of the
+    // report phase, and separately marks CompactTable (what an EvidenceTable becomes) as something
+    // the future dd-table widget replaces, rendered live from cited observations instead of carried
+    // on the finding. So ReferenceChainDominatorCorrelation migrated without its table (see its own
+    // remarks) rather than growing Finding to keep it; the other three stay held since their tables
+    // aren't optional supplementary detail the way that one's was.
     private sealed class CorrelationRuleGroup : IInsightRuleGroup
     {
         public void Apply(List<InsightFinding> findings, in InsightRuleContext context)
@@ -245,7 +254,6 @@ internal sealed class InsightEngine
             DetectLongHeldTransactionOnOpenConnection(findings, context.SqlTxn, context.DbConn);
             DetectCrashModuleHotspot(findings, context.Crash, context.AppDomains);
             DetectClusterHangCorrelation(findings, context.Clusters, context.Hang, context.Threads, context.LockGraph);
-            DetectReferenceChainDominatorCorrelation(findings, context.ReferenceChain, context.Leak);
         }
     }
 
@@ -1149,72 +1157,6 @@ internal sealed class InsightEngine
             return;
         for (int i = 0; i < snapshots.Count; i++)
             map[snapshots[i].OSThreadId] = snapshots[i].StackRootCount;
-    }
-
-    /// <summary>
-    /// E-4 (docs/analysis/phase1/reference-chain-analyzer-audit.md): correlates
-    /// ReferenceChainAnalyzer's top-by-size type traces with DominatorAnalyzer's total heap size
-    /// to flag types whose representative sample dominates a disproportionate fraction of the
-    /// heap — closes the dotMemory "dominators" parity gap. Reuses <see cref="ReferenceTypeSampleSnapshot.RetainedBytes"/>
-    /// (already exact, dominator-tree-backed via E-2) rather than re-deriving retained size here.
-    /// </summary>
-    private static void DetectReferenceChainDominatorCorrelation(
-        List<InsightFinding> findings,
-        ReferenceChainDomainResult? referenceChain,
-        DominatorDomainResult? leak)
-    {
-        if (referenceChain is null || leak is null || leak.TotalHeapBytes == 0)
-            return;
-        if (referenceChain.TopTypeSampleTraces is not { Count: > 0 } traces)
-            return;
-
-        var offenders = new List<(string TypeName, ulong RetainedBytes, double Pct)>();
-        bool anyCritical = false;
-
-        for (int i = 0; i < traces.Count; i++)
-        {
-            ReferenceTypeSampleSnapshot trace = traces[i];
-            if (!trace.RetainedBytes.HasValue)
-                continue;
-
-            double pct = trace.RetainedBytes.Value * 100.0 / leak.TotalHeapBytes;
-            if (pct < ReferenceChainDominatorWarningPct)
-                continue;
-
-            offenders.Add((trace.TypeName, trace.RetainedBytes.Value, pct));
-            anyCritical |= pct >= ReferenceChainDominatorCriticalPct;
-        }
-
-        if (offenders.Count == 0)
-            return;
-
-        offenders.Sort(static (a, b) => b.Pct.CompareTo(a.Pct));
-
-        var rows = new List<IReadOnlyList<object?>>(offenders.Count);
-        for (int i = 0; i < offenders.Count; i++)
-            rows.Add(new object?[] { offenders[i].TypeName, FormatBytes(offenders[i].RetainedBytes), $"{offenders[i].Pct:F1}%" });
-
-        var evidenceTable = new FindingEvidenceTable(
-            "Types dominating a large heap fraction",
-            ["Type", "Retained Bytes", "% of Heap"],
-            rows);
-
-        (string TypeName, ulong RetainedBytes, double Pct) top = offenders[0];
-
-        findings.Add(new InsightFinding(
-            Analyzer: Source,
-            Category: "Memory",
-            Severity: anyCritical ? FindingSeverity.Critical : FindingSeverity.Warning,
-            Title: "Reference-chain type dominates a large heap fraction",
-            Evidence: $"{offenders.Count:N0} traced type(s) retain ≥ {ReferenceChainDominatorWarningPct:F0}% of the heap. " +
-                      $"Largest: {top.TypeName} retains {FormatBytes(top.RetainedBytes)} ({top.Pct:F1}% of {FormatBytes(leak.TotalHeapBytes)} total heap).",
-            Recommendation: "A single type's representative instance dominating this much of the heap indicates a small " +
-                            "number of objects (often a cache, collection, or singleton) are pinning a disproportionate " +
-                            "amount of memory. Inspect the reference-chain root path for these types to identify the owner.",
-            Tags: ["reference-chain", "dominator", "memory-leak", "cross-analyzer"],
-            MetricValue: top.Pct,
-            MetricUnit: "% of heap",
-            EvidenceTables: [evidenceTable]));
     }
 
     // ── Utilities (last block) ────────────────────────────────────────────────

@@ -6,6 +6,9 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
+using DumpDetective.Sdk.Observations;
+using DumpDetective.Sdk.Temporal;
 
 namespace DumpDetective.Analysis.Analyzers.Leaks;
 
@@ -141,7 +144,7 @@ public sealed class LeakCandidateAnalyzer : IAnalyzer, IProducesAnalyzerDomainRe
     private const int TimerLeakWarningThreshold = 100;
     private const int TimerLeakCriticalThreshold = 250;
 
-    public ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
+    public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -156,8 +159,70 @@ public sealed class LeakCandidateAnalyzer : IAnalyzer, IProducesAnalyzerDomainRe
 
         var options = context.AnalyzerOptions as LeakCandidateAnalyzerOptions ?? LeakCandidateAnalyzerOptions.Empty;
 
-        LastResult = Analyze(typeStatistics, heapRoots, objectLookup, rootPaths, options, cancellationToken);
-        return ValueTask.CompletedTask;
+        LeakCandidateDomainResult result = Analyze(typeStatistics, heapRoots, objectLookup, rootPaths, options, cancellationToken);
+        LastResult = result;
+
+        await EmitObservationsAsync(context, result, cancellationToken);
+    }
+
+    /// <summary>
+    /// Phase 5 step 6.1 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md): first
+    /// observation emission for this analyzer — deliberately raw per-type facts only.
+    /// <see cref="LeakCandidateRecord.SuspicionScore"/>/<see cref="LeakCandidateRecord.Severity"/>/
+    /// <see cref="LeakCandidateRecord.Classification"/> are composites (<see cref="Classify"/>/
+    /// <see cref="Score"/>) and stay out of <see cref="Measures"/> entirely, per the purity rule —
+    /// see observation-and-correlation-model.md § 2a. <c>IsStaticRooted</c> is included even though
+    /// it feeds a classifier downstream: it is itself a raw fact (a direct <see cref="IHeapRootQuery"/>
+    /// membership check on this analyzer's own <c>staticRoots</c> set inside <see cref="Analyze"/>),
+    /// not a derived judgment — the same distinction <c>IsFinalizableType</c>/<c>IsDelegateType</c>
+    /// flags elsewhere in this batch already rely on. <c>IsPinned</c>/<c>IsDependent</c> (from
+    /// <c>GCHandleAnalyzer</c>) and the logical timer count (from <c>TimerLeakAnalyzer</c>) are
+    /// deliberately not re-emitted here — <see cref="LeakCandidateSynthesisRule"/> reads those
+    /// directly off <c>handle.pinned-target-type</c>/<c>handle.dependent-target-type</c>/
+    /// <c>infra.timer-population</c>, the producing analyzers' own observations, rather than this
+    /// analyzer re-stating facts it doesn't own.
+    /// </summary>
+    private static async ValueTask EmitObservationsAsync(
+        AnalysisContext context, LeakCandidateDomainResult result, CancellationToken cancellationToken)
+    {
+        var capabilitiesUsed = new HashSet<Capability>
+        {
+            CapabilityVocabulary.HeapObjects, CapabilityVocabulary.HeapRoots, CapabilityVocabulary.HeapTypes,
+        };
+
+        foreach (LeakCandidateRecord candidate in result.TopCandidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            (string canonicalName, MatchFidelity typeFidelity) = EntityCanonicalizer.CanonicalizeTypeName(candidate.TypeName);
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "leak.candidate-type",
+                Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = typeFidelity }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["shallow.bytes"] = new Measure(candidate.TotalSize, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["instance.count"] = new Measure(candidate.InstanceCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["gen2.percent"] = new Measure(candidate.Gen2Pct, MeasureUnit.Percent, MeasureSemantics.Ratio),
+                    ["gen2.count"] = new Measure(candidate.Gen2Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["reference-field.ratio"] = new Measure(candidate.ReferenceFieldRatio, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                    ["is-finalizable.flag"] = new Measure(candidate.IsFinalizable ? 1 : 0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["is-container.flag"] = new Measure(candidate.IsContainer ? 1 : 0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["is-static-rooted.flag"] = new Measure(candidate.IsStaticRooted ? 1 : 0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["is-delegate.flag"] = new Measure(candidate.IsDelegate ? 1 : 0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Leak Candidate Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
     }
 
     private static LeakCandidateDomainResult Analyze(
@@ -268,7 +333,10 @@ public sealed class LeakCandidateAnalyzer : IAnalyzer, IProducesAnalyzerDomainRe
                 RootKind: rootKind,
                 IsFinalizable: isFinalizable,
                 IsContainer: isContainer,
-                ReferenceFieldRatio: referenceFieldRatio));
+                ReferenceFieldRatio: referenceFieldRatio,
+                IsStaticRooted: isStaticRooted,
+                IsDelegate: stat.IsDelegateType,
+                Gen2Count: stat.Gen2Count));
 
             Increment(byClass, classification);
         }

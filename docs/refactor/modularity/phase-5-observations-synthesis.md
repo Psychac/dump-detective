@@ -179,7 +179,12 @@ the one before it:
 3. **Carve out `LeakCandidateAnalyzer` explicitly.** It doesn't emit observations until `## Work`
    step 6 below (see the Stage-1 purity bullet above — distinct from playbook step f just above),
    so its `IFindingGenerator` cannot be retired alongside the rest in this playbook — state this
-   so "retire `IFindingGenerator`" doesn't implicitly assume 36/36.
+   so "retire `IFindingGenerator`" doesn't implicitly assume 36/36. **Resolved 2026-09-22**: step
+   6.1 shipped — `LeakCandidateAnalyzer` now emits observations, `LeakCandidateSynthesisRule`
+   replaced `LeakCandidateFindingGenerator` (deleted), and it was the *last* surviving
+   `IFindingGenerator`, so `services.GetServices<IFindingGenerator>()` is correctly empty now.
+   "Retire `IFindingGenerator`" is 36/36 as of this change. Details:
+   [phase-5-step6-insight-engine-plan.md § 6.1](phase-5-step6-insight-engine-plan.md#61--leakcandidateanalyzer-first-observation-emission--its-synthesis-rule).
 
 Judgment call, not a gate — decide before designing `Finding`/`ConfidenceBreakdown` in step 2/7,
 since redesigning after the fact is the expensive path:
@@ -417,7 +422,10 @@ actually starts, not before.
    `LeakCandidate`'s own per-type raw facts with `GCHandleDomainResult.TopPinnedTargetTypes` and
    `TimerLeakDomainResult.LogicalTimerCount` as a synthesis rule, replacing the informal
    cross-analyzer read `LeakCandidateAnalyzer` does inside its own stage 1 today. See the audit
-   doc's "Leak Candidate — deferred to Phase 5" section.
+   doc's "Leak Candidate — deferred to Phase 5" section. **Full implementation plan, split out
+   2026-09-22 once it stopped fitting inline (same reason step 2 and step 4 got their own docs):
+   [phase-5-step6-insight-engine-plan.md](phase-5-step6-insight-engine-plan.md). 6.1 (LeakCandidate)
+   shipped 2026-09-22; 6.2 (folding `InsightEngine` itself) not started.**
 6a. **Sections derive from observations, not from domain results.** This resolves the open question
    the earlier draft deferred, and it's the audit's central complaint: as long as
    `IAnalyzerSectionBuilder` reads `AnalyzerDomainResult` independently of the finding path, two
@@ -425,11 +433,13 @@ actually starts, not before.
    After this step, section builders are **presentation-only**: they shape already-decided
    observations and findings into blocks/tables/charts and never re-derive severity, banding, or
    row selection. `SectionLeadFinding` is always derived from the top-severity finding, never
-   constructed inline.
+   constructed inline. Implementation steps in
+   [phase-5-step6-insight-engine-plan.md § 6.3](phase-5-step6-insight-engine-plan.md#63--section-builders-become-presentation-only-6a).
 6b. **Consolidate the confidence ladders.** The three near-identical band/symbol tables
    (`SectionBuilderBase`, `ReportSectionAssembler.NormalizeSectionContractSlots`,
    `LeakAnalysisSectionBuilder`) collapse into `ConfidenceBreakdown` — though per the audit this is
-   worth doing *now* rather than waiting for this phase.
+   worth doing *now* rather than waiting for this phase. Implementation steps in
+   [phase-5-step6-insight-engine-plan.md § 6.4](phase-5-step6-insight-engine-plan.md#64--consolidate-confidence-ladders-6b).
 7. **Confidence plumbing.** Implement `ConfidenceBreakdown` with the caps from
    [observation-and-correlation-model.md § 4](observation-and-correlation-model.md) — identity
    fidelity, temporal alignment, capability fidelity. In a dump-only session most caps are 1.0, but

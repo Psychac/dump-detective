@@ -5,7 +5,7 @@ Finalizable Object, Segment Reservation) and the P1 fix plan (Crash/Exception, A
 both shipped 2026-09-08. Stage 1 purity audit (Smell A) also shipped 2026-09-17: 5 of 6 catalogued
 cases fixed (Hang, GC Root, Memory, Allocation Pattern, Event Leak); Leak Candidate deliberately
 deferred to Phase 5 (see its row in the Smell A table below) — it's cross-analyzer synthesis, not a
-same-shaped stage-1 extraction.
+same-shaped stage-1 extraction. **That deferred fix shipped 2026-09-22**, so Smell A is now 6 of 6.
 
 ## Current pipeline (as-built, 4 stages)
 
@@ -191,7 +191,7 @@ domain model found 6 analyzers computing genuine judgment (not raw facts) inside
 | Memory | `MemoryPressureScore` | `MemoryAnalysisProjection.cs:174-185` | Weighted composite: `lohPressure*0.35 + concentrationPressure*0.30 + smallObjectPressure*0.20 + densityPressure*0.15`, each sub-score normalized against a hand-picked constant (`/35.0`, `/70.0`, `/85.0`, `/45.0`, `/12_000.0`) | **FIXED.** All five pressure fields (composite + 4 sub-scores) removed from `MemoryDomainResult`; sole owner is `MemoryPressureClassifier`, which also absorbed the separately-flagged `pressureBand` narrative-text smell from `MemorySectionBuilder`. |
 | Allocation Pattern | `GCPressureLevel` (enum: Low/Moderate/High/Critical), `PromotionPressureScore` | `AllocationPatternDomainResult.cs:9,40-41`; classified via `AllocationPatternAnalyzer.ClassifyPressure(double)` | Same shape as Memory's pressure score — a classified band derived from a composite score | **FIXED.** Both fields removed (re-derivable from `Gen0CountPct`/`Gen2CountPct`/`LohSizePct`, no options-dependence); sole owner is `AllocationPatternPressureClassifier`. `AllocationProfile`/`TypeProfile`/the four `Top*TypeProfile` lists deliberately left alone — that's the separately-catalogued Smell B, not this smell. |
 | Event Leak | `SeverityScore` (on both `EventLeakGroupSnapshot` and `EventLeakInstanceSnapshot`) | `EventLeakDomainResult.cs:41,68` | Notably, the domain result already carries a `ScoringVersion` field (`EventLeakDomainResult.cs`) with the comment *"Bumped whenever the severity-scoring formula changes... trend comparisons across a version boundary are not meaningful"* — the team has already recognized this as a versioned scoring **algorithm**, which is exactly the kind of logic that belongs in a single, named, testable stage rather than embedded in the analyzer | **FIXED**, with a nuance. Instance-level `SeverityScore` removed (re-derivable; needed one new raw field, `HasLowIncomingRefs`). Group-level `MaxSeverityScore` (renamed from `SeverityScore`) **kept as a retained field** — it's a genuine streaming max-reduction over every instance the scanner touches, and only a bounded top-K sample is retained, so it's mathematically impossible to re-derive downstream without either keeping the full per-instance population (violates the project's no-materialization rule) or silently maxing over just the sample (a correctness regression). Sole owner of the formula either way is `EventLeakSeverityClassifier`; the 8 configurable `EventLeakOptions` severity weights are echoed once, at the top level of `EventLeakDomainResult` (`ScoringWeights`), not per-row. |
-| Leak Candidate | `SuspicionScore` (int), `Severity` (`Core.Enums.FindingSeverity` — literally `InsightFinding`'s own output type), `Classification` (`LeakClass`) | `LeakCandidateAnalyzer.cs:346-427` (`Classify`/`Score`) | Most extreme case: the domain row already carries a `FindingSeverity` value. `LeakCandidateFindingGenerator` and `LeakAnalysisSectionBuilder` both just relay `candidate.Severity` — stage 2 is a pass-through for this analyzer today, not an interpreter | **Deliberately deferred to Phase 5, not fixed here.** See "Leak Candidate — deferred to Phase 5" below; this isn't a same-shaped fix. |
+| Leak Candidate | `SuspicionScore` (int), `Severity` (`Core.Enums.FindingSeverity` — literally `InsightFinding`'s own output type), `Classification` (`LeakClass`) | `LeakCandidateAnalyzer.cs:346-427` (`Classify`/`Score`) | Most extreme case: the domain row already carries a `FindingSeverity` value. `LeakCandidateFindingGenerator` and `LeakAnalysisSectionBuilder` both just relay `candidate.Severity` — stage 2 is a pass-through for this analyzer today, not an interpreter | **Done, shipped 2026-09-22** — not a same-shaped fix, a cross-analyzer synthesis rule instead. `LeakCandidateFindingGenerator` retired; `LeakCandidateSynthesisRule` is the sole owner of the finding-facing `Classify`/`Score`/`Severity` now. `LeakCandidateAnalyzer.Analyze` still computes the same for its own domain result (unchanged — `LeakAnalysisSectionBuilder` still relays `candidate.Severity` from it), by design. See "Leak Candidate — deferred to Phase 5" below. |
 
 **The "likely-related fifth scoring location" is resolved — no reconciliation needed.**
 `ExplainableScoringEngine.ComputeScores` (`DumpDetective.Reporting/Services/ExplainableScoringEngine.cs:36-102`)
@@ -225,6 +225,15 @@ correct fix is a cross-analyzer synthesis rule that joins `LeakCandidate`'s own 
 `ConfidenceSectionBuilder` already do) — computed once, in the synthesis layer, not baked into any single
 analyzer's output. That's Phase 5's Insight-stage merge, not a classifier extraction. **Plan this
 specifically alongside Phase 5 implementation, not before it.**
+
+**Done, shipped 2026-09-22** — see
+[phase-5-step6-insight-engine-plan.md § 6.1](modularity/phase-5-step6-insight-engine-plan.md#61--leakcandidateanalyzer-first-observation-emission--its-synthesis-rule).
+`LeakCandidateSynthesisRule` now joins `LeakCandidateAnalyzer`'s new `leak.candidate-type`
+observations with `GCHandleAnalyzer`'s `handle.pinned-target-type`/`handle.dependent-target-type`
+and `TimerLeakAnalyzer`'s existing `infra.timer-population` — exactly the cross-analyzer
+multi-observation join anticipated here. `LeakCandidateAnalyzer.Analyze` still computes the same
+`Classify`/`Score` for its own domain result too (the "benign parallel selection" row above), by
+design — see the linked section for why that duplication was kept rather than removed.
 
 ### Smell B — Stage 1 pre-curates ranked/filtered views instead of exposing one raw table
 

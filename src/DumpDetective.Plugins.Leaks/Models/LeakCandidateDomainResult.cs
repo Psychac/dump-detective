@@ -28,6 +28,19 @@ internal sealed record LeakCandidateRecord(
     bool IsFinalizable,
     bool IsContainer,
     double ReferenceFieldRatio,
+    /// <summary>Raw fact, not a derived judgment — a direct <c>IHeapRootQuery</c> membership
+    /// check against this type's sample address. Feeds <c>Classify</c>'s composite classification
+    /// but is itself measurement, not judgment; see <c>LeakCandidateAnalyzer.EmitObservationsAsync</c>'s
+    /// own remarks (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md § 6.1).</summary>
+    bool IsStaticRooted = false,
+    /// <summary>Raw fact from <c>HeapTypeStatistics.IsDelegateType</c>, carried onto the record for
+    /// the same reason as <see cref="IsStaticRooted"/> — added alongside it, phase 5 step 6.1.</summary>
+    bool IsDelegate = false,
+    /// <summary>Raw <c>HeapTypeStatistics.Gen2Count</c> — <see cref="Gen2Pct"/> alone can't
+    /// reconstruct this exactly (it's a rounded percentage), and <c>Score</c>'s
+    /// isFinalizable/Gen2Count&gt;1000 branch needs the exact count. Added alongside
+    /// <see cref="IsStaticRooted"/>/<see cref="IsDelegate"/>, phase 5 step 6.1.</summary>
+    long Gen2Count = 0,
     /// <summary>
     /// P3-1/P3-2 (docs/analysis/phase1/gcroot-analyzer-audit.md): genuine "why is this alive"
     /// chain from a GC root down to this candidate's sample object — either a direct hit against

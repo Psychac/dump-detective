@@ -9,7 +9,6 @@ using DumpDetective.Cli.Services;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Capabilities;
-using DumpDetective.Reporting.FindingGenerators;
 using DumpDetective.Reporting.Formatters;
 using DumpDetective.Reporting.Services;
 using DumpDetective.Analysis.Trend;

@@ -1,5 +1,4 @@
 using DumpDetective.Analysis.Dump;
-using DumpDetective.Reporting.FindingGenerators;
 using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Trend;
 using DumpDetective.Cli.Commands;
@@ -51,7 +50,11 @@ public sealed class ServiceRegistrationTests
         services.GetRequiredService<ReportSerializer>().Should().NotBeNull();
         services.GetRequiredService<ReportBuilderFacade>().Should().NotBeNull();
         services.GetServices<IReportFormatter>().Should().HaveCount(4);
-        services.GetServices<IFindingGenerator>().Should().NotBeEmpty();
+        // Phase 5 step 6.1 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md) retired
+        // LeakCandidateFindingGenerator, the last analyzer still using this path — every
+        // AnalyzerFeatureModule now has a SynthesisRuleType instead, so zero IFindingGenerator
+        // registrations is the correct, fully-migrated state, not a regression.
+        services.GetServices<IFindingGenerator>().Should().BeEmpty();
         services.GetServices<IAnalyzerTrendComparer>().Should().NotBeEmpty();
     }
 

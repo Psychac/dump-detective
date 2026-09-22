@@ -244,6 +244,7 @@ public sealed class LeakCandidateAnalyzerRetypingCharacterizationTests
 
         DumpDetective.Sdk.Analysis.AnalysisContext context = new() {
             Observations = NoOpObservationSink.Instance,
+            ArtifactId = new DumpDetective.Sdk.Artifacts.ArtifactId("test-artifact"),
             HeapTypeStatistics = typeStatistics,
             HeapRoots = heapRoots ?? new FakeHeapRootQuery(),
             HeapObjectLookup = objectLookup ?? new FakeHeapObjectLookup(),

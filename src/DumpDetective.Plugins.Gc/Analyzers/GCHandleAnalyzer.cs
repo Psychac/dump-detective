@@ -205,6 +205,66 @@ public sealed class GCHandleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
                 Confidence = 1.0,
             }, cancellationToken);
         }
+
+        // Per-type Pinned/Dependent target population (phase 5 step 6.1,
+        // docs/refactor/modularity/phase-5-step6-insight-engine-plan.md) — same shape as
+        // TopRefCountedTargetTypes above, added specifically so LeakCandidateSynthesisRule can
+        // determine per-type isPinned/isDependent membership from observations instead of the
+        // CompletedRunResults cross-reference LeakCandidateAnalyzer used before this. Before this,
+        // handle.pinned only existed at the per-address level (TopPinnedHandleAddresses, bounded to
+        // GCHandleAnalysisOptions.TopPinnedHandleAddressesToShow), which is too narrow a population
+        // for a consumer that needs "every pinned target type", not just the top few addresses.
+        foreach (NameCountEntry entry in result.TopPinnedTargetTypes ?? [])
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            (string canonicalName, MatchFidelity typeFidelity) = EntityCanonicalizer.CanonicalizeTypeName(entry.Name);
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "handle.pinned-target-type",
+                Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = typeFidelity }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["instance.count"] = new Measure(entry.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "GC Handle Analysis",
+                    CapabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapHandles },
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
+
+        foreach (NameCountEntry entry in result.DependentTopTargetTypes ?? [])
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            (string canonicalName, MatchFidelity typeFidelity) = EntityCanonicalizer.CanonicalizeTypeName(entry.Name);
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "handle.dependent-target-type",
+                Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = typeFidelity }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["instance.count"] = new Measure(entry.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "GC Handle Analysis",
+                    CapabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapHandles },
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
     }
 
     private static GCHandleDomainResult Analyze(

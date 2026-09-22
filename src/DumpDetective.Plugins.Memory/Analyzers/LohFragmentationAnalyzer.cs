@@ -103,6 +103,40 @@ namespace DumpDetective.Analysis.Analyzers.Memory
         {
             var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapSegments };
 
+            // Whole-run LOH-only aggregate (phase 5 step 6.2, docs/refactor/modularity/
+            // phase-5-step6-insight-engine-plan.md) — the flat top-level FragmentationPercent/
+            // FreeBytes/FreeBlockCount/LargestFreeBlock fields on LohFragmentationDomainResult had no
+            // observation of their own before this; only the per-kind heap.loh-fragmentation rows
+            // below existed, and those don't carry FreeBlockCount at all. Added specifically so
+            // LohFragmentationSynthesisRule/InsightEngine's LOH-fragmentation and pinned-handle
+            // rules can read the same whole-LOH numbers the pre-migration InsightEngine read
+            // directly off the domain result.
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "heap.loh-fragmentation-summary",
+                Subjects = [],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["segment.count"] = new Measure(result.SegmentCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["total.bytes"] = new Measure(result.TotalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["free.bytes"] = new Measure(result.FreeBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["used.bytes"] = new Measure(result.UsedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["free-block.count"] = new Measure(result.FreeBlockCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["fragmentation.percent"] = new Measure(result.FragmentationPercent, MeasureUnit.Percent, MeasureSemantics.Ratio),
+                    ["largest-free-block.bytes"] = new Measure(result.LargestFreeBlock, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "LOH & POH Fragmentation Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+
             foreach (LohKindBreakdown kind in result.KindBreakdown ?? [])
             {
                 cancellationToken.ThrowIfCancellationRequested();

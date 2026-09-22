@@ -60,32 +60,11 @@ public sealed class InsightEngineTests
             && f.Title.Contains("Fatal exception", StringComparison.OrdinalIgnoreCase));
     }
 
-    [Fact]
-    public void Analyze_ShouldEmitCritical_WhenLohPressureExceedsThreshold()
-    {
-        InsightEngine engine = new();
-
-        MemoryDomainResult memory = new(
-            TotalBytes: 1_000,
-            LohBytes: 450,
-            LohPercent: 45.0,
-            TotalObjects: 10,
-            LohObjects: 1,
-            LohThresholdBytes: 85_000,
-            UniqueTypes: 3,
-            TopTypes: []);
-
-        AnalyzerRunResult[] runs =
-        [
-            BuildRun("Memory Analyzer", AnalyzerExecutionStatus.Success, memory)
-        ];
-
-        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
-
-        findings.Should().Contain(f =>
-            f.Severity == FindingSeverity.Critical
-            && f.Title.Contains("LOH", StringComparison.OrdinalIgnoreCase));
-    }
+    // Analyze_ShouldEmitCritical_WhenLohPressureExceedsThreshold moved to
+    // LohPressureInsightRuleTests (phase 5 step 6.2,
+    // docs/refactor/modularity/phase-5-step6-insight-engine-plan.md) — DetectLohPressure was
+    // migrated out of InsightEngine and removed, so exercising it via InsightEngine.Analyze is no
+    // longer possible.
 
     [Fact]
     public void Analyze_ShouldEmitCorrelation_WhenDominantClusterOverlapsHangWaitingThreads()

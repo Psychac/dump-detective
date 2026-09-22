@@ -116,39 +116,82 @@ plus a `"cross-analyzer"` tag, picked up by `InsightsSectionBuilder`'s `X1` "Cro
 section — any migration needs to either keep that convention or update the section builder's filter
 to match whatever the migrated rules actually set.
 
-- [ ] **Freeze a golden baseline for `InsightEngine.Analyze` first.** Check whether an existing
-      `InsightEngineTests.cs` fixture set already covers all 39 rules' trigger conditions; if it's
-      thin, build fixtures from each rule's own threshold constants before touching any migration
-      code — same as step 2's playbook item (a)/(b), just for one engine instead of one analyzer.
-- [ ] **Decide the rule-count/clustering shape before writing code.** Several `Detect*` methods
-      already share domain-result inputs (e.g. `DetectLohPressure`/`DetectLohFragmentation`/
-      `DetectPohGrowth`/`DetectLohArrayPressure`/`DetectPinnedHandlePressure` all touch LOH/handles/
-      segments together). Choose between one `ISynthesisRule` per `Detect*` method (39 small rules)
-      or fewer rules clustered by theme (Memory pressure, GC/handles, Threads/hang, Async,
-      Crash/modules, Sql/Wcf/Http) with several findings each — the per-analyzer precedent (one rule
-      per analyzer, several findings per rule) leans toward clustering, but confirm against how each
-      rule's `EvidenceTables`/ranking logic reads most naturally before committing.
-- [ ] **Audit every field each `Detect*` method reads against what's already an `Observation`** —
-      same audit shape as step 2's playbook item (c)/(d), run once per rule/cluster rather than
-      once per analyzer. Expect gaps: several methods reach into fields not obviously promoted yet
-      (e.g. `MemoryDomainResult.TopTypes`, `ModuleDomainResult.ConflictingAssemblyNames`,
-      `CrashDomainResult.TopCrashThreadCandidates`, `ThreadDomainResult.FinalizerThreadBlocked`).
-      Extend the owning analyzer's emission (and its `SdkRegistryConformanceTests.
-      KnownEmittedObservationTypes` entry) before writing the rule that needs it — never let a new
-      rule reach back into the old domain result for a value its observations don't carry. Expect
-      this audit to be the largest single piece of 6.2's work, larger than the rule-writing itself.
-- [ ] **Migrate rule-by-rule (or cluster-by-cluster), diffing against the frozen baseline each
-      time.**
-- [ ] **Reconcile `InsightsSectionBuilder`'s pickup filter.** Confirm migrated findings still land
-      in the `X1` section — either keep every migrated rule setting `Analyzer: "InsightEngine"` and
-      the `"cross-analyzer"` tag, or update `InsightsSectionBuilder.GetCrossDomainFindings`'s filter
-      condition to match the new convention. Verify via the frozen baseline diff, not by inspection.
-- [ ] **Retire `InsightEngine` only once every rule is ported and diff-clean.** Delete the class,
-      `DumpOrchestrationService.cs`'s `new InsightEngine().Analyze(...)` call, `sessionState.
-      Insights`, and `SingleDumpConsolePresenter.PrintInsights`.
+### Design decisions (resolved 2026-09-22)
+
+- **Golden baseline**: `InsightEngineTests.cs` (1,270 lines, 31 tests) already existed, but only
+  covers roughly 15 of the 39 rules — the newer/harder correlation rules, not the simpler
+  `BaselineRuleGroup` methods. It is not a complete baseline and was never treated as one; migration
+  instead verifies each rule against the *specific* tests that covered it (moved/adapted into the
+  new rule's own test file) plus new tests for previously-uncovered rules, then a full-suite run
+  after each migration. No single frozen-fixtures gate blocks starting — this is closer to step 2's
+  actual practice (per-analyzer tests, full suite as the safety net) than a literal "freeze first"
+  step.
+- **Rule-count shape: one `ISynthesisRule` per `Detect*` method**, not clustered by theme. The
+  per-analyzer precedent (one rule per analyzer, several findings per rule) doesn't map cleanly onto
+  `InsightEngine`, which never had a single owning analyzer to begin with; one rule per method keeps
+  each `ObservationQuery` tightly scoped to what that method actually reads, and `SynthesisEngine`'s
+  per-rule cost is sub-millisecond regardless of rule count (see `SynthesisEngine`'s own remarks) —
+  clustering would only add merge complexity for no measured benefit.
+- **Migrate incrementally, in the same class**, mirroring the single-analyzer retirement discipline
+  exactly: each `Detect*` method is removed from `InsightEngine.cs` (its rule group's `Apply` call
+  site first, then the method body) in the *same change* that adds its `*InsightRule` replacement —
+  never left coexisting, which would double-fire the finding. `InsightEngine` shrinks group by group
+  as rules migrate, rather than being deleted in one shot at the end.
+- **Naming/location**: new rules live under `DumpDetective.Reporting/SynthesisRules/Insight/`, named
+  `{ShortName}InsightRule`, registered explicitly in `DefaultSynthesisRuleCatalog.RuleTypes` (they
+  have no backing `IAnalyzer` for `PluginCatalogBuilder`'s naming convention to resolve). All keep
+  `Finding.Analyzer = "InsightEngine"` exactly, so `InsightsSectionBuilder.GetCrossDomainFindings`'s
+  existing filter (`Analyzer == "InsightEngine"`) keeps picking them up with no section-builder
+  change needed — confirmed, not just assumed, by the full-suite test run after each migration.
+- **`InsightByteFormat.FormatBytes`** (new, `SynthesisRules/Insight/`) is `InsightEngine.FormatBytes`
+  moved verbatim and shared by every migrated rule — deliberately not
+  `DumpDetective.Core.Utilities.FormatHelper.FormatBytes`, which rounds differently. All these rules
+  descend from the one `InsightEngine` source method, unlike per-analyzer rules elsewhere in this
+  folder which each replaced a distinct generator that may have had its own distinct formatting.
+
+### Progress tracker
+
+39 `Detect*` methods across 3 groups (`BaselineRuleGroup`: 11, `MemoryAndRuntimeRuleGroup`: 11,
+`CorrelationRuleGroup`: 17).
+
+- [x] **`BaselineRuleGroup`: 10 of 11 done, shipped 2026-09-22.** Migrated:
+      `LohPressureInsightRule`, `LohFragmentationInsightRule`, `PohGrowthInsightRule`,
+      `ThreadContentionInsightRule`, `FinalizerQueueBacklogInsightRule`,
+      `PinnedHandlePressureInsightRule`, `ActiveCrashInsightRule`, `LeakSuspicionInsightRule`,
+      `WastefulCollectionsInsightRule`, `OrphanedTaskAccumulationInsightRule`. All 10 were
+      observation-gap-free except two (`DetectLohFragmentation`, `DetectPinnedHandlePressure`),
+      which shared one small gap: `LohFragmentationDomainResult`'s whole-run
+      `FragmentationPercent`/`FreeBytes`/`FreeBlockCount`/`LargestFreeBlock` had no observation of
+      their own (only the per-kind `heap.loh-fragmentation` breakdown existed, which doesn't carry
+      `FreeBlockCount` at all) — closed by adding a new whole-run `heap.loh-fragmentation-summary`
+      observation to `LohFragmentationAnalyzer`. `DetectThreadContention`'s `HangDomainResult.
+      ThreadsHoldingLocks` turned out not to need a new observation either — it's the same
+      lock-holding-thread count `ThreadAnalyzer`'s `runtime.thread-triage` already observes
+      independently, so the rule reads that instead of adding a duplicate measure.
+      Tests: `tests/DumpDetective.Tests/Unit/Synthesis/InsightBaselineRulesTests.cs` (13 tests, one
+      nested class per rule). Full suite: 1357 passed, 0 failed, 4 skipped (real-dump/trace
+      integration, expected) after this batch.
+- [ ] **`DetectAnalyzerFailures` — held, not migrated.** Unlike every other rule, it reads raw
+      `AnalyzerRunResult` execution status (`Runs`), not any observation — there is no
+      `runtime-status`-shaped fact for an analyzer to emit; this is pipeline metadata, not a heap or
+      runtime fact. `SynthesisContext` (a currently-empty record) carries no run data at the real
+      call site either (`SynthesisFindingEnricher.cs` always constructs `new SynthesisContext()`).
+      Migrating this one needs a real design decision — extend `SynthesisContext` to optionally
+      carry `IReadOnlyList<AnalyzerRunResult>`, or accept it as a permanent hand-written exception
+      outside the observation model (the same shape as step 5's "genuine exception" bucket, just for
+      pipeline health instead of a domain composite). Left in `InsightEngine.BaselineRuleGroup` for
+      now — it's the sole remaining method in that group.
+- [ ] **`MemoryAndRuntimeRuleGroup` (11 methods)** — not started.
+- [ ] **`CorrelationRuleGroup` (17 methods)** — not started.
+- [ ] **Retire `InsightEngine` only once every rule is ported (except the held
+      `DetectAnalyzerFailures`, whose fate is a separate decision).** Delete the class down to
+      whatever `DetectAnalyzerFailures`'s resolution leaves, `DumpOrchestrationService.cs`'s
+      `new InsightEngine().Analyze(...)` call, `sessionState.Insights`, and
+      `SingleDumpConsolePresenter.PrintInsights` — update this once the last group ships, since the
+      exact shape depends on how `DetectAnalyzerFailures` gets resolved.
 - [ ] This closes the phase's own exit criterion — "`IFindingGenerator`/`InsightEngine` no longer
-      exist as separate concepts" — jointly with 6.1 (6.1 closes the last surviving
-      `IFindingGenerator`; 6.2 closes `InsightEngine`).
+      exist as separate concepts" — jointly with 6.1 (6.1 closed the last surviving
+      `IFindingGenerator`; 6.2 closes `InsightEngine`, `DetectAnalyzerFailures`'s fate permitting).
 
 ## 6.3 — Section builders become presentation-only (6a)
 
@@ -171,9 +214,13 @@ to match whatever the migrated rules actually set.
 
 ## Sizing note
 
-6.1 is scoped and bounded — one analyzer, one new rule, an existing template
-(`GCHandleSynthesisRule`) to follow. 6.2 is the large item: 39 rule methods, ~1,300 lines of
-detection logic, and an unknown-until-audited number of observation-emission gaps across a
-dozen-plus analyzers. Treat 6.2's observation-gap audit as its own checkpoint before committing to a
-rule-count/clustering design — the same way step 2's per-analyzer audit surfaced real gaps in 32 of
-35 analyzers before any rule got written.
+6.1 is done (see § 6.1). 6.2 is the large item: 39 rule methods, ~1,300 lines of detection logic.
+The first slice (`BaselineRuleGroup`, 11 methods) is done too — 10 migrated, 1 held — and its own
+observation-gap audit found only 1 real gap (shared by 2 rules), closed with one new whole-run
+observation; 8 of the 11 needed no new emission at all. Whether that gap-rate holds for the
+remaining 28 methods (`MemoryAndRuntimeRuleGroup` + `CorrelationRuleGroup`) is not yet known — several
+of those reach into fields the parent doc's original audit flagged as likely gaps (e.g.
+`MemoryDomainResult.TopTypes`, `ModuleDomainResult.ConflictingAssemblyNames`,
+`CrashDomainResult.TopCrashThreadCandidates`) that `BaselineRuleGroup` didn't happen to touch. Treat
+each remaining group's own observation-gap audit as its own checkpoint, the same way this one was,
+before assuming the same low gap-rate carries over.

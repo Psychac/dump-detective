@@ -425,7 +425,8 @@ actually starts, not before.
    doc's "Leak Candidate — deferred to Phase 5" section. **Full implementation plan, split out
    2026-09-22 once it stopped fitting inline (same reason step 2 and step 4 got their own docs):
    [phase-5-step6-insight-engine-plan.md](phase-5-step6-insight-engine-plan.md). 6.1 (LeakCandidate)
-   shipped 2026-09-22; 6.2 (folding `InsightEngine` itself) not started.**
+   shipped 2026-09-22; 6.2 (folding `InsightEngine` itself) started 2026-09-22 —
+   `BaselineRuleGroup`'s first 10 of 11 methods migrated, 2 groups (28 methods) still to go.**
 6a. **Sections derive from observations, not from domain results.** This resolves the open question
    the earlier draft deferred, and it's the audit's central complaint: as long as
    `IAnalyzerSectionBuilder` reads `AnalyzerDomainResult` independently of the finding path, two

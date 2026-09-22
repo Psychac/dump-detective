@@ -188,6 +188,10 @@ public sealed partial class EventLeakAnalyzer : IAnalyzer, IProducesAnalyzerDoma
                 ["total.count"] = new Measure(result.TotalEventLeakInstances, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["instance-leak.count"] = new Measure(result.InstanceEventLeakCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                 ["static-leak.count"] = new Measure(result.StaticEventLeakCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                // Added phase 5 step 6.2 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md)
+                // for EventLeakPatternInsightRule — already an exact field on the domain result, no
+                // new aggregation needed.
+                ["subscriber.count"] = new Measure(result.TotalSubscribers, MeasureUnit.Count, MeasureSemantics.Absolute),
             },
             Provenance = new Provenance
             {

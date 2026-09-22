@@ -342,19 +342,27 @@ public sealed class ReferenceChainAnalyzer : IAnalyzer, IProducesAnalyzerDomainR
             // DominantSampleRootKind) that finalizer-only-retention detection needs, and covers
             // every pending type (not just the ones with a resolvable sample address).
             (string canonicalTypeName, MatchFidelity typeFidelity) = EntityCanonicalizer.CanonicalizeTypeName(pending.TypeName);
+            var typeSampleMeasures = new Dictionary<string, Measure>
+            {
+                ["instance.count"] = new Measure(pending.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["sample.count"] = new Measure(sampleCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["retained-sample.count"] = new Measure(retainedSampleCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                ["dominant-root-kind.count"] = new Measure(dominantRootKindCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            };
+            // Added phase 5 step 6.2 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md)
+            // for ReferenceChainDominatorCorrelationInsightRule — only present when RetainedBytes
+            // was actually computed (dominator tree available), same optionality as the domain
+            // record's own nullable field.
+            if (pending.RetainedBytes.HasValue)
+                typeSampleMeasures["retained.bytes"] = new Measure(pending.RetainedBytes.Value, MeasureUnit.Bytes, MeasureSemantics.Absolute);
+
             await observationContext.Observations.EmitAsync(new Observation
             {
                 Id = ObservationId.NewId(),
                 ObservationType = "reference-chain.type-sample",
                 Subjects = [new TypeRef { CanonicalName = canonicalTypeName, Fidelity = typeFidelity }],
                 When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
-                Measures = new Dictionary<string, Measure>
-                {
-                    ["instance.count"] = new Measure(pending.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
-                    ["sample.count"] = new Measure(sampleCount, MeasureUnit.Count, MeasureSemantics.Absolute),
-                    ["retained-sample.count"] = new Measure(retainedSampleCount, MeasureUnit.Count, MeasureSemantics.Absolute),
-                    ["dominant-root-kind.count"] = new Measure(dominantRootKindCount, MeasureUnit.Count, MeasureSemantics.Absolute),
-                },
+                Measures = typeSampleMeasures,
                 Provenance = new Provenance
                 {
                     Artifact = observationContext.ArtifactId!.Value,

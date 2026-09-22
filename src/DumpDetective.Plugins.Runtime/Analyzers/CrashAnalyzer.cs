@@ -351,6 +351,39 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
                 Confidence = 1.0,
             }, cancellationToken);
 
+            // Per-type ALL-exception population (phase 5 step 6.2, docs/refactor/modularity/
+            // phase-5-step6-insight-engine-plan.md) — runtime.active-exception above only covers
+            // currently-active exceptions; several InsightEngine correlation rules need the
+            // all-exception ExceptionTypeCounts breakdown (fatal-type detection, timeout/
+            // ObjectDisposed/TaskCanceled pattern matching), which had no observation of its own.
+            // Bounded by distinct exception type count (unique-types.count above), not exception
+            // instance count.
+            foreach (KeyValuePair<string, int> kv in exceptionTypeCounts)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                (string canonicalName, MatchFidelity typeFidelity) = EntityCanonicalizer.CanonicalizeTypeName(kv.Key);
+
+                await observationContext.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "runtime.exception-type",
+                    Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = typeFidelity }],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["instance.count"] = new Measure(kv.Value, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = observationContext.ArtifactId!.Value,
+                        AnalyzerKey = "Crash Analysis",
+                        CapabilitiesUsed = observationCapabilities,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                }, cancellationToken);
+            }
+
             foreach (CrashThreadCandidate candidate in topCrashThreadCandidates)
             {
                 cancellationToken.ThrowIfCancellationRequested();

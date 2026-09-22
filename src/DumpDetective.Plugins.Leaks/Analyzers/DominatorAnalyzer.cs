@@ -292,6 +292,11 @@ public sealed class DominatorAnalyzer :
                 ["retained.bytes"] = new Measure(result.TotalEstimatedRetainedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                 ["pressure.ratio"] = new Measure(
                     result.TotalHeapBytes > 0 ? (double)result.TotalEstimatedRetainedBytes / result.TotalHeapBytes : 0.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                // Added phase 5 step 6.2 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md)
+                // for ReferenceChainDominatorCorrelationInsightRule — pressure.ratio alone can't
+                // reconstruct this exactly (division is lossy at ratio == 0), and the rule needs the
+                // raw denominator to compute its own per-type retained-bytes percentages.
+                ["total.bytes"] = new Measure(result.TotalHeapBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
             },
             Provenance = new Provenance
             {

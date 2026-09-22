@@ -33,32 +33,10 @@ public sealed class InsightEngineTests
             && f.Title.Contains("analyzer(s) failed", StringComparison.OrdinalIgnoreCase));
     }
 
-    [Fact]
-    public void Analyze_ShouldEmitCritical_WhenFatalExceptionTypePresent()
-    {
-        InsightEngine engine = new();
-
-        CrashDomainResult crash = new(
-            TotalExceptions: 3,
-            ActiveExceptions: 0,
-            ExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal)
-            {
-                ["System.OutOfMemoryException"] = 1,
-                ["System.InvalidOperationException"] = 2,
-            },
-            ActiveExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal));
-
-        AnalyzerRunResult[] runs =
-        [
-            BuildRun("Crash Analyzer", AnalyzerExecutionStatus.Success, crash)
-        ];
-
-        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
-
-        findings.Should().Contain(f =>
-            f.Severity == FindingSeverity.Critical
-            && f.Title.Contains("Fatal exception", StringComparison.OrdinalIgnoreCase));
-    }
+    // Analyze_ShouldEmitCritical_WhenFatalExceptionTypePresent moved to
+    // FatalExceptionOnHeapInsightRuleTests (phase 5 step 6.2,
+    // docs/refactor/modularity/phase-5-step6-insight-engine-plan.md) — DetectFatalExceptionOnHeap
+    // was migrated out of InsightEngine and removed.
 
     // Analyze_ShouldEmitCritical_WhenLohPressureExceedsThreshold moved to
     // LohPressureInsightRuleTests (phase 5 step 6.2,
@@ -1020,117 +998,13 @@ public sealed class InsightEngineTests
         findings.Should().NotContain(f => f.Title.Contains("held by a live transaction", StringComparison.OrdinalIgnoreCase));
     }
 
-    [Fact]
-    public void Analyze_ShouldEmitFinding_WhenOpeningChannelsCoincideWithTimeoutExceptions()
-    {
-        InsightEngine engine = new();
-
-        WcfChannelDomainResult wcf = BuildWcfResult(opening: 1);
-
-        CrashDomainResult crash = new(
-            TotalExceptions: 1,
-            ActiveExceptions: 0,
-            ExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal)
-            {
-                ["System.TimeoutException"] = 1,
-            },
-            ActiveExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal));
-
-        AnalyzerRunResult[] runs =
-        [
-            BuildRun("WCF Channel Analysis", AnalyzerExecutionStatus.Success, wcf),
-            BuildRun("Crash Analyzer", AnalyzerExecutionStatus.Success, crash),
-        ];
-
-        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
-
-        findings.Should().Contain(f =>
-            f.Severity == FindingSeverity.Info
-            && f.Title.Contains("stuck Opening", StringComparison.OrdinalIgnoreCase));
-    }
-
-    [Fact]
-    public void Analyze_ShouldEscalateToWarning_WhenOpeningChannelCountIsHigh()
-    {
-        InsightEngine engine = new();
-
-        WcfChannelDomainResult wcf = BuildWcfResult(opening: 5);
-
-        CrashDomainResult crash = new(
-            TotalExceptions: 1,
-            ActiveExceptions: 0,
-            ExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal)
-            {
-                ["System.TimeoutException"] = 1,
-            },
-            ActiveExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal));
-
-        AnalyzerRunResult[] runs =
-        [
-            BuildRun("WCF Channel Analysis", AnalyzerExecutionStatus.Success, wcf),
-            BuildRun("Crash Analyzer", AnalyzerExecutionStatus.Success, crash),
-        ];
-
-        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
-
-        findings.Should().Contain(f =>
-            f.Severity == FindingSeverity.Warning
-            && f.Title.Contains("stuck Opening", StringComparison.OrdinalIgnoreCase));
-    }
-
-    [Fact]
-    public void Analyze_ShouldNotEmitOpeningTimeoutFinding_WhenNoTimeoutExceptionsPresent()
-    {
-        InsightEngine engine = new();
-
-        WcfChannelDomainResult wcf = BuildWcfResult(opening: 3);
-
-        CrashDomainResult crash = new(
-            TotalExceptions: 1,
-            ActiveExceptions: 0,
-            ExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal)
-            {
-                ["System.InvalidOperationException"] = 1,
-            },
-            ActiveExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal));
-
-        AnalyzerRunResult[] runs =
-        [
-            BuildRun("WCF Channel Analysis", AnalyzerExecutionStatus.Success, wcf),
-            BuildRun("Crash Analyzer", AnalyzerExecutionStatus.Success, crash),
-        ];
-
-        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
-
-        findings.Should().NotContain(f => f.Title.Contains("stuck Opening", StringComparison.OrdinalIgnoreCase));
-    }
-
-    [Fact]
-    public void Analyze_ShouldNotEmitOpeningTimeoutFinding_WhenNoChannelsAreOpening()
-    {
-        InsightEngine engine = new();
-
-        WcfChannelDomainResult wcf = BuildWcfResult(opening: 0);
-
-        CrashDomainResult crash = new(
-            TotalExceptions: 1,
-            ActiveExceptions: 0,
-            ExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal)
-            {
-                ["System.TimeoutException"] = 1,
-            },
-            ActiveExceptionTypeCounts: new Dictionary<string, int>(StringComparer.Ordinal));
-
-        AnalyzerRunResult[] runs =
-        [
-            BuildRun("WCF Channel Analysis", AnalyzerExecutionStatus.Success, wcf),
-            BuildRun("Crash Analyzer", AnalyzerExecutionStatus.Success, crash),
-        ];
-
-        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
-
-        findings.Should().NotContain(f => f.Title.Contains("stuck Opening", StringComparison.OrdinalIgnoreCase));
-    }
+    // Analyze_ShouldEmitFinding_WhenOpeningChannelsCoincideWithTimeoutExceptions,
+    // Analyze_ShouldEscalateToWarning_WhenOpeningChannelCountIsHigh,
+    // Analyze_ShouldNotEmitOpeningTimeoutFinding_WhenNoTimeoutExceptionsPresent, and
+    // Analyze_ShouldNotEmitOpeningTimeoutFinding_WhenNoChannelsAreOpening moved to
+    // WcfOpeningTimeoutCorrelationInsightRuleTests (phase 5 step 6.2,
+    // docs/refactor/modularity/phase-5-step6-insight-engine-plan.md) -
+    // DetectWcfOpeningTimeoutCorrelation was migrated out of InsightEngine and removed.
 
     [Fact]
     public void Analyze_ReferenceChainTypeBelowHeapFractionThreshold_EmitsNoDominatorCorrelationFinding()
@@ -1225,18 +1099,6 @@ public sealed class InsightEngineTests
         TotalEstimatedRetainedBytes: 0,
         TopDominatorTypes: [],
         TotalHeapBytes: totalHeapBytes);
-
-    private static WcfChannelDomainResult BuildWcfResult(int opening) => new(
-        WcfPresent: true,
-        TotalChannels: opening + 1,
-        OpeningChannels: opening,
-        OpenedChannels: 1,
-        FaultedChannels: 0,
-        ClosingChannels: 0,
-        ClosedChannels: 0,
-        OtherChannels: 0,
-        ByType: [],
-        TopFaultedChannels: []);
 
     private static AnalyzerRunResult BuildRun(string analyzerName, AnalyzerExecutionStatus status, AnalyzerDomainResult? result = null)
         => new(

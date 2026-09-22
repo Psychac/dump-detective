@@ -26,23 +26,16 @@ internal sealed class InsightEngine
     // ── Thresholds ────────────────────────────────────────────────────────────
 
     // LohPressureWarningPct/CriticalPct, PohPressureWarningPct, LohFragCriticalPct,
-    // ThreadBlockedWarningPct/CriticalPct, FinalizerQueueCritical, and PinnedHandleWarning were
-    // removed here (phase 5 step 6.2, docs/refactor/modularity/phase-5-step6-insight-engine-plan.md)
-    // alongside the Detect* methods that were their only reader — each now lives as a private const
-    // on its own *InsightRule class instead. LohFragWarningPct and FinalizerQueueWarning stay: still
-    // read by DetectLohArrayPressure/DetectEventLeakPattern below, not yet migrated.
-    private const double LohFragWarningPct = 30.0;
-    private const int FinalizerQueueWarning = 1_000;
+    // ThreadBlockedWarningPct/CriticalPct, FinalizerQueueCritical, PinnedHandleWarning,
+    // LohFragWarningPct, and FinalizerQueueWarning were removed here (phase 5 step 6.2,
+    // docs/refactor/modularity/phase-5-step6-insight-engine-plan.md) alongside the Detect* methods
+    // that were their only readers (DetectLohArrayPressure, DetectPinnedHandlePressure,
+    // DetectEventLeakPattern) — each now lives as a private const on its own *InsightRule class
+    // instead.
     private const int AnalyzerFailureWarning = 3;
 
-    // Fatal exception detection
-    private static readonly HashSet<string> FatalExceptionTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "System.OutOfMemoryException",
-        "System.StackOverflowException",
-        "System.ExecutionEngineException",
-        "System.AccessViolationException",
-    };
+    // FatalExceptionTypes was removed here too (same step 6.2 change) — its only reader,
+    // DetectFatalExceptionOnHeap, is now FatalExceptionOnHeapInsightRule's own copy.
 
     // New thresholds for Part 4 additions. StringDuplicationWarningRatio, WeakRefDeadTargetWarningRatio,
     // EphemeralFillCriticalPct, DynamicModuleWarning, JitHeapBloatThreshold,
@@ -226,26 +219,31 @@ internal sealed class InsightEngine
         }
     }
 
+    // 7 of this group's original 17 methods were migrated to *InsightRule ISynthesisRule classes
+    // (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md § 6.2) and removed from here to
+    // avoid double-firing. The remaining 10 are held for various reasons documented in that doc:
+    // DataTableLifecyclePattern/KnownLeakPatterns/MemoryTypeGenerationCorrelation/
+    // StringMemoryConcentration need MemoryDomainResult.TopTypes, an unbounded per-type list
+    // deliberately never promoted to an observation; StaticRootFinalizableCorrelation and
+    // LongHeldTransactionOnOpenConnection need per-entity cross joins with no clean observation
+    // shape yet; ClusterHangCorrelation and CrashModuleHotspot are large/complex enough to need
+    // their own dedicated pass; PinnedStringLeak needs a per-type pinned-bytes measure that doesn't
+    // exist yet; ReferenceChainDominatorCorrelation, MemoryTypeGenerationCorrelation, and
+    // StringMemoryConcentration all also use InsightFinding.EvidenceTables, which
+    // Sdk.Synthesis.Finding has no equivalent field for at all — a real SDK gap, not a per-rule one.
     private sealed class CorrelationRuleGroup : IInsightRuleGroup
     {
         public void Apply(List<InsightFinding> findings, in InsightRuleContext context)
         {
-            DetectFatalExceptionOnHeap(findings, context.Crash);
-            DetectEventLeakPattern(findings, context.EventLeaks, context.GcGen, context.Finalizable);
             DetectDataTableLifecyclePattern(findings, context.Finalizable, context.Memory);
             DetectStaticRootFinalizableCorrelation(findings, context.StaticRoot, context.Finalizable);
             DetectKnownLeakPatterns(findings, context.Memory);
             DetectMemoryTypeGenerationCorrelation(findings, context.Memory, context.GcGen);
             DetectStringMemoryConcentration(findings, context.Memory, context.Strings);
             DetectPinnedStringLeak(findings, context.Handles);
-            DetectRecurringTimeoutPattern(findings, context.Crash);
 
-            DetectDbConnectionLeak(findings, context.DbConn, context.Crash);
             DetectLongHeldTransactionOnOpenConnection(findings, context.SqlTxn, context.DbConn);
             DetectCrashModuleHotspot(findings, context.Crash, context.AppDomains);
-            DetectWcfChannelFault(findings, context.Wcf, context.Crash);
-            DetectWcfOpeningTimeoutCorrelation(findings, context.Wcf, context.Crash);
-            DetectHttpClientAccumulation(findings, context.Http);
             DetectClusterHangCorrelation(findings, context.Clusters, context.Hang, context.Threads, context.LockGraph);
             DetectReferenceChainDominatorCorrelation(findings, context.ReferenceChain, context.Leak);
         }
@@ -466,85 +464,6 @@ internal sealed class InsightEngine
     }
 
     // ── Utilities ─────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Raises a Critical finding when fatal exception type(s) — OOM, SOE, EEE, AV —
-    /// are found on the managed heap, even when no exception is currently active.
-    /// Their presence indicates the process experienced a near-fatal event prior to the dump.
-    /// </summary>
-    private static void DetectFatalExceptionOnHeap(
-        List<InsightFinding> findings,
-        CrashDomainResult? crash)
-    {
-        if (crash is null || crash.TotalExceptions == 0)
-            return;
-
-        var fatalFound = new List<string>();
-        foreach (KeyValuePair<string, int> kv in crash.ExceptionTypeCounts)
-        {
-            if (FatalExceptionTypes.Contains(kv.Key))
-                fatalFound.Add($"{kv.Key} ×{kv.Value}");
-        }
-
-        if (fatalFound.Count == 0)
-            return;
-
-        findings.Add(new InsightFinding(
-            Analyzer: Source,
-            Category: "Crash",
-            Severity: FindingSeverity.Critical,
-            Title: "Fatal exception type(s) found on managed heap",
-            Evidence: $"Fatal exception object(s) present: {string.Join(", ", fatalFound)}. " +
-                      "These exception types indicate a previous near-fatal process event.",
-            Recommendation: "OutOfMemoryException: reduce allocations, enable large address space, or scale out. " +
-                            "StackOverflowException: review recursive call depth and unbounded recursion. " +
-                            "ExecutionEngineException: indicates CLR corruption — check native interop and upgrade runtime. " +
-                            "AccessViolationException: unsafe code or native interop writing beyond allocated buffers.",
-            Tags: ["crash", "fatal-exception", "oom", "soe", "critical"]));
-    }
-
-    /// <summary>
-    /// Cross-correlates event leak subscriptions with high Gen2 and finalizer queue pressure.
-    /// Emits a finding only when at least one other signal is present to avoid duplicate noise.
-    /// </summary>
-    private static void DetectEventLeakPattern(
-        List<InsightFinding> findings,
-        EventLeakDomainResult? eventLeaks,
-        GCGenerationDomainResult? gcGen,
-        FinalizableObjectDomainResult? finalizable)
-    {
-        if (eventLeaks is null || eventLeaks.TotalEventLeakInstances == 0)
-            return;
-
-        bool highGen2 = gcGen is not null && gcGen.Gen2Pct >= 40.0;
-        bool highFinalizer = finalizable is not null && finalizable.FinalizerQueueCount >= FinalizerQueueWarning;
-
-        // Only emit cross-cutting finding when at least one other signal correlates.
-        if (!highGen2 && !highFinalizer)
-            return;
-
-        string gen2Note = highGen2
-            ? $" Gen2 holds {gcGen!.Gen2Pct:F1}% of managed heap — event subscribers may be keeping objects alive across GC generations."
-            : string.Empty;
-
-        string finNote = highFinalizer
-            ? $" Finalizer queue has {finalizable!.FinalizerQueueCount:N0} objects — some may be retained by event subscription chains."
-            : string.Empty;
-
-        findings.Add(new InsightFinding(
-            Analyzer: Source,
-            Category: "Memory",
-            Severity: FindingSeverity.Warning,
-            Title: "Event subscriptions likely amplify Gen2 and finalizer queue pressure",
-            Evidence: $"{eventLeaks.TotalEventLeakInstances:N0} event-leak group(s) with " +
-                      $"{eventLeaks.TotalSubscribers:N0} total subscribers detected.{gen2Note}{finNote}",
-            Recommendation: "Unsubscribe event handlers in Dispose() to release publisher references. " +
-                            "Use WeakEventManager or weak-reference delegate patterns for long-lived publishers. " +
-                            "Review PropertyChanged and custom event patterns for unbounded subscription growth.",
-            Tags: ["event-leak", "gen2", "finalizer", "cross-cutting"],
-            MetricValue: eventLeaks.TotalSubscribers,
-            MetricUnit: "subscribers"));
-    }
 
     /// <summary>
     /// Detects classic DataTable/DataColumn/DataRow accumulation: DataColumn objects carry
@@ -988,110 +907,6 @@ internal sealed class InsightEngine
         }
     }
 
-    /// <summary>
-    /// Raises a Warning when a large number of operational timeout exceptions are present on the heap,
-    /// indicating systematic connection pool exhaustion, network instability, or slow dependencies.
-    /// </summary>
-    private static bool IsTimeoutExceptionType(string typeName) =>
-        typeName is "System.TimeoutException" or
-            "System.OperationCanceledException" or
-            "System.Net.WebException" ||
-        typeName.EndsWith("TimeoutException", StringComparison.OrdinalIgnoreCase);
-
-    private static void DetectRecurringTimeoutPattern(
-        List<InsightFinding> findings,
-        CrashDomainResult? crash)
-    {
-        if (crash is null || crash.TotalExceptions == 0)
-            return;
-
-        int timeoutCount = 0;
-        int objectDisposedCount = 0;
-        int taskCanceledCount = 0;
-
-        foreach (KeyValuePair<string, int> kv in crash.ExceptionTypeCounts)
-        {
-            if (IsTimeoutExceptionType(kv.Key))
-            {
-                timeoutCount += kv.Value;
-            }
-            else if (kv.Key is "System.ObjectDisposedException")
-            {
-                objectDisposedCount += kv.Value;
-            }
-            else if (kv.Key is "System.Threading.Tasks.TaskCanceledException" or
-                     "System.OperationCanceledException")
-            {
-                taskCanceledCount += kv.Value;
-            }
-        }
-
-        if (timeoutCount < 10)
-            return;
-
-        string disposedNote = objectDisposedCount >= 5
-            ? $" Combined with {objectDisposedCount:N0} ObjectDisposedException(s), this may indicate connections " +
-              "being used after pool exhaustion or channel faults."
-            : string.Empty;
-
-        findings.Add(new InsightFinding(
-            Analyzer: Source,
-            Category: "Exceptions",
-            Severity: timeoutCount >= 20 ? FindingSeverity.Warning : FindingSeverity.Info,
-            Title: "Recurring timeout exceptions indicate dependency instability",
-            Evidence: $"{timeoutCount:N0} timeout/cancellation exception(s) on heap.{disposedNote}",
-            Recommendation: "Review connection pool sizing, query/call timeouts, and retry policies. " +
-                            "High timeout counts often indicate: (1) DB connection pool exhaustion, " +
-                            "(2) downstream service latency, or (3) network intermittency. " +
-                            "Correlate with DB connections on heap and WCF channel state.",
-            Tags: ["timeout", "exceptions", "connection-pool", "performance"],
-            MetricValue: timeoutCount,
-            MetricUnit: "exceptions"));
-    }
-
-    // ── Infrastructure detection rules ────────────────────────────────────────
-
-    private static void DetectDbConnectionLeak(
-        List<InsightFinding> findings,
-        DbConnectionDomainResult? dbConn,
-        CrashDomainResult? crash)
-    {
-        if (dbConn is null || !dbConn.ConnectionsFound) return;
-
-        // Already covered by DbConnectionFindingGenerator for the direct findings.
-        // InsightEngine cross-correlates with timeout/crash exceptions.
-        if (dbConn.TotalConnections < 10) return;
-
-        int timeoutCount = 0;
-        if (crash?.ExceptionTypeCounts is not null)
-        {
-            foreach (KeyValuePair<string, int> kv in crash.ExceptionTypeCounts)
-            {
-                if (kv.Key.Contains("Timeout", StringComparison.OrdinalIgnoreCase) ||
-                    kv.Key is "System.InvalidOperationException") // "Timeout expired waiting for a pool"
-                    timeoutCount += kv.Value;
-            }
-        }
-
-        if (dbConn.OpenConnections >= 10 && timeoutCount >= 5)
-        {
-            findings.Add(new InsightFinding(
-                Analyzer: Source,
-                Category: "Infrastructure",
-                Severity: FindingSeverity.Critical,
-                Title: "DB connection pool exhaustion suspected",
-                Evidence: $"{dbConn.OpenConnections:N0} open connections on heap combined with " +
-                          $"{timeoutCount:N0} timeout/InvalidOperation exception(s) strongly indicates " +
-                          "connection pool exhaustion.",
-                Recommendation: "Verify Max Pool Size in the connection string. " +
-                                "Ensure all SqlConnection objects are disposed (use 'using'). " +
-                                "Check for long-running transactions holding connections open. " +
-                                "Consider connection pool monitoring via Performance Counters.",
-                Tags: ["infrastructure", "connections", "timeout", "pool-exhaustion"],
-                MetricValue: dbConn.OpenConnections,
-                MetricUnit: "open connections"));
-        }
-    }
 
     // R8 (docs/analysis/phase1/DbConnectionAnalyzer-audit.md): correlates SqlTransactionAnalyzer's
     // Active transaction snapshots (still referencing their owning connection) against
@@ -1134,122 +949,6 @@ internal sealed class InsightEngine
             Tags: ["infrastructure", "connections", "transaction", "pool-exhaustion"],
             MetricValue: correlatedCount,
             MetricUnit: "connections held by open transactions"));
-    }
-
-    private static void DetectWcfChannelFault(
-        List<InsightFinding> findings,
-        WcfChannelDomainResult? wcf,
-        CrashDomainResult? crash)
-    {
-        if (wcf is null || !wcf.WcfPresent) return;
-        if (wcf.FaultedChannels == 0) return;
-
-        // Cross-correlate faulted channels with ObjectDisposedException or CommunicationException
-        int commExCount = 0;
-        if (crash?.ExceptionTypeCounts is not null)
-        {
-            foreach (KeyValuePair<string, int> kv in crash.ExceptionTypeCounts)
-            {
-                if (kv.Key.StartsWith("System.ServiceModel.", StringComparison.Ordinal) ||
-                    kv.Key is "System.ObjectDisposedException")
-                    commExCount += kv.Value;
-            }
-        }
-
-        if (commExCount > 0)
-        {
-            findings.Add(new InsightFinding(
-                Analyzer: Source,
-                Category: "Infrastructure",
-                Severity: FindingSeverity.Critical,
-                Title: "WCF faulted channels combined with communication exceptions",
-                Evidence: $"{wcf.FaultedChannels:N0} faulted WCF channel(s) on heap with " +
-                          $"{commExCount:N0} WCF/communication exception(s). " +
-                          "Calling any method on a faulted channel throws CommunicationObjectFaultedException.",
-                Recommendation: "In the catch block for any WCF exception, call channel.Abort() instead of Close(). " +
-                                "Create a new channel per operation. Cache ChannelFactory<T>, not the channel itself.",
-                Tags: ["infrastructure", "wcf", "fault", "communication"],
-                MetricValue: wcf.FaultedChannels,
-                MetricUnit: "faulted channels"));
-        }
-    }
-
-    /// <summary>
-    /// Cross-correlates channels stuck in the Opening state with timeout exceptions elsewhere
-    /// on the heap. Opening is transient in healthy operation, so its presence alongside a
-    /// timeout exception is itself the signal (§P2-2,
-    /// docs/analysis/phase1/wcf-channel-analyzer-audit.md) — this is deliberately not gated on a
-    /// count threshold the way <see cref="DetectRecurringTimeoutPattern"/> is, since a co-occurring
-    /// timeout is a much stronger indicator here than raw timeout volume alone. Severity escalates
-    /// once either signal grows large enough to suggest an ongoing outage rather than one-off flakiness.
-    /// </summary>
-    private static void DetectWcfOpeningTimeoutCorrelation(
-        List<InsightFinding> findings,
-        WcfChannelDomainResult? wcf,
-        CrashDomainResult? crash)
-    {
-        if (wcf is null || !wcf.WcfPresent) return;
-        if (wcf.OpeningChannels == 0) return;
-
-        int timeoutCount = 0;
-        if (crash?.ExceptionTypeCounts is not null)
-        {
-            foreach (KeyValuePair<string, int> kv in crash.ExceptionTypeCounts)
-            {
-                if (IsTimeoutExceptionType(kv.Key))
-                    timeoutCount += kv.Value;
-            }
-        }
-
-        if (timeoutCount == 0) return;
-
-        FindingSeverity severity = wcf.OpeningChannels >= 5 || timeoutCount >= 10
-            ? FindingSeverity.Warning
-            : FindingSeverity.Info;
-
-        findings.Add(new InsightFinding(
-            Analyzer: Source,
-            Category: "Infrastructure",
-            Severity: severity,
-            Title: $"{wcf.OpeningChannels:N0} WCF channel(s) stuck Opening alongside timeout exceptions",
-            Evidence: $"{wcf.OpeningChannels:N0} WCF channel(s) are in the Opening state with " +
-                      $"{timeoutCount:N0} timeout/cancellation exception(s) on heap. " +
-                      "A channel normally spends milliseconds in Opening — a channel captured in " +
-                      "this state usually means Channel.Open()/OpenAsync() is blocked on a connect, " +
-                      "DNS, or handshake timeout.",
-            Recommendation: "Check the remote endpoint's availability and network path (firewall, DNS, " +
-                            "load balancer health). Confirm openTimeout is set appropriately for the " +
-                            "transport, and that Open()/OpenAsync() failures are observed and the channel " +
-                            "is Abort()ed rather than left half-open.",
-            Tags: ["infrastructure", "wcf", "channel", "timeout", "connection"],
-            MetricValue: wcf.OpeningChannels,
-            MetricUnit: "opening channels"));
-    }
-
-    private static void DetectHttpClientAccumulation(
-        List<InsightFinding> findings,
-        HttpObjectDomainResult? http)
-    {
-        if (http is null || !http.HttpObjectsFound) return;
-
-        // Only flag when HttpClient and HttpWebResponse are both present, suggesting mixed API usage.
-        if (http.HttpClientCount >= 3 && http.HttpWebResponseCount >= 10)
-        {
-            findings.Add(new InsightFinding(
-                Analyzer: Source,
-                Category: "Infrastructure",
-                Severity: FindingSeverity.Warning,
-                Title: "Mixed HTTP API usage: HttpClient and HttpWebResponse both present",
-                Evidence: $"{http.HttpClientCount:N0} HttpClient instance(s) and " +
-                          $"{http.HttpWebResponseCount:N0} HttpWebResponse object(s) found simultaneously. " +
-                          "Mixed usage suggests an incomplete migration from HttpWebRequest to HttpClient.",
-                Recommendation: "Consolidate all HTTP calls to HttpClient/IHttpClientFactory. " +
-                                "HttpWebRequest and HttpWebResponse are legacy and do not benefit from " +
-                                "modern connection pooling or HTTP/2 support.",
-                Tags: ["infrastructure", "http", "httpclient", "legacy"],
-                MetricValue: http.TotalHttpObjects,
-                MetricUnit: "HTTP objects"));
-        }
     }
 
     /// <summary>

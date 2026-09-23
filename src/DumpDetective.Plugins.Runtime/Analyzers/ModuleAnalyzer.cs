@@ -135,6 +135,35 @@ public sealed class ModuleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
             }, cancellationToken);
         }
 
+        // Phase 5 step 6.2 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md):
+        // CrashModuleHotspotInsightRule needs each module's on-disk size — a different quantity
+        // from runtime.module-heap-footprint's shallow.bytes (heap footprint) above, and never
+        // observed on its own before. Bounded to TopModulesBySize, an already-capped list.
+        foreach (LoadedModuleSnapshot module in result.TopModulesBySize ?? [])
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "runtime.module-disk-footprint",
+                Subjects = [new ModuleRef { SimpleName = module.Name, Fidelity = MatchFidelity.Exact }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["disk.bytes"] = new Measure(module.Size, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Module Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
+
         await context.Observations.EmitAsync(new Observation
         {
             Id = ObservationId.NewId(),

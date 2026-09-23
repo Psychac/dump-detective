@@ -51,8 +51,6 @@ internal sealed class InsightEngine
     private const int MemoryGenerationCorrelationTopTypesScanned = 30;
     private const ulong StringMemoryCorrelationMinWastedBytes = 5UL * 1024 * 1024; // 5 MB
     private const int StringMemoryCorrelationMaxRank = 10;
-    private const int CrashModuleHotspotMinActiveExceptions = 3;
-    private const double CrashModuleHotspotDominantSharePct = 50.0;
     // ReferenceChainDominatorWarningPct/CriticalPct were removed here (phase 5 step 6.2,
     // docs/refactor/modularity/phase-5-step6-insight-engine-plan.md) alongside
     // DetectReferenceChainDominatorCorrelation, migrated without its evidence table — see
@@ -218,7 +216,7 @@ internal sealed class InsightEngine
         }
     }
 
-    // 14 of this group's original 17 methods were migrated to *InsightRule ISynthesisRule classes
+    // 15 of this group's original 17 methods were migrated to *InsightRule ISynthesisRule classes
     // (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md § 6.2) and removed from here to
     // avoid double-firing. DataTableLifecyclePattern/KnownLeakPatterns needed a new bounded,
     // known-vocabulary type.known-pattern-population observation (MemoryAnalyzer) rather than the
@@ -245,30 +243,37 @@ internal sealed class InsightEngine
     // scoped to within-artifact joins, which is exactly what this is (same dump, same run); both
     // infra.sql-transaction and infra.db-connection gained a second ObjectRef subject (the
     // referenced/own connection address) alongside their existing TypeRef, same multi-subject
-    // relation shape lock.contested already uses. The remaining 3 are held for reasons documented in
-    // that doc: MemoryTypeGenerationCorrelation/StringMemoryConcentration need
+    // relation shape lock.contested already uses. CrashModuleHotspot needed two new observations —
+    // runtime.crash-thread-candidate-module (CrashAnalyzer, per-candidate module attribution had
+    // never been promoted; runtime.crash-thread-candidate subjects on exception type instead) and
+    // runtime.module-disk-footprint (ModuleAnalyzer, on-disk size — a different quantity from
+    // runtime.module-heap-footprint's shallow.bytes, the gap its original held-reason actually
+    // named); its version-conflict flag needed no new emission at all — runtime.module-conflict-group
+    // already subjects per module with empty Measures, so presence alone is the signal. See
+    // CrashModuleHotspotInsightRule's own remarks for the full reasoning; its ranked module table was
+    // dropped, same "supplementary, not the whole payload" call ReferenceChainDominatorCorrelation's
+    // migration made — it turned out not to be blocked by the EvidenceTables decision below despite
+    // the original held-reason grouping it with the three that are. The remaining 2 are held for
+    // reasons documented in that doc: MemoryTypeGenerationCorrelation/StringMemoryConcentration need
     // MemoryDomainResult.TopTypes' full per-type population cross-joined against another unbounded
     // per-type list — a bigger design decision (see docs/ReportStructure/ReportSystemVision.md
-    // §10.1/§10.4's dd-scatter Correlation shape), not a routine emission gap; CrashModuleHotspot is
-    // large/complex enough to need its own dedicated pass. ReferenceChainDominatorCorrelation
-    // (migrated) and the still-held
-    // MemoryTypeGenerationCorrelation/StringMemoryConcentration/CrashModuleHotspot/JitModuleHotspot
-    // all used InsightFinding.EvidenceTables, which Sdk.Synthesis.Finding has no equivalent field
-    // for — ran that question against docs/ReportStructure/ReportSystemVision.md § 6.2/Appendix C,
-    // which already decided not to grow Finding toward Claim/report-rendering shape ahead of the
-    // report phase, and separately marks CompactTable (what an EvidenceTable becomes) as something
-    // the future dd-table widget replaces, rendered live from cited observations instead of carried
-    // on the finding. So ReferenceChainDominatorCorrelation migrated without its table (see its own
-    // remarks) rather than growing Finding to keep it; the other three stay held since their tables
-    // aren't optional supplementary detail the way that one's was.
+    // §10.1/§10.4's dd-scatter Correlation shape), not a routine emission gap.
+    // ReferenceChainDominatorCorrelation/CrashModuleHotspot (both migrated) and the still-held
+    // MemoryTypeGenerationCorrelation/StringMemoryConcentration/JitModuleHotspot all used
+    // InsightFinding.EvidenceTables, which Sdk.Synthesis.Finding has no equivalent field for — ran
+    // that question against docs/ReportStructure/ReportSystemVision.md § 6.2/Appendix C, which
+    // already decided not to grow Finding toward Claim/report-rendering shape ahead of the report
+    // phase, and separately marks CompactTable (what an EvidenceTable becomes) as something the
+    // future dd-table widget replaces, rendered live from cited observations instead of carried on
+    // the finding. So ReferenceChainDominatorCorrelation/CrashModuleHotspot migrated without their
+    // tables (see their own remarks) rather than growing Finding to keep them; the remaining two stay
+    // held since their tables aren't optional supplementary detail the way those were.
     private sealed class CorrelationRuleGroup : IInsightRuleGroup
     {
         public void Apply(List<InsightFinding> findings, in InsightRuleContext context)
         {
             DetectMemoryTypeGenerationCorrelation(findings, context.Memory, context.GcGen);
             DetectStringMemoryConcentration(findings, context.Memory, context.Strings);
-
-            DetectCrashModuleHotspot(findings, context.Crash, context.AppDomains);
         }
     }
 
@@ -365,104 +370,6 @@ internal sealed class InsightEngine
             Tags: ["jit", "modules", "cross-analyzer"],
             MetricValue: topModule.Count,
             MetricUnit: "frames",
-            EvidenceTables: [evidenceTable]));
-    }
-
-    /// <summary>
-    /// Correlates CrashAnalyzer's per-candidate top-user-frame module attribution with
-    /// ModuleAnalyzer's own per-module size/version-conflict data. Neither analyzer can produce
-    /// this alone: CrashAnalyzer resolves the owning module directly via ClrStackFrame but has no
-    /// module size/conflict data, and ModuleAnalyzer never walks exception thread stacks.
-    /// </summary>
-    private static void DetectCrashModuleHotspot(
-        List<InsightFinding> findings,
-        CrashDomainResult? crash,
-        ModuleDomainResult? modules)
-    {
-        if (crash is null || modules is null || crash.TopCrashThreadCandidates is not { Count: > 0 })
-            return;
-
-        var moduleActiveCounts = new Dictionary<string, int>(StringComparer.Ordinal);
-        int attributedActiveExceptions = 0;
-        for (int i = 0; i < crash.TopCrashThreadCandidates.Count; i++)
-        {
-            CrashThreadCandidateSnapshot candidate = crash.TopCrashThreadCandidates[i];
-            if (string.IsNullOrWhiteSpace(candidate.TopUserFrameModule))
-                continue;
-            moduleActiveCounts.TryGetValue(candidate.TopUserFrameModule, out int count);
-            moduleActiveCounts[candidate.TopUserFrameModule] = count + candidate.ActiveExceptionCount;
-            attributedActiveExceptions += candidate.ActiveExceptionCount;
-        }
-
-        if (attributedActiveExceptions < CrashModuleHotspotMinActiveExceptions)
-            return;
-
-        string topModuleName = string.Empty;
-        int topModuleCount = -1;
-        foreach (KeyValuePair<string, int> kvp in moduleActiveCounts)
-        {
-            if (kvp.Value > topModuleCount)
-            {
-                topModuleCount = kvp.Value;
-                topModuleName = kvp.Key;
-            }
-        }
-
-        double topModuleSharePct = 100.0 * topModuleCount / attributedActiveExceptions;
-        if (topModuleSharePct < CrashModuleHotspotDominantSharePct)
-            return;
-
-        LoadedModuleSnapshot? sizeMatch = FindModuleByName(modules.TopModulesBySize, topModuleName);
-        bool inConflict = ContainsModuleName(modules.ConflictingAssemblyNames, topModuleName);
-
-        if (sizeMatch is null && !inConflict)
-            return; // no cross-analyzer signal beyond what the Exception Analysis section's own attribution table already shows
-
-        var moduleEntries = new List<KeyValuePair<string, int>>(moduleActiveCounts);
-        moduleEntries.Sort(static (a, b) => b.Value.CompareTo(a.Value));
-
-        int rowCount = Math.Min(moduleEntries.Count, 5);
-        var rows = new List<IReadOnlyList<object?>>(rowCount);
-        for (int i = 0; i < rowCount; i++)
-        {
-            KeyValuePair<string, int> entry = moduleEntries[i];
-            LoadedModuleSnapshot? rowSizeMatch = FindModuleByName(modules.TopModulesBySize, entry.Key);
-            bool rowInConflict = ContainsModuleName(modules.ConflictingAssemblyNames, entry.Key);
-
-            rows.Add(new object?[]
-            {
-                entry.Key,
-                entry.Value,
-                rowSizeMatch is not null ? FormatBytes(rowSizeMatch.Size) : "n/a",
-                rowInConflict ? "Yes" : "No",
-            });
-        }
-
-        var evidenceTable = new FindingEvidenceTable(
-            "Active exception attribution by module (crash thread candidates)",
-            ["Module", "Active Exceptions", "Module Size", "Version Conflict"],
-            rows);
-
-        string sizeNote = sizeMatch is not null ? $" and is {FormatBytes(sizeMatch.Size)} on disk" : string.Empty;
-        string conflictNote = inConflict
-            ? " and has a conflicting assembly version loaded — a version mismatch may be the underlying cause"
-            : string.Empty;
-
-        findings.Add(new InsightFinding(
-            Analyzer: Source,
-            Category: "Crash",
-            Severity: inConflict ? FindingSeverity.Warning : FindingSeverity.Info,
-            Title: "Active exceptions concentrated in a module flagged by module analysis",
-            Evidence: $"Module '{topModuleName}' owns {topModuleSharePct:F1}% of attributed active exceptions " +
-                      $"({topModuleCount:N0} of {attributedActiveExceptions:N0}){sizeNote}{conflictNote}.",
-            Recommendation: inConflict
-                ? $"Check the module inventory for duplicate/conflicting assembly versions of '{topModuleName}' — " +
-                  "a version mismatch loading the wrong dependency is a common cause of concentrated runtime faults."
-                : $"Correlate '{topModuleName}'s size and load context with the exception attribution table to " +
-                  "prioritize investigation of this assembly's fault handling.",
-            Tags: ["crash", "modules", "cross-analyzer"],
-            MetricValue: topModuleSharePct,
-            MetricUnit: "% of active exceptions",
             EvidenceTables: [evidenceTable]));
     }
 

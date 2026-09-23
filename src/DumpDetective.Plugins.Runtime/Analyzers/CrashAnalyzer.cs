@@ -162,7 +162,48 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
                 ?? new CrashAnalyzerOptions(new CrashAnalysisOptions(), new HashSet<ulong>());
 
             ExceptionAnalysis analysis = await Analyze(candidates, fields, arrayShapes, objectLookup, segments, threads, crashOptions, context, cancellationToken);
-            LastResult = BuildDomainResult(analysis, context.HeapRootPaths, crashOptions.Options);
+            var result = (CrashDomainResult)BuildDomainResult(analysis, context.HeapRootPaths, crashOptions.Options);
+            LastResult = result;
+
+            // Phase 5 step 6.2 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md):
+            // CrashModuleHotspotInsightRule needs per-candidate module attribution
+            // (TopUserFrameModule), which only exists on the final CrashThreadCandidateSnapshot —
+            // resolved in BuildCrashThreadSnapshotsImpl, after the runtime.crash-thread-candidate
+            // observations above (which subject on exception type, from the pre-resolution
+            // CrashThreadCandidate) are already emitted. Emitted here, post-BuildDomainResult,
+            // rather than threading module resolution earlier into that loop.
+            await EmitCrashThreadCandidateModuleObservationsAsync(context, result, cancellationToken);
+        }
+
+        private static async ValueTask EmitCrashThreadCandidateModuleObservationsAsync(
+            AnalysisContext context, CrashDomainResult result, CancellationToken cancellationToken)
+        {
+            foreach (CrashThreadCandidateSnapshot candidate in result.TopCrashThreadCandidates)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (string.IsNullOrWhiteSpace(candidate.TopUserFrameModule))
+                    continue;
+
+                await context.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "runtime.crash-thread-candidate-module",
+                    Subjects = [new ModuleRef { SimpleName = candidate.TopUserFrameModule, Fidelity = MatchFidelity.Exact }],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["active-exception.count"] = new Measure(candidate.ActiveExceptionCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = context.ArtifactId!.Value,
+                        AnalyzerKey = "Crash Analysis",
+                        CapabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapObjects, CapabilityVocabulary.RuntimeThreads },
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                }, cancellationToken);
+            }
         }
 
         /// <summary>

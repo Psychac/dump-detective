@@ -13,7 +13,7 @@ using Xunit;
 namespace DumpDetective.Tests.Unit.Synthesis;
 
 /// <summary>
-/// Covers the first 13 <c>*InsightRule</c> classes migrated out of <c>InsightEngine</c>'s
+/// Covers the first 14 <c>*InsightRule</c> classes migrated out of <c>InsightEngine</c>'s
 /// <c>CorrelationRuleGroup</c> (phase 5 step 6.2,
 /// docs/refactor/modularity/phase-5-step6-insight-engine-plan.md). See
 /// <c>InsightBaselineRulesTests</c>/<c>InsightMemoryAndRuntimeRulesTests</c> for the other two
@@ -839,6 +839,100 @@ public sealed class InsightCorrelationRulesTests
             [
                 DbConnection(0x1000), DbConnection(0x2000), DbConnection(0x3000),
                 SqlTransaction(0x9000), SqlTransaction(0x9001), SqlTransaction(0x9002),
+            ]);
+
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+
+            findings.Should().BeEmpty();
+        }
+    }
+
+    private static Observation CrashCandidateModule(string moduleName, int activeExceptionCount) => Obs(
+        "runtime.crash-thread-candidate-module",
+        new Dictionary<string, Measure> { ["active-exception.count"] = Count(activeExceptionCount) },
+        subjects: [new ModuleRef { SimpleName = moduleName, Fidelity = MatchFidelity.Exact }]);
+
+    private static Observation ModuleConflict(string moduleName) => Obs(
+        "runtime.module-conflict-group",
+        new Dictionary<string, Measure>(),
+        subjects: [new ModuleRef { SimpleName = moduleName, Fidelity = MatchFidelity.Exact }]);
+
+    private static Observation ModuleDiskFootprint(string moduleName, ulong bytes) => Obs(
+        "runtime.module-disk-footprint",
+        new Dictionary<string, Measure> { ["disk.bytes"] = Bytes(bytes) },
+        subjects: [new ModuleRef { SimpleName = moduleName, Fidelity = MatchFidelity.Exact }]);
+
+    public sealed class CrashModuleHotspot
+    {
+        private readonly CrashModuleHotspotInsightRule _rule = new();
+
+        [Fact]
+        public async Task DominantModuleWithConflict_Fires()
+        {
+            var matched = new ObservationMatchSet(
+            [
+                CrashCandidateModule("MyApp.Data.dll", 4), CrashCandidateModule("System.Private.CoreLib.dll", 1),
+                ModuleConflict("MyApp.Data.dll"),
+            ]);
+
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+
+            findings.Should().ContainSingle();
+            findings[0].Severity.Should().Be(Severity.Warning);
+            findings[0].Narrative.Should().Contain("MyApp.Data.dll");
+            findings[0].Narrative.Should().Contain("conflicting assembly version");
+        }
+
+        [Fact]
+        public async Task DominantModuleWithDiskSize_NoConflict_FiresAsInfo()
+        {
+            var matched = new ObservationMatchSet(
+            [
+                CrashCandidateModule("MyApp.Data.dll", 4), CrashCandidateModule("System.Private.CoreLib.dll", 1),
+                ModuleDiskFootprint("MyApp.Data.dll", 2 * 1024 * 1024),
+            ]);
+
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+
+            findings.Should().ContainSingle();
+            findings[0].Severity.Should().Be(Severity.Info);
+            findings[0].Narrative.Should().Contain("on disk");
+        }
+
+        [Fact]
+        public async Task NoCrossAnalyzerSignal_ReturnsEmpty()
+        {
+            var matched = new ObservationMatchSet(
+            [
+                CrashCandidateModule("MyApp.Data.dll", 4), CrashCandidateModule("System.Private.CoreLib.dll", 1),
+            ]);
+
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+
+            findings.Should().BeEmpty();
+        }
+
+        [Fact]
+        public async Task BelowMinActiveExceptions_ReturnsEmpty()
+        {
+            var matched = new ObservationMatchSet(
+            [
+                CrashCandidateModule("MyApp.Data.dll", 1),
+                ModuleConflict("MyApp.Data.dll"),
+            ]);
+
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+
+            findings.Should().BeEmpty();
+        }
+
+        [Fact]
+        public async Task NotDominantShare_ReturnsEmpty()
+        {
+            var matched = new ObservationMatchSet(
+            [
+                CrashCandidateModule("MyApp.Data.dll", 2), CrashCandidateModule("System.Private.CoreLib.dll", 5),
+                ModuleConflict("MyApp.Data.dll"),
             ]);
 
             IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());

@@ -218,7 +218,7 @@ internal sealed class InsightEngine
         }
     }
 
-    // 13 of this group's original 17 methods were migrated to *InsightRule ISynthesisRule classes
+    // 14 of this group's original 17 methods were migrated to *InsightRule ISynthesisRule classes
     // (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md § 6.2) and removed from here to
     // avoid double-firing. DataTableLifecyclePattern/KnownLeakPatterns needed a new bounded,
     // known-vocabulary type.known-pattern-population observation (MemoryAnalyzer) rather than the
@@ -239,14 +239,19 @@ internal sealed class InsightEngine
     // heap.static-root subjects on the root object's own type, not the TopRetainedTypes breakdown;
     // no root EntityKind exists in the SDK yet, so the new observation subjects on the retained
     // TypeRef instead and carries the root description as Evidence, the same call already made for
-    // thread.stack-cluster's Signature. The remaining 4 are held for reasons documented in that doc:
-    // MemoryTypeGenerationCorrelation/StringMemoryConcentration need MemoryDomainResult.TopTypes'
-    // full per-type population cross-joined against another unbounded per-type list — a bigger
-    // design decision (see docs/ReportStructure/ReportSystemVision.md §10.1/§10.4's dd-scatter
-    // Correlation shape), not a routine emission gap; LongHeldTransactionOnOpenConnection needs a
-    // per-entity cross join with no clean observation shape yet; CrashModuleHotspot is large/complex
-    // enough to need its own dedicated pass. ReferenceChainDominatorCorrelation (migrated) and the
-    // still-held
+    // thread.stack-cluster's Signature. LongHeldTransactionOnOpenConnection's held-reason — "needs
+    // checking whether the addresses are even observable as stable identity, not assumed" — turned
+    // out already answered by the SDK: ObjectRef's identity is (artifact, address), explicitly
+    // scoped to within-artifact joins, which is exactly what this is (same dump, same run); both
+    // infra.sql-transaction and infra.db-connection gained a second ObjectRef subject (the
+    // referenced/own connection address) alongside their existing TypeRef, same multi-subject
+    // relation shape lock.contested already uses. The remaining 3 are held for reasons documented in
+    // that doc: MemoryTypeGenerationCorrelation/StringMemoryConcentration need
+    // MemoryDomainResult.TopTypes' full per-type population cross-joined against another unbounded
+    // per-type list — a bigger design decision (see docs/ReportStructure/ReportSystemVision.md
+    // §10.1/§10.4's dd-scatter Correlation shape), not a routine emission gap; CrashModuleHotspot is
+    // large/complex enough to need its own dedicated pass. ReferenceChainDominatorCorrelation
+    // (migrated) and the still-held
     // MemoryTypeGenerationCorrelation/StringMemoryConcentration/CrashModuleHotspot/JitModuleHotspot
     // all used InsightFinding.EvidenceTables, which Sdk.Synthesis.Finding has no equivalent field
     // for — ran that question against docs/ReportStructure/ReportSystemVision.md § 6.2/Appendix C,
@@ -263,7 +268,6 @@ internal sealed class InsightEngine
             DetectMemoryTypeGenerationCorrelation(findings, context.Memory, context.GcGen);
             DetectStringMemoryConcentration(findings, context.Memory, context.Strings);
 
-            DetectLongHeldTransactionOnOpenConnection(findings, context.SqlTxn, context.DbConn);
             DetectCrashModuleHotspot(findings, context.Crash, context.AppDomains);
         }
     }
@@ -647,49 +651,6 @@ internal sealed class InsightEngine
             MetricValue: (double)strings.DuplicateWastedBytes,
             MetricUnit: "bytes",
             EvidenceTables: [evidenceTable]));
-    }
-
-    // R8 (docs/analysis/phase1/DbConnectionAnalyzer-audit.md): correlates SqlTransactionAnalyzer's
-    // Active transaction snapshots (still referencing their owning connection) against
-    // DbConnectionAnalyzer's TopOpenConnections addresses. "N active transactions" alone is already
-    // reported by SqlTransactionFindingGenerator; this rule adds the cross-analyzer signal that
-    // specific open connections are being held by a live transaction, not just idle.
-    private static void DetectLongHeldTransactionOnOpenConnection(
-        List<InsightFinding> findings,
-        SqlTransactionDomainResult? sqlTxn,
-        DbConnectionDomainResult? dbConn)
-    {
-        if (sqlTxn is null || dbConn is null) return;
-        if (sqlTxn.ActiveCount == 0 || dbConn.OpenConnections == 0) return;
-
-        var openConnectionAddresses = new HashSet<ulong>(dbConn.TopOpenConnections.Count);
-        foreach (DbConnectionSnapshot conn in dbConn.TopOpenConnections)
-            openConnectionAddresses.Add(conn.Address);
-
-        int correlatedCount = 0;
-        foreach (SqlTransactionSnapshot txn in sqlTxn.TopActiveTransactions)
-        {
-            if (txn.ConnectionAddress is ulong connAddress && openConnectionAddresses.Contains(connAddress))
-                correlatedCount++;
-        }
-
-        if (correlatedCount < 3) return;
-
-        findings.Add(new InsightFinding(
-            Analyzer: Source,
-            Category: "Infrastructure",
-            Severity: correlatedCount >= 15 ? FindingSeverity.Critical : FindingSeverity.Warning,
-            Title: $"{correlatedCount:N0} open DB connections are held by a live transaction",
-            Evidence: $"{correlatedCount:N0} of {dbConn.OpenConnections:N0} open connections on the heap are " +
-                      "referenced by an Active SqlTransaction/IDbTransaction object that has not yet been " +
-                      "Committed, Rolled back, or Disposed. These connections cannot return to the pool while " +
-                      "the transaction is held open.",
-            Recommendation: "Review call sites that open a transaction alongside its connection. Ensure both " +
-                            "are wrapped in using statements scoped tightly to the unit of work, and that no " +
-                            "unrelated I/O or awaits happen while the transaction is open.",
-            Tags: ["infrastructure", "connections", "transaction", "pool-exhaustion"],
-            MetricValue: correlatedCount,
-            MetricUnit: "connections held by open transactions"));
     }
 
     // ── Utilities (last block) ────────────────────────────────────────────────

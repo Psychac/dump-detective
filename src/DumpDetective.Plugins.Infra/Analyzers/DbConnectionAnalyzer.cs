@@ -175,11 +175,19 @@ public sealed class DbConnectionAnalyzer :
                 ? [new EvidenceRef { Artifact = context.ArtifactId!.Value, Locator = snap.Address.ToString("X", System.Globalization.CultureInfo.InvariantCulture), Description = snap.RootPath }]
                 : [];
 
+            // Phase 5 step 6.2 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md):
+            // LongHeldTransactionOnOpenConnectionInsightRule needs this connection's own heap
+            // address to correlate against SqlTransactionAnalyzer's referenced-connection ObjectRef
+            // — same within-artifact ObjectRef join, see that analyzer's own remarks.
             await context.Observations.EmitAsync(new Observation
             {
                 Id = ObservationId.NewId(),
                 ObservationType = "infra.db-connection",
-                Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
+                Subjects =
+                [
+                    new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity },
+                    new ObjectRef { Address = snap.Address, Artifact = context.ArtifactId!.Value, Fidelity = MatchFidelity.Exact },
+                ],
                 When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
                 Measures = measures,
                 Provenance = new Provenance

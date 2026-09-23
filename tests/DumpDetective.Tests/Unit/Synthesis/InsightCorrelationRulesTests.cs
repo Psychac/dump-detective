@@ -13,7 +13,7 @@ using Xunit;
 namespace DumpDetective.Tests.Unit.Synthesis;
 
 /// <summary>
-/// Covers the first 12 <c>*InsightRule</c> classes migrated out of <c>InsightEngine</c>'s
+/// Covers the first 13 <c>*InsightRule</c> classes migrated out of <c>InsightEngine</c>'s
 /// <c>CorrelationRuleGroup</c> (phase 5 step 6.2,
 /// docs/refactor/modularity/phase-5-step6-insight-engine-plan.md). See
 /// <c>InsightBaselineRulesTests</c>/<c>InsightMemoryAndRuntimeRulesTests</c> for the other two
@@ -740,6 +740,105 @@ public sealed class InsightCorrelationRulesTests
             var matched = new ObservationMatchSet(
             [
                 RetainedType("MyApp.Resource", count: 50, rootDescription: "MyApp.Cache._entries"),
+            ]);
+
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+
+            findings.Should().BeEmpty();
+        }
+    }
+
+    private static readonly ArtifactId TestArtifact = new("test-artifact");
+
+    private static Observation SqlTransaction(ulong? connectionAddress) => Obs(
+        "infra.sql-transaction",
+        new Dictionary<string, Measure> { ["shallow.bytes"] = Bytes(0) },
+        subjects: connectionAddress is ulong addr
+            ? [new TypeRef { CanonicalName = "System.Data.SqlClient.SqlTransaction", Fidelity = MatchFidelity.Exact },
+               new ObjectRef { Address = addr, Artifact = TestArtifact, Fidelity = MatchFidelity.Exact }]
+            : [new TypeRef { CanonicalName = "System.Data.SqlClient.SqlTransaction", Fidelity = MatchFidelity.Exact }]);
+
+    private static Observation DbConnection(ulong address) => Obs(
+        "infra.db-connection",
+        new Dictionary<string, Measure> { ["generation.ordinal"] = Count(2), ["retained.bytes"] = Bytes(0) },
+        subjects:
+        [
+            new TypeRef { CanonicalName = "System.Data.SqlClient.SqlConnection", Fidelity = MatchFidelity.Exact },
+            new ObjectRef { Address = address, Artifact = TestArtifact, Fidelity = MatchFidelity.Exact },
+        ]);
+
+    public sealed class LongHeldTransactionOnOpenConnection
+    {
+        private readonly LongHeldTransactionOnOpenConnectionInsightRule _rule = new();
+
+        [Fact]
+        public async Task CorrelatedCountAtThreshold_Fires()
+        {
+            var matched = new ObservationMatchSet(
+            [
+                DbConnection(0x1000), DbConnection(0x2000), DbConnection(0x3000), DbConnection(0x4000),
+                SqlTransaction(0x1000), SqlTransaction(0x2000), SqlTransaction(0x3000),
+            ]);
+
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+
+            findings.Should().ContainSingle();
+            findings[0].Severity.Should().Be(Severity.Warning);
+            findings[0].Title.Should().Contain("3");
+        }
+
+        [Fact]
+        public async Task CorrelatedCountAtCriticalThreshold_IsCritical()
+        {
+            var observations = new List<Observation>();
+            for (int i = 0; i < 15; i++)
+            {
+                ulong address = (ulong)(0x1000 * (i + 1));
+                observations.Add(DbConnection(address));
+                observations.Add(SqlTransaction(address));
+            }
+
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(new ObservationMatchSet(observations), new SynthesisContext());
+
+            findings.Should().ContainSingle();
+            findings[0].Severity.Should().Be(Severity.Critical);
+        }
+
+        [Fact]
+        public async Task BelowThreshold_ReturnsEmpty()
+        {
+            var matched = new ObservationMatchSet(
+            [
+                DbConnection(0x1000), DbConnection(0x2000),
+                SqlTransaction(0x1000), SqlTransaction(0x2000),
+            ]);
+
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+
+            findings.Should().BeEmpty();
+        }
+
+        [Fact]
+        public async Task TransactionsWithNoConnectionAddress_AreIgnored()
+        {
+            var matched = new ObservationMatchSet(
+            [
+                DbConnection(0x1000), DbConnection(0x2000), DbConnection(0x3000),
+                SqlTransaction(null), SqlTransaction(null), SqlTransaction(null),
+            ]);
+
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+
+            findings.Should().BeEmpty();
+        }
+
+        [Fact]
+        public async Task NonMatchingAddresses_ReturnsEmpty()
+        {
+            var matched = new ObservationMatchSet(
+            [
+                DbConnection(0x1000), DbConnection(0x2000), DbConnection(0x3000),
+                SqlTransaction(0x9000), SqlTransaction(0x9001), SqlTransaction(0x9002),
             ]);
 
             IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());

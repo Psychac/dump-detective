@@ -5,6 +5,7 @@ using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Models;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Temporal;
 
@@ -122,11 +123,23 @@ public sealed class SqlTransactionAnalyzer :
                 active++;
                 topActive.Add(new SqlTransactionSnapshot(candidate.TypeDisplayName, candidate.Address, "Active", stateVal, connectionAddress));
 
+                // Phase 5 step 6.2 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md):
+                // LongHeldTransactionOnOpenConnectionInsightRule needs to correlate this transaction
+                // against DbConnectionAnalyzer's open-connection set — by the referenced connection's
+                // own heap address, which had no home among Subjects before. ObjectRef's identity is
+                // (artifact, address), explicitly scoped to within-artifact joins (see its own
+                // remarks) — this is exactly that: both analyzers read the same dump in the same run,
+                // never a cross-artifact join. Only present when a connection reference was actually
+                // read (StateActive doesn't guarantee ConnectionAddress is non-null).
+                var subjects = connectionAddress is ulong connAddr
+                    ? new EntityRef[] { candidate.Type, new ObjectRef { Address = connAddr, Artifact = observationContext.ArtifactId!.Value, Fidelity = MatchFidelity.Exact } }
+                    : [candidate.Type];
+
                 await observationContext.Observations.EmitAsync(new Observation
                 {
                     Id = ObservationId.NewId(),
                     ObservationType = "infra.sql-transaction",
-                    Subjects = [candidate.Type],
+                    Subjects = subjects,
                     When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
                     Measures = new Dictionary<string, Measure>
                     {

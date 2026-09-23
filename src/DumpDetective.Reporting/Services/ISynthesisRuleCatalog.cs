@@ -33,5 +33,5 @@ internal sealed class DefaultSynthesisRuleCatalog : ISynthesisRuleCatalog
         typeof(FatalExceptionOnHeapInsightRule), typeof(EventLeakPatternInsightRule), typeof(RecurringTimeoutPatternInsightRule), typeof(DbConnectionLeakInsightRule), typeof(WcfChannelFaultInsightRule), typeof(WcfOpeningTimeoutCorrelationInsightRule), typeof(HttpClientAccumulationInsightRule),
         typeof(ReferenceChainDominatorCorrelationInsightRule), typeof(DataTableLifecycleInsightRule), typeof(KnownLeakPatternsInsightRule),
         typeof(PinnedStringLeakInsightRule), typeof(ClusterHangCorrelationInsightRule),
-        typeof(StaticRootFinalizableCorrelationInsightRule)];
+        typeof(StaticRootFinalizableCorrelationInsightRule), typeof(LongHeldTransactionOnOpenConnectionInsightRule)];
 }

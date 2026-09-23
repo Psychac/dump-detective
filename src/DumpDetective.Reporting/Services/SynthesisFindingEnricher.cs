@@ -32,10 +32,25 @@ internal sealed class SynthesisFindingEnricher
     public async ValueTask<IReadOnlyList<AnalyzerRunResult>> EnrichAsync(
         IReadOnlyList<AnalyzerRunResult> runs, IReadOnlyList<Observation> observations, CancellationToken cancellationToken)
     {
+        // AnalyzerFailuresInsightRule needs no observations at all (only the run-count summary
+        // below), so in principle this guard could skip it on a zero-observation pass — but real
+        // dumps always have tens of thousands of observations, so this is a synthetic-test-only
+        // edge case, not a production concern. Left as-is rather than widening it: widening let
+        // SynthesisFindingEnricherTests' StubRule (which unconditionally returns a finding,
+        // ignoring its match set) fire on a zero-observation pass too, which broke that test's own
+        // "nothing to synthesize, return runs unchanged" contract for every rule, not just this one.
         if (observations.Count == 0)
             return runs;
 
-        IReadOnlyList<Finding> findings = await _engine.SynthesizeAsync(observations, new SynthesisContext(), cancellationToken);
+        int failedCount = 0;
+        for (int i = 0; i < runs.Count; i++)
+        {
+            if (runs[i].Status == AnalyzerExecutionStatus.Failed)
+                failedCount++;
+        }
+        var context = new SynthesisContext { AnalyzerRunSummary = (runs.Count, failedCount) };
+
+        IReadOnlyList<Finding> findings = await _engine.SynthesizeAsync(observations, context, cancellationToken);
         if (findings.Count == 0)
             return runs;
 

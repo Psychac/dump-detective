@@ -13,25 +13,9 @@ namespace DumpDetective.Tests.Unit.Analysis;
 
 public sealed class InsightEngineTests
 {
-    [Fact]
-    public void Analyze_ShouldEmitWarning_WhenThreeAnalyzersFail()
-    {
-        InsightEngine engine = new();
-
-        AnalyzerRunResult[] runs =
-        [
-            BuildRun("A", AnalyzerExecutionStatus.Failed),
-            BuildRun("B", AnalyzerExecutionStatus.Failed),
-            BuildRun("C", AnalyzerExecutionStatus.Failed),
-            BuildRun("D", AnalyzerExecutionStatus.Success, new GenericAnalyzerDomainResult())
-        ];
-
-        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
-
-        findings.Should().Contain(f =>
-            f.Severity == FindingSeverity.Warning
-            && f.Title.Contains("analyzer(s) failed", StringComparison.OrdinalIgnoreCase));
-    }
+    // Analyze_ShouldEmitWarning_WhenThreeAnalyzersFail removed 2026-09-23 — DetectAnalyzerFailures
+    // migrated to AnalyzerFailuresInsightRule (phase 5 step 6.2), covered by
+    // InsightBaselineRulesTests.AnalyzerFailures instead.
 
     // Analyze_ShouldEmitCritical_WhenFatalExceptionTypePresent moved to
     // FatalExceptionOnHeapInsightRuleTests (phase 5 step 6.2,

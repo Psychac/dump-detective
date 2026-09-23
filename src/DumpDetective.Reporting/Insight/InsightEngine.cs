@@ -18,7 +18,6 @@ internal sealed class InsightEngine
 {
     private static readonly IReadOnlyList<IInsightRuleGroup> RuleGroups =
     [
-        new BaselineRuleGroup(),
         new MemoryAndRuntimeRuleGroup(),
         new CorrelationRuleGroup(),
     ];
@@ -31,8 +30,9 @@ internal sealed class InsightEngine
     // docs/refactor/modularity/phase-5-step6-insight-engine-plan.md) alongside the Detect* methods
     // that were their only readers (DetectLohArrayPressure, DetectPinnedHandlePressure,
     // DetectEventLeakPattern) — each now lives as a private const on its own *InsightRule class
-    // instead.
-    private const int AnalyzerFailureWarning = 3;
+    // instead. AnalyzerFailureWarning was removed here too (same step 6.2 change) — its only
+    // reader, DetectAnalyzerFailures, is now AnalyzerFailuresInsightRule's own copy; BaselineRuleGroup
+    // itself is gone, since that was its last method.
 
     // FatalExceptionTypes was removed here too (same step 6.2 change) — its only reader,
     // DetectFatalExceptionOnHeap, is now FatalExceptionOnHeapInsightRule's own copy.
@@ -186,21 +186,15 @@ internal sealed class InsightEngine
         ReferenceChainDomainResult? ReferenceChain,
         LockGraphDomainResult? LockGraph);
 
-    // 10 of this group's original 11 methods were migrated to *InsightRule ISynthesisRule classes
-    // (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md § 6.2) and removed from here to
-    // avoid double-firing. DetectAnalyzerFailures is the sole survivor — deliberately held, not
-    // migrated: it reads raw AnalyzerRunResult execution status, not any observation, and
-    // SynthesisContext (always `new SynthesisContext()` at the real call site,
-    // SynthesisFindingEnricher.cs) carries no run data today. Migrating it needs a SynthesisContext
-    // extension, a real design decision, not a routine observation-emission gap — see that doc's
-    // tracking for this item.
-    private sealed class BaselineRuleGroup : IInsightRuleGroup
-    {
-        public void Apply(List<InsightFinding> findings, in InsightRuleContext context)
-        {
-            DetectAnalyzerFailures(findings, context.Runs);
-        }
-    }
+    // All 11 of this group's original methods were migrated to *InsightRule ISynthesisRule classes
+    // (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md § 6.2) and removed from here —
+    // BaselineRuleGroup itself is gone, since it has no methods left. DetectAnalyzerFailures was the
+    // last one, held longest: it read raw AnalyzerRunResult execution status, not any observation,
+    // and SynthesisContext carried no run data. Closed by adding SynthesisContext.AnalyzerRunSummary
+    // (a (total, failed) count pair, not the full AnalyzerRunResult list — that's internal to a
+    // different assembly the SDK must not depend on) and threading it through at the one real call
+    // site, SynthesisFindingEnricher.EnrichAsync, which already had runs in scope unused. See
+    // AnalyzerFailuresInsightRule's own remarks for the full reasoning.
 
     // 10 of this group's original 11 methods were migrated to *InsightRule ISynthesisRule classes
     // (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md § 6.2) and removed from here to
@@ -275,36 +269,6 @@ internal sealed class InsightEngine
             DetectMemoryTypeGenerationCorrelation(findings, context.Memory, context.GcGen);
             DetectStringMemoryConcentration(findings, context.Memory, context.Strings);
         }
-    }
-
-    // ── Detection rules ───────────────────────────────────────────────────────
-
-    private static void DetectAnalyzerFailures(
-        List<InsightFinding> findings,
-        IReadOnlyList<AnalyzerRunResult> runs)
-    {
-        int failCount = 0;
-        for (int i = 0; i < runs.Count; i++)
-        {
-            if (runs[i].Status == AnalyzerExecutionStatus.Failed)
-                failCount++;
-        }
-
-        if (failCount < AnalyzerFailureWarning)
-            return;
-
-        findings.Add(new InsightFinding(
-            Analyzer: Source,
-            Category: "Analysis",
-            Severity: FindingSeverity.Warning,
-            Title: $"{failCount} analyzer(s) failed — insights may be incomplete",
-            Evidence: $"{failCount} of {runs.Count} analyzers did not complete successfully. " +
-                      "Cross-cutting correlations that depend on their results will be absent.",
-            Recommendation: "Check the diagnostic output for per-analyzer error messages. " +
-                            "Re-run with --diagnostic flag for detailed error information.",
-            Tags: ["analysis-quality", "failed-analyzer"],
-            ConfidenceScore: 0.55,
-                Caveats: ["Derived from a partially complete analyzer set."]));
     }
 
     // ── Part 4: New cross-cutting detection methods ───────────────────────────

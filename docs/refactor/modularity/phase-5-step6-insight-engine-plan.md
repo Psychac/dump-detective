@@ -171,16 +171,33 @@ to match whatever the migrated rules actually set.
       Tests: `tests/DumpDetective.Tests/Unit/Synthesis/InsightBaselineRulesTests.cs` (13 tests, one
       nested class per rule). Full suite: 1357 passed, 0 failed, 4 skipped (real-dump/trace
       integration, expected) after this batch.
-- [ ] **`DetectAnalyzerFailures` — held, not migrated.** Unlike every other rule, it reads raw
-      `AnalyzerRunResult` execution status (`Runs`), not any observation — there is no
-      `runtime-status`-shaped fact for an analyzer to emit; this is pipeline metadata, not a heap or
-      runtime fact. `SynthesisContext` (a currently-empty record) carries no run data at the real
-      call site either (`SynthesisFindingEnricher.cs` always constructs `new SynthesisContext()`).
-      Migrating this one needs a real design decision — extend `SynthesisContext` to optionally
-      carry `IReadOnlyList<AnalyzerRunResult>`, or accept it as a permanent hand-written exception
-      outside the observation model (the same shape as step 5's "genuine exception" bucket, just for
-      pipeline health instead of a domain composite). Left in `InsightEngine.BaselineRuleGroup` for
-      now — it's the sole remaining method in that group.
+- [x] **`DetectAnalyzerFailures` — migrated, shipped 2026-09-23.** Unlike every other rule, it read
+      raw `AnalyzerRunResult` execution status, not any observation — pipeline metadata, not a heap
+      or runtime fact, so it has no natural `Observation` shape (the model exists for claims about
+      the artifact, not about the tool's own execution). Investigated the two options this doc had
+      floated: extending `SynthesisContext`, or a permanent hand-written exception (the same shape
+      as step 5's "genuine exception" bucket). The "real design decision" framing turned out to
+      overstate the actual cost — `SynthesisFindingEnricher.EnrichAsync`, the one real call site,
+      already receives `IReadOnlyList<AnalyzerRunResult> runs` as a parameter, just never threaded
+      it into `SynthesisContext`. Added `SynthesisContext.AnalyzerRunSummary`, a `(int Total, int
+      Failed)` count pair rather than the full `AnalyzerRunResult` list (`internal` to
+      `DumpDetective.Core`, an assembly the `Sdk` project must not depend on, and a count is all the
+      rule needs) — `SynthesisContext`'s own doc comment already said it "grows as \[later phases]
+      land," and this is exactly that moment, not a speculative addition. `AnalyzerFailuresInsightRule`
+      declares an empty `ObservationTypes` and relies on `SynthesisEngine`'s documented "no
+      zero-match skip" behavior (every rule runs every pass, regardless of match count) to still
+      fire. One real regression surfaced and was reverted: widening `EnrichAsync`'s
+      `observations.Count == 0` early-return guard (so the new rule could fire on a synthetic
+      zero-observation pass) broke `SynthesisFindingEnricherTests`' `StubRule`, which unconditionally
+      returns a finding ignoring its match set — that test's "nothing to synthesize, return runs
+      unchanged" contract turned out to depend on the original blanket guard for every rule, not
+      just checking whether *this* rule needed observations. Left as the original guard; real dumps
+      always have tens of thousands of observations, so the zero-observation case this leaves
+      unhandled is a synthetic-test-only edge case, not a production concern. `BaselineRuleGroup`
+      itself is now gone from `InsightEngine.cs` — this was its last method. Tests:
+      `tests/DumpDetective.Tests/Unit/Synthesis/InsightBaselineRulesTests.cs` gained an `AnalyzerFailures`
+      nested class (4 tests); one stale `InsightEngineTests.cs` case removed. Full suite: 1401
+      passed, 0 failed, 4 skipped (real-dump/trace, expected).
 - [x] **`MemoryAndRuntimeRuleGroup`: 10 of 11 done, shipped 2026-09-22.** Migrated:
       `GCRootLargeRetentionInsightRule`, `AllocationPressureCrossCorrelationInsightRule`,
       `StringDuplicationRatioInsightRule`, `LohArrayPressureInsightRule`,
@@ -413,15 +430,16 @@ to match whatever the migrated rules actually set.
          `DetectDataTableLifecyclePattern`/`DetectKnownLeakPatterns`, are closed above).
       Both stay in `InsightEngine.CorrelationRuleGroup` for now, each with its own reason documented
       inline in that class's leading comment.
-- [ ] **Retire `InsightEngine` only once every rule is ported (except the held
-      `DetectAnalyzerFailures`, whose fate is a separate decision).** Delete the class down to
-      whatever `DetectAnalyzerFailures`'s resolution leaves, `DumpOrchestrationService.cs`'s
-      `new InsightEngine().Analyze(...)` call, `sessionState.Insights`, and
-      `SingleDumpConsolePresenter.PrintInsights` — update this once the last group ships, since the
-      exact shape depends on how `DetectAnalyzerFailures` gets resolved.
+- [ ] **Retire `InsightEngine` only once every rule is ported.** `DetectAnalyzerFailures` — the one
+      open question about whether this could even happen without a separate design decision — is
+      resolved (see above); `BaselineRuleGroup` is now gone entirely. What's left blocking full
+      retirement is purely the 3 still-held methods (`DetectMemoryTypeGenerationCorrelation`,
+      `DetectStringMemoryConcentration`, `DetectJitModuleHotspot`) — once those land, delete the
+      class, `DumpOrchestrationService.cs`'s `new InsightEngine().Analyze(...)` call,
+      `sessionState.Insights`, and `SingleDumpConsolePresenter.PrintInsights`.
 - [ ] This closes the phase's own exit criterion — "`IFindingGenerator`/`InsightEngine` no longer
       exist as separate concepts" — jointly with 6.1 (6.1 closed the last surviving
-      `IFindingGenerator`; 6.2 closes `InsightEngine`, `DetectAnalyzerFailures`'s fate permitting).
+      `IFindingGenerator`; 6.2 closes `InsightEngine`).
 
 ## 6.3 — Section builders become presentation-only (6a)
 
@@ -445,8 +463,9 @@ to match whatever the migrated rules actually set.
 ## Sizing note
 
 6.1 is done (see § 6.1). 6.2 is the large item: 39 rule methods, ~1,300 lines of detection logic.
-All three groups have started; 35 of 39 methods are migrated, 4 held. `BaselineRuleGroup` (10/11)
-and `MemoryAndRuntimeRuleGroup` (10/11) had a low gap rate — 8/11 and 6/10 needed zero new emission,
+All three groups have started; 36 of 39 methods are migrated, 3 held. `BaselineRuleGroup` is fully
+done (11/11 — `DetectAnalyzerFailures` was the last, closed 2026-09-23) and
+`MemoryAndRuntimeRuleGroup` (10/11) had a low gap rate — 8/11 and 6/10 needed zero new emission,
 most of the rest needed one new measure on an existing observation, and two needed only a classifier
 formula duplicated locally. `CorrelationRuleGroup` (15/17 so far) confirmed the sizing note's own
 warning: its gap profile is different and harder — fewer single-measure gaps, more structural
@@ -494,5 +513,5 @@ held `CorrelationRuleGroup` methods (`MemoryTypeGenerationCorrelation`, `StringM
 need `MemoryDomainResult.TopTypes` cross-joined against another unbounded per-type list — a bigger
 design decision the vision doc assigns to the future `dd-scatter` widget, not a routine emission
 gap. See § "CorrelationRuleGroup" above for the full per-method breakdown.
-`DetectAnalyzerFailures` (`BaselineRuleGroup`) is the remaining held method from an earlier
-group — needs pipeline run-status, not a heap/runtime fact.
+`DetectAnalyzerFailures` (`BaselineRuleGroup`), the remaining held method from an earlier group,
+closed 2026-09-23 — see its own entry above; `BaselineRuleGroup` is now fully migrated (11/11).

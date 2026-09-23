@@ -13,7 +13,7 @@ using Xunit;
 namespace DumpDetective.Tests.Unit.Synthesis;
 
 /// <summary>
-/// Covers the 10 <c>*InsightRule</c> classes that replaced <c>InsightEngine</c>'s
+/// Covers the 11 <c>*InsightRule</c> classes that replaced <c>InsightEngine</c>'s
 /// <c>BaselineRuleGroup</c> (phase 5 step 6.2, docs/refactor/modularity/phase-5-step6-insight-engine-plan.md).
 /// One class per rule, mirroring the scenarios <c>InsightEngineTests</c> would have covered had it
 /// tested this group directly (it mostly didn't — see that doc's note on <c>InsightEngineTests.cs</c>
@@ -331,6 +331,54 @@ public sealed class InsightBaselineRulesTests
             IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle(f => f.Title.Contains("Faulted tasks"));
+        }
+    }
+
+    public sealed class AnalyzerFailures
+    {
+        private readonly AnalyzerFailuresInsightRule _rule = new();
+
+        [Fact]
+        public async Task FailedCountAtThreshold_Fires()
+        {
+            var context = new SynthesisContext { AnalyzerRunSummary = (36, 3) };
+
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(new ObservationMatchSet([]), context);
+
+            findings.Should().ContainSingle();
+            findings[0].Narrative.Should().Contain("3 of 36");
+        }
+
+        [Fact]
+        public async Task FailedCountBelowThreshold_ReturnsEmpty()
+        {
+            var context = new SynthesisContext { AnalyzerRunSummary = (36, 2) };
+
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(new ObservationMatchSet([]), context);
+
+            findings.Should().BeEmpty();
+        }
+
+        [Fact]
+        public async Task NoRunSummary_ReturnsEmpty()
+        {
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(new ObservationMatchSet([]), new SynthesisContext());
+
+            findings.Should().BeEmpty();
+        }
+
+        [Fact]
+        public async Task IgnoresAnyMatchedObservations()
+        {
+            var context = new SynthesisContext { AnalyzerRunSummary = (36, 5) };
+            var matched = new ObservationMatchSet(
+            [
+                Obs("gc.finalizable-composition", new Dictionary<string, Measure> { ["total.count"] = Count(0) }),
+            ]);
+
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, context);
+
+            findings.Should().ContainSingle();
         }
     }
 }

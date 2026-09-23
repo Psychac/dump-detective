@@ -34,5 +34,5 @@ internal sealed class DefaultSynthesisRuleCatalog : ISynthesisRuleCatalog
         typeof(ReferenceChainDominatorCorrelationInsightRule), typeof(DataTableLifecycleInsightRule), typeof(KnownLeakPatternsInsightRule),
         typeof(PinnedStringLeakInsightRule), typeof(ClusterHangCorrelationInsightRule),
         typeof(StaticRootFinalizableCorrelationInsightRule), typeof(LongHeldTransactionOnOpenConnectionInsightRule),
-        typeof(CrashModuleHotspotInsightRule)];
+        typeof(CrashModuleHotspotInsightRule), typeof(AnalyzerFailuresInsightRule)];
 }

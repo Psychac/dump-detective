@@ -5,6 +5,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Temporal;
 
@@ -137,7 +138,73 @@ public sealed class MemoryAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
         }
 
         await EmitMemoryCompositionAsync(context, result, cancellationToken);
+        await EmitKnownPatternObservationsAsync(context, result, cancellationToken);
     }
+
+    /// <summary>
+    /// Phase 5 step 6.2 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md):
+    /// <c>DataTableLifecycleInsightRule</c>/<c>KnownLeakPatternsInsightRule</c> need per-type facts
+    /// for a small, fixed vocabulary of well-known problematic type-name patterns (DataRow,
+    /// SqlClient TdsParser closures, uncached reflection metadata) — the same "bounded,
+    /// known-vocabulary" shape as <c>TimerWrapperTypeNames</c>, not the unbounded full-<c>TopTypes</c>
+    /// population <see cref="EmitMemoryCompositionAsync"/>'s own remarks decline to observe per-entry.
+    /// <see cref="MemoryDomainResult.TopTypes"/> is, despite its name, already the exhaustive
+    /// per-type list built in <see cref="Analyze"/> — not capped to a top-N slice — so this scan
+    /// sees every matching type on heap.
+    /// </summary>
+    private static async ValueTask EmitKnownPatternObservationsAsync(AnalysisContext context, MemoryDomainResult result, CancellationToken cancellationToken)
+    {
+        var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapTypes };
+
+        for (int i = 0; i < result.TopTypes.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            TypeSnapshot t = result.TopTypes[i];
+            if (!IsKnownPatternType(t.TypeName))
+                continue;
+
+            (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(t.TypeName);
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "type.known-pattern-population",
+                Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["instance.count"] = new Measure(t.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["shallow.bytes"] = new Measure(t.TotalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "Memory Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Mirrors the substring checks <c>InsightEngine.DetectDataTableLifecyclePattern</c>/
+    /// <c>DetectKnownLeakPatterns</c> used to run directly against <c>MemoryDomainResult.TopTypes</c>
+    /// (moved here verbatim, not re-derived) — DataRow, TdsParser async-continuation closures, and
+    /// uncached reflection metadata wrappers.
+    /// </summary>
+    private static bool IsKnownPatternType(string typeName) =>
+        typeName.Contains("DataRow", StringComparison.OrdinalIgnoreCase) ||
+        (typeName.Contains("TdsParser", StringComparison.OrdinalIgnoreCase) &&
+         (typeName.Contains("DisplayClass", StringComparison.OrdinalIgnoreCase) ||
+          typeName.Contains("c__", StringComparison.OrdinalIgnoreCase) ||
+          typeName.Contains("<>", StringComparison.OrdinalIgnoreCase))) ||
+        typeName is "System.Reflection.RuntimeMethodInfo" or
+                    "System.Reflection.RuntimePropertyInfo" or
+                    "System.Reflection.RuntimeFieldInfo" or
+                    "System.Reflection.RuntimeConstructorInfo";
 
     /// <summary>
     /// Phase 5 step 2: a single whole-heap <c>heap.memory-composition</c> observation backing

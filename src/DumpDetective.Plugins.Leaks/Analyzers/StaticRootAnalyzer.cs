@@ -5,6 +5,7 @@ using DumpDetective.Core.Options;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Temporal;
 
@@ -357,6 +358,44 @@ public sealed class StaticRootAnalyzer : IAnalyzer, IProducesAnalyzerDomainResul
                 },
                 Confidence = dominators is not null ? 1.0 : 0.5,
             }, cancellationToken);
+
+            // Phase 5 step 6.2 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md):
+            // StaticRootFinalizableCorrelationInsightRule needs, per root, which types it retains —
+            // heap.static-root above subjects on the root *object's own* type, not the (bounded)
+            // TopRetainedTypes breakdown, which had no observation of its own. No root EntityKind
+            // exists in the SDK yet (ReportSystemVision.md §4.1's root entity is aspirational, not
+            // shipped), so this subjects on the retained TypeRef (joinable against
+            // finalizer.queue-entry by type name) and carries rootDescription as narrative-only
+            // Evidence — the same "Evidence, not a new entity kind" call thread.stack-cluster's
+            // Signature and thread.blocked's lock-object-types already made. Bounded by
+            // TopRetainedTypes' own existing cap, not a new unbounded emission.
+            foreach (RetainedTypeInfo typeInfo in topRetainedTypes)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                (string canonicalName, MatchFidelity typeFidelity) = EntityCanonicalizer.CanonicalizeTypeName(typeInfo.TypeName);
+
+                await observationContext.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "heap.static-root-retained-type",
+                    Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = typeFidelity }],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["instance.count"] = new Measure(typeInfo.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["shallow.bytes"] = new Measure(typeInfo.TotalSize, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    },
+                    Evidence = [new EvidenceRef { Artifact = observationContext.ArtifactId!.Value, Locator = "root-description", Description = rootDescription }],
+                    Provenance = new Provenance
+                    {
+                        Artifact = observationContext.ArtifactId!.Value,
+                        AnalyzerKey = "Static Root Leak Detection",
+                        CapabilitiesUsed = observationCapabilities,
+                        Fidelity = dominators is not null ? FidelityLevel.Full : FidelityLevel.Degraded,
+                    },
+                    Confidence = dominators is not null ? 1.0 : 0.5,
+                }, cancellationToken);
+            }
         }
 
         return results;

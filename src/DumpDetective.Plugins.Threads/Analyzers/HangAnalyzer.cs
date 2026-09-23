@@ -146,11 +146,19 @@ namespace DumpDetective.Analysis.Analyzers.Threads
         /// Phase 5 step 1 (docs/refactor/modularity/phase-5-observations-synthesis.md): one
         /// <c>thread.wait-state</c> observation per <see cref="HangDomainResult.WaitingThreads"/>
         /// entry — bounded to alive threads that are actually waiting, a proper subset of all alive
-        /// threads. <c>WaitType</c>/<c>WaitReason</c>/<c>TopStackFrame</c> are left out of
-        /// <c>Measures</c> (categorical strings, and by the time this domain result exists the
-        /// original <c>WaitType</c> enum instance is gone — same "no enum in scope" gap
-        /// <c>GCRootAnalyzer</c>'s <c>RootKind</c> omission documents). A
-        /// <c>circular-wait-candidate.count</c> flag is kept, though — it's a raw per-thread fact
+        /// threads. <c>WaitReason</c>/<c>TopStackFrame</c> stay out of <c>Measures</c> (free text /
+        /// no natural numeric shape). <c>WaitType</c> also stayed out originally for the same
+        /// "categorical string, no enum in scope" reason <c>GCRootAnalyzer</c>'s <c>RootKind</c>
+        /// omission documented — but unlike <c>RootKind</c>, <see cref="WaitingThreadSnapshot.WaitType"/>
+        /// is a string only because <see cref="DetectWaitPattern"/> already stringified the enum before
+        /// this method sees it (the <see cref="WaitType"/> enum itself is still in scope, defined in
+        /// this class). Phase 5 step 6.2 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md,
+        /// <c>ClusterHangCorrelationInsightRule</c>) needs <c>WaitReason</c> to reproduce the original
+        /// finding's narrative, and <c>WaitReason</c> is itself just a 1:1 display label per
+        /// <c>WaitType</c> case (see <see cref="DetectWaitPattern"/>) — so a <c>wait-type.ordinal</c>
+        /// measure, parsed back from the string, carries everything needed, the same
+        /// <c>root-kind.ordinal</c> pattern <c>GCRootAnalyzer</c> already uses. A
+        /// <c>circular-wait-candidate.count</c> flag is kept too — it's a raw per-thread fact
         /// ("MonitorWait" while holding a lock), not the categorical string itself, and it's what
         /// <c>HangHealthClassifier.ComputeHealthScore</c> needs to reproduce its deadlock-candidate
         /// penalty without WaitType ever crossing into Reporting.
@@ -181,6 +189,7 @@ namespace DumpDetective.Analysis.Analyzers.Threads
                     {
                         ["locks-held.count"] = new Measure(wt.LockCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                         ["circular-wait-candidate.count"] = new Measure(isCircularWaitCandidate ? 1 : 0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["wait-type.ordinal"] = new Measure((double)(int)Enum.Parse<WaitType>(wt.WaitType), MeasureUnit.Custom, MeasureSemantics.Absolute),
                     },
                     Provenance = new Provenance
                     {

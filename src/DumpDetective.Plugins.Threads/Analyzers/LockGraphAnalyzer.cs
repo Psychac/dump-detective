@@ -213,6 +213,22 @@ public sealed class LockGraphAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
             deadlockCandidates.Add(new DeadlockCandidateSnapshot(
                 (uint)managedThreadId, thread.Thread.OsThreadId, lockTypes, lockAddresses, summary, ownerFrames));
 
+            // Phase 5 step 6.2 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md):
+            // ClusterHangCorrelationInsightRule needs the held lock type names for its narrative
+            // ("holding lock(s) on: X, Y") — the original only ever joined them into prose, never
+            // filtered/scored on the list, so Evidence (not a new Subjects/observation shape) is
+            // enough, mirroring how thread.stack-cluster already carries its Signature.
+            var lockTypeEvidence = new List<EvidenceRef>(lockTypes.Count == 0 ? 0 : 1);
+            if (lockTypes.Count > 0)
+            {
+                lockTypeEvidence.Add(new EvidenceRef
+                {
+                    Artifact = observationContext.ArtifactId!.Value,
+                    Locator = "lock-object-types",
+                    Description = string.Join(", ", new HashSet<string>(lockTypes, StringComparer.Ordinal)),
+                });
+            }
+
             await observationContext.Observations.EmitAsync(new Observation
             {
                 Id = ObservationId.NewId(),
@@ -223,6 +239,7 @@ public sealed class LockGraphAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
                 {
                     ["locks-held.count"] = new Measure(locksHeld.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
                 },
+                Evidence = lockTypeEvidence,
                 Provenance = new Provenance
                 {
                     Artifact = observationContext.ArtifactId!.Value,

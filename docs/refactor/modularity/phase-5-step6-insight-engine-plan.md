@@ -213,11 +213,14 @@ to match whatever the migrated rules actually set.
       `ConflictingAssemblyNames`), which also has no clean per-module join target yet. Left in
       `InsightEngine.MemoryAndRuntimeRuleGroup` for now — it's the sole remaining method in that
       group.
-- [x] **`CorrelationRuleGroup`: 8 of 17 done, shipped 2026-09-22.** Migrated:
+- [x] **`CorrelationRuleGroup`: 13 of 17 done, shipped 2026-09-22/23.** Migrated:
       `FatalExceptionOnHeapInsightRule`, `EventLeakPatternInsightRule`,
       `RecurringTimeoutPatternInsightRule`, `DbConnectionLeakInsightRule`,
       `WcfChannelFaultInsightRule`, `WcfOpeningTimeoutCorrelationInsightRule`,
-      `HttpClientAccumulationInsightRule`, `ReferenceChainDominatorCorrelationInsightRule`. This
+      `HttpClientAccumulationInsightRule`, `ReferenceChainDominatorCorrelationInsightRule`,
+      `DataTableLifecycleInsightRule`, `KnownLeakPatternsInsightRule`,
+      `PinnedStringLeakInsightRule`, `ClusterHangCorrelationInsightRule`,
+      `StaticRootFinalizableCorrelationInsightRule`. This
       group's gap profile is different from the first two — fewer clean single-measure gaps, more
       structural blockers:
       - **One gap unblocked 5 rules at once.** `CrashDomainResult.ExceptionTypeCounts` (every
@@ -272,41 +275,114 @@ to match whatever the migrated rules actually set.
         `JitModuleHotspot` stay held — their tables aren't optional supplementary detail the way
         `ReferenceChainDominatorCorrelation`'s was (see the per-method reasons below), so dropping
         the table would mean dropping most of the finding's value, not a disclosed simplification.
-- [ ] **9 of 17 `CorrelationRuleGroup` methods held, for three distinct reasons, several methods
-      held on more than one** — none are a routine "add one measure" gap the way most of steps
-      6.2's earlier work was:
+- [x] **Closed the substring-scan half of the `MemoryDomainResult.TopTypes` gap, shipped
+      2026-09-22.** Scoped against
+      [docs/ReportStructure/ReportSystemVision.md](../../ReportStructure/ReportSystemVision.md)
+      first: §5.4's "no top-N, no cap" is a store-level policy against sampling an unbounded
+      ranking, not against a fixed, known-vocabulary check — the same distinction
+      `TimerWrapperTypeNames` already relies on — so a bounded observation for a handful of named
+      patterns doesn't reopen that rule. `MemoryAnalyzer` now emits
+      `type.known-pattern-population` (bounded to DataRow, SqlClient `TdsParser` async-closures, and
+      four uncached-reflection-metadata type names) scanned from `MemoryDomainResult.TopTypes`,
+      which — despite its name — was already the full per-type population, not a top-N slice; only
+      the observation was missing. `DetectDataTableLifecyclePattern`'s finalizer-side half
+      (DataColumn/DataTable via `FinalizableObjectDomainResult`) already had full observation
+      coverage (`type.finalizable-population`, `finalizer.queue-entry`, both exhaustive) and needed
+      no new emission at all. Migrated as `DataTableLifecycleInsightRule` and
+      `KnownLeakPatternsInsightRule`. `DetectMemoryTypeGenerationCorrelation`/
+      `DetectStringMemoryConcentration` stay held — those need a full cross-join against another
+      unbounded per-type list, which §10.1/§10.4 of the same vision doc assigns to the future
+      `dd-scatter` Correlation widget over the entity/observation store, not a hand-rolled per-rule
+      join built ahead of that model landing.
+      Tests: `tests/DumpDetective.Tests/Unit/Synthesis/InsightCorrelationRulesTests.cs` (9 rules
+      now covered in this file); full suite 1388 passed, 0 failed, 4 skipped (real-dump/trace,
+      expected).
+- [x] **Closed `DetectPinnedStringLeak`'s gap, shipped 2026-09-22.** `handle.pinned-target-type`
+      only carried per-type pinned *counts*; `TopPinnedObjectsBySize`/`TopAsyncPinnedObjectsBySize`
+      (the analyzer's own independent top-N-by-bytes rankings) had no observation at all.
+      `GCHandleAnalyzer` now also emits `handle.pinned-target-bytes` from those two lists directly
+      — deliberately not summed from the per-address `handle.pinned` observation (that one is
+      capped to `GCHandleAnalysisOptions.TopPinnedHandleAddressesToShow` addresses, so a per-type
+      sum over it would silently undercount) and deliberately not index-zipped against
+      `handle.pinned-target-type` (the original's own `FindBytes`/`FindCount` helpers already
+      treated the two rankings as independent, exact-name lookups — that semantics is preserved,
+      not "fixed"). Migrated as `PinnedStringLeakInsightRule`; the two stale
+      `InsightEngineTests.cs` cases for the old method removed, coverage moved to
+      `InsightCorrelationRulesTests.PinnedStringLeak`. Full suite: 1390 passed, 0 failed, 4 skipped
+      (real-dump/trace, expected) — one unrelated pre-existing flaky test
+      (`ArrayAnalyzerRetypingCharacterizationTests.AnalyzeAsync_RealSparseArray_...`) failed once in
+      the full run, passed in isolation; not touched by this change.
+- [x] **Closed `DetectClusterHangCorrelation`'s gap, shipped 2026-09-23.** Investigated deeper than
+      the other "audit pass" items and found two separate real gaps, not one:
+      `ThreadStackClusterAnalyzer`'s `thread.stack-cluster` had `Subjects=[]` (no entity subject at
+      all — a cluster spans many threads) and the dominant cluster's member OS thread ids
+      (`SampleOsThreadIds`) were domain-result-only; closed with a new `thread.stack-cluster-member`
+      observation (`Subjects=[ThreadRef]`) plus a shared `cluster.rank` measure (0 = dominant) on
+      both it and `thread.stack-cluster`, so the rule can find the dominant cluster and its members
+      without a positional assumption. `HangAnalyzer`'s `thread.wait-state` deliberately never
+      carried `WaitType`/`WaitReason` (categorical strings, no home in numeric `Measures`) — but
+      investigation showed `WaitReason` is just a fixed 1:1 display label per `WaitType` case (a
+      small, code-defined 7-value enum), so a `wait-type.ordinal` measure closes it with the same
+      `root-kind.ordinal` pattern `GCRootAnalyzer` already uses; scoped against
+      [docs/ReportStructure/ReportSystemVision.md](../../ReportStructure/ReportSystemVision.md)
+      first — §14.2's column-store spec has a first-class `"kind": "enum"` column (ordinal + fixed
+      label dictionary), independently validating the ordinal-measure shape as forward-compatible,
+      not a stopgap. The rule keeps its own copy of the ordinal-to-label table rather than
+      referencing `HangAnalyzer`'s `WaitType` enum directly — it's `internal` to a different
+      assembly, the same "re-derive, don't share the internal type" call `LeakCandidateSynthesisRule`
+      made for `AllocationPatternPressureClassifier`. Deadlock-candidate lock-object-type names ride
+      on `thread.blocked`'s `Evidence` (narrative-only in the original) rather than a new `Subjects`
+      shape. The wait-reason breakdown table was dropped, not ported — same "supplementary, not the
+      whole payload" call `ReferenceChainDominatorCorrelation` made for its own table; the headline
+      already states the dominant reason. Migrated as `ClusterHangCorrelationInsightRule`; six stale
+      `InsightEngineTests.cs` cases (two tests plus a shared helper) removed, coverage moved to
+      `InsightCorrelationRulesTests.ClusterHangCorrelation`. Full suite: 1390 passed, 0 failed, 4
+      skipped (real-dump/trace, expected).
+- [x] **Closed `DetectStaticRootFinalizableCorrelation`'s gap, shipped 2026-09-23.** Turned out
+      simpler than the original "nested per-root × per-type cross join, no clean observation shape
+      yet" held-reason suggested — both sides of the join are already small, bounded, domain-result
+      lists (`TopRootsByRetainedBytes` and each root's `TopRetainedTypes`), not a full heap-wide
+      cross join. The finalizer-queue side needed no new emission — `finalizer.queue-entry` (already
+      exhaustive) is grouped by type name in the rule, the same trick `DataTableLifecycleInsightRule`
+      already uses. The static-root side needed one new observation:
+      `StaticRootAnalyzer`'s existing `heap.static-root` subjects on the root object's own type, not
+      the `TopRetainedTypes` breakdown. There's no `root` `EntityKind` in the SDK yet
+      ([docs/ReportStructure/ReportSystemVision.md](../../ReportStructure/ReportSystemVision.md)
+      §4.1's root entity is aspirational, not shipped), so the new
+      `heap.static-root-retained-type` observation subjects on the retained `TypeRef` instead
+      (joinable against `finalizer.queue-entry` by type name) and carries the root's description as
+      narrative-only `Evidence` — the same call already made for `thread.stack-cluster`'s
+      `Signature` and `thread.blocked`'s lock-object-types. Bounded by `TopRetainedTypes`' own
+      existing cap, not a new unbounded emission. Migrated as
+      `StaticRootFinalizableCorrelationInsightRule`; two stale `InsightEngineTests.cs` cases
+      removed, coverage moved to `InsightCorrelationRulesTests.StaticRootFinalizableCorrelation`.
+      Full suite: 1392 passed, 0 failed, 4 skipped (real-dump/trace, expected). Note:
+      `StaticRootAnalyzer`'s pre-existing "never actually fires on a real dump" bug (see
+      [docs/analysis/phase1/static-root-leak-detector-audit.md](../../analysis/phase1/static-root-leak-detector-audit.md))
+      was deliberately left untouched here, same as when it was retyped — this migration is
+      mechanical and doesn't depend on that bug being fixed.
+- [ ] **4 of 17 `CorrelationRuleGroup` methods remain held, for three distinct reasons, several
+      methods held on more than one** — none are a routine "add one measure" gap the way most of
+      steps 6.2's earlier work was:
       1. **The `EvidenceTables` decision above** holds `DetectMemoryTypeGenerationCorrelation`,
          `DetectStringMemoryConcentration`, `DetectCrashModuleHotspot`, and `DetectJitModuleHotspot`
          — for all four, the table is the finding's main payload, not supplementary detail the way
          `ReferenceChainDominatorCorrelation`'s was, so dropping it isn't a reasonable disclosed
          simplification.
-      2. **`MemoryDomainResult.TopTypes` is an unbounded per-type list deliberately never promoted
-         to an observation** (the same volume-risk reasoning `GCGenerationAnalyzer`'s own per-type
-         list already got flagged for). `DetectDataTableLifecyclePattern`, `DetectKnownLeakPatterns`,
-         `DetectMemoryTypeGenerationCorrelation`, and `DetectStringMemoryConcentration` all scan it
-         for known substrings (DataColumn/DataTable/DataRow, TdsParser-closures, reflection-metadata
-         types) or cross-join it against another unbounded per-type list. A bounded, known-vocabulary
-         observation (the same shape as `TimerWrapperTypeNames`) could close the substring-scan
-         cases; the full cross-join case (`MemoryTypeGenerationCorrelation`) needs a bigger design
-         decision, not a quick fix.
+      2. **`MemoryDomainResult.TopTypes` cross-joined against another unbounded per-type list needs
+         a bigger design decision, not a quick fix.** `DetectMemoryTypeGenerationCorrelation` and
+         `DetectStringMemoryConcentration` are the two remaining cases (the substring-scan cases,
+         `DetectDataTableLifecyclePattern`/`DetectKnownLeakPatterns`, are closed above).
       3. **Large/complex enough to need a dedicated audit pass, not a quick fix squeezed into this
-         batch**: `DetectClusterHangCorrelation` (four-way cross-reference —
-         `ThreadStackClusterDomainResult`/`HangDomainResult`/`ThreadDomainResult`/
-         `LockGraphDomainResult` — with OS-thread-ID-level joins and a deadlock-candidate escalation
-         path); `DetectCrashModuleHotspot`/`DetectJitModuleHotspot` (both need a genuinely new
+         batch**: `DetectCrashModuleHotspot`/`DetectJitModuleHotspot` (both need a genuinely new
          per-module `LoadedModuleSnapshot.Size` observation — `runtime.module-heap-footprint`
          measures heap footprint, a different quantity — and `DetectJitModuleHotspot` separately
          needs a new per-module JIT frame-hit observation on top of that);
-         `DetectStaticRootFinalizableCorrelation` (nested per-root × per-type cross join, no clean
-         observation shape yet); `DetectLongHeldTransactionOnOpenConnection` (address-level join
-         between `SqlTransactionDomainResult`'s active-transaction connection addresses and
+         `DetectLongHeldTransactionOnOpenConnection` (address-level join between
+         `SqlTransactionDomainResult`'s active-transaction connection addresses and
          `DbConnectionDomainResult`'s open-connection addresses — needs checking whether those
-         addresses are even observable as stable identity, not assumed); `DetectPinnedStringLeak`
-         (needs a per-type *bytes* measure for pinned targets — `handle.pinned-target-type` only
-         carries counts, and `TopPinnedObjectsBySize`/`TopPinnedTargetTypes` are two independently-
-         sorted rankings that may not share membership, so aligning them needs care, not a blind
-         index-zip).
-      All 9 stay in `InsightEngine.CorrelationRuleGroup` for now, each with its own reason
+         addresses are even observable as stable identity, not assumed).
+      All 4 stay in `InsightEngine.CorrelationRuleGroup` for now, each with its own reason
       documented inline in that class's leading comment.
 - [ ] **Retire `InsightEngine` only once every rule is ported (except the held
       `DetectAnalyzerFailures`, whose fate is a separate decision).** Delete the class down to
@@ -340,10 +416,10 @@ to match whatever the migrated rules actually set.
 ## Sizing note
 
 6.1 is done (see § 6.1). 6.2 is the large item: 39 rule methods, ~1,300 lines of detection logic.
-All three groups have started; 28 of 39 methods are migrated, 11 held. `BaselineRuleGroup` (10/11)
+All three groups have started; 33 of 39 methods are migrated, 6 held. `BaselineRuleGroup` (10/11)
 and `MemoryAndRuntimeRuleGroup` (10/11) had a low gap rate — 8/11 and 6/10 needed zero new emission,
 most of the rest needed one new measure on an existing observation, and two needed only a classifier
-formula duplicated locally. `CorrelationRuleGroup` (8/17 so far) confirmed the sizing note's own
+formula duplicated locally. `CorrelationRuleGroup` (13/17 so far) confirmed the sizing note's own
 warning: its gap profile is different and harder — fewer single-measure gaps, more structural
 blockers.
 
@@ -366,11 +442,23 @@ Two things surfaced there worth remembering for future groups:
   observations directly. `MemoryTypeGenerationCorrelation`/`StringMemoryConcentration`/
   `CrashModuleHotspot`/`JitModuleHotspot` were the latter — stay held.
 
-The remaining held `CorrelationRuleGroup` methods split into "needs `MemoryDomainResult.TopTypes`,
-an unbounded per-type list deliberately never observed" (4 methods) and "large/complex enough to
-need its own dedicated audit pass" (`ClusterHangCorrelation`, `StaticRootFinalizableCorrelation`,
-`LongHeldTransactionOnOpenConnection`, `PinnedStringLeak`, `CrashModuleHotspot` — the last also
-needs a genuinely new per-module `LoadedModuleSnapshot.Size` observation, the same gap
-`JitModuleHotspot` needs). See § "CorrelationRuleGroup" above for the full per-method breakdown.
+The `DataTableLifecyclePattern`/`KnownLeakPatterns` half of the `MemoryDomainResult.TopTypes` gap,
+`PinnedStringLeak`'s own separate gap, `ClusterHangCorrelation`'s two separate gaps (cluster
+membership had no subject at all; wait-type was a categorical string with no home in numeric
+`Measures`), and `StaticRootFinalizableCorrelation`'s gap (a per-root retained-type breakdown with
+no observation, closed without needing a new `root` `EntityKind`) all closed 2026-09-22/23 via
+bounded/ordinal/`Evidence`-carried observations, each scoped first against
+[docs/ReportStructure/ReportSystemVision.md](../../ReportStructure/ReportSystemVision.md) — §5.4's
+"no top-N, no cap" targets sampling an unbounded ranking, not a fixed small vocabulary or an
+analyzer's own already-bounded top-N-by-bytes ranking; §14.2's column-store `"kind": "enum"` spec
+(ordinal + fixed label dictionary) independently validated the `wait-type.ordinal` shape as
+forward-compatible, not a stopgap — so none of these reopened settled decisions. The remaining held
+`CorrelationRuleGroup` methods split into "needs `MemoryDomainResult.TopTypes` cross-joined against
+another unbounded per-type list, a bigger design decision the vision doc assigns to the future
+`dd-scatter` widget" (2 methods: `MemoryTypeGenerationCorrelation`, `StringMemoryConcentration`) and
+"large/complex enough to need its own dedicated audit pass"
+(`DetectLongHeldTransactionOnOpenConnection`, `DetectCrashModuleHotspot` — the last also needs a
+genuinely new per-module `LoadedModuleSnapshot.Size` observation, the same gap `JitModuleHotspot`
+needs). See § "CorrelationRuleGroup" above for the full per-method breakdown.
 `DetectAnalyzerFailures` (`BaselineRuleGroup`) is the remaining held method from an earlier
 group — needs pipeline run-status, not a heap/runtime fact.

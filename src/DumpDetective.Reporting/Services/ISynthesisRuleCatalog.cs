@@ -31,5 +31,7 @@ internal sealed class DefaultSynthesisRuleCatalog : ISynthesisRuleCatalog
         typeof(LohPressureInsightRule), typeof(LohFragmentationInsightRule), typeof(PohGrowthInsightRule), typeof(ThreadContentionInsightRule), typeof(FinalizerQueueBacklogInsightRule), typeof(PinnedHandlePressureInsightRule), typeof(ActiveCrashInsightRule), typeof(LeakSuspicionInsightRule), typeof(WastefulCollectionsInsightRule), typeof(OrphanedTaskAccumulationInsightRule),
         typeof(GCRootLargeRetentionInsightRule), typeof(AllocationPressureCrossCorrelationInsightRule), typeof(StringDuplicationRatioInsightRule), typeof(LohArrayPressureInsightRule), typeof(AsyncStateMachineFireAndForgetInsightRule), typeof(StaleWeakReferenceAccumulationInsightRule), typeof(AddressSpacePressureInsightRule), typeof(DynamicAssemblyAccumulationInsightRule), typeof(JitHeapBloatInsightRule), typeof(BoxingGCCorrelationInsightRule),
         typeof(FatalExceptionOnHeapInsightRule), typeof(EventLeakPatternInsightRule), typeof(RecurringTimeoutPatternInsightRule), typeof(DbConnectionLeakInsightRule), typeof(WcfChannelFaultInsightRule), typeof(WcfOpeningTimeoutCorrelationInsightRule), typeof(HttpClientAccumulationInsightRule),
-        typeof(ReferenceChainDominatorCorrelationInsightRule)];
+        typeof(ReferenceChainDominatorCorrelationInsightRule), typeof(DataTableLifecycleInsightRule), typeof(KnownLeakPatternsInsightRule),
+        typeof(PinnedStringLeakInsightRule), typeof(ClusterHangCorrelationInsightRule),
+        typeof(StaticRootFinalizableCorrelationInsightRule)];
 }

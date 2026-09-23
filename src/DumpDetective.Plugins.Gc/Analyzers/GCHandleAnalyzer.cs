@@ -240,6 +240,17 @@ public sealed class GCHandleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
             }, cancellationToken);
         }
 
+        // Phase 5 step 6.2 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md):
+        // PinnedStringLeakInsightRule needs per-type pinned *bytes*, which handle.pinned-target-type
+        // above doesn't carry (count only) and handle.pinned can't safely stand in for — it's capped
+        // to GCHandleAnalysisOptions.TopPinnedHandleAddressesToShow addresses, so summing it by type
+        // would silently undercount. TopPinnedObjectsBySize/TopAsyncPinnedObjectsBySize are their own
+        // separate top-N-by-bytes rankings (not the same entry set as TopPinnedTargetTypes — deliberately
+        // not index-zipped with it), so this emits its own observation rather than trying to align two
+        // independently-sorted lists.
+        await EmitPinnedTargetBytesAsync(context, result.TopPinnedObjectsBySize, cancellationToken);
+        await EmitPinnedTargetBytesAsync(context, result.TopAsyncPinnedObjectsBySize, cancellationToken);
+
         foreach (NameCountEntry entry in result.DependentTopTargetTypes ?? [])
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -254,6 +265,36 @@ public sealed class GCHandleAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
                 Measures = new Dictionary<string, Measure>
                 {
                     ["instance.count"] = new Measure(entry.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "GC Handle Analysis",
+                    CapabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapHandles },
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
+    }
+
+    private static async ValueTask EmitPinnedTargetBytesAsync(
+        AnalysisContext context, IReadOnlyList<NameBytesEntry>? entries, CancellationToken cancellationToken)
+    {
+        foreach (NameBytesEntry entry in entries ?? [])
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            (string canonicalName, MatchFidelity typeFidelity) = EntityCanonicalizer.CanonicalizeTypeName(entry.Name);
+
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "handle.pinned-target-bytes",
+                Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = typeFidelity }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["retained.bytes"] = new Measure(entry.Bytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                 },
                 Provenance = new Provenance
                 {

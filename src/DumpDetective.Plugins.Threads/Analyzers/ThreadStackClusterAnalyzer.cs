@@ -5,6 +5,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Temporal;
 
@@ -119,13 +120,24 @@ namespace DumpDetective.Analysis.Analyzers.Threads
         /// unfiltered scalars (<c>AliveThreadCount</c>/<c>UniqueClusters</c>/<c>DiversityPercent</c>)
         /// no per-cluster observation could stand in for, since <c>TopClusters</c> — and therefore
         /// every emitted <c>thread.stack-cluster</c> — is filtered by <c>MinClusterSize</c>.
+        ///
+        /// Phase 5 step 6.2 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md):
+        /// <c>ClusterHangCorrelationInsightRule</c> needs the dominant cluster's own sampled OS thread
+        /// ids to intersect against <c>HangAnalyzer</c>'s waiting-thread set — a new
+        /// <c>thread.stack-cluster-member</c> observation (<c>Subjects=[ThreadRef]</c>) carries exactly
+        /// <c>SampleOsThreadIds</c>, the same sample this method already builds, now queryable; it
+        /// doesn't widen the sample into full membership. Both this and <c>thread.stack-cluster</c> now
+        /// also carry a <c>cluster.rank</c> measure (0 = dominant/largest, per <c>TopClusters</c>'
+        /// existing descending-by-<c>Count</c> sort) so a rule can find one cluster's whole-cluster
+        /// measures and its members without an implicit positional assumption.
         /// </summary>
         private static async ValueTask EmitObservationsAsync(Sdk.Analysis.AnalysisContext context, ThreadStackClusterDomainResult result, CancellationToken cancellationToken)
         {
             var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.RuntimeThreads };
 
-            foreach (ThreadClusterSnapshot cluster in result.TopClusters ?? [])
+            for (int rank = 0; rank < (result.TopClusters?.Count ?? 0); rank++)
             {
+                ThreadClusterSnapshot cluster = result.TopClusters![rank];
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var evidence = new List<EvidenceRef>
@@ -147,6 +159,12 @@ namespace DumpDetective.Analysis.Analyzers.Threads
                         ["threadpool-worker.count"] = new Measure(cluster.ThreadpoolWorkerCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                         ["gc.count"] = new Measure(cluster.GcCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                         ["finalizer.count"] = new Measure(cluster.FinalizerCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        // Phase 5 step 6.2 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md):
+                        // ClusterHangCorrelationInsightRule needs to find "the dominant (largest) cluster"
+                        // specifically — TopClusters is sorted descending by Count (see the Sort call this
+                        // result is built from), so rank 0 is that cluster; carried here since neither this
+                        // observation nor thread.stack-cluster-member below otherwise expose ordering.
+                        ["cluster.rank"] = new Measure(rank, MeasureUnit.Custom, MeasureSemantics.Absolute),
                     },
                     Evidence = evidence,
                     Provenance = new Provenance
@@ -158,6 +176,34 @@ namespace DumpDetective.Analysis.Analyzers.Threads
                     },
                     Confidence = 1.0,
                 }, cancellationToken);
+
+                // ClusterHangCorrelationInsightRule also needs which OS threads make up the dominant
+                // cluster, to intersect against HangAnalyzer's waiting-thread set — SampleOsThreadIds
+                // was domain-result-only before this (same "sample, not full membership" caveat as the
+                // whole-cluster observation above; this doesn't change that, it just makes the existing
+                // sample queryable).
+                for (int i = 0; i < cluster.SampleOsThreadIds.Count; i++)
+                {
+                    await context.Observations.EmitAsync(new Observation
+                    {
+                        Id = ObservationId.NewId(),
+                        ObservationType = "thread.stack-cluster-member",
+                        Subjects = [new ThreadRef { OsThreadId = cluster.SampleOsThreadIds[i], Fidelity = MatchFidelity.Exact }],
+                        When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                        Measures = new Dictionary<string, Measure>
+                        {
+                            ["cluster.rank"] = new Measure(rank, MeasureUnit.Custom, MeasureSemantics.Absolute),
+                        },
+                        Provenance = new Provenance
+                        {
+                            Artifact = context.ArtifactId!.Value,
+                            AnalyzerKey = "Thread Stack Signature Clustering",
+                            CapabilitiesUsed = capabilitiesUsed,
+                            Fidelity = FidelityLevel.Full,
+                        },
+                        Confidence = 1.0,
+                    }, cancellationToken);
+                }
             }
 
             await context.Observations.EmitAsync(new Observation

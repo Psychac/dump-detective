@@ -38,23 +38,6 @@ internal sealed class LeakCandidateSectionBuilder : SectionBuilderBase, IAnalyze
                 : new[] { "Leak analysis is heuristic-guided; confirm with root-path review." }),
         };
 
-        SectionLeadFinding? leadFinding = null;
-        if (leak.TopCandidates.Count > 0)
-        {
-            LeakCandidateRecord top = leak.TopCandidates[0];
-            if (top.Severity != FindingSeverity.Info)
-            {
-                leadFinding = new SectionLeadFinding(
-                    Severity: top.Severity.ToString(),
-                    Title: $"Memory leak candidate: {top.TypeName} ({top.Classification})",
-                    Summary: $"Score: {top.SuspicionScore:N0}, {top.InstanceCount:N0} instances, {FormatBytes(top.TotalSize)} total. Gen2: {top.Gen2Pct:F1}%.",
-                    Recommendation: "Investigate root paths in §A5 (GC Root Intelligence) to confirm retention.",
-                    ConfidenceSymbol: confidenceSymbol,
-                    ConfidenceScore: confidenceScore,
-                    Caveats: leakCaveats);
-            }
-        }
-
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
             ["total_candidates"] = new NumericMetricValue(leak.TotalCandidates, MetricUnit.Count),
@@ -160,7 +143,6 @@ internal sealed class LeakCandidateSectionBuilder : SectionBuilderBase, IAnalyze
             DisplayTitle: DisplayTitle,
             SortOrder: SortOrder,
             Blocks: blocks,
-            LeadFinding: leadFinding,
             KeyMetrics: keyMetrics,
             CompactTables: compactTables.Count > 0 ? compactTables : null,
             LeakCandidateCards: leakCandidateCards.Count > 0 ? leakCandidateCards : null);

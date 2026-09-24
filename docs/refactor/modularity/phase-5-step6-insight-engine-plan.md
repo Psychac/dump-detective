@@ -443,15 +443,36 @@ to match whatever the migrated rules actually set.
 
 ## 6.3 — Section builders become presentation-only (6a)
 
-- [ ] Re-run the `grep "new SectionLeadFinding("` audit from
-      [analyzer-pipeline-stages-and-leadfinding-dedup.md](../analyzer-pipeline-stages-and-leadfinding-dedup.md)
-      to confirm zero inline constructions remain outside `NormalizeSectionContractSlots`'s
-      derivation path — the doc's own tracking says only `LeakAnalysisSectionBuilder`'s benign
-      parallel read (`Severity` read independently by both builder and generator, not re-derived
-      logic) was still open, and 6.1 above removes the reason that was allowed to stand.
-- [ ] Add the architecture-conformance test the phase's exit criteria call for: no section builder
-      contains a threshold/band/severity comparison. Grep-based, same style as
-      `SynthesisRuleRegistryConformanceTests`.
+- [x] **Inline `SectionLeadFinding` constructions removed, shipped 2026-09-24.**
+      - The re-run audit found two builders left, not the one expected: `LeakCandidateSectionBuilder`
+        and `LohFragmentationSectionBuilder` (whose ≥30%/≥15% ladder the 2026-09-08 audit marked
+        "duplicated, currently consistent" and never fixed). Both inline leads were deleted; both
+        sections now get their lead from `NormalizeSectionContractSlots`.
+      - No wording lost: the LOH builder's severity-specific title, byte/free-block summary, and
+        recommendations moved into `LohFragmentationSynthesisRule` (it now also reads
+        `heap.loh-fragmentation-summary` for free-block count and largest free block). The leak rule
+        already carried everything the builder's lead had.
+      - `NormalizeSectionContractSlots` no longer derives a lead from an `Info` top finding —
+        previously the leak builder alone suppressed `Info` leads; now it's one rule for every
+        section.
+      - Confidence now comes from the rules (`MeasurementCertain`) instead of the builders' hard-coded
+        0.9 / 0.75 — folding the ladder itself is § 6.4.
+- [x] **Conformance test added, shipped 2026-09-24** — narrower than originally worded, by design.
+      - `FitnessEnforcementTests.SectionBuilders_ShouldNotDecideLeadFindingsOrSeverity` bans
+        `new SectionLeadFinding(` and hard-coded `Severity: "..."` literals under `SectionBuilders/`.
+      - The original wording ("no threshold/band/severity comparison") isn't enforceable by grep:
+        ~99 numeric comparisons across 25 builders, nearly all display logic (counts, byte-unit loops,
+        truncation). Reading `FindingSeverity` off an already-synthesized finding (executive
+        summary, narrative, insights) is presentation and stays allowed.
+      - Full suite: 1402 passed, 0 failed, 65 skipped (same skip count as the pre-change baseline).
+- [ ] Remaining builder-side judgment, each needs its own call (not caught by the test above):
+      - `GetSeverityBand` key metric in `LohFragmentationSectionBuilder` and
+        `FinalizableObjectSectionBuilder` — duplicates its rule's thresholds.
+      - Threshold-gated advice text in `HttpObjectSectionBuilder` (≥5/≥20/≥50/≥20) and
+        `GCGenerationSectionBuilder` (Gen2 ≥40%, LOH ≥35%) — no matching rule.
+      - Row-flagging reasons in `TypeSystemSectionBuilder` (>1% heap, >80% Gen2, >500 finalizable,
+        >50 MB).
+      - `LeakCandidateSectionBuilder.GetImpactBand` — size band, orthogonal to severity.
 
 ## 6.4 — Consolidate confidence ladders (6b)
 

@@ -41,6 +41,22 @@ public sealed class FitnessEnforcementTests
     }
 
     [Fact]
+    public void SectionBuilders_ShouldNotDecideLeadFindingsOrSeverity()
+    {
+        string repoRoot = FindRepositoryRoot();
+        string sectionBuildersRoot = Path.Combine(repoRoot, "src", "DumpDetective.Reporting", "SectionBuilders");
+
+        IReadOnlyList<string> offenders = FindNamespaceReferences(
+            sectionBuildersRoot,
+            forbiddenPrefixes: ["new SectionLeadFinding(", "Severity: \""]);
+
+        offenders.Should().BeEmpty(
+            "section builders are presentation-only: the lead finding is derived from the top " +
+            "synthesized finding in ReportSectionAssembler.NormalizeSectionContractSlots, never " +
+            "constructed or severity-classified by a builder.");
+    }
+
+    [Fact]
     public void HotspotGuardrailTests_ShouldExistForCriticalPaths()
     {
         string repoRoot = FindRepositoryRoot();

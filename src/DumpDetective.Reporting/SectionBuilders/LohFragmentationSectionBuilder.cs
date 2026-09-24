@@ -155,29 +155,8 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
             compactTables.Add(STCompact("Top large objects by size", new[] { CH("Type"), CH("Size","bytes"), CH("Address") }, loRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
-        SectionLeadFinding? leadFinding = null;
-        if (d.FragmentationPercent >= 30)
-            leadFinding = new SectionLeadFinding(
-                Severity: "Critical",
-                Title: $"Critical LOH/POH fragmentation — {d.FragmentationPercent:F1}% of LOH/POH is free space",
-                    Summary: $"Total LOH/POH: {FormatHelper.FormatBytes(d.TotalBytes)}, free: {FormatHelper.FormatBytes(d.FreeBytes)} ({d.FreeBlockCount:N0} free blocks). Largest free block: {FormatHelper.FormatBytes(d.LargestFreeBlock)}.",
-                Recommendation: "Compact the LOH via GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true), or pool large objects (ArrayPool<T>/MemoryPool<T>) to reduce allocation churn.",
-                ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
-                ConfidenceScore: 0.9,
-                Caveats: []);
-        else if (d.FragmentationPercent >= 15)
-            leadFinding = new SectionLeadFinding(
-                Severity: "Warning",
-                Title: $"Elevated LOH/POH fragmentation — {d.FragmentationPercent:F1}% free-space fragmentation",
-                    Summary: $"Total LOH/POH: {FormatHelper.FormatBytes(d.TotalBytes)}, free: {FormatHelper.FormatBytes(d.FreeBytes)} ({d.FreeBlockCount:N0} free blocks). Largest free block: {FormatHelper.FormatBytes(d.LargestFreeBlock)}.",
-                Recommendation: "Monitor LOH allocation patterns. Consider using ArrayPool<T> or MemoryPool<T> for large buffers to reduce fragmentation over time.",
-                ConfidenceSymbol: "\u25cf\u25cf\u25cf\u25cf",
-                ConfidenceScore: 0.9,
-                Caveats: []);
-
         return new AnalyzerDetailSection(
             AnalyzerName, DisplayTitle, SortOrder, blocks,
-            LeadFinding: leadFinding,
             KeyMetrics: keyMetrics,
             CompactTables: compactTables.Count > 0 ? compactTables : null);
     }

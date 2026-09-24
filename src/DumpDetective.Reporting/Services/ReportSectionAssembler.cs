@@ -190,7 +190,7 @@ internal static class ReportSectionAssembler
                         top = finding;
                 }
 
-                if (top is not null)
+                if (top is not null && top.Severity != FindingSeverity.Info)
                 {
                     double score = top.EffectiveConfidenceScore;
                     string symbol = SectionBuilderBase.SymbolForScore(score);

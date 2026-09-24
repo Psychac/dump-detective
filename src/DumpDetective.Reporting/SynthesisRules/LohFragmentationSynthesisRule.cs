@@ -1,3 +1,4 @@
+using DumpDetective.Core.Utilities;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -15,6 +16,8 @@ namespace DumpDetective.Reporting.SynthesisRules;
 /// <c>free.bytes</c>/<c>segment.count</c> across every matched row and recomputing the percentage
 /// from those sums — never averaging the per-kind percentages, which would silently misweight a
 /// case where one kind has far more segments than the other.
+/// <c>heap.loh-fragmentation-summary</c> is read only for the free-block count and largest free
+/// block, which the per-kind rows don't carry as a combined figure.
 /// </remarks>
 internal sealed class LohFragmentationSynthesisRule : ISynthesisRule
 {
@@ -28,7 +31,7 @@ internal sealed class LohFragmentationSynthesisRule : ISynthesisRule
 
     public ObservationQuery Query { get; } = new()
     {
-        ObservationTypes = ["heap.loh-fragmentation"],
+        ObservationTypes = ["heap.loh-fragmentation", "heap.loh-fragmentation-summary"],
     };
 
     public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
@@ -37,10 +40,18 @@ internal sealed class LohFragmentationSynthesisRule : ISynthesisRule
         long segmentCount = 0;
         ulong totalBytes = 0;
         ulong freeBytes = 0;
+        Observation? summary = null;
         var derivedFrom = new List<ObservationId>(matched.Matched.Count);
 
         foreach (Observation observation in matched.Matched)
         {
+            if (observation.ObservationType == "heap.loh-fragmentation-summary")
+            {
+                summary = observation;
+                derivedFrom.Add(observation.Id);
+                continue;
+            }
+
             segmentCount += (long)observation.Measures["segment.count"].Value;
             totalBytes += (ulong)observation.Measures["total.bytes"].Value;
             freeBytes += (ulong)observation.Measures["free.bytes"].Value;
@@ -59,13 +70,19 @@ internal sealed class LohFragmentationSynthesisRule : ISynthesisRule
             Analyzer = AnalyzerName,
             Category = "Fragmentation",
             Severity = severity,
-            Title = "LOH fragmentation assessment",
-            Narrative = $"{fragmentationPercent:F1}% overall free-space fragmentation across {segmentCount:N0} LOH/POH segment(s).",
-            Recommendation = severity == Severity.Critical
-                ? "Investigate large object allocation churn and retention; consider compaction strategies and pooling."
-                : severity == Severity.Warning
-                    ? "Monitor LOH allocation patterns and reduce churn from short-lived large allocations."
-                    : "LOH fragmentation is currently within acceptable range.",
+            Title = severity switch
+            {
+                Severity.Critical => $"Critical LOH/POH fragmentation — {fragmentationPercent:F1}% of LOH/POH is free space",
+                Severity.Warning => $"Elevated LOH/POH fragmentation — {fragmentationPercent:F1}% free-space fragmentation",
+                _ => $"LOH/POH fragmentation within acceptable range — {fragmentationPercent:F1}%",
+            },
+            Narrative = BuildNarrative(totalBytes, freeBytes, segmentCount, summary),
+            Recommendation = severity switch
+            {
+                Severity.Critical => "Compact the LOH via GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true), or pool large objects (ArrayPool<T>/MemoryPool<T>) to reduce allocation churn.",
+                Severity.Warning => "Monitor LOH allocation patterns. Consider using ArrayPool<T> or MemoryPool<T> for large buffers to reduce fragmentation over time.",
+                _ => "LOH fragmentation is currently within acceptable range.",
+            },
             Tags = ["loh", "fragmentation", "memory"],
             MetricValue = fragmentationPercent,
             MetricUnit = "% fragmentation",
@@ -74,5 +91,16 @@ internal sealed class LohFragmentationSynthesisRule : ISynthesisRule
         };
 
         return ValueTask.FromResult<IReadOnlyList<Finding>>([finding]);
+    }
+
+    private static string BuildNarrative(ulong totalBytes, ulong freeBytes, long segmentCount, Observation? summary)
+    {
+        string narrative = $"Total LOH/POH: {FormatHelper.FormatBytes(totalBytes)}, free: {FormatHelper.FormatBytes(freeBytes)} across {segmentCount:N0} segment(s).";
+        if (summary is null)
+            return narrative;
+
+        long freeBlockCount = (long)summary.Measures["free-block.count"].Value;
+        ulong largestFreeBlock = (ulong)summary.Measures["largest-free-block.bytes"].Value;
+        return narrative + $" {freeBlockCount:N0} free blocks; largest free block: {FormatHelper.FormatBytes(largestFreeBlock)}.";
     }
 }

@@ -67,28 +67,6 @@ internal sealed class HttpObjectSectionBuilder : SectionBuilderBase, IAnalyzerSe
                 typeRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
-        if (d.HttpClientCount >= 5)
-            blocks.Add(new TextBlock(
-                "HttpClient is designed for long-lived reuse. Use IHttpClientFactory or a static HttpClient. " +
-                "Creating per-request instances exhausts ephemeral TCP ports even before GC can collect them."));
-
-        if (d.HttpWebResponseCount >= 20)
-            blocks.Add(new TextBlock(
-                "Undisposed HttpWebResponse objects hold network streams open, exhausting connection pool slots. " +
-                "Always wrap responses in a `using` statement or explicitly call Dispose()."));
-
-        if (d.ServicePointCount >= 50)
-            blocks.Add(new TextBlock(
-                "ServicePointManager.MaxServicePoints defaults to unlimited, causing ServicePoint accumulation and potential OOM. " +
-                "Set a reasonable limit (e.g., 100) or migrate to HttpClient (.NET 6+ preferred)."));
-
-        if (d.ExpiredHandlerTrackingEntryCount >= 20)
-            blocks.Add(new TextBlock(
-                "A large number of expired IHttpClientFactory handler tracking entries means many SocketsHttpHandler " +
-                "rotations have accumulated. Each rotation only frees the previous handler once nothing still " +
-                "references it — a persistently high count suggests either a very short HandlerLifetime or code " +
-                "holding onto a handler/HttpMessageHandler directly instead of obtaining it through the factory."));
-
         if (d.TopHttpInstances.Count > 0)
         {
             var instanceRows = new List<TableRow>(d.TopHttpInstances.Count);

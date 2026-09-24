@@ -470,8 +470,11 @@ to match whatever the migrated rules actually set.
         `FinalizableObjectSectionBuilder`~~ — **removed 2026-09-24.** The LOH copy fed a
         `severity_band` key metric duplicating the rule's ≥30%/≥15% thresholds (the derived lead
         already shows severity; nothing else read it). The Finalizable copy had no callers at all.
-      - Threshold-gated advice text in `HttpObjectSectionBuilder` (≥5/≥20/≥50/≥20) and
-        `GCGenerationSectionBuilder` (Gen2 ≥40%, LOH ≥35%) — no matching rule.
+      - [x] ~~Threshold-gated advice text in `HttpObjectSectionBuilder` (≥5/≥20/≥50/≥20)~~ —
+        **removed 2026-09-24.** All four cut-offs were exact copies of `HttpObjectSynthesisRule`'s
+        warning thresholds, and each matching finding already carries the same (or richer) advice in
+        its `Narrative`/`Recommendation`, so the builder text was a second copy, not unique content.
+      - Threshold-gated advice text in `GCGenerationSectionBuilder` (Gen2 ≥40%, LOH ≥35%).
       - Row-flagging reasons in `TypeSystemSectionBuilder` (>1% heap, >80% Gen2, >500 finalizable,
         >50 MB).
       - `LeakCandidateSectionBuilder.GetImpactBand` — size band, orthogonal to severity.

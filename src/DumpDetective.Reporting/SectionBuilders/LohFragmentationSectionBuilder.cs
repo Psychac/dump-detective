@@ -35,7 +35,6 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
             ["free_blocks"] = new NumericMetricValue(d.FreeBlockCount, MetricUnit.Count),
             ["overall_fragmentation_pct"] = new NumericMetricValue(d.FragmentationPercent, MetricUnit.Percent, $"{d.FragmentationPercent:F1}%"),
             ["largest_free_block"] = new NumericMetricValue((double)d.LargestFreeBlock, MetricUnit.Bytes, FormatHelper.FormatBytes(d.LargestFreeBlock)),
-            ["severity_band"] = new TextMetricValue(GetSeverityBand(d.FragmentationPercent)),
         };
 
         var segments = d.TopFragmentedSegments ?? [];
@@ -167,15 +166,4 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
         HeapSegmentKind.PinnedObjectHeap => "POH",
         _ => kind.ToString(),
     };
-
-    private static string GetSeverityBand(double fragmentationPercent)
-    {
-        if (fragmentationPercent >= 30)
-            return "Critical (\u2265 30%)";
-
-        if (fragmentationPercent >= 15)
-            return "Warning (15%\u201330%)";
-
-        return "OK (< 15%)";
-    }
 }

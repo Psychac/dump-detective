@@ -466,8 +466,10 @@ to match whatever the migrated rules actually set.
         summary, narrative, insights) is presentation and stays allowed.
       - Full suite: 1402 passed, 0 failed, 65 skipped (same skip count as the pre-change baseline).
 - [ ] Remaining builder-side judgment, each needs its own call (not caught by the test above):
-      - `GetSeverityBand` key metric in `LohFragmentationSectionBuilder` and
-        `FinalizableObjectSectionBuilder` — duplicates its rule's thresholds.
+      - [x] ~~`GetSeverityBand` in `LohFragmentationSectionBuilder` and
+        `FinalizableObjectSectionBuilder`~~ — **removed 2026-09-24.** The LOH copy fed a
+        `severity_band` key metric duplicating the rule's ≥30%/≥15% thresholds (the derived lead
+        already shows severity; nothing else read it). The Finalizable copy had no callers at all.
       - Threshold-gated advice text in `HttpObjectSectionBuilder` (≥5/≥20/≥50/≥20) and
         `GCGenerationSectionBuilder` (Gen2 ≥40%, LOH ≥35%) — no matching rule.
       - Row-flagging reasons in `TypeSystemSectionBuilder` (>1% heap, >80% Gen2, >500 finalizable,

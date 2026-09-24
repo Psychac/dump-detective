@@ -176,15 +176,4 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
         >= 3 => "LOH",
         _ => "Unknown",
     };
-
-    private static string GetSeverityBand(int queueCount)
-    {
-        if (queueCount > 10_000)
-            return "Critical (> 10,000)";
-
-        if (queueCount >= 1_000)
-            return "Warning (1,000–10,000)";
-
-        return "OK (< 1,000)";
-    }
 }

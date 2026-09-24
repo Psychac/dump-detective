@@ -756,10 +756,9 @@ export function buildAnalyzerSection(section, i) {
       const cSum = el('summary', 'leak-card__summary');
 
       const sevBadge = el('span', 'leak-card__sev leak-card__sev--' + sev); sevBadge.textContent = card.severity || 'Info';
-      const impactBadge = el('span', 'leak-card__impact leak-card__impact--' + String(card.impactBand || 'low').toLowerCase()); impactBadge.textContent = card.impactBand || '';
       const cName = el('span', 'leak-card__name'); cName.textContent = card.typeName || '';
       const cScore = el('span', 'leak-card__score'); cScore.textContent = card.suspicionScore != null ? 'Score ' + Number(card.suspicionScore).toLocaleString('en-US') : '';
-      cSum.appendChild(sevBadge); cSum.appendChild(impactBadge); cSum.appendChild(cName); cSum.appendChild(cScore);
+      cSum.appendChild(sevBadge); cSum.appendChild(cName); cSum.appendChild(cScore);
       cDetails.appendChild(cSum);
 
       const cBody = el('div', 'leak-card__body');

@@ -109,7 +109,6 @@ internal sealed class LeakCandidateSectionBuilder : SectionBuilderBase, IAnalyze
         for (int i = 0; i < cardCount; i++)
         {
             LeakCandidateRecord candidate = leak.TopCandidates[i];
-            string impactBand = GetImpactBand(candidate.TotalSize);
             string gcImpact = candidate.IsFinalizable
                 ? "Finalizable objects can extend collection cycles and add second-pass GC pressure."
                 : "No finalizer-specific impact detected.";
@@ -133,7 +132,6 @@ internal sealed class LeakCandidateSectionBuilder : SectionBuilderBase, IAnalyze
                 IsContainer:         candidate.IsContainer,
                 ReferenceFieldRatio: candidate.ReferenceFieldRatio,
                 ExplanationText:     explanationText,
-                ImpactBand:          impactBand,
                 GcImpactNote:        gcImpact,
                 LohImpactNote:       lohImpact));
         }
@@ -147,12 +145,6 @@ internal sealed class LeakCandidateSectionBuilder : SectionBuilderBase, IAnalyze
             CompactTables: compactTables.Count > 0 ? compactTables : null,
             LeakCandidateCards: leakCandidateCards.Count > 0 ? leakCandidateCards : null);
     }
-
-    private static string GetImpactBand(ulong totalSize)
-        => totalSize < 50UL * 1024 * 1024 ? "Low"
-            : totalSize < 500UL * 1024 * 1024 ? "Medium"
-            : totalSize < 2UL * 1024 * 1024 * 1024 ? "High"
-            : "Critical";
 
     private static bool IsLargeObjectLike(string typeName)
         => typeName.Contains("[]", StringComparison.Ordinal)

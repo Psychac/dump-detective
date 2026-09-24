@@ -465,7 +465,8 @@ to match whatever the migrated rules actually set.
         truncation). Reading `FindingSeverity` off an already-synthesized finding (executive
         summary, narrative, insights) is presentation and stays allowed.
       - Full suite: 1402 passed, 0 failed, 65 skipped (same skip count as the pre-change baseline).
-- [ ] Remaining builder-side judgment, each needs its own call (not caught by the test above):
+- [x] **Remaining builder-side judgment — all resolved 2026-09-24**, one at a time (none caught by
+      the test above):
       - [x] ~~`GetSeverityBand` in `LohFragmentationSectionBuilder` and
         `FinalizableObjectSectionBuilder`~~ — **removed 2026-09-24.** The LOH copy fed a
         `severity_band` key metric duplicating the rule's ≥30%/≥15% thresholds (the derived lead
@@ -488,7 +489,12 @@ to match whatever the migrated rules actually set.
         `MemoryDomainResult.TopTypes` cross-join blocker as the 3 held `InsightEngine` rules
         (§ 6.2). Lost: its finalizable and rooted columns (finalizable types have their own
         section).
-      - `LeakCandidateSectionBuilder.GetImpactBand` — size band, orthogonal to severity.
+      - [x] ~~`LeakCandidateSectionBuilder.GetImpactBand`~~ — **removed 2026-09-24.** A size-only
+        Low/Medium/High/Critical badge rendered next to the real severity badge in severity-style
+        colours, so a card could read "Warning" and "Critical" at once. The card body already shows
+        the exact total size, so the band was dropped end to end: `LeakCandidateCard.ImpactBand`,
+        the builder method, the header badge in `report.renderers.sections.js`, and its
+        `report.detail.css` rules. Report JSON no longer carries `impactBand` (no other reader).
 
 ## 6.4 — Consolidate confidence ladders (6b)
 

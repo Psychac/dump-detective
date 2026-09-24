@@ -1409,11 +1409,6 @@ body.high-contrast .filter-btn.active { background: #fff !important; color: #000
 .leak-card__sev--critical { background: #fee2e2; color: #991b1b; }
 .leak-card__sev--warning  { background: #fef3c7; color: #92400e; }
 .leak-card__sev--info     { background: #f1f5f9; color: #475569; }
-.leak-card__impact { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 7px; border-radius: 4px; flex-shrink: 0; }
-.leak-card__impact--critical { background: #fecaca; color: #7f1d1d; }
-.leak-card__impact--high     { background: #fed7aa; color: #7c2d12; }
-.leak-card__impact--medium   { background: #fef3c7; color: #78350f; }
-.leak-card__impact--low      { background: #f1f5f9; color: #475569; }
 .leak-card__name  { font-size: 12.5px; font-weight: 500; color: #1e293b; flex: 1; word-break: break-all; }
 .leak-card__score { font-size: 11px; color: #64748b; flex-shrink: 0; }
 .leak-card__body  { padding: 10px 14px; }

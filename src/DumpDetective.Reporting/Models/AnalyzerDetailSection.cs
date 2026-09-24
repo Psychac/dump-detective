@@ -120,7 +120,6 @@ internal sealed record LeakCandidateCard(
     bool IsContainer,
     double ReferenceFieldRatio,
     string ExplanationText,
-    string ImpactBand,
     string GcImpactNote,
     string LohImpactNote);
 

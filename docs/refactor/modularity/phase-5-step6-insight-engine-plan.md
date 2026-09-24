@@ -479,8 +479,15 @@ to match whatever the migrated rules actually set.
         Warning threshold. Gen2 ≥40% *diverged* from the rule's ≥50% Warning / ≥75% Critical, so
         40–50% Gen2 dumps got a "Gen2 dominates" note the rule never backed; resolved in the rule's
         favour (user call) — no note below 50%, rule unchanged.
-      - Row-flagging reasons in `TypeSystemSectionBuilder` (>1% heap, >80% Gen2, >500 finalizable,
-        >50 MB).
+      - [x] ~~Row-flagging reasons in `TypeSystemSectionBuilder` (>1% heap, >80% Gen2, >500
+        finalizable, >50 MB)~~ — **removed 2026-09-24.** These weren't labels but row *selection*:
+        they nominated a "Dominator candidates" table by joining Memory/GCGeneration/ObjectShape/
+        GCRoot domain results in the builder. The Dominator section already answers the same
+        question with exact (Lengauer-Tarjan) retained bytes when available, so the table was
+        deleted rather than moved into a rule — moving it would have hit the same
+        `MemoryDomainResult.TopTypes` cross-join blocker as the 3 held `InsightEngine` rules
+        (§ 6.2). Lost: its finalizable and rooted columns (finalizable types have their own
+        section).
       - `LeakCandidateSectionBuilder.GetImpactBand` — size band, orthogonal to severity.
 
 ## 6.4 — Consolidate confidence ladders (6b)

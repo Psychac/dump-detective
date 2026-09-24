@@ -29,7 +29,6 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
         MemoryDomainResult? memory = results.Get<MemoryDomainResult>();
         GCGenerationDomainResult? gcGen = results.Get<GCGenerationDomainResult>();
         ObjectShapeAnalyzerDomainResult? shape = results.Get<ObjectShapeAnalyzerDomainResult>();
-        GCRootDomainResult? roots = results.Get<GCRootDomainResult>();
 
         var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>
@@ -180,36 +179,6 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
                 blocks.Add(T($"Showing top {finalizableLimit} finalizable type(s). {finalizableOverheadRows.Count - finalizableLimit} additional type(s) omitted."));
         }
 
-        blocks.Add(H("DOMINATOR CANDIDATES"));
-        blocks.Add(T("Candidates are nominated from available type, generation, and shape signals."));
-
-        var candidates = BuildCandidates(memory, gcGen, shape, roots);
-        if (candidates.Count == 0)
-        {
-            blocks.Add(T("No dominator candidates met the heuristic thresholds."));
-        }
-        else
-        {
-            var candidateRows = new List<TableRow>(candidates.Count);
-            for (int i = 0; i < candidates.Count; i++)
-            {
-                DominatorCandidate candidate = candidates[i];
-                candidateRows.Add(Row(
-                    Cell(candidate.TypeName),
-                    Cell(candidate.Reasons),
-                    Cell(candidate.InstanceCount.ToString("N0"), candidate.InstanceCount),
-                    Cell(FormatBytes(candidate.ShallowBytes), (long)Math.Min(candidate.ShallowBytes, long.MaxValue)),
-                    Cell(candidate.Gen2Pct.ToString("F1") + "%"),
-                    Cell(candidate.RetainedBytes > 0 ? FormatBytes(candidate.RetainedBytes) : "—"),
-                    Cell(candidate.SampleAddress == 0 ? "—" : $"0x{candidate.SampleAddress:X}"),
-                    Cell(candidate.Rooted ? "Rooted" : "Unknown")));
-            }
-            compactTables.Add(STCompact(
-                "Dominator candidates",
-                new[] { CH("Type"), CH("Reason"), CH("Instances","number"), CH("Shallow Size","bytes"), CH("Gen2%", "number", "percent"), CH("Estimated Retained","bytes"), CH("Sample Address"), CH("GC Root Reachability") },
-                candidateRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
-        }
-
         blocks.Add(H("TYPE SHAPE NOTES"));
         blocks.Add(T("Balanced shapes are surfaced as Mixed; arrays are flagged explicitly in the type table."));
 
@@ -271,74 +240,12 @@ internal sealed class TypeSystemSectionBuilder : SectionBuilderBase, IReportSect
     private static string GenPct(TypeGenerationProfile profile, int gen)
         => $"{GenPctValue(profile, gen):F1}%";
 
-    private sealed record DominatorCandidate(
-        string TypeName,
-        string Reasons,
-        int InstanceCount,
-        ulong ShallowBytes,
-        double Gen2Pct,
-        ulong RetainedBytes,
-        ulong SampleAddress,
-        bool Rooted);
-
     private sealed record FinalizableOverheadCandidate(
         string TypeName,
         long Gen2Count,
         ulong AverageSize,
         ulong EstimatedGen2Bytes,
         string ModuleName);
-
-    private static IReadOnlyList<DominatorCandidate> BuildCandidates(MemoryDomainResult memory, GCGenerationDomainResult? gcGen, ObjectShapeAnalyzerDomainResult? shape, GCRootDomainResult? roots)
-    {
-        var candidates = new List<DominatorCandidate>();
-        ulong heapTotal = memory.TotalBytes == 0 ? 1 : memory.TotalBytes;
-        var rootedTypes = new HashSet<string>(StringComparer.Ordinal);
-        if (roots is not null)
-        {
-            for (int i = 0; i < roots.TopRootsBySeverity.Count; i++)
-                rootedTypes.Add(roots.TopRootsBySeverity[i].TargetTypeName);
-
-            for (int i = 0; i < roots.RootOwnedSubgraphs.Count; i++)
-                rootedTypes.Add(roots.RootOwnedSubgraphs[i].TargetTypeName);
-        }
-
-        int limit = Math.Min(memory.TopTypes.Count, TopRows);
-        for (int i = 0; i < limit; i++)
-        {
-            TypeSnapshot type = memory.TopTypes[i];
-            TypeGenerationProfile? gen = FindGeneration(gcGen, type.TypeName);
-            TypeShapeProfile? profile = FindShape(shape, type.TypeName);
-
-            double gen2Pct = gen is null ? 0.0 : GenRatioValue(gen);
-            bool finalizable = profile?.IsFinalizable ?? false;
-            bool rooted = rootedTypes.Contains(type.TypeName) || type.EstimatedRetainedBytes > 0;
-            var reasons = new List<string>();
-
-            if ((double)type.TotalBytes / heapTotal > 0.01)
-                reasons.Add(">1% of heap");
-            if (gen2Pct > 80.0)
-                reasons.Add("Gen2-heavy");
-            if (finalizable && type.Count > 500)
-                reasons.Add("finalizable");
-            if (type.TotalBytes > 50UL * 1024 * 1024)
-                reasons.Add("large footprint");
-
-            if (reasons.Count == 0)
-                continue;
-
-            candidates.Add(new DominatorCandidate(
-                type.TypeName,
-                string.Join(", ", reasons),
-                type.Count,
-                type.TotalBytes,
-                gen2Pct,
-                type.EstimatedRetainedBytes,
-                type.SampleAddress,
-                rooted));
-        }
-
-        return candidates.OrderByDescending(c => c.ShallowBytes).Take(TopRows).ToArray();
-    }
 
     private static string FormatBytes(ulong value)
     {

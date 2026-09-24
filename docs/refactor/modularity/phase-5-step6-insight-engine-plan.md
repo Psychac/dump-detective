@@ -474,7 +474,11 @@ to match whatever the migrated rules actually set.
         **removed 2026-09-24.** All four cut-offs were exact copies of `HttpObjectSynthesisRule`'s
         warning thresholds, and each matching finding already carries the same (or richer) advice in
         its `Narrative`/`Recommendation`, so the builder text was a second copy, not unique content.
-      - Threshold-gated advice text in `GCGenerationSectionBuilder` (Gen2 ≥40%, LOH ≥35%).
+      - [x] ~~Threshold-gated advice text in `GCGenerationSectionBuilder` (Gen2 ≥40%, LOH ≥35%)~~ —
+        **removed 2026-09-24.** LOH ≥35% was an exact copy of `GCGenerationSynthesisRule`'s LOH
+        Warning threshold. Gen2 ≥40% *diverged* from the rule's ≥50% Warning / ≥75% Critical, so
+        40–50% Gen2 dumps got a "Gen2 dominates" note the rule never backed; resolved in the rule's
+        favour (user call) — no note below 50%, rule unchanged.
       - Row-flagging reasons in `TypeSystemSectionBuilder` (>1% heap, >80% Gen2, >500 finalizable,
         >50 MB).
       - `LeakCandidateSectionBuilder.GetImpactBand` — size band, orthogonal to severity.

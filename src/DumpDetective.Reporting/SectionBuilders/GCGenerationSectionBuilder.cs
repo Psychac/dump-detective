@@ -47,10 +47,6 @@ internal sealed class GCGenerationSectionBuilder : SectionBuilderBase, IAnalyzer
         else if (d.GenBytesAreApproximate)
             blocks.Add(T("⚠ Generation byte values are approximate and computed from per-type averages. High-variance types (arrays, strings) may show inaccurate per-generation splits."));
 
-        if (d.Gen2Pct >= 40.0)
-            blocks.Add(T("Gen2 dominates the heap; retention is likely becoming long-lived."));
-        if (d.LohPercent >= 35.0)
-            blocks.Add(T("LOH share is elevated and may be contributing to fragmentation or promotion pressure."));
         if (d.PohBytes > 0)
             blocks.Add(T($"POH (Pinned Object Heap) detected: {FormatBytes(d.PohBytes)} in {d.PohObjects:N0} objects. POH is a separate heap for pinned objects on .NET 5+."));
         if (d.FinalizableGen2Count > 0)

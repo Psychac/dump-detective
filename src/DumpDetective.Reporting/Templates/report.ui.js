@@ -1,5 +1,6 @@
 import { renderSparklines, renderCharts } from './report.renderers.js';
 import { nvl } from './report.dom.js';
+import { isLowConfidenceBand } from './report.renderers.shared.js';
 import { filterTocList, setupActiveTocHighlighting } from './report.ui.toc.js';
 import { runRenderIntegrityAudit } from './report.ui.integrity.js';
 import { loadMotionPreference, setupMotionStagger } from './report.ui.motion.js';
@@ -384,8 +385,7 @@ export function setupInteractivity(doc, announce) {
           visible = hay.indexOf(query) >= 0;
         }
         if (visible && lowOnly) {
-          const leadConfidence = Number(section.dataset.leadConfidence || '1');
-          visible = Number.isFinite(leadConfidence) ? leadConfidence < 0.65 : false;
+          visible = isLowConfidenceBand(section.dataset.leadConfidenceBand);
         }
       }
 

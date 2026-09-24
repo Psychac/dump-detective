@@ -6,6 +6,7 @@ import { slugifyAnchor } from './report.renderers.shared.js';
 import { ensureUniqueDomId } from './report.renderers.shared.js';
 import { buildTreeWidget } from './report.renderers.shared.js';
 import { resolveStr } from './report.renderers.shared.js';
+import { confidenceSlots } from './report.renderers.shared.js';
 
 // Resolves pooled-string cells (see report.renderers.shared.js) back to their literal value.
 // Only non-numeric columns can contain pooled indices — the producer never pools a cell in a
@@ -148,9 +149,7 @@ export function buildAnalyzerSection(section, i) {
   wrapper.dataset.detailIndex = sectionIndexKey;
   wrapper.dataset.analyzerName = String(section.analyzerName || section.displayTitle || '');
   wrapper.dataset.leadSeverity = leadSev;
-  wrapper.dataset.leadConfidence = String((section.leadFinding && section.leadFinding.confidence != null)
-    ? Number(section.leadFinding.confidence)
-    : 1);
+  wrapper.dataset.leadConfidenceBand = (section.leadFinding && section.leadFinding.confidenceBand) || '';
 
   // Keep legacy section IDs addressable (e.g., #A1) while moving canonical
   // section anchors to section-{id} for v2 contract compliance.
@@ -229,12 +228,12 @@ export function buildAnalyzerSection(section, i) {
     lfHeader.appendChild(eyebrow);
 
     const headerMeta = el('div', 'finding-card__header-meta');
-    if (lead.confidence != null) {
-      const conf = Number(lead.confidence);
-      const band = conf >= 0.85 ? 'high' : conf >= 0.65 ? 'medhigh' : conf >= 0.45 ? 'medium' : 'low';
+    if (lead.confidenceScore != null) {
+      const conf = Number(lead.confidenceScore);
+      const band = lead.confidenceBand || 'low';
       const confChip = el('span', 'finding-card__confidence-chip finding-card__confidence-chip--' + band);
       const meter = el('span', 'finding-card__confidence-meter');
-      const slots = Math.max(1, Math.min(4, Math.round(conf * 4)));
+      const slots = confidenceSlots(band);
       for (let si = 0; si < 4; si++) {
         const slot = el('span', 'finding-card__confidence-slot' + (si < slots ? ' finding-card__confidence-slot--on' : ''));
         meter.appendChild(slot);
@@ -1051,7 +1050,7 @@ export function buildCorrelationTimeline(doc) {
     const snapshotIdx = evt.primarySnapshotIndex != null ? Number(evt.primarySnapshotIndex) : -1;
     const domainList = Array.isArray(evt.domains) ? evt.domains : [];
     const confNum = Number(evt.confidence) || 0;
-    const confBand = confNum >= 0.85 ? 'high' : confNum >= 0.65 ? 'med' : 'low';
+    const confBand = evt.confidenceBand === 'high' ? 'high' : evt.confidenceBand === 'medhigh' ? 'med' : 'low';
 
     const card = el('article', 'timeline-event timeline-event--' + confBand);
     card.setAttribute('role', 'listitem');

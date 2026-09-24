@@ -28,7 +28,6 @@ internal sealed class LeakCandidateSectionBuilder : SectionBuilderBase, IAnalyze
 
         var (confidenceScore, leakCaveats) = ConfidenceScoring.Compute(0.75,
             ConfidenceScoring.F(leak.HeuristicOnly, 0.15, "Heuristic-only leak analysis; no full retention scan."));
-        string confidenceSymbol = SymbolForScore(confidenceScore);
 
         var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>

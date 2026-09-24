@@ -37,7 +37,6 @@ public sealed class TrendSnapshotSectionComposerTests
                 Title: "Lead issue",
                 Summary: "Evidence text",
                 Recommendation: "Fix it",
-                ConfidenceSymbol: "●●●○",
                 ConfidenceScore: 0.7,
                 Caveats: []));
 

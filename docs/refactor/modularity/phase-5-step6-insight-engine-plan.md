@@ -498,10 +498,29 @@ to match whatever the migrated rules actually set.
 
 ## 6.4 — Consolidate confidence ladders (6b)
 
-- [ ] Confirm `SectionBuilderBase.SymbolForScore` is still the only remaining band/symbol ladder
-      copy (per the audit doc, the other two were already folded into it) after 6.1/6.2 land.
-- [ ] Fold that last copy into `ConfidenceBreakdown` per the parent doc's item 6b; delete the local
-      ladder if `SymbolForScore` becomes a trivial `ConfidenceBreakdown` call.
+- [x] **One confidence ladder, shipped 2026-09-24** — scope and target both changed from the
+      original wording, by design.
+      - **Premise was wrong.** `SymbolForScore` was not the last copy: C# had two ladders side by
+        side in `SectionBuilderBase` (band label + symbol), and the HTML renderer had five more —
+        two chip-band copies (`report.renderers.findings.js`, `report.renderers.sections.js`), a
+        dot-count formula (`round(conf × 4)`, which disagreed with the C# symbol, e.g. 0.85 → 3 dots
+        vs `●●●●`), the correlation-timeline's 3-level copy, and the "low confidence only" filter's
+        `< 0.65` in `report.ui.js`.
+      - **Target moved off `ConfidenceBreakdown`.** It's the plugin-facing SDK contract; band labels
+        and dot symbols are presentation, and
+        [ReportSystemVision.md](../../ReportStructure/ReportSystemVision.md) § 6.2 already ruled out
+        growing SDK types toward report rendering (same call § 6.2's `EvidenceTables` decision made).
+        The ladder now lives in `Reporting/Utilities/ConfidenceLadder.cs`.
+      - **JSON carries the band.** `FindingRecord`, `SectionLeadFinding` and `CorrelationEventRecord`
+        expose a computed `confidenceBand` (`high`/`medhigh`/`medium`/`low`); `SectionLeadFinding`'s
+        `ConfidenceSymbol` became computed too. The renderer only maps a band key to a dot count or
+        CSS class — no cut-offs left in any `.js` file. The timeline's 3 classes map from the 4 bands
+        with identical output to before.
+      - **Fixed a pre-existing bug along the way.** The renderer read `leadFinding.confidence`, but
+        the serialized field was `confidenceScore` — so the lead's confidence chip never rendered and
+        the "low confidence only" filter hid every section. Both now read the real fields.
+      - Tests: new `ConfidenceBandSerializationTests` (band emitted through the source-generated
+        `ReportJsonContext` for all three records). Full suite: 1410 passed, 0 failed, 65 skipped.
 
 ## Sizing note
 

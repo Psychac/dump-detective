@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text.Json.Serialization;
 
 using DumpDetective.Core.Enums;
+using DumpDetective.Reporting.Utilities;
 
 namespace DumpDetective.Reporting.Models;
 
@@ -15,9 +16,12 @@ internal sealed record SectionLeadFinding(
     string Title,
     string Summary,
     string Recommendation,
-    string ConfidenceSymbol,
     double ConfidenceScore,
-    IReadOnlyList<string> Caveats);
+    IReadOnlyList<string> Caveats)
+{
+    public string ConfidenceSymbol => ConfidenceLadder.For(ConfidenceScore).Symbol;
+    public string ConfidenceBand => ConfidenceLadder.For(ConfidenceScore).Key;
+}
 
 /// <summary>A single key metric shown in the always-visible metrics strip.</summary>
 internal sealed record SectionKeyMetric(

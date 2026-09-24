@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using System.Collections.Generic;
 
 using DumpDetective.Core.Enums;
+using DumpDetective.Reporting.Utilities;
 
 namespace DumpDetective.Reporting.Models;
 
@@ -185,6 +186,9 @@ internal sealed record FindingRecord(
     [property: JsonPropertyName("confidence")]
     public double? Confidence { get; init; } = null;
 
+    [JsonPropertyName("confidenceBand")]
+    public string? ConfidenceBand => Confidence is double score ? ConfidenceLadder.For(score).Key : null;
+
     [property: JsonPropertyName("refs")]
     public IReadOnlyList<EvidenceRef>? Refs { get; init; } = null;
 
@@ -290,7 +294,10 @@ internal sealed record CorrelationEventRecord(
     IReadOnlyList<int> SnapshotIndices,
     IReadOnlyList<string> SignalKeys,
     IReadOnlyList<string> SourceFingerprints,
-    int? PrimarySnapshotIndex = null);
+    int? PrimarySnapshotIndex = null)
+{
+    public string ConfidenceBand => ConfidenceLadder.For(Confidence).Key;
+}
 
 // P1.2: Scoring models
 internal sealed record ScoreContributor(

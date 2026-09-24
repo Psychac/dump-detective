@@ -150,6 +150,18 @@ export function domainSevLabel(sev) {
   return String(sev).charAt(0).toUpperCase() + String(sev).slice(1).toLowerCase();
 }
 
+// ── Confidence bands ─────────────────────────────────────────────────────────
+// Band keys are serialized by the C# ConfidenceLadder; read them, never re-derive from the score.
+const CONFIDENCE_BAND_SLOTS = { high: 4, medhigh: 3, medium: 2, low: 1 };
+
+export function confidenceSlots(band) {
+  return CONFIDENCE_BAND_SLOTS[band] || 1;
+}
+
+export function isLowConfidenceBand(band) {
+  return band === 'medium' || band === 'low';
+}
+
 // ── Finding sort helpers ─────────────────────────────────────────────────────
 export function findingSeverityRank(severity) {
   const s = String(severity || 'info').toLowerCase();

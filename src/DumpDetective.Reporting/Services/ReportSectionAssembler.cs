@@ -193,14 +193,12 @@ internal static class ReportSectionAssembler
                 if (top is not null && top.Severity != FindingSeverity.Info)
                 {
                     double score = top.EffectiveConfidenceScore;
-                    string symbol = SectionBuilderBase.SymbolForScore(score);
 
                     leadFinding = new SectionLeadFinding(
                         Severity:          top.Severity.ToString(),
                         Title:             top.Title,
                         Summary:           top.Evidence,
                         Recommendation:    top.Recommendation,
-                        ConfidenceSymbol:  symbol,
                         ConfidenceScore:   score,
                         Caveats:           top.EffectiveCaveats);
                 }

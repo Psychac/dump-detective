@@ -2,6 +2,7 @@
 import { el, t, sevCss, linkifyAnchors } from './report.dom.js';
 import { findingAnchorId } from './report.renderers.shared.js';
 import { ensureUniqueDomId } from './report.renderers.shared.js';
+import { confidenceSlots } from './report.renderers.shared.js';
 
 // ── Finding card ──────────────────────────────────────────────────────────────
 
@@ -43,10 +44,10 @@ export function buildFindingCard(f, i, options) {
   const headerMeta = el('div', 'finding-card__header-meta');
   if (f.confidence != null) {
     const conf = Number(f.confidence);
-    const band = conf >= 0.85 ? 'high' : conf >= 0.65 ? 'medhigh' : conf >= 0.45 ? 'medium' : 'low';
+    const band = f.confidenceBand || 'low';
     const confChip = el('span', 'finding-card__confidence-chip finding-card__confidence-chip--' + band);
     const meter = el('span', 'finding-card__confidence-meter');
-    const slots = Math.max(1, Math.min(4, Math.round(conf * 4)));
+    const slots = confidenceSlots(band);
     for (let si = 0; si < 4; si++) {
       const slot = el('span', 'finding-card__confidence-slot' + (si < slots ? ' finding-card__confidence-slot--on' : ''));
       meter.appendChild(slot);

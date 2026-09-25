@@ -223,13 +223,15 @@ to match whatever the migrated rules actually set.
       Tests: `tests/DumpDetective.Tests/Unit/Synthesis/InsightMemoryAndRuntimeRulesTests.cs` (15
       tests). Full suite: 1372 passed, 0 failed, 4 skipped (real-dump/trace integration, expected)
       after this batch.
-- [ ] **`DetectJitModuleHotspot` — held, not migrated.** Needs a genuinely new capability, not a
-      routine gap: `JitDomainResult.TopActiveModulesByFrameHits` (a per-module frame-hit ranking)
-      has no observation of its own today, and this rule cross-references it against
-      `ModuleAnalyzer`'s per-module size/conflict data (`TopModulesBySize`/
-      `ConflictingAssemblyNames`), which also has no clean per-module join target yet. Left in
-      `InsightEngine.MemoryAndRuntimeRuleGroup` for now — it's the sole remaining method in that
-      group.
+- [x] **`DetectJitModuleHotspot` — migrated 2026-09-26** as `JitModuleHotspotInsightRule`;
+      `MemoryAndRuntimeRuleGroup` is now gone (11/11).
+      - New observation: `runtime.jit-module-frames` (`JitAnalyzer`), one per module with active
+        frames — the whole per-module list, bounded by loaded-module count.
+      - The module side needed nothing new: it joins against `runtime.module-disk-footprint` and
+        `runtime.module-conflict-group`, the same pair `CrashModuleHotspotInsightRule` uses. Names
+        match case-insensitively, as the original did.
+      - Top-5 module table dropped — supplementary; the headline names the module, frame count,
+        size and conflict status.
 - [x] **`CorrelationRuleGroup`: 15 of 17 done, shipped 2026-09-22/23.** Migrated:
       `FatalExceptionOnHeapInsightRule`, `EventLeakPatternInsightRule`,
       `RecurringTimeoutPatternInsightRule`, `DbConnectionLeakInsightRule`,
@@ -416,27 +418,25 @@ to match whatever the migrated rules actually set.
       `CrashCandidate` helper) removed, coverage moved to
       `InsightCorrelationRulesTests.CrashModuleHotspot`. Full suite: 1398 passed, 0 failed, 4 skipped
       (real-dump/trace, expected).
-- [ ] **2 of 17 `CorrelationRuleGroup` methods remain held, for two distinct reasons, one method
-      held on both** — neither is a routine "add one measure" gap the way most of steps 6.2's
-      earlier work was:
-      1. **The `EvidenceTables` decision above** holds `DetectMemoryTypeGenerationCorrelation` and
-         `DetectStringMemoryConcentration` (and `DetectJitModuleHotspot` in `MemoryAndRuntimeRuleGroup`)
-         — for all three, the table is the finding's main payload, not supplementary detail the way
-         `ReferenceChainDominatorCorrelation`'s/`CrashModuleHotspot`'s were, so dropping it isn't a
-         reasonable disclosed simplification.
-      2. **`MemoryDomainResult.TopTypes` cross-joined against another unbounded per-type list needs
-         a bigger design decision, not a quick fix.** `DetectMemoryTypeGenerationCorrelation` and
-         `DetectStringMemoryConcentration` are the two remaining cases (the substring-scan cases,
-         `DetectDataTableLifecyclePattern`/`DetectKnownLeakPatterns`, are closed above).
-      Both stay in `InsightEngine.CorrelationRuleGroup` for now, each with its own reason documented
-      inline in that class's leading comment.
-- [ ] **Retire `InsightEngine` only once every rule is ported.** `DetectAnalyzerFailures` — the one
-      open question about whether this could even happen without a separate design decision — is
-      resolved (see above); `BaselineRuleGroup` is now gone entirely. What's left blocking full
-      retirement is purely the 3 still-held methods (`DetectMemoryTypeGenerationCorrelation`,
-      `DetectStringMemoryConcentration`, `DetectJitModuleHotspot`) — once those land, delete the
-      class, `DumpOrchestrationService.cs`'s `new InsightEngine().Analyze(...)` call,
-      `sessionState.Insights`, and `SingleDumpConsolePresenter.PrintInsights`.
+- [x] **Last 2 `CorrelationRuleGroup` methods resolved 2026-09-26** — the "cross-join two
+      unbounded per-type lists" blocker turned out not to apply to either.
+      - `DetectMemoryTypeGenerationCorrelation` → **migrated** as `MemoryTypeGenerationInsightRule`.
+        No join needed: `GCGenerationDomainResult`'s per-type profile carries the same heap-index
+        total `MemoryDomainResult.TopTypes` did. New observation `gc.generation-type-profile`
+        (`GCGenerationAnalyzer`), one per type ≥ 10 MB — an emission floor, not a top-N (user call).
+        Deliberate change: every large type is checked, not only the top 30 by size. Table dropped;
+        every match cited via `DerivedFrom`.
+      - `DetectStringMemoryConcentration` → **dropped, not migrated** (user call). Its payload was a
+        table of duplicate string values, which have no SDK entity kind; the only other content
+        (String's size rank + wasted bytes) the String Analysis section already reports, and the
+        rule was Info-only.
+- [ ] **Retire `InsightEngine`** — every rule group is now empty (`RuleGroups = []`), so
+      `Analyze` returns nothing. Remaining: delete the class, `DumpOrchestrationService.cs`'s
+      `new InsightEngine().Analyze(...)` call, `sessionState.Insights` (also passed into the report
+      by `BuildReportNode`), and `SingleDumpConsolePresenter.PrintInsights`.
+      - Open question first: the console's insight summary came only from `InsightEngine`, so it has
+        been shrinking as rules migrated and is now empty. The migrated rules' findings reach the
+        report but not the console. Decide whether the console should print them instead.
 - [ ] This closes the phase's own exit criterion — "`IFindingGenerator`/`InsightEngine` no longer
       exist as separate concepts" — jointly with 6.1 (6.1 closed the last surviving
       `IFindingGenerator`; 6.2 closes `InsightEngine`).

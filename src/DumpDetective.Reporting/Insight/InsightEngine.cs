@@ -16,10 +16,12 @@ namespace DumpDetective.Analysis.Insight;
 /// </remarks>
 internal sealed class InsightEngine
 {
-    private static readonly IReadOnlyList<IInsightRuleGroup> RuleGroups =
-    [
-        new CorrelationRuleGroup(),
-    ];
+    // Every rule group has been migrated to ISynthesisRule classes (phase 5 step 6.2,
+    // docs/refactor/modularity/phase-5-step6-insight-engine-plan.md); the engine is pending
+    // retirement. DetectStringMemoryConcentration was dropped rather than migrated — its value was
+    // a table of duplicate string values, which have no SDK entity kind, and the String Analysis
+    // section already reports the same duplication.
+    private static readonly IReadOnlyList<IInsightRuleGroup> RuleGroups = [];
 
     // ── Thresholds ────────────────────────────────────────────────────────────
 
@@ -42,8 +44,6 @@ internal sealed class InsightEngine
     // step 6.2, docs/refactor/modularity/phase-5-step6-insight-engine-plan.md) alongside the Detect*
     // methods that were their only reader — each now lives as a private const on its own
     // *InsightRule class instead.
-    private const ulong StringMemoryCorrelationMinWastedBytes = 5UL * 1024 * 1024; // 5 MB
-    private const int StringMemoryCorrelationMaxRank = 10;
     // ReferenceChainDominatorWarningPct/CriticalPct were removed here (phase 5 step 6.2,
     // docs/refactor/modularity/phase-5-step6-insight-engine-plan.md) alongside
     // DetectReferenceChainDominatorCorrelation, migrated without its evidence table — see
@@ -189,134 +189,10 @@ internal sealed class InsightEngine
     // site, SynthesisFindingEnricher.EnrichAsync, which already had runs in scope unused. See
     // AnalyzerFailuresInsightRule's own remarks for the full reasoning.
 
-    // 15 of this group's original 17 methods were migrated to *InsightRule ISynthesisRule classes
-    // (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md § 6.2) and removed from here to
-    // avoid double-firing. DataTableLifecyclePattern/KnownLeakPatterns needed a new bounded,
-    // known-vocabulary type.known-pattern-population observation (MemoryAnalyzer) rather than the
-    // unbounded full-TopTypes population — same shape as TimerWrapperTypeNames, not a capped
-    // ranking; the finalizer-side half of DataTableLifecyclePattern already had full observation
-    // coverage (type.finalizable-population, finalizer.queue-entry) and needed no new emission.
-    // PinnedStringLeak needed a new handle.pinned-target-bytes observation (GCHandleAnalyzer) —
-    // its own independent top-N-by-bytes ranking, not summed from the capped per-address
-    // handle.pinned observation and not index-zipped against handle.pinned-target-type's separate
-    // count ranking. ClusterHangCorrelation needed two new observations — thread.stack-cluster-member
-    // (ThreadStackClusterAnalyzer, the dominant cluster's OS thread ids had never been promoted from
-    // SampleOsThreadIds) and wait-type.ordinal (HangAnalyzer, the same root-kind.ordinal pattern
-    // GCRootAnalyzer already uses for a categorical value with no home in numeric Measures) — see
-    // ClusterHangCorrelationInsightRule's own remarks for the full reasoning; its wait-reason
-    // breakdown table was dropped, same "supplementary, not the whole payload" call
-    // ReferenceChainDominatorCorrelation's own migration made. StaticRootFinalizableCorrelation
-    // needed a new heap.static-root-retained-type observation (StaticRootAnalyzer) — its existing
-    // heap.static-root subjects on the root object's own type, not the TopRetainedTypes breakdown;
-    // no root EntityKind exists in the SDK yet, so the new observation subjects on the retained
-    // TypeRef instead and carries the root description as Evidence, the same call already made for
-    // thread.stack-cluster's Signature. LongHeldTransactionOnOpenConnection's held-reason — "needs
-    // checking whether the addresses are even observable as stable identity, not assumed" — turned
-    // out already answered by the SDK: ObjectRef's identity is (artifact, address), explicitly
-    // scoped to within-artifact joins, which is exactly what this is (same dump, same run); both
-    // infra.sql-transaction and infra.db-connection gained a second ObjectRef subject (the
-    // referenced/own connection address) alongside their existing TypeRef, same multi-subject
-    // relation shape lock.contested already uses. CrashModuleHotspot needed two new observations —
-    // runtime.crash-thread-candidate-module (CrashAnalyzer, per-candidate module attribution had
-    // never been promoted; runtime.crash-thread-candidate subjects on exception type instead) and
-    // runtime.module-disk-footprint (ModuleAnalyzer, on-disk size — a different quantity from
-    // runtime.module-heap-footprint's shallow.bytes, the gap its original held-reason actually
-    // named); its version-conflict flag needed no new emission at all — runtime.module-conflict-group
-    // already subjects per module with empty Measures, so presence alone is the signal. See
-    // CrashModuleHotspotInsightRule's own remarks for the full reasoning; its ranked module table was
-    // dropped, same "supplementary, not the whole payload" call ReferenceChainDominatorCorrelation's
-    // migration made — it turned out not to be blocked by the EvidenceTables decision below despite
-    // the original held-reason grouping it with the three that are. The remaining 2 are held for
-    // reasons documented in that doc: MemoryTypeGenerationCorrelation/StringMemoryConcentration need
-    // MemoryDomainResult.TopTypes' full per-type population cross-joined against another unbounded
-    // per-type list — a bigger design decision (see docs/ReportStructure/ReportSystemVision.md
-    // §10.1/§10.4's dd-scatter Correlation shape), not a routine emission gap.
-    // ReferenceChainDominatorCorrelation/CrashModuleHotspot (both migrated) and the still-held
-    // MemoryTypeGenerationCorrelation/StringMemoryConcentration/JitModuleHotspot all used
-    // InsightFinding.EvidenceTables, which Sdk.Synthesis.Finding has no equivalent field for — ran
-    // that question against docs/ReportStructure/ReportSystemVision.md § 6.2/Appendix C, which
-    // already decided not to grow Finding toward Claim/report-rendering shape ahead of the report
-    // phase, and separately marks CompactTable (what an EvidenceTable becomes) as something the
-    // future dd-table widget replaces, rendered live from cited observations instead of carried on
-    // the finding. So ReferenceChainDominatorCorrelation/CrashModuleHotspot migrated without their
-    // tables (see their own remarks) rather than growing Finding to keep them; the remaining two stay
-    // held since their tables aren't optional supplementary detail the way those were.
-    private sealed class CorrelationRuleGroup : IInsightRuleGroup
-    {
-        public void Apply(List<InsightFinding> findings, in InsightRuleContext context)
-        {
-            DetectStringMemoryConcentration(findings, context.Memory, context.Strings);
-        }
-    }
-
     // ── Part 4: New cross-cutting detection methods ───────────────────────────
 
     // ── Utilities ─────────────────────────────────────────────────────────────
 
-
-    /// <summary>
-    /// Cross-references the memory analyzer's own top-types-by-size ranking with the string
-    /// analyzer's duplication data. The Memory section only ever sees <c>System.String</c> as one
-    /// more ranked type entry — it has no visibility into duplication. The String section computes
-    /// duplication in isolation and never learns whether that duplication is happening inside a
-    /// top-ranked heap consumer. Combining the two turns "String is duplicated somewhere" into
-    /// "String is your #N largest type, and here's why."
-    /// </summary>
-    private static void DetectStringMemoryConcentration(
-        List<InsightFinding> findings,
-        MemoryDomainResult? memory,
-        StringDomainResult? strings)
-    {
-        if (memory is null || strings is null || strings.TopDuplicates.Count == 0)
-            return;
-
-        if (strings.DuplicateWastedBytes < StringMemoryCorrelationMinWastedBytes)
-            return;
-
-        int stringRank = -1;
-        ulong stringTypeBytes = 0;
-        int scanCount = Math.Min(memory.TopTypes.Count, StringMemoryCorrelationMaxRank);
-        for (int i = 0; i < scanCount; i++)
-        {
-            if (string.Equals(memory.TopTypes[i].TypeName, "System.String", StringComparison.Ordinal))
-            {
-                stringRank = i + 1;
-                stringTypeBytes = memory.TopTypes[i].TotalBytes;
-                break;
-            }
-        }
-
-        if (stringRank < 0)
-            return;
-
-        int rowCount = Math.Min(strings.TopDuplicates.Count, 5);
-        var rows = new List<IReadOnlyList<object?>>(rowCount);
-        for (int i = 0; i < rowCount; i++)
-        {
-            DuplicateStringSnapshot d = strings.TopDuplicates[i];
-            rows.Add(new object?[] { d.Preview, d.Count, FormatBytes(d.WastedBytes) });
-        }
-
-        var evidenceTable = new FindingEvidenceTable(
-            "Top duplicate string values (System.String is a top memory-section consumer)",
-            ["Preview", "Occurrences", "Wasted Bytes"],
-            rows);
-
-        findings.Add(new InsightFinding(
-            Analyzer: Source,
-            Category: "Memory",
-            Severity: FindingSeverity.Info,
-            Title: "String data is a top heap consumer with significant duplication",
-            Evidence: $"System.String ranks #{stringRank} in the Memory section by size " +
-                      $"({FormatBytes(stringTypeBytes)}). {FormatBytes(strings.DuplicateWastedBytes)} of managed " +
-                      $"heap memory is wasted across {strings.DuplicatePatternCount:N0} duplicate string pattern(s).",
-            Recommendation: "Intern or cache the frequently duplicated string values below rather than allocating " +
-                            "fresh instances per request. See the String Analysis section for full duplicate detail.",
-            Tags: ["memory", "strings", "duplication", "cross-analyzer"],
-            MetricValue: (double)strings.DuplicateWastedBytes,
-            MetricUnit: "bytes",
-            EvidenceTables: [evidenceTable]));
-    }
 
     // ── Utilities (last block) ────────────────────────────────────────────────
 

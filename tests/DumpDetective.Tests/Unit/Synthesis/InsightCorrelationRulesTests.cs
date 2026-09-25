@@ -940,4 +940,80 @@ public sealed class InsightCorrelationRulesTests
             findings.Should().BeEmpty();
         }
     }
+
+    public sealed class MemoryTypeGeneration
+    {
+        private readonly MemoryTypeGenerationInsightRule _rule = new();
+
+        private static Observation TypeProfile(string typeName, double totalBytes, double gen2Bytes,
+            double gen0 = 0, double gen1 = 0, double gen2 = 0, double loh = 0) => Obs(
+            "gc.generation-type-profile",
+            new Dictionary<string, Measure>
+            {
+                ["total.bytes"] = Bytes(totalBytes), ["gen2.bytes"] = Bytes(gen2Bytes),
+                ["gen0.count"] = Count(gen0), ["gen1.count"] = Count(gen1),
+                ["gen2.count"] = Count(gen2), ["loh.count"] = Count(loh),
+            },
+            subjects: [new TypeRef { CanonicalName = typeName, Fidelity = MatchFidelity.Exact }]);
+
+        [Fact]
+        public async Task LargeTypeAlmostEntirelyGen2_FiresWarningNamingLargest()
+        {
+            var matched = new ObservationMatchSet(
+            [
+                TypeProfile("MyApp.Small", 20_000_000, 19_000_000),
+                TypeProfile("MyApp.Cache.Entry", 150_000_000, 140_000_000),
+            ]);
+
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+
+            findings.Should().ContainSingle();
+            findings[0].Severity.Should().Be(Severity.Warning);
+            findings[0].Narrative.Should().Contain("2 type(s)").And.Contain("MyApp.Cache.Entry");
+            findings[0].DerivedFrom.Should().HaveCount(2);
+        }
+
+        [Fact]
+        public async Task LargestMatchUnder100Mb_IsInfo()
+        {
+            var matched = new ObservationMatchSet([TypeProfile("MyApp.Small", 20_000_000, 19_000_000)]);
+
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+
+            findings.Should().ContainSingle().Which.Severity.Should().Be(Severity.Info);
+        }
+
+        [Fact]
+        public async Task MostlyGen0_DoesNotFire()
+        {
+            var matched = new ObservationMatchSet([TypeProfile("MyApp.Transient", 150_000_000, 10_000_000)]);
+
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+
+            findings.Should().BeEmpty();
+        }
+
+        [Fact]
+        public async Task ByteFractionPreferredOverCount_WhenGen2BytesAvailable()
+        {
+            // Mostly Gen0 by count (50 of 1,000 in Gen2), but those survivors hold 90% of the bytes.
+            var matched = new ObservationMatchSet(
+                [TypeProfile("MyApp.GrowingList", 150_000_000, 135_000_000, gen0: 950, gen2: 50)]);
+
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+
+            findings.Should().ContainSingle();
+        }
+
+        [Fact]
+        public async Task CountFractionUsed_WhenGen2BytesUnavailable()
+        {
+            var matched = new ObservationMatchSet(
+                [TypeProfile("MyApp.Cache.Entry", 150_000_000, 0, gen0: 10, gen1: 40, gen2: 950)]);
+
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+
+            findings.Should().ContainSingle();
+        }
+    }
 }

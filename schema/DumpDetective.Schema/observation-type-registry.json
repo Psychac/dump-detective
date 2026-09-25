@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/observation-type-registry.json",
-  "registryVersion": "1.85.0",
+  "registryVersion": "1.86.0",
   "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
   "observationTypes": {
     "gc.pause": {
@@ -309,6 +309,23 @@
       },
       "note": "Up to 3 types, ranked by exact Gen2 bytes when any type in the full population has them (gc.generation-composition's has-gen2-bytes), otherwise by Gen2 instance count — same selection/fallback gc.generation-composition's own note describes for gc.generation-top-allocator. Both gen2.bytes and gen2.count are always carried so the synthesis rule can pick the right text format per has-gen2-bytes without a second observation type.",
       "addedIn": "1.55.0"
+    },
+    "gc.generation-type-profile": {
+      "producedBy": "GCGenerationAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Memory/Analyzers/GCGenerationAnalyzer.cs",
+      "requiresCapabilities": ["heap.types"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "total.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "gen2.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "gen0.count": { "unit": "count", "semantics": "absolute" },
+        "gen1.count": { "unit": "count", "semantics": "absolute" },
+        "gen2.count": { "unit": "count", "semantics": "absolute" },
+        "loh.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per type with total.bytes at or above a 10 MB emission floor — every such type, not a top-N. The floor bounds volume (a 25 GB heap has at most ~2,500 such types) instead of emitting the full per-type population gc.generation-composition's note defers. gen2.bytes is 0 for heap indices that predate exact Gen2 bytes; consumers fall back to the count split.",
+      "addedIn": "1.86.0"
     },
     "gc.allocation-composition": {
       "producedBy": "AllocationPatternAnalyzer",

@@ -28,6 +28,11 @@ namespace DumpDetective.Analysis.Analyzers.Memory
         public int Order => 10;
         public bool IsThreadSafe => false;
 
+        // Emission floor, not a severity threshold: bounds gc.generation-type-profile to types
+        // large enough to matter (a 25 GB heap has at most ~2,500 such types) instead of the full
+        // per-type population. The synthesis rule applies its own judgment on top.
+        private const ulong TypeProfileEmissionFloorBytes = 10UL * 1024 * 1024;
+
         public AnalyzerDomainResult? LastResult
         {
             get => _lastResult;
@@ -200,6 +205,52 @@ namespace DumpDetective.Analysis.Analyzers.Memory
                     {
                         ["gen2.bytes"] = new Measure(type.Gen2Bytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                         ["gen2.count"] = new Measure(type.Gen2Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = context.ArtifactId!.Value,
+                        AnalyzerKey = "GC Generation Analysis",
+                        CapabilitiesUsed = capabilitiesUsed,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                }, cancellationToken);
+            }
+
+            await EmitTypeProfilesAsync(context, profiles, capabilitiesUsed, cancellationToken);
+        }
+
+        /// <summary>
+        /// One <c>gc.generation-type-profile</c> per type at or above
+        /// <see cref="TypeProfileEmissionFloorBytes"/> — every such type, not a top-N, so
+        /// <c>MemoryTypeGenerationInsightRule</c> sees the complete set of large types.
+        /// </summary>
+        private static async ValueTask EmitTypeProfilesAsync(
+            AnalysisContext context,
+            IReadOnlyList<TypeGenerationProfile> profiles,
+            IReadOnlySet<Capability> capabilitiesUsed,
+            CancellationToken cancellationToken)
+        {
+            foreach (TypeGenerationProfile type in profiles)
+            {
+                if (type.TotalBytes < TypeProfileEmissionFloorBytes)
+                    continue;
+
+                (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(type.TypeName);
+                await context.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "gc.generation-type-profile",
+                    Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["total.bytes"] = new Measure(type.TotalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                        ["gen2.bytes"] = new Measure(type.Gen2Bytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                        ["gen0.count"] = new Measure(type.Gen0Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["gen1.count"] = new Measure(type.Gen1Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["gen2.count"] = new Measure(type.Gen2Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["loh.count"] = new Measure(type.LohCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                     },
                     Provenance = new Provenance
                     {

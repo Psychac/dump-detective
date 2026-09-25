@@ -68,6 +68,7 @@ public sealed class SdkRegistryConformanceTests
             ],
             ["gc.generation-top-allocator"] = ["gen0.count"],
             ["gc.generation-top-accumulator"] = ["gen2.bytes", "gen2.count"],
+            ["gc.generation-type-profile"] = ["total.bytes", "gen2.bytes", "gen0.count", "gen1.count", "gen2.count", "loh.count"],
             ["gc.allocation-composition"] = [
                 "gen0.count-fraction", "gen1.count-fraction", "gen2.count-fraction", "loh.count-fraction",
                 "gen0.size-fraction", "gen1.size-fraction", "gen2.size-fraction", "loh.size-fraction",

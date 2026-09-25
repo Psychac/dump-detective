@@ -4,6 +4,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Artifacts;
+using DumpDetective.Sdk.Identity;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Temporal;
 
@@ -124,6 +125,42 @@ public sealed class JitAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
             Confidence = 1.0,
             Evidence = evidence,
         }, cancellationToken);
+
+        await EmitModuleFrameCountsAsync(context, result, cancellationToken);
+    }
+
+    /// <summary>
+    /// One <c>runtime.jit-module-frames</c> per module with active frames on any thread stack —
+    /// the whole <see cref="JitDomainResult.TopActiveModulesByFrameHits"/> list, naturally bounded
+    /// by loaded-module count. Subjects on the same <see cref="ModuleRef"/> shape
+    /// <c>ModuleAnalyzer</c>'s per-module observations use, so rules can join the two.
+    /// </summary>
+    private static async ValueTask EmitModuleFrameCountsAsync(AnalysisContext context, JitDomainResult result, CancellationToken cancellationToken)
+    {
+        var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.RuntimeJit, CapabilityVocabulary.RuntimeThreads };
+
+        foreach (NameCountEntry module in result.TopActiveModulesByFrameHits)
+        {
+            await context.Observations.EmitAsync(new Observation
+            {
+                Id = ObservationId.NewId(),
+                ObservationType = "runtime.jit-module-frames",
+                Subjects = [new ModuleRef { SimpleName = module.Name, Fidelity = MatchFidelity.Exact }],
+                When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                Measures = new Dictionary<string, Measure>
+                {
+                    ["active-frame.count"] = new Measure(module.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                },
+                Provenance = new Provenance
+                {
+                    Artifact = context.ArtifactId!.Value,
+                    AnalyzerKey = "JIT Analysis",
+                    CapabilitiesUsed = capabilitiesUsed,
+                    Fidelity = FidelityLevel.Full,
+                },
+                Confidence = 1.0,
+            }, cancellationToken);
+        }
     }
 
     private static JitDomainResult Analyze(

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/observation-type-registry.json",
-  "registryVersion": "1.86.0",
+  "registryVersion": "1.87.0",
   "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
   "observationTypes": {
     "gc.pause": {
@@ -887,6 +887,18 @@
       },
       "note": "Single whole-run observation. No per-method observation yet — building a real MethodRef needs name/signature splitting ThreadStackFrameRef doesn't expose structurally, so Phase 5 step 2 didn't attempt one either: top-method.hot-size-bytes/cold-size-bytes are TopLargestMethods[0]'s sizes, and an EvidenceRef carries its pre-formatted Signature string as free text (no identity resolution needed for evidence, unlike a Subject) — large-method.count is TopLargestMethods.Count (every method already over LargeMethodThresholdBytes), not a second, different count.",
       "addedIn": "1.24.0"
+    },
+    "runtime.jit-module-frames": {
+      "producedBy": "JitAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Runtime/Analyzers/JitAnalyzer.cs",
+      "requiresCapabilities": ["runtime.jit", "runtime.threads"],
+      "subjectKind": "module",
+      "temporalKind": "point",
+      "measures": {
+        "active-frame.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per module with active frames on any thread stack — the whole per-module list, naturally bounded by loaded-module count. Subjects on the same ModuleRef shape ModuleAnalyzer's per-module observations use, so rules can join the two.",
+      "addedIn": "1.87.0"
     },
     "heap.segment-kind-composition": {
       "producedBy": "HeapTopologyAnalyzer",

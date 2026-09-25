@@ -18,7 +18,6 @@ internal sealed class InsightEngine
 {
     private static readonly IReadOnlyList<IInsightRuleGroup> RuleGroups =
     [
-        new MemoryAndRuntimeRuleGroup(),
         new CorrelationRuleGroup(),
     ];
 
@@ -42,9 +41,7 @@ internal sealed class InsightEngine
     // SuspendedMethodFireForgetThreshold, and LohArrayPressureThreshold were removed here (phase 5
     // step 6.2, docs/refactor/modularity/phase-5-step6-insight-engine-plan.md) alongside the Detect*
     // methods that were their only reader — each now lives as a private const on its own
-    // *InsightRule class instead. JitModuleHotspotMinFrameHits stays: still read by
-    // DetectJitModuleHotspot below, not yet migrated.
-    private const int JitModuleHotspotMinFrameHits = 50;
+    // *InsightRule class instead.
     private const ulong StringMemoryCorrelationMinWastedBytes = 5UL * 1024 * 1024; // 5 MB
     private const int StringMemoryCorrelationMaxRank = 10;
     // ReferenceChainDominatorWarningPct/CriticalPct were removed here (phase 5 step 6.2,
@@ -192,20 +189,6 @@ internal sealed class InsightEngine
     // site, SynthesisFindingEnricher.EnrichAsync, which already had runs in scope unused. See
     // AnalyzerFailuresInsightRule's own remarks for the full reasoning.
 
-    // 10 of this group's original 11 methods were migrated to *InsightRule ISynthesisRule classes
-    // (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md § 6.2) and removed from here to
-    // avoid double-firing. DetectJitModuleHotspot is the sole survivor — deliberately held: it needs
-    // a new per-module JIT observation (JitDomainResult.TopActiveModulesByFrameHits has no
-    // observation of its own today) cross-referenced against ModuleAnalyzer's per-module size/
-    // conflict data, a larger lift than this batch's other small gaps — see that doc's tracking.
-    private sealed class MemoryAndRuntimeRuleGroup : IInsightRuleGroup
-    {
-        public void Apply(List<InsightFinding> findings, in InsightRuleContext context)
-        {
-            DetectJitModuleHotspot(findings, context.Jit, context.AppDomains);
-        }
-    }
-
     // 15 of this group's original 17 methods were migrated to *InsightRule ISynthesisRule classes
     // (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md § 6.2) and removed from here to
     // avoid double-firing. DataTableLifecyclePattern/KnownLeakPatterns needed a new bounded,
@@ -267,90 +250,6 @@ internal sealed class InsightEngine
     }
 
     // ── Part 4: New cross-cutting detection methods ───────────────────────────
-
-    /// <summary>
-    /// Correlates JitAnalyzer's per-module active-frame heatmap with ModuleAnalyzer's own
-    /// per-module size/version-conflict data. Neither analyzer can produce this alone: JitAnalyzer
-    /// has no module size/conflict data, and ModuleAnalyzer never walks thread stacks.
-    /// </summary>
-    private static void DetectJitModuleHotspot(
-        List<InsightFinding> findings,
-        JitDomainResult? jit,
-        ModuleDomainResult? modules)
-    {
-        if (jit is null || modules is null || jit.TopActiveModulesByFrameHits.Count == 0)
-            return;
-
-        NameCountEntry topModule = jit.TopActiveModulesByFrameHits[0];
-        if (topModule.Count < JitModuleHotspotMinFrameHits)
-            return;
-
-        LoadedModuleSnapshot? topModuleSizeMatch = FindModuleByName(modules.TopModulesBySize, topModule.Name);
-        bool topModuleInConflict = ContainsModuleName(modules.ConflictingAssemblyNames, topModule.Name);
-
-        if (topModuleSizeMatch is null && !topModuleInConflict)
-            return; // no cross-analyzer signal beyond what JitSectionBuilder's own heatmap already shows
-
-        int rowCount = Math.Min(jit.TopActiveModulesByFrameHits.Count, 5);
-        var rows = new List<IReadOnlyList<object?>>(rowCount);
-        for (int i = 0; i < rowCount; i++)
-        {
-            NameCountEntry entry = jit.TopActiveModulesByFrameHits[i];
-            LoadedModuleSnapshot? sizeMatch = FindModuleByName(modules.TopModulesBySize, entry.Name);
-            bool inConflict = ContainsModuleName(modules.ConflictingAssemblyNames, entry.Name);
-
-            rows.Add(new object?[]
-            {
-                entry.Name,
-                entry.Count,
-                sizeMatch is not null ? FormatBytes(sizeMatch.Size) : "n/a",
-                inConflict ? "Yes" : "No",
-            });
-        }
-
-        var evidenceTable = new FindingEvidenceTable(
-            "Per-module JIT stack heatmap (top active modules)",
-            ["Module", "Active JIT Frames", "Module Size", "Version Conflict"],
-            rows);
-
-        string sizeNote = topModuleSizeMatch is not null ? $" and is {FormatBytes(topModuleSizeMatch.Size)} on disk" : string.Empty;
-        string conflictNote = topModuleInConflict ? " and is involved in an assembly version conflict" : string.Empty;
-
-        findings.Add(new InsightFinding(
-            Analyzer: Source,
-            Category: "Performance",
-            Severity: FindingSeverity.Info,
-            Title: "Module with heavy active JIT stack presence also flagged by module analysis",
-            Evidence: $"Module '{topModule.Name}' accounts for {topModule.Count:N0} active JIT stack " +
-                      $"frames{sizeNote}{conflictNote}.",
-            Recommendation: "Correlate this module's size/version-conflict status with the JIT stack " +
-                            "heatmap to prioritize ReadyToRun/NativeAOT precompilation or dependency " +
-                            "deduplication for this assembly.",
-            Tags: ["jit", "modules", "cross-analyzer"],
-            MetricValue: topModule.Count,
-            MetricUnit: "frames",
-            EvidenceTables: [evidenceTable]));
-    }
-
-    private static LoadedModuleSnapshot? FindModuleByName(IReadOnlyList<LoadedModuleSnapshot> modules, string name)
-    {
-        for (int i = 0; i < modules.Count; i++)
-        {
-            if (string.Equals(modules[i].Name, name, StringComparison.OrdinalIgnoreCase))
-                return modules[i];
-        }
-        return null;
-    }
-
-    private static bool ContainsModuleName(IReadOnlyList<string> names, string name)
-    {
-        for (int i = 0; i < names.Count; i++)
-        {
-            if (string.Equals(names[i], name, StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
-        return false;
-    }
 
     // ── Utilities ─────────────────────────────────────────────────────────────
 

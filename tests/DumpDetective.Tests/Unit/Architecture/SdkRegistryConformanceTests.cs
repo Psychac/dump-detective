@@ -135,6 +135,7 @@ public sealed class SdkRegistryConformanceTests
                 "top-method.hot-size-bytes", "top-method.cold-size-bytes",
                 "max-thread-frame-depth.count", "max-thread-frame-depth.os-thread-id",
             ],
+            ["runtime.jit-module-frames"] = ["active-frame.count"],
             ["heap.segment-kind-composition"] = ["kind.ordinal", "segment.count", "object.count", "committed.bytes", "reserved.bytes", "fragmented.bytes"],
             ["heap.poh-type-composition"] = ["instance.count", "shallow.bytes"],
             ["heap.frozen-type-composition"] = ["instance.count", "shallow.bytes"],

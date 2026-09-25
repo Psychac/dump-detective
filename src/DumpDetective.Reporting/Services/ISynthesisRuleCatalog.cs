@@ -35,5 +35,5 @@ internal sealed class DefaultSynthesisRuleCatalog : ISynthesisRuleCatalog
         typeof(PinnedStringLeakInsightRule), typeof(ClusterHangCorrelationInsightRule),
         typeof(StaticRootFinalizableCorrelationInsightRule), typeof(LongHeldTransactionOnOpenConnectionInsightRule),
         typeof(CrashModuleHotspotInsightRule), typeof(AnalyzerFailuresInsightRule),
-        typeof(MemoryTypeGenerationInsightRule)];
+        typeof(MemoryTypeGenerationInsightRule), typeof(JitModuleHotspotInsightRule)];
 }

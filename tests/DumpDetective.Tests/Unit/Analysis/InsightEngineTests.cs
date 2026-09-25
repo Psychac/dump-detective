@@ -33,53 +33,9 @@ public sealed class InsightEngineTests
     // DetectClusterHangCorrelation migrated to ClusterHangCorrelationInsightRule (phase 5 step 6.2),
     // covered by InsightCorrelationRulesTests.ClusterHangCorrelation instead.
 
-    [Fact]
-    public void Analyze_ShouldEmitCrossAnalyzerFinding_WithEvidenceTable_WhenJitHotspotModuleIsConflicted()
-    {
-        InsightEngine engine = new();
-
-        JitDomainResult jit = new(
-            TotalJitHeapBytes: 1_000_000,
-            JitManagerCount: 1,
-            ActiveMethodsOnStacks: 500,
-            DistinctMethodsOnStacks: 20,
-            TopLargestMethods: [],
-            TopActiveFrameTypes: [],
-            TopActiveModulesByFrameHits: [new NameCountEntry("MyApp.Plugins.dll", 200)],
-            UnmanagedFrameCount: 0,
-            ManagedFrameCount: 500,
-            ReadyToRunFrameCount: 0,
-            DynamicMethodFrameCount: 0,
-            TieredMethodCount: 0,
-            MaxThreadFrameDepth: 0,
-            MaxThreadFrameDepthOSThreadId: 0,
-            LargeMethodThresholdBytes: 64 * 1024);
-
-        ModuleDomainResult modules = new(
-            TotalModules: 10,
-            DynamicModules: 0,
-            UniqueModuleNames: 10,
-            VersionConflictGroups: 1,
-            ConflictingAssemblyNames: ["MyApp.Plugins.dll"],
-            TopModulesBySize: [new LoadedModuleSnapshot("MyApp.Plugins.dll", "MyApp.Plugins", "C:\\app\\MyApp.Plugins.dll", 0x1000, 5_000_000, false, true)],
-            ConflictDetails: [],
-            HeavyModuleWarningThresholdBytes: 1_000_000,
-            UnknownIdentityDuplicateModules: new HashSet<string>());
-
-        AnalyzerRunResult[] runs =
-        [
-            BuildRun("JIT Analysis", AnalyzerExecutionStatus.Success, jit),
-            BuildRun("Module Analysis", AnalyzerExecutionStatus.Success, modules),
-        ];
-
-        IReadOnlyList<InsightFinding> findings = engine.Analyze(runs);
-
-        findings.Should().Contain(f =>
-            f.Title.Contains("heavy active JIT stack presence", StringComparison.OrdinalIgnoreCase)
-            && f.Tags.Contains("cross-analyzer")
-            && f.EffectiveEvidenceTables.Count == 1
-            && f.EffectiveEvidenceTables[0].Rows.Count == 1);
-    }
+    // Analyze_ShouldEmitCrossAnalyzerFinding_WithEvidenceTable_WhenJitHotspotModuleIsConflicted
+    // removed 2026-09-26 — DetectJitModuleHotspot migrated to JitModuleHotspotInsightRule (phase 5
+    // step 6.2), covered by InsightMemoryAndRuntimeRulesTests.JitModuleHotspot instead.
 
     // Analyze_ShouldEmitWarning_WhenActiveExceptionsConcentratedInConflictedModule /
     // Analyze_ShouldNotEmitCrashModuleFinding_WhenActiveExceptionsBelowThreshold / CrashCandidate

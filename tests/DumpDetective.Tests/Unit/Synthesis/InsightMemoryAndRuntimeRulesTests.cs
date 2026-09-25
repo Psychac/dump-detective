@@ -407,4 +407,73 @@ public sealed class InsightMemoryAndRuntimeRulesTests
             findings.Should().ContainSingle();
         }
     }
+
+    public sealed class JitModuleHotspot
+    {
+        private readonly JitModuleHotspotInsightRule _rule = new();
+
+        private static ModuleRef Module(string name) => new() { SimpleName = name, Fidelity = MatchFidelity.Exact };
+
+        private static Observation Frames(string module, int count) => Obs(
+            "runtime.jit-module-frames",
+            new Dictionary<string, Measure> { ["active-frame.count"] = Count(count) },
+            subjects: [Module(module)]);
+
+        private static Observation DiskFootprint(string module, double bytes) => Obs(
+            "runtime.module-disk-footprint",
+            new Dictionary<string, Measure> { ["disk.bytes"] = Bytes(bytes) },
+            subjects: [Module(module)]);
+
+        private static Observation ConflictGroup(string module) => Obs(
+            "runtime.module-conflict-group", new Dictionary<string, Measure>(), subjects: [Module(module)]);
+
+        [Fact]
+        public async Task TopModuleConflictedAndSized_Fires()
+        {
+            var matched = new ObservationMatchSet(
+            [
+                Frames("MyApp.Plugins.dll", 200),
+                Frames("Other.dll", 60),
+                DiskFootprint("MyApp.Plugins.dll", 5_000_000),
+                ConflictGroup("MyApp.Plugins.dll"),
+            ]);
+
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+
+            findings.Should().ContainSingle();
+            findings[0].Severity.Should().Be(Severity.Info);
+            findings[0].Narrative.Should().Contain("MyApp.Plugins.dll").And.Contain("200").And.Contain("version conflict");
+            findings[0].DerivedFrom.Should().HaveCount(3);
+        }
+
+        [Fact]
+        public async Task ModuleNamesMatchCaseInsensitively()
+        {
+            var matched = new ObservationMatchSet([Frames("myapp.plugins.dll", 200), ConflictGroup("MyApp.Plugins.dll")]);
+
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+
+            findings.Should().ContainSingle();
+        }
+
+        [Fact]
+        public async Task BelowMinFrameHits_DoesNotFire()
+        {
+            var matched = new ObservationMatchSet([Frames("MyApp.Plugins.dll", 49), ConflictGroup("MyApp.Plugins.dll")]);
+
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+
+            findings.Should().BeEmpty();
+        }
+
+        [Fact]
+        public async Task TopModuleNotFlaggedByModuleAnalysis_DoesNotFire()
+        {
+            var matched = new ObservationMatchSet([Frames("MyApp.Plugins.dll", 200), ConflictGroup("Other.dll")]);
+
+            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+
+            findings.Should().BeEmpty();
+        }
+    }
 }

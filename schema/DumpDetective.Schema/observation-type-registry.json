@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dumpdetective/schema/observation-type-registry.json",
-  "registryVersion": "1.87.0",
+  "registryVersion": "1.88.0",
   "description": "Canonical ObservationType namespace. Observation.ObservationType (src/DumpDetective.Sdk/Observations/Observation.cs) is a free-form string, not an enum, by design (docs/refactor/modularity/observation-and-correlation-model.md § 7 keeps it open until enough producers exist to justify closing it) — this registry is the checked-in record of every type actually emitted today, so a typo or a silent rename is a diffable, reviewable event instead of an invisible string drift. Cross-checked against real analyzer output by tests/DumpDetective.Tests/Unit/Architecture/SdkRegistryConformanceTests.cs. Purity rules for every entry's measures (raw only, never a severity/weighted composite) are in Observation.cs's own remarks and observation-and-correlation-model.md § 2a.",
   "observationTypes": {
     "gc.pause": {
@@ -148,6 +148,42 @@
       },
       "note": "One per distinct RefCounted (COM interop RCW) handle target type — bounded by distinct type count, not per-handle. Backs the old finding generator's dominant-type narrative text, which handle.pinned (Pinned/AsyncPinned only) cannot.",
       "addedIn": "1.46.0"
+    },
+    "handle.pinned-target-type": {
+      "producedBy": "GCHandleAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Gc/Analyzers/GCHandleAnalyzer.cs",
+      "requiresCapabilities": ["heap.handles"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "instance.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per pinned-handle target type, with its instance count. Added in phase 5 step 6.1 for LeakCandidateSynthesisRule's GC-handle-retention classification.",
+      "addedIn": "1.88.0"
+    },
+    "handle.dependent-target-type": {
+      "producedBy": "GCHandleAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Gc/Analyzers/GCHandleAnalyzer.cs",
+      "requiresCapabilities": ["heap.handles"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "instance.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per dependent-handle (ConditionalWeakTable) target type, with its instance count. Added in phase 5 step 6.1 for LeakCandidateSynthesisRule's dependent-handle classification.",
+      "addedIn": "1.88.0"
+    },
+    "handle.pinned-target-bytes": {
+      "producedBy": "GCHandleAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Gc/Analyzers/GCHandleAnalyzer.cs",
+      "requiresCapabilities": ["heap.handles"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "retained.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "Pinned-handle target types ranked by bytes: its own ranking, not summed from handle.pinned or zipped against handle.pinned-target-type's count ranking. Added in phase 5 step 6.2 for PinnedStringLeakInsightRule.",
+      "addedIn": "1.88.0"
     },
     "finalizer.queue-entry": {
       "producedBy": "FinalizableObjectAnalyzer",
@@ -388,6 +424,19 @@
       "note": "Single whole-heap observation per run — no entity subject, same pattern as gc.generation-composition. Backs MemoryFindingGenerator's pressure-score/concentration/small-object/LOH findings; MemoryPressureClassifier itself (internal to a different assembly) is not called, its formula is duplicated in MemorySynthesisRule, same choice AllocationPatternSynthesisRule made. top1-type.bytes and the top-1 type's name (as EvidenceRef.Description) are present only when TopTypes is non-empty — TopTypes itself is the full, unbounded per-type population (same volume risk GCGenerationAnalyzer's own PerTypeGenerationProfiles note flags) and is not observed per-entry; only the single top-1 identity the finding generator actually reads is. Top10BytesPercent is deliberately not carried: no finding reads it.",
       "addedIn": "1.56.0"
     },
+    "type.known-pattern-population": {
+      "producedBy": "MemoryAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Memory/Analyzers/MemoryAnalyzer.cs",
+      "requiresCapabilities": ["heap.types"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "instance.count": { "unit": "count", "semantics": "absolute" },
+        "shallow.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "One per type matching a small fixed vocabulary of known leak-prone type names; bounded by the vocabulary, not a top-N over the full TopTypes population. Added in phase 5 step 6.2 for DataTableLifecycleInsightRule and KnownLeakPatternsInsightRule.",
+      "addedIn": "1.88.0"
+    },
     "heap.loh-fragmentation": {
       "producedBy": "LohFragmentationAnalyzer",
       "sourceFile": "src/DumpDetective.Plugins.Memory/Analyzers/LohFragmentationAnalyzer.cs",
@@ -418,6 +467,24 @@
       },
       "note": "One observation per type that actually has LOH objects — bounded to a small fraction of the whole-heap type population, unlike GCGenerationAnalyzer's per-type list.",
       "addedIn": "1.9.0"
+    },
+    "heap.loh-fragmentation-summary": {
+      "producedBy": "LohFragmentationAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Memory/Analyzers/LohFragmentationAnalyzer.cs",
+      "requiresCapabilities": ["heap.segments"],
+      "subjectKind": null,
+      "temporalKind": "point",
+      "measures": {
+        "segment.count": { "unit": "count", "semantics": "absolute" },
+        "total.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "free.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "used.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "free-block.count": { "unit": "count", "semantics": "absolute" },
+        "fragmentation.percent": { "unit": "percent", "semantics": "ratio" },
+        "largest-free-block.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "Single whole-LOH/POH aggregate per run. The per-kind heap.loh-fragmentation rows carry no free-block count and no combined figures. Added in phase 5 step 6.2 for the LOH-fragmentation and pinned-handle insight rules; also read by LohFragmentationSynthesisRule's narrative.",
+      "addedIn": "1.88.0"
     },
     "heap.segment-reservation": {
       "producedBy": "SegmentReservationAnalyzer",
@@ -607,6 +674,18 @@
       },
       "note": "Whole-run, unfiltered — every thread.stack-cluster observation is filtered by MinClusterSize, so these three scalars have no per-cluster stand-in.",
       "addedIn": "1.63.0"
+    },
+    "thread.stack-cluster-member": {
+      "producedBy": "ThreadStackClusterAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Threads/Analyzers/ThreadStackClusterAnalyzer.cs",
+      "requiresCapabilities": ["runtime.threads"],
+      "subjectKind": "thread",
+      "temporalKind": "point",
+      "measures": {
+        "cluster.rank": { "unit": "custom", "semantics": "absolute" }
+      },
+      "note": "One per OS thread in a stack cluster, with the cluster's rank. Cluster membership had no subject before. Added in phase 5 step 6.2 for ClusterHangCorrelationInsightRule.",
+      "addedIn": "1.88.0"
     },
     "infra.sql-connection-pool": {
       "producedBy": "SqlConnectionPoolAnalyzer",
@@ -1059,6 +1138,18 @@
       "note": "One per UnknownIdentityDuplicateModules entry (a HashSet<string>, process-scale not heap-scale) — emitted in that set's own enumeration order, the same order the old finding generator's Take(5) read directly from the (unordered-by-contract, but stable-in-practice) set.",
       "addedIn": "1.59.0"
     },
+    "runtime.module-disk-footprint": {
+      "producedBy": "ModuleAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Runtime/Analyzers/ModuleAnalyzer.cs",
+      "requiresCapabilities": ["heap.types", "runtime.modules"],
+      "subjectKind": "module",
+      "temporalKind": "point",
+      "measures": {
+        "disk.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "On-disk module size from the already-capped TopModulesBySize list; a different quantity from runtime.module-heap-footprint's heap bytes. Added in phase 5 step 6.2 for CrashModuleHotspotInsightRule and JitModuleHotspotInsightRule.",
+      "addedIn": "1.88.0"
+    },
     "runtime.active-exception": {
       "producedBy": "CrashAnalyzer",
       "sourceFile": "src/DumpDetective.Plugins.Runtime/Analyzers/CrashAnalyzer.cs",
@@ -1097,6 +1188,30 @@
       },
       "note": "One per distinct thread carrying an active exception (bounded by thread count, never heap-scale), already sorted descending by active-exception.count before emission — the rule trusts that order for the \"primary exception type\" of the top thread, the same already-sorted-before-emission structure ArraySynthesisRule relies on. Cannot be reconstructed from runtime.active-exception alone: that observation's Subject identifies only the exception type, not which thread it belongs to, so per-thread grouping needs its own observation.",
       "addedIn": "1.57.0"
+    },
+    "runtime.exception-type": {
+      "producedBy": "CrashAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Runtime/Analyzers/CrashAnalyzer.cs",
+      "requiresCapabilities": ["heap.objects", "heap.segments", "runtime.threads"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "instance.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per exception type on the heap (CrashDomainResult.ExceptionTypeCounts). Added in phase 5 step 6.2; closing this one gap unblocked five correlation rules.",
+      "addedIn": "1.88.0"
+    },
+    "runtime.crash-thread-candidate-module": {
+      "producedBy": "CrashAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Runtime/Analyzers/CrashAnalyzer.cs",
+      "requiresCapabilities": ["heap.objects", "runtime.threads"],
+      "subjectKind": "module",
+      "temporalKind": "point",
+      "measures": {
+        "active-exception.count": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "Per crash-thread candidate's top user-frame module. Emitted after BuildDomainResult, since module attribution resolves later than runtime.crash-thread-candidate (which subjects on exception type). Added in phase 5 step 6.2 for CrashModuleHotspotInsightRule.",
+      "addedIn": "1.88.0"
     },
     "type.shape-composition": {
       "producedBy": "ObjectShapeAnalyzer",
@@ -1512,6 +1627,19 @@
       "note": "One whole-run observation per analysis — no entity subject, same pattern as gc.generation-composition. Scoped to the *significant* subset (a config-threshold filter, IsSignificant) unlike heap.static-root's every-analyzed-root population, so root.count/retained.bytes can't be reconstructed by counting/summing that stream. Always emitted, including the zero-significant-roots case (also currently unreachable, same known bug as heap.static-root), since both scalars are exhaustively computed either way.",
       "addedIn": "1.54.0"
     },
+    "heap.static-root-retained-type": {
+      "producedBy": "StaticRootAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Leaks/Analyzers/StaticRootAnalyzer.cs",
+      "requiresCapabilities": ["heap.roots", "heap.objects", "heap.segments"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "instance.count": { "unit": "count", "semantics": "absolute" },
+        "shallow.bytes": { "unit": "bytes", "semantics": "absolute" }
+      },
+      "note": "One per type in a static root's retained-type breakdown. No root EntityKind exists, so it subjects on the retained type and carries the root description as Evidence. Added in phase 5 step 6.2 for StaticRootFinalizableCorrelationInsightRule.",
+      "addedIn": "1.88.0"
+    },
     "type.root-reachability": {
       "producedBy": "ReferenceChainAnalyzer",
       "sourceFile": "src/DumpDetective.Plugins.Leaks/Analyzers/ReferenceChainAnalyzer.cs",
@@ -1661,6 +1789,26 @@
       },
       "note": "One whole-run observation per analysis — no entity subject, same pattern as gc.generation-composition. Always emitted, including the zero-leak case, since these are exhaustive scalars Analyze always computes. Backs the zero-leak-signature finding and the group-count fallback used when TopLeakGroups happens to contain no group of a given IsStatic value even though the real count is nonzero.",
       "addedIn": "1.54.0"
+    },
+    "leak.candidate-type": {
+      "producedBy": "LeakCandidateAnalyzer",
+      "sourceFile": "src/DumpDetective.Plugins.Leaks/Analyzers/LeakCandidateAnalyzer.cs",
+      "requiresCapabilities": ["heap.objects", "heap.roots", "heap.types"],
+      "subjectKind": "type",
+      "temporalKind": "point",
+      "measures": {
+        "shallow.bytes": { "unit": "bytes", "semantics": "absolute" },
+        "instance.count": { "unit": "count", "semantics": "absolute" },
+        "gen2.percent": { "unit": "percent", "semantics": "ratio" },
+        "gen2.count": { "unit": "count", "semantics": "absolute" },
+        "reference-field.ratio": { "unit": "ratio", "semantics": "ratio" },
+        "is-finalizable.flag": { "unit": "count", "semantics": "absolute" },
+        "is-container.flag": { "unit": "count", "semantics": "absolute" },
+        "is-static-rooted.flag": { "unit": "count", "semantics": "absolute" },
+        "is-delegate.flag": { "unit": "count", "semantics": "absolute" }
+      },
+      "note": "One per leak candidate type with the raw facts LeakCandidateSynthesisRule classifies and scores; *.flag measures are 0/1. Added in phase 5 step 6.1 as LeakCandidateAnalyzer's first observation emission.",
+      "addedIn": "1.88.0"
     }
   }
 }

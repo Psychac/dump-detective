@@ -1,6 +1,7 @@
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 
 using DumpDetective.Sdk.Artifacts;
 using DumpDetective.Sdk.Observations;
@@ -207,6 +208,23 @@ public sealed class SdkRegistryConformanceTests
                 "max-severity.score", "is-timer-event", "is-property-changed-event",
             ],
             ["event.publisher-leak-population"] = ["total.count", "instance-leak.count", "static-leak.count"],
+            ["handle.pinned-target-type"] = ["instance.count"],
+            ["handle.dependent-target-type"] = ["instance.count"],
+            ["handle.pinned-target-bytes"] = ["retained.bytes"],
+            ["heap.loh-fragmentation-summary"] = [
+                "segment.count", "total.bytes", "free.bytes", "used.bytes", "free-block.count",
+                "fragmentation.percent", "largest-free-block.bytes",
+            ],
+            ["heap.static-root-retained-type"] = ["instance.count", "shallow.bytes"],
+            ["leak.candidate-type"] = [
+                "shallow.bytes", "instance.count", "gen2.percent", "gen2.count", "reference-field.ratio",
+                "is-finalizable.flag", "is-container.flag", "is-static-rooted.flag", "is-delegate.flag",
+            ],
+            ["runtime.exception-type"] = ["instance.count"],
+            ["runtime.crash-thread-candidate-module"] = ["active-exception.count"],
+            ["runtime.module-disk-footprint"] = ["disk.bytes"],
+            ["thread.stack-cluster-member"] = ["cluster.rank"],
+            ["type.known-pattern-population"] = ["instance.count", "shallow.bytes"],
         };
 
     [Fact]
@@ -285,6 +303,35 @@ public sealed class SdkRegistryConformanceTests
             "ObservationType is deliberately free-form (observation-and-correlation-model.md § 7) — " +
             "the closed list of real values lives in observation-type-registry.json, not as a schema enum");
     }
+
+    /// <summary>
+    /// Keeps <see cref="KnownEmittedObservationTypes"/> honest: every <c>ObservationType = "..."</c>
+    /// literal under <c>src/</c> must appear in it. The table is hand-maintained (measure keys can't
+    /// be reliably scanned), and 11 types added during phase 5 step 6 slipped past both it and the
+    /// registry before this check existed.
+    /// </summary>
+    [Fact]
+    public void KnownEmittedObservationTypes_ShouldCoverEveryObservationTypeEmittedInSource()
+    {
+        string sourceRoot = Path.Combine(FindRepositoryRoot(), "src");
+        var emittedInSource = new SortedSet<string>(StringComparer.Ordinal);
+
+        foreach (string file in Directory.EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories))
+        {
+            if (file.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                continue;
+
+            foreach (Match match in EmittedObservationTypePattern.Matches(File.ReadAllText(file)))
+                emittedInSource.Add(match.Groups[1].Value);
+        }
+
+        emittedInSource.Should().NotBeEmpty();
+        emittedInSource.Where(type => !KnownEmittedObservationTypes.ContainsKey(type)).Should().BeEmpty(
+            "every observation type an analyzer emits must be listed in KnownEmittedObservationTypes " +
+            "and registered in observation-type-registry.json");
+    }
+
+    private static readonly Regex EmittedObservationTypePattern = new("ObservationType = \"([a-z0-9.-]+)\"", RegexOptions.Compiled);
 
     private static JsonObject LoadJsonObject(string schemaFileName)
     {

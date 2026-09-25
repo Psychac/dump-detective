@@ -447,6 +447,13 @@ to match whatever the migrated rules actually set.
       - **Console (user call: keep it):** `SingleDumpConsolePresenter.PrintInsights` stays and now
         prints the migrated cross-analyzer findings. Single-dump only, as before.
       - Not verified end-to-end against a real dump yet.
+- [x] **Observation-type registry backfilled 2026-09-26.** 11 types added during 6.1/6.2 had
+      never been registered in `observation-type-registry.json` or the conformance test's
+      hand-kept `KnownEmittedObservationTypes` table (registry 1.87.0 → 1.88.0).
+      - New guard: `SdkRegistryConformanceTests.KnownEmittedObservationTypes_ShouldCoverEveryObservationTypeEmittedInSource`
+        scans `src/` for every `ObservationType = "..."` literal, so a new emission can't skip the
+        table again; the existing test then ties the table to the registry. Mutation-checked
+        (removing one entry fails the test and names the type).
 - [x] This closes the phase's own exit criterion — "`IFindingGenerator`/`InsightEngine` no longer
       exist as separate concepts" — jointly with 6.1 (6.1 closed the last surviving
       `IFindingGenerator`; 6.2 closes `InsightEngine`).

@@ -1,4 +1,3 @@
-using DumpDetective.Analysis.Insight;
 using DumpDetective.Analysis.Trend;
 using DumpDetective.Cli.Execution;
 using DumpDetective.Core.Abstractions;

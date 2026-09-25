@@ -1,6 +1,5 @@
 using System.Diagnostics;
 
-using DumpDetective.Analysis.Insight;
 using DumpDetective.Cli.Console;
 using DumpDetective.Core.Models;
 

@@ -60,7 +60,11 @@ internal sealed class RunAnalyzersNode(
             state.Observations = collectingSink.Observations;
 
         if (state.Observations is { Count: > 0 } observations)
-            state.Runs = await synthesisFindingEnricher.EnrichAsync(state.Runs, observations, cancellationToken);
+        {
+            SynthesisEnrichment enrichment = await synthesisFindingEnricher.EnrichAsync(state.Runs, observations, cancellationToken);
+            state.Runs = enrichment.Runs;
+            state.Insights = enrichment.UnattachedFindings;
+        }
 
         state.IncidentContext = IncidentContextFactory.Create(
             mode: mode,

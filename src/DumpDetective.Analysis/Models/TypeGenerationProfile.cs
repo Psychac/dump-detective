@@ -2,8 +2,8 @@ namespace DumpDetective.Analysis.Models;
 
 /// <summary>Generation distribution for a single type, built from Phase-1 TypeAggregates.</summary>
 /// <remarks>
-/// Shared across multiple analyzer domains (<c>GCGenerationAnalyzer</c>, <c>FinalizableObjectAnalyzer</c>,
-/// <c>InsightEngine</c>) — kept in <c>Analysis.Models</c> rather than moved alongside any single
+/// Shared across multiple analyzer domains (<c>GCGenerationAnalyzer</c>, <c>FinalizableObjectAnalyzer</c>)
+/// — kept in <c>Analysis.Models</c> rather than moved alongside any single
 /// package's <c>DomainResult</c> when GC Generation's analyzer/model split into
 /// <c>DumpDetective.Plugins.Memory</c> (docs/refactor/modularity/phase-3-plugin-packaging.md).
 /// </remarks>

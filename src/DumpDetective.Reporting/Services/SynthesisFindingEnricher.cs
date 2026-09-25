@@ -18,7 +18,10 @@ namespace DumpDetective.Reporting.Services;
 /// <remarks>
 /// Groups synthesized findings by <see cref="Finding.Analyzer"/>, not by re-querying per run — a
 /// single <see cref="SynthesisEngine.SynthesizeAsync"/> pass over the whole observation set, same
-/// as a real report run would do once more than one analyzer has a rule.
+/// as a real report run would do once more than one analyzer has a rule. Findings whose
+/// <see cref="Finding.Analyzer"/> matches no run (the cross-analyzer rules, all named
+/// <c>"InsightEngine"</c>) are returned separately as <see cref="SynthesisEnrichment.UnattachedFindings"/>
+/// rather than dropped.
 /// </remarks>
 internal sealed class SynthesisFindingEnricher
 {
@@ -29,7 +32,7 @@ internal sealed class SynthesisFindingEnricher
         _engine = new SynthesisEngine(ruleFactory.CreateRules());
     }
 
-    public async ValueTask<IReadOnlyList<AnalyzerRunResult>> EnrichAsync(
+    public async ValueTask<SynthesisEnrichment> EnrichAsync(
         IReadOnlyList<AnalyzerRunResult> runs, IReadOnlyList<Observation> observations, CancellationToken cancellationToken)
     {
         // AnalyzerFailuresInsightRule needs no observations at all (only the run-count summary
@@ -40,7 +43,7 @@ internal sealed class SynthesisFindingEnricher
         // ignoring its match set) fire on a zero-observation pass too, which broke that test's own
         // "nothing to synthesize, return runs unchanged" contract for every rule, not just this one.
         if (observations.Count == 0)
-            return runs;
+            return new SynthesisEnrichment(runs, []);
 
         int failedCount = 0;
         for (int i = 0; i < runs.Count; i++)
@@ -52,7 +55,7 @@ internal sealed class SynthesisFindingEnricher
 
         IReadOnlyList<Finding> findings = await _engine.SynthesizeAsync(observations, context, cancellationToken);
         if (findings.Count == 0)
-            return runs;
+            return new SynthesisEnrichment(runs, []);
 
         var byAnalyzer = new Dictionary<string, List<InsightFinding>>(StringComparer.Ordinal);
         foreach (Finding finding in findings)
@@ -69,7 +72,7 @@ internal sealed class SynthesisFindingEnricher
         var updated = new List<AnalyzerRunResult>(runs.Count);
         foreach (AnalyzerRunResult run in runs)
         {
-            if (!byAnalyzer.TryGetValue(run.AnalyzerName, out List<InsightFinding>? replacementFindings))
+            if (!byAnalyzer.Remove(run.AnalyzerName, out List<InsightFinding>? replacementFindings))
             {
                 updated.Add(run);
                 continue;
@@ -78,6 +81,14 @@ internal sealed class SynthesisFindingEnricher
             updated.Add(run with { Findings = replacementFindings, FindingCount = replacementFindings.Count });
         }
 
-        return updated;
+        var unattached = new List<InsightFinding>();
+        foreach (List<InsightFinding> bucket in byAnalyzer.Values)
+            unattached.AddRange(bucket);
+
+        return new SynthesisEnrichment(updated, unattached);
     }
 }
+
+internal readonly record struct SynthesisEnrichment(
+    IReadOnlyList<AnalyzerRunResult> Runs,
+    IReadOnlyList<InsightFinding> UnattachedFindings);

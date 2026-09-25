@@ -55,8 +55,10 @@ internal sealed class SingleDumpPipelineState : IDisposable
     /// <summary>Elapsed time from pipeline start through the end of analyzer execution (stages 1–3).</summary>
     public TimeSpan AnalysisElapsed { get; set; }
 
-    // ── Stage 4: InsightEngine (post-pipeline) ───────────────────────────────
-    /// <summary>Cross-cutting insight findings produced by <see cref="DumpDetective.Analysis.Insight.InsightEngine"/>.</summary>
+    /// <summary>
+    /// Cross-analyzer synthesis findings that belong to no single analyzer run — see
+    /// <see cref="DumpDetective.Reporting.Services.SynthesisEnrichment.UnattachedFindings"/>.
+    /// </summary>
     public IReadOnlyList<InsightFinding> Insights { get; set; } = [];
 
     // ── Stage 5: BuildReportStage ────────────────────────────────────────────

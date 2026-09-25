@@ -24,7 +24,7 @@ public sealed class SynthesisFindingEnricherTests
             Findings = [new InsightFinding("Stub Analyzer", "Old", DumpDetective.Core.Enums.FindingSeverity.Info, "old title", "old evidence", "old rec", [])],
         };
 
-        IReadOnlyList<AnalyzerRunResult> result = await enricher.EnrichAsync([run], [MakeObservation()], CancellationToken.None);
+        IReadOnlyList<AnalyzerRunResult> result = (await enricher.EnrichAsync([run], [MakeObservation()], CancellationToken.None)).Runs;
 
         result.Should().ContainSingle();
         result[0].Findings.Should().ContainSingle(f => f.Fingerprint == "stub-fingerprint");
@@ -40,9 +40,21 @@ public sealed class SynthesisFindingEnricherTests
             Findings = [new InsightFinding("Other Analyzer", "Old", DumpDetective.Core.Enums.FindingSeverity.Info, "kept title", "kept evidence", "kept rec", [])],
         };
 
-        IReadOnlyList<AnalyzerRunResult> result = await enricher.EnrichAsync([unrelated], [MakeObservation()], CancellationToken.None);
+        IReadOnlyList<AnalyzerRunResult> result = (await enricher.EnrichAsync([unrelated], [MakeObservation()], CancellationToken.None)).Runs;
 
         result[0].Findings.Should().ContainSingle(f => f.Title == "kept title");
+    }
+
+    [Fact]
+    public async Task EnrichAsync_KeepsFindingsWhoseAnalyzerHasNoRun()
+    {
+        var enricher = new SynthesisFindingEnricher(new FakeRuleFactory([new StubRule("InsightEngine", "cross-analyzer-fingerprint")]));
+        AnalyzerRunResult run = new("Stub Analyzer", AnalyzerExecutionStatus.Success, TimeSpan.Zero, Result: null, ErrorMessage: null, ErrorType: null);
+
+        SynthesisEnrichment result = await enricher.EnrichAsync([run], [MakeObservation()], CancellationToken.None);
+
+        result.UnattachedFindings.Should().ContainSingle(f => f.Fingerprint == "cross-analyzer-fingerprint");
+        result.Runs.Should().ContainSingle().Which.Findings.Should().BeEmpty();
     }
 
     [Fact]
@@ -52,7 +64,7 @@ public sealed class SynthesisFindingEnricherTests
         AnalyzerRunResult run = new("Stub Analyzer", AnalyzerExecutionStatus.Success, TimeSpan.Zero, Result: null, ErrorMessage: null, ErrorType: null);
         AnalyzerRunResult[] runs = [run];
 
-        IReadOnlyList<AnalyzerRunResult> result = await enricher.EnrichAsync(runs, [], CancellationToken.None);
+        IReadOnlyList<AnalyzerRunResult> result = (await enricher.EnrichAsync(runs, [], CancellationToken.None)).Runs;
 
         result.Should().BeSameAs(runs);
     }

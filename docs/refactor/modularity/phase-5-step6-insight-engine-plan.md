@@ -142,7 +142,12 @@ to match whatever the migrated rules actually set.
   have no backing `IAnalyzer` for `PluginCatalogBuilder`'s naming convention to resolve). All keep
   `Finding.Analyzer = "InsightEngine"` exactly, so `InsightsSectionBuilder.GetCrossDomainFindings`'s
   existing filter (`Analyzer == "InsightEngine"`) keeps picking them up with no section-builder
-  change needed — confirmed, not just assumed, by the full-suite test run after each migration.
+  change needed.
+  - **Correction, 2026-09-26: this was wrong in practice.** The section filter matched, but the
+    findings never got that far — `SynthesisFindingEnricher` only replaced findings on runs that
+    already exist, and no run is named `"InsightEngine"`, so every migrated insight finding was
+    silently dropped from 2026-09-22 until the fix below. The full suite never caught it: no test
+    covered a finding whose analyzer has no run. Fixed as part of retiring `InsightEngine`.
 - **`InsightByteFormat.FormatBytes`** (new, `SynthesisRules/Insight/`) is `InsightEngine.FormatBytes`
   moved verbatim and shared by every migrated rule — deliberately not
   `DumpDetective.Core.Utilities.FormatHelper.FormatBytes`, which rounds differently. All these rules
@@ -430,14 +435,19 @@ to match whatever the migrated rules actually set.
         table of duplicate string values, which have no SDK entity kind; the only other content
         (String's size rank + wasted bytes) the String Analysis section already reports, and the
         rule was Info-only.
-- [ ] **Retire `InsightEngine`** — every rule group is now empty (`RuleGroups = []`), so
-      `Analyze` returns nothing. Remaining: delete the class, `DumpOrchestrationService.cs`'s
-      `new InsightEngine().Analyze(...)` call, `sessionState.Insights` (also passed into the report
-      by `BuildReportNode`), and `SingleDumpConsolePresenter.PrintInsights`.
-      - Open question first: the console's insight summary came only from `InsightEngine`, so it has
-        been shrinking as rules migrated and is now empty. The migrated rules' findings reach the
-        report but not the console. Decide whether the console should print them instead.
-- [ ] This closes the phase's own exit criterion — "`IFindingGenerator`/`InsightEngine` no longer
+- [x] **`InsightEngine` retired 2026-09-26.** Class, its tests, and the
+      `new InsightEngine().Analyze(...)` call deleted.
+      - **Fixed a silent data loss found on the way** (see the correction under "Design decisions"):
+        `SynthesisFindingEnricher.EnrichAsync` now returns `SynthesisEnrichment`, whose
+        `UnattachedFindings` carries findings whose analyzer has no run. `RunAnalyzersNode` stores
+        them in `SingleDumpPipelineState.Insights` — the slot `InsightEngine`'s output used — so the
+        report (`BuildReportNode` → `additionalFindings` → `InsightsSectionBuilder`'s X1 section)
+        and the console both get them unchanged. New test:
+        `SynthesisFindingEnricherTests.EnrichAsync_KeepsFindingsWhoseAnalyzerHasNoRun`.
+      - **Console (user call: keep it):** `SingleDumpConsolePresenter.PrintInsights` stays and now
+        prints the migrated cross-analyzer findings. Single-dump only, as before.
+      - Not verified end-to-end against a real dump yet.
+- [x] This closes the phase's own exit criterion — "`IFindingGenerator`/`InsightEngine` no longer
       exist as separate concepts" — jointly with 6.1 (6.1 closed the last surviving
       `IFindingGenerator`; 6.2 closes `InsightEngine`).
 

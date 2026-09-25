@@ -1,5 +1,4 @@
 using DumpDetective.Analysis.Dump;
-using DumpDetective.Analysis.Insight;
 using DumpDetective.Analysis.Trend;
 using DumpDetective.Cli.Console;
 using DumpDetective.Cli.Pipeline;
@@ -159,15 +158,10 @@ internal sealed class DumpOrchestrationService(
         if (traceState is not null)
             ConsoleUx.Info($"Trace half complete — {traceState.Observations.Count} observation(s), see the trace's own report.json.");
 
-        // Cross-cutting insight engine only runs for a single dump today — the trend path never
-        // called it before this merge either (TrendOrchestrationService had no InsightEngine step);
-        // preserved as-is rather than folded in as an unplanned behavior change.
-        if (!isTrend)
-        {
-            sessionState.Insights = new InsightEngine().Analyze(sessionState.Runs);
-            if (sessionState.Insights.Count > 0)
-                SingleDumpConsolePresenter.PrintInsights(sessionState.Insights, resolved.DiagnosticMode);
-        }
+        // Cross-analyzer insights print for a single dump only — the trend path never printed them
+        // (TrendOrchestrationService had no InsightEngine step), preserved as-is.
+        if (!isTrend && sessionState.Insights.Count > 0)
+            SingleDumpConsolePresenter.PrintInsights(sessionState.Insights, resolved.DiagnosticMode);
 
         if (resolved.DiagnosticMode)
         {

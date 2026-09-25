@@ -5,7 +5,7 @@ namespace DumpDetective.Analysis.Models;
 // GC Generation
 
 // TypeGenerationProfile lives in DumpDetective.Analysis.Models/TypeGenerationProfile.cs — it's
-// shared with FinalizableObjectAnalyzer and InsightEngine, which stay in DumpDetective.Analysis.
+// shared with FinalizableObjectAnalyzer, which stays in DumpDetective.Analysis.
 
 public sealed record GCGenerationDomainResult(
     ulong Gen0Bytes,

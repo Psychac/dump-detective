@@ -3,8 +3,8 @@ namespace DumpDetective.Sdk.Synthesis;
 /// <summary>
 /// Replaces per-analyzer <c>IFindingGenerator</c> code with expressed rules over a uniform
 /// substrate. Three tiers use this same mechanism: single-observation rules (most of today's
-/// per-analyzer finding generators), multi-observation single-source rules (what
-/// <c>InsightEngine</c> does today, generalized), and cross-source rules (Phase 7) — structurally
+/// per-analyzer finding generators), multi-observation single-source rules (the cross-analyzer
+/// rules that replaced <c>InsightEngine</c>), and cross-source rules (Phase 7) — structurally
 /// identical, just matching observations whose <c>Provenance.Artifact</c> differs. See
 /// docs/refactor/modularity/observation-and-correlation-model.md § 3.
 /// </summary>

@@ -79,7 +79,7 @@ public sealed class DominatorConcurrentResidentMemoryRealDumpTests(ITestOutputHe
             DiagnosticsSink = NullAnalysisDiagnosticsSink.Instance,
         };
 
-        var pipeline = new AnalysisPipeline(analyzers, new FindingGenerationPipeline([]));
+        var pipeline = new AnalysisPipeline(analyzers);
 
         long peakWorkingSet = Environment.WorkingSet;
         var samplerCts = new CancellationTokenSource();

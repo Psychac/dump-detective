@@ -43,18 +43,12 @@ public sealed class ServiceRegistrationTests
         services.GetRequiredService<TraceOrchestrationService>().Should().NotBeNull();
         services.GetRequiredService<IAnalyzerFactory>().Should().NotBeNull();
         services.GetRequiredService<ISectionBuilderFactory>().Should().NotBeNull();
-        services.GetRequiredService<FindingGenerationPipeline>().Should().NotBeNull();
         services.GetRequiredService<TrendAnalyzer>().Should().NotBeNull();
         services.GetRequiredService<TrendReportComposer>().Should().NotBeNull();
         services.GetRequiredService<ExecutiveSummaryProjector>().Should().NotBeNull();
         services.GetRequiredService<ReportSerializer>().Should().NotBeNull();
         services.GetRequiredService<ReportBuilderFacade>().Should().NotBeNull();
         services.GetServices<IReportFormatter>().Should().HaveCount(4);
-        // Phase 5 step 6.1 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md) retired
-        // LeakCandidateFindingGenerator, the last analyzer still using this path — every
-        // AnalyzerFeatureModule now has a SynthesisRuleType instead, so zero IFindingGenerator
-        // registrations is the correct, fully-migrated state, not a regression.
-        services.GetServices<IFindingGenerator>().Should().BeEmpty();
         services.GetServices<IAnalyzerTrendComparer>().Should().NotBeEmpty();
     }
 
@@ -74,13 +68,12 @@ public sealed class ServiceRegistrationTests
 
         IReadOnlyList<DumpDetective.Sdk.Analysis.IAnalyzer> analyzers = services.GetRequiredService<IAnalyzerFactory>().CreateAnalyzers();
         IAnalyzerFeatureModuleCatalog moduleCatalog = services.GetRequiredService<IAnalyzerFeatureModuleCatalog>();
-        IEnumerable<IFindingGenerator> findingGenerators = services.GetServices<IFindingGenerator>();
         IEnumerable<IAnalyzerTrendComparer> trendComparers = services.GetServices<IAnalyzerTrendComparer>();
         ISectionBuilderFactory sectionBuilderFactory = services.GetRequiredService<ISectionBuilderFactory>();
         StartupValidator validator = services.GetRequiredService<StartupValidator>();
 
         Action act = () => validator.ValidateRegistrations(
-            analyzers, moduleCatalog, findingGenerators, trendComparers, sectionBuilderFactory);
+            analyzers, moduleCatalog, trendComparers, sectionBuilderFactory);
 
         act.Should().NotThrow();
     }

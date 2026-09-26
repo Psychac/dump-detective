@@ -54,20 +54,6 @@ internal static class ServiceRegistration
 
         foreach (AnalyzerFeatureModule module in moduleCatalog.Modules)
         {
-            // Retired generators (Phase 5 step 3 — FindingGeneratorType null once a SynthesisRule
-            // ships) have nothing left to register here; SynthesisFindingEnricher supplies their
-            // findings instead.
-            if (module.FindingGeneratorType is null)
-                continue;
-
-            Type findingGeneratorType = module.FindingGeneratorType;
-            services.AddSingleton(typeof(IFindingGenerator), sp => ActivatorUtilities.CreateInstance(sp, findingGeneratorType));
-        }
-
-        services.AddSingleton<FindingGenerationPipeline>();
-
-        foreach (AnalyzerFeatureModule module in moduleCatalog.Modules)
-        {
             // Retired comparers (Phase 5 step 4 — TrendComparerType null once fully covered by
             // ObservationTrendDiffer) have nothing left to register here; TrendAnalyzer's
             // observation-differ-driven path supplies their trend deltas instead.

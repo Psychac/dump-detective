@@ -17,8 +17,9 @@ namespace DumpDetective.Reporting.Capabilities;
 /// <remarks>
 /// Deliberately stops at discovering validated <see cref="IAnalyzer"/> types — it does not build
 /// <see cref="AnalyzerFeatureModule"/>s for them. A module also needs an
-/// <c>IFindingGenerator</c>/<c>IAnalyzerTrendComparer</c>/<c>IAnalyzerSectionBuilder</c> companion,
-/// and all three of those interfaces are `internal` to <c>DumpDetective.Core</c>/
+/// <c>IAnalyzerTrendComparer</c>/<c>IAnalyzerSectionBuilder</c> companion (its
+/// <c>ISynthesisRule</c> is public SDK, but the catalog only looks for it in Reporting), and both of
+/// those interfaces are `internal` to <c>DumpDetective.Core</c>/
 /// <c>DumpDetective.Reporting</c> today — unimplementable from a genuinely out-of-tree assembly with
 /// no <c>InternalsVisibleTo</c> grant. That gap is the same one already called out in this doc's step
 /// 3 notes (`FindingGenerator`/`SectionBuilder` staying interim in `Reporting`) and is explicitly

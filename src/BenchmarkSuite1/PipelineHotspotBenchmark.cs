@@ -29,7 +29,7 @@ public class PipelineHotspotBenchmark
             .Select(i => (IAnalyzer)new SyntheticAnalyzer($"Analyzer-{i:00}", i))
             .ToArray();
 
-        _pipeline = new AnalysisPipeline(analyzers, new FindingGenerationPipeline(Array.Empty<DumpDetective.Core.Abstractions.IFindingGenerator>()));
+        _pipeline = new AnalysisPipeline(analyzers);
         _context = new RuntimeAnalysisContext
         {
             Runtime = null!,

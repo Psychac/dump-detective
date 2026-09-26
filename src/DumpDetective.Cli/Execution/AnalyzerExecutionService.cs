@@ -14,10 +14,8 @@ using DumpDetective.Cli.Models;
 
 namespace DumpDetective.Cli.Execution;
 
-internal sealed class AnalyzerExecutionService(FindingGenerationPipeline findingGenerationPipeline)
+internal sealed class AnalyzerExecutionService
 {
-    private readonly FindingGenerationPipeline _findingGenerationPipeline = findingGenerationPipeline;
-
     public RuntimeAnalysisContext BuildContext(
         ResolvedExecutionOptions resolved,
         DumpLoadContext loadContext,
@@ -40,7 +38,7 @@ internal sealed class AnalyzerExecutionService(FindingGenerationPipeline finding
     }
 
     public AnalysisPipeline CreatePipeline(IReadOnlyList<Sdk.Analysis.IAnalyzer> activeAnalyzers) =>
-        new(activeAnalyzers, _findingGenerationPipeline);
+        new(activeAnalyzers);
 
     /// <summary>
     /// Runs the shared heap-index/thread-stack scan passes for <paramref name="pipeline"/>.

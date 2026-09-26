@@ -87,47 +87,35 @@ internal sealed class PluginCatalogBuilder
 
         Assembly reportingAssembly = typeof(PluginCatalogBuilder).Assembly;
 
-        // FindingGeneratorType is resolved tolerantly (null when absent), not required like the
-        // other two companions: Phase 5 step 3 retires an analyzer's IFindingGenerator once its
-        // SynthesisRule ships, so "no companion class found" is the expected steady state for a
-        // migrated analyzer, not a naming-convention violation.
-        Type? findingGeneratorType = TryResolveCompanionType(
-            reportingAssembly, "DumpDetective.Reporting.FindingGenerators", $"{baseName}FindingGenerator");
         Type? synthesisRuleType = TryResolveCompanionType(
             reportingAssembly, "DumpDetective.Reporting.SynthesisRules", $"{baseName}SynthesisRule");
-        // TrendComparerType is resolved tolerantly too, same reasoning as FindingGeneratorType:
-        // Phase 5 step 4 retires an analyzer's IAnalyzerTrendComparer once its headline metrics are
-        // fully covered by the generic ObservationTrendDiffer (see ObservationDifferAnalyzerOwnership),
-        // so "no companion class found" is the expected steady state for a migrated analyzer. Unlike
-        // FindingGeneratorType there's no per-analyzer replacement to require here — one shared
-        // differ instance covers every retired analyzer, so IsShapeValid() doesn't (and can't)
-        // enforce an "or" companion the way it does for FindingGeneratorType/SynthesisRuleType;
-        // StartupValidator's trend-comparer coverage check is the real backstop against an analyzer
-        // silently losing trend output.
+        // TrendComparerType is resolved tolerantly: Phase 5 step 4 retires an analyzer's
+        // IAnalyzerTrendComparer once its headline metrics are fully covered by the generic
+        // ObservationTrendDiffer (see ObservationDifferAnalyzerOwnership), so "no companion class
+        // found" is the expected steady state for a migrated analyzer. StartupValidator's
+        // trend-comparer coverage check is the backstop against an analyzer losing trend output.
         Type? trendComparerType = TryResolveCompanionType(
             analyzerType.Assembly, "DumpDetective.Analysis.Trend.Comparers", $"{baseName}TrendComparer");
         Type sectionBuilderType = ResolveCompanionType(
             analyzerType, reportingAssembly, "DumpDetective.Reporting.SectionBuilders", $"{baseName}SectionBuilder");
 
+        if (synthesisRuleType is null)
+        {
+            throw new InvalidOperationException(
+                $"Analyzer '{analyzerType.FullName}' has no '{baseName}SynthesisRule' companion type — " +
+                "every analyzer needs a synthesis rule to produce its findings.");
+        }
+
         AnalyzerFeatureModule module = new(
             Key: moduleAttribute.Key,
             DisplayName: moduleAttribute.DisplayName,
             AnalyzerType: analyzerType,
-            FindingGeneratorType: findingGeneratorType,
             SynthesisRuleType: synthesisRuleType,
             TrendComparerType: trendComparerType,
             AnalyzerSectionBuilderType: sectionBuilderType,
             ReportSectionContributionTypes: [],
             Order: moduleAttribute.Order,
             Tags: moduleAttribute.Tags);
-
-        if (findingGeneratorType is null && synthesisRuleType is null)
-        {
-            throw new InvalidOperationException(
-                $"Analyzer '{analyzerType.FullName}' has neither a '{baseName}FindingGenerator' nor a " +
-                $"'{baseName}SynthesisRule' companion type — every analyzer needs at least one live path " +
-                "to a Finding.");
-        }
 
         if (!module.IsShapeValid())
         {

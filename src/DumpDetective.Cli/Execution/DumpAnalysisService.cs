@@ -23,7 +23,6 @@ internal sealed class DumpAnalysisService
     private readonly StartupValidator _startupValidator;
     private readonly IAnalyzerFactory _analyzerFactory;
     private readonly IAnalyzerFeatureModuleCatalog _moduleCatalog;
-    private readonly IEnumerable<IFindingGenerator> _findingGenerators;
     private readonly IEnumerable<IAnalyzerTrendComparer> _trendComparers;
     private readonly ISectionBuilderFactory _sectionBuilderFactory;
     private readonly DumpOrchestrationService _dumpOrchestration;
@@ -44,7 +43,6 @@ internal sealed class DumpAnalysisService
         StartupValidator startupValidator,
         IAnalyzerFactory analyzerFactory,
         IAnalyzerFeatureModuleCatalog moduleCatalog,
-        IEnumerable<IFindingGenerator> findingGenerators,
         IEnumerable<IAnalyzerTrendComparer> trendComparers,
         ISectionBuilderFactory sectionBuilderFactory,
         DumpOrchestrationService dumpOrchestration,
@@ -54,7 +52,6 @@ internal sealed class DumpAnalysisService
         _startupValidator = startupValidator;
         _analyzerFactory = analyzerFactory;
         _moduleCatalog = moduleCatalog;
-        _findingGenerators = findingGenerators;
         _trendComparers = trendComparers;
         _sectionBuilderFactory = sectionBuilderFactory;
         _dumpOrchestration = dumpOrchestration;
@@ -75,7 +72,7 @@ internal sealed class DumpAnalysisService
 
         IReadOnlyList<IAnalyzer> analyzers = _analyzerFactory.CreateAnalyzers();
 
-        _startupValidator.ValidateRegistrations(analyzers, _moduleCatalog, _findingGenerators, _trendComparers, _sectionBuilderFactory);
+        _startupValidator.ValidateRegistrations(analyzers, _moduleCatalog, _trendComparers, _sectionBuilderFactory);
 
         bool isTrend = TryResolveTrendSequence(resolved, out IReadOnlyList<string>? trendDumpPaths);
         IReadOnlyList<string> sessionDumpPaths = isTrend ? trendDumpPaths! : [resolved.DumpPath];

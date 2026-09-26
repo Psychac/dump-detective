@@ -29,7 +29,7 @@ namespace BenchmarkSuite1;
 ///   2. Prebuild heap index (Auto mode — same as BuildHeapIndexStage)
 ///   3. Build RuntimeAnalysisContext with all real options
 ///   4. Execute AnalysisPipeline with all 18 real analyzers
-/// Report generation (FindingGenerationPipeline, ReportBuilderFacade, WriteOutputStage)
+/// Report generation (ReportBuilderFacade, WriteOutputStage)
 /// is intentionally excluded — this benchmark isolates analysis memory and CPU.
 /// </summary>
 [MemoryDiagnoser]
@@ -109,7 +109,7 @@ public class FullPipelineBenchmark
             new ThreadAnalyzer(),
             new LockGraphAnalyzer(),
             new EventLeakAnalyzer(),
-        }, new FindingGenerationPipeline(Array.Empty<DumpDetective.Core.Abstractions.IFindingGenerator>()));
+        });
     }
 
     [GlobalCleanup]

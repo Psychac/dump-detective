@@ -146,20 +146,6 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
                     Recommendation: "Inspect analyzer failure details and re-run analysis.",
                     Tags: []));
             }
-
-            if (!string.IsNullOrWhiteSpace(run.FindingGeneratorError))
-            {
-                string evidence = $"The finding generator for '{run.AnalyzerName}' threw an exception. Findings for this analyzer may be incomplete or missing.";
-                allFindings.Add(new FindingRecord(
-                    Id: $"finding-generator-error:{run.AnalyzerName}",
-                    Analyzer: run.AnalyzerName,
-                    Category: "Pipeline",
-                    Severity: nameof(FindingSeverity.Warning),
-                    Title: $"Finding generator failed: {run.AnalyzerName}",
-                    Details: [evidence],
-                    Recommendation: "Re-run analysis. If the error persists, report it with the full error details.",
-                    Tags: []));
-            }
         }
 
         if (additionalFindings is { Count: > 0 })

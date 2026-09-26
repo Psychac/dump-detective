@@ -61,7 +61,7 @@ public sealed class ObservationVolumeRealDumpTests
         };
 
         IReadOnlyList<Sdk.Analysis.IAnalyzer> analyzers = new DefaultAnalyzerFactory().CreateAnalyzers();
-        var pipeline = new AnalysisPipeline(analyzers, new FindingGenerationPipeline([]));
+        var pipeline = new AnalysisPipeline(analyzers);
 
         GC.Collect();
         GC.WaitForPendingFinalizers();

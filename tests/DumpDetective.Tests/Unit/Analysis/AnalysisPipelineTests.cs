@@ -35,7 +35,7 @@ public sealed class AnalysisPipelineTests
             new TestAnalyzer("AfterFailure", 1)
         ];
 
-        AnalysisPipeline pipeline = new(analyzers, new FindingGenerationPipeline([]));
+        AnalysisPipeline pipeline = new(analyzers);
         RuntimeAnalysisContext context = CreateContext(continueOnFailure: true);
 
         IReadOnlyList<AnalyzerRunResult> result = await pipeline.ExecuteAsync(context, CancellationToken.None);
@@ -54,7 +54,7 @@ public sealed class AnalysisPipelineTests
             new TestAnalyzer("ShouldNotRun", 1)
         ];
 
-        AnalysisPipeline pipeline = new(analyzers, new FindingGenerationPipeline([]));
+        AnalysisPipeline pipeline = new(analyzers);
         RuntimeAnalysisContext context = CreateContext(continueOnFailure: false);
 
         IReadOnlyList<AnalyzerRunResult> result = await pipeline.ExecuteAsync(context, CancellationToken.None);
@@ -73,7 +73,7 @@ public sealed class AnalysisPipelineTests
             new TestAnalyzer("ShouldNotRun", 1)
         ];
 
-        AnalysisPipeline pipeline = new(analyzers, new FindingGenerationPipeline([]));
+        AnalysisPipeline pipeline = new(analyzers);
         RuntimeAnalysisContext context = CreateContext(continueOnFailure: true);
 
         IReadOnlyList<AnalyzerRunResult> result = await pipeline.ExecuteAsync(context, CancellationToken.None);
@@ -96,7 +96,7 @@ public sealed class AnalysisPipelineTests
         ScanParticipantTestAnalyzer second = new("Second", 1);
         IAnalyzer[] analyzers = [first, second];
 
-        AnalysisPipeline pipeline = new(analyzers, new FindingGenerationPipeline([]));
+        AnalysisPipeline pipeline = new(analyzers);
         RuntimeAnalysisContext context = CreateContext(continueOnFailure: true);
         InjectHeapIndex((HeapAnalysisCache)context.Cache, entries);
 
@@ -137,7 +137,7 @@ public sealed class AnalysisPipelineTests
         var second = new ThreadStackScanParticipantTestAnalyzer("Second", 2);
         IAnalyzer[] analyzers = [first, lockGraph, threadStackCluster, second];
 
-        AnalysisPipeline pipeline = new(analyzers, new FindingGenerationPipeline([]));
+        AnalysisPipeline pipeline = new(analyzers);
         RuntimeAnalysisContext context = new() { Runtime = runtime, Cache = new HeapAnalysisCache() };
 
         IReadOnlyList<AnalyzerRunResult> results = await pipeline.ExecuteAsync(context, CancellationToken.None);

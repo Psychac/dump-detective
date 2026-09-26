@@ -51,8 +51,7 @@ internal sealed record AnalyzerExecutionDiagnostics(
     long ObjectScanCount,
     long CacheHits,
     long CacheMisses,
-    AnalyzerMemoryStats? MemoryStats = null,
-    string? FindingGeneratorError = null);
+    AnalyzerMemoryStats? MemoryStats = null);
 
 internal sealed record AnalyzerRunResult(
     string AnalyzerName,
@@ -68,16 +67,9 @@ internal sealed record AnalyzerRunResult(
     IReadOnlyList<ReportArtifact>? Artifacts = null,
     AnalyzerExecutionDiagnostics? Diagnostics = null)
 {
-    /// <summary>Generated findings for this run. Populated by <see cref="DumpDetective.Analysis.FindingGenerators"/> after the analyzer completes.</summary>
+    /// <summary>Findings for this run, attached by <c>SynthesisFindingEnricher</c> from the analyzer's synthesis rule.</summary>
     public IReadOnlyList<InsightFinding> Findings { get; init; } = Findings ?? Array.Empty<InsightFinding>();
     public IReadOnlyList<ReportArtifact> Artifacts { get; init; } = Artifacts ?? Array.Empty<ReportArtifact>();
-
-    /// <summary>
-    /// Set when the <see cref="IFindingGenerator"/> for this analyzer threw during
-    /// <see cref="DumpDetective.Analysis.Pipeline.FindingGenerationPipeline"/> execution.
-    /// Non-null means findings may be incomplete. Surfaced as a Warning in the report and console.
-    /// </summary>
-    public string? FindingGeneratorError => Diagnostics?.FindingGeneratorError;
 
     /// <summary>
     /// Per-analyzer memory stats captured when <c>--memory-diagnostics</c> is enabled.

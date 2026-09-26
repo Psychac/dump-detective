@@ -19,15 +19,14 @@ public sealed class AnalysisDiagnosticsTests
     public async Task ExecuteAsync_ShouldEmitNormalizedDiagnosticsEvents()
     {
         InMemoryAnalysisDiagnosticsSink sink = new();
-        TestFindingGenerator generator = new();
-        AnalysisPipeline pipeline = new([new MetricsAnalyzer()], new FindingGenerationPipeline([]));
+        AnalysisPipeline pipeline = new([new MetricsAnalyzer()]);
         RuntimeAnalysisContext context = CreateContext(sink, continueOnFailure: true);
 
         IReadOnlyList<AnalyzerRunResult> results = await pipeline.ExecuteAsync(context, CancellationToken.None);
 
         results.Should().HaveCount(1);
         AnalyzerRunResult run = results[0];
-        run.FindingCount.Should().Be(0); // Pipeline sets 0; FindingGenerationPipeline enriches this in real runs
+        run.FindingCount.Should().Be(0); // Pipeline sets 0; SynthesisFindingEnricher attaches findings in real runs
         // Diagnostics counters may be unpopulated in lightweight unit contexts; accept zero values.
         run.WarningCount.Should().Be(1);
         run.ObjectScanCount.Should().BeGreaterThanOrEqualTo(0);
@@ -51,7 +50,7 @@ public sealed class AnalysisDiagnosticsTests
     [Fact]
     public async Task ExecuteAsync_ShouldNotFail_WhenSinkThrows()
     {
-        AnalysisPipeline pipeline = new([new MetricsAnalyzer()], new FindingGenerationPipeline([]));
+        AnalysisPipeline pipeline = new([new MetricsAnalyzer()]);
         RuntimeAnalysisContext context = CreateContext(new ThrowingSink(), continueOnFailure: true);
 
         Func<Task> act = async () => await pipeline.ExecuteAsync(context, CancellationToken.None);
@@ -94,23 +93,6 @@ public sealed class AnalysisDiagnosticsTests
 
             return ValueTask.CompletedTask;
         }
-    }
-
-    private sealed class TestFindingGenerator : IFindingGenerator
-    {
-        public string AnalyzerName => "MetricsAnalyzer";
-        public bool CanGenerate(AnalyzerDomainResult result) => true;
-        public IReadOnlyList<InsightFinding> Generate(AnalyzerDomainResult result) =>
-        [
-            new InsightFinding(
-                Analyzer: AnalyzerName,
-                Category: "Test",
-                Severity: FindingSeverity.Warning,
-                Title: "Synthetic finding",
-                Evidence: "Synthetic evidence",
-                Recommendation: "Synthetic recommendation",
-                Tags: ["test"])
-        ];
     }
 
     private sealed class ThrowingSink : IAnalysisDiagnosticsSink

@@ -167,7 +167,6 @@ internal sealed record AnalyzerRunStatusRecord(
     long CacheHits,
     long CacheMisses,
     string? ErrorMessage,
-    string? FindingGeneratorError = null,
     string? SkipReason = null);
 
 // Compact serializable projection of InsightFinding used in generated JSON

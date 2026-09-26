@@ -15,7 +15,6 @@ internal sealed class StartupValidator
     public void ValidateRegistrations(
         IReadOnlyList<IAnalyzer> analyzers,
         IAnalyzerFeatureModuleCatalog moduleCatalog,
-        IEnumerable<IFindingGenerator> findingGenerators,
         IEnumerable<IAnalyzerTrendComparer> trendComparers,
         ISectionBuilderFactory sectionBuilderFactory)
     {
@@ -27,28 +26,23 @@ internal sealed class StartupValidator
         if (reportSectionBuilders.Count == 0)
             errors.Add("No report section builders are registered.");
 
-        // A retired analyzer (Phase 5 step 3) has no IFindingGenerator at all — its module's
-        // SynthesisRuleType is its only path to a Finding, via SynthesisFindingEnricher rather
-        // than this DI-registered set. Joined against the real IAnalyzer instances by AnalyzerType,
-        // not AnalyzerFeatureModule.DisplayName — DisplayName is a report-facing label
-        // ([AnalyzerModule(displayName: ...)]) that can legitimately differ from IAnalyzer.Name
-        // (e.g. ThreadStackClusterAnalyzer: DisplayName "Thread Stack Cluster Analysis" vs. Name
-        // "Thread Stack Signature Clustering" — a real, live case, not hypothetical). The two match
-        // for most analyzers but nothing guarantees it, so don't rely on it holding.
-        IEnumerable<string> retiredButSynthesisCovered = moduleCatalog.Modules
-            .Where(m => m.FindingGeneratorType is null && m.SynthesisRuleType is not null)
+        // Joined against the real IAnalyzer instances by AnalyzerType, not
+        // AnalyzerFeatureModule.DisplayName — DisplayName is a report-facing label that can
+        // legitimately differ from IAnalyzer.Name (ThreadStackClusterAnalyzer: "Thread Stack Cluster
+        // Analysis" vs. "Thread Stack Signature Clustering").
+        IEnumerable<string> synthesisCovered = moduleCatalog.Modules
             .Join(analyzers, m => m.AnalyzerType, a => a.GetType(), (_, a) => a.Name);
 
         ValidateNameCoverage(
-            "finding generators",
+            "synthesis rules",
             analyzers.Select(a => a.Name),
-            findingGenerators.Select(g => g.AnalyzerName).Concat(retiredButSynthesisCovered),
+            synthesisCovered,
             errors,
             requireEveryAnalyzer: true);
 
         // A retired trend comparer (Phase 5 step 4) has no IAnalyzerTrendComparer at all — its
         // headline metrics are covered by TrendAnalyzer's ObservationTrendDiffer-driven path
-        // instead, via ObservationDifferAnalyzerOwnership. Unlike the FindingGenerator/SynthesisRule
+        // instead, via ObservationDifferAnalyzerOwnership. Unlike the SynthesisRule
         // case there's no per-analyzer companion type recorded on the module to check here, so this
         // reads DisplayName directly off Analysis.Trend.ObservationDifferAnalyzerOwnership rather
         // than off moduleCatalog.

@@ -56,7 +56,7 @@ public sealed class FindingConfidenceRealDumpTests
             AnalysisOptions = new(),
         };
 
-        var pipeline = new AnalysisPipeline(new DefaultAnalyzerFactory().CreateAnalyzers(), new FindingGenerationPipeline([]));
+        var pipeline = new AnalysisPipeline(new DefaultAnalyzerFactory().CreateAnalyzers());
         IReadOnlyList<AnalyzerRunResult> runs = await pipeline.ExecuteAsync(context, CancellationToken.None);
         IReadOnlyList<Observation> observations = sink.Observations;
 

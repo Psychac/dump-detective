@@ -7,13 +7,8 @@ namespace DumpDetective.Reporting.Services;
 
 /// <summary>
 /// Runs every registered <see cref="ISynthesisRule"/> over a run's collected observations and
-/// substitutes their <see cref="FindingSynthesisAdapter"/>-translated output for whatever
-/// <c>IFindingGenerator</c>-based <c>FindingGenerationPipeline</c> already produced for the same
-/// analyzer. Deliberately overrides rather than only filling in nulls: it's what lets
-/// <c>ArrayFindingGenerator</c> stay registered (unchanged, since <c>AnalyzerFeatureModule.FindingGeneratorType</c>
-/// is a required field with no per-analyzer opt-out — see
-/// docs/refactor/modularity/phase-5-observations-synthesis.md's per-analyzer playbook, step 6 note)
-/// while still proving the migrated rule's output is what actually reaches the real report.
+/// attaches the <see cref="FindingSynthesisAdapter"/>-translated output to each analyzer's run —
+/// synthesis rules are the only source of analyzer findings.
 /// </summary>
 /// <remarks>
 /// Groups synthesized findings by <see cref="Finding.Analyzer"/>, not by re-querying per run — a

@@ -101,7 +101,7 @@ public class SmallDumpLatencyBenchmark
             new ThreadAnalyzer(),
             new LockGraphAnalyzer(),
             new EventLeakAnalyzer(),
-        }, new FindingGenerationPipeline(Array.Empty<IFindingGenerator>()));
+        });
 
         IReadOnlyList<AnalyzerRunResult> results =
             await pipeline.ExecuteAsync(context, CancellationToken.None);

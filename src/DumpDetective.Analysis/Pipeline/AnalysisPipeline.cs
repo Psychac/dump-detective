@@ -6,17 +6,14 @@ namespace DumpDetective.Analysis.Pipeline;
 
 internal sealed class AnalysisPipeline(
     IEnumerable<Sdk.Analysis.IAnalyzer> analyzers,
-    FindingGenerationPipeline findingGenerationPipeline,
     AnalyzerCleanupPolicy? cleanupPolicy = null,
     AnalyzerExecutionRunner? executionRunner = null,
-    AnalysisDiagnosticsPublisher? diagnosticsPublisher = null,
-    AnalyzerResultPostProcessor? resultPostProcessor = null)
+    AnalysisDiagnosticsPublisher? diagnosticsPublisher = null)
 {
     private readonly IReadOnlyList<Sdk.Analysis.IAnalyzer> _analyzers = analyzers.Where(a => a is not IDeferredAnalyzer).ToArray();
     // Analyzers that must observe the full completed run list (post-hoc, order-agnostic
     // inter-analyzer result bus) run here, after every mid-loop analyzer has finished.
     private readonly IReadOnlyList<Sdk.Analysis.IAnalyzer> _deferredAnalyzers = analyzers.OfType<IDeferredAnalyzer>().ToArray();
-    private readonly AnalyzerResultPostProcessor _resultPostProcessor = resultPostProcessor ?? new AnalyzerResultPostProcessor(findingGenerationPipeline);
     private readonly AnalyzerCleanupPolicy _cleanupPolicy = cleanupPolicy ?? new AnalyzerCleanupPolicy();
     private readonly AnalysisDiagnosticsPublisher _diagnosticsPublisher = diagnosticsPublisher ?? new AnalysisDiagnosticsPublisher();
     private readonly AnalyzerExecutionRunner _executionRunner = executionRunner ?? new AnalyzerExecutionRunner(diagnosticsPublisher ?? new AnalysisDiagnosticsPublisher());
@@ -83,7 +80,7 @@ internal sealed class AnalysisPipeline(
 
         runStopwatch.Stop();
 
-        var finalResults = _resultPostProcessor.Enrich(runResults, cancellationToken).ToArray();
+        var finalResults = runResults.ToArray();
 
         _diagnosticsPublisher.Publish(context.DiagnosticsSink, new AnalysisDiagnosticsEvent(
             RunId: runId,

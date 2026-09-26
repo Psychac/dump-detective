@@ -251,7 +251,6 @@ internal static class ReportSectionAssembler
                 CacheHits:             run.CacheHits,
                 CacheMisses:           run.CacheMisses,
                 ErrorMessage:          run.ErrorMessage,
-                FindingGeneratorError: run.FindingGeneratorError,
                 SkipReason:            run.SkipReason));
 
             if (run.MemoryStats is null)

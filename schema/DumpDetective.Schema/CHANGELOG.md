@@ -15,6 +15,13 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.91.0 — 2026-09-26
+
+Phase 5 exit criterion (section builders presentation-only): `heap.loh-fragmentation-summary`
+gains `free-gap.count` and `sub-kb-free-gap.count`, summed from the free-gap histogram. They back
+the "free gaps are mostly under 1 KB" note, which moves from `LohFragmentationSectionBuilder` into
+`LohFragmentationSynthesisRule`'s narrative.
+
 ## `observation-type-registry.json` 1.90.0 — 2026-09-26
 
 Phase 5 step 7 follow-up: `finalizer.queue-entry` gains `is-retained-exact`, and

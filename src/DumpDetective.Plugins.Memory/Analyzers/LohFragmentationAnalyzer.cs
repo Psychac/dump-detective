@@ -102,6 +102,7 @@ namespace DumpDetective.Analysis.Analyzers.Memory
         private static async ValueTask EmitObservationsAsync(AnalysisContext context, LohFragmentationDomainResult result, CancellationToken cancellationToken)
         {
             var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.HeapSegments };
+            (int freeGapCount, int subKbFreeGapCount) = CountFreeGaps(result.FreeGapHistogram);
 
             // Whole-run LOH-only aggregate (phase 5 step 6.2, docs/refactor/modularity/
             // phase-5-step6-insight-engine-plan.md) — the flat top-level FragmentationPercent/
@@ -126,6 +127,8 @@ namespace DumpDetective.Analysis.Analyzers.Memory
                     ["free-block.count"] = new Measure(result.FreeBlockCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                     ["fragmentation.percent"] = new Measure(result.FragmentationPercent, MeasureUnit.Percent, MeasureSemantics.Ratio),
                     ["largest-free-block.bytes"] = new Measure(result.LargestFreeBlock, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["free-gap.count"] = new Measure(freeGapCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["sub-kb-free-gap.count"] = new Measure(subKbFreeGapCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                 },
                 Provenance = new Provenance
                 {
@@ -444,6 +447,20 @@ namespace DumpDetective.Analysis.Analyzers.Memory
         }
 
         // ── Free-gap histogram ────────────────────────────────────────────────────
+
+        // Summed from the histogram rather than FreeBlockCount so the total matches the histogram
+        // rows the section renders, gap for gap.
+        private static (int Total, int SubKb) CountFreeGaps(IReadOnlyList<FreeGapBucket>? histogram)
+        {
+            int total = 0, subKb = 0;
+            foreach (FreeGapBucket bucket in histogram ?? [])
+            {
+                total += bucket.GapCount;
+                if (bucket.GapSizeRange == s_gapBuckets[0].Label)
+                    subKb = bucket.GapCount;
+            }
+            return (total, subKb);
+        }
 
         internal static List<FreeGapBucket> BuildFreeGapHistogram(List<ulong> allFreeSizes, CancellationToken cancellationToken = default)
         {

@@ -23,6 +23,7 @@ internal sealed class LohFragmentationSynthesisRule : ISynthesisRule
 {
     private const double CriticalThreshold = 30.0;
     private const double WarningThreshold = 15.0;
+    private const double SmallGapDominancePercent = 80.0;
 
     private const string AnalyzerName = "LOH & POH Fragmentation Analysis";
 
@@ -101,6 +102,13 @@ internal sealed class LohFragmentationSynthesisRule : ISynthesisRule
 
         long freeBlockCount = (long)summary.Measures["free-block.count"].Value;
         ulong largestFreeBlock = (ulong)summary.Measures["largest-free-block.bytes"].Value;
-        return narrative + $" {freeBlockCount:N0} free blocks; largest free block: {FormatHelper.FormatBytes(largestFreeBlock)}.";
+        narrative += $" {freeBlockCount:N0} free blocks; largest free block: {FormatHelper.FormatBytes(largestFreeBlock)}.";
+
+        long freeGapCount = (long)summary.Measures["free-gap.count"].Value;
+        double subKbPercent = freeGapCount == 0 ? 0 : summary.Measures["sub-kb-free-gap.count"].Value * 100.0 / freeGapCount;
+        if (subKbPercent > SmallGapDominancePercent)
+            narrative += $" {subKbPercent:F0}% of free gaps are under 1 KB — the free space is fragmented into slivers too small to satisfy any meaningful LOH/POH allocation without compaction.";
+
+        return narrative;
     }
 }

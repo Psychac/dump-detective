@@ -222,7 +222,7 @@ public sealed class SdkRegistryConformanceTests
             ["handle.pinned-target-bytes"] = ["retained.bytes"],
             ["heap.loh-fragmentation-summary"] = [
                 "segment.count", "total.bytes", "free.bytes", "used.bytes", "free-block.count",
-                "fragmentation.percent", "largest-free-block.bytes",
+                "fragmentation.percent", "largest-free-block.bytes", "free-gap.count", "sub-kb-free-gap.count",
             ],
             ["heap.static-root-retained-type"] = ["instance.count", "shallow.bytes"],
             ["leak.candidate-type"] = [

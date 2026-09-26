@@ -18,6 +18,9 @@ namespace DumpDetective.Reporting.SynthesisRules;
 internal sealed class LockGraphSynthesisRule : ISynthesisRule
 {
     private const string AnalyzerName = "Lock Graph Analysis";
+    // A lock re-entered this many times by its holder while other threads wait on it is a
+    // re-entrancy signal worth calling out separately from ordinary contention.
+    private const int HighRecursionThreshold = 3;
 
     public string RuleId => "lock-graph.finding-parity";
     public int Version => 1;
@@ -32,6 +35,7 @@ internal sealed class LockGraphSynthesisRule : ISynthesisRule
     {
         Observation? pressure = null;
         int contestedLockCount = 0;
+        int highRecursionLockCount = 0;
         var derivedFrom = new List<ObservationId>();
         var deadlockCandidates = new List<ThreadRef>();
 
@@ -44,6 +48,8 @@ internal sealed class LockGraphSynthesisRule : ISynthesisRule
                     break;
                 case "lock.contested":
                     contestedLockCount++;
+                    if (observation.Measures["recursion.count"].Value >= HighRecursionThreshold)
+                        highRecursionLockCount++;
                     derivedFrom.Add(observation.Id);
                     break;
                 case "thread.blocked":
@@ -77,6 +83,9 @@ internal sealed class LockGraphSynthesisRule : ISynthesisRule
             sb.Append('.');
             evidence = sb.ToString();
         }
+
+        if (highRecursionLockCount > 0)
+            evidence += $" {highRecursionLockCount} contested lock(s) show a recursion count ≥ {HighRecursionThreshold} — the holder is re-entering the lock repeatedly while other threads wait, a potential re-entrancy issue.";
 
         var finding = new Finding
         {

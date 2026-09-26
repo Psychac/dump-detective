@@ -74,4 +74,21 @@ public sealed class JitAnalyzerRetypingCharacterizationTests
             dataTarget.Dispose();
         }
     }
+
+    [Fact]
+    public void FrameCountsByModuleFileName_KeysByFileNameAndSumsSharedNames()
+    {
+        // Stack frames report full paths; ModuleAnalyzer's ModuleRef subjects use file names, so the
+        // JIT observation must too or JitModuleHotspotInsightRule can never join the two.
+        Dictionary<string, long> counts = JitAnalyzer.FrameCountsByModuleFileName(
+        [
+            new DumpDetective.Core.Models.NameCountEntry(@"C:\Windows\Microsoft.Netssembly\GAC_64\mscorlib4.0_4.0.0.0__b77a5c561934e089\mscorlib.dll", 40),
+            new DumpDetective.Core.Models.NameCountEntry(@"C:\Temp\Shadow\MSCORLIB.DLL", 20),
+            new DumpDetective.Core.Models.NameCountEntry(@"C:pp\MyApp.dll", 7),
+        ]);
+
+        counts.Should().HaveCount(2);
+        counts["mscorlib.dll"].Should().Be(60);
+        counts["MyApp.dll"].Should().Be(7);
+    }
 }

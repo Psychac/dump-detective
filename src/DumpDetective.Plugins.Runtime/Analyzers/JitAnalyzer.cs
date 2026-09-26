@@ -133,23 +133,25 @@ public sealed class JitAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
     /// One <c>runtime.jit-module-frames</c> per module with active frames on any thread stack —
     /// the whole <see cref="JitDomainResult.TopActiveModulesByFrameHits"/> list, naturally bounded
     /// by loaded-module count. Subjects on the same <see cref="ModuleRef"/> shape
-    /// <c>ModuleAnalyzer</c>'s per-module observations use, so rules can join the two.
+    /// <c>ModuleAnalyzer</c>'s per-module observations use, so rules can join the two. Stack frames
+    /// report a module's full path while <c>ModuleAnalyzer</c> names it by file name, so the subject
+    /// uses the file name, and counts for paths that share one are summed.
     /// </summary>
     private static async ValueTask EmitModuleFrameCountsAsync(AnalysisContext context, JitDomainResult result, CancellationToken cancellationToken)
     {
         var capabilitiesUsed = new HashSet<Capability> { CapabilityVocabulary.RuntimeJit, CapabilityVocabulary.RuntimeThreads };
 
-        foreach (NameCountEntry module in result.TopActiveModulesByFrameHits)
+        foreach ((string fileName, long frameCount) in FrameCountsByModuleFileName(result.TopActiveModulesByFrameHits))
         {
             await context.Observations.EmitAsync(new Observation
             {
                 Id = ObservationId.NewId(),
                 ObservationType = "runtime.jit-module-frames",
-                Subjects = [new ModuleRef { SimpleName = module.Name, Fidelity = MatchFidelity.Exact }],
+                Subjects = [new ModuleRef { SimpleName = fileName, Fidelity = MatchFidelity.Exact }],
                 When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
                 Measures = new Dictionary<string, Measure>
                 {
-                    ["active-frame.count"] = new Measure(module.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["active-frame.count"] = new Measure(frameCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                 },
                 Provenance = new Provenance
                 {
@@ -161,6 +163,18 @@ public sealed class JitAnalyzer : IAnalyzer, IProducesAnalyzerDomainResult
                 Confidence = 1.0,
             }, cancellationToken);
         }
+    }
+
+    internal static Dictionary<string, long> FrameCountsByModuleFileName(IReadOnlyList<NameCountEntry> framesByModulePath)
+    {
+        var frameCountsByFileName = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        foreach (NameCountEntry module in framesByModulePath)
+        {
+            string fileName = Path.GetFileName(module.Name);
+            frameCountsByFileName[fileName] = frameCountsByFileName.GetValueOrDefault(fileName) + module.Count;
+        }
+
+        return frameCountsByFileName;
     }
 
     private static JitDomainResult Analyze(

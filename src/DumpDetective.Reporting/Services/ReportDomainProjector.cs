@@ -45,7 +45,7 @@ internal static class ReportDomainProjector
             if (ShouldSuppressInfoInsight(finding))
                 continue;
 
-            if (finding.Tags.Any(tag => string.Equals(tag, "cross-analyzer", StringComparison.OrdinalIgnoreCase)))
+            if (IsCrossDomainInsight(finding))
                 continue;
 
             string domain = InferFindingDomain(finding);
@@ -109,6 +109,12 @@ internal static class ReportDomainProjector
         return domains;
     }
 
+    // The one test both projections share, so a finding lands in exactly one of them: domain
+    // sections or cross-domain insights, never both.
+    private static bool IsCrossDomainInsight(FindingRecord finding) =>
+        finding.Tags.Any(tag => string.Equals(tag, "cross-analyzer", StringComparison.OrdinalIgnoreCase))
+        || string.Equals(finding.Analyzer, "InsightEngine", StringComparison.OrdinalIgnoreCase);
+
     public static IReadOnlyList<FindingRecord> BuildCrossDomainInsights(IReadOnlyList<FindingRecord> findings)
     {
         var cross = new List<FindingRecord>();
@@ -118,11 +124,8 @@ internal static class ReportDomainProjector
             if (ShouldSuppressInfoInsight(finding))
                 continue;
 
-            if (finding.Tags.Any(tag => string.Equals(tag, "cross-analyzer", StringComparison.OrdinalIgnoreCase))
-                || string.Equals(finding.Analyzer, "InsightEngine", StringComparison.OrdinalIgnoreCase))
-            {
+            if (IsCrossDomainInsight(finding))
                 cross.Add(finding);
-            }
         }
 
         cross.Sort(static (a, b) =>

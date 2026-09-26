@@ -13,7 +13,10 @@ internal static class SingleDumpConsolePresenter
     public static void PrintInsights(IReadOnlyList<InsightFinding> insights, bool diagnosticMode)
     {
         ConsoleUx.InsightsHeader(insights.Count);
-        foreach (InsightFinding f in insights)
+
+        // Most severe first; OrderByDescending is stable, so equal severities keep the synthesis
+        // engine's deterministic fingerprint order.
+        foreach (InsightFinding f in insights.OrderByDescending(static insight => insight.Severity))
             ConsoleUx.InsightLine(f.Severity, f.Title, f.Evidence, diagnosticMode);
     }
 

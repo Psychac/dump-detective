@@ -520,7 +520,12 @@ Checked 2026-09-26 against the code and the 3.35 GB reference dump
     its 19. HEAD fires the same 19, except that the one rule dropped by user call is gone and
     `JitModuleHotspotInsightRule` now fires (see `docs/known-issues.md`). With insights in the
     report, top actions and correlation events include them.
-  - **Two regressions found, both in insight presentation:** see `docs/known-issues.md`.
+  - **Two insight presentation regressions found and fixed:**
+    - 15 insights appeared in a domain section as well as in cross-domain insights, because only
+      findings tagged `cross-analyzer` were kept out of the domain lists. Both projections now
+      share one test (`ReportDomainProjector.IsCrossDomainInsight`). Scoring was never affected:
+      it reads the de-duplicated finding list.
+    - The console insight list was in fingerprint order; it's sorted by severity again.
 - Trend reports identical, with ≤ ~5 bespoke comparers remaining and each justified in writing.
   **Met for headline metrics only.**
   - Step 5 lists 3 composite-score comparers as the only hand-written headline branches. There's a

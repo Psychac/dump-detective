@@ -17,6 +17,19 @@ add one when something is found but deliberately left for later.
   - The pre-migration `InsightEngine` rule never filtered framework modules either, so adding a
     filter is a new judgment call, not a regression fix.
 
+- **15 cross-analyzer insights appear twice in the report.** Found 2026-09-26 (Phase 5
+  pre-phase-vs-HEAD check).
+  - Cause: `ReportDomainProjector` keeps a finding out of the domain sections only if it's tagged
+    `cross-analyzer`, but puts every `InsightEngine` finding in the cross-domain list. Only 3 of the
+    old engine's findings carried the tag, and none of the 38 migrated rules do.
+  - Effect: they show in a domain section and in cross-domain insights. They are also counted
+    twice as score contributors; the leak score is capped at 100 on the reference dump, so it
+    doesn't show there.
+  - Likely fix: skip `InsightEngine` findings in the domain projection as well.
+- **Console insights are no longer sorted by severity.** Found 2026-09-26, same check.
+  - The old engine emitted them in severity order. `SynthesisEngine` sorts all findings by
+    fingerprint, so Critical/Warning/Info now interleave.
+
 ## Flaky tests
 
 Each of these passes when run on its own but fails intermittently in full-suite runs. None is

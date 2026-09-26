@@ -508,13 +508,19 @@ Checked 2026-09-26 against the code and the 3.35 GB reference dump
   § below warns about — so the disk-backed `ObservationStore` design remains deferred, not built on
   a guess. See `tests/DumpDetective.Tests/Integration/CacheDiscrepancies/ObservationVolumeRealDumpTests.cs`.
 - Findings produced via synthesis rules are **byte-identical** to pre-phase findings across the
-  golden corpus. **Met per migration, not re-checked end to end.**
-  - Each analyzer's baselines were frozen and diffed by its parity test, then deleted with the
-    generator in step 3 by design, so nothing guards this today.
-  - The parity surface excluded confidence and Crash's caveats. Both were restored in step 7.
-  - Known deliberate differences: one step-6 rule dropped by user call, and the step-7 lineage
-    confidence (which moves 0 of 83 findings on the reference dump).
-  - **Open:** optionally, one pre-phase-vs-HEAD findings comparison on the reference dump.
+  golden corpus. **Met for analyzer findings; checked end to end 2026-09-26.**
+  - The per-analyzer baselines were deleted with the generators in step 3, by design, so this was
+    re-checked once instead: the last pre-phase commit `64943407` and HEAD, each run once on the
+    3.35 GB reference dump (CrashAnalysis profile) and diffed on the report JSON.
+  - **Analyzer findings:** 63 in each. 62 are identical in severity, title, details,
+    recommendation, tags and category. The two differences are both deliberate:
+    - The LOH finding was reworded; step 6.3 moved the builder's wording into the rule.
+    - `queue-retained-bytes` confidence went 0.9 → 0.7 (step 7).
+  - **Insights:** the pre-phase report carried none; it dropped them, and only the console listed
+    its 19. HEAD fires the same 19, except that the one rule dropped by user call is gone and
+    `JitModuleHotspotInsightRule` now fires (see `docs/known-issues.md`). With insights in the
+    report, top actions and correlation events include them.
+  - **Two regressions found, both in insight presentation:** see `docs/known-issues.md`.
 - Trend reports identical, with ≤ ~5 bespoke comparers remaining and each justified in writing.
   **Met for headline metrics only.**
   - Step 5 lists 3 composite-score comparers as the only hand-written headline branches. There's a

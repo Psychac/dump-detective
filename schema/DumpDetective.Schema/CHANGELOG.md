@@ -15,6 +15,21 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.89.0 — 2026-09-26
+
+Phase 5 step 7, parity half: restores the evidence-based finding confidence the pre-Phase-5
+generators reported, which the step-2 rules deliberately left at a flat 1.0.
+
+- `infra.timer-population` (`top-type.*`), `static-root.population` (`top-root.*`),
+  `type.retention-population` (`top-highly-referenced.*`), and `event.publisher-leak-population`
+  (`top-static-publisher.*`, `top-instance-publisher.*`) each gain `has-root-path`,
+  `is-root-path-search-truncated`, and `evidence-signal.count` — the raw GC root-path facts for the
+  same top entity the old `EvidenceConfidence.Compute` read. No `direction`: they feed confidence,
+  not trends.
+- `runtime.crash-thread-candidate` is now emitted from the final candidate snapshots (same order)
+  and carries the original-stack-trace inference tier as an `EvidenceRef`
+  (`original-stack-trace-confidence`).
+
 ## `observation-type-registry.json` 1.85.0 — 2026-09-22
 
 Phase 5 step 4, Bucket D (seventh and last item): `gc.generation-composition` gains `gen1.count`,

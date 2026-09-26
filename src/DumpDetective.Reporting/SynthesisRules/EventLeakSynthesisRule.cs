@@ -17,11 +17,10 @@ namespace DumpDetective.Reporting.SynthesisRules;
 /// <c>TopPublisherEvents</c>) is not part of this rule's query — it backs a different consumer, not
 /// this finding generator.
 /// <para>
-/// The old generator's aggregate findings also compute an evidence-based
-/// <c>Finding.ConfidenceScore</c> override via <c>EvidenceConfidence.Compute(topEvidence)</c> — left
-/// unreproduced, same choice <c>TimerLeakSynthesisRule</c>/<c>DominatorSynthesisRule</c> made, since
-/// no rendered text reads it. <c>topEvidence</c> itself (the per-instance root-path evidence used
-/// only for that override) needed no observation backing as a result.
+/// Each aggregate finding's confidence comes from the sampled publisher root path of the
+/// most-subscribed leak instance of that kind (<see cref="RootPathEvidenceStrength"/>), carried as
+/// raw facts on <c>event.publisher-leak-population</c> — the same instance the old generator's
+/// <c>EvidenceConfidence.Compute(topEvidence)</c> read.
 /// </para>
 /// </remarks>
 internal sealed class EventLeakSynthesisRule : ISynthesisRule
@@ -87,17 +86,17 @@ internal sealed class EventLeakSynthesisRule : ISynthesisRule
 
         var findings = new List<Finding>(2);
 
-        Finding? instanceFinding = BuildAggregateFinding(groups, isStatic: false, instanceLeakCount, population.Id);
+        Finding? instanceFinding = BuildAggregateFinding(groups, isStatic: false, instanceLeakCount, population);
         if (instanceFinding is not null) findings.Add(instanceFinding);
 
-        Finding? staticFinding = BuildAggregateFinding(groups, isStatic: true, staticLeakCount, population.Id);
+        Finding? staticFinding = BuildAggregateFinding(groups, isStatic: true, staticLeakCount, population);
         if (staticFinding is not null) findings.Add(staticFinding);
 
         return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
     }
 
     private static Finding? BuildAggregateFinding(
-        IReadOnlyList<Observation> groups, bool isStatic, long fallbackGroupCount, ObservationId populationId)
+        IReadOnlyList<Observation> groups, bool isStatic, long fallbackGroupCount, Observation population)
     {
         int groupCount = 0;
         long totalPublisherInstances = 0;
@@ -205,8 +204,8 @@ internal sealed class EventLeakSynthesisRule : ISynthesisRule
             Tags = tags,
             MetricValue = totalSubscribers,
             MetricUnit = "subscribers",
-            DerivedFrom = contributingIds.Count > 0 ? [populationId, .. contributingIds] : [populationId],
-            Confidence = ConfidenceBreakdown.MeasurementCertain,
+            DerivedFrom = contributingIds.Count > 0 ? [population.Id, .. contributingIds] : [population.Id],
+            Confidence = RootPathEvidenceStrength.FromMeasures(population.Measures, isStatic ? "top-static-publisher." : "top-instance-publisher."),
         };
     }
 

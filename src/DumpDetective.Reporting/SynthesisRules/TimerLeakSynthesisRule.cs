@@ -17,13 +17,10 @@ namespace DumpDetective.Reporting.SynthesisRules;
 /// <c>LogicalTimerCount</c>, which the real analyzer sets equal to <c>TimerQueueTimerCount</c>
 /// (not a sum of the "real" disposable timer categories, despite the name).
 /// <para>
-/// The old generator's first finding also computes an evidence-based <see cref="Finding.Confidence"/>
-/// override via <c>EvidenceConfidence.Compute</c> (root-path presence/truncation, signal count) —
-/// not read by any Title/Narrative/Recommendation/Tags/MetricValue/MetricUnit text, and, like every
-/// prior rule in this playbook, left as <see cref="ConfidenceBreakdown.MeasurementCertain"/> rather
-/// than reconstructed: confidence plumbing is deliberately deferred to a later step (see the
-/// per-analyzer playbook's own "Before step 2" judgment call), and no observation needs to exist
-/// solely to feed a value this pass doesn't reproduce for any other rule either.
+/// The logical-timers finding's confidence comes from the top timer type's sampled GC root path
+/// (<see cref="RootPathEvidenceStrength"/>), carried as raw facts on <c>infra.timer-population</c>
+/// — the same top type (<c>ByType[0]</c>, highest count) the old generator's
+/// <c>EvidenceConfidence.Compute</c> read.
 /// </para>
 /// </remarks>
 internal sealed class TimerLeakSynthesisRule : ISynthesisRule
@@ -40,7 +37,7 @@ internal sealed class TimerLeakSynthesisRule : ISynthesisRule
 
     public ObservationQuery Query { get; } = new()
     {
-        ObservationTypes = ["infra.timer"],
+        ObservationTypes = ["infra.timer", "infra.timer-population"],
     };
 
     public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
@@ -52,8 +49,16 @@ internal sealed class TimerLeakSynthesisRule : ISynthesisRule
         var allIds = new List<ObservationId>();
         var timerHolderAndQueueIds = new List<ObservationId>();
 
+        Observation? population = null;
+
         foreach (Observation observation in matched.Matched)
         {
+            if (observation.ObservationType == "infra.timer-population")
+            {
+                population = observation;
+                continue;
+            }
+
             long count = (long)observation.Measures["instance.count"].Value;
             totalTimers += count;
             allIds.Add(observation.Id);
@@ -108,8 +113,10 @@ internal sealed class TimerLeakSynthesisRule : ISynthesisRule
                 Tags = ["infrastructure", "timer", "leak", "dispose"],
                 MetricValue = logicalTimerCount,
                 MetricUnit = "timers",
-                DerivedFrom = allIds,
-                Confidence = ConfidenceBreakdown.MeasurementCertain,
+                DerivedFrom = population is null ? allIds : [.. allIds, population.Id],
+                Confidence = population is null
+                    ? ConfidenceBreakdown.MeasurementCertain
+                    : RootPathEvidenceStrength.FromMeasures(population.Measures, "top-type."),
             });
         }
 

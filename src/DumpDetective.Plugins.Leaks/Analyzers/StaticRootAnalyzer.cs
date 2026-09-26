@@ -143,17 +143,20 @@ public sealed class StaticRootAnalyzer : IAnalyzer, IProducesAnalyzerDomainResul
         // topRoots[0].TotalMemoryImpact needs no new field: it's the max heap.static-root
         // retained.bytes across *all* analyzed roots by construction (a root large enough to be the
         // overall max is always >= SignificantMemoryThresholdBytes, hence always significant).
+        var populationMeasures = new Dictionary<string, Measure>
+        {
+            ["root.count"] = new Measure(significantStaticRoots.Length, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["retained.bytes"] = new Measure(totalImpact, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+        };
+        RootPathEvidenceMeasures.Add(populationMeasures, "top-root.", topRoots.Length > 0 ? topRoots[0].Evidence : null);
+
         await observationContext.Observations.EmitAsync(new Observation
         {
             Id = ObservationId.NewId(),
             ObservationType = "static-root.population",
             Subjects = [],
             When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
-            Measures = new Dictionary<string, Measure>
-            {
-                ["root.count"] = new Measure(significantStaticRoots.Length, MeasureUnit.Count, MeasureSemantics.Absolute),
-                ["retained.bytes"] = new Measure(totalImpact, MeasureUnit.Bytes, MeasureSemantics.Absolute),
-            },
+            Measures = populationMeasures,
             Provenance = new Provenance
             {
                 Artifact = observationContext.ArtifactId!.Value,

@@ -16,17 +16,18 @@ namespace DumpDetective.Reporting.SynthesisRules;
 /// back to counting <c>runtime.active-exception</c> Subject types when no candidate observations
 /// exist, matching the old generator's own fallback to <c>ActiveExceptionTypeCounts</c>.
 /// <para>
-/// The old generator's active-exceptions finding also computes a weighted-average
-/// <c>Finding.ConfidenceScore</c> (from each candidate's <c>OriginalStackTraceConfidence</c> tier)
-/// plus a <c>Caveats</c> list summarizing tier distribution — left unreproduced, same choice every
-/// prior rule in this playbook made for evidence-based confidence overrides, since neither is part
-/// of this migration's parity surface (Title/Narrative/Recommendation/Severity/Category/Tags/
-/// MetricValue/MetricUnit).
+/// The active-exceptions finding's confidence is the active-exception-weighted average of each
+/// candidate's original-stack-trace inference tier, and its caveats summarize the tier
+/// distribution — both as the old generator computed them. The tier travels as an
+/// <c>original-stack-trace-confidence</c> <see cref="EvidenceRef"/> on each
+/// <c>runtime.crash-thread-candidate</c>: it's a label, not a measure.
 /// </para>
 /// </remarks>
 internal sealed class CrashSynthesisRule : ISynthesisRule
 {
     private const string AnalyzerName = "Crash Analysis";
+    private const string MeasuredActiveExceptionsCaveat = "Active exception count is based on measured runtime objects and thread snapshots.";
+    private const double NoCandidateStrength = 0.5;
 
     public string RuleId => "crash.finding-parity";
     public int Version => 1;
@@ -40,7 +41,7 @@ internal sealed class CrashSynthesisRule : ISynthesisRule
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? population = null;
-        Observation? topCandidate = null;
+        var candidates = new List<Observation>();
         var activeExceptionTypeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
         var activeExceptionIds = new List<ObservationId>();
 
@@ -52,7 +53,7 @@ internal sealed class CrashSynthesisRule : ISynthesisRule
                     population = observation;
                     break;
                 case "runtime.crash-thread-candidate":
-                    topCandidate ??= observation;
+                    candidates.Add(observation);
                     break;
                 case "runtime.active-exception":
                     activeExceptionIds.Add(observation.Id);
@@ -95,6 +96,7 @@ internal sealed class CrashSynthesisRule : ISynthesisRule
             string topType;
             var derivedFrom = new List<ObservationId> { population.Id };
 
+            Observation? topCandidate = candidates.Count > 0 ? candidates[0] : null;
             if (topCandidate is not null)
             {
                 topType = ((TypeRef)topCandidate.Subjects[0]).CanonicalName;
@@ -120,6 +122,8 @@ internal sealed class CrashSynthesisRule : ISynthesisRule
                 topType = "Unknown";
             }
 
+            string? tierSummary = SummarizeStackTraceTiers(candidates);
+
             return ValueTask.FromResult<IReadOnlyList<Finding>>([new Finding
             {
                 Fingerprint = Fingerprint("active-exceptions"),
@@ -134,7 +138,10 @@ internal sealed class CrashSynthesisRule : ISynthesisRule
                 MetricValue = activeExceptions,
                 MetricUnit = "active-exceptions",
                 DerivedFrom = derivedFrom,
-                Confidence = ConfidenceBreakdown.MeasurementCertain,
+                Confidence = StackTraceInferenceConfidence(candidates, tierSummary),
+                Caveats = tierSummary is null
+                    ? [MeasuredActiveExceptionsCaveat]
+                    : [MeasuredActiveExceptionsCaveat, $"Original stack trace confidence: {tierSummary}."],
             }]);
         }
 
@@ -153,6 +160,71 @@ internal sealed class CrashSynthesisRule : ISynthesisRule
             DerivedFrom = [population.Id],
             Confidence = ConfidenceBreakdown.MeasurementCertain,
         }]);
+    }
+
+    // Weighted by each candidate's active-exception count (at least 1), so the thread carrying most
+    // of the exceptions dominates how far its original stack trace can be trusted.
+    private static ConfidenceBreakdown StackTraceInferenceConfidence(IReadOnlyList<Observation> candidates, string? tierSummary)
+    {
+        double strength = NoCandidateStrength;
+        if (candidates.Count > 0)
+        {
+            double weightedScore = 0;
+            double totalWeight = 0;
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                double weight = Math.Max((int)candidates[i].Measures["active-exception.count"].Value, 1);
+                weightedScore += StackTraceTierScore(StackTraceTier(candidates[i])) * weight;
+                totalWeight += weight;
+            }
+            strength = totalWeight > 0 ? weightedScore / totalWeight : NoCandidateStrength;
+        }
+
+        return new ConfidenceBreakdown
+        {
+            Composite = strength,
+            EvidenceStrength = strength,
+            IdentityFidelityCap = 1.0,
+            TemporalAlignmentCap = 1.0,
+            CapabilityFidelity = 1.0,
+            ConflictPenalty = 1.0,
+            LimitingFactors = [tierSummary is null
+                ? "No crash-thread candidate to attribute an original stack trace to."
+                : $"Original stack trace confidence: {tierSummary}."],
+        };
+    }
+
+    private static string StackTraceTier(Observation candidate) =>
+        candidate.Evidence.Count > 0 ? candidate.Evidence[0].Description ?? "None" : "None";
+
+    // Numeric anchors for CrashAnalyzer's inference tiers: Exact=High, ThreadId=Medium,
+    // MessageHResult=Medium-Low, TypeInnerType=Low, None=no original trace found at all.
+    private static double StackTraceTierScore(string tier) => tier switch
+    {
+        "Exact" => 0.95,
+        "ThreadId" => 0.65,
+        "MessageHResult" => 0.5,
+        "TypeInnerType" => 0.3,
+        "None" => 0.15,
+        _ => 0.5,
+    };
+
+    private static string? SummarizeStackTraceTiers(IReadOnlyList<Observation> candidates)
+    {
+        if (candidates.Count == 0)
+            return null;
+
+        var tierCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            string tier = StackTraceTier(candidates[i]);
+            tierCounts.TryGetValue(tier, out int count);
+            tierCounts[tier] = count + 1;
+        }
+
+        return string.Join(", ", tierCounts
+            .OrderByDescending(kvp => kvp.Value)
+            .Select(kvp => $"{kvp.Value:N0} {kvp.Key}"));
     }
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();

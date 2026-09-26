@@ -177,22 +177,26 @@ public sealed partial class EventLeakAnalyzer : IAnalyzer, IProducesAnalyzerDoma
             }, cancellationToken);
         }
 
+        var populationMeasures = new Dictionary<string, Measure>
+        {
+            ["total.count"] = new Measure(result.TotalEventLeakInstances, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["instance-leak.count"] = new Measure(result.InstanceEventLeakCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["static-leak.count"] = new Measure(result.StaticEventLeakCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            // Added phase 5 step 6.2 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md)
+            // for EventLeakPatternInsightRule — already an exact field on the domain result, no
+            // new aggregation needed.
+            ["subscriber.count"] = new Measure(result.TotalSubscribers, MeasureUnit.Count, MeasureSemantics.Absolute),
+        };
+        RootPathEvidenceMeasures.Add(populationMeasures, "top-static-publisher.", FindMostSubscribedLeakInstance(result.TopLeakInstances, isStatic: true)?.Evidence);
+        RootPathEvidenceMeasures.Add(populationMeasures, "top-instance-publisher.", FindMostSubscribedLeakInstance(result.TopLeakInstances, isStatic: false)?.Evidence);
+
         await context.Observations.EmitAsync(new Observation
         {
             Id = ObservationId.NewId(),
             ObservationType = "event.publisher-leak-population",
             Subjects = [],
             When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
-            Measures = new Dictionary<string, Measure>
-            {
-                ["total.count"] = new Measure(result.TotalEventLeakInstances, MeasureUnit.Count, MeasureSemantics.Absolute),
-                ["instance-leak.count"] = new Measure(result.InstanceEventLeakCount, MeasureUnit.Count, MeasureSemantics.Absolute),
-                ["static-leak.count"] = new Measure(result.StaticEventLeakCount, MeasureUnit.Count, MeasureSemantics.Absolute),
-                // Added phase 5 step 6.2 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md)
-                // for EventLeakPatternInsightRule — already an exact field on the domain result, no
-                // new aggregation needed.
-                ["subscriber.count"] = new Measure(result.TotalSubscribers, MeasureUnit.Count, MeasureSemantics.Absolute),
-            },
+            Measures = populationMeasures,
             Provenance = new Provenance
             {
                 Artifact = context.ArtifactId!.Value,
@@ -202,6 +206,17 @@ public sealed partial class EventLeakAnalyzer : IAnalyzer, IProducesAnalyzerDoma
             },
             Confidence = 1.0,
         }, cancellationToken);
+    }
+
+    private static EventLeakInstanceSnapshot? FindMostSubscribedLeakInstance(IReadOnlyList<EventLeakInstanceSnapshot>? instances, bool isStatic)
+    {
+        EventLeakInstanceSnapshot? mostSubscribed = null;
+        foreach (EventLeakInstanceSnapshot instance in instances ?? [])
+        {
+            if (instance.IsStatic == isStatic && (mostSubscribed is null || instance.SubscriberCount > mostSubscribed.SubscriberCount))
+                mostSubscribed = instance;
+        }
+        return mostSubscribed;
     }
 
     private static EventLeakDomainResult Analyze(

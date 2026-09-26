@@ -26,8 +26,14 @@ internal static class FindingSynthesisAdapter
         Fingerprint: finding.Fingerprint,
         MetricValue: finding.MetricValue,
         MetricUnit: finding.MetricUnit,
-        ConfidenceScore: finding.Confidence.Composite,
+        ConfidenceScore: ToConfidenceScore(finding.Confidence),
         Caveats: finding.Caveats.Count > 0 ? finding.Caveats : null);
+
+    // A breakdown with nothing limiting it carries no measured information, so it defers to
+    // InsightFinding's severity-based default — the value every pre-Phase-5 finding without an
+    // evidence-based override reported. Only a measured limitation overrides that default.
+    private static double? ToConfidenceScore(ConfidenceBreakdown confidence) =>
+        confidence.Composite < 1.0 ? confidence.Composite : null;
 
     private static FindingSeverity ToFindingSeverity(Severity severity) => severity switch
     {

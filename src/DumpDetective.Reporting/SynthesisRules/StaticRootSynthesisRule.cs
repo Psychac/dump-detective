@@ -24,10 +24,10 @@ namespace DumpDetective.Reporting.SynthesisRules;
 /// size-descending-sorted population) are always the same value.
 /// </para>
 /// <para>
-/// The old generator's single retention finding also computes an evidence-based
-/// <c>Finding.ConfidenceScore</c> override via <c>EvidenceConfidence.Compute(topEvidence)</c> — left
-/// unreproduced, same choice <c>TimerLeakSynthesisRule</c>/<c>DominatorSynthesisRule</c>/
-/// <c>EventLeakSynthesisRule</c> made, since no rendered text reads it.
+/// The retention finding's confidence comes from the largest root's sampled GC root path
+/// (<see cref="RootPathEvidenceStrength"/>), carried as raw facts on
+/// <c>static-root.population</c> — the same root the old generator's
+/// <c>EvidenceConfidence.Compute(topEvidence)</c> read.
 /// </para>
 /// </remarks>
 internal sealed class StaticRootSynthesisRule : ISynthesisRule
@@ -110,7 +110,7 @@ internal sealed class StaticRootSynthesisRule : ISynthesisRule
             MetricValue = totalRetainedBytes,
             MetricUnit = "retained-bytes",
             DerivedFrom = rootIds.Count > 0 ? [population.Id, .. rootIds] : [population.Id],
-            Confidence = ConfidenceBreakdown.MeasurementCertain,
+            Confidence = RootPathEvidenceStrength.FromMeasures(population.Measures, "top-root."),
         }]);
     }
 

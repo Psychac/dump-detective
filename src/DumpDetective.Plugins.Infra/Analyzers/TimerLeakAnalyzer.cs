@@ -237,23 +237,26 @@ public sealed class TimerLeakAnalyzer :
         // TimerQueueTimerCount, not a sum of the 'real' disposable timer categories, despite the
         // name"), so timer-queue.count backs both TimerLeakTrendComparer's old timer.logical and
         // timer.queue headline metrics rather than duplicating the same total under two measures.
+        var populationMeasures = new Dictionary<string, Measure>
+        {
+            ["total.count"] = new Measure(total, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["total.bytes"] = new Measure(totalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+            ["threading.count"] = new Measure(threadingTimerCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["timers-timer.count"] = new Measure(timersTimerCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["timer-queue.count"] = new Measure(timerQueueTimerCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["holder.count"] = new Measure(timerHolderCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["periodic.count"] = new Measure(periodicTimerCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["other.count"] = new Measure(otherTimerCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+        };
+        RootPathEvidenceMeasures.Add(populationMeasures, "top-type.", byType.Count > 0 ? byType[0].Evidence : null);
+
         await observationContext.Observations.EmitAsync(new Observation
         {
             Id = ObservationId.NewId(),
             ObservationType = "infra.timer-population",
             Subjects = [],
             When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
-            Measures = new Dictionary<string, Measure>
-            {
-                ["total.count"] = new Measure(total, MeasureUnit.Count, MeasureSemantics.Absolute),
-                ["total.bytes"] = new Measure(totalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
-                ["threading.count"] = new Measure(threadingTimerCount, MeasureUnit.Count, MeasureSemantics.Absolute),
-                ["timers-timer.count"] = new Measure(timersTimerCount, MeasureUnit.Count, MeasureSemantics.Absolute),
-                ["timer-queue.count"] = new Measure(timerQueueTimerCount, MeasureUnit.Count, MeasureSemantics.Absolute),
-                ["holder.count"] = new Measure(timerHolderCount, MeasureUnit.Count, MeasureSemantics.Absolute),
-                ["periodic.count"] = new Measure(periodicTimerCount, MeasureUnit.Count, MeasureSemantics.Absolute),
-                ["other.count"] = new Measure(otherTimerCount, MeasureUnit.Count, MeasureSemantics.Absolute),
-            },
+            Measures = populationMeasures,
             Provenance = new Provenance
             {
                 Artifact = observationContext.ArtifactId!.Value,

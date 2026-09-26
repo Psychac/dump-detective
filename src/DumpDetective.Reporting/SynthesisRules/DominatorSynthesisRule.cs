@@ -26,12 +26,10 @@ namespace DumpDetective.Reporting.SynthesisRules;
 /// <c>AsyncStateMachineSynthesisRule</c> hit for its per-type case.
 /// </para>
 /// <para>
-/// The old generator's second finding (highly-referenced objects) also computes an evidence-based
-/// <c>Finding.ConfidenceScore</c> override via <c>EvidenceConfidence.Compute</c> — not read by any
-/// Title/Narrative/Recommendation/Tags/MetricValue/MetricUnit text, and, like every prior rule in
-/// this playbook (<c>TimerLeakSynthesisRule</c>'s own notable-findings entry), left as
-/// <see cref="ConfidenceBreakdown.MeasurementCertain"/> rather than reconstructed — no observation
-/// exists solely to feed a value this pass doesn't reproduce for any other rule either.
+/// The highly-referenced-objects finding's confidence comes from the top highly-referenced
+/// object's sampled GC root path (<see cref="RootPathEvidenceStrength"/>), carried as raw facts on
+/// <c>type.retention-population</c> — the same object the old generator's
+/// <c>EvidenceConfidence.Compute</c> read.
 /// </para>
 /// </remarks>
 internal sealed class DominatorSynthesisRule : ISynthesisRule
@@ -130,7 +128,7 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
                     MetricValue = highlyReferencedCount,
                     MetricUnit = "objects",
                     DerivedFrom = [population.Id],
-                    Confidence = ConfidenceBreakdown.MeasurementCertain,
+                    Confidence = RootPathEvidenceStrength.FromMeasures(population.Measures, "top-highly-referenced."),
                 });
             }
         }

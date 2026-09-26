@@ -165,14 +165,52 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
             var result = (CrashDomainResult)BuildDomainResult(analysis, context.HeapRootPaths, crashOptions.Options);
             LastResult = result;
 
-            // Phase 5 step 6.2 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md):
-            // CrashModuleHotspotInsightRule needs per-candidate module attribution
-            // (TopUserFrameModule), which only exists on the final CrashThreadCandidateSnapshot —
-            // resolved in BuildCrashThreadSnapshotsImpl, after the runtime.crash-thread-candidate
-            // observations above (which subject on exception type, from the pre-resolution
-            // CrashThreadCandidate) are already emitted. Emitted here, post-BuildDomainResult,
-            // rather than threading module resolution earlier into that loop.
+            // Both candidate observation types are emitted from the final CrashThreadCandidateSnapshot
+            // list: TopUserFrameModule (CrashModuleHotspotInsightRule) and the original-stack-trace
+            // tier (CrashSynthesisRule's confidence) are only resolved in BuildCrashThreadSnapshotsImpl.
+            await EmitCrashThreadCandidateObservationsAsync(context, result, cancellationToken);
             await EmitCrashThreadCandidateModuleObservationsAsync(context, result, cancellationToken);
+        }
+
+        // Emitted from the final snapshots rather than inline in Analyze: each candidate's
+        // original-stack-trace tier is only resolved in BuildCrashThreadSnapshotsImpl, and
+        // CrashSynthesisRule's confidence and caveats read it. Snapshot order is the candidates'
+        // own descending-ActiveExceptionCount order, which the rule trusts.
+        private static async ValueTask EmitCrashThreadCandidateObservationsAsync(
+            AnalysisContext context, CrashDomainResult result, CancellationToken cancellationToken)
+        {
+            var observationCapabilities = new HashSet<Capability> { CapabilityVocabulary.HeapObjects, CapabilityVocabulary.HeapSegments, CapabilityVocabulary.RuntimeThreads };
+            foreach (CrashThreadCandidateSnapshot candidate in result.TopCrashThreadCandidates)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(candidate.PrimaryExceptionType);
+                await context.Observations.EmitAsync(new Observation
+                {
+                    Id = ObservationId.NewId(),
+                    ObservationType = "runtime.crash-thread-candidate",
+                    Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
+                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
+                    Measures = new Dictionary<string, Measure>
+                    {
+                        ["active-exception.count"] = new Measure(candidate.ActiveExceptionCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    },
+                    Provenance = new Provenance
+                    {
+                        Artifact = context.ArtifactId!.Value,
+                        AnalyzerKey = "Crash Analysis",
+                        CapabilitiesUsed = observationCapabilities,
+                        Fidelity = FidelityLevel.Full,
+                    },
+                    Confidence = 1.0,
+                    Evidence = [new EvidenceRef
+                    {
+                        Artifact = context.ArtifactId!.Value,
+                        Locator = "original-stack-trace-confidence",
+                        Description = candidate.OriginalStackTraceConfidence.ToString(),
+                    }],
+                }, cancellationToken);
+            }
         }
 
         private static async ValueTask EmitCrashThreadCandidateModuleObservationsAsync(
@@ -217,11 +255,9 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
         /// out of this pass).
         /// Phase 5 step 2 adds: a whole-run <c>runtime.crash-population</c> observation
         /// (<c>TotalExceptions</c>/<c>ActiveExceptions</c>/unique-type count — exhaustive scalars,
-        /// emitted unconditionally including the zero-exception case); and one
-        /// <c>runtime.crash-thread-candidate</c> observation per <c>CrashThreadCandidate</c> —
-        /// bounded by distinct thread-with-active-exception count (process-scale, never heap-scale),
-        /// backing <c>CrashFindingGenerator</c>'s "primary exception type" text without needing
-        /// per-object thread identity on <c>runtime.active-exception</c> itself.
+        /// emitted unconditionally including the zero-exception case). Per-candidate
+        /// <c>runtime.crash-thread-candidate</c> observations are emitted later, from the final
+        /// snapshots — see <see cref="EmitCrashThreadCandidateObservationsAsync"/>.
         /// </summary>
         private async ValueTask<ExceptionAnalysis> Analyze(
             IHeapObjectStream candidates, IDumpObjectFieldQuery fields, IDumpArrayShapeQuery arrayShapes,
@@ -365,11 +401,7 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
                 .ToList();
 
             // Phase 5 step 2: one whole-run runtime.crash-population observation (exhaustive
-            // scalars, emitted unconditionally including the zero-exception case) plus one
-            // runtime.crash-thread-candidate observation per candidate — bounded by distinct
-            // thread-with-active-exception count (process-scale, not heap-scale), already sorted
-            // descending by ActiveExceptionCount before this loop runs, same already-sorted-before-
-            // emission structure ArraySynthesisRule relies on.
+            // scalars, emitted unconditionally including the zero-exception case).
             await observationContext.Observations.EmitAsync(new Observation
             {
                 Id = ObservationId.NewId(),
@@ -413,32 +445,6 @@ namespace DumpDetective.Analysis.Analyzers.Runtime
                     Measures = new Dictionary<string, Measure>
                     {
                         ["instance.count"] = new Measure(kv.Value, MeasureUnit.Count, MeasureSemantics.Absolute),
-                    },
-                    Provenance = new Provenance
-                    {
-                        Artifact = observationContext.ArtifactId!.Value,
-                        AnalyzerKey = "Crash Analysis",
-                        CapabilitiesUsed = observationCapabilities,
-                        Fidelity = FidelityLevel.Full,
-                    },
-                    Confidence = 1.0,
-                }, cancellationToken);
-            }
-
-            foreach (CrashThreadCandidate candidate in topCrashThreadCandidates)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                (string canonicalName, MatchFidelity fidelity) = EntityCanonicalizer.CanonicalizeTypeName(candidate.PrimaryExceptionType);
-                await observationContext.Observations.EmitAsync(new Observation
-                {
-                    Id = ObservationId.NewId(),
-                    ObservationType = "runtime.crash-thread-candidate",
-                    Subjects = [new TypeRef { CanonicalName = canonicalName, Fidelity = fidelity }],
-                    When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
-                    Measures = new Dictionary<string, Measure>
-                    {
-                        ["active-exception.count"] = new Measure(candidate.ActiveExceptionCount, MeasureUnit.Count, MeasureSemantics.Absolute),
                     },
                     Provenance = new Provenance
                     {

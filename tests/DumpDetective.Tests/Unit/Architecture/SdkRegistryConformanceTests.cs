@@ -122,6 +122,7 @@ public sealed class SdkRegistryConformanceTests
             ["infra.timer-population"] = [
                 "total.count", "total.bytes", "threading.count", "timers-timer.count",
                 "timer-queue.count", "holder.count", "periodic.count", "other.count",
+                "top-type.has-root-path", "top-type.is-root-path-search-truncated", "top-type.evidence-signal.count",
             ],
             ["infra.wcf-channel"] = ["retained.bytes", "binding-hint.ordinal"],
             ["infra.wcf-channel-type-population"] = ["total.count"],
@@ -191,7 +192,10 @@ public sealed class SdkRegistryConformanceTests
                 "unresolved-tcs-oldgen.count", "total-vts.count", "pending-vts.count", "pending-vts-oldgen.count",
             ],
             ["heap.static-root"] = ["retained.bytes", "objects-kept-alive.count", "gen2-or-loh-retained.fraction"],
-            ["static-root.population"] = ["root.count", "retained.bytes"],
+            ["static-root.population"] = [
+                "root.count", "retained.bytes",
+                "top-root.has-root-path", "top-root.is-root-path-search-truncated", "top-root.evidence-signal.count",
+            ],
             ["type.root-reachability"] = ["sample.bytes", "has-gc-root", "retained.bytes"],
             ["reference-chain.type-sample"] = ["instance.count", "sample.count", "retained-sample.count", "dominant-root-kind.count"],
             ["reference-chain.population"] = ["analyzed.count", "retained.count", "retained.percent", "traversal-limited.count"],
@@ -200,6 +204,7 @@ public sealed class SdkRegistryConformanceTests
             ["type.retention-population"] = [
                 "highly-referenced.count", "highly-referenced.bytes", "approximated-reference-addresses.count",
                 "candidate.count", "analyzed.count", "retained.bytes", "pressure.ratio",
+                "top-highly-referenced.has-root-path", "top-highly-referenced.is-root-path-search-truncated", "top-highly-referenced.evidence-signal.count",
             ],
             ["type.retention-hotspot"] = ["object.count", "total.bytes", "total-incoming-references.count"],
             ["event.publisher-leak"] = ["subscriber.count", "instance.count", "retained.bytes"],
@@ -207,7 +212,11 @@ public sealed class SdkRegistryConformanceTests
                 "is-static", "instance.count", "subscriber.count", "max-subscribers-per-instance.count",
                 "max-severity.score", "is-timer-event", "is-property-changed-event",
             ],
-            ["event.publisher-leak-population"] = ["total.count", "instance-leak.count", "static-leak.count"],
+            ["event.publisher-leak-population"] = [
+                "total.count", "instance-leak.count", "static-leak.count",
+                "top-static-publisher.has-root-path", "top-static-publisher.is-root-path-search-truncated", "top-static-publisher.evidence-signal.count",
+                "top-instance-publisher.has-root-path", "top-instance-publisher.is-root-path-search-truncated", "top-instance-publisher.evidence-signal.count",
+            ],
             ["handle.pinned-target-type"] = ["instance.count"],
             ["handle.dependent-target-type"] = ["instance.count"],
             ["handle.pinned-target-bytes"] = ["retained.bytes"],

@@ -1,3 +1,5 @@
+using DumpDetective.Sdk.Observations;
+
 namespace DumpDetective.Analysis.Models;
 
 /// <summary>
@@ -31,33 +33,24 @@ internal sealed record EventLeakEvidence(
     IReadOnlyList<EvidenceSignal> Signals);
 
 /// <summary>
-/// Derives a per-finding confidence score from <see cref="Evidence"/>: a resolved, non-truncated
-/// sample root path is high confidence; a truncated path is partial/bounded; no path is speculative.
+/// Writes the raw root-path facts behind an <see cref="Evidence"/>/<see cref="EventLeakEvidence"/> onto
+/// an observation, under a caller-chosen key prefix naming which entity they describe (e.g. the top
+/// timer type). Facts only — whether a root path was found, whether its search was truncated, how
+/// many contributing signals there were; the confidence judged from them is a synthesis-rule concern
+/// (Reporting's <c>RootPathEvidenceStrength</c>).
 /// </summary>
-internal static class EvidenceConfidence
+internal static class RootPathEvidenceMeasures
 {
-    internal static double Compute(Evidence? evidence)
+    internal static void Add(Dictionary<string, Measure> measures, string prefix, Evidence? evidence) =>
+        Add(measures, prefix, evidence?.SampleRootPath, evidence?.RootPathSearchTruncated ?? false, evidence?.ContributingSignals.Count ?? 0);
+
+    internal static void Add(Dictionary<string, Measure> measures, string prefix, EventLeakEvidence? evidence) =>
+        Add(measures, prefix, evidence?.PublisherRootPath, evidence?.SearchTruncated ?? false, evidence?.Signals.Count ?? 0);
+
+    private static void Add(Dictionary<string, Measure> measures, string prefix, string? rootPath, bool searchTruncated, int signalCount)
     {
-        if (evidence is null || string.IsNullOrEmpty(evidence.SampleRootPath))
-            return 0.4;
-
-        double score = evidence.RootPathSearchTruncated ? 0.6 : 0.8;
-        score += Math.Min(evidence.ContributingSignals.Count, 3) * 0.02;
-        return Math.Min(score, 0.9);
-    }
-
-    /// <summary>
-    /// EventLeak-specific overload for <see cref="EventLeakEvidence"/> (design §4.3).
-    /// Only <c>PublisherRootPath</c> counts as a resolved path here — <c>SampleSubscriberHint</c>
-    /// is a cheap fallback, not evidence the publisher itself is reachable from a root.
-    /// </summary>
-    internal static double Compute(EventLeakEvidence? evidence)
-    {
-        if (evidence is null || string.IsNullOrEmpty(evidence.PublisherRootPath))
-            return 0.4;
-
-        double score = evidence.SearchTruncated ? 0.6 : 0.8;
-        score += Math.Min(evidence.Signals.Count, 3) * 0.02;
-        return Math.Min(score, 0.9);
+        measures[prefix + "has-root-path"] = new Measure(string.IsNullOrEmpty(rootPath) ? 0 : 1, MeasureUnit.Count, MeasureSemantics.Absolute);
+        measures[prefix + "is-root-path-search-truncated"] = new Measure(searchTruncated ? 1 : 0, MeasureUnit.Count, MeasureSemantics.Absolute);
+        measures[prefix + "evidence-signal.count"] = new Measure(signalCount, MeasureUnit.Count, MeasureSemantics.Absolute);
     }
 }

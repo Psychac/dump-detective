@@ -276,28 +276,31 @@ public sealed class DominatorAnalyzer :
         // from the same topTypes.Count at DominatorDomainResult's one construction site), so one
         // measure, not two. pressure.ratio is a plain derived ratio
         // (TotalEstimatedRetainedBytes / TotalHeapBytes), not a classifier composite.
+        var populationMeasures = new Dictionary<string, Measure>
+        {
+            ["highly-referenced.count"] = new Measure(result.HighlyReferencedObjectCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["highly-referenced.bytes"] = new Measure(result.TopHighlyReferencedTotalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+            ["approximated-reference-addresses.count"] = new Measure(result.ApproximatedReferenceAddresses, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["candidate.count"] = new Measure(result.CandidateCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["analyzed.count"] = new Measure(result.AnalyzedCount, MeasureUnit.Count, MeasureSemantics.Absolute),
+            ["retained.bytes"] = new Measure(result.TotalEstimatedRetainedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+            ["pressure.ratio"] = new Measure(
+                result.TotalHeapBytes > 0 ? (double)result.TotalEstimatedRetainedBytes / result.TotalHeapBytes : 0.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+            // Added phase 5 step 6.2 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md)
+            // for ReferenceChainDominatorCorrelationInsightRule — pressure.ratio alone can't
+            // reconstruct this exactly (division is lossy at ratio == 0), and the rule needs the
+            // raw denominator to compute its own per-type retained-bytes percentages.
+            ["total.bytes"] = new Measure(result.TotalHeapBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+        };
+        RootPathEvidenceMeasures.Add(populationMeasures, "top-highly-referenced.", result.TopHighlyReferencedObjects is { Count: > 0 } ? result.TopHighlyReferencedObjects[0].Evidence : null);
+
         await observationContext.Observations.EmitAsync(new Observation
         {
             Id = ObservationId.NewId(),
             ObservationType = "type.retention-population",
             Subjects = [],
             When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
-            Measures = new Dictionary<string, Measure>
-            {
-                ["highly-referenced.count"] = new Measure(result.HighlyReferencedObjectCount, MeasureUnit.Count, MeasureSemantics.Absolute),
-                ["highly-referenced.bytes"] = new Measure(result.TopHighlyReferencedTotalBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
-                ["approximated-reference-addresses.count"] = new Measure(result.ApproximatedReferenceAddresses, MeasureUnit.Count, MeasureSemantics.Absolute),
-                ["candidate.count"] = new Measure(result.CandidateCount, MeasureUnit.Count, MeasureSemantics.Absolute),
-                ["analyzed.count"] = new Measure(result.AnalyzedCount, MeasureUnit.Count, MeasureSemantics.Absolute),
-                ["retained.bytes"] = new Measure(result.TotalEstimatedRetainedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
-                ["pressure.ratio"] = new Measure(
-                    result.TotalHeapBytes > 0 ? (double)result.TotalEstimatedRetainedBytes / result.TotalHeapBytes : 0.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
-                // Added phase 5 step 6.2 (docs/refactor/modularity/phase-5-step6-insight-engine-plan.md)
-                // for ReferenceChainDominatorCorrelationInsightRule — pressure.ratio alone can't
-                // reconstruct this exactly (division is lossy at ratio == 0), and the rule needs the
-                // raw denominator to compute its own per-type retained-bytes percentages.
-                ["total.bytes"] = new Measure(result.TotalHeapBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
-            },
+            Measures = populationMeasures,
             Provenance = new Provenance
             {
                 Artifact = observationContext.ArtifactId!.Value,

@@ -570,12 +570,9 @@ One foreground run of the Release CLI against the ~3.3 GB `Crash_IIS_BALTSTPRD` 
 - **The X1 "Cross-Domain Insights" panel** is rendered by the HTML from `crossDomainInsights`, not
   from a domain section — `ReportDomainProjector` deliberately skips `CrossDomain` sections. Not a
   gap.
-- **Open, not fixed here:**
-  - The JIT hotspot's first real hit is a framework module (`mscorlib.dll`), which isn't very
-    actionable. The original rule never filtered framework modules either; a filter would be a new
-    judgment, not part of this migration.
-  - `--separate-json` never writes `report.json` — `ReportOutputWriter`'s regex has a stray space
-    (`(['"]) (report-json)`) so it never matches. Pre-existing and unrelated to step 6.
+- **Open, not fixed here:** the JIT hotspot's first real hit is a framework module, and
+  `--separate-json` never writes `report.json` (pre-existing, unrelated to step 6). Both tracked in
+  [known-issues.md](../../known-issues.md).
 
 ## Sizing note
 

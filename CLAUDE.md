@@ -38,7 +38,7 @@ Core modules:
 - Graph: `ReferenceGraph`, optional `ReverseReferenceIndex`, `RootPathFinder` (BFS, depth 20)
 - Analysis: analyzers (leaks, threads, GCHandles, modules, LOH, etc.)
 - Query: `QueryEngine` for index-based queries
-- Insight: `InsightEngine` ranks cross-analyzer findings
+- Insight: cross-analyzer `ISynthesisRule`s (`Reporting/SynthesisRules/Insight/`) produce cross-analyzer findings
 
 ## Performance rules (strict)
 

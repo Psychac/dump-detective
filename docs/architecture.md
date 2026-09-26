@@ -249,7 +249,8 @@ both declared on the `[AnalyzerModule]` attribute. Current catalog, in execution
 | 440 | `http-object` | `HttpObjectAnalyzer` | infra, network |
 | 450 | `timer-leak` | `TimerLeakAnalyzer` | infra, timers |
 
-Plus cross-cutting, non-catalog stages: `InsightEngine` (cross-analyzer synthesis) and
+Plus cross-cutting, non-catalog stages: cross-analyzer synthesis rules (`ISynthesisRule` classes
+under `DumpDetective.Reporting/SynthesisRules/Insight/`, run by `SynthesisFindingEnricher`) and
 `TrendAnalyzer` (multi-snapshot comparison, § 12).
 
 Global (non-analyzer-scoped) report sections, also registered in the catalog:
@@ -329,7 +330,11 @@ The CLI executes analysis as a linear sequence of `IAnalysisStage` steps sharing
 | `WriteOutputStage` | Writes report to console and/or file |
 
 `ExecutePerDumpPipelineStage` composes the above for each dump in a multi-dump/trend run.
-`InsightEngine` runs cross-cutting analysis after the per-analyzer pipeline completes.
+Cross-analyzer findings come from synthesis rules run by `SynthesisFindingEnricher` once analyzers
+finish (in `RunAnalyzersNode`); findings that belong to no single analyzer are carried separately
+and reach both the report's Cross-Domain Insights and the console. `InsightEngine`, which used to do
+this, was retired in phase 5 step 6 —
+[phase-5-step6-insight-engine-plan.md](refactor/modularity/phase-5-step6-insight-engine-plan.md).
 
 ---
 

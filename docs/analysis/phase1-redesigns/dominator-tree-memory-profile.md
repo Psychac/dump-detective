@@ -754,6 +754,7 @@ decision, not a drive-by. Tracked in § 8.
    — fails roughly 1 run in 10 with "Did not expect smallAddr to be 0UL". Confirmed **pre-existing**
    (reproduced at the commit before the `segBuf` work, same rate, in a clean worktree), so it is not a
    regression — but a suite that fails 10% of the time erodes the signal every other item here depends on.
+   Now tracked with the project's other flaky tests in [known-issues.md](../../known-issues.md).
 4. **Re-measure the 25.6 GB dump end-to-end.** Everything about it in this doc is analytic — derived
    from the stage model and the design doc's original figures, not re-run since the allocation fixes and
    the new budget model. It is the one dump that exercises the parts of § 5 that matter most, and the

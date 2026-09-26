@@ -545,14 +545,25 @@ Checked 2026-09-26 against the code and the 3.35 GB reference dump
     Insights) is presentation, not judgment.
   - **Open.**
 - No `AnalyzerDomainResult` carries a composite score, `FindingSeverity`, or classification enum
-  (audit Smell A closed). **Not met: two remain.**
-  - `LeakCandidateRecord` still carries `SuspicionScore`/`Severity`/`Classification`, computed in
-    stage 1 by `LeakCandidateAnalyzer`. They drive its candidate ordering, its trend comparer, and
-    its section builder. Step 6.1 moved the finding judgment to the rule, but not these fields.
-  - `EventLeakGroupSnapshot.MaxSeverityScore` is a composite that is also emitted as the
-    `event.publisher-leak-group` measure `max-severity.score`, against the § 2a purity rule.
-  - `GCPressureLevel` (AllocationPattern) is defined but unused: dead code.
-  - **Open.**
+  (audit Smell A closed). **Leak Candidate fixed 2026-09-26; one item open.**
+  - **Leak Candidate — done.** `LeakCandidateRecord` no longer carries
+    `SuspicionScore`/`Severity`/`Classification`/`RootKind`, and the domain result no longer carries
+    `CandidatesByClass`. They now carry only raw inputs (`IsPinned`, `IsDependent`,
+    `LogicalTimerCount`). `LeakCandidateClassifier` (`Plugins.Leaks/Utilities`) is the sole owner;
+    the analyzer, section builder, trend comparer and `LeakCandidateSynthesisRule` all call it.
+    - The rule's own verbatim copy of `Classify`/`Score`/`GetSeverity` is gone.
+    - The analyzer still ranks by score internally, because it picks the top 20 for root-chain
+      enrichment. It still reads the GC Handle and Timer results through its options to do that;
+      that cross-analyzer read stays in stage 1 for this bounded selection.
+    - Output is the same, except that the "groups by leak class" table now breaks count ties by
+      class order. There are no ties on the reference dump.
+  - **Open: Event Leak.** `EventLeakGroupSnapshot.MaxSeverityScore` is a composite that is also
+    emitted as the `event.publisher-leak-group` measure `max-severity.score`, against the § 2a
+    purity rule. It's a streaming max over every scanned instance, so a rule can't recompute it
+    from bounded observations. Fixing it needs a design decision.
+  - `GCPressureLevel` is not a violation: it's the return type of the sole-owner
+    `AllocationPatternPressureClassifier`, not a domain-result field. (An earlier version of this
+    item called it dead code; that was wrong.)
 - `ExplainableScoringEngine` either reuses synthesis outputs or is gone — not a surviving
   independent scoring path. **Met** (see the prerequisites section: it reads finding severity and
   confidence only).

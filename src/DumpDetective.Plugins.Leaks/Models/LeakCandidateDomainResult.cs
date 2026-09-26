@@ -1,5 +1,6 @@
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
+using DumpDetective.Analysis.Utilities;
 
 namespace DumpDetective.Analysis.Models;
 
@@ -21,10 +22,6 @@ internal sealed record LeakCandidateRecord(
     ulong TotalSize,
     long InstanceCount,
     double Gen2Pct,
-    int SuspicionScore,
-    FindingSeverity Severity,
-    LeakClass Classification,
-    string? RootKind,
     bool IsFinalizable,
     bool IsContainer,
     double ReferenceFieldRatio,
@@ -41,6 +38,10 @@ internal sealed record LeakCandidateRecord(
     /// isFinalizable/Gen2Count&gt;1000 branch needs the exact count. Added alongside
     /// <see cref="IsStaticRooted"/>/<see cref="IsDelegate"/>, phase 5 step 6.1.</summary>
     long Gen2Count = 0,
+    /// <summary>Raw fact: the type is a pinned-handle target in the GC Handle analyzer's result.</summary>
+    bool IsPinned = false,
+    /// <summary>Raw fact: the type is a dependent-handle target in the GC Handle analyzer's result.</summary>
+    bool IsDependent = false,
     /// <summary>
     /// P3-1/P3-2 (docs/analysis/phase1/gcroot-analyzer-audit.md): genuine "why is this alive"
     /// chain from a GC root down to this candidate's sample object — either a direct hit against
@@ -49,7 +50,7 @@ internal sealed record LeakCandidateRecord(
     /// reverse-reference index other analyzers already rely on. Computed only for the top-scored
     /// candidates (see <c>LeakCandidateAnalyzer.RootChainTopN</c>) — cosmetic enrichment only;
     /// <see langword="null"/> means unattempted or unreachable within search bounds, not "not
-    /// leaked". Unlike <see cref="RootKind"/> (a heuristic classification guess), this is a
+    /// leaked". Unlike <see cref="LeakCandidateAssessment.RootKind"/> (a heuristic classification guess), this is a
     /// verified chain when non-null.
     /// </summary>
     string? RootChain = null);
@@ -57,5 +58,10 @@ internal sealed record LeakCandidateRecord(
 internal sealed record LeakCandidateDomainResult(
     int TotalCandidates,
     IReadOnlyList<LeakCandidateRecord> TopCandidates,
-    IReadOnlyDictionary<LeakClass, int> CandidatesByClass,
+    /// <summary>
+    /// Raw input to <see cref="LeakCandidateClassifier"/>'s timer classification, from the Timer
+    /// Leak analyzer's result — carried so consumers can recompute each candidate's assessment
+    /// exactly, the same way <c>EventLeakDomainResult.ScoringWeights</c> does.
+    /// </summary>
+    int LogicalTimerCount,
     bool HeuristicOnly = true) : AnalyzerDomainResult;

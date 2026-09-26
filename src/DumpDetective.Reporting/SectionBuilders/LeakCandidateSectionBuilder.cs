@@ -1,4 +1,5 @@
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
@@ -26,6 +27,16 @@ internal sealed class LeakCandidateSectionBuilder : SectionBuilderBase, IAnalyze
     {
         var leak = (LeakCandidateDomainResult)result;
 
+        var assessments = new Dictionary<LeakCandidateRecord, LeakCandidateAssessment>(leak.TopCandidates.Count, ReferenceEqualityComparer.Instance);
+        var candidateCountByClass = new Dictionary<LeakClass, int>();
+        foreach (LeakCandidateRecord candidate in leak.TopCandidates)
+        {
+            LeakCandidateAssessment assessment = LeakCandidateClassifier.Assess(candidate, leak.LogicalTimerCount);
+            assessments[candidate] = assessment;
+            candidateCountByClass.TryGetValue(assessment.Classification, out int classCount);
+            candidateCountByClass[assessment.Classification] = classCount + 1;
+        }
+
         var (confidenceScore, leakCaveats) = ConfidenceScoring.Compute(0.75,
             ConfidenceScoring.F(leak.HeuristicOnly, 0.15, "Heuristic-only leak analysis; no full retention scan."));
 
@@ -45,19 +56,19 @@ internal sealed class LeakCandidateSectionBuilder : SectionBuilderBase, IAnalyze
         if (leak.TopCandidates.Count > 0)
         {
             LeakCandidateRecord top = leak.TopCandidates[0];
-            keyMetrics["top_suspect"] = new TextMetricValue($"{top.TypeName} ({top.Severity})");
-            keyMetrics["top_suspicion_score"] = new NumericMetricValue(top.SuspicionScore, MetricUnit.Custom, top.SuspicionScore.ToString("N0"));
+            keyMetrics["top_suspect"] = new TextMetricValue($"{top.TypeName} ({assessments[top].Severity})");
+            keyMetrics["top_suspicion_score"] = new NumericMetricValue(assessments[top].SuspicionScore, MetricUnit.Custom, assessments[top].SuspicionScore.ToString("N0"));
         }
 
-        if (leak.CandidatesByClass.Count > 0)
+        if (candidateCountByClass.Count > 0)
         {
-            var classRows = new List<TableRow>(leak.CandidatesByClass.Count);
-            foreach ((LeakClass leakClass, int count) in leak.CandidatesByClass.OrderByDescending(kvp => kvp.Value))
+            var classRows = new List<TableRow>(candidateCountByClass.Count);
+            foreach ((LeakClass leakClass, int count) in candidateCountByClass.OrderByDescending(kvp => kvp.Value).ThenBy(kvp => kvp.Key))
             {
                 LeakCandidateRecord[] classCandidates = leak.TopCandidates
-                    .Where(candidate => candidate.Classification == leakClass)
+                    .Where(candidate => assessments[candidate].Classification == leakClass)
                     .OrderByDescending(candidate => candidate.TotalSize)
-                    .ThenByDescending(candidate => candidate.SuspicionScore)
+                    .ThenByDescending(candidate => assessments[candidate].SuspicionScore)
                     .ToArray();
 
                 string topTypes = string.Join(", ", classCandidates.Take(3).Select(candidate => candidate.TypeName));
@@ -85,13 +96,13 @@ internal sealed class LeakCandidateSectionBuilder : SectionBuilderBase, IAnalyze
                     new[] { CH("Type"), CH("Score","number"), CH("Severity"), CH("Class"), CH("Total Size","bytes"), CH("Instances","number"), CH("Gen2%", "number", "percent"), CH("Root Kind"), CH("Finalizable"), CH("Container"), CH("Ref Ratio", "number", "ratio"), CH("Root Chain") },
                 leak.TopCandidates.Select(candidate => R(new object?[] {
                     candidate.TypeName,
-                    candidate.SuspicionScore,
-                    candidate.Severity.ToString(),
-                    candidate.Classification.ToString(),
+                    assessments[candidate].SuspicionScore,
+                    assessments[candidate].Severity.ToString(),
+                    assessments[candidate].Classification.ToString(),
                         candidate.TotalSize,
                     candidate.InstanceCount,
                         candidate.Gen2Pct,
-                    candidate.RootKind ?? "—",
+                    assessments[candidate].RootKind ?? "—",
                     candidate.IsFinalizable ? "Yes" : "No",
                     candidate.IsContainer ? "Yes" : "No",
                         candidate.ReferenceFieldRatio,
@@ -114,19 +125,19 @@ internal sealed class LeakCandidateSectionBuilder : SectionBuilderBase, IAnalyze
             string lohImpact = candidate.TotalSize > 85_000 && IsLargeObjectLike(candidate.TypeName)
                 ? "Potential LOH fragmentation risk due to large array/string-like allocations."
                 : "No LOH-specific fragmentation note.";
-            string explanationText = candidate.Severity != FindingSeverity.Info
-                ? LeakExplainer.Explain(candidate)
+            string explanationText = assessments[candidate].Severity != FindingSeverity.Info
+                ? LeakExplainer.Explain(candidate, assessments[candidate])
                 : string.Empty;
 
             leakCandidateCards.Add(new LeakCandidateCard(
                 TypeName:            candidate.TypeName,
-                Severity:            candidate.Severity.ToString(),
-                Classification:      candidate.Classification.ToString(),
-                SuspicionScore:      candidate.SuspicionScore,
+                Severity:            assessments[candidate].Severity.ToString(),
+                Classification:      assessments[candidate].Classification.ToString(),
+                SuspicionScore:      assessments[candidate].SuspicionScore,
                 InstanceCount:       candidate.InstanceCount,
                 TotalSize:           candidate.TotalSize,
                 Gen2Pct:             candidate.Gen2Pct,
-                RootKind:            candidate.RootKind,
+                RootKind:            assessments[candidate].RootKind,
                 IsFinalizable:       candidate.IsFinalizable,
                 IsContainer:         candidate.IsContainer,
                 ReferenceFieldRatio: candidate.ReferenceFieldRatio,
@@ -152,7 +163,7 @@ internal sealed class LeakCandidateSectionBuilder : SectionBuilderBase, IAnalyze
 
     private static class LeakExplainer
     {
-        public static string Explain(LeakCandidateRecord candidate, string? rootField = null) => candidate.Classification switch
+        public static string Explain(LeakCandidateRecord candidate, LeakCandidateAssessment assessment, string? rootField = null) => assessment.Classification switch
         {
             LeakClass.StaticRetention =>
                 $"{candidate.TypeName} is retained by a static field{(rootField != null ? $" ({rootField})" : string.Empty)} and cannot be collected. " +
@@ -191,7 +202,7 @@ internal sealed class LeakCandidateSectionBuilder : SectionBuilderBase, IAnalyze
                 $"{candidate.TypeName} is reachable from a GC root but the retention pattern was not recognised. " +
                 "Investigate using the root paths in §5 and the dominator candidates in §3.2.",
 
-            _ => $"{candidate.TypeName}: {candidate.SuspicionScore} suspicion score. Manual investigation required."
+            _ => $"{candidate.TypeName}: {assessment.SuspicionScore} suspicion score. Manual investigation required."
         };
     }
 

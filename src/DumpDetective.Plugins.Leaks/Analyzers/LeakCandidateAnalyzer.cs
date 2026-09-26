@@ -1,4 +1,5 @@
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.SdkBridge;
 using DumpDetective.Core.Enums;
@@ -138,12 +139,6 @@ public sealed class LeakCandidateAnalyzer : IAnalyzer, IProducesAnalyzerDomainRe
     // that's too costly to run for every candidate, so scoped to the highest-suspicion ones only.
     private const int RootChainTopN = 20;
 
-    // Same Warning/Critical thresholds TimerLeakFindingGenerator uses, so a candidate only earns
-    // the TimerLeak classification/score boost once the timer analyzer itself considers the count
-    // leak-worthy.
-    private const int TimerLeakWarningThreshold = 100;
-    private const int TimerLeakCriticalThreshold = 250;
-
     public async ValueTask AnalyzeAsync(AnalysisContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -237,11 +232,11 @@ public sealed class LeakCandidateAnalyzer : IAnalyzer, IProducesAnalyzerDomainRe
         // a live-heap fallback pre-retyping — HasExactGenerationData is the same "is a disk index
         // present" gate the old TryGetHeapIndex check was.
         if (!typeStatistics.HasExactGenerationData)
-            return new LeakCandidateDomainResult(0, [], new Dictionary<LeakClass, int>(), true);
+            return new LeakCandidateDomainResult(0, [], options.LogicalTimerCount, true);
 
         IReadOnlyDictionary<string, HeapTypeStatistics> typeStats = typeStatistics.GetTypeStatistics();
         if (typeStats.Count == 0)
-            return new LeakCandidateDomainResult(0, [], new Dictionary<LeakClass, int>(), true);
+            return new LeakCandidateDomainResult(0, [], options.LogicalTimerCount, true);
 
         var staticRoots = new HashSet<ulong>();
         foreach (HeapRootRef root in heapRoots.EnumerateRoots())
@@ -251,7 +246,7 @@ public sealed class LeakCandidateAnalyzer : IAnalyzer, IProducesAnalyzerDomainRe
         }
 
         var candidates = new List<LeakCandidateRecord>(Math.Min(typeStats.Count, 128));
-        var byClass = new Dictionary<LeakClass, int>();
+        var suspicionScoreByTypeName = new Dictionary<string, int>(StringComparer.Ordinal);
         var sampleAddressByTypeName = new Dictionary<string, ulong>(StringComparer.Ordinal);
 
         foreach (KeyValuePair<string, HeapTypeStatistics> kv in typeStats)
@@ -282,68 +277,29 @@ public sealed class LeakCandidateAnalyzer : IAnalyzer, IProducesAnalyzerDomainRe
             bool isPinned = options.PinnedTargetTypes.Contains(typeName);
             bool isDependent = options.DependentTargetTypes.Contains(typeName);
 
-            LeakClass classification = Classify(
-                typeName,
-                isStaticRooted,
-                isPinned,
-                isDependent,
-                isFinalizable,
-                stat.IsDelegateType,
-                isContainer,
-                gen2Pct,
-                options.LogicalTimerCount);
-
-            int score = Score(
-                stat.TotalSize,
-                stat.Gen2Count,
-                gen2Pct,
-                isFinalizable,
-                isStaticRooted,
-                isPinned,
-                isDependent,
-                isContainer,
-                referenceFieldRatio,
-                typeName,
-                stat.IsDelegateType,
-                options.LogicalTimerCount);
-
-            FindingSeverity severity = GetSeverity(score);
-
-            string? rootKind = classification switch
-            {
-                LeakClass.StaticRetention => "StaticRoot",
-                LeakClass.GCHandleRetention => "GCHandle",
-                LeakClass.DependentHandleLeak => "DependentHandle",
-                LeakClass.FinalizerRetention => "FinalizerQueue",
-                LeakClass.EventLeak => "EventLeak",
-                LeakClass.CacheLeak => "Cache",
-                LeakClass.ThreadLocalLeak => "ThreadLocal",
-                LeakClass.TimerLeak => "Timer",
-                _ => null
-            };
-
-            candidates.Add(new LeakCandidateRecord(
+            var candidate = new LeakCandidateRecord(
                 TypeName: typeName,
                 TotalSize: stat.TotalSize,
                 InstanceCount: stat.InstanceCount,
                 Gen2Pct: gen2Pct,
-                SuspicionScore: score,
-                Severity: severity,
-                Classification: classification,
-                RootKind: rootKind,
                 IsFinalizable: isFinalizable,
                 IsContainer: isContainer,
                 ReferenceFieldRatio: referenceFieldRatio,
                 IsStaticRooted: isStaticRooted,
                 IsDelegate: stat.IsDelegateType,
-                Gen2Count: stat.Gen2Count));
+                Gen2Count: stat.Gen2Count,
+                IsPinned: isPinned,
+                IsDependent: isDependent);
 
-            Increment(byClass, classification);
+            candidates.Add(candidate);
+            suspicionScoreByTypeName[typeName] = LeakCandidateClassifier.Assess(candidate, options.LogicalTimerCount).SuspicionScore;
         }
 
-        candidates.Sort(static (a, b) =>
+        // Ranked by suspicion so the bounded root-chain enrichment below goes to the most suspicious
+        // candidates; the score itself isn't stored — consumers recompute it via LeakCandidateClassifier.
+        candidates.Sort((a, b) =>
         {
-            int score = b.SuspicionScore.CompareTo(a.SuspicionScore);
+            int score = suspicionScoreByTypeName[b.TypeName].CompareTo(suspicionScoreByTypeName[a.TypeName]);
             if (score != 0)
                 return score;
 
@@ -357,7 +313,7 @@ public sealed class LeakCandidateAnalyzer : IAnalyzer, IProducesAnalyzerDomainRe
         EnrichTopCandidatesWithRootChains(candidates, objectLookup, rootPaths, sampleAddressByTypeName, options, cancellationToken);
 
         // Complete ranked population, no Top-N cap (§11.2 D5) — the render layer paginates.
-        return new LeakCandidateDomainResult(candidates.Count, candidates, byClass, true);
+        return new LeakCandidateDomainResult(candidates.Count, candidates, options.LogicalTimerCount, true);
     }
 
     // P3-1/P3-2 (docs/analysis/phase1/gcroot-analyzer-audit.md): genuine root chains for the
@@ -411,101 +367,4 @@ public sealed class LeakCandidateAnalyzer : IAnalyzer, IProducesAnalyzerDomainRe
         return $"{typeName}@0x{address:X}";
     }
 
-    private static LeakClass Classify(
-        string typeName,
-        bool isStaticRooted,
-        bool isPinned,
-        bool isDependent,
-        bool isFinalizable,
-        bool isDelegate,
-        bool isContainer,
-        double gen2Pct,
-        int logicalTimerCount)
-    {
-        if (typeName.Contains("ThreadLocal", StringComparison.OrdinalIgnoreCase))
-            return LeakClass.ThreadLocalLeak;
-
-        if (isDependent)
-            return LeakClass.DependentHandleLeak;
-
-        if (isPinned)
-            return LeakClass.GCHandleRetention;
-
-        if (isStaticRooted)
-            return LeakClass.StaticRetention;
-
-        if (logicalTimerCount >= TimerLeakWarningThreshold && TimerWrapperTypeNames.Names.Contains(typeName))
-            return LeakClass.TimerLeak;
-
-        if (isDelegate || typeName.Contains("Event", StringComparison.OrdinalIgnoreCase))
-            return LeakClass.EventLeak;
-
-        if (isFinalizable && gen2Pct > 50.0)
-            return LeakClass.FinalizerRetention;
-
-        if (isContainer && gen2Pct > 70.0)
-            return LeakClass.CacheLeak;
-
-        return LeakClass.Unknown;
-    }
-
-    private static int Score(
-        ulong totalSize,
-        long gen2Count,
-        double gen2Pct,
-        bool isFinalizable,
-        bool isStaticRooted,
-        bool isPinned,
-        bool isDependent,
-        bool isContainer,
-        double referenceFieldRatio,
-        string typeName,
-        bool isDelegate,
-        int logicalTimerCount)
-    {
-        int score = 0;
-
-        if (gen2Pct > 80.0)
-            score += 30;
-        if (totalSize > 100UL * 1024 * 1024)
-            score += 20;
-        if (isFinalizable && gen2Count > 1000)
-            score += 15;
-        if (isStaticRooted)
-            score += 10;
-        if (isPinned)
-            score += 10;
-        if (isDependent)
-            score += 10;
-        if (isContainer)
-            score += 5;
-        if (referenceFieldRatio > 0.5)
-            score += 5;
-        if (isDelegate)
-            score += 5;
-        if (TimerWrapperTypeNames.Names.Contains(typeName))
-        {
-            if (logicalTimerCount >= TimerLeakCriticalThreshold)
-                score += 20;
-            else if (logicalTimerCount >= TimerLeakWarningThreshold)
-                score += 10;
-        }
-
-        return score;
-    }
-
-    private static FindingSeverity GetSeverity(int score)
-        => score >= 90
-            ? FindingSeverity.Critical
-            : score >= 70
-                ? FindingSeverity.Warning
-                : FindingSeverity.Info;
-
-    private static void Increment(Dictionary<LeakClass, int> counts, LeakClass classification)
-    {
-        if (counts.TryGetValue(classification, out int value))
-            counts[classification] = value + 1;
-        else
-            counts[classification] = 1;
-    }
 }

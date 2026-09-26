@@ -1,4 +1,6 @@
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Utilities;
+using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Sdk.Identity;
@@ -16,25 +18,14 @@ namespace DumpDetective.Reporting.SynthesisRules;
 /// <c>leak.candidate-type</c> (raw per-type facts, this analyzer's own new emission),
 /// <c>handle.pinned-target-type</c>/<c>handle.dependent-target-type</c> (<c>GCHandleAnalyzer</c>,
 /// also new — added specifically for this rule), and <c>infra.timer-population</c>
-/// (<c>TimerLeakAnalyzer</c>, already existed). <c>Classify</c>/<c>Score</c>/<c>GetSeverity</c> are
-/// moved in verbatim from <c>LeakCandidateAnalyzer</c> — byte-identical logic, just reading raw
-/// measures off observations instead of <c>HeapTypeStatistics</c>/<c>LeakCandidateAnalyzerOptions</c>
-/// fields directly. <c>LeakCandidateAnalyzer</c> itself still computes the same classification for
-/// its own <c>LeakCandidateDomainResult</c> (unchanged) — <c>LeakAnalysisSectionBuilder</c> reads
-/// that copy for section display, this rule reads its own copy for findings. This is the "benign
-/// parallel selection" duplication the modularity audit doc's Smell A table already called out and
-/// declined to flag; it's not new here.
+/// (<c>TimerLeakAnalyzer</c>, already existed). The judgment itself is
+/// <see cref="LeakCandidateClassifier"/>, shared with the analyzer's ranking, its section builder,
+/// and its trend comparer — this rule just feeds it raw measures read off observations.
 /// </remarks>
 internal sealed class LeakCandidateSynthesisRule : ISynthesisRule
 {
     private const string AnalyzerName = "Leak Candidate Analysis";
 
-    // Mirrors LeakCandidateAnalyzer's own private consts exactly — these are fixed generator
-    // constants (not runtime-configurable via AnalyzerOptions the way GCHandleAnalysisOptions'
-    // thresholds are), so hard-coding them here follows the same precedent as every other rule in
-    // this batch, not GCHandleSynthesisRule's exception.
-    private const int TimerLeakWarningThreshold = 100;
-    private const int TimerLeakCriticalThreshold = 250;
     private const int CriticalCandidateLimit = 3;
     private const int AggregateConsideredLimit = 5;
 
@@ -99,18 +90,13 @@ internal sealed class LeakCandidateSynthesisRule : ISynthesisRule
             bool isPinned = pinnedTargetTypes.Contains(typeName);
             bool isDependent = dependentTargetTypes.Contains(typeName);
 
-            LeakClass classification = Classify(
-                typeName, isStaticRooted, isPinned, isDependent, isFinalizable, isDelegate, isContainer,
-                gen2Pct, logicalTimerCount);
-
-            int score = Score(
-                totalSize, gen2Count, gen2Pct, isFinalizable, isStaticRooted, isPinned, isDependent,
-                isContainer, referenceFieldRatio, typeName, isDelegate, logicalTimerCount);
-
-            Severity severity = GetSeverity(score);
+            LeakCandidateAssessment assessment = LeakCandidateClassifier.Assess(
+                typeName, totalSize, gen2Count, gen2Pct, isFinalizable, isStaticRooted, isPinned, isDependent,
+                isContainer, referenceFieldRatio, isDelegate, logicalTimerCount);
 
             candidates.Add(new CandidateRow(
-                observation.Id, typeName, totalSize, instanceCount, gen2Pct, score, severity, classification));
+                observation.Id, typeName, totalSize, instanceCount, gen2Pct, assessment.SuspicionScore,
+                ToSeverity(assessment.Severity), assessment.Classification));
         }
 
         // Same tie-break as LeakCandidateAnalyzer.Analyze's own candidates.Sort: score desc, then
@@ -272,93 +258,10 @@ internal sealed class LeakCandidateSynthesisRule : ISynthesisRule
     // ── Moved verbatim from LeakCandidateAnalyzer (LeakClass enum lives in Core.Models — the
     // ── analyzer's own copy references it the same way) ────────────────────────────────────────
 
-    private static LeakClass Classify(
-        string typeName,
-        bool isStaticRooted,
-        bool isPinned,
-        bool isDependent,
-        bool isFinalizable,
-        bool isDelegate,
-        bool isContainer,
-        double gen2Pct,
-        int logicalTimerCount)
+    private static Severity ToSeverity(FindingSeverity severity) => severity switch
     {
-        if (typeName.Contains("ThreadLocal", StringComparison.OrdinalIgnoreCase))
-            return LeakClass.ThreadLocalLeak;
-
-        if (isDependent)
-            return LeakClass.DependentHandleLeak;
-
-        if (isPinned)
-            return LeakClass.GCHandleRetention;
-
-        if (isStaticRooted)
-            return LeakClass.StaticRetention;
-
-        if (logicalTimerCount >= TimerLeakWarningThreshold && TimerWrapperTypeNames.Names.Contains(typeName))
-            return LeakClass.TimerLeak;
-
-        if (isDelegate || typeName.Contains("Event", StringComparison.OrdinalIgnoreCase))
-            return LeakClass.EventLeak;
-
-        if (isFinalizable && gen2Pct > 50.0)
-            return LeakClass.FinalizerRetention;
-
-        if (isContainer && gen2Pct > 70.0)
-            return LeakClass.CacheLeak;
-
-        return LeakClass.Unknown;
-    }
-
-    private static int Score(
-        ulong totalSize,
-        long gen2Count,
-        double gen2Pct,
-        bool isFinalizable,
-        bool isStaticRooted,
-        bool isPinned,
-        bool isDependent,
-        bool isContainer,
-        double referenceFieldRatio,
-        string typeName,
-        bool isDelegate,
-        int logicalTimerCount)
-    {
-        int score = 0;
-
-        if (gen2Pct > 80.0)
-            score += 30;
-        if (totalSize > 100UL * 1024 * 1024)
-            score += 20;
-        if (isFinalizable && gen2Count > 1000)
-            score += 15;
-        if (isStaticRooted)
-            score += 10;
-        if (isPinned)
-            score += 10;
-        if (isDependent)
-            score += 10;
-        if (isContainer)
-            score += 5;
-        if (referenceFieldRatio > 0.5)
-            score += 5;
-        if (isDelegate)
-            score += 5;
-        if (TimerWrapperTypeNames.Names.Contains(typeName))
-        {
-            if (logicalTimerCount >= TimerLeakCriticalThreshold)
-                score += 20;
-            else if (logicalTimerCount >= TimerLeakWarningThreshold)
-                score += 10;
-        }
-
-        return score;
-    }
-
-    private static Severity GetSeverity(int score)
-        => score >= 90
-            ? Severity.Critical
-            : score >= 70
-                ? Severity.Warning
-                : Severity.Info;
+        FindingSeverity.Critical => Severity.Critical,
+        FindingSeverity.Warning => Severity.Warning,
+        _ => Severity.Info,
+    };
 }

@@ -1,7 +1,8 @@
-using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.Analyzers.Leaks;
 using DumpDetective.Analysis.Models;
+using DumpDetective.Analysis.Pipeline;
 using DumpDetective.Analysis.SdkBridge;
+using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Options;
@@ -60,7 +61,9 @@ public sealed class LeakCandidateAnalyzerRetypingCharacterizationTests
 
         LeakCandidateDomainResult result = await Analyze(typeStats, heapRoots: heapRoots);
 
-        result.TopCandidates.Should().ContainSingle().Which.Classification.Should().Be(LeakClass.ThreadLocalLeak);
+        result.TopCandidates.Should().ContainSingle();
+
+        Assess(result).Classification.Should().Be(LeakClass.ThreadLocalLeak);
     }
 
     [Fact]
@@ -71,7 +74,9 @@ public sealed class LeakCandidateAnalyzerRetypingCharacterizationTests
 
         LeakCandidateDomainResult result = await Analyze(typeStats, dependentTargetTypes: new HashSet<string> { "MyApp.Dependent" });
 
-        result.TopCandidates.Should().ContainSingle().Which.Classification.Should().Be(LeakClass.DependentHandleLeak);
+        result.TopCandidates.Should().ContainSingle();
+
+        Assess(result).Classification.Should().Be(LeakClass.DependentHandleLeak);
     }
 
     [Fact]
@@ -82,7 +87,9 @@ public sealed class LeakCandidateAnalyzerRetypingCharacterizationTests
 
         LeakCandidateDomainResult result = await Analyze(typeStats, pinnedTargetTypes: new HashSet<string> { "MyApp.Pinned" });
 
-        result.TopCandidates.Should().ContainSingle().Which.Classification.Should().Be(LeakClass.GCHandleRetention);
+        result.TopCandidates.Should().ContainSingle();
+
+        Assess(result).Classification.Should().Be(LeakClass.GCHandleRetention);
     }
 
     [Fact]
@@ -96,8 +103,10 @@ public sealed class LeakCandidateAnalyzerRetypingCharacterizationTests
 
         LeakCandidateDomainResult result = await Analyze(typeStats, heapRoots: heapRoots);
 
-        result.TopCandidates.Should().ContainSingle().Which.Classification.Should().Be(LeakClass.StaticRetention);
-        result.TopCandidates[0].RootKind.Should().Be("StaticRoot");
+        result.TopCandidates.Should().ContainSingle();
+
+        Assess(result).Classification.Should().Be(LeakClass.StaticRetention);
+        Assess(result).RootKind.Should().Be("StaticRoot");
     }
 
     [Fact]
@@ -108,7 +117,9 @@ public sealed class LeakCandidateAnalyzerRetypingCharacterizationTests
 
         LeakCandidateDomainResult result = await Analyze(typeStats, logicalTimerCount: 150);
 
-        result.TopCandidates.Should().ContainSingle().Which.Classification.Should().Be(LeakClass.TimerLeak);
+        result.TopCandidates.Should().ContainSingle();
+
+        Assess(result).Classification.Should().Be(LeakClass.TimerLeak);
     }
 
     [Fact]
@@ -119,7 +130,9 @@ public sealed class LeakCandidateAnalyzerRetypingCharacterizationTests
 
         LeakCandidateDomainResult result = await Analyze(typeStats, logicalTimerCount: 50);
 
-        result.TopCandidates.Should().ContainSingle().Which.Classification.Should().NotBe(LeakClass.TimerLeak);
+        result.TopCandidates.Should().ContainSingle();
+
+        Assess(result).Classification.Should().NotBe(LeakClass.TimerLeak);
     }
 
     [Fact]
@@ -130,7 +143,9 @@ public sealed class LeakCandidateAnalyzerRetypingCharacterizationTests
 
         LeakCandidateDomainResult result = await Analyze(typeStats);
 
-        result.TopCandidates.Should().ContainSingle().Which.Classification.Should().Be(LeakClass.EventLeak);
+        result.TopCandidates.Should().ContainSingle();
+
+        Assess(result).Classification.Should().Be(LeakClass.EventLeak);
     }
 
     [Fact]
@@ -141,7 +156,9 @@ public sealed class LeakCandidateAnalyzerRetypingCharacterizationTests
 
         LeakCandidateDomainResult result = await Analyze(typeStats);
 
-        result.TopCandidates.Should().ContainSingle().Which.Classification.Should().Be(LeakClass.FinalizerRetention);
+        result.TopCandidates.Should().ContainSingle();
+
+        Assess(result).Classification.Should().Be(LeakClass.FinalizerRetention);
     }
 
     [Fact]
@@ -152,7 +169,9 @@ public sealed class LeakCandidateAnalyzerRetypingCharacterizationTests
 
         LeakCandidateDomainResult result = await Analyze(typeStats);
 
-        result.TopCandidates.Should().ContainSingle().Which.Classification.Should().Be(LeakClass.CacheLeak);
+        result.TopCandidates.Should().ContainSingle();
+
+        Assess(result).Classification.Should().Be(LeakClass.CacheLeak);
     }
 
     [Fact]
@@ -163,7 +182,9 @@ public sealed class LeakCandidateAnalyzerRetypingCharacterizationTests
 
         LeakCandidateDomainResult result = await Analyze(typeStats);
 
-        result.TopCandidates.Should().ContainSingle().Which.Classification.Should().Be(LeakClass.Unknown);
+        result.TopCandidates.Should().ContainSingle();
+
+        Assess(result).Classification.Should().Be(LeakClass.Unknown);
     }
 
     [Fact]
@@ -176,7 +197,7 @@ public sealed class LeakCandidateAnalyzerRetypingCharacterizationTests
         LeakCandidateDomainResult result = await Analyze(typeStats);
 
         result.TopCandidates[0].TypeName.Should().Be("MyApp.BigHotType");
-        result.TopCandidates[0].SuspicionScore.Should().BeGreaterThan(result.TopCandidates[1].SuspicionScore);
+        Assess(result).SuspicionScore.Should().BeGreaterThan(Assess(result, 1).SuspicionScore);
     }
 
     [Fact]
@@ -353,4 +374,7 @@ public sealed class LeakCandidateAnalyzerRetypingCharacterizationTests
             return false;
         }
     }
+
+    private static LeakCandidateAssessment Assess(LeakCandidateDomainResult result, int index = 0) =>
+        LeakCandidateClassifier.Assess(result.TopCandidates[index], result.LogicalTimerCount);
 }

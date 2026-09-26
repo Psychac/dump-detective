@@ -1,3 +1,4 @@
+using DumpDetective.Analysis.Utilities;
 using Microsoft.Diagnostics.Runtime;
 
 using DumpDetective.Analysis.Analyzers.Gc;
@@ -91,27 +92,31 @@ public sealed class LeakCandidateAnalyzerRealDumpTests
         result.TotalCandidates.Should().BeGreaterThan(0, "a real IIS crash dump has many candidate types once a heap index is built");
         result.TopCandidates.Should().HaveCount(result.TotalCandidates, "no Top-N cap on the returned population");
 
-        int sumByClass = 0;
-        foreach (int count in result.CandidatesByClass.Values)
-            sumByClass += count;
-        sumByClass.Should().Be(result.TotalCandidates);
+        var assessments = new LeakCandidateAssessment[result.TopCandidates.Count];
+        var countByClass = new Dictionary<LeakClass, int>();
+        for (int i = 0; i < assessments.Length; i++)
+        {
+            assessments[i] = LeakCandidateClassifier.Assess(result.TopCandidates[i], result.LogicalTimerCount);
+            countByClass[assessments[i].Classification] = countByClass.GetValueOrDefault(assessments[i].Classification) + 1;
+        }
 
         for (int i = 1; i < result.TopCandidates.Count; i++)
         {
-            int prevScore = result.TopCandidates[i - 1].SuspicionScore;
-            int score = result.TopCandidates[i].SuspicionScore;
+            int prevScore = assessments[i - 1].SuspicionScore;
+            int score = assessments[i].SuspicionScore;
             (score <= prevScore).Should().BeTrue("candidates are sorted by descending suspicion score");
         }
 
         int withRootChain = result.TopCandidates.Count(c => c.RootChain is not null);
         _output.WriteLine($"TotalCandidates={result.TotalCandidates:N0} WithRootChain={withRootChain:N0}/{Math.Min(result.TotalCandidates, 20):N0} (top-20 enrichment)");
-        foreach (var kv in result.CandidatesByClass)
+        foreach (var kv in countByClass)
             _output.WriteLine($"  {kv.Key}: {kv.Value:N0}");
-        foreach (LeakCandidateRecord candidate in result.TopCandidates.Take(10))
+        for (int i = 0; i < Math.Min(10, result.TopCandidates.Count); i++)
         {
+            LeakCandidateRecord candidate = result.TopCandidates[i];
             _output.WriteLine(
-                $"  {candidate.TypeName}: score={candidate.SuspicionScore} class={candidate.Classification} " +
-                $"severity={candidate.Severity} totalSize={candidate.TotalSize:N0} rootChain={candidate.RootChain ?? "n/a"}");
+                $"  {candidate.TypeName}: score={assessments[i].SuspicionScore} class={assessments[i].Classification} " +
+                $"severity={assessments[i].Severity} totalSize={candidate.TotalSize:N0} rootChain={candidate.RootChain ?? "n/a"}");
         }
     }
 }

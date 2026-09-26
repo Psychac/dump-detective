@@ -101,12 +101,50 @@ public sealed class FindingConfidenceRealDumpTests
 
         lines.Add($"Findings whose report score moved: {moved}");
         lines.AddRange(movedLines);
+        lines.AddRange(DescribeLineageGaps(withLineage, observations));
 
         string reportPath = Path.Combine(Path.GetTempPath(), "dd-finding-confidence-real-dump.txt");
         await File.WriteAllLinesAsync(reportPath, lines);
         lines.Add($"(also written to {reportPath})");
         foreach (string line in lines)
             _output.WriteLine(line);
+    }
+
+    // Exit criterion "full observation lineage": every finding resolves to observations, and each
+    // of those to an artifact, an analyzer, and the capabilities it used.
+    private static List<string> DescribeLineageGaps(IReadOnlyList<Finding> findings, IReadOnlyList<Observation> observations)
+    {
+        var byId = new Dictionary<ObservationId, Observation>(observations.Count);
+        foreach (Observation observation in observations)
+            byId[observation.Id] = observation;
+
+        var gaps = new List<string>();
+        int fullyResolved = 0;
+        foreach (Finding finding in findings)
+        {
+            int unresolved = 0, missingProvenance = 0;
+            foreach (ObservationId id in finding.DerivedFrom)
+            {
+                if (!byId.TryGetValue(id, out Observation? observation))
+                    unresolved++;
+                else if (string.IsNullOrEmpty(observation.Provenance.Artifact.ToString())
+                         || string.IsNullOrEmpty(observation.Provenance.AnalyzerKey)
+                         || observation.Provenance.CapabilitiesUsed.Count == 0)
+                    missingProvenance++;
+            }
+
+            if (finding.DerivedFrom.Count > 0 && unresolved == 0 && missingProvenance == 0)
+            {
+                fullyResolved++;
+                continue;
+            }
+
+            gaps.Add($"  {finding.Analyzer} :: {finding.Fingerprint} — lineage {finding.DerivedFrom.Count}, " +
+                     $"unresolved {unresolved}, missing provenance {missingProvenance}");
+        }
+
+        gaps.Insert(0, $"Lineage: {fullyResolved} of {findings.Count} findings fully resolve to artifact/analyzer/capabilities; gaps:");
+        return gaps;
     }
 
     private static IReadOnlyList<ISynthesisRule> CreateProductionRules()

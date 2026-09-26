@@ -492,7 +492,10 @@ actually starts, not before.
 
 ## Exit criteria
 
-- Every analyzer emits observations (**35/36 done — see step 1**); `ObservationStore` handles a full
+Checked 2026-09-26 against the code and the 3.35 GB reference dump
+(`FindingConfidenceRealDumpTests`, opt-in). Status is on each item.
+
+- Every analyzer emits observations (**Met — 36/36**: `LeakCandidateAnalyzer` joined in step 6.1; re-run 2026-09-26: 97,408 observations); `ObservationStore` handles a full
   large-dump run within bounded memory. **Measured, not just tested, 2026-09-17** against the
   3.35 GB reference dump: 36 analyzers emitted **81,316 observations** in 61 s (heap index build
   0.55 s). `finalizer.queue-entry` alone accounts for 68,576 of those (84%) — the one analyzer that
@@ -505,18 +508,61 @@ actually starts, not before.
   § below warns about — so the disk-backed `ObservationStore` design remains deferred, not built on
   a guess. See `tests/DumpDetective.Tests/Integration/CacheDiscrepancies/ObservationVolumeRealDumpTests.cs`.
 - Findings produced via synthesis rules are **byte-identical** to pre-phase findings across the
-  golden corpus.
+  golden corpus. **Met per migration, not re-checked end to end.**
+  - Each analyzer's baselines were frozen and diffed by its parity test, then deleted with the
+    generator in step 3 by design, so nothing guards this today.
+  - The parity surface excluded confidence and Crash's caveats. Both were restored in step 7.
+  - Known deliberate differences: one step-6 rule dropped by user call, and the step-7 lineage
+    confidence (which moves 0 of 83 findings on the reference dump).
+  - **Open:** optionally, one pre-phase-vs-HEAD findings comparison on the reference dump.
 - Trend reports identical, with ≤ ~5 bespoke comparers remaining and each justified in writing.
-- `IFindingGenerator` and `InsightEngine` no longer exist as separate concepts.
+  **Met for headline metrics only.**
+  - Step 5 lists 3 composite-score comparers as the only hand-written headline branches. There's a
+    fourth it missed: `LeakCandidateTrendComparer`'s `leak.candidates.top.score` trends the stage-1
+    `SuspicionScore` (see the Smell A item below).
+  - 22 more comparer classes survive for scoped (per-type/per-entity) metrics, which step 4
+    deliberately deferred to separate follow-up work. That is 25 classes against a target of about 5.
+- `IFindingGenerator` and `InsightEngine` no longer exist as separate concepts. **InsightEngine
+  met; `IFindingGenerator` not.**
+  - `InsightEngine` is gone. The remaining `"InsightEngine"` strings are the analyzer name that
+    cross-analyzer findings report under.
+  - `IFindingGenerator` has zero implementations (it's `internal`, so plugins can't add one), but
+    its plumbing is still live and always empty: `FindingGenerationPipeline`,
+    `AnalyzerFeatureModule.FindingGeneratorType`, DI registration, and `StartupValidator`'s check.
+  - **Open:** delete that plumbing.
 - **No section builder constructs `SectionLeadFinding` inline**, and no builder contains a
   threshold, band, or severity comparison — verifiable by grep, and worth encoding as an
-  architecture-conformance rule so it can't regress.
+  architecture-conformance rule so it can't regress. **Lead finding met; thresholds not.**
+  - `FitnessEnforcementTests` guards `new SectionLeadFinding(` and `Severity: "` only.
+  - Judgment still in about 10 builders:
+    - LohFragmentation: 30%/15% bands and an 80% small-gap check.
+    - LockGraph: recursion and deadlock thresholds.
+    - TimerLeak: a hard-coded 50, duplicating the rule's `QueuePressureInfoThreshold`.
+    - Array and String: size and coverage cut-offs.
+    - `SectionBuilderBase.Interpret` tier banding, used by Dominator.
+    - `ConfidenceScoring` in Dominator, GCRoot, LeakCandidate and String.
+  - Grouping by an already-decided finding severity (ExecutiveSummary, FindingNarrative,
+    Insights) is presentation, not judgment.
+  - **Open.**
 - No `AnalyzerDomainResult` carries a composite score, `FindingSeverity`, or classification enum
-  (audit Smell A closed).
+  (audit Smell A closed). **Not met: two remain.**
+  - `LeakCandidateRecord` still carries `SuspicionScore`/`Severity`/`Classification`, computed in
+    stage 1 by `LeakCandidateAnalyzer`. They drive its candidate ordering, its trend comparer, and
+    its section builder. Step 6.1 moved the finding judgment to the rule, but not these fields.
+  - `EventLeakGroupSnapshot.MaxSeverityScore` is a composite that is also emitted as the
+    `event.publisher-leak-group` measure `max-severity.score`, against the § 2a purity rule.
+  - `GCPressureLevel` (AllocationPattern) is defined but unused: dead code.
+  - **Open.**
 - `ExplainableScoringEngine` either reuses synthesis outputs or is gone — not a surviving
-  independent scoring path.
+  independent scoring path. **Met** (see the prerequisites section: it reads finding severity and
+  confidence only).
 - Full observation lineage: every finding resolves to observations → analyzer → capabilities →
-  artifact.
+  artifact. **Met at the `Finding` level.**
+  - Reference dump: all 83 findings resolve fully.
+  - `AnalyzerFailuresInsightRule` has an empty `DerivedFrom` by design (pipeline metadata, not an
+    observation). It didn't fire on this run.
+  - Lineage stops at the report: `FindingSynthesisAdapter` doesn't carry `DerivedFrom` into
+    `InsightFinding`. Closing that is report-phase work.
 
 ## Risk / effort
 

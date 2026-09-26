@@ -79,13 +79,6 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
                 clRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
-        if (d.DeadlockCandidateCount >= 2)
-            blocks.Add(T("Potential deadlock pattern detected (candidates identified; cycle confirmation required)."));
-        else if (d.ContestedLockCount > 0)
-            blocks.Add(T("Lock contention present; monitor lock acquisition order matters."));
-        else
-            blocks.Add(T("No lock contention/deadlock candidates detected."));
-
         var deadlockDetails = d.DeadlockCandidateDetails ?? [];
         var deadlockOwnerIds = new HashSet<uint>();
         for (int i = 0; i < deadlockDetails.Count; i++)

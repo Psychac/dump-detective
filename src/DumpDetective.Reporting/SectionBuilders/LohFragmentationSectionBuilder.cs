@@ -89,13 +89,6 @@ internal sealed class LohFragmentationSectionBuilder : SectionBuilderBase, IAnal
             compactTables.Add(STCompact("LOH vs. POH breakdown", new[] { CH("Kind"), CH("Segments","number"), CH("Total Bytes","bytes"), CH("Free Bytes","bytes"), CH("Frag %", "number", "percent"), CH("Largest Free Block","bytes") }, kindRows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
         }
 
-        if (d.FragmentationPercent >= 30)
-            blocks.Add(T("LOH/POH fragmentation is critically high — compaction or large-object pooling recommended."));
-        else if (d.FragmentationPercent >= 15)
-            blocks.Add(T("LOH/POH fragmentation is elevated — monitor allocation patterns."));
-        else
-            blocks.Add(T("LOH/POH fragmentation is within normal range."));
-
         var histogram = d.FreeGapHistogram ?? [];
         if (histogram.Count > 0)
         {

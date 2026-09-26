@@ -129,11 +129,6 @@ internal sealed class TimerLeakSectionBuilder : SectionBuilderBase, IAnalyzerSec
             }, histogramRows));
         }
 
-        if ((d.TimerHolderCount + d.TimerQueueTimerCount) >= 50)
-        {
-            blocks.Add(T("Timer queue pressure is elevated. This usually means timers outlive their intended scope and are not disposed promptly."));
-        }
-
         return new AnalyzerDetailSection(
             AnalyzerName: AnalyzerName,
             DisplayTitle: DisplayTitle,

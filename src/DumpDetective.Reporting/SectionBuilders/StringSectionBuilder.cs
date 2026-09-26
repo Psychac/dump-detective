@@ -24,23 +24,9 @@ internal sealed class StringSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         var d = (StringDomainResult)result;
         var compactTables = new List<CompactTable>();
 
-        // P3-3: confidence should fall as dedup SamplingCoverage falls — a report built from a
-        // 1% sample of the strings on the heap isn't as trustworthy as one built from a full
-        // scan. Thresholds match StringFindingGenerator's existing "low coverage" warning (< 5%)
-        // so the confidence band and that finding agree on what counts as low coverage.
-        var (confidenceScore, coverageCaveats) = ConfidenceScoring.Compute(0.85,
-            ConfidenceScoring.F(d.SamplingCoverage > 0 && d.SamplingCoverage < 0.05, 0.35,
-                $"Sampling coverage is below 5% ({d.SamplingCoverage * 100.0:F1}%); duplication and pattern statistics reflect only the sampled subset, not the full heap."),
-            ConfidenceScoring.F(d.SamplingCoverage >= 0.05 && d.SamplingCoverage < 0.5, 0.15,
-                $"Sampling coverage is {d.SamplingCoverage * 100.0:F1}%; results may not fully represent heap-wide patterns."));
-
-        var blocks = new List<SectionBlock>
-        {
-            BuildConfidenceBand(confidenceScore,
-                new[] { "String statistics are measured from analyzed heap data." }
-                    .Concat(coverageCaveats)
-                    .ToArray()),
-        };
+        // The confidence badge is derived from this section's findings (ReportSectionAssembler);
+        // the sampling-coverage penalty lives on the duplication findings in StringSynthesisRule.
+        var blocks = new List<SectionBlock>();
 
         string dedupLine = $"Performed ({d.StringsSampled:N0} sampled, {(d.SamplingCoverage * 100.0):F1}% coverage)";
 

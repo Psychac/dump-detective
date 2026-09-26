@@ -78,6 +78,17 @@ public sealed class DominatorSectionBuilderTests
         table.Rows.Single().Values[retainedColumn].Should().Be(5_000UL);
     }
 
+    [Fact]
+    public void Build_OverlapInstanceScanCapped_StatesTheLimit()
+    {
+        DominatorDomainResult result = BuildResult(exactByType: null) with { CrossTypeOverlapInstanceScanCapped = true };
+
+        AnalyzerDetailSection section = new DominatorSectionBuilder().Build(result);
+
+        section.Blocks.OfType<TextBlock>().Should().Contain(t => t.Text.Contains("Cross-type overlap instance scan was capped"));
+        section.Blocks.OfType<ConfidenceBandBlock>().Should().BeEmpty("the badge is derived from findings by the report assembler");
+    }
+
     // The retained-vs-shallow sentence is the rule's now (DominatorSynthesisRule; see
     // SectionNotesMovedToRulesTests) — the section only renders the table.
     [Fact]
@@ -410,17 +421,6 @@ public sealed class DominatorSectionBuilderTests
         AnalyzerDetailSection section = new DominatorSectionBuilder().Build(result);
 
         section.CompactTables!.Should().NotContain(t => t.Title == "Cross-type retained overlap");
-    }
-
-    [Fact]
-    public void Build_OverlapInstanceScanCapped_AddsCaveatToConfidenceBand()
-    {
-        DominatorDomainResult result = BuildResult(exactByType: null, crossTypeOverlapInstanceScanCapped: true);
-
-        AnalyzerDetailSection section = new DominatorSectionBuilder().Build(result);
-
-        ConfidenceBandBlock band = section.Blocks.OfType<ConfidenceBandBlock>().Single();
-        band.Caveats.Should().Contain(c => c.Contains("Cross-type overlap instance scan was capped"));
     }
 
     [Fact]

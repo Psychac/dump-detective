@@ -34,7 +34,7 @@ public sealed class SdkRegistryConformanceTests
             ["contention.episode"] = ["contention.duration"],
             ["cpu.sample-attribution"] = ["cpu.sample-count"],
             ["heap.root"] = ["retained.bytes", "subgraph.node-count"],
-            ["root.kind-summary"] = ["kind.ordinal", "count", "retained.bytes"],
+            ["root.kind-summary"] = ["kind.ordinal", "count", "retained.bytes", "is-retained-exact"],
             ["root.population"] = ["total.count", "subgraph-walk-capped", "subgraph-walk-capped.count", "strong-handle.count", "finalizer-queue.count"],
             ["handle.pinned"] = ["retained.bytes"],
             ["handle.population"] = [
@@ -204,7 +204,7 @@ public sealed class SdkRegistryConformanceTests
             ["type.retention-population"] = [
                 "highly-referenced.count", "highly-referenced.bytes", "approximated-reference-addresses.count",
                 "candidate.count", "analyzed.count", "retained.bytes", "pressure.ratio",
-                "top-highly-referenced.has-root-path", "top-highly-referenced.is-root-path-search-truncated", "top-highly-referenced.evidence-signal.count",
+                "top-highly-referenced.has-root-path", "top-highly-referenced.is-root-path-search-truncated", "top-highly-referenced.evidence-signal.count", "is-object-scan-capped", "is-reference-counting-skipped",
             ],
             ["type.retention-hotspot"] = ["object.count", "total.bytes", "total-incoming-references.count"],
             ["event.publisher-leak"] = ["subscriber.count", "instance.count", "retained.bytes"],

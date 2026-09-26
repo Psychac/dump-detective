@@ -37,16 +37,8 @@ internal sealed class LeakCandidateSectionBuilder : SectionBuilderBase, IAnalyze
             candidateCountByClass[assessment.Classification] = classCount + 1;
         }
 
-        var (confidenceScore, leakCaveats) = ConfidenceScoring.Compute(0.75,
-            ConfidenceScoring.F(leak.HeuristicOnly, 0.15, "Heuristic-only leak analysis; no full retention scan."));
-
         var compactTables = new List<CompactTable>();
-        var blocks = new List<SectionBlock>
-        {
-            BuildConfidenceBand(confidenceScore, leakCaveats.Count > 0
-                ? leakCaveats
-                : new[] { "Leak analysis is heuristic-guided; confirm with root-path review." }),
-        };
+        var blocks = new List<SectionBlock>();
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {

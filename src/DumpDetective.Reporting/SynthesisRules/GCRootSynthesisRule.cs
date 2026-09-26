@@ -41,6 +41,7 @@ internal sealed class GCRootSynthesisRule : ISynthesisRule
         Observation? population = null;
         Observation? topRoot = null;
         ulong staticBytes = 0;
+        bool staticBytesAreExact = true;
         int staticCount = 0;
         var staticIds = new List<ObservationId>();
         int finalizerCount = 0;
@@ -66,6 +67,7 @@ internal sealed class GCRootSynthesisRule : ISynthesisRule
                     {
                         case HeapRootKind.StrongHandle:
                             staticBytes = (ulong)observation.Measures["retained.bytes"].Value;
+                            staticBytesAreExact = observation.Measures["is-retained-exact"].Value != 0;
                             staticCount = (int)observation.Measures["count"].Value;
                             staticIds.Add(observation.Id);
                             break;
@@ -113,7 +115,7 @@ internal sealed class GCRootSynthesisRule : ISynthesisRule
                 MetricValue = staticBytes,
                 MetricUnit = "bytes",
                 DerivedFrom = derivedFrom,
-                Confidence = ConfidenceBreakdown.MeasurementCertain,
+                Confidence = StaticRetentionConfidence(staticBytesAreExact, population),
             });
         }
 
@@ -189,6 +191,17 @@ internal sealed class GCRootSynthesisRule : ISynthesisRule
         }
 
         return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+    }
+
+    // Only the static-root finding reads retained bytes. Without the dominator tree they're the
+    // bounded subgraph-walk estimate, and a capped walk undercounts that estimate further.
+    private static ConfidenceBreakdown StaticRetentionConfidence(bool retainedBytesAreExact, Observation? population)
+    {
+        bool walkCapped = population is not null && population.Measures["subgraph-walk-capped"].Value != 0;
+        long cappedCount = population is not null ? (long)population.Measures["subgraph-walk-capped.count"].Value : 0;
+        return DataQualityPenalties.Apply(ConfidenceBreakdown.MeasurementCertain,
+            new DataQualityPenalty(!retainedBytesAreExact, 0.3, "Average retained bytes are heuristic estimates."),
+            new DataQualityPenalty(!retainedBytesAreExact && walkCapped, 0.20, $"Root-owned subgraph walk was capped ({cappedCount:N0} subgraph(s) truncated)."));
     }
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();

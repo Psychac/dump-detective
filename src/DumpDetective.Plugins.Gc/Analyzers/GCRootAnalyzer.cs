@@ -175,6 +175,7 @@ public sealed class GCRootAnalyzer :
                     ["kind.ordinal"] = new Measure((double)(int)Enum.Parse<HeapRootKind>(ks.Kind), MeasureUnit.Custom, MeasureSemantics.Absolute),
                     ["count"] = new Measure(ks.Count, MeasureUnit.Count, MeasureSemantics.Absolute),
                     ["retained.bytes"] = new Measure(ks.EstimatedRetainedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["is-retained-exact"] = new Measure(ks.IsExactRetainedBytes ? 1 : 0, MeasureUnit.Count, MeasureSemantics.Absolute),
                 },
                 Provenance = new Provenance
                 {

@@ -3,6 +3,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Abstractions;
 using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.SectionBuilders;
+using DumpDetective.Reporting.Utilities;
 
 namespace DumpDetective.Reporting.Services;
 
@@ -204,17 +205,56 @@ internal static class ReportSectionAssembler
                 }
             }
 
-            // ── Write back only if something changed ──────────────────────────
-            bool changed = leadFinding is not null && section.LeadFinding is null;
+            ConfidenceBandBlock? confidenceBand = matchedRun is null ? null : DeriveConfidenceBand(section, matchedRun);
 
-            if (changed)
+            // ── Write back only if something changed ──────────────────────────
+            bool leadChanged = leadFinding is not null && section.LeadFinding is null;
+
+            if (leadChanged || confidenceBand is not null)
             {
                 sections[i] = section with
                 {
-                    LeadFinding = leadFinding,
+                    LeadFinding = leadChanged ? leadFinding : section.LeadFinding,
+                    Blocks = confidenceBand is null ? section.Blocks : [confidenceBand, .. section.Blocks],
                 };
             }
         }
+    }
+
+    // A section's confidence badge is its least confident finding that carries a measured
+    // limitation, with every such limitation as a caveat — so the badge can't disagree with the
+    // findings under it. Sections whose builder still states its own badge keep that one.
+    private static ConfidenceBandBlock? DeriveConfidenceBand(AnalyzerDetailSection section, AnalyzerRunResult run)
+    {
+        for (int b = 0; b < section.Blocks.Count; b++)
+        {
+            if (section.Blocks[b] is ConfidenceBandBlock)
+                return null;
+        }
+
+        double? lowestScore = null;
+        var caveats = new List<string>();
+        for (int f = 0; f < run.Findings.Count; f++)
+        {
+            InsightFinding finding = run.Findings[f];
+            if (finding.ConfidenceLimitingFactors.Count == 0)
+                continue;
+
+            double score = finding.EffectiveConfidenceScore;
+            if (lowestScore is null || score < lowestScore)
+                lowestScore = score;
+            foreach (string factor in finding.ConfidenceLimitingFactors)
+            {
+                if (!caveats.Contains(factor, StringComparer.Ordinal))
+                    caveats.Add(factor);
+            }
+        }
+
+        if (lowestScore is not double resolved)
+            return null;
+
+        ConfidenceLevel level = ConfidenceLadder.For(resolved);
+        return new ConfidenceBandBlock(level.Label, resolved, level.Symbol, [.. caveats]);
     }
 
     public static ReportAppendix BuildAppendix(IReadOnlyList<AnalyzerRunResult> runs)

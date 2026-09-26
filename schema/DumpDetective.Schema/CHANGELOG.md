@@ -15,6 +15,13 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.93.0 — 2026-09-27
+
+Phase 5 exit criterion (section builders presentation-only): section confidence badges are now
+derived from findings, so the data-quality flags the badges used reach the findings as raw facts.
+`type.retention-population` gains `is-object-scan-capped` and `is-reference-counting-skipped`;
+`root.kind-summary` gains `is-retained-exact`. No `direction`: they feed confidence, not trends.
+
 ## `observation-type-registry.json` 1.92.0 — 2026-09-27
 
 Phase 5 exit criterion (section builders presentation-only): `type.retention` gains `loh.bytes`.

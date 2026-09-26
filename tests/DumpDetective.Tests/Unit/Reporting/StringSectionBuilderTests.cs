@@ -48,9 +48,6 @@ public sealed class StringSectionBuilderTests
     private static CompactTable? FindRetentionPathTable(AnalyzerDetailSection section) =>
         section.CompactTables?.FirstOrDefault(t => t.Title == "Duplicate string retention paths");
 
-    private static ConfidenceBandBlock ConfidenceBand(AnalyzerDetailSection section) =>
-        section.Blocks.OfType<ConfidenceBandBlock>().Single();
-
     [Fact]
     public void Build_GroupsPatterns_SharingLongCommonPrefix()
     {
@@ -105,58 +102,6 @@ public sealed class StringSectionBuilderTests
         AnalyzerDetailSection section = new StringSectionBuilder().Build(result);
 
         FindClusterTable(section).Should().BeNull();
-    }
-
-    [Fact]
-    public void Build_FullConfidence_WhenSamplingCoverageIsHigh()
-    {
-        StringDomainResult result = BuildResult([], samplingCoverage: 1.0);
-
-        AnalyzerDetailSection section = new StringSectionBuilder().Build(result);
-
-        ConfidenceBandBlock band = ConfidenceBand(section);
-        band.Score.Should().Be(0.85);
-        band.Band.Should().Be("High");
-        band.Caveats.Should().NotContain(c => c.Contains("Sampling coverage"));
-    }
-
-    [Fact]
-    public void Build_ReducedConfidence_WhenSamplingCoverageIsModerate()
-    {
-        StringDomainResult result = BuildResult([], samplingCoverage: 0.20);
-
-        AnalyzerDetailSection section = new StringSectionBuilder().Build(result);
-
-        ConfidenceBandBlock band = ConfidenceBand(section);
-        band.Score.Should().Be(0.70);
-        band.Caveats.Should().Contain(c => c.Contains("Sampling coverage is 20.0%"));
-    }
-
-    [Fact]
-    public void Build_LowConfidence_WhenSamplingCoverageIsBelowFivePercent()
-    {
-        StringDomainResult result = BuildResult([], samplingCoverage: 0.01);
-
-        AnalyzerDetailSection section = new StringSectionBuilder().Build(result);
-
-        ConfidenceBandBlock band = ConfidenceBand(section);
-        band.Score.Should().Be(0.50);
-        band.Band.Should().Be("Medium");
-        band.Caveats.Should().Contain(c => c.Contains("Sampling coverage is below 5%"));
-    }
-
-    [Fact]
-    public void Build_FullConfidence_WhenSamplingCoverageIsZero_AndNoStringsScanned()
-    {
-        // SamplingCoverage == 0 with no strings on the heap is a "nothing to sample" case, not a
-        // low-coverage warning — the < 0.05 penalty flag explicitly excludes 0 coverage.
-        StringDomainResult result = BuildResult([], samplingCoverage: 0.0);
-
-        AnalyzerDetailSection section = new StringSectionBuilder().Build(result);
-
-        ConfidenceBandBlock band = ConfidenceBand(section);
-        band.Score.Should().Be(0.85);
-        band.Caveats.Should().NotContain(c => c.Contains("Sampling coverage"));
     }
 
     [Fact]

@@ -558,12 +558,28 @@ Checked 2026-09-26 against the code and the 3.35 GB reference dump
     no named threshold constant, no `ConfidenceScoring`, no `Interpret` tiering in any builder
     outside a named exception list that can only shrink. The test caught a fifth confidence
     builder the audit had missed (`ConfidenceSectionBuilder`).
-  - **Open: section confidence bands** (Confidence, Dominator, GCRoot, LeakCandidate, String).
-    Deriving them from the section's findings, as planned, would lose information: their inputs
-    (capped scans, skipped reference counting, sampling coverage, heuristic-only mode) never reach
-    any observation's confidence. Moving them properly means the analyzers setting measurement
-    confidence from these flags, which runs into the whole-observation confidence problem step 7
-    found (a count finding would inherit a sampled measure's uncertainty). Needs a design call.
+  - **Section confidence badges — derived from findings, done 2026-09-27.**
+    - Each analyzer's data-quality flag is a raw fact on its observation; its rule lowers only the
+      findings whose values the flag affects (`DataQualityPenalties`, the builders' old
+      subtract-and-floor model). The report assembler sets a section's badge to its least
+      confident finding that has a measured limitation, with those limitations as caveats.
+      - String: sampling coverage lowers the two duplication findings, not the exact
+        string-memory/LOH/very-long figures.
+      - Dominator: capped object scan, skipped reference counting and approximated counts lower the
+        highly-referenced and hotspot findings (new flags, registry 1.93.0). The top-dominator
+        finding always reads the BFS estimate, so it carries 0.7. The builder still states the
+        scan bounds as plain caveats, so they stay visible when no finding fires.
+      - GC Root: the static-root finding is lowered when its kind's bytes aren't exact (new
+        `is-retained-exact`), and further when the subgraph walk was capped.
+      - Leak Candidate: its heuristic classification carries 0.6 on its findings.
+      - Known Limitations: the always-0.50 Confidence column and its legend were dropped.
+      - `ConfidenceScoring` deleted. `FitnessEnforcementTests` now bans builder-made badges
+        outside Crash (fixed 0.85) and LockGraph (owner-resolution ratio), which weren't in scope.
+    - Reference dump, before → after: two Info findings went up (Dominator top type 0.5 → 0.7,
+      Leak Candidate cluster 0.5 → 0.6), because a measured value replaces the severity default.
+      Badges appeared on Event Leak, Finalizable, Timer and Weak Reference, and went away on String
+      and GC Root, where nothing was limited. The Dominator badge dropped to Low: one finding had
+      no resolved root path. One health score went 92 → 93; top actions unchanged.
   - **Dominator's retained-vs-shallow sentence — done 2026-09-27.** It moved from the builder's
     `Interpret` tiering into `DominatorSynthesisRule`'s top-dominator narrative, same 3.0×/1.2×
     cut-offs and wording. `type.retention` gained `loh.bytes` so the rule picks the same type the

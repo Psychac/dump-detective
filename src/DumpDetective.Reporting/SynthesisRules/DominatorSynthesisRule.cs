@@ -110,7 +110,7 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
                 MetricValue = estimatedRetainedBytes,
                 MetricUnit = "bytes",
                 DerivedFrom = [topRetention.Id],
-                Confidence = ConfidenceBreakdown.MeasurementCertain,
+                Confidence = EstimatedRetainedBytesConfidence,
             });
         }
 
@@ -134,7 +134,7 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
                     MetricValue = highlyReferencedCount,
                     MetricUnit = "objects",
                     DerivedFrom = [population.Id],
-                    Confidence = RootPathEvidenceStrength.FromMeasures(population.Measures, "top-highly-referenced."),
+                    Confidence = WithReferenceCountingLimits(RootPathEvidenceStrength.FromMeasures(population.Measures, "top-highly-referenced."), population),
                 });
             }
         }
@@ -164,7 +164,7 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
                     MetricValue = totalIncomingReferences,
                     MetricUnit = "references",
                     DerivedFrom = [topHotspot.Id],
-                    Confidence = ConfidenceBreakdown.MeasurementCertain,
+                    Confidence = WithReferenceCountingLimits(ConfidenceBreakdown.MeasurementCertain, population),
                 });
             }
         }
@@ -200,6 +200,29 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
 
     // The Gen2/LOH type the section's long-lived table leads with: most Gen2 instances, then most
     // LOH bytes; ties keep emission order (TopDominatorTypes order).
+    // The top-dominator finding always reads estimated-retained.bytes, the bounded-BFS estimate,
+    // even when an exact dominator-tree value exists — so its figure is an estimate either way.
+    private static readonly ConfidenceBreakdown EstimatedRetainedBytesConfidence = ConfidenceBreakdown.MeasurementCertain with
+    {
+        Composite = 0.7,
+        EvidenceStrength = 0.7,
+        LimitingFactors = ["Retained bytes are bounded BFS estimates, not a true Lengauer-Tarjan dominator tree."],
+    };
+
+    // Incoming-reference counts back the highly-referenced and hotspot findings, so every way the
+    // counting pass was bounded lowers those two, and only those two.
+    private static ConfidenceBreakdown WithReferenceCountingLimits(ConfidenceBreakdown confidence, Observation? population)
+    {
+        if (population is null)
+            return confidence;
+
+        long approximated = (long)population.Measures["approximated-reference-addresses.count"].Value;
+        return DataQualityPenalties.Apply(confidence,
+            new DataQualityPenalty(population.Measures["is-object-scan-capped"].Value != 0, 0.15, "Object scan was capped; retention counts may be partial."),
+            new DataQualityPenalty(population.Measures["is-reference-counting-skipped"].Value != 0, 0.20, "Reference counting was skipped; results are estimated."),
+            new DataQualityPenalty(approximated > 0, 0.10, $"{approximated:N0} reference addresses have approximated (bounded-error) counts."));
+    }
+
     private static bool IsMoreLongLived(Observation candidate, Observation? current)
     {
         double gen2 = candidate.Measures["gen2.count"].Value;

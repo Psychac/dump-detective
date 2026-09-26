@@ -20,21 +20,9 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
     public AnalyzerDetailSection Build(AnalyzerDomainResult result)
     {
         var d = (DominatorDomainResult)result;
-        var (confidenceScore, caveats) = ConfidenceScoring.Compute(0.75,
-            ConfidenceScoring.F(d.ObjectScanCapped, 0.15, "Object scan was capped; retention counts may be partial."),
-            ConfidenceScoring.F(d.ReferenceCountingSkipped, 0.20, "Reference counting was skipped; results are estimated."),
-            ConfidenceScoring.F(d.ApproximatedReferenceAddresses > 0, 0.10, $"{d.ApproximatedReferenceAddresses:N0} reference addresses have approximated (bounded-error) counts."),
-            ConfidenceScoring.F(d.CrossTypeOverlapInstanceScanCapped, 0.05, "Cross-type overlap instance scan was capped; overlap counts may undercount."));
-
         var compactTables = new List<CompactTable>();
         var treeWidgets = new List<TreeWidget>();
-        var blocks = new List<SectionBlock>
-        {
-            BuildConfidenceBand(confidenceScore,
-                new[] { "Retained bytes are bounded BFS estimates, not a true Lengauer-Tarjan dominator tree." }
-                    .Concat(caveats)
-                    .ToArray()),
-        };
+        var blocks = new List<SectionBlock>();
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>
         {
@@ -269,8 +257,9 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
                     totalFanIn == 0 ? 0.0 : b.ObjectCount * 100.0 / totalFanIn)).ToArray()));
         }
 
-        if (caveats.Count > 0)
-            blocks.Add(T("Caveats: " + string.Join(" ", caveats)));
+        IReadOnlyList<string> scanLimits = DescribeScanLimits(d);
+        if (scanLimits.Count > 0)
+            blocks.Add(T("Caveats: " + string.Join(" ", scanLimits)));
 
         // Audit P3 "Shared Next steps" (docs/analysis/phase1/dominator-analyzer-audit.md):
         // dominator-suspect bytes explain *how much* is retained; GC Root Analysis explains *why*
@@ -290,6 +279,23 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
             KeyMetrics: keyMetrics,
             CompactTables: compactTables.Count > 0 ? compactTables : null,
             TreeWidgets: treeWidgets.Count > 0 ? treeWidgets : null);
+    }
+
+    // The scan's recorded bounds, stated as facts. Their effect on confidence is applied to the
+    // affected findings by DominatorSynthesisRule; this keeps them visible even when no finding
+    // fires (e.g. skipped reference counting yields no highly-referenced finding at all).
+    private static IReadOnlyList<string> DescribeScanLimits(DominatorDomainResult d)
+    {
+        var limits = new List<string>(4);
+        if (d.ObjectScanCapped)
+            limits.Add("Object scan was capped; retention counts may be partial.");
+        if (d.ReferenceCountingSkipped)
+            limits.Add("Reference counting was skipped; results are estimated.");
+        if (d.ApproximatedReferenceAddresses > 0)
+            limits.Add($"{d.ApproximatedReferenceAddresses:N0} reference addresses have approximated (bounded-error) counts.");
+        if (d.CrossTypeOverlapInstanceScanCapped)
+            limits.Add("Cross-type overlap instance scan was capped; overlap counts may undercount.");
+        return limits;
     }
 
     private static new double RatioValue(ulong retained, ulong shallow)

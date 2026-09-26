@@ -27,7 +27,10 @@ internal static class FindingSynthesisAdapter
         MetricValue: finding.MetricValue,
         MetricUnit: finding.MetricUnit,
         ConfidenceScore: ToConfidenceScore(finding.Confidence),
-        Caveats: finding.Caveats.Count > 0 ? finding.Caveats : null);
+        Caveats: finding.Caveats.Count > 0 ? finding.Caveats : null)
+    {
+        ConfidenceLimitingFactors = finding.Confidence.Composite < 1.0 ? finding.Confidence.LimitingFactors : [],
+    };
 
     // A breakdown with nothing limiting it carries no measured information, so it defers to
     // InsightFinding's severity-based default — the value every pre-Phase-5 finding without an

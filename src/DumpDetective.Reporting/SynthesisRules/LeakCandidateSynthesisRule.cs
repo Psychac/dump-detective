@@ -143,7 +143,7 @@ internal sealed class LeakCandidateSynthesisRule : ISynthesisRule
                 MetricValue = candidate.TotalSize,
                 MetricUnit = "bytes",
                 DerivedFrom = [candidate.ObservationId],
-                Confidence = ConfidenceBreakdown.MeasurementCertain,
+                Confidence = HeuristicClassificationConfidence,
             });
         }
 
@@ -216,7 +216,7 @@ internal sealed class LeakCandidateSynthesisRule : ISynthesisRule
                 MetricValue = totalShallowBytes,
                 MetricUnit = "bytes",
                 DerivedFrom = derivedFrom,
-                Confidence = ConfidenceBreakdown.MeasurementCertain,
+                Confidence = HeuristicClassificationConfidence,
             });
         }
 
@@ -232,6 +232,12 @@ internal sealed class LeakCandidateSynthesisRule : ISynthesisRule
         int Score,
         Severity Severity,
         LeakClass Classification);
+
+    // Suspicion scoring and classification are heuristics over per-type shape facts — no full
+    // retention scan proves a candidate leaks — so every finding from them carries that ceiling.
+    private static readonly ConfidenceBreakdown HeuristicClassificationConfidence = DataQualityPenalties.Apply(
+        ConfidenceBreakdown.MeasurementCertain with { Composite = 0.75, EvidenceStrength = 0.75 },
+        new DataQualityPenalty(true, 0.15, "Heuristic-only leak analysis; no full retention scan."));
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();
 

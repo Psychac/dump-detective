@@ -26,22 +26,11 @@ internal sealed class GCRootSectionBuilder : SectionBuilderBase, IAnalyzerSectio
         // "heuristic estimate" caveat no longer applies to this report.
         bool anyKindIsHeuristic = roots.ByKind.Count == 0 || roots.ByKind.Any(k => !k.IsExactRetainedBytes);
 
-        var (confidenceScore, capCaveats) = ConfidenceScoring.Compute(0.75,
-            ConfidenceScoring.F(roots.SubgraphWalkCapped, 0.20, $"Root-owned subgraph walk was capped ({roots.SubgraphWalkCappedCount:N0} subgraph(s) truncated)."));
-
         var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
-        if (anyKindIsHeuristic)
-        {
-            blocks.Add(BuildConfidenceBand(confidenceScore,
-                new[] { "Average retained bytes are heuristic estimates." }.Concat(capCaveats).ToArray()));
-            blocks.Add(T("Average retained bytes are heuristic estimates unless a targeted retained-size pass is available."));
-        }
-        else
-        {
-            blocks.Add(BuildConfidenceBand(confidenceScore, capCaveats.ToArray()));
-            blocks.Add(T("Retained bytes are exact — computed from the dominator tree, not a heuristic estimate."));
-        }
+        blocks.Add(T(anyKindIsHeuristic
+            ? "Average retained bytes are heuristic estimates unless a targeted retained-size pass is available."
+            : "Retained bytes are exact — computed from the dominator tree, not a heuristic estimate."));
         blocks.Add(T("Root-owned subgraph types show the object types reachable from each root. For exact root-to-target retention chains, use WinDbg !gcroot or dotMemory."));
 
         if (roots.DroppedZeroEstimateRootCount > 0)

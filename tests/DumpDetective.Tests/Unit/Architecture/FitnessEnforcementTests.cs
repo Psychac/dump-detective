@@ -56,18 +56,6 @@ public sealed class FitnessEnforcementTests
             "constructed or severity-classified by a builder.");
     }
 
-    // Section builders still computing their own confidence band — each a
-    // known, open exception to the Phase 5 "presentation-only" exit criterion (see
-    // docs/refactor/modularity/phase-5-observations-synthesis.md), listed so the set can only shrink.
-    private static readonly HashSet<string> KnownBuilderJudgmentFiles = new(StringComparer.Ordinal)
-    {
-        "ConfidenceSectionBuilder.cs",
-        "DominatorSectionBuilder.cs",
-        "GCRootSectionBuilder.cs",
-        "LeakCandidateSectionBuilder.cs",
-        "StringSectionBuilder.cs",
-    };
-
     /// <summary>
     /// A text search can't tell a severity threshold from a byte-unit loop (step 6a found ~99
     /// numeric comparisons across the builders, nearly all display), so this bans the three shapes
@@ -85,7 +73,6 @@ public sealed class FitnessEnforcementTests
         var offenders = new List<string>();
         foreach (string file in Directory.EnumerateFiles(sectionBuildersRoot, "*.cs", SearchOption.AllDirectories))
         {
-            bool knownException = KnownBuilderJudgmentFiles.Contains(Path.GetFileName(file));
             string[] lines = File.ReadAllLines(file);
             for (int i = 0; i < lines.Length; i++)
             {
@@ -95,7 +82,7 @@ public sealed class FitnessEnforcementTests
 
                 bool scoresConfidence = line.Contains("ConfidenceScoring.", StringComparison.Ordinal)
                     || line.Contains("Interpret(", StringComparison.Ordinal);
-                if (thresholdConstant.IsMatch(line) || (scoresConfidence && !knownException))
+                if (thresholdConstant.IsMatch(line) || scoresConfidence)
                     offenders.Add($"{file}:{i + 1}: {line}");
             }
         }
@@ -103,6 +90,41 @@ public sealed class FitnessEnforcementTests
         offenders.Should().BeEmpty(
             "thresholds, confidence penalties and tier banding belong in synthesis rules or " +
             "analyzers; section builders only shape already-decided findings and measures.");
+    }
+
+    // Builders that still state their own confidence badge rather than having the report derive it
+    // from their findings (ReportSectionAssembler). Crash's is a fixed 0.85; LockGraph's is its
+    // owner-resolution ratio. Listed so the set can only shrink.
+    private static readonly HashSet<string> BuildersWithOwnConfidenceBadge = new(StringComparer.Ordinal)
+    {
+        "CrashSectionBuilder.cs",
+        "LockGraphSectionBuilder.cs",
+    };
+
+    [Fact]
+    public void SectionBuilders_ShouldLeaveConfidenceBadgesToTheirFindings()
+    {
+        string repoRoot = FindRepositoryRoot();
+        string sectionBuildersRoot = Path.Combine(repoRoot, "src", "DumpDetective.Reporting", "SectionBuilders");
+
+        var offenders = new List<string>();
+        foreach (string file in Directory.EnumerateFiles(sectionBuildersRoot, "*.cs", SearchOption.AllDirectories))
+        {
+            string fileName = Path.GetFileName(file);
+            if (fileName == "SectionBuilderBase.cs" || BuildersWithOwnConfidenceBadge.Contains(fileName))
+                continue;
+
+            string[] lines = File.ReadAllLines(file);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (lines[i].Contains("BuildConfidenceBand(", StringComparison.Ordinal))
+                    offenders.Add($"{file}:{i + 1}: {lines[i].Trim()}");
+            }
+        }
+
+        offenders.Should().BeEmpty(
+            "a section's confidence badge is derived from its findings' measured limitations, so " +
+            "the badge can't disagree with the findings under it.");
     }
 
     [Fact]

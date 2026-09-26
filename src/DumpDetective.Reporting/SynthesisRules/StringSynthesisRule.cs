@@ -64,7 +64,7 @@ internal sealed class StringSynthesisRule : ISynthesisRule
                 MetricValue = duplicateWastedBytes,
                 MetricUnit = "wasted-bytes",
                 DerivedFrom = [composition.Id],
-                Confidence = ConfidenceBreakdown.MeasurementCertain,
+                Confidence = SampledDuplicationConfidence(samplingCoverage),
             });
         }
         else if (duplicatePatternCount > 0)
@@ -82,7 +82,7 @@ internal sealed class StringSynthesisRule : ISynthesisRule
                 MetricValue = duplicateWastedBytes,
                 MetricUnit = "wasted-bytes",
                 DerivedFrom = [composition.Id],
-                Confidence = ConfidenceBreakdown.MeasurementCertain,
+                Confidence = SampledDuplicationConfidence(samplingCoverage),
             });
         }
 
@@ -164,6 +164,15 @@ internal sealed class StringSynthesisRule : ISynthesisRule
 
         return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
     }
+
+    // Duplication figures come from the sampled dedup scan, so they're only as representative as
+    // the sample; the exact whole-heap figures (string memory, LOH, very long strings) aren't.
+    private static ConfidenceBreakdown SampledDuplicationConfidence(double samplingCoverage) => DataQualityPenalties.Apply(
+        ConfidenceBreakdown.MeasurementCertain,
+        new DataQualityPenalty(samplingCoverage > 0 && samplingCoverage < 0.05, 0.35,
+            $"Sampling coverage is below 5% ({samplingCoverage * 100.0:F1}%); duplication and pattern statistics reflect only the sampled subset, not the full heap."),
+        new DataQualityPenalty(samplingCoverage >= 0.05 && samplingCoverage < 0.5, 0.15,
+            $"Sampling coverage is {samplingCoverage * 100.0:F1}%; results may not fully represent heap-wide patterns."));
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();
 }

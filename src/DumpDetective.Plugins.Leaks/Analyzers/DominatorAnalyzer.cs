@@ -293,6 +293,8 @@ public sealed class DominatorAnalyzer :
             // raw denominator to compute its own per-type retained-bytes percentages.
             ["total.bytes"] = new Measure(result.TotalHeapBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
         };
+        populationMeasures["is-object-scan-capped"] = new Measure(result.ObjectScanCapped ? 1 : 0, MeasureUnit.Count, MeasureSemantics.Absolute);
+        populationMeasures["is-reference-counting-skipped"] = new Measure(result.ReferenceCountingSkipped ? 1 : 0, MeasureUnit.Count, MeasureSemantics.Absolute);
         RootPathEvidenceMeasures.Add(populationMeasures, "top-highly-referenced.", result.TopHighlyReferencedObjects is { Count: > 0 } ? result.TopHighlyReferencedObjects[0].Evidence : null);
 
         await observationContext.Observations.EmitAsync(new Observation

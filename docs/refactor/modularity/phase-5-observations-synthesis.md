@@ -480,6 +480,13 @@ actually starts, not before.
          also cites retained bytes): the drop is mostly spurious. Observation confidence covers the
          whole observation, so an exact count inherits the retained-bytes estimate's uncertainty.
          The analyzer's own comment on `finalizer.queue-population` already notes this convention.
+       - **Fixed for Finalizable Object only** (registry 1.90.0). Both queue observations are
+         confidence 1.0 and carry an exactness flag (`is-retained-exact` /
+         `is-retained-estimate-partial`). `FinalizableObjectSynthesisRule` gives 0.7 only to
+         `queue-retained-bytes`, from that flag. Re-measured: the two count findings are back to
+         0.9, `queue-retained-bytes` stays 0.7, and lineage now moves 0 of 83 findings.
+       - **Not done:** per-measure confidence across the SDK. Other observations below 1.0 on this
+         dump back retained-bytes claims, where the lower confidence is correct.
      - **Still open: conflict penalty** — fixed at 1.0 until a rule detects contradicting
        observations.
 

@@ -315,6 +315,7 @@ namespace DumpDetective.Analysis.Analyzers.Gc
                         // fact, not a leak judgment (that's a synthesis-rule call, Phase 5 step 2+).
                         ["disposed-but-live"] = new Measure(entry.IsDisposableType && disposedFound && !disposedValue ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
                         ["is-critical-finalizer"] = new Measure(entry.IsCriticalFinalizerType ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
+                        ["is-retained-exact"] = new Measure(retainedIsExact ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
                     },
                     Provenance = new Provenance
                     {
@@ -323,7 +324,10 @@ namespace DumpDetective.Analysis.Analyzers.Gc
                         CapabilitiesUsed = observationCapabilities,
                         Fidelity = observationFidelity,
                     },
-                    Confidence = retainedIsExact ? 1.0 : 0.7,
+                    // Exactness of retained.bytes travels as is-retained-exact, not as confidence:
+                    // the entry's counts and flags are exact either way, and a whole-observation
+                    // confidence would mark every finding built on them as uncertain.
+                    Confidence = 1.0,
                 }, cancellationToken);
 
                 topEntries.Add(new FinalizerQueueEntry(
@@ -369,6 +373,7 @@ namespace DumpDetective.Analysis.Analyzers.Gc
                     ["critical.bytes"] = new Measure(criticalFinalizerQueueBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                     ["pressure.ratio"] = new Measure(
                         totalObjects > 0 ? (double)queueCount / totalObjects : 0.0, MeasureUnit.Ratio, MeasureSemantics.Ratio),
+                    ["is-retained-estimate-partial"] = new Measure(isRetainedEstimatePartial ? 1.0 : 0.0, MeasureUnit.Count, MeasureSemantics.Absolute),
                 },
                 Provenance = new Provenance
                 {
@@ -377,12 +382,9 @@ namespace DumpDetective.Analysis.Analyzers.Gc
                     CapabilitiesUsed = observationCapabilities,
                     Fidelity = observationFidelity,
                 },
-                // Mirrors finalizer.queue-entry's own exact-vs-estimated split: retained.bytes here
-                // is an aggregate over the same per-entry values, so it inherits the same partial
-                // uncertainty isRetainedEstimatePartial already tracks (queue.count/critical.count/
-                // pressure.ratio don't depend on dominators at all, but one shared Confidence for the
-                // whole observation is the existing convention, same as finalizer.queue-entry itself).
-                Confidence = isRetainedEstimatePartial ? 0.7 : 1.0,
+                // Same split as finalizer.queue-entry: retained.bytes' exactness is the
+                // is-retained-estimate-partial flag, so the exact counts keep full confidence.
+                Confidence = 1.0,
             }, cancellationToken);
 
             return new FinalizableObjectDomainResult(

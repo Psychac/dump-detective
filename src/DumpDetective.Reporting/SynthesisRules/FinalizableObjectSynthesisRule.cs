@@ -41,6 +41,16 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
     public string RuleId => "finalizable-object.finding-parity";
     public int Version => 1;
 
+    // Some entries fell back to shallow size, so the retained total is an underestimate — the same
+    // 0.7 the analyzer used to put on the whole observation, now scoped to the one finding whose
+    // claim is the retained total.
+    private static readonly ConfidenceBreakdown EstimatedRetainedBytesConfidence = ConfidenceBreakdown.MeasurementCertain with
+    {
+        Composite = 0.7,
+        EvidenceStrength = 0.7,
+        LimitingFactors = ["Some finalizer-queue entries had no exact dominator-tree retained size; shallow size was used instead."],
+    };
+
     public ObservationQuery Query { get; } = new()
     {
         ObservationTypes = ["type.finalizable-population", "finalizer.queue-entry", "finalizer.queue-population"],
@@ -89,7 +99,7 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
                 {
                     queueEntryIds.Add(observation.Id);
                     queueRetainedBytes += (ulong)observation.Measures["retained.bytes"].Value;
-                    if (observation.Confidence < 1.0) isRetainedEstimatePartial = true;
+                    if (observation.Measures["is-retained-exact"].Value == 0) isRetainedEstimatePartial = true;
 
                     bool disposedButLive = observation.Measures["disposed-but-live"].Value >= 1.0;
                     if (disposedButLive)
@@ -213,7 +223,7 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
                 MetricValue = queueRetainedBytes,
                 MetricUnit = "bytes",
                 DerivedFrom = queueEntryIds,
-                Confidence = ConfidenceBreakdown.MeasurementCertain,
+                Confidence = isRetainedEstimatePartial ? EstimatedRetainedBytesConfidence : ConfidenceBreakdown.MeasurementCertain,
             });
         }
 

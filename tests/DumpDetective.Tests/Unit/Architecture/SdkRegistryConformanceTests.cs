@@ -50,10 +50,10 @@ public sealed class SdkRegistryConformanceTests
                 "dependent-unresolved-percent-warning.threshold",
             ],
             ["handle.refcounted-target"] = ["instance.count"],
-            ["finalizer.queue-entry"] = ["retained.bytes", "shallow.bytes", "disposed-but-live", "is-critical-finalizer"],
+            ["finalizer.queue-entry"] = ["retained.bytes", "shallow.bytes", "disposed-but-live", "is-critical-finalizer", "is-retained-exact"],
             ["type.finalizable-population"] = ["instance.count", "shallow.bytes", "gen2.count"],
             ["gc.finalizable-composition"] = ["total.count", "total.bytes", "gen2.count"],
-            ["finalizer.queue-population"] = ["queue.count", "retained.bytes", "critical.count", "critical.bytes", "pressure.ratio"],
+            ["finalizer.queue-population"] = ["queue.count", "retained.bytes", "critical.count", "critical.bytes", "pressure.ratio", "is-retained-estimate-partial"],
             ["weakhandle.target"] = ["retained.bytes", "held-only-via-weak-reference"],
             ["weakreference.stale-wrapper"] = ["shallow.bytes"],
             ["weakreference.population"] = [

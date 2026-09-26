@@ -157,6 +157,29 @@ public sealed class FindingConfidenceParityTests
         finding.Caveats.Should().Equal("Active exception count is based on measured runtime objects and thread snapshots.");
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FinalizableObjectRule_OnlyTheRetainedBytesFindingReflectsEstimatedRetainedSizes(bool retainedIsExact)
+    {
+        IReadOnlyList<Finding> findings = await new FinalizableObjectSynthesisRule().SynthesizeAsync(
+            new ObservationMatchSet([
+                MakeObservation("finalizer.queue-entry", "Finalizable Object Analysis", new()
+                {
+                    ["retained.bytes"] = new Measure(200_000_000, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["shallow.bytes"] = new Measure(64, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+                    ["disposed-but-live"] = Count(0),
+                    ["is-critical-finalizer"] = Count(0),
+                    ["is-retained-exact"] = Count(retainedIsExact ? 1 : 0),
+                }, "App.Resource"),
+            ]),
+            new SynthesisContext());
+
+        Finding retained = findings.Single(f => f.Fingerprint.EndsWith("queue-retained-bytes", StringComparison.Ordinal));
+        retained.Confidence.Composite.Should().Be(retainedIsExact ? 1.0 : 0.7);
+        retained.Narrative.Should().Contain(retainedIsExact ? "(exact, from the dominator tree)" : "shallow size used instead");
+    }
+
     private static double RetiredEvidenceConfidence(Evidence evidence)
     {
         if (string.IsNullOrEmpty(evidence.SampleRootPath))

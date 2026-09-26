@@ -15,6 +15,14 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.90.0 — 2026-09-26
+
+Phase 5 step 7 follow-up: `finalizer.queue-entry` gains `is-retained-exact`, and
+`finalizer.queue-population` gains `is-retained-estimate-partial`. Both observations' `Confidence`
+is now 1.0 (it was 0.7 whenever a retained size fell back to shallow size). Their counts are exact,
+and the whole-observation 0.7 was lowering count findings through lineage confidence. Only the
+retained-bytes finding lowers its confidence now, from the flag.
+
 ## `observation-type-registry.json` 1.89.0 — 2026-09-26
 
 Phase 5 step 7, parity half: restores the evidence-based finding confidence the pre-Phase-5

@@ -424,16 +424,11 @@ actually starts, not before.
    cross-analyzer read `LeakCandidateAnalyzer` does inside its own stage 1 today. See the audit
    doc's "Leak Candidate — deferred to Phase 5" section. **Full implementation plan, split out
    2026-09-22 once it stopped fitting inline (same reason step 2 and step 4 got their own docs):
-   [phase-5-step6-insight-engine-plan.md](phase-5-step6-insight-engine-plan.md). 6.1 (LeakCandidate)
-   shipped 2026-09-22; 6.2 (folding `InsightEngine` itself) in progress — 28 of 39 `Detect*`
-   methods migrated 2026-09-22 across all three rule groups (`BaselineRuleGroup` 10/11,
-   `MemoryAndRuntimeRuleGroup` 10/11, `CorrelationRuleGroup` 8/17), 11 held for documented reasons.
-   One of those reasons was a real design question — `Sdk.Synthesis.Finding` has no
-   `InsightFinding.EvidenceTables` equivalent — resolved by checking
-   [ReportSystemVision.md](../ReportStructure/ReportSystemVision.md) § 6.2/Appendix C rather than
-   extending the SDK: `Finding` stays as-is, and each blocked rule was judged on whether its table
-   was optional (migrate without it) or core to the finding (stay held).**
-6a. **Sections derive from observations, not from domain results.** This resolves the open question
+   [phase-5-step6-insight-engine-plan.md](phase-5-step6-insight-engine-plan.md).** **Done
+   2026-09-26** — 38 of 39 rules migrated, 1 dropped by user call, `InsightEngine` deleted; details
+   in that doc.
+6a. **Sections derive from observations, not from domain results.** **Done 2026-09-24** (step 6
+   doc § 6.3). This resolves the open question
    the earlier draft deferred, and it's the audit's central complaint: as long as
    `IAnalyzerSectionBuilder` reads `AnalyzerDomainResult` independently of the finding path, two
    passes over the same data can disagree — which is already happening in 6 of 8 audited builders.
@@ -442,7 +437,9 @@ actually starts, not before.
    row selection. `SectionLeadFinding` is always derived from the top-severity finding, never
    constructed inline. Implementation steps in
    [phase-5-step6-insight-engine-plan.md § 6.3](phase-5-step6-insight-engine-plan.md#63--section-builders-become-presentation-only-6a).
-6b. **Consolidate the confidence ladders.** The three near-identical band/symbol tables
+6b. **Consolidate the confidence ladders.** **Done 2026-09-24** (step 6 doc § 6.4) — into
+   Reporting's `ConfidenceLadder`, not `ConfidenceBreakdown` as written below; that doc explains
+   why. The three near-identical band/symbol tables
    (`SectionBuilderBase`, `ReportSectionAssembler.NormalizeSectionContractSlots`,
    `LeakAnalysisSectionBuilder`) collapse into `ConfidenceBreakdown` — though per the audit this is
    worth doing *now* rather than waiting for this phase. Implementation steps in

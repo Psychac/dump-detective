@@ -11,6 +11,12 @@ observations, per that doc's "Carve out `LeakCandidateAnalyzer` explicitly" item
 update it in place as work completes, per the same discipline
 [phase-5-step2-per-analyzer-findings.md](phase-5-step2-per-analyzer-findings.md) uses.
 
+**Status: closed 2026-09-26.** All four sub-steps done (6.1–6.4); `InsightEngine` is deleted and
+the phase's exit criterion "`IFindingGenerator`/`InsightEngine` no longer exist as separate
+concepts" is met. Verified against the ~3.3 GB reference dump — see
+[Real-dump verification](#real-dump-verification-2026-09-26). This doc is now a record, not a live
+plan.
+
 ## Prerequisites (all already satisfied)
 
 - The synthesis machinery (`ISynthesisRule`, `ObservationQuery`, `SynthesisEngine`,
@@ -539,16 +545,45 @@ to match whatever the migrated rules actually set.
       - Tests: new `ConfidenceBandSerializationTests` (band emitted through the source-generated
         `ReportJsonContext` for all three records). Full suite: 1410 passed, 0 failed, 65 skipped.
 
+## Real-dump verification (2026-09-26)
+
+One foreground run of the Release CLI against the ~3.3 GB `Crash_IIS_BALTSTPRD` reference dump
+(exit 0, 61–83 s), checked against the report's embedded JSON and the console output.
+
+- **Cross-analyzer findings reach the report and console** — 19 in the report's
+  `crossDomainInsights` and 19 in the console's Insights summary, confirming the silent-drop fix
+  under 6.2 ("`InsightEngine` retired").
+- **New rules fire on real data:**
+  - `MemoryTypeGenerationInsightRule` (Info): 3 types ≥ 10 MB are ≥ 85% Gen2, largest
+    `Excellon.FW5.Base.DataContracts.CompanyMasterData` at 54.5 MB (96.0% Gen2).
+  - `JitModuleHotspotInsightRule` (Info): `mscorlib.dll`, 60 active JIT frames, 22.4 MB on disk.
+- **Bug found and fixed by this run:** `JitModuleHotspotInsightRule` initially never fired. Stack
+  frames report a module's full path while `ModuleAnalyzer`'s `ModuleRef` subjects use the file
+  name, so the join never matched — the pre-migration `InsightEngine` method had the same
+  mismatch. `runtime.jit-module-frames` now subjects on the file name, summing paths that share
+  one (`JitAnalyzer.FrameCountsByModuleFileName`, unit-tested).
+- **6.3/6.4 output:** every finding, section lead and correlation event with a confidence carries a
+  `confidenceBand`; no section lead is `Info`-severity (LOH at 1.9% fragmentation and Leak
+  Candidates have only `Info` findings, so correctly show no lead); none of the removed outputs
+  (`impactBand`, `severity_band`, "Dominator candidates") appear. The LOH rule's migrated wording
+  shows ("LOH/POH fragmentation within acceptable range — 1.9%").
+- **The X1 "Cross-Domain Insights" panel** is rendered by the HTML from `crossDomainInsights`, not
+  from a domain section — `ReportDomainProjector` deliberately skips `CrossDomain` sections. Not a
+  gap.
+- **Open, not fixed here:**
+  - The JIT hotspot's first real hit is a framework module (`mscorlib.dll`), which isn't very
+    actionable. The original rule never filtered framework modules either; a filter would be a new
+    judgment, not part of this migration.
+  - `--separate-json` never writes `report.json` — `ReportOutputWriter`'s regex has a stray space
+    (`(['"]) (report-json)`) so it never matches. Pre-existing and unrelated to step 6.
+
 ## Sizing note
 
-6.1 is done (see § 6.1). 6.2 is the large item: 39 rule methods, ~1,300 lines of detection logic.
-All three groups have started; 36 of 39 methods are migrated, 3 held. `BaselineRuleGroup` is fully
-done (11/11 — `DetectAnalyzerFailures` was the last, closed 2026-09-23) and
-`MemoryAndRuntimeRuleGroup` (10/11) had a low gap rate — 8/11 and 6/10 needed zero new emission,
-most of the rest needed one new measure on an existing observation, and two needed only a classifier
-formula duplicated locally. `CorrelationRuleGroup` (15/17 so far) confirmed the sizing note's own
-warning: its gap profile is different and harder — fewer single-measure gaps, more structural
-blockers.
+Final tally: 38 of 39 `Detect*` methods migrated, 1 dropped (`DetectStringMemoryConcentration`, user
+call). `BaselineRuleGroup` and `MemoryAndRuntimeRuleGroup` had a low gap rate — most methods needed
+zero new emission or one new measure. `CorrelationRuleGroup` confirmed this note's original warning:
+fewer single-measure gaps, more structural blockers. The last three held methods turned out to be
+smaller than their "cross-join two unbounded per-type lists" blocker suggested — see 6.2's tracker.
 
 Two things surfaced there worth remembering for future groups:
 

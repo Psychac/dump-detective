@@ -585,10 +585,12 @@ Checked 2026-09-26 against the code and the 3.35 GB reference dump
       that cross-analyzer read stays in stage 1 for this bounded selection.
     - Output is the same, except that the "groups by leak class" table now breaks count ties by
       class order. There are no ties on the reference dump.
-  - **Open: Event Leak.** `EventLeakGroupSnapshot.MaxSeverityScore` is a composite that is also
-    emitted as the `event.publisher-leak-group` measure `max-severity.score`, against the § 2a
-    purity rule. It's a streaming max over every scanned instance, so a rule can't recompute it
-    from bounded observations. Fixing it needs a design decision.
+  - **Event Leak — documented exception, decided 2026-09-27.**
+    `EventLeakGroupSnapshot.MaxSeverityScore`, emitted as `event.publisher-leak-group`'s
+    `max-severity.score`, stays. It is `EventLeakSeverityClassifier`'s score (the formula's sole
+    owner), applied to each publisher instance during the streaming scan and reduced to the group
+    maximum. A rule can't recompute it: that needs every instance's inputs, too many to emit, and
+    picking "the top instance" already needs the formula. Recorded on the registry entry.
   - `GCPressureLevel` is not a violation: it's the return type of the sole-owner
     `AllocationPatternPressureClassifier`, not a domain-result field. (An earlier version of this
     item called it dead code; that was wrong.)

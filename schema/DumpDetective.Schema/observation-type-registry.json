@@ -1787,7 +1787,7 @@
         "is-timer-event": { "unit": "custom", "semantics": "absolute" },
         "is-property-changed-event": { "unit": "custom", "semantics": "absolute" }
       },
-      "note": "One per TopLeakGroups entry — the full, unbounded per-group population (unlike event.publisher-leak's top-50-by-subscriber-count sample from a different list, TopPublisherEvents), and the one the instance/static aggregate findings actually read. Evidence[0].Description carries EventFieldName, which has no home among Subjects' typed EntityRef kinds (Subject alone identifies only the publisher type).",
+      "note": "One per TopLeakGroups entry — the full, unbounded per-group population (unlike event.publisher-leak's top-50-by-subscriber-count sample from a different list, TopPublisherEvents), and the one the instance/static aggregate findings actually read. Evidence[0].Description carries EventFieldName, which has no home among Subjects' typed EntityRef kinds (Subject alone identifies only the publisher type). max-severity.score is a documented exception to the raw-measures-only purity rule: it is EventLeakSeverityClassifier's score, applied per instance during the streaming scan and reduced to the group maximum, because the per-instance inputs are too many to emit. The formula has one owner; only its application is in stage 1.",
       "addedIn": "1.54.0"
     },
     "event.publisher-leak-population": {

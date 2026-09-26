@@ -78,6 +78,14 @@ synthesis, the same score sharpens automatically when a session supplies `trace.
 which is exactly the graded-fidelity premise the platform rests on. Baked stage-1 scores would
 quietly defeat it.
 
+**Known exception — streaming reductions of a scored value.** Event Leak's
+`event.publisher-leak-group` `max-severity.score` is a composite: the maximum of a per-instance
+severity score across every publisher instance in the group. The score's formula has one owner
+(`EventLeakSeverityClassifier`); it is applied during the analyzer's single streaming pass because
+recomputing a maximum later would need every instance's inputs, which are too many to emit. Accept
+this shape only when those three conditions hold: one formula owner, a reduction over an unbounded
+population, and no bounded set of raw facts that could reproduce it.
+
 ### Where the raw per-entity data lives
 
 The audit's Smell B asks whether N separately-capped `Top*` lists should collapse into one complete

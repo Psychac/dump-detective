@@ -409,6 +409,9 @@ actually starts, not before.
        `AllocationPatternTrendComparer.alloc.promotion.pressure` —
        `AllocationPatternPressureClassifier.ClassifyPressure` /
        `.ComputePromotionPressureScore`.
+     - `LeakCandidateTrendComparer.leak.candidates.top.score` —
+       `LeakCandidateClassifier.Assess`. Missed by the original step-5 write-up, found in the
+       2026-09-26 exit-criteria pass.
 
      No code changes from this step itself — the trims that made each comparer's composite branch
      the *only* one left were already done as part of step 4's Bucket A/B work; this is the explicit
@@ -527,34 +530,46 @@ Checked 2026-09-26 against the code and the 3.35 GB reference dump
       it reads the de-duplicated finding list.
     - The console insight list was in fingerprint order; it's sorted by severity again.
 - Trend reports identical, with ≤ ~5 bespoke comparers remaining and each justified in writing.
-  **Met for headline metrics only.**
-  - Step 5 lists 3 composite-score comparers as the only hand-written headline branches. There's a
-    fourth it missed: `LeakCandidateTrendComparer`'s `leak.candidates.top.score` trends the stage-1
-    `SuspicionScore` (see the Smell A item below).
-  - 22 more comparer classes survive for scoped (per-type/per-entity) metrics, which step 4
-    deliberately deferred to separate follow-up work. That is 25 classes against a target of about 5.
-- `IFindingGenerator` and `InsightEngine` no longer exist as separate concepts. **InsightEngine
-  met; `IFindingGenerator` not.**
+  **Met, with per-type trending formally deferred (decided 2026-09-26).**
+  - The criterion counts headline metrics only. Four comparers keep a hand-written headline
+    branch, each for a classifier-derived composite score (step 5): Hang, GCRoot,
+    AllocationPattern, and Leak Candidate's `leak.candidates.top.score` (added to step 5's list;
+    it now recomputes via `LeakCandidateClassifier`).
+  - The other 21 surviving comparer classes exist only for scoped (per-type/per-entity) metrics.
+    Step 4 deferred those as separate follow-up work; they are out of this criterion by decision,
+    not by omission.
+- `IFindingGenerator` and `InsightEngine` no longer exist as separate concepts. **Met.**
   - `InsightEngine` is gone. The remaining `"InsightEngine"` strings are the analyzer name that
     cross-analyzer findings report under.
-  - `IFindingGenerator` has zero implementations (it's `internal`, so plugins can't add one), but
-    its plumbing is still live and always empty: `FindingGenerationPipeline`,
-    `AnalyzerFeatureModule.FindingGeneratorType`, DI registration, and `StartupValidator`'s check.
-  - **Open:** delete that plumbing.
+  - `IFindingGenerator` and its plumbing (`FindingGenerationPipeline`,
+    `AnalyzerFeatureModule.FindingGeneratorType`, DI registration, the startup check) were
+    deleted 2026-09-26. Every analyzer now must have a synthesis rule.
 - **No section builder constructs `SectionLeadFinding` inline**, and no builder contains a
   threshold, band, or severity comparison — verifiable by grep, and worth encoding as an
-  architecture-conformance rule so it can't regress. **Lead finding met; thresholds not.**
-  - `FitnessEnforcementTests` guards `new SectionLeadFinding(` and `Severity: "` only.
-  - Judgment still in about 10 builders:
-    - LohFragmentation: 30%/15% bands and an 80% small-gap check.
-    - LockGraph: recursion and deadlock thresholds.
-    - TimerLeak: a hard-coded 50, duplicating the rule's `QueuePressureInfoThreshold`.
-    - Array and String: size and coverage cut-offs.
-    - `SectionBuilderBase.Interpret` tier banding, used by Dominator.
-    - `ConfidenceScoring` in Dominator, GCRoot, LeakCandidate and String.
+  architecture-conformance rule so it can't regress. **Lead finding met; thresholds mostly met, two items open.**
+  - Moved or removed 2026-09-26:
+    - Removed as duplicates of the rule: LohFragmentation 30%/15% text, LockGraph
+      deadlock/contention text, TimerLeak's "≥50" note.
+    - Moved into the rule's narrative: LOH "over 80% of free gaps under 1 KB" (registry 1.91.0)
+      and LockGraph "recursion count ≥ 3" (its builder key metric removed).
+  - Kept as display annotations, by decision: Array's `byte[] > 1 MB`/`> 10k` row labels and
+    pool-length check, JIT's large-method flag, and the Leak Candidate card's LOH note.
+  - Guarded by `FitnessEnforcementTests.SectionBuilders_ShouldNotDeclareThresholdsOrScoreConfidence`:
+    no named threshold constant, no `ConfidenceScoring`, no `Interpret` tiering in any builder
+    outside a named exception list that can only shrink. The test caught a fifth confidence
+    builder the audit had missed (`ConfidenceSectionBuilder`).
+  - **Open: section confidence bands** (Confidence, Dominator, GCRoot, LeakCandidate, String).
+    Deriving them from the section's findings, as planned, would lose information: their inputs
+    (capped scans, skipped reference counting, sampling coverage, heuristic-only mode) never reach
+    any observation's confidence. Moving them properly means the analyzers setting measurement
+    confidence from these flags, which runs into the whole-observation confidence problem step 7
+    found (a count finding would inherit a sampled measure's uncertainty). Needs a design call.
+  - **Open: Dominator's `Interpret` tiering** of the retained/shallow ratio for the top
+    Gen2/LOH type. It's descriptive, not severity, but still a threshold in a builder; moving it
+    needs the per-type ratio in an observation.
   - Grouping by an already-decided finding severity (ExecutiveSummary, FindingNarrative,
     Insights) is presentation, not judgment.
-  - **Open.**
+
 - No `AnalyzerDomainResult` carries a composite score, `FindingSeverity`, or classification enum
   (audit Smell A closed). **Leak Candidate fixed 2026-09-26; one item open.**
   - **Leak Candidate — done.** `LeakCandidateRecord` no longer carries

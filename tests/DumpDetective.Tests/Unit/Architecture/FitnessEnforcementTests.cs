@@ -56,6 +56,54 @@ public sealed class FitnessEnforcementTests
             "constructed or severity-classified by a builder.");
     }
 
+    // Section builders still computing their own confidence band or tiered interpretation — each a
+    // known, open exception to the Phase 5 "presentation-only" exit criterion (see
+    // docs/refactor/modularity/phase-5-observations-synthesis.md), listed so the set can only shrink.
+    private static readonly HashSet<string> KnownBuilderJudgmentFiles = new(StringComparer.Ordinal)
+    {
+        "ConfidenceSectionBuilder.cs",
+        "DominatorSectionBuilder.cs",
+        "GCRootSectionBuilder.cs",
+        "LeakCandidateSectionBuilder.cs",
+        "StringSectionBuilder.cs",
+    };
+
+    /// <summary>
+    /// A text search can't tell a severity threshold from a byte-unit loop (step 6a found ~99
+    /// numeric comparisons across the builders, nearly all display), so this bans the three shapes
+    /// judgment has actually taken in builders instead: a named threshold constant, the
+    /// <c>ConfidenceScoring</c> penalty model, and <c>Interpret</c> tier banding.
+    /// </summary>
+    [Fact]
+    public void SectionBuilders_ShouldNotDeclareThresholdsOrScoreConfidence()
+    {
+        string repoRoot = FindRepositoryRoot();
+        string sectionBuildersRoot = Path.Combine(repoRoot, "src", "DumpDetective.Reporting", "SectionBuilders");
+        var thresholdConstant = new System.Text.RegularExpressions.Regex(@"const\s+\w+\s+\w*(Threshold|Critical|Warning|Band)\w*\s*=");
+
+        var offenders = new List<string>();
+        foreach (string file in Directory.EnumerateFiles(sectionBuildersRoot, "*.cs", SearchOption.AllDirectories))
+        {
+            bool knownException = KnownBuilderJudgmentFiles.Contains(Path.GetFileName(file));
+            string[] lines = File.ReadAllLines(file);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = lines[i].Trim();
+                if (line.StartsWith("//", StringComparison.Ordinal))
+                    continue;
+
+                bool scoresConfidence = line.Contains("ConfidenceScoring.", StringComparison.Ordinal)
+                    || (line.Contains("Interpret(", StringComparison.Ordinal) && !line.Contains("protected static", StringComparison.Ordinal));
+                if (thresholdConstant.IsMatch(line) || (scoresConfidence && !knownException))
+                    offenders.Add($"{file}:{i + 1}: {line}");
+            }
+        }
+
+        offenders.Should().BeEmpty(
+            "thresholds, confidence penalties and tier banding belong in synthesis rules or " +
+            "analyzers; section builders only shape already-decided findings and measures.");
+    }
+
     [Fact]
     public void HotspotGuardrailTests_ShouldExistForCriticalPaths()
     {

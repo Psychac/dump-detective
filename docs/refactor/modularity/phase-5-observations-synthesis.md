@@ -469,7 +469,17 @@ actually starts, not before.
      - **Intended output change:** a finding whose lineage includes an observation with confidence
        below 1.0, or one from a degraded analyzer run, now reports that lower confidence instead of
        the severity default. Fully confident dump-only lineage is unchanged.
-     - Not yet measured on the reference dump.
+     - **Measured 2026-09-26** on the 3.35 GB reference dump
+       (`FindingConfidenceRealDumpTests`, opt-in). 36 analyzers ran with 0 failures, emitting
+       97,408 observations: 3 degraded, 14,095 below confidence 1.0.
+       - **3 of 83 findings moved**, all from Finalizable Object Analysis, all Critical, all
+         0.9 → 0.7. In each case some finalizer-queue entries had no exact dominator-retained size,
+         so the analyzer marks the whole observation 0.7.
+       - `queue-retained-bytes` (a claim about retained bytes): the drop is correct.
+       - `critical-finalizer-accumulation` (a count claim) and `queue-backlog` (a count claim that
+         also cites retained bytes): the drop is mostly spurious. Observation confidence covers the
+         whole observation, so an exact count inherits the retained-bytes estimate's uncertainty.
+         The analyzer's own comment on `finalizer.queue-population` already notes this convention.
      - **Still open: conflict penalty** — fixed at 1.0 until a rule detects contradicting
        observations.
 

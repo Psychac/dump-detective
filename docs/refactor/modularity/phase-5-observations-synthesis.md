@@ -448,6 +448,30 @@ actually starts, not before.
    [observation-and-correlation-model.md § 4](observation-and-correlation-model.md) — identity
    fidelity, temporal alignment, capability fidelity. In a dump-only session most caps are 1.0, but
    building them now means Phase 7 turns them on rather than inventing them.
+   **Done, 2026-09-26**, in two commits:
+   - **Parity first — fixed a live regression.** Step 2 left every rule at
+     `ConfidenceBreakdown.MeasurementCertain`, and `FindingSynthesisAdapter` passed its 1.0 straight
+     through, so every finding reached the report at confidence 1.0. Before the phase, most
+     generators left the score unset (`InsightFinding`'s severity default: 0.9/0.7/0.5), and five
+     computed one from evidence. That had silently changed `ExplainableScoringEngine`'s weighting,
+     `ActionPriorityService`'s base confidence, and `CorrelationBuilder`'s 0.6 filter.
+     - The adapter now passes `null` for an unlimited breakdown, which restores the severity default.
+     - Timer/StaticRoot/Dominator/EventLeak: the population observations carry the top entity's raw
+       root-path facts; `RootPathEvidenceStrength` reproduces the retired `EvidenceConfidence`.
+     - Crash: `runtime.crash-thread-candidate` carries the stack-trace inference tier, which restores
+       the weighted confidence and the tier caveats.
+     - Pinned to the retired formulas by `FindingConfidenceParityTests`. Registry 1.89.0.
+   - **Then the calculation.** `ConfidenceCalculator` (SDK) implements the § 4 scoring.
+     `SynthesisEngine` applies it to every finding from its `DerivedFrom` lineage, so rules only
+     state how well their own evidence supports the claim. What the calculation does is recorded in
+     [observation-and-correlation-model.md § 4](observation-and-correlation-model.md) ("As
+     implemented").
+     - **Intended output change:** a finding whose lineage includes an observation with confidence
+       below 1.0, or one from a degraded analyzer run, now reports that lower confidence instead of
+       the severity default. Fully confident dump-only lineage is unchanged.
+     - Not yet measured on the reference dump.
+     - **Still open: conflict penalty** — fixed at 1.0 until a rule detects contradicting
+       observations.
 
 ## Exit criteria
 

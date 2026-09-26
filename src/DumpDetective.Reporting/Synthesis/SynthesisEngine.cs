@@ -36,8 +36,11 @@ internal sealed class SynthesisEngine
         CancellationToken cancellationToken = default)
     {
         Dictionary<string, List<Observation>> byType = new(StringComparer.Ordinal);
+        Dictionary<ObservationId, Observation> byId = new(observations.Count);
         foreach (Observation observation in observations)
         {
+            byId[observation.Id] = observation;
+
             if (!byType.TryGetValue(observation.ObservationType, out List<Observation>? bucket))
             {
                 bucket = [];
@@ -66,7 +69,8 @@ internal sealed class SynthesisEngine
             {
                 IReadOnlyList<Finding> ruleFindings = await rule.SynthesizeAsync(
                     new ObservationMatchSet(matched), context, cancellationToken);
-                findings.AddRange(ruleFindings);
+                foreach (Finding finding in ruleFindings)
+                    findings.Add(WithLineageConfidence(finding, byId));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -76,6 +80,20 @@ internal sealed class SynthesisEngine
 
         findings.Sort((a, b) => string.CompareOrdinal(a.Fingerprint, b.Fingerprint));
         return findings;
+    }
+
+    // A rule judges how well its evidence supports its claim; the engine adds what the observations
+    // underneath can vouch for, so no rule has to re-derive measurement caps from its own lineage.
+    private static Finding WithLineageConfidence(Finding finding, Dictionary<ObservationId, Observation> byId)
+    {
+        var lineage = new List<Observation>(finding.DerivedFrom.Count);
+        foreach (ObservationId id in finding.DerivedFrom)
+        {
+            if (byId.TryGetValue(id, out Observation? observation))
+                lineage.Add(observation);
+        }
+
+        return finding with { Confidence = ConfidenceCalculator.Apply(finding.Confidence, lineage) };
     }
 
     private static List<Observation> CollectMatches(

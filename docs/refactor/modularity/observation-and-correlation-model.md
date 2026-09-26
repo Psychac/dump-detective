@@ -230,6 +230,30 @@ public sealed record ConfidenceBreakdown(
 Surfacing `LimitingFactors` in the report is what keeps the tool honest — a user who sees
 "confidence 0.4, limited by: artifacts not time-aligned" can go fix the input and re-run.
 
+**As implemented** (`src/DumpDetective.Sdk/Synthesis/ConfidenceCalculator.cs`, Phase 5 step 7).
+`SynthesisEngine` applies it to every finding, taking the rule's own breakdown (its evidence-support
+judgment, e.g. `RootPathEvidenceStrength`) plus the observations in `DerivedFrom`:
+
+- **Evidence strength**: the rule's strength × noisy-OR over distinct (artifact, analyzer) sources.
+  Within one source, its weakest full-fidelity observation confidence counts.
+- **Capability fidelity**: the weakest confidence among observations from a degraded run. It's kept
+  out of evidence strength: those observations' confidence already encodes the degradation, and
+  counting it in both places would penalize it twice.
+- **Identity and temporal caps**: applied only when the lineage spans more than one artifact. Within
+  one artifact every join uses the same runtime's names at one instant, so `Low` lambda fidelity or
+  `Unknown` dump anchors don't cap a dump-only finding.
+  - Constants: identity `Exact` 1.0 / `High` 0.9 / `Medium` 0.7 / `Low` 0.4 / `None` 0.0; anchor
+    `Exact` 1.0 / `Approximate` 0.7 / `Unknown` 0.4.
+  - The temporal cap applies to every cross-artifact finding, not only ones making an explicit
+    temporal claim: correlating two artifacts already assumes they describe the same window.
+- **Conflict penalty**: passed through from the rule (1.0 today). No rule detects conflict yet.
+- **Composite**: rule composite × corroborated measurement × capability fidelity, capped by
+  min(identity cap, temporal cap).
+- **Report mapping**: an unlimited composite (1.0) reaches the report as "no measured value", so
+  `InsightFinding`'s severity-based default still applies.
+- Constants are code, not config. Neither they nor `ScoringModelVersion` coverage (§ 6) exist in
+  config yet.
+
 ---
 
 ## 5. Trend falls out for free

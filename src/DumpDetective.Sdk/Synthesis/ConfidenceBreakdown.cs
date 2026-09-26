@@ -23,10 +23,9 @@ public sealed record ConfidenceBreakdown
     public IReadOnlyList<string> LimitingFactors { get; init; } = [];
 
     /// <summary>
-    /// Every cap and factor at its ceiling — a dump-only session's default until Phase 7 actually
-    /// wires cross-artifact caps in. Removes the 30-rule copy-paste-the-same-1.0-object boilerplate
-    /// this record would otherwise force on every Phase 5 step-2 synthesis rule; see
-    /// docs/refactor/modularity/phase-5-observations-synthesis.md's "Before step 2" prerequisites.
+    /// Every cap and factor at its ceiling — what a rule returns when nothing about its own evidence
+    /// limits the claim. The observation lineage's measured limits are folded in afterwards by
+    /// <see cref="ConfidenceCalculator"/>, so a rule never re-derives them itself.
     /// </summary>
     public static ConfidenceBreakdown MeasurementCertain { get; } = new()
     {

@@ -256,6 +256,7 @@ public sealed class DominatorAnalyzer :
                     ["retained.bytes"] = new Measure(retainedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                     ["estimated-retained.bytes"] = new Measure(snapshot.EstimatedRetainedBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                     ["gen2.count"] = new Measure(snapshot.Gen2Count, MeasureUnit.Count, MeasureSemantics.Absolute),
+                    ["loh.bytes"] = new Measure(snapshot.LohBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
                 },
                 Provenance = new Provenance
                 {

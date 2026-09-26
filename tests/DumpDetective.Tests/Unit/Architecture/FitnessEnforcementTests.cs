@@ -56,7 +56,7 @@ public sealed class FitnessEnforcementTests
             "constructed or severity-classified by a builder.");
     }
 
-    // Section builders still computing their own confidence band or tiered interpretation — each a
+    // Section builders still computing their own confidence band — each a
     // known, open exception to the Phase 5 "presentation-only" exit criterion (see
     // docs/refactor/modularity/phase-5-observations-synthesis.md), listed so the set can only shrink.
     private static readonly HashSet<string> KnownBuilderJudgmentFiles = new(StringComparer.Ordinal)
@@ -72,7 +72,8 @@ public sealed class FitnessEnforcementTests
     /// A text search can't tell a severity threshold from a byte-unit loop (step 6a found ~99
     /// numeric comparisons across the builders, nearly all display), so this bans the three shapes
     /// judgment has actually taken in builders instead: a named threshold constant, the
-    /// <c>ConfidenceScoring</c> penalty model, and <c>Interpret</c> tier banding.
+    /// <c>ConfidenceScoring</c> penalty model, and <c>Interpret</c> tier banding (the helper was
+    /// deleted once its last caller moved into a rule; the check stops it coming back).
     /// </summary>
     [Fact]
     public void SectionBuilders_ShouldNotDeclareThresholdsOrScoreConfidence()
@@ -93,7 +94,7 @@ public sealed class FitnessEnforcementTests
                     continue;
 
                 bool scoresConfidence = line.Contains("ConfidenceScoring.", StringComparison.Ordinal)
-                    || (line.Contains("Interpret(", StringComparison.Ordinal) && !line.Contains("protected static", StringComparison.Ordinal));
+                    || line.Contains("Interpret(", StringComparison.Ordinal);
                 if (thresholdConstant.IsMatch(line) || (scoresConfidence && !knownException))
                     offenders.Add($"{file}:{i + 1}: {line}");
             }

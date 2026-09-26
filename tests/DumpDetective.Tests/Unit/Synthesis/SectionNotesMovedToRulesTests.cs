@@ -78,6 +78,46 @@ public sealed class SectionNotesMovedToRulesTests
         findings.Should().ContainSingle().Which.Narrative.Should().NotContain("recursion count");
     }
 
+    [Theory]
+    [InlineData(3_000UL, "≫", "holds a large external graph", "3.00x")]
+    [InlineData(1_200UL, ">", "holds some external references", "1.20x")]
+    [InlineData(1_000UL, "≈", "largely self-contained", "1.00x")]
+    public async Task DominatorRule_DescribesTopLongLivedTypeRetentionShape(ulong retainedBytes, string relation, string shape, string ratio)
+    {
+        IReadOnlyList<Finding> findings = await new DominatorSynthesisRule().SynthesizeAsync(
+            new ObservationMatchSet([
+                MakeRetention("App.Gen0Heavy", gen2: 0, lohBytes: 0, shallow: 1_000, retained: 50_000),
+                MakeRetention("App.LongLivedA", gen2: 10, lohBytes: 0, shallow: 1_000, retained: 1_000),
+                MakeRetention("App.LongLivedB", gen2: 10, lohBytes: 500, shallow: 1_000, retained: retainedBytes),
+            ]),
+            new SynthesisContext());
+
+        findings.Single(f => f.Fingerprint.EndsWith("top-dominator-type", StringComparison.Ordinal)).Narrative
+            .Should().EndWith($"Top long-lived (Gen2/LOH) type App.LongLivedB: retained {relation} shallow ({ratio}) — {shape}.");
+    }
+
+    [Fact]
+    public async Task DominatorRule_NoRetentionShapeSentence_WithoutAnyGen2OrLohType()
+    {
+        IReadOnlyList<Finding> findings = await new DominatorSynthesisRule().SynthesizeAsync(
+            new ObservationMatchSet([MakeRetention("App.Gen0Heavy", gen2: 0, lohBytes: 0, shallow: 1_000, retained: 50_000)]),
+            new SynthesisContext());
+
+        findings.Single(f => f.Fingerprint.EndsWith("top-dominator-type", StringComparison.Ordinal)).Narrative
+            .Should().NotContain("Top long-lived");
+    }
+
+    private static Observation MakeRetention(string typeName, long gen2, ulong lohBytes, ulong shallow, ulong retained) =>
+        MakeObservation("type.retention", "Dominator Analysis", new()
+        {
+            ["instance.count"] = Count(10),
+            ["shallow.bytes"] = new Measure(shallow, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+            ["retained.bytes"] = new Measure(retained, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+            ["estimated-retained.bytes"] = new Measure(retained, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+            ["gen2.count"] = Count(gen2),
+            ["loh.bytes"] = new Measure(lohBytes, MeasureUnit.Bytes, MeasureSemantics.Absolute),
+        }, [new TypeRef { CanonicalName = typeName, Fidelity = MatchFidelity.Exact }]);
+
     private static Observation MakeContestedLock(int recursionCount) => MakeObservation(
         "lock.contested",
         "Lock Graph Analysis",
@@ -85,11 +125,12 @@ public sealed class SectionNotesMovedToRulesTests
 
     private static Measure Count(double value) => new(value, MeasureUnit.Count, MeasureSemantics.Absolute);
 
-    private static Observation MakeObservation(string observationType, string analyzerKey, Dictionary<string, Measure> measures) => new()
+    private static Observation MakeObservation(
+        string observationType, string analyzerKey, Dictionary<string, Measure> measures, IReadOnlyList<EntityRef>? subjects = null) => new()
     {
         Id = ObservationId.NewId(),
         ObservationType = observationType,
-        Subjects = [],
+        Subjects = subjects ?? [],
         When = new TemporalExtent { Kind = TemporalKind.Point, Start = new TimeAnchor { Confidence = AnchorConfidence.Unknown } },
         Measures = measures,
         Provenance = new Provenance

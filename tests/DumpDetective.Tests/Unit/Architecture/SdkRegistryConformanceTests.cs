@@ -200,7 +200,7 @@ public sealed class SdkRegistryConformanceTests
             ["reference-chain.type-sample"] = ["instance.count", "sample.count", "retained-sample.count", "dominant-root-kind.count"],
             ["reference-chain.population"] = ["analyzed.count", "retained.count", "retained.percent", "traversal-limited.count"],
             ["reference-chain.shared-root-group"] = ["type.count"],
-            ["type.retention"] = ["instance.count", "shallow.bytes", "retained.bytes", "estimated-retained.bytes", "gen2.count"],
+            ["type.retention"] = ["instance.count", "shallow.bytes", "retained.bytes", "estimated-retained.bytes", "gen2.count", "loh.bytes"],
             ["type.retention-population"] = [
                 "highly-referenced.count", "highly-referenced.bytes", "approximated-reference-addresses.count",
                 "candidate.count", "analyzed.count", "retained.bytes", "pressure.ratio",

@@ -564,9 +564,11 @@ Checked 2026-09-26 against the code and the 3.35 GB reference dump
     any observation's confidence. Moving them properly means the analyzers setting measurement
     confidence from these flags, which runs into the whole-observation confidence problem step 7
     found (a count finding would inherit a sampled measure's uncertainty). Needs a design call.
-  - **Open: Dominator's `Interpret` tiering** of the retained/shallow ratio for the top
-    Gen2/LOH type. It's descriptive, not severity, but still a threshold in a builder; moving it
-    needs the per-type ratio in an observation.
+  - **Dominator's retained-vs-shallow sentence — done 2026-09-27.** It moved from the builder's
+    `Interpret` tiering into `DominatorSynthesisRule`'s top-dominator narrative, same 3.0×/1.2×
+    cut-offs and wording. `type.retention` gained `loh.bytes` so the rule picks the same type the
+    section table leads with (registry 1.92.0). `SectionBuilderBase.Interpret` was deleted with its
+    last caller.
   - Grouping by an already-decided finding severity (ExecutiveSummary, FindingNarrative,
     Insights) is presentation, not judgment.
 

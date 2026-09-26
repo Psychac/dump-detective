@@ -101,22 +101,6 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
                 if (anyExact)
                     blocks.Add(T("Gen2/LOH retained bytes below are exact (Lengauer-Tarjan dominator tree) for this run."));
 
-                // Audit P2 (docs/refactor/narrative-interpretation-text-design.md, first adopter):
-                // interprets the top-ranked candidate's retained/shallow ratio rather than every
-                // row — gen2LohTypes is already sorted by Gen2Count/LohBytes descending, so the
-                // first entry is the sub-table's most notable row, and naming it keeps the blurb
-                // unambiguous about which row it describes despite the table having many.
-                TypeSnapshot topGen2LohType = gen2LohTypes[0];
-                ulong topGen2LohRetained = d.ExactRetainedBytesByTypeName is { } topExact && topExact.TryGetValue(topGen2LohType.TypeName, out ulong topExactRetained)
-                    ? topExactRetained
-                    : topGen2LohType.EstimatedRetainedBytes;
-                string topGen2LohRatioText = FormatRatio(topGen2LohRetained, topGen2LohType.TotalBytes);
-                InterpretationBlock? ratioInterpretation = Interpret(RatioValue(topGen2LohRetained, topGen2LohType.TotalBytes),
-                    (3.0, $"{topGen2LohType.TypeName}: retained ≫ shallow ({topGen2LohRatioText}) — holds a large external graph."),
-                    (1.2, $"{topGen2LohType.TypeName}: retained > shallow ({topGen2LohRatioText}) — holds some external references."),
-                    (0.0, $"{topGen2LohType.TypeName}: retained ≈ shallow ({topGen2LohRatioText}) — largely self-contained."));
-                if (ratioInterpretation is not null)
-                    blocks.Add(ratioInterpretation);
 
                 compactTables.Add(STCompact(
                     "Gen2 / LOH dominator suspects",
@@ -307,9 +291,6 @@ internal sealed class DominatorSectionBuilder : SectionBuilderBase, IAnalyzerSec
             CompactTables: compactTables.Count > 0 ? compactTables : null,
             TreeWidgets: treeWidgets.Count > 0 ? treeWidgets : null);
     }
-
-    private static new string FormatRatio(ulong retained, ulong shallow)
-        => shallow == 0 ? "—" : $"{(double)retained / shallow:F2}x";
 
     private static new double RatioValue(ulong retained, ulong shallow)
         => shallow == 0 ? 0.0 : (double)retained / shallow;

@@ -40,6 +40,8 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
     private const long TypeHotspotWarningThreshold = 1_000;
     private const long TypeHotspotCriticalThreshold = 10_000;
 
+    private const double LargeExternalGraphRatio = 3.0;
+    private const double SomeExternalReferencesRatio = 1.2;
     private const string AnalyzerName = "Dominator Analysis";
 
     public string RuleId => "dominator.finding-parity";
@@ -57,12 +59,15 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
         Observation? population = null;
         Observation? topHotspot = null;
 
+        Observation? topLongLived = null;
         foreach (Observation observation in matched.Matched)
         {
             switch (observation.ObservationType)
             {
                 case "type.retention":
                     topRetention ??= observation;
+                    if (IsMoreLongLived(observation, topLongLived))
+                        topLongLived = observation;
                     break;
                 case "type.retention-population":
                     population = observation;
@@ -98,7 +103,8 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
                 Category = "Memory",
                 Severity = severity,
                 Title = $"Dominant retention suspect: {typeName}",
-                Narrative = $"{typeName} estimates {FormatHelper.FormatBytes(estimatedRetainedBytes)} retained across {instanceCount:N0} instances.",
+                Narrative = $"{typeName} estimates {FormatHelper.FormatBytes(estimatedRetainedBytes)} retained across {instanceCount:N0} instances."
+                    + DescribeRetentionShape(topLongLived),
                 Recommendation = "Use the retention section and root paths to confirm why this type remains live.",
                 Tags = ["dominator", "retained-bytes", typeName],
                 MetricValue = estimatedRetainedBytes,
@@ -190,6 +196,41 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
         }
 
         return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+    }
+
+    // The Gen2/LOH type the section's long-lived table leads with: most Gen2 instances, then most
+    // LOH bytes; ties keep emission order (TopDominatorTypes order).
+    private static bool IsMoreLongLived(Observation candidate, Observation? current)
+    {
+        double gen2 = candidate.Measures["gen2.count"].Value;
+        double loh = candidate.Measures["loh.bytes"].Value;
+        if (gen2 <= 0 && loh <= 0)
+            return false;
+        if (current is null)
+            return true;
+
+        double currentGen2 = current.Measures["gen2.count"].Value;
+        return gen2 > currentGen2 || (gen2 == currentGen2 && loh > current.Measures["loh.bytes"].Value);
+    }
+
+    // Whether the top long-lived type mostly holds other objects alive or mostly is its own bytes.
+    private static string DescribeRetentionShape(Observation? topLongLived)
+    {
+        if (topLongLived is null)
+            return string.Empty;
+
+        string typeName = ((TypeRef)topLongLived.Subjects[0]).CanonicalName;
+        ulong retained = (ulong)topLongLived.Measures["retained.bytes"].Value;
+        ulong shallow = (ulong)topLongLived.Measures["shallow.bytes"].Value;
+        double ratio = shallow == 0 ? 0.0 : (double)retained / shallow;
+        string ratioText = shallow == 0 ? "—" : $"{ratio:F2}x";
+
+        string shape = ratio >= LargeExternalGraphRatio
+            ? $"retained ≫ shallow ({ratioText}) — holds a large external graph."
+            : ratio >= SomeExternalReferencesRatio
+                ? $"retained > shallow ({ratioText}) — holds some external references."
+                : $"retained ≈ shallow ({ratioText}) — largely self-contained.";
+        return $" Top long-lived (Gen2/LOH) type {typeName}: {shape}";
     }
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();

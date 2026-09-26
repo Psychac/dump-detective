@@ -78,48 +78,14 @@ public sealed class DominatorSectionBuilderTests
         table.Rows.Single().Values[retainedColumn].Should().Be(5_000UL);
     }
 
+    // The retained-vs-shallow sentence is the rule's now (DominatorSynthesisRule; see
+    // SectionNotesMovedToRulesTests) — the section only renders the table.
     [Fact]
-    public void Build_TopGen2LohCandidate_RendersRetainedShallowInterpretation()
+    public void Build_TopGen2LohCandidate_LeavesRetentionShapeToTheRule()
     {
-        // Default candidate: EstimatedRetainedBytes 1_000, TotalBytes 500 -> ratio 2.0, the
-        // "medium" (retained > shallow) tier.
-        DominatorDomainResult result = BuildResult(exactByType: null);
+        AnalyzerDetailSection section = new DominatorSectionBuilder().Build(BuildResult(exactByType: null));
 
-        AnalyzerDetailSection section = new DominatorSectionBuilder().Build(result);
-
-        InterpretationBlock interpretation = section.Blocks.OfType<InterpretationBlock>().Single();
-        interpretation.Text.Should().Contain("App.LeakyType");
-        interpretation.Text.Should().Contain("retained > shallow");
-    }
-
-    [Fact]
-    public void Build_TopGen2LohCandidate_SelfContainedRatio_RendersLowestTier()
-    {
-        var topTypes = new[]
-        {
-            new TypeSnapshot(TypeName: "App.SelfContained", Count: 1, TotalBytes: 1_000, LohBytes: 0, EstimatedRetainedBytes: 1_050, SampleAddress: 0x1, Gen2Count: 1),
-        };
-        DominatorDomainResult result = BuildResult(exactByType: null, topDominatorTypes: topTypes);
-
-        AnalyzerDetailSection section = new DominatorSectionBuilder().Build(result);
-
-        InterpretationBlock interpretation = section.Blocks.OfType<InterpretationBlock>().Single();
-        interpretation.Text.Should().Contain("retained ≈ shallow");
-    }
-
-    [Fact]
-    public void Build_TopGen2LohCandidate_LargeExternalGraphRatio_RendersHighestTier()
-    {
-        var topTypes = new[]
-        {
-            new TypeSnapshot(TypeName: "App.BigHolder", Count: 1, TotalBytes: 100, LohBytes: 0, EstimatedRetainedBytes: 1_000_000, SampleAddress: 0x1, Gen2Count: 1),
-        };
-        DominatorDomainResult result = BuildResult(exactByType: null, topDominatorTypes: topTypes);
-
-        AnalyzerDetailSection section = new DominatorSectionBuilder().Build(result);
-
-        InterpretationBlock interpretation = section.Blocks.OfType<InterpretationBlock>().Single();
-        interpretation.Text.Should().Contain("retained ≫ shallow");
+        section.Blocks.OfType<InterpretationBlock>().Should().BeEmpty();
     }
 
     [Fact]

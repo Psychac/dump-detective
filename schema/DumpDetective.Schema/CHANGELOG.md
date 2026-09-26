@@ -15,6 +15,13 @@ exist. See `phase-1-contracts-sdk.md`'s Status section for the standing reason.
 `index-container-format.md` is documentation, not a versioned wire contract, so it isn't tracked
 here — see its own "Known gap" section for its relationship to `docs/binary-format.md`.
 
+## `observation-type-registry.json` 1.92.0 — 2026-09-27
+
+Phase 5 exit criterion (section builders presentation-only): `type.retention` gains `loh.bytes`.
+`DominatorSynthesisRule` uses it with `gen2.count` to pick the top long-lived type, and now
+describes that type's retained-vs-shallow shape in its top-dominator finding. That sentence used to
+be computed by `DominatorSectionBuilder` with `Interpret`.
+
 ## `observation-type-registry.json` 1.91.0 — 2026-09-26
 
 Phase 5 exit criterion (section builders presentation-only): `heap.loh-fragmentation-summary`

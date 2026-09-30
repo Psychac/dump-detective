@@ -546,7 +546,7 @@ Checked 2026-09-26 against the code and the 3.35 GB reference dump
     deleted 2026-09-26. Every analyzer now must have a synthesis rule.
 - **No section builder constructs `SectionLeadFinding` inline**, and no builder contains a
   threshold, band, or severity comparison — verifiable by grep, and worth encoding as an
-  architecture-conformance rule so it can't regress. **Lead finding met; thresholds mostly met, two items open.**
+  architecture-conformance rule so it can't regress. **Met.** Remaining builder thresholds are the decided display annotations below.
   - Moved or removed 2026-09-26:
     - Removed as duplicates of the rule: LohFragmentation 30%/15% text, LockGraph
       deadlock/contention text, TimerLeak's "≥50" note.
@@ -594,7 +594,7 @@ Checked 2026-09-26 against the code and the 3.35 GB reference dump
     Insights) is presentation, not judgment.
 
 - No `AnalyzerDomainResult` carries a composite score, `FindingSeverity`, or classification enum
-  (audit Smell A closed). **Leak Candidate fixed 2026-09-26; one item open.**
+  (audit Smell A closed). **Met, with one documented exception (Event Leak).**
   - **Leak Candidate — done.** `LeakCandidateRecord` no longer carries
     `SuspicionScore`/`Severity`/`Classification`/`RootKind`, and the domain result no longer carries
     `CandidatesByClass`. They now carry only raw inputs (`IsPinned`, `IsDependent`,

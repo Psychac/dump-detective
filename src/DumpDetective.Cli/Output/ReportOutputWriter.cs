@@ -4,12 +4,36 @@ using DumpDetective.Reporting.Models;
 using DumpDetective.Cli.Models;
 using DumpDetective.Cli.Diagnostics;
 
+using System.IO.Compression;
+using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace DumpDetective.Cli.Output;
 
 internal sealed class ReportOutputWriter
 {
+    internal static readonly Regex EmbeddedReportJsonPattern = new(
+        "<script\\b([^>]*\\bid\\s*=\\s*(['\"])report-json\\2[^>]*)>([\\s\\S]*?)</script>",
+        RegexOptions.IgnoreCase);
+
+    private static readonly Regex GzipBase64EncodingAttribute = new(
+        "\\bdata-encoding\\s*=\\s*(['\"])gzip-base64\\1",
+        RegexOptions.IgnoreCase);
+
+    internal static string DecodeEmbeddedReportJson(Match embeddedReportJson)
+    {
+        string scriptAttributes = embeddedReportJson.Groups[1].Value;
+        string body = embeddedReportJson.Groups[3].Value;
+        if (!GzipBase64EncodingAttribute.IsMatch(scriptAttributes))
+            return body;
+
+        using var compressed = new MemoryStream(Convert.FromBase64String(body.Trim()));
+        using var gzip = new GZipStream(compressed, CompressionMode.Decompress);
+        using var reader = new StreamReader(gzip, Encoding.UTF8);
+        return reader.ReadToEnd();
+    }
+
     public async Task WriteAsync(
         ResolvedExecutionOptions resolved,
         AnalysisReportDocument? document,
@@ -28,9 +52,8 @@ internal sealed class ReportOutputWriter
             if (resolved.Report.SeparateJson && resolved.Report.Format == Core.Configuration.ReportFormat.Html)
             {
                 string html = renderedReport ?? string.Empty;
-                string pattern = "<script[^>]*\\bid\\s*=\\s*(['\"]) (report-json)\\1[^>]*>([\\s\\S]*?)</script>";
-                var match = System.Text.RegularExpressions.Regex.Match(html, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                string json = match.Success ? match.Groups[3].Value : string.Empty;
+                var match = EmbeddedReportJsonPattern.Match(html);
+                string json = match.Success ? DecodeEmbeddedReportJson(match) : string.Empty;
                 string outDir = Path.GetDirectoryName(outPath) ?? Directory.GetCurrentDirectory();
                 string jsonPath = Path.Combine(outDir, Path.GetFileNameWithoutExtension(outPath) + ".json");
                 if (!string.IsNullOrWhiteSpace(json))

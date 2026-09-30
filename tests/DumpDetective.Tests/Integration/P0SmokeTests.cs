@@ -1,6 +1,9 @@
+using System.IO.Compression;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
+using DumpDetective.Cli.Output;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
@@ -120,11 +123,10 @@ public sealed class P0SmokeTests
         const string fakeJson = """{"schemaVersion":"2.1","dumpPath":"test.dmp"}""";
         string html = $"""<html><body><script id="report-json" type="application/json">{fakeJson}</script></body></html>""";
 
-        var pattern = @"<script\b[^>]*\bid\s*=\s*(['""])(report-json)\1[^>]*>([\s\S]*?)</script>";
-        Match m = Regex.Match(html, pattern, RegexOptions.IgnoreCase);
+        Match m = ReportOutputWriter.EmbeddedReportJsonPattern.Match(html);
 
         m.Success.Should().BeTrue();
-        m.Groups[3].Value.Should().Be(fakeJson);
+        ReportOutputWriter.DecodeEmbeddedReportJson(m).Should().Be(fakeJson);
     }
 
     [Fact]
@@ -134,11 +136,29 @@ public sealed class P0SmokeTests
         const string fakeJson = """{"schemaVersion":"2.1"}""";
         string html = $"""<script type="application/json" id="report-json">{fakeJson}</script>""";
 
-        var pattern = @"<script\b[^>]*\bid\s*=\s*(['""])(report-json)\1[^>]*>([\s\S]*?)</script>";
-        Match m = Regex.Match(html, pattern, RegexOptions.IgnoreCase);
+        Match m = ReportOutputWriter.EmbeddedReportJsonPattern.Match(html);
 
         m.Success.Should().BeTrue();
-        m.Groups[3].Value.Should().Be(fakeJson);
+        ReportOutputWriter.DecodeEmbeddedReportJson(m).Should().Be(fakeJson);
+    }
+
+    [Fact]
+    public void P0_1_SeparateJsonRegex_DecodesGzipBase64Payload()
+    {
+        const string fakeJson = """{"report":{"schemaVersion":"2.1"},"perDumpDocs":[]}""";
+        string encoded;
+        using (var buffer = new MemoryStream())
+        {
+            using (var gzip = new GZipStream(buffer, CompressionLevel.Optimal, leaveOpen: true))
+                gzip.Write(Encoding.UTF8.GetBytes(fakeJson));
+            encoded = Convert.ToBase64String(buffer.ToArray());
+        }
+        string html = $"""<script id="report-json" type="application/json" data-encoding="gzip-base64">{encoded}</script>""";
+
+        Match m = ReportOutputWriter.EmbeddedReportJsonPattern.Match(html);
+
+        m.Success.Should().BeTrue();
+        ReportOutputWriter.DecodeEmbeddedReportJson(m).Should().Be(fakeJson);
     }
 
     // ── P0.3: Appendix populated and round-trips ───────────────────────────

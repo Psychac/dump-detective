@@ -5,12 +5,6 @@ add one when something is found but deliberately left for later.
 
 ## Open bugs
 
-- **`--separate-json` never writes `report.json`.** Found 2026-09-26.
-  - Cause: `ReportOutputWriter`'s pattern for the embedded `<script id="report-json">` has a stray
-    space — `(['"]) (report-json)` — so it never matches, and the writer falls back to writing the
-    HTML alone.
-  - Fix: remove the space. Until then, the report JSON can be read from the HTML: it's the
-    gzip-base64 content of `<script id="report-json" data-encoding="gzip-base64">`.
 - **JIT hotspot insight can point at a framework module.** Found 2026-09-26.
   - `JitModuleHotspotInsightRule`'s first hit on the reference dump was `mscorlib.dll` — correct by
     the rule's definition, but not actionable.

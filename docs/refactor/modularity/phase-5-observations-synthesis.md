@@ -580,6 +580,11 @@ Checked 2026-09-26 against the code and the 3.35 GB reference dump
       Badges appeared on Event Leak, Finalizable, Timer and Weak Reference, and went away on String
       and GC Root, where nothing was limited. The Dominator badge dropped to Low: one finding had
       no resolved root path. One health score went 92 → 93; top actions unchanged.
+    - Derived badges read "Lowest finding confidence: <band>" (2026-09-30), so a section with
+      one weak finding doesn't read as untrustworthy overall. Builder-stated badges (Crash,
+      LockGraph) keep "<band> confidence". The lowest-finding rule was kept over "use the lead
+      finding" by decision: on the reference dump the lead rule would have hidden Dominator's
+      unresolved-root-path Critical finding and Finalizable's estimated retained sizes.
   - **Dominator's retained-vs-shallow sentence — done 2026-09-27.** It moved from the builder's
     `Interpret` tiering into `DominatorSynthesisRule`'s top-dominator narrative, same 3.0×/1.2×
     cut-offs and wording. `type.retention` gained `loh.bytes` so the rule picks the same type the

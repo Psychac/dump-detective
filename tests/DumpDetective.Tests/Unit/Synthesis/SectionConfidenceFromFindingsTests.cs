@@ -69,6 +69,8 @@ public sealed class SectionConfidenceFromFindingsTests
         ConfidenceBandBlock band = sections[0].Blocks.OfType<ConfidenceBandBlock>().Should().ContainSingle().Subject;
         band.Score.Should().Be(0.65);
         band.Caveats.Should().Equal("Sampling coverage is below 5% (1.0%).", "Sampling coverage is 20.0%.");
+        band.IsLowestFindingConfidence.Should().BeTrue();
+        band.Label.Should().Be("Lowest finding confidence: Med-High");
     }
 
     [Fact]
@@ -90,6 +92,7 @@ public sealed class SectionConfidenceFromFindingsTests
         ReportSectionAssembler.NormalizeSectionContractSlots(sections, [MakeRun([MakeFinding("Limited", 0.5, ["x"])])]);
 
         sections[0].Blocks.OfType<ConfidenceBandBlock>().Should().ContainSingle().Which.Should().BeSameAs(builderBadge);
+        builderBadge.Label.Should().Be("High confidence");
     }
 
     [Fact]

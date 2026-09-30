@@ -131,7 +131,7 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
                     sb.AppendLine();
                     break;
                 case ConfidenceBandBlock band:
-                    sb.AppendLine($"{Indent(0)}> {band.Symbol} {band.Band} confidence{(band.Caveats.Length > 0 ? $" — {string.Join("; ", band.Caveats)}" : string.Empty)}");
+                    sb.AppendLine($"{Indent(0)}> {band.Symbol} {band.Label}{(band.Caveats.Length > 0 ? $" — {string.Join("; ", band.Caveats)}" : string.Empty)}");
                     sb.AppendLine();
                     break;
                 case InterpretationBlock interp:

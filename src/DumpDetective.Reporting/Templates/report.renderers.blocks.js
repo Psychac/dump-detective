@@ -139,7 +139,7 @@ export function renderBlocks(blocks, container, announce) {
       case 'confidenceBand': {
         const d = el('div', 'confidence-band confidence-band--' + (block.band || 'medium').toLowerCase().replace('-', ''));
         const sym = el('span', 'confidence-band__symbol'); sym.textContent = block.symbol || '';
-        const lbl = el('span', 'confidence-band__band'); lbl.textContent = block.band || '';
+        const lbl = el('span', 'confidence-band__band'); lbl.textContent = block.isLowestFindingConfidence ? 'Lowest finding confidence: ' + (block.band || '') : (block.band || '');
         d.appendChild(sym); d.appendChild(document.createTextNode('\u2002')); d.appendChild(lbl);
         if (block.score != null) {
           const sc = el('span', 'confidence-band__score'); sc.textContent = '\u2002' + (Number(block.score) * 100).toFixed(0) + '%'; d.appendChild(sc);

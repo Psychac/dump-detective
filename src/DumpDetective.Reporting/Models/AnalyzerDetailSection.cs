@@ -302,11 +302,19 @@ internal sealed record ChartBlock(
     string PayloadJson,
     int IndentLevel = 0) : SectionBlock;
 
+/// <param name="IsLowestFindingConfidence">Set when the report derived this badge from the section's
+/// least confident limited finding, rather than a builder stating it for the whole section — so the
+/// label says what it measures instead of reading as a verdict on everything in the section.</param>
 internal sealed record ConfidenceBandBlock(
     string Band,
     double Score,
     string Symbol,
-    string[] Caveats) : SectionBlock;
+    string[] Caveats,
+    bool IsLowestFindingConfidence = false) : SectionBlock
+{
+    [JsonIgnore]
+    public string Label => IsLowestFindingConfidence ? $"Lowest finding confidence: {Band}" : $"{Band} confidence";
+}
 
 /// <summary>
 /// Narrative reading of a ratio/percent metric (docs/refactor/narrative-interpretation-text-design.md)

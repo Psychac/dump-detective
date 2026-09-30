@@ -254,7 +254,7 @@ internal static class ReportSectionAssembler
             return null;
 
         ConfidenceLevel level = ConfidenceLadder.For(resolved);
-        return new ConfidenceBandBlock(level.Label, resolved, level.Symbol, [.. caveats]);
+        return new ConfidenceBandBlock(level.Label, resolved, level.Symbol, [.. caveats], IsLowestFindingConfidence: true);
     }
 
     public static ReportAppendix BuildAppendix(IReadOnlyList<AnalyzerRunResult> runs)

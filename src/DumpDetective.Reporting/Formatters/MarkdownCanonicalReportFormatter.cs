@@ -276,7 +276,7 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
                     sb.AppendLine();
                     break;
                 case ConfidenceBandBlock band:
-                    sb.AppendLine($"> {band.Symbol} {band.Band} confidence{(band.Caveats.Length > 0 ? $" — {string.Join("; ", band.Caveats)}" : string.Empty)}");
+                    sb.AppendLine($"> {band.Symbol} {band.Label}{(band.Caveats.Length > 0 ? $" — {string.Join("; ", band.Caveats)}" : string.Empty)}");
                     sb.AppendLine();
                     break;
                 case InterpretationBlock interp:

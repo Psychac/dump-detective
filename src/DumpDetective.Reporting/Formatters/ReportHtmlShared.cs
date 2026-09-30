@@ -79,7 +79,7 @@ internal static class ReportHtmlShared
                     {
                         string bandCss = band.Band.ToLowerInvariant();
                         sb.AppendLine("<div class=\"detail-confidence\">");
-                        sb.AppendLine($"<span class=\"confidence-band confidence-{bandCss}\">{Enc(band.Symbol)} {Enc(band.Band)} confidence</span>");
+                        sb.AppendLine($"<span class=\"confidence-band confidence-{bandCss}\">{Enc(band.Symbol)} {Enc(band.Label)}</span>");
                         if (band.Caveats.Length > 0)
                         {
                             sb.AppendLine("<ul class=\"confidence-caveats\">");

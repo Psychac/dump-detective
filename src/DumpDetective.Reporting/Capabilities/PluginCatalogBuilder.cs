@@ -13,7 +13,7 @@ namespace DumpDetective.Reporting.Capabilities;
 /// docs/refactor/modularity/phase-3-plugin-packaging.md migration steps 2 and 4.
 /// </summary>
 /// <remarks>
-/// Each analyzer's <c>FindingGenerator</c>/<c>TrendComparer</c>/<c>SectionBuilder</c> companion
+/// Each analyzer's <c>SynthesisRule</c>/<c>TrendComparer</c>/<c>SectionBuilder</c> companion
 /// types are located by convention — <c>{AnalyzerName minus trailing "Analyzer"}{Suffix}</c> — not
 /// declared on the attribute. Verified before this was written: 36/36 analyzers already follow this
 /// convention (renamed the handful that didn't as part of the same change), so the convention
@@ -136,7 +136,7 @@ internal sealed class PluginCatalogBuilder
             throw new InvalidOperationException(
                 $"Analyzer '{analyzerType.FullName}' is annotated with [AnalyzerModule] but its expected " +
                 $"companion type '{@namespace}.{typeName}' was not found in assembly " +
-                $"'{assembly.GetName().Name}'. PluginCatalogBuilder resolves FindingGenerator/" +
+                $"'{assembly.GetName().Name}'. PluginCatalogBuilder resolves SynthesisRule/" +
                 "TrendComparer/SectionBuilder types by stripping a trailing \"Analyzer\" from the analyzer's " +
                 "type name and appending the companion's suffix — rename the companion type to match, or " +
                 "the analyzer if the mismatch is on its side.");

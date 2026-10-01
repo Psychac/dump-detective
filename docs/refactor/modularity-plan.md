@@ -3,7 +3,8 @@
 Status: draft; entity-join spike resolved 2026-09-08 (go, § 8 step 4). **§ 8's minimum-viable path
 adopted as the chosen plan, 2026-09-08** (see [§ 10 point 7](#10-external-review-2026-09-08--where-this-can-be-questioned)):
 build the new trace/correlation capability first, refactor the existing dump pipeline (Phases 3–5,
-9) later. Phase 1 not yet started.
+9) later. **Phases 1–5 since shipped** (Phase 3 started ahead of § 8's sequence by explicit
+decision; Phase 5 closed 2026-09-30) — each phase doc carries its own open items.
 Supersedes the dump-only modularity draft and reworks
 [../improvements/unified-dump-trace-architecture.md](../improvements/unified-dump-trace-architecture.md)
 into the modularity plan rather than treating them as separate efforts.

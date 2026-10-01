@@ -14,7 +14,7 @@ steps item 2 (`DependencyDirectionTests`, SDK project rules) is also done (2026-
 analyzer retyping step is now fully closed out; remaining work moves to Phase 3/5 (see item 3
 below).
 
-All analyzers migrated to SDK contracts via `LegacyAnalyzer` adapters (dump-side implementations in `DumpDetective.Analysis/Sdk/`):
+All analyzers implement `Sdk.Analysis.IAnalyzer` directly (the `LegacyAnalyzer` adapters used during retyping were deleted 2026-09-14; dump-side capability implementations live in `DumpDetective.Analysis/Sdk/`):
 
 `AllocationPatternAnalyzer`, `ArrayAnalyzer`, `AsyncStateMachineAnalyzer`, `AsyncTaskAnalyzer`, `BoxingAnalyzer`,
 `CollectionAnalyzer`, `CrashAnalyzer`, `DbConnectionAnalyzer`, `FinalizableObjectAnalyzer`,
@@ -29,7 +29,7 @@ All analyzers migrated to SDK contracts via `LegacyAnalyzer` adapters (dump-side
 
 - **Two-tier design forced by evidence, not architecture**: All 35 analyzers touch `context.Heap`/`context.Runtime` coarse operations. **Two-thirds (24) also read live field values** — ruling out a single source-neutral object/field model (no other source carries field layouts). Split instead into Tier 1 (coarse/structural, source-neutral) + Tier 2 (dump-specific field reads, `dump.object-fields` escape hatch).
 
-- **LeakCandidateAnalyzer** (last, 2026-09-13): Cross-analyzer correlation via stopgap `LeakCandidateAnalyzerOptions` extraction in adapter's `BuildSdkContext`. Phase-4 dependency orchestrator will replace this.
+- **LeakCandidateAnalyzer** (last, 2026-09-13): Cross-analyzer correlation via stopgap `LeakCandidateAnalyzerOptions` extraction in adapter's `BuildSdkContext`. Still the mechanism after Phase 4: replacing it needs per-analyzer graph nodes, which Phase 4 deferred (its step 5e).
 
 - **ReferenceChainAnalyzer** (2026-09-13): Two behavior changes documented on `IHeapRootPathQuery` remarks (force-expand predicate, root-priority ordering) — both pre-existing decisions, not new.
 
@@ -113,7 +113,7 @@ Tier 1 finished by thread-quartet audit (2026-09-11): `LockGraphAnalyzer`/`Threa
 - **`ModuleAnalyzer`** (2026-09-13) — no scan participant needed; redesigned `IRuntimeModuleQuery` (declared but never implemented); found/fixed two-pass heavy-module gate bug
 - **`StaticRootLeakDetector`** (2026-09-13) — plain adapter; added `IHeapDominatorQuery.EnumerateRetainedObjects()`, `HasDelegateField()` Tier-2 primitive; bug preserved with doc comment
 - **`EventLeakAnalyzer`** (2026-09-13) — largest batch (~3000 lines); hot path stays dump-side (hand-rolled `IMemoryReader` field reads to avoid ClrMD overhead); real-dump verified sub-30s (no regression)
-- **Remaining Tier-1+Tier-2**: Only `ObjectShapeAnalyzer`, `AllocationPatternAnalyzer`, `ArrayAnalyzer` left (all Tier-1+Tier-2 tier-split corrections similar to `BoxingAnalyzer`/`ThreadAnalyzer`)
+- **`ObjectShapeAnalyzer`, `AllocationPatternAnalyzer`, `ArrayAnalyzer`** — the last three; Tier-1+Tier-2 tier-split corrections similar to `BoxingAnalyzer`/`ThreadAnalyzer`
 
 ## Test strategy
 
@@ -175,4 +175,4 @@ Next steps item 1 (below), fully executed:
 2. ~~Update `DependencyDirectionTests`, SDK project rules~~ — done 2026-09-15: stale
    "legacy bridge adapter" comment removed; assertions themselves were already correct
    and unchanged.
-3. Phase 3's capability-attribute discovery and Phase 5's observation emission now have real ground to build on
+3. ~~Phase 3's capability-attribute discovery and Phase 5's observation emission now have real ground to build on~~ — both shipped: Phase 3 2026-09-15, Phase 5 closed 2026-09-30.

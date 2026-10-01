@@ -29,8 +29,8 @@ namespace DumpDetective.Analysis.Analyzers.Leaks;
 /// analyzers' finished results" — deliberately, since <c>AnalyzerRunResult</c>/<c>AnalyzerDomainResult</c>
 /// live in <c>Core.Models</c>, which the SDK cannot reference. The real, principled fix
 /// (docs/refactor/modularity/phase-4-session-orchestration.md's dependency-graph orchestrator,
-/// where nodes declare <c>Produces</c>/<c>Consumes</c> instead of a single "run me last" bucket) is
-/// Phase 4 and hasn't started. This class still implements <c>IDeferredAnalyzer</c> and still reads
+/// where nodes declare <c>Produces</c>/<c>Consumes</c> instead of a single "run me last" bucket) needs
+/// one graph node per analyzer, which Phase 4 deferred (its step 5e). This class still implements <c>IDeferredAnalyzer</c> and still reads
 /// <c>context.CompletedRunResults</c> in <see cref="ICustomizesAnalysisContext.BuildAnalysisContext"/>,
 /// extracting only the three specific signals actually consumed — <see cref="Core.Models.IHandleRetentionSignal"/>'s
 /// pinned/dependent target types, <see cref="Core.Models.ILogicalTimerCountSignal"/>'s logical timer
@@ -42,8 +42,8 @@ namespace DumpDetective.Analysis.Analyzers.Leaks;
 /// them — it's what let all three move into per-domain plugin packages without this one needing to
 /// reference each of those packages in turn. The inner analyzer (<see cref="AnalyzeAsync"/>) still
 /// has zero knowledge that <c>CompletedRunResults</c> exists — it just reads plain fields off
-/// <see cref="LeakCandidateAnalyzerOptions"/>. When Phase 4 lands, this context-building-side
-/// extraction is replaced by real graph edges, not reworked from scratch.
+/// <see cref="LeakCandidateAnalyzerOptions"/>. When that per-analyzer split lands, this
+/// context-building-side extraction is replaced by real graph edges, not reworked from scratch.
 /// </para>
 /// <para>
 /// <see cref="IHeapTypeStatisticsQuery.GetTypeStatistics"/> replaces the pre-retyping analyzer's own

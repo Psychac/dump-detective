@@ -181,7 +181,11 @@ Carried forward, not resolved by this phase — each is explicitly Phase 4 or Ph
   `IAnalyzerTrendComparer`, and `IAnalyzerSectionBuilder` are all `internal` to `Core`/`Reporting`
   — unimplementable by a genuinely out-of-tree assembly with no `InternalsVisibleTo` grant. A
   discovered plugin analyzer is never turned into an `AnalyzerFeatureModule` or wired into
-  `ServiceRegistration`/report output today. Closing this needs Phase 5's synthesis/observation
+  `ServiceRegistration`/report output today. **Still open after Phase 5 (checked 2026-10-01)**:
+  Phase 5 replaced `IFindingGenerator` with the public `ISynthesisRule`, but `PluginCatalogBuilder`
+  resolves an analyzer's rule and section builder only from the Reporting assembly,
+  `IAnalyzerSectionBuilder`/`IAnalyzerTrendComparer` are still `internal`, and `DropInPluginLoader`
+  is called only from tests. No current consumer, so not scheduled. Closing this needs Phase 5's synthesis/observation
   schema to replace the `FindingGenerator`/`SectionBuilder`/`TrendComparer` DSL with something a
   plugin can genuinely implement against a public contract.
 - **No orchestrator exists to consume capability declarations.** `[RequiresCapability]`/
@@ -216,7 +220,9 @@ Carried forward, not resolved by this phase — each is explicitly Phase 4 or Ph
 - ✅ Every analyzer declares capabilities (2026-09-16, via
   [phase-4-session-orchestration.md step 3](phase-4-session-orchestration.md#migration-steps)); no
   analyzer references any `Sources.*` package — still true, unchanged by this.
-- ⬜ Capability satisfaction report is produced for a dump-only session and correctly lists
+- ✅ **Closed 2026-09-17 by [Phase 4 step 5g](phase-4-session-orchestration.md#migration-steps)**
+  (`UnifiedCapabilityResolutionTests`: a dump-only session resolves the 3 trace analyzers as
+  unsatisfied). Original criterion: capability satisfaction report is produced for a dump-only session and correctly lists
   `Plugins.Cpu` analyzers as skipped-for-missing-`trace.cpu-samples` — split in two, 2026-09-16:
   the report itself (runnable/degraded/skipped buckets, visible output) is **done**, via
   [phase-4-session-orchestration.md step 3](phase-4-session-orchestration.md#migration-steps); the

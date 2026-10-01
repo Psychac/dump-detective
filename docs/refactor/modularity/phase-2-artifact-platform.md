@@ -185,11 +185,15 @@ where it actually gets picked up, so it isn't silently lost between phase docs:
    above.
 3. ~~Split `IHeapAnalysisCache` into capability-scoped query surfaces; `HeapAnalysisCache` keeps its
    internals and implements several of them (mechanical interface segregation, no behavior change).~~
-   **Deferred, per § 8** — a Phase 3 concern.
+   **Deferred, per § 8** — a Phase 3 concern. **Superseded in effect by Phase 1's capability
+   surfaces** — analyzers see `IHeap*Query`/`IRuntime*Query` interfaces, implemented in
+   `Analysis/Sdk/` over `IHeapAnalysisCache`; `IHeapAnalysisCache` itself stays unsplit.
 4. ~~Build `ObservationStore` and `TimelineAligner` (new code, unused until Phases 5/6 — accept that
    they're speculative here, or defer them to their consuming phase if that's preferred; the
    argument for building now is that they're cheaper to design against dump-only reality).~~
-   **Deferred, per § 8** — Phase 4/5 concerns, out of scope for the minimum-viable path.
+   **Deferred, per § 8** — Phase 4/5 concerns, out of scope for the minimum-viable path. Phase 5
+   kept observations in memory (~97k on the reference dump), so the disk-backed `ObservationStore`
+   stays unbuilt; `TimelineAligner` is unclaimed (see Phase 4's header).
 5. Architecture rules: `Platform` may not reference any `Sources.*`; `Sources.*` may not reference
    each other. **Partially done** — `Platform` may not reference anything but `Sdk`, enforced by
    `PlatformProject_ShouldDependOnSdkOnly`. The `Sources.*`-to-`Sources.*` half doesn't apply yet;
@@ -213,9 +217,10 @@ Phase 1 — several don't apply yet under § 8. Marked below rather than silentl
 - **A trivial second source exists** — even a stub (`gcdump` reading only `heap.types`, or a
   synthetic test source) — proving the SPI isn't accidentally shaped around ClrMD's peculiarities.
   This is the real exit criterion; without a second implementation, "general" is unverified.
-  **Still not met** — genuinely can't be until Phase 6a. This is the one gap in this phase worth
-  remembering: the columnar/container extraction is real and tested, but nothing has yet proven the
-  *abstraction* generalizes beyond ClrMD, because nothing else has used it.
+  **Met by Phase 6a (2026-09-09)** — `Sources.NetTrace` builds its trace index on `Platform`'s
+  container/columnar primitives (`TraceContainer`, the `*IndexWriter`s). This proves the *storage*
+  primitives generalize beyond ClrMD; it doesn't prove an `IArtifactSource` SPI, which still
+  doesn't exist (migration step 2).
 
 ## Risk / effort
 

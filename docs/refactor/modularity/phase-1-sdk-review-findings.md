@@ -106,14 +106,17 @@ under the per-finding bump policy adopted at finding 10.
 Not part of this review's scope to resolve — flagged so they aren't silently rediscovered later:
 
 - Whether `ArtifactDescriptor` (and `SourceKind`) is dead scaffolding worth removing, or worth
-  keeping for when Phase 2/4 build real artifact discovery (finding 15).
+  keeping for when Phase 2/4 build real artifact discovery (finding 15). **Resolved — kept**: Phase 4's
+  `SessionBuilder`/`SessionValidator`/`AnalysisSession` use it.
 - `AnalysisContext`'s required-vs-optional nullability distinction, blocked on Phase 4's
-  orchestrator existing (finding 12).
+  orchestrator existing (finding 12). **Unblocked** (Phase 4 shipped 2026-09-17); not revisited.
 - `ObservationQuery.AdditionalPredicate`'s declarative replacement, blocked on a real
-  `ISynthesisRule` implementation existing (finding 16).
+  `ISynthesisRule` implementation existing (finding 16). **Unblocked, and narrower than expected**:
+  every analyzer has a synthesis rule now, and none sets `AdditionalPredicate` — only
+  `SynthesisEngine` reads it. Removing it may be the whole fix; not done.
 - `Sdk.Analysis.AnalyzerProgressReport` has the same adjacent-same-typed-parameter transposition
   risk finding 5 fixed elsewhere (`Phase`/`Detail`), inherited from `IndexProgress` — not yet fixed
-  (finding 21).
+  (finding 21). **Still open** — `Phase`/`Detail` are still adjacent `string`s.
 - `temporal.point`/`temporal.interval` capabilities are also currently unconsumed by any real code;
   whether the whole Temporal capability group is under-justified wasn't examined (finding 11
-  follow-on).
+  follow-on). **Still true** — only `CapabilityVocabulary` references them.

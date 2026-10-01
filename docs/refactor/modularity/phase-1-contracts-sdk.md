@@ -17,7 +17,11 @@ one mistake that's genuinely expensive to undo.
 Establish a small, stable, source-neutral contract surface that any artifact source, any analyzer,
 and any consumer can target without knowing that dumps exist.
 
-## Status: trimmed pass shipped 2026-09-08; schemas/registries + Tier-1 Analysis/ skeleton added 2026-09-09, per § 8's minimum-viable path; retyping pilot (`GCGenerationAnalyzer`) shipped 2026-09-10 — see [phase-1-full-extraction-retyping-plan.md](phase-1-full-extraction-retyping-plan.md) step 3
+## Status: done 2026-09-15 — trimmed pass 2026-09-08, schemas/registries 2026-09-09, all 36 analyzers retyped onto the SDK 2026-09-14 (see [phase-1-full-extraction-retyping-plan.md](phase-1-full-extraction-retyping-plan.md#legacy-adapter-removal-2026-09-14))
+
+The dated notes below record each step as it landed; where one says something "hasn't started" or
+"no analyzer implements" the SDK, the migration-step and exit-criteria markers further down carry
+the current state.
 
 Per [modularity-plan.md § 8](../modularity-plan.md#8-the-minimum-viable-unified-path--adopted-as-the-chosen-plan-2026-09-08)
 (adopted, see [§ 10 point 7](../modularity-plan.md#10-external-review-2026-09-08--where-this-can-be-questioned)):
@@ -131,7 +135,7 @@ behavior change, matching Phase 0's own rule. First real consumer is Phase 6a.
   the way this skeleton was, so none of it has started).
 
 **Deferred**, per § 8's explicit scope:
-- `Analysis/`'s remaining pieces (dump-side implementations of the Tier-1 interfaces above, plus
+- **Done 2026-09-14** — see [phase-1-full-extraction-retyping-plan.md](phase-1-full-extraction-retyping-plan.md#legacy-adapter-removal-2026-09-14). Original note: `Analysis/`'s remaining pieces (dump-side implementations of the Tier-1 interfaces above, plus
   `Presentation/IAnalyzerSectionBuilder.cs`) and the analyzer retyping itself — this is the "full SDK
   extraction" § 8 explicitly skips, now that the skeleton above has separated "additive SDK
   contracts" (shipped) from "actually rewiring analyzers onto them" (not started). `Core`'s
@@ -175,7 +179,8 @@ behavior change, matching Phase 0's own rule. First real consumer is Phase 6a.
   consumers.
 - `session-report.schema.json` v3 — still needs Phase 4's session model
   (`sources[]`/`timeline`/per-finding source attribution can't be described honestly without a real
-  session/artifact model to back them), which still doesn't exist. The rest of the schema directory
+  session/artifact model to back them), which didn't exist then. **Unblocked since Phase 4 shipped
+  (2026-09-17); still unbuilt — nothing consumes it yet.** The rest of the schema directory
   shipped 2026-09-09 (see Shipped above); this one file is the sole remaining gap in it.
 
 ## Target shape
@@ -259,7 +264,9 @@ behavior change, matching Phase 0's own rule. First real consumer is Phase 6a.
    above) now exists *alongside* the untouched `Core` one, per
    [phase-1-full-extraction-retyping-plan.md](phase-1-full-extraction-retyping-plan.md)'s staged
    approach — not a move, a second implementation nothing yet targets, so this step's "skipped"
-   status stands until that plan's retyping step actually retires the `Core` original.
+   status stands until that plan's retyping step actually retires the `Core` original. **Done 2026-09-14** — the retyping step deleted
+   `Core.Abstractions.IAnalyzer`/`Models.AnalysisContext`; `Sdk.Analysis.IAnalyzer` is the only one
+   left. See [phase-1-full-extraction-retyping-plan.md](phase-1-full-extraction-retyping-plan.md#legacy-adapter-removal-2026-09-14).
 2. Author the new identity/temporal/observation/capability types. Genuinely new code — the largest
    greenfield chunk in the plan. **Done 2026-09-08** for the § 8-trimmed set — see Status above for
    exactly what shipped vs. what's still deferred (`IArtifactSource`/`IArtifactIndex`, the schema
@@ -292,13 +299,15 @@ behavior change, matching Phase 0's own rule. First real consumer is Phase 6a.
    content for `observation.schema.json`, `capability-registry.json`,
    `observation-type-registry.json`, and `index-container-format.md` (see Status above for what
    each actually contains and how it was validated). `session-report.schema.json` v3 stays deferred
-   — still needs Phase 4's session model, which doesn't exist. "Namespaced sections" shipped as a
+   — still needs Phase 4's session model, which didn't exist then. **Unblocked since Phase 4 shipped
+   (2026-09-17); still unbuilt — nothing consumes it yet.** "Namespaced sections" shipped as a
    flat, append-only `CacheSectionId` enum shared across artifact kinds rather than the string
    `"heap.*"`/`"trace.*"` namespacing originally sketched — see `index-container-format.md` for why
    that's the real, cheaper equivalent, not a shortfall.
 6. ~~Retire or shrink `DumpDetective.Core` per what Phase 0's inventory shows is left.~~ **Not
    applicable to the § 8-trimmed pass** — step 1 (the extraction this cleanup follows from) was
-   itself skipped, so there's nothing yet to retire from Core.
+   itself skipped, so there's nothing yet to retire from Core. **Partly superseded 2026-09-14** —
+   the retyping step deleted Core's `IAnalyzer`/`AnalysisContext`.
 7. Add SDK-boundary and registry-conformance rules to the architecture test. **Done 2026-09-09** —
    SDK-boundary half done 2026-09-08, see `SdkProject_ShouldHaveZeroDependenciesBeyondTheBcl` in
    `DependencyDirectionTests.cs`, extending the harness Phase 0 discovered already exists rather
@@ -399,14 +408,9 @@ adopted § 8 path, several don't apply yet — marked below rather than silently
 
 - `DumpDetective.Sdk` builds standalone, zero project references. **Done** — also zero package
   references, and enforced by a standing test (see migration step 7 above), not just true today.
-- ~~Every existing analyzer compiles against the SDK (still emitting domain results; observations
-  come in Phase 5).~~ **Not applicable to the § 8-trimmed pass** — this criterion presumes step 1's
-  full extraction (moving `IAnalyzer` into the SDK), which § 8 explicitly skips. Existing analyzers
-  are unchanged and don't reference the SDK at all yet. **Still true 2026-09-09** despite the new
-  Tier-1 `Analysis/` skeleton (see Status above) existing now — zero analyzers implement it; this
-  criterion becomes live only once
-  [phase-1-full-extraction-retyping-plan.md](phase-1-full-extraction-retyping-plan.md)'s pilot
-  migration begins.
+- Every existing analyzer compiles against the SDK (still emitting domain results; observations
+  come in Phase 5). **Done 2026-09-14** — all 36 analyzers implement `Sdk.Analysis.IAnalyzer`;
+  see [phase-1-full-extraction-retyping-plan.md](phase-1-full-extraction-retyping-plan.md#legacy-adapter-removal-2026-09-14).
 - **Entity-join spike has produced a measured join rate per entity kind**, and that measurement —
   not an assumption — informs the canonicalizer's fidelity ratings. A poor result here is a
   legitimate trigger to stop and reconsider Phases 6–7 before investing in them. Caveat accepted as
@@ -424,8 +428,8 @@ adopted § 8 path, several don't apply yet — marked below rather than silently
   spike's proven technique; the "extensive real-world corpus" this criterion actually means is
   Phase 6a's job (see migration step 4 above).
 - **Schemas + registries exist, versioned, with conformance tests.** **Done 2026-09-09**, except
-  `session-report.schema.json` v3 (still genuinely blocked on Phase 4's session model, not
-  deferrable-by-choice like the rest of this list was). See Status above.
+  `session-report.schema.json` v3 (unblocked since Phase 4 shipped 2026-09-17; still unbuilt —
+  nothing consumes it yet). See Status above.
 
 ## Risk / effort
 

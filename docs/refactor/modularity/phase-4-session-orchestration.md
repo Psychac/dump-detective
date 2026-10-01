@@ -361,7 +361,8 @@ running code.
      goes through, for zero observable behavior change — the same "splitting a working bundle for
      no observable benefit" anti-pattern this doc's own Risk section warns against, one level
      deeper than before. **Revisit this specifically when Phase 5 or Phase 7 lands and names a real
-     per-analyzer graph-key consumer** — not before.
+     per-analyzer graph-key consumer** — not before. Phase 5 closed without one (2026-09-30), so
+     Phase 7 is the remaining trigger.
    - **Shipped (2026-09-17), sub-step 5g.** New `UnifiedCapabilityResolutionTests` (3 tests) closes
      Phase 3's exit criterion left half-open by step 3 — the criterion couldn't previously be fully
      verified because `CpuHotspotAnalyzer` wasn't in a resolvable catalog until step 5b's retyping.
@@ -415,7 +416,7 @@ running code.
      Phase 5/7 names a real consumer. `AnalyzerFilterService` still does real, necessary work today
      (name validation, include/exclude filtering, domain/stage ordering, synthesizing
      `SkippedByFilter` results) with no other home to move to yet, so it's untouched. Revisit
-     together with 5e's deferred split, same trigger.
+     together with 5e's deferred split, same trigger (now Phase 7 — Phase 5 named none).
    - **Verified:** merged `SingleDumpOrchestrationServiceTests` (2 tests, both dump-load-failure
      shapes) + updated `ServiceRegistrationTests` (`TrendOrchestrationService` references swapped
      for `TraceOrchestrationService`, the DI registrations that actually still exist) + full

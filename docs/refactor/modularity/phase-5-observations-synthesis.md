@@ -9,6 +9,28 @@ dump-only sessions. Depends on [phase-4-session-orchestration.md](phase-4-sessio
 list) — the "handles a full large-dump run within bounded memory" exit criterion below is exactly
 the assumption Phase 2 flagged as unvalidated and deferred to here.
 
+## Open items
+
+Checked against code 2026-10-01. The single list of what this phase leaves open; each item
+links to where its detail lives.
+
+- **Conflict penalty** — fixed at 1.0 until a rule detects contradicting observations. See
+  [step 7](#work).
+- **Per-type trending** — 21 comparers survive only for scoped (per-type/per-entity) metrics;
+  formally deferred 2026-09-26. See [exit criteria](#exit-criteria).
+- **Series-aware trend math** — `Rate`/`Count`/`Duration` fall back to pairwise delta+percent; a
+  differ over 3+ snapshots isn't built. See [step 4](#work).
+- **Per-measure confidence** — only Finalizable Object has it. See [step 7](#work).
+- **Lineage into the report** — `FindingSynthesisAdapter` doesn't carry `DerivedFrom` into
+  `InsightFinding`; report-phase work. See [exit criteria](#exit-criteria).
+- **Builder-stated confidence badges** — Crash and LockGraph still set their own. See
+  [exit criteria](#exit-criteria).
+- **`JitModuleHotspotInsightRule` flags framework modules** — tracked in
+  [known-issues.md](../../known-issues.md).
+- **Closed by decision, not open:** disk-backed `ObservationStore` (~97k observations fit in
+  memory); Event Leak's `max-severity.score` (documented exception).
+
+
 ## Goal
 
 Migrate analyzers to emit observations, move finding generation from hand-written per-analyzer

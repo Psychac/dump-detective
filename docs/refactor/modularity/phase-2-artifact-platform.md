@@ -5,6 +5,21 @@ Depends on [phase-1-contracts-sdk.md](phase-1-contracts-sdk.md).
 (Supersedes the earlier `phase-2-engine-platform.md` framing, which assumed dump was the engine's
 subject rather than one source among several.)
 
+## Open items
+
+Checked against code 2026-10-01. The single list of what this phase leaves open; each item
+links to where its detail lives.
+
+- **`IArtifactSource` SPI and `Sources.ClrDump`** — deferred per § 8; `IIndexStorage` doesn't
+  exist either. `Sources.NetTrace` proves the storage primitives generalize, not the SPI. See
+  [migration step 2](#migration-steps) and [exit criteria](#exit-criteria).
+- **`Sources.*`-isolation architecture rule** — meaningful once a second `Sources.*` project
+  exists; only `Sources.NetTrace` does today. See [migration step 5](#migration-steps).
+- **`TimelineAligner`** — unclaimed; whichever phase first needs multi-artifact alignment picks it
+  up (see [Phase 4's header](phase-4-session-orchestration.md)). `ObservationStore` is closed:
+  Phase 5 kept observations in memory.
+
+
 ## Goal
 
 Turn today's dump-specific engine into a general artifact platform where **the dump is the first

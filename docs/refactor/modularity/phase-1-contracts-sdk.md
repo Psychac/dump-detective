@@ -12,6 +12,26 @@ This is the most consequential phase in the plan. Everything downstream — trac
 plugins, UI — is shaped by what lands here, and getting the identity/temporal model wrong is the
 one mistake that's genuinely expensive to undo.
 
+## Open items
+
+Checked against code 2026-10-01. The single list of what this phase leaves open; each item
+links to where its detail lives.
+
+- **`session-report.schema.json` v3** — unblocked since Phase 4 shipped, unbuilt; no consumer yet.
+  See [migration step 5](#migration-steps).
+- **`EntityCanonicalizer` real-world corpus** — only the 21-test hand-written corpus exists; the
+  real corpus is owned by [Phase 6a § Phase 6a exit criteria](phase-6-trace-source.md#phase-6a-exit-criteria)
+  and not done there yet.
+- **`IArtifactSource`/`IArtifactIndex`** — owned by Phase 2, see its
+  [open items](phase-2-artifact-platform.md#open-items).
+- **SDK review carry-forwards** — `AnalysisContext` nullability (finding 12),
+  `ObservationQuery.AdditionalPredicate` (16, likely just deletable), `AnalyzerProgressReport`
+  parameter order (21), unused Temporal capabilities (11). See
+  [phase-1-sdk-review-findings.md § Open items carried forward](phase-1-sdk-review-findings.md#open-items-carried-forward).
+- **Accepted risk, not open work:** entity-join fidelity is validated for the WCF/EF-on-`w3wp.exe`
+  app family only. See [exit criteria](#exit-criteria).
+
+
 ## Goal
 
 Establish a small, stable, source-neutral contract surface that any artifact source, any analyzer,

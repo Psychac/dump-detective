@@ -38,6 +38,23 @@ another for de-risking reasons (verify output equality before adding the next ax
 that is explicit in the step's own text — it is about *ordering* real work safely, not about
 skipping real work that has a named, documented need.
 
+## Open items
+
+Checked against code 2026-10-01. The single list of what this phase leaves open; each item
+links to where its detail lives.
+
+- **Per-analyzer graph nodes (step 5e)** — deferred until a phase names a real per-analyzer
+  graph-key consumer; Phase 5 didn't, so Phase 7 is the trigger. Blocks two dependents:
+  `LeakCandidateAnalyzer`'s `CompletedRunResults` stopgap, and hand-declared `Produces`/`Consumes`
+  on the shared `SingleDumpPipelineState`. See [migration step 5](#migration-steps).
+- **`AnalyzerFilterService` retirement (step 6)** — same trigger as 5e. See
+  [migration step 6](#migration-steps).
+- **Artifact-level parallelism** — not built; the exit criterion is only trivially met. Build if a
+  real performance need appears. See [exit criteria](#exit-criteria).
+- **`PhaseTimeline` keyed by node id** — not met: it is still per-analyzer inside
+  `ConsoleDiagnosticsSink`. See [exit criteria](#exit-criteria).
+
+
 ## Goal
 
 Replace the fixed five-stage pipeline **and** the proposed mode enum with one capability-driven
@@ -483,8 +500,9 @@ running code.
   above) once the CLI-shape question resolved and the old name's staleness had no more reason to
   wait — so there is exactly one class doing this job now, under a name that actually describes it,
   and neither of the two original class names survives.
-- `PhaseTimeline` preserved, now keyed by node id. — inherited from step 1, unchanged by steps 5-7;
-  not independently re-verified in this pass.
+- `PhaseTimeline` preserved, now keyed by node id. — **Not met (checked 2026-10-01).** It's
+  preserved, but still per-analyzer: `ConsoleDiagnosticsSink` creates one per analyzer run and
+  flushes it on analyzer completion. Nothing keys it by pipeline node.
 
 ## Risk / effort
 

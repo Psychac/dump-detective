@@ -4,7 +4,7 @@ Status: draft; entity-join spike resolved 2026-09-08 (go, § 8 step 4). **§ 8's
 adopted as the chosen plan, 2026-09-08** (see [§ 10 point 7](#10-external-review-2026-09-08--where-this-can-be-questioned)):
 build the new trace/correlation capability first, refactor the existing dump pipeline (Phases 3–5,
 9) later. **Phases 1–5 since shipped** (Phase 3 started ahead of § 8's sequence by explicit
-decision; Phase 5 closed 2026-09-30) — each phase doc carries its own open items.
+decision; Phase 5 closed 2026-09-30) — see [§ 4 Phases](#4-phases) for where their open items live.
 Supersedes the dump-only modularity draft and reworks
 [../improvements/unified-dump-trace-architecture.md](../improvements/unified-dump-trace-architecture.md)
 into the modularity plan rather than treating them as separate efforts.
@@ -116,6 +116,13 @@ boundary that only exists for organizational tidiness isn't on this diagram.
 | [7 — Cross-source correlation](modularity/phase-7-cross-source-correlation.md) | Entity+time joined observations, correlation rules, capped confidence | 6 |
 | [8 — Sinks & unified UI](modularity/phase-8-sinks-and-ui.md) | `IReportSink`, unconditional `report.json`, timeline/entity-pivot UI | 1 (parts land early) |
 | [9 — Isolation & distribution](modularity/phase-9-isolation-distribution.md) | Out-of-process plugins, distributed storage — **speculative** | 2, 3 |
+
+**Open items, Phases 1–5:** each phase doc has one "Open items" list (checked 2026-10-01) —
+[1](modularity/phase-1-contracts-sdk.md#open-items) ·
+[2](modularity/phase-2-artifact-platform.md#open-items) ·
+[3](modularity/phase-3-plugin-packaging.md#open-items) ·
+[4](modularity/phase-4-session-orchestration.md#open-items) ·
+[5](modularity/phase-5-observations-synthesis.md#open-items).
 
 Supporting design docs (read before the phases):
 [source-model.md](modularity/source-model.md) ·

@@ -15,6 +15,15 @@ explicit instruction this session, not a formal revisiting of that deferral. Mad
 36/36 analyzer retyping to the SDK `IAnalyzer`/`AnalysisContext` contract finishing first (commit
 `b713c165`), since step 2 needs every analyzer to already be a real `Sdk.Analysis.IAnalyzer`.
 
+## Open items
+
+Checked against code 2026-10-01. The single list of what this phase leaves open; each item
+links to where its detail lives.
+
+- **Drop-in plugins can't contribute a working analyzer** — Phase 5 didn't close this. No current
+  consumer, so not scheduled. See [Known gaps](#known-gaps).
+
+
 ## Goal
 
 Kill `DefaultAnalyzerFeatureModuleCatalog` as a hand-maintained list, and make analyzers declare

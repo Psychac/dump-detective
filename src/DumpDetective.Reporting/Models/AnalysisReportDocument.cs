@@ -203,6 +203,18 @@ internal sealed record FindingRecord(
     [JsonPropertyName("rule")]
     public DumpDetective.Sdk.Synthesis.RuleRef? Rule { get; init; } = null;
 
+    [JsonPropertyName("assertion")]
+    public DumpDetective.Sdk.Synthesis.Assertion? Assertion { get; init; } = null;
+
+    [JsonPropertyName("support")]
+    public IReadOnlyList<DumpDetective.Sdk.Synthesis.EvidenceStatement>? Support { get; init; } = null;
+
+    [JsonPropertyName("counter")]
+    public DumpDetective.Sdk.Synthesis.Counter? Counter { get; init; } = null;
+
+    [JsonPropertyName("falsifiedBy")]
+    public IReadOnlyList<DumpDetective.Sdk.Synthesis.FalsificationTest>? FalsifiedBy { get; init; } = null;
+
     [JsonPropertyName("confidenceBand")]
     public string? ConfidenceBand => Confidence is double score ? ConfidenceLadder.For(score).Key : null;
 

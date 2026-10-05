@@ -99,13 +99,13 @@ system. It gates M4.
      findings (one finding cites 68,576 observations; 145,781 ids total), which is why `report.json` grew ~10 MB.
    - Open: trend runs write the side-car (all dumps' observations) but trend findings come from deltas, so
      they carry no lineage yet.
-3. **`Claim` record** *(in progress — types, engine stamping and rename done 2026-10-05; golden test pending)* — per D1, in `Sdk/Synthesis`.
+3. **`Claim` record** *(in progress — types, engine stamping and rename done 2026-10-05; golden test landed in step 4's pilot)* — per D1, in `Sdk/Synthesis`.
    - Done: `Assertion`, `AssertionPredicate` (15), `Reference`, `EvidenceStatement`, `Counter`, `FalsificationTest`,
      `RuleRef`, added to `Finding` as optional; `ISynthesisRule.Version` on the interface (the 76 rules already
      declared `Version => 1`); `SynthesisEngine` stamps `Finding.Rule` and `report.json` carries it per finding.
    - Done: `Sdk.Synthesis.Finding` renamed `Claim` (identifiers only; user-visible strings like "Critical Finding
      Narratives" and `InsightFinding` untouched, and other docs still say `Finding` for the Sdk type).
-   - Pending: the per-rule golden test that fails on a shape change without a version bump.
+   - The per-rule golden test landed with step 4's pilot (see above).
    - Fields from [vision § 6.2](ReportSystemVision.md#62-the-claim-record) that M1 owns:
      `assertion` (closed predicate vocabulary, § 6.8), `subjects`, `support`, `counter`,
      `falsifiedBy`, split `confidence`, `derivedFrom` with rule id + version.
@@ -135,7 +135,16 @@ system. It gates M4.
      `ISynthesisRule`, recorded in `derivedFrom` as rule id + version. A per-rule golden-output test fails
      when a rule's emitted findings change shape without a version bump. Derived (hash) versions rejected:
      they change on any rebuild, so identical rules from different builds would look different.
-4. **Rule migration** *(pending)* — all 76 rules author `assertion`, `counter`, `falsifiedBy`.
+4. **Rule migration** *(in progress — 1 of 76 rules, started 2026-10-05)* — all 76 rules author `assertion`, `counter`, `falsifiedBy`.
+   - Done: `LohFragmentationSynthesisRule` (pilot), with the per-rule golden mechanism
+     (`Golden/RuleShapeGolden.cs`, goldens in `Golden/RuleShapes/`; `DD_BLESS_RULE_SHAPES=1` to bless). Fails when
+     a rule's claim shape changes without a `Version` bump, or the version changes without a re-bless.
+   - Plumbing: the structured fields now reach `report.json` per finding (`assertion`, `support`, `counter`,
+     `falsifiedBy`) and are omitted from the HTML's embedded JSON. Step 2 had only carried lineage, so the first
+     real-dump check of the pilot found they were not being written; fixed.
+   - Lesson from the pilot: a `counter` points away from what the claim says. The first draft gave a `Normal`
+     claim a counter that argued against "fragmented"; caught on the real dump, fixed. Check direction per predicate.
+   - Verified on the reference dump: 82 findings, 1 with `assertion`; `report.json` 76.5 MB, HTML 2.7 MB (unchanged).
    - Batched by domain package, per-analyzer rule and its cross-analyzer rules together.
    - The single biggest execution risk ([§ 21 assumption 3](ReportSystemVision.md#21-risks-assumptions-and-open-questions)):
      a rule that can't state what would falsify it is reported back, not padded.

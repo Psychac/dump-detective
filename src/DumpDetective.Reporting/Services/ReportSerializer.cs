@@ -161,7 +161,13 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
 
     private static FindingRecord WithLineage(FindingRecord record, IReadOnlyDictionary<string, FindingLineage>? lineageByFingerprint)
         => lineageByFingerprint is not null && lineageByFingerprint.TryGetValue(record.Id, out FindingLineage? lineage)
-            ? record with { DerivedFrom = lineage.DerivedFrom, ConfidenceBreakdown = lineage.Confidence, Rule = lineage.Rule }
+            ? record with { DerivedFrom = lineage.DerivedFrom, ConfidenceBreakdown = lineage.Confidence,
+                Rule = lineage.Rule,
+                Assertion = lineage.Assertion,
+                Support = lineage.Support.Count > 0 ? lineage.Support : null,
+                Counter = lineage.Counter,
+                FalsifiedBy = lineage.FalsifiedBy.Count > 0 ? lineage.FalsifiedBy : null,
+            }
             : record;
 
     private static void SortFindingsBySeverity(List<FindingRecord> findings)

@@ -68,7 +68,7 @@ internal sealed class SynthesisFindingEnricher
             InsightFinding insightFinding = FindingSynthesisAdapter.ToInsightFinding(finding);
             bucket.Add(insightFinding);
 
-            var lineage = new FindingLineage(finding.DerivedFrom, finding.Confidence, finding.Rule);
+            var lineage = FindingLineage.From(finding);
             string fingerprint = insightFinding.EffectiveFingerprint;
             lineageByFingerprint[fingerprint] = lineageByFingerprint.TryGetValue(fingerprint, out FindingLineage? existing)
                 ? existing.MergeWith(lineage)

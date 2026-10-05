@@ -151,6 +151,46 @@ public sealed class ObservationsSideCarTests : IDisposable
         html.Should().NotContain(derivedFrom.ToString()).And.NotContain("confidenceBreakdown").And.NotContain("Crash.observations.json.gz");
     }
 
+    [Fact]
+    public void StructuredClaimFields_ReachReportJson_AndStayOutOfTheEmbeddedHtml()
+    {
+        ObservationId cited = ObservationId.NewId();
+        var finding = new InsightFinding("Stub Analyzer", "Leak", DumpDetective.Core.Enums.FindingSeverity.Warning, "title", "evidence", "rec", [], Fingerprint: "stub-fingerprint");
+        var run = new AnalyzerRunResult("Stub Analyzer", AnalyzerExecutionStatus.Success, TimeSpan.Zero, Result: null, ErrorMessage: null, ErrorType: null)
+        {
+            Findings = [finding],
+        };
+        var claim = new Claim
+        {
+            Fingerprint = "stub-fingerprint",
+            Severity = Severity.Warning,
+            Title = "title",
+            Narrative = "evidence",
+            Recommendation = "rec",
+            DerivedFrom = [cited],
+            Confidence = ConfidenceBreakdown.MeasurementCertain,
+            Analyzer = "Stub Analyzer",
+            Category = "Leak",
+            Assertion = new Assertion { Predicate = AssertionPredicate.Fragments },
+            Support = [new EvidenceStatement([cited], "STRUCTURED_SUPPORT_WHY")],
+            Counter = Counter.None("STRUCTURED_COUNTER_REASON"),
+            FalsifiedBy = [new FalsificationTest { Kind = FalsificationKind.Windbg, Test = "STRUCTURED_TEST", Command = "!cmd" }],
+        };
+        var lineage = new Dictionary<string, FindingLineage> { ["stub-fingerprint"] = FindingLineage.From(claim) };
+
+        AnalysisReportDocument built = _facade.BuildReportDocument(
+            "C:/dumps/Crash.dmp", [run], TimeSpan.FromSeconds(1), lineageByFingerprint: lineage);
+        FindingRecord record = built.Findings.Should().ContainSingle().Which;
+        AnalysisReportDocument document = new SingleDumpReportDocument { DumpPath = "C:/dumps/Crash.dmp", CrossDomainInsights = [record] };
+
+        string json = _facade.RenderDocument(document, ReportFormat.Json);
+        string html = _facade.RenderDocument(document, ReportFormat.Html);
+
+        json.Should().Contain("\"predicate\": \"Fragments\"").And.Contain("STRUCTURED_SUPPORT_WHY")
+            .And.Contain("STRUCTURED_COUNTER_REASON").And.Contain("STRUCTURED_TEST").And.Contain("\"kind\": \"Windbg\"");
+        html.Should().NotContain("STRUCTURED_SUPPORT_WHY").And.NotContain("STRUCTURED_COUNTER_REASON").And.NotContain("STRUCTURED_TEST");
+    }
+
     private static Observation MakeObservation() => new()
     {
         Id = ObservationId.NewId(),

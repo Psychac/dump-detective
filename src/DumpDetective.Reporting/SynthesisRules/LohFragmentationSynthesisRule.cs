@@ -43,6 +43,7 @@ internal sealed class LohFragmentationSynthesisRule : ISynthesisRule
         ulong freeBytes = 0;
         Observation? summary = null;
         var derivedFrom = new List<ObservationId>(matched.Matched.Count);
+        var segmentRowIds = new List<ObservationId>(2);
 
         foreach (Observation observation in matched.Matched)
         {
@@ -57,9 +58,11 @@ internal sealed class LohFragmentationSynthesisRule : ISynthesisRule
             totalBytes += (ulong)observation.Measures["total.bytes"].Value;
             freeBytes += (ulong)observation.Measures["free.bytes"].Value;
             derivedFrom.Add(observation.Id);
+            segmentRowIds.Add(observation.Id);
         }
 
         double fragmentationPercent = totalBytes > 0 ? freeBytes * 100.0 / totalBytes : 0.0;
+        double subKbGapPercent = SubKbGapPercent(summary);
 
         Severity severity = fragmentationPercent >= CriticalThreshold ? Severity.Critical
             : fragmentationPercent >= WarningThreshold ? Severity.Warning
@@ -89,9 +92,97 @@ internal sealed class LohFragmentationSynthesisRule : ISynthesisRule
             MetricUnit = "% fragmentation",
             DerivedFrom = derivedFrom,
             Confidence = ConfidenceBreakdown.MeasurementCertain,
+            Assertion = BuildAssertion(severity, fragmentationPercent),
+            Support = BuildSupport(segmentRowIds, summary),
+            Counter = BuildCounter(severity, summary, subKbGapPercent),
+            FalsifiedBy = BuildFalsifiedBy(severity, fragmentationPercent, freeBytes),
         };
 
         return ValueTask.FromResult<IReadOnlyList<Claim>>([finding]);
+    }
+
+    private static double SubKbGapPercent(Observation? summary)
+    {
+        if (summary is null)
+            return 0;
+
+        long freeGapCount = (long)summary.Measures["free-gap.count"].Value;
+        return freeGapCount == 0 ? 0 : summary.Measures["sub-kb-free-gap.count"].Value * 100.0 / freeGapCount;
+    }
+
+    private static Assertion BuildAssertion(Severity severity, double fragmentationPercent)
+    {
+        double budget = severity == Severity.Critical ? CriticalThreshold : WarningThreshold;
+        string budgetName = severity == Severity.Critical ? "LOH/POH fragmentation critical threshold" : "LOH/POH fragmentation warning threshold";
+
+        return new Assertion
+        {
+            Predicate = severity == Severity.Info ? AssertionPredicate.Normal : AssertionPredicate.Fragments,
+            Measure = new Measure(fragmentationPercent, MeasureUnit.Percent, MeasureSemantics.Ratio),
+            Reference = new Reference { Value = new Measure(budget, MeasureUnit.Percent, MeasureSemantics.Ratio), Basis = budgetName },
+            Qualifiers = new AssertionQualifiers { Location = "LOH/POH", Scope = "all LOH and POH segments" },
+        };
+    }
+
+    private static IReadOnlyList<EvidenceStatement> BuildSupport(IReadOnlyList<ObservationId> segmentRowIds, Observation? summary)
+    {
+        var support = new List<EvidenceStatement>(2)
+        {
+            new(segmentRowIds, "Free bytes divided by total bytes, summed across these segment rows, gives the fragmentation percentage."),
+        };
+
+        if (summary is not null)
+            support.Add(new([summary.Id], "Supplies the free-block count, largest free block and free-gap size distribution."));
+
+        return support;
+    }
+
+    // Counter-evidence points away from whatever the claim says: against "fragmented" it is reusable-size gaps,
+    // against "normal" it is sliver-dominated free space that a low percentage hides.
+    private static Counter BuildCounter(Severity severity, Observation? summary, double subKbGapPercent)
+    {
+        if (summary is null)
+            return Counter.None("No free-block distribution was available to judge whether the free space is reusable.");
+
+        bool sliverDominated = subKbGapPercent > SmallGapDominancePercent;
+
+        if (severity == Severity.Info)
+        {
+            return sliverDominated
+                ? Counter.Of(new EvidenceStatement(
+                    [summary.Id],
+                    $"{subKbGapPercent:F0}% of free gaps are under 1 KB, so a low free percentage may still leave too little usable space for LOH/POH allocations."))
+                : Counter.None("Free gaps are mostly large enough to be reused, so nothing in the distribution contradicts the low percentage.");
+        }
+
+        return sliverDominated
+            ? Counter.None("Free space is dominated by sub-KB slivers, so nothing in the distribution suggests it is reusable.")
+            : Counter.Of(new EvidenceStatement(
+                [summary.Id],
+                $"Only {subKbGapPercent:F0}% of free gaps are under 1 KB, so a meaningful share of the free space may be reusable without compaction."));
+    }
+
+    private static IReadOnlyList<FalsificationTest> BuildFalsifiedBy(Severity severity, double fragmentationPercent, ulong freeBytes)
+    {
+        var windbgTest = new FalsificationTest
+        {
+            Kind = FalsificationKind.Windbg,
+            Command = "!dumpheap -type Free -stat",
+            Test = $"If the free bytes on LOH/POH segments differ materially from the reported {FormatHelper.FormatBytes(freeBytes)}, the measurement is wrong.",
+        };
+
+        if (severity == Severity.Info)
+            return [windbgTest];
+
+        return
+        [
+            windbgTest,
+            new FalsificationTest
+            {
+                Kind = FalsificationKind.Capture,
+                Test = $"Capture a second dump after the workload quiesces; if free space falls below {WarningThreshold:F0}% without a compacting GC, the {fragmentationPercent:F1}% was transient, not fragmentation.",
+            },
+        ];
     }
 
     private static string BuildNarrative(ulong totalBytes, ulong freeBytes, long segmentCount, Observation? summary)

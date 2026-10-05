@@ -1,0 +1,234 @@
+rule: loh-fragmentation.finding-parity
+version: 1
+[
+  {
+    "name": "warning-with-reusable-gaps",
+    "claims": [
+      {
+        "fingerprint": "loh \u0026 poh fragmentation analysis::loh-fragmentation-assessment",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Fragments",
+          "measure": {
+            "value": 22.4,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 15,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "LOH/POH fragmentation warning threshold"
+          },
+          "qualifiers": {
+            "location": "LOH/POH",
+            "scope": "all LOH and POH segments"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Free bytes divided by total bytes, summed across these segment rows, gives the fragmentation percentage."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Supplies the free-block count, largest free block and free-gap size distribution."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[1]"
+              ],
+              "why": "Only 40% of free gaps are under 1 KB, so a meaningful share of the free space may be reusable without compaction."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the free bytes on LOH/POH segments differ materially from the reported 218.75 KB, the measurement is wrong.",
+            "command": "!dumpheap -type Free -stat"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump after the workload quiesces; if free space falls below 15% without a compacting GC, the 22.4% was transient, not fragmentation."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "critical-sliver-dominated",
+    "claims": [
+      {
+        "fingerprint": "loh \u0026 poh fragmentation analysis::loh-fragmentation-assessment",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Fragments",
+          "measure": {
+            "value": 35,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 30,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "LOH/POH fragmentation critical threshold"
+          },
+          "qualifiers": {
+            "location": "LOH/POH",
+            "scope": "all LOH and POH segments"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Free bytes divided by total bytes, summed across these segment rows, gives the fragmentation percentage."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Supplies the free-block count, largest free block and free-gap size distribution."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Free space is dominated by sub-KB slivers, so nothing in the distribution suggests it is reusable."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the free bytes on LOH/POH segments differ materially from the reported 341.8 KB, the measurement is wrong.",
+            "command": "!dumpheap -type Free -stat"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump after the workload quiesces; if free space falls below 15% without a compacting GC, the 35.0% was transient, not fragmentation."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "info-without-summary",
+    "claims": [
+      {
+        "fingerprint": "loh \u0026 poh fragmentation analysis::loh-fragmentation-assessment",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Normal",
+          "measure": {
+            "value": 2,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 15,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "LOH/POH fragmentation warning threshold"
+          },
+          "qualifiers": {
+            "location": "LOH/POH",
+            "scope": "all LOH and POH segments"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Free bytes divided by total bytes, summed across these segment rows, gives the fragmentation percentage."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "No free-block distribution was available to judge whether the free space is reusable."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the free bytes on LOH/POH segments differ materially from the reported 19.53 KB, the measurement is wrong.",
+            "command": "!dumpheap -type Free -stat"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "info-sliver-dominated",
+    "claims": [
+      {
+        "fingerprint": "loh \u0026 poh fragmentation analysis::loh-fragmentation-assessment",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Normal",
+          "measure": {
+            "value": 2,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 15,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "LOH/POH fragmentation warning threshold"
+          },
+          "qualifiers": {
+            "location": "LOH/POH",
+            "scope": "all LOH and POH segments"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Free bytes divided by total bytes, summed across these segment rows, gives the fragmentation percentage."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Supplies the free-block count, largest free block and free-gap size distribution."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[1]"
+              ],
+              "why": "90% of free gaps are under 1 KB, so a low free percentage may still leave too little usable space for LOH/POH allocations."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the free bytes on LOH/POH segments differ materially from the reported 19.53 KB, the measurement is wrong.",
+            "command": "!dumpheap -type Free -stat"
+          }
+        ]
+      }
+    ]
+  }
+]

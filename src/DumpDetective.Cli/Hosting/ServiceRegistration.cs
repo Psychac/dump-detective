@@ -42,6 +42,8 @@ internal static class ServiceRegistration
         services.AddSingleton<StartupValidator>();
         services.AddSingleton<IDumpLoader, DumpLoader>();
         services.AddSingleton<DumpDetective.Cli.Execution.AnalyzerExecutionService>();
+        services.AddSingleton<IReportSink, FileReportSink>();
+        services.AddSingleton<IReportSink, ReportJsonSink>();
         services.AddSingleton<ReportOutputWriter>();
         services.AddSingleton<DumpAnalysisService>();
         services.AddSingleton<DumpOrchestrationService>();

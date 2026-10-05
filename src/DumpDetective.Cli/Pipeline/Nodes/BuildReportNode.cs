@@ -1,6 +1,5 @@
 using DumpDetective.Orchestration.Graph;
 using DumpDetective.Reporting.Services;
-using DumpDetective.Reporting.Formatters;
 
 namespace DumpDetective.Cli.Pipeline.Nodes;
 
@@ -21,7 +20,7 @@ internal sealed class BuildReportNode(ReportBuilderFacade reportBuilderFacade) :
             throw new InvalidOperationException("Incident context was not initialized by the per-dump execution stage.");
         }
 
-        // Build the serializable report document and keep it in state for artifact persistence.
+        // Rendering to a file format is the report sinks' job, run by WriteOutputNode.
         var doc = reportBuilderFacade.BuildReportDocument(
             state.Resolved.DumpPath,
             state.Runs,
@@ -29,12 +28,6 @@ internal sealed class BuildReportNode(ReportBuilderFacade reportBuilderFacade) :
             state.IncidentContext,
             state.Insights);
         state.ReportDocument = doc;
-
-        // Render using explicit settings rather than mutable static renderer flags.
-        state.RenderedReport = reportBuilderFacade.RenderDocument(
-            doc,
-            state.Resolved.Report.Format,
-            new HtmlRenderSettings(state.Resolved.Report.PreRender, state.Resolved.Report.StyleVersion));
 
         context.Set(SingleDumpPipelineKeys.ReportDocument, doc);
 

@@ -114,53 +114,6 @@ public sealed class P0SmokeTests
         restored.CrossDomainInsights.Should().NotBeNull();
     }
 
-    // ── P0.2: Separate-JSON regex extracts the same content ────────────────
-
-    [Fact]
-    public void P0_1_SeparateJsonRegex_ExtractsEmbeddedContent()
-    {
-        // Simulate an HTML file with the embedded JSON block
-        const string fakeJson = """{"schemaVersion":"2.1","dumpPath":"test.dmp"}""";
-        string html = $"""<html><body><script id="report-json" type="application/json">{fakeJson}</script></body></html>""";
-
-        Match m = ReportOutputWriter.EmbeddedReportJsonPattern.Match(html);
-
-        m.Success.Should().BeTrue();
-        ReportOutputWriter.DecodeEmbeddedReportJson(m).Should().Be(fakeJson);
-    }
-
-    [Fact]
-    public void P0_1_SeparateJsonRegex_HandlesAlternateAttributeOrdering()
-    {
-        // id attribute comes after type
-        const string fakeJson = """{"schemaVersion":"2.1"}""";
-        string html = $"""<script type="application/json" id="report-json">{fakeJson}</script>""";
-
-        Match m = ReportOutputWriter.EmbeddedReportJsonPattern.Match(html);
-
-        m.Success.Should().BeTrue();
-        ReportOutputWriter.DecodeEmbeddedReportJson(m).Should().Be(fakeJson);
-    }
-
-    [Fact]
-    public void P0_1_SeparateJsonRegex_DecodesGzipBase64Payload()
-    {
-        const string fakeJson = """{"report":{"schemaVersion":"2.1"},"perDumpDocs":[]}""";
-        string encoded;
-        using (var buffer = new MemoryStream())
-        {
-            using (var gzip = new GZipStream(buffer, CompressionLevel.Optimal, leaveOpen: true))
-                gzip.Write(Encoding.UTF8.GetBytes(fakeJson));
-            encoded = Convert.ToBase64String(buffer.ToArray());
-        }
-        string html = $"""<script id="report-json" type="application/json" data-encoding="gzip-base64">{encoded}</script>""";
-
-        Match m = ReportOutputWriter.EmbeddedReportJsonPattern.Match(html);
-
-        m.Success.Should().BeTrue();
-        ReportOutputWriter.DecodeEmbeddedReportJson(m).Should().Be(fakeJson);
-    }
-
     // ── P0.3: Appendix populated and round-trips ───────────────────────────
 
     [Fact]

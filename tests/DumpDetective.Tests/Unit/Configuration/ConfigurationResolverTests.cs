@@ -94,8 +94,7 @@ public sealed class ConfigurationResolverTests
                 DumpPath = null,
                 OutputFormat = ReportFormat.Html,
                 ReportStyleVersion = ReportStyleVersion.V1,
-                PreRender = true,
-                SeparateJson = true
+                PreRender = true
             };
             ConfigurationResolver resolver = new();
 
@@ -103,7 +102,6 @@ public sealed class ConfigurationResolverTests
 
             resolved.Report.StyleVersion.Should().Be(ReportStyleVersion.V2);
             resolved.Report.PreRender.Should().BeTrue();
-            resolved.Report.SeparateJson.Should().BeTrue();
         }
         finally
         {

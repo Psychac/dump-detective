@@ -571,7 +571,8 @@ One foreground run of the Release CLI against the ~3.3 GB `Crash_IIS_BALTSTPRD` 
   from a domain section — `ReportDomainProjector` deliberately skips `CrossDomain` sections. Not a
   gap.
 - **Open, not fixed here:** the JIT hotspot's first real hit is a framework module, and
-  `--separate-json` never writes `report.json` (pre-existing, unrelated to step 6). Both tracked in
+  `--separate-json` never writes `report.json` (pre-existing, unrelated to step 6; the flag was
+  retired in M1 step 1, which writes `report.json` on every run). Both tracked in
   [known-issues.md](../../known-issues.md).
 
 ## Sizing note

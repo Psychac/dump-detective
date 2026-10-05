@@ -16,6 +16,5 @@ internal sealed record AnalysisCommandRequest(
     bool EnablePerformanceDiagnostics,
     ReportStyleVersion? ReportStyleVersion = null,
     bool PreRender = false,
-    bool SeparateJson = false,
     string? CacheDirectory = null,
     string? TracePath = null);

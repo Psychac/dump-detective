@@ -73,10 +73,15 @@ system. It gates M4.
 
 ## Steps
 
-1. **Sinks + unconditional `report.json`** *(pending)* — Phase 8 steps 1–2.
-   - `IReportSink`; `FileReportSink` wraps the four existing formatters unchanged.
-   - `report.json` written every run, regardless of `--format` / `--output`.
-   - Gate: golden-equal output for all four formats.
+1. **Sinks + unconditional `report.json`** *(done 2026-10-05)* — Phase 8 steps 1–2.
+   - `IReportSink` in `Cli/Output`; `FileReportSink` renders through the existing formatters unchanged.
+   - `ReportJsonSink` writes `report.json` beside the primary output file (which defaults to beside
+     the dump) on every run, single-dump and trend alike, regardless of `--format`.
+   - `--separate-json` retired (it extracted JSON from the rendered HTML by regex; `report.json` now
+     comes from the document). The `_external` loader in `report.main.js` is now unreachable.
+   - Gate met: full suite green (1452 passed), per-format output asserted equal to the formatter's
+     own render, real run on the 3.35 GB reference dump wrote `out.html` 2.6 MB + `report.json` 66.3 MB.
+   - Open: `report.json` is 66.3 MB uncompressed; the HTML embeds the same JSON gzip-base64.
 2. **Lineage into the report** *(pending)* — closes the Phase 5 open item.
    - Carry `DerivedFrom` and the full `ConfidenceBreakdown` through to the report document.
    - Observations into `report.json`, inline or side-car per D2.

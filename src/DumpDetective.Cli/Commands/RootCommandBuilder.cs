@@ -61,8 +61,6 @@ internal sealed class RootCommandBuilder
     // TODO: pre-render?? there is something like this??
     private readonly Option<bool> _preRenderOption = new("--pre-render") { Description = "Pre-render findings and analyzer sections server-side for faster initial paint." };
     
-    private readonly Option<bool> _separateJsonOption = new("--separate-json") { Description = "Write report.html and report.json side-by-side; client will load external JSON." };
-    
     
     private readonly Option<string?> _cacheDirectoryOption = new("--cache-dir")
     {
@@ -93,7 +91,6 @@ internal sealed class RootCommandBuilder
             _reportFormatOption,
             _reportStyleOption,
             _preRenderOption,
-            _separateJsonOption,
             _outputPathOption,
             _cacheDirectoryOption,
             _tracePathOption
@@ -117,7 +114,6 @@ internal sealed class RootCommandBuilder
             parseResult.GetValue(_performanceDiagnosticsOption),
             ParseReportStyle(parseResult.GetValue(_reportStyleOption)),
             parseResult.GetValue(_preRenderOption),
-            parseResult.GetValue(_separateJsonOption),
             parseResult.GetValue(_cacheDirectoryOption),
             parseResult.GetValue(_tracePathOption));
     }

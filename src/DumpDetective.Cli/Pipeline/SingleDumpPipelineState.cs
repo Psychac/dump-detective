@@ -62,7 +62,6 @@ internal sealed class SingleDumpPipelineState : IDisposable
     public IReadOnlyList<InsightFinding> Insights { get; set; } = [];
 
     // ── Stage 5: BuildReportStage ────────────────────────────────────────────
-    public string RenderedReport { get; set; } = string.Empty;
     public DumpDetective.Reporting.Models.AnalysisReportDocument? ReportDocument { get; set; }
     public DumpDetective.Core.Models.AnalysisIncidentContext? IncidentContext { get; set; }
 

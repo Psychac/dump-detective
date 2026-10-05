@@ -4,40 +4,17 @@ using DumpDetective.Reporting.Models;
 using DumpDetective.Cli.Models;
 using DumpDetective.Cli.Diagnostics;
 
-using System.IO.Compression;
-using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 
 namespace DumpDetective.Cli.Output;
 
-internal sealed class ReportOutputWriter
+internal sealed class ReportOutputWriter(IEnumerable<IReportSink> sinks)
 {
-    internal static readonly Regex EmbeddedReportJsonPattern = new(
-        "<script\\b([^>]*\\bid\\s*=\\s*(['\"])report-json\\2[^>]*)>([\\s\\S]*?)</script>",
-        RegexOptions.IgnoreCase);
-
-    private static readonly Regex GzipBase64EncodingAttribute = new(
-        "\\bdata-encoding\\s*=\\s*(['\"])gzip-base64\\1",
-        RegexOptions.IgnoreCase);
-
-    internal static string DecodeEmbeddedReportJson(Match embeddedReportJson)
-    {
-        string scriptAttributes = embeddedReportJson.Groups[1].Value;
-        string body = embeddedReportJson.Groups[3].Value;
-        if (!GzipBase64EncodingAttribute.IsMatch(scriptAttributes))
-            return body;
-
-        using var compressed = new MemoryStream(Convert.FromBase64String(body.Trim()));
-        using var gzip = new GZipStream(compressed, CompressionMode.Decompress);
-        using var reader = new StreamReader(gzip, Encoding.UTF8);
-        return reader.ReadToEnd();
-    }
+    private readonly IReadOnlyList<IReportSink> _sinks = sinks.ToArray();
 
     public async Task WriteAsync(
         ResolvedExecutionOptions resolved,
         AnalysisReportDocument? document,
-        string renderedReport,
         IReadOnlyList<ReportArtifact>? artifacts,
         CancellationToken cancellationToken)
     {
@@ -49,35 +26,10 @@ internal sealed class ReportOutputWriter
                 return;
 
             string outPath = resolved.OutputPath;
-            if (resolved.Report.SeparateJson && resolved.Report.Format == Core.Configuration.ReportFormat.Html)
+            if (document is not null)
             {
-                string html = renderedReport ?? string.Empty;
-                var match = EmbeddedReportJsonPattern.Match(html);
-                string json = match.Success ? DecodeEmbeddedReportJson(match) : string.Empty;
-                string outDir = Path.GetDirectoryName(outPath) ?? Directory.GetCurrentDirectory();
-                string jsonPath = Path.Combine(outDir, Path.GetFileNameWithoutExtension(outPath) + ".json");
-                if (!string.IsNullOrWhiteSpace(json))
-                {
-                    await File.WriteAllTextAsync(jsonPath, json, cancellationToken);
-                    ConsoleUx.ReportWritten(jsonPath);
-
-                    string replacement = "<script id=\"report-json\" type=\"application/json\">{" + "\"_external\": \"" + Path.GetFileName(jsonPath) + "\"}</script>";
-                    if (match.Success)
-                        html = html.Substring(0, match.Index) + replacement + html.Substring(match.Index + match.Length);
-
-                    await File.WriteAllTextAsync(outPath, html, cancellationToken);
-                    ConsoleUx.ReportWritten(outPath);
-                }
-                else
-                {
-                    await File.WriteAllTextAsync(outPath, renderedReport ?? string.Empty, cancellationToken);
-                    ConsoleUx.ReportWritten(outPath);
-                }
-            }
-            else
-            {
-                await File.WriteAllTextAsync(outPath, renderedReport ?? string.Empty, cancellationToken);
-                ConsoleUx.ReportWritten(outPath);
+                foreach (IReportSink sink in _sinks)
+                    await sink.PublishAsync(resolved, document, cancellationToken);
             }
 
             if (artifacts is not { Count: > 0 })

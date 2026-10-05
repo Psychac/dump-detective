@@ -57,12 +57,11 @@ public sealed class WriteOutputStageTests
                 Resolved = ResolvedExecutionOptionsFactory.Create(reportPath),
                 ActiveAnalyzers = Array.Empty<DumpDetective.Sdk.Analysis.IAnalyzer>(),
                 AllAnalyzers = Array.Empty<DumpDetective.Sdk.Analysis.IAnalyzer>(),
-                RenderedReport = "dummy",
                 ReportDocument = new SingleDumpReportDocument(),
                 Runs = [run]
             };
 
-            var node = new WriteOutputNode(new ReportOutputWriter());
+            var node = new WriteOutputNode(new ReportOutputWriter([]));
             var context = new PipelineNodeContext();
             context.Set(SingleDumpPipelineKeys.State, state);
             await node.ExecuteAsync(context, CancellationToken.None);

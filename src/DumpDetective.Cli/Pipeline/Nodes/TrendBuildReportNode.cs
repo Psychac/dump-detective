@@ -3,7 +3,6 @@ using DumpDetective.Cli.Execution;
 using DumpDetective.Core.Abstractions;
 using DumpDetective.Core.Models;
 using DumpDetective.Orchestration.Graph;
-using DumpDetective.Reporting.Formatters;
 using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.Services;
 using DumpDetective.Reporting.Trend;
@@ -87,10 +86,6 @@ internal sealed class TrendBuildReportNode(
             trendData);
 
         sessionState.ReportDocument = trendDoc;
-        sessionState.RenderedReport = reportBuilderFacade.RenderDocument(
-            trendDoc,
-            sessionState.Resolved.Report.Format,
-            new HtmlRenderSettings(sessionState.Resolved.Report.PreRender, sessionState.Resolved.Report.StyleVersion));
         sessionState.Runs = executions.SelectMany(e => e.Runs).ToArray();
         sessionState.AnalysisElapsed = sessionState.PipelineStopwatch.Elapsed;
 

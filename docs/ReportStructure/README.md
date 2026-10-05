@@ -16,6 +16,12 @@ Read the vision doc first for direction; the two clean-slate docs are the detail
 critique of the current report and carry the migration phases. Where they disagree, the vision doc
 states the disagreement explicitly in its §20.
 
+## Implementation plans
+
+| Doc | Covers |
+|---|---|
+| [m1-claims-plan.md](m1-claims-plan.md) | vision § 19 step M1 (claims), with Phase 8's sinks and unconditional `report.json` folded in |
+
 ## Where current-state truth lives
 
 The baseline above deliberately describes target states. For what the report *actually does today*,

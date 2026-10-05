@@ -33,7 +33,7 @@ internal sealed class PinnedStringLeakInsightRule : ISynthesisRule
         ObservationTypes = ["handle.pinned-target-bytes", "handle.pinned-target-type"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         ulong pinnedBytes = 0;
@@ -60,13 +60,13 @@ internal sealed class PinnedStringLeakInsightRule : ISynthesisRule
         }
 
         if (pinnedBytes < MinBytes)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         Severity severity = pinnedBytes >= CriticalBytes ? Severity.Critical : Severity.Warning;
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::pinned-string-leak",
                 Analyzer = "InsightEngine",

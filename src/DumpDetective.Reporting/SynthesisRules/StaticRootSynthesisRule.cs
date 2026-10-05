@@ -45,7 +45,7 @@ internal sealed class StaticRootSynthesisRule : ISynthesisRule
         ObservationTypes = ["heap.static-root", "static-root.population"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? population = null;
@@ -68,13 +68,13 @@ internal sealed class StaticRootSynthesisRule : ISynthesisRule
         }
 
         if (population is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long rootCount = (long)population.Measures["root.count"].Value;
 
         if (rootCount == 0)
         {
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([new Finding
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([new Claim
             {
                 Fingerprint = Fingerprint("no-candidates"),
                 Analyzer = AnalyzerName,
@@ -97,7 +97,7 @@ internal sealed class StaticRootSynthesisRule : ISynthesisRule
             ? Severity.Critical
             : Severity.Warning;
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>([new Finding
+        return ValueTask.FromResult<IReadOnlyList<Claim>>([new Claim
         {
             Fingerprint = Fingerprint("retention-candidates"),
             Analyzer = AnalyzerName,

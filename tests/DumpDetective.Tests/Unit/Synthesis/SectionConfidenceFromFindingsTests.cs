@@ -29,10 +29,10 @@ public sealed class SectionConfidenceFromFindingsTests
     [InlineData(0.0, 1.0, null)]
     public async Task StringRule_SamplingCoverageLowersOnlyTheDuplicationFindings(double coverage, double expectedComposite, string? expectedFactor)
     {
-        IReadOnlyList<Finding> findings = await new StringSynthesisRule().SynthesizeAsync(
+        IReadOnlyList<Claim> findings = await new StringSynthesisRule().SynthesizeAsync(
             new ObservationMatchSet([MakeStringComposition(coverage)]), new SynthesisContext());
 
-        Finding duplication = findings.Single(f => f.Fingerprint.EndsWith("extreme-duplication", StringComparison.Ordinal));
+        Claim duplication = findings.Single(f => f.Fingerprint.EndsWith("extreme-duplication", StringComparison.Ordinal));
         duplication.Confidence.Composite.Should().BeApproximately(expectedComposite, 1e-12);
         if (expectedFactor is null)
             duplication.Confidence.LimitingFactors.Should().BeEmpty();
@@ -98,7 +98,7 @@ public sealed class SectionConfidenceFromFindingsTests
     [Fact]
     public async Task DominatorRule_ReferenceCountingLimitsLowerTheHotspot_AndTopTypeIsAlwaysAnEstimate()
     {
-        IReadOnlyList<Finding> findings = await new DominatorSynthesisRule().SynthesizeAsync(
+        IReadOnlyList<Claim> findings = await new DominatorSynthesisRule().SynthesizeAsync(
             new ObservationMatchSet([
                 MakeObservation("type.retention", "Dominator Analysis", new()
                 {
@@ -119,11 +119,11 @@ public sealed class SectionConfidenceFromFindingsTests
             ]),
             new SynthesisContext());
 
-        Finding hotspot = findings.Single(f => f.Fingerprint.EndsWith("dominant-retained-type-hotspot", StringComparison.Ordinal));
+        Claim hotspot = findings.Single(f => f.Fingerprint.EndsWith("dominant-retained-type-hotspot", StringComparison.Ordinal));
         hotspot.Confidence.Composite.Should().BeApproximately(0.85, 1e-12);
         hotspot.Confidence.LimitingFactors.Should().Equal("Object scan was capped; retention counts may be partial.");
 
-        Finding top = findings.Single(f => f.Fingerprint.EndsWith("top-dominator-type", StringComparison.Ordinal));
+        Claim top = findings.Single(f => f.Fingerprint.EndsWith("top-dominator-type", StringComparison.Ordinal));
         top.Confidence.Composite.Should().Be(0.7);
     }
 
@@ -134,7 +134,7 @@ public sealed class SectionConfidenceFromFindingsTests
     [InlineData(true, true, 1.0)]
     public async Task GCRootRule_StaticRetentionConfidence_FollowsExactnessAndWalkCap(bool exact, bool walkCapped, double expected)
     {
-        IReadOnlyList<Finding> findings = await new GCRootSynthesisRule().SynthesizeAsync(
+        IReadOnlyList<Claim> findings = await new GCRootSynthesisRule().SynthesizeAsync(
             new ObservationMatchSet([
                 MakeObservation("root.population", "GC Root Analysis", new()
                 {

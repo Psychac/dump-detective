@@ -40,7 +40,7 @@ internal sealed class GCGenerationSynthesisRule : ISynthesisRule
         ObservationTypes = ["gc.generation-composition", "gc.generation-top-allocator", "gc.generation-top-accumulator"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? composition = null;
@@ -64,7 +64,7 @@ internal sealed class GCGenerationSynthesisRule : ISynthesisRule
         }
 
         if (composition is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long totalObjects = (long)composition.Measures["total.count"].Value;
         long pohObjects = (long)composition.Measures["poh.count"].Value;
@@ -85,13 +85,13 @@ internal sealed class GCGenerationSynthesisRule : ISynthesisRule
         bool fallbackMode = composition.Provenance.Fidelity == FidelityLevel.Degraded;
         bool genBytesAreApproximate = composition.Confidence < 1.0;
 
-        var findings = new List<Finding>(4);
+        var findings = new List<Claim>(4);
 
         // ── POH share finding ────────────────────────────────────────────────────
         double pohPct = totalObjects == 0 ? 0.0 : pohObjects * 100.0 / totalObjects;
         if (pohBytes > 0 && pohPct >= pohThresholdPercent)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("poh-share"),
                 Analyzer = AnalyzerName,
@@ -113,7 +113,7 @@ internal sealed class GCGenerationSynthesisRule : ISynthesisRule
         // ── LOH share finding ────────────────────────────────────────────────────
         if (lohPercent >= lohThresholdPercent)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("loh-share"),
                 Analyzer = AnalyzerName,
@@ -147,7 +147,7 @@ internal sealed class GCGenerationSynthesisRule : ISynthesisRule
             var derivedFrom = new List<ObservationId>(1 + topAllocators.Count) { composition.Id };
             foreach (Observation o in topAllocators) derivedFrom.Add(o.Id);
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("gen0-pressure"),
                 Analyzer = AnalyzerName,
@@ -197,7 +197,7 @@ internal sealed class GCGenerationSynthesisRule : ISynthesisRule
             var derivedFrom = new List<ObservationId>(1 + topAccumulators.Count) { composition.Id };
             foreach (Observation o in topAccumulators) derivedFrom.Add(o.Id);
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("gen2-pressure"),
                 Analyzer = AnalyzerName,
@@ -218,7 +218,7 @@ internal sealed class GCGenerationSynthesisRule : ISynthesisRule
             });
         }
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
     /// <summary>Formats and joins already-selected, already-ordered observations with "; " — the

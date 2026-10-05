@@ -28,7 +28,7 @@ internal sealed class ThreadStackClusterSynthesisRule : ISynthesisRule
         ObservationTypes = ["runtime.thread-cluster-diversity", "thread.stack-cluster"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? diversity = null;
@@ -48,9 +48,9 @@ internal sealed class ThreadStackClusterSynthesisRule : ISynthesisRule
         }
 
         if (diversity is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
-        var findings = new List<Finding>(2);
+        var findings = new List<Claim>(2);
 
         int aliveThreadCount = (int)diversity.Measures["alive-thread.count"].Value;
         int uniqueClusters = (int)diversity.Measures["unique-cluster.count"].Value;
@@ -58,7 +58,7 @@ internal sealed class ThreadStackClusterSynthesisRule : ISynthesisRule
 
         Severity severity = diversityPercent <= 25 ? Severity.Warning : Severity.Info;
 
-        findings.Add(new Finding
+        findings.Add(new Claim
         {
             Fingerprint = Fingerprint("diversity"),
             Analyzer = AnalyzerName,
@@ -93,7 +93,7 @@ internal sealed class ThreadStackClusterSynthesisRule : ISynthesisRule
             else
                 recommendation = "The largest cluster is below 50% of threads; thread activity appears distributed.";
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("dominant-cluster"),
                 Analyzer = AnalyzerName,
@@ -112,7 +112,7 @@ internal sealed class ThreadStackClusterSynthesisRule : ISynthesisRule
             });
         }
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();

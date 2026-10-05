@@ -37,7 +37,7 @@ internal sealed class CrashSynthesisRule : ISynthesisRule
         ObservationTypes = ["runtime.crash-population", "runtime.active-exception", "runtime.crash-thread-candidate"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? population = null;
@@ -65,13 +65,13 @@ internal sealed class CrashSynthesisRule : ISynthesisRule
         }
 
         if (population is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long totalExceptions = (long)population.Measures["total.count"].Value;
 
         if (totalExceptions == 0)
         {
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([new Finding
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([new Claim
             {
                 Fingerprint = Fingerprint("no-exceptions"),
                 Analyzer = AnalyzerName,
@@ -124,7 +124,7 @@ internal sealed class CrashSynthesisRule : ISynthesisRule
 
             string? tierSummary = SummarizeStackTraceTiers(candidates);
 
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([new Finding
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([new Claim
             {
                 Fingerprint = Fingerprint("active-exceptions"),
                 Analyzer = AnalyzerName,
@@ -145,7 +145,7 @@ internal sealed class CrashSynthesisRule : ISynthesisRule
             }]);
         }
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>([new Finding
+        return ValueTask.FromResult<IReadOnlyList<Claim>>([new Claim
         {
             Fingerprint = Fingerprint("exception-pressure"),
             Analyzer = AnalyzerName,

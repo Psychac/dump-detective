@@ -35,7 +35,7 @@ internal sealed class GCRootSynthesisRule : ISynthesisRule
         ObservationTypes = ["heap.root", "root.kind-summary", "root.population"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? population = null;
@@ -89,7 +89,7 @@ internal sealed class GCRootSynthesisRule : ISynthesisRule
             }
         }
 
-        var findings = new List<Finding>(capacity: 4);
+        var findings = new List<Claim>(capacity: 4);
 
         // ── Large static/strong root retention ──────────────────────────────────
         if (staticBytes >= StaticRootWarningBytes)
@@ -100,7 +100,7 @@ internal sealed class GCRootSynthesisRule : ISynthesisRule
             var derivedFrom = new List<ObservationId>(staticIds);
             if (topRoot is not null) derivedFrom.Add(topRoot.Id);
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("static-root-retention"),
                 Analyzer = AnalyzerName,
@@ -122,7 +122,7 @@ internal sealed class GCRootSynthesisRule : ISynthesisRule
         // ── Finalizer queue pressure ─────────────────────────────────────────────
         if (finalizerCount >= FinalizerQueueInfoThreshold)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("finalizer-queue-pressure"),
                 Analyzer = AnalyzerName,
@@ -145,7 +145,7 @@ internal sealed class GCRootSynthesisRule : ISynthesisRule
         int totalPinned = pinnedCount + asyncPinnedCount;
         if (totalPinned >= PinnedHandleInfoThreshold)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("pinned-handle-accumulation"),
                 Analyzer = AnalyzerName,
@@ -172,7 +172,7 @@ internal sealed class GCRootSynthesisRule : ISynthesisRule
         {
             int cappedCount = (int)population.Measures["subgraph-walk-capped.count"].Value;
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("subgraph-walk-capped"),
                 Analyzer = AnalyzerName,
@@ -190,7 +190,7 @@ internal sealed class GCRootSynthesisRule : ISynthesisRule
             });
         }
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
     // Only the static-root finding reads retained bytes. Without the dominator tree they're the

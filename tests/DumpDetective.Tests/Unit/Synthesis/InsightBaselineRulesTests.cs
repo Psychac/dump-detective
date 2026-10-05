@@ -58,7 +58,7 @@ public sealed class InsightBaselineRulesTests
                 Obs("gc.generation-composition", new Dictionary<string, Measure> { ["loh.percent"] = Pct(5.0), ["loh.bytes"] = Bytes(5) }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Critical);
@@ -73,7 +73,7 @@ public sealed class InsightBaselineRulesTests
                 Obs("heap.memory-composition", new Dictionary<string, Measure> { ["loh.percent"] = Pct(10.0), ["loh.bytes"] = Bytes(10) }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -97,7 +97,7 @@ public sealed class InsightBaselineRulesTests
                 }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Critical);
@@ -117,7 +117,7 @@ public sealed class InsightBaselineRulesTests
                 Obs("heap.topology-population", new Dictionary<string, Measure> { ["poh.percent"] = Pct(15.0), ["poh.bytes"] = Bytes(1024) }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Warning);
@@ -142,7 +142,7 @@ public sealed class InsightBaselineRulesTests
                 }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Title.Should().Contain("waiting");
@@ -166,7 +166,7 @@ public sealed class InsightBaselineRulesTests
                     subjects: [finalizerThreadRef]),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle(f => f.Title == "Finalizer thread is blocked" && f.Severity == Severity.Critical);
             findings[0].Narrative.Should().Contain("OS tid: 42");
@@ -189,7 +189,7 @@ public sealed class InsightBaselineRulesTests
                     subjects: [finalizerThreadRef]),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Critical);
@@ -216,7 +216,7 @@ public sealed class InsightBaselineRulesTests
                 }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Critical);
@@ -241,7 +241,7 @@ public sealed class InsightBaselineRulesTests
                 Obs("runtime.active-exception", new Dictionary<string, Measure>(), subjects: [otherType]),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Narrative.Should().Contain("System.OutOfMemoryException (2 active)");
@@ -268,7 +268,7 @@ public sealed class InsightBaselineRulesTests
                 }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().HaveCount(2);
         }
@@ -289,7 +289,7 @@ public sealed class InsightBaselineRulesTests
                 }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -310,7 +310,7 @@ public sealed class InsightBaselineRulesTests
                 }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Title.Should().Contain("orphaned tasks");
@@ -328,7 +328,7 @@ public sealed class InsightBaselineRulesTests
                 Obs("runtime.finalizer-thread", new Dictionary<string, Measure> { ["is-blocked"] = Count(1), ["locks-held.count"] = Count(1) }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle(f => f.Title.Contains("Faulted tasks"));
         }
@@ -343,7 +343,7 @@ public sealed class InsightBaselineRulesTests
         {
             var context = new SynthesisContext { AnalyzerRunSummary = (36, 3) };
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(new ObservationMatchSet([]), context);
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(new ObservationMatchSet([]), context);
 
             findings.Should().ContainSingle();
             findings[0].Narrative.Should().Contain("3 of 36");
@@ -354,7 +354,7 @@ public sealed class InsightBaselineRulesTests
         {
             var context = new SynthesisContext { AnalyzerRunSummary = (36, 2) };
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(new ObservationMatchSet([]), context);
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(new ObservationMatchSet([]), context);
 
             findings.Should().BeEmpty();
         }
@@ -362,7 +362,7 @@ public sealed class InsightBaselineRulesTests
         [Fact]
         public async Task NoRunSummary_ReturnsEmpty()
         {
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(new ObservationMatchSet([]), new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(new ObservationMatchSet([]), new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -376,7 +376,7 @@ public sealed class InsightBaselineRulesTests
                 Obs("gc.finalizable-composition", new Dictionary<string, Measure> { ["total.count"] = Count(0) }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, context);
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, context);
 
             findings.Should().ContainSingle();
         }

@@ -52,7 +52,7 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
         ObservationTypes = ["type.retention", "type.retention-population", "type.retention-hotspot"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? topRetention = null;
@@ -81,7 +81,7 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
             }
         }
 
-        var findings = new List<Finding>(4);
+        var findings = new List<Claim>(4);
 
         // ── Top dominator type ──────────────────────────────────────────────────
         if (topRetention is not null)
@@ -96,7 +96,7 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
                     ? Severity.Warning
                     : Severity.Info;
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("top-dominator-type"),
                 Analyzer = AnalyzerName,
@@ -121,7 +121,7 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
 
             if (highlyReferencedCount > 0)
             {
-                findings.Add(new Finding
+                findings.Add(new Claim
                 {
                     Fingerprint = Fingerprint("highly-referenced-objects"),
                     Analyzer = AnalyzerName,
@@ -150,7 +150,7 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
                 ulong totalBytes = (ulong)topHotspot.Measures["total.bytes"].Value;
                 string typeName = ((TypeRef)topHotspot.Subjects[0]).CanonicalName;
 
-                findings.Add(new Finding
+                findings.Add(new Claim
                 {
                     Fingerprint = Fingerprint("dominant-retained-type-hotspot"),
                     Analyzer = AnalyzerName,
@@ -176,7 +176,7 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
 
             if (approximatedReferenceAddresses > 0)
             {
-                findings.Add(new Finding
+                findings.Add(new Claim
                 {
                     Fingerprint = Fingerprint("reference-tracking-capped"),
                     Analyzer = AnalyzerName,
@@ -195,7 +195,7 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
             }
         }
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
     // The Gen2/LOH type the section's long-lived table leads with: most Gen2 instances, then most

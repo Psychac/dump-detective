@@ -32,7 +32,7 @@ public sealed class ClaimEvidenceTests
     [Fact]
     public void Finding_NotYetMigrated_HasNoCounterAtAll_SoItIsDistinguishableFromExplicitNone()
     {
-        Finding finding = new()
+        Claim finding = new()
         {
             Fingerprint = "fp",
             Severity = Severity.Info,

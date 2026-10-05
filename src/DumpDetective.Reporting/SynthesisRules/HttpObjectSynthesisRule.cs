@@ -38,7 +38,7 @@ internal sealed class HttpObjectSynthesisRule : ISynthesisRule
         ObservationTypes = ["infra.http-object", "infra.http-handler-module", "infra.http-object-population"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? population = null;
@@ -107,19 +107,19 @@ internal sealed class HttpObjectSynthesisRule : ISynthesisRule
             }
         }
 
-        if (population is null) return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+        if (population is null) return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long httpWebResponseCount = (long)population.Measures["http-web-response.count"].Value;
         long httpMessageHandlerCount = (long)population.Measures["http-message-handler.count"].Value;
 
-        var findings = new List<Finding>(6);
+        var findings = new List<Claim>(6);
 
         // ── HttpClient misuse ────────────────────────────────────────────────────
         if (httpClientCount >= HttpClientWarningThreshold)
         {
             Severity sev = httpClientCount >= HttpClientCriticalThreshold ? Severity.Critical : Severity.Warning;
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("httpclient-count"),
                 Analyzer = AnalyzerName,
@@ -145,7 +145,7 @@ internal sealed class HttpObjectSynthesisRule : ISynthesisRule
         // ── HttpWebRequest accumulation (obsolete API) ────────────────────────────
         if (httpWebRequestCount >= HttpWebRequestWarningThreshold)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("httpwebrequest-accumulation"),
                 Analyzer = AnalyzerName,
@@ -170,7 +170,7 @@ internal sealed class HttpObjectSynthesisRule : ISynthesisRule
         // ── HttpWebResponse not disposed ──────────────────────────────────────────
         if (httpWebResponseCount >= HttpWebResponseWarningThreshold)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("httpwebresponse-not-disposed"),
                 Analyzer = AnalyzerName,
@@ -201,7 +201,7 @@ internal sealed class HttpObjectSynthesisRule : ISynthesisRule
             var derivedFrom = new List<ObservationId> { population.Id };
             if (topHandlerModule is not null) derivedFrom.Add(topHandlerModule.Id);
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("httpmessagehandler-accumulation"),
                 Analyzer = AnalyzerName,
@@ -232,7 +232,7 @@ internal sealed class HttpObjectSynthesisRule : ISynthesisRule
                 ? $" At least one sampled ServicePoint has ConnectionLimit={limit}, which can cause request queuing under concurrent load to that endpoint."
                 : string.Empty;
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("servicepoint-accumulation"),
                 Analyzer = AnalyzerName,
@@ -260,7 +260,7 @@ internal sealed class HttpObjectSynthesisRule : ISynthesisRule
             var derivedFrom = new List<ObservationId>(expiredHandlerIds);
             derivedFrom.AddRange(activeHandlerIds);
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("handler-tracking-churn"),
                 Analyzer = AnalyzerName,
@@ -283,7 +283,7 @@ internal sealed class HttpObjectSynthesisRule : ISynthesisRule
             });
         }
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
     private static string BuildGenerationEvidence(long gen0, long gen2, long classified)

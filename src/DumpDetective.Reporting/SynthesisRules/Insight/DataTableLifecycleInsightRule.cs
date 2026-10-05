@@ -28,7 +28,7 @@ internal sealed class DataTableLifecycleInsightRule : ISynthesisRule
         ObservationTypes = ["type.finalizable-population", "finalizer.queue-entry", "type.known-pattern-population"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         long dataColumnFinalizer = 0;
@@ -85,16 +85,16 @@ internal sealed class DataTableLifecycleInsightRule : ISynthesisRule
 
         // Trigger: DataColumn in finalizer queue AND/OR DataRow on heap in large numbers.
         if (dataColumnFinalizer < DataColumnFinalizerThreshold && dataRowHeap < DataRowHeapThreshold)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         var evidenceParts = new List<string>(3);
         if (dataColumnFinalizer > 0) evidenceParts.Add($"DataColumn ×{dataColumnFinalizer:N0} in finalizer queue");
         if (dataTableFinalizer > 0) evidenceParts.Add($"DataTable ×{dataTableFinalizer:N0} in finalizer queue");
         if (dataRowHeap > 0) evidenceParts.Add($"DataRow ×{dataRowHeap:N0} on heap");
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::datatable-lifecycle",
                 Analyzer = "InsightEngine",

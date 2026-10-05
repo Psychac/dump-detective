@@ -48,7 +48,7 @@ internal sealed class ArraySynthesisRule : ISynthesisRule
         ObservationTypes = ["type.array-composition", "heap.sparse-array", "heap.large-array", "heap.pinned-array"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         var compositions = new List<Observation>();
@@ -67,17 +67,17 @@ internal sealed class ArraySynthesisRule : ISynthesisRule
             }
         }
 
-        var findings = new List<Finding>(4);
+        var findings = new List<Claim>(4);
 
         EmitLohPressure(compositions, largeArrays, findings);
         EmitMultiDimAntiPattern(compositions, findings);
         EmitSparseArrays(sparseArrays, findings);
         EmitPinnedAccumulation(compositions, pinnedArrays, findings);
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
-    private static void EmitLohPressure(List<Observation> compositions, List<Observation> largeArrays, List<Finding> findings)
+    private static void EmitLohPressure(List<Observation> compositions, List<Observation> largeArrays, List<Claim> findings)
     {
         ulong lohArrayBytes = 0;
         long lohArrayCount = 0;
@@ -93,7 +93,7 @@ internal sealed class ArraySynthesisRule : ISynthesisRule
         Observation? largest = largeArrays.Count > 0 ? largeArrays[0] : null;
         string topType = largest is null ? "N/A" : ((TypeRef)largest.Subjects[0]).CanonicalName;
 
-        findings.Add(new Finding
+        findings.Add(new Claim
         {
             Fingerprint = Fingerprint("loh-array-pressure"),
             Analyzer = AnalyzerName,
@@ -114,7 +114,7 @@ internal sealed class ArraySynthesisRule : ISynthesisRule
         });
     }
 
-    private static void EmitMultiDimAntiPattern(List<Observation> compositions, List<Finding> findings)
+    private static void EmitMultiDimAntiPattern(List<Observation> compositions, List<Claim> findings)
     {
         long multiDimCount = 0;
         ulong multiDimBytes = 0;
@@ -129,7 +129,7 @@ internal sealed class ArraySynthesisRule : ISynthesisRule
 
         if (multiDimCount < MultiDimWarningCount && multiDimBytes < MultiDimWarningBytes) return;
 
-        findings.Add(new Finding
+        findings.Add(new Claim
         {
             Fingerprint = Fingerprint("multidim-array-anti-pattern"),
             Analyzer = AnalyzerName,
@@ -151,7 +151,7 @@ internal sealed class ArraySynthesisRule : ISynthesisRule
         });
     }
 
-    private static void EmitSparseArrays(List<Observation> sparseArrays, List<Finding> findings)
+    private static void EmitSparseArrays(List<Observation> sparseArrays, List<Claim> findings)
     {
         int emitted = 0;
         foreach (Observation s in sparseArrays)
@@ -166,7 +166,7 @@ internal sealed class ArraySynthesisRule : ISynthesisRule
             double sparseRatio = s.Measures["sparse.ratio"].Value;
             ulong wastedBytes = (ulong)s.Measures["wasted.bytes"].Value;
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint($"sparse-array-{emitted}"),
                 Analyzer = AnalyzerName,
@@ -189,7 +189,7 @@ internal sealed class ArraySynthesisRule : ISynthesisRule
         }
     }
 
-    private static void EmitPinnedAccumulation(List<Observation> compositions, List<Observation> pinnedArrays, List<Finding> findings)
+    private static void EmitPinnedAccumulation(List<Observation> compositions, List<Observation> pinnedArrays, List<Claim> findings)
     {
         long pinnedArrayCount = 0;
         ulong pinnedArrayBytes = 0;
@@ -210,7 +210,7 @@ internal sealed class ArraySynthesisRule : ISynthesisRule
         string topType = largest is null ? "N/A" : ((TypeRef)largest.Subjects[0]).CanonicalName;
         if (largest is not null) contributing.Add(largest.Id);
 
-        findings.Add(new Finding
+        findings.Add(new Claim
         {
             Fingerprint = Fingerprint("pinned-array-accumulation"),
             Analyzer = AnalyzerName,

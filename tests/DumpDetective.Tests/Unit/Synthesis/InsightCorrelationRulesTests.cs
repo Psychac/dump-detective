@@ -73,7 +73,7 @@ public sealed class InsightCorrelationRulesTests
                 ExceptionType("System.InvalidOperationException", 2),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Critical);
@@ -89,7 +89,7 @@ public sealed class InsightCorrelationRulesTests
                 ExceptionType("System.InvalidOperationException", 2),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -114,7 +114,7 @@ public sealed class InsightCorrelationRulesTests
                 }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].MetricValue.Should().Be(200);
@@ -128,7 +128,7 @@ public sealed class InsightCorrelationRulesTests
                 Obs("event.publisher-leak-population", new Dictionary<string, Measure> { ["total.count"] = Count(5), ["instance-leak.count"] = Count(3), ["static-leak.count"] = Count(2), ["subscriber.count"] = Count(200) }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -147,7 +147,7 @@ public sealed class InsightCorrelationRulesTests
                 ExceptionType("System.TimeoutException", 25),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Warning);
@@ -162,7 +162,7 @@ public sealed class InsightCorrelationRulesTests
                 ExceptionType("System.TimeoutException", 3),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -185,7 +185,7 @@ public sealed class InsightCorrelationRulesTests
                 ExceptionType("System.TimeoutException", 8),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Critical);
@@ -210,7 +210,7 @@ public sealed class InsightCorrelationRulesTests
                 ExceptionType("System.ServiceModel.CommunicationObjectFaultedException", 3),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
         }
@@ -234,7 +234,7 @@ public sealed class InsightCorrelationRulesTests
                 ExceptionType("System.TimeoutException", 1),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Warning);
@@ -254,7 +254,7 @@ public sealed class InsightCorrelationRulesTests
                 ExceptionType("System.TimeoutException", 1),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -278,7 +278,7 @@ public sealed class InsightCorrelationRulesTests
                 }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
         }
@@ -297,7 +297,7 @@ public sealed class InsightCorrelationRulesTests
                 }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -330,7 +330,7 @@ public sealed class InsightCorrelationRulesTests
                 FinalizablePopulation("System.Data.DataColumn", gen2Count: 150),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Narrative.Should().Contain("DataColumn ×150");
@@ -343,7 +343,7 @@ public sealed class InsightCorrelationRulesTests
             for (int i = 0; i < 120; i++)
                 observations.Add(QueueEntry("System.Data.DataColumn"));
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(new ObservationMatchSet(observations), new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(new ObservationMatchSet(observations), new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Narrative.Should().Contain("DataColumn ×120");
@@ -357,7 +357,7 @@ public sealed class InsightCorrelationRulesTests
                 KnownPattern("System.Data.DataRow", count: 15_000),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Narrative.Should().Contain("DataRow ×15,000");
@@ -372,7 +372,7 @@ public sealed class InsightCorrelationRulesTests
                 KnownPattern("System.Data.DataRow", count: 500),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -390,7 +390,7 @@ public sealed class InsightCorrelationRulesTests
                 KnownPattern("System.Data.SqlClient.TdsParser+<>c__DisplayClass45_0", count: 1_500),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Title.Should().Contain("TdsParser");
@@ -405,7 +405,7 @@ public sealed class InsightCorrelationRulesTests
                 KnownPattern("System.Reflection.RuntimePropertyInfo", count: 20_000),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Title.Should().Contain("reflection");
@@ -420,7 +420,7 @@ public sealed class InsightCorrelationRulesTests
                 KnownPattern("System.Reflection.RuntimeMethodInfo", count: 60_000),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().HaveCount(2);
         }
@@ -434,7 +434,7 @@ public sealed class InsightCorrelationRulesTests
                 KnownPattern("System.Reflection.RuntimeMethodInfo", count: 10),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -463,7 +463,7 @@ public sealed class InsightCorrelationRulesTests
                 PinnedTargetType("System.String", count: 500),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Warning);
@@ -480,7 +480,7 @@ public sealed class InsightCorrelationRulesTests
                 PinnedTargetType("System.String", count: 900),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Critical);
@@ -495,7 +495,7 @@ public sealed class InsightCorrelationRulesTests
                 PinnedTargetType("System.Byte[]", count: 900),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -508,7 +508,7 @@ public sealed class InsightCorrelationRulesTests
                 PinnedBytes("System.String", 100 * 1024),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -577,7 +577,7 @@ public sealed class InsightCorrelationRulesTests
                 WaitState(3, waitTypeOrdinal: 0), WaitState(4, waitTypeOrdinal: 0),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Warning);
@@ -597,7 +597,7 @@ public sealed class InsightCorrelationRulesTests
                 WaitState(1, waitTypeOrdinal: 0),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -614,7 +614,7 @@ public sealed class InsightCorrelationRulesTests
                 WaitState(3, waitTypeOrdinal: 1), WaitState(4, waitTypeOrdinal: 1), WaitState(5, waitTypeOrdinal: 1),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Critical);
@@ -633,7 +633,7 @@ public sealed class InsightCorrelationRulesTests
                 Blocked(2, locksHeldCount: 1, lockTypesCsv: "System.Threading.Monitor"),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Critical);
@@ -654,7 +654,7 @@ public sealed class InsightCorrelationRulesTests
                 ThreadState(1, stackRootCount: 5), ThreadState(2, stackRootCount: 3),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Narrative.Should().Contain("8 GC root(s)");
@@ -670,7 +670,7 @@ public sealed class InsightCorrelationRulesTests
                 Diversity(aliveThreadCount: 20),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -695,7 +695,7 @@ public sealed class InsightCorrelationRulesTests
                 QueueEntry("MyApp.Resource"),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Narrative.Should().Contain("MyApp.Cache._entries");
@@ -711,7 +711,7 @@ public sealed class InsightCorrelationRulesTests
                 QueueEntry("MyApp.OtherType"),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -727,7 +727,7 @@ public sealed class InsightCorrelationRulesTests
                 QueueEntry("MyApp.Big"), QueueEntry("MyApp.Big"), QueueEntry("MyApp.Big"),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Narrative.Should().Contain("MyApp.BigCache._entries");
@@ -742,7 +742,7 @@ public sealed class InsightCorrelationRulesTests
                 RetainedType("MyApp.Resource", count: 50, rootDescription: "MyApp.Cache._entries"),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -780,7 +780,7 @@ public sealed class InsightCorrelationRulesTests
                 SqlTransaction(0x1000), SqlTransaction(0x2000), SqlTransaction(0x3000),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Warning);
@@ -798,7 +798,7 @@ public sealed class InsightCorrelationRulesTests
                 observations.Add(SqlTransaction(address));
             }
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(new ObservationMatchSet(observations), new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(new ObservationMatchSet(observations), new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Critical);
@@ -813,7 +813,7 @@ public sealed class InsightCorrelationRulesTests
                 SqlTransaction(0x1000), SqlTransaction(0x2000),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -827,7 +827,7 @@ public sealed class InsightCorrelationRulesTests
                 SqlTransaction(null), SqlTransaction(null), SqlTransaction(null),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -841,7 +841,7 @@ public sealed class InsightCorrelationRulesTests
                 SqlTransaction(0x9000), SqlTransaction(0x9001), SqlTransaction(0x9002),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -875,7 +875,7 @@ public sealed class InsightCorrelationRulesTests
                 ModuleConflict("MyApp.Data.dll"),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Warning);
@@ -892,7 +892,7 @@ public sealed class InsightCorrelationRulesTests
                 ModuleDiskFootprint("MyApp.Data.dll", 2 * 1024 * 1024),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Info);
@@ -907,7 +907,7 @@ public sealed class InsightCorrelationRulesTests
                 CrashCandidateModule("MyApp.Data.dll", 4), CrashCandidateModule("System.Private.CoreLib.dll", 1),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -921,7 +921,7 @@ public sealed class InsightCorrelationRulesTests
                 ModuleConflict("MyApp.Data.dll"),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -935,7 +935,7 @@ public sealed class InsightCorrelationRulesTests
                 ModuleConflict("MyApp.Data.dll"),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -965,7 +965,7 @@ public sealed class InsightCorrelationRulesTests
                 TypeProfile("MyApp.Cache.Entry", 150_000_000, 140_000_000),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Warning);
@@ -978,7 +978,7 @@ public sealed class InsightCorrelationRulesTests
         {
             var matched = new ObservationMatchSet([TypeProfile("MyApp.Small", 20_000_000, 19_000_000)]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle().Which.Severity.Should().Be(Severity.Info);
         }
@@ -988,7 +988,7 @@ public sealed class InsightCorrelationRulesTests
         {
             var matched = new ObservationMatchSet([TypeProfile("MyApp.Transient", 150_000_000, 10_000_000)]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -1000,7 +1000,7 @@ public sealed class InsightCorrelationRulesTests
             var matched = new ObservationMatchSet(
                 [TypeProfile("MyApp.GrowingList", 150_000_000, 135_000_000, gen0: 950, gen2: 50)]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
         }
@@ -1011,7 +1011,7 @@ public sealed class InsightCorrelationRulesTests
             var matched = new ObservationMatchSet(
                 [TypeProfile("MyApp.Cache.Entry", 150_000_000, 0, gen0: 10, gen1: 40, gen2: 950)]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
         }

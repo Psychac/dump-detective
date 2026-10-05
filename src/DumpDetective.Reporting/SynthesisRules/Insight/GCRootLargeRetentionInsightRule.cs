@@ -25,7 +25,7 @@ internal sealed class GCRootLargeRetentionInsightRule : ISynthesisRule
 
     public ObservationQuery Query { get; } = new() { ObservationTypes = ["heap.root", "root.kind-summary"] };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         var roots = new List<Observation>();
@@ -39,7 +39,7 @@ internal sealed class GCRootLargeRetentionInsightRule : ISynthesisRule
         }
 
         if (roots.Count == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         // Find the most impactful root overall
         ulong maxRetained = 0;
@@ -60,7 +60,7 @@ internal sealed class GCRootLargeRetentionInsightRule : ISynthesisRule
         }
 
         if (maxRetained < LargeRetentionThresholdBytes)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         // Also count how many roots exceed the threshold
         int largeRootCount = 0;
@@ -91,9 +91,9 @@ internal sealed class GCRootLargeRetentionInsightRule : ISynthesisRule
         foreach (Observation kindSummary in kindSummaries)
             derivedFrom.Add(kindSummary.Id);
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::gcroot-large-retention",
                 Analyzer = "InsightEngine",

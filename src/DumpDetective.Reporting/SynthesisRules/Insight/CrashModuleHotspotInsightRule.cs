@@ -39,7 +39,7 @@ internal sealed class CrashModuleHotspotInsightRule : ISynthesisRule
         ObservationTypes = ["runtime.crash-thread-candidate-module", "runtime.module-conflict-group", "runtime.module-disk-footprint"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         var moduleActiveCounts = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -73,7 +73,7 @@ internal sealed class CrashModuleHotspotInsightRule : ISynthesisRule
         }
 
         if (attributedActiveExceptions < MinActiveExceptions)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         string topModuleName = string.Empty;
         int topModuleCount = -1;
@@ -88,13 +88,13 @@ internal sealed class CrashModuleHotspotInsightRule : ISynthesisRule
 
         double topModuleSharePct = 100.0 * topModuleCount / attributedActiveExceptions;
         if (topModuleSharePct < DominantSharePct)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         bool hasSizeMatch = diskFootprintByModule.TryGetValue(topModuleName, out Observation? sizeMatch);
         bool inConflict = conflictedModules.TryGetValue(topModuleName, out ObservationId conflictObservationId);
 
         if (!hasSizeMatch && !inConflict)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]); // no cross-analyzer signal beyond what per-analyzer attribution already shows
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]); // no cross-analyzer signal beyond what per-analyzer attribution already shows
 
         var derivedFrom = new List<ObservationId>(moduleActiveObservations[topModuleName]);
         if (hasSizeMatch)
@@ -107,9 +107,9 @@ internal sealed class CrashModuleHotspotInsightRule : ISynthesisRule
             ? " and has a conflicting assembly version loaded — a version mismatch may be the underlying cause"
             : string.Empty;
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::crash-module-hotspot",
                 Analyzer = "InsightEngine",

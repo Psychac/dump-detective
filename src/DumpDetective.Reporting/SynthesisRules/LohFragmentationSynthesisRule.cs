@@ -35,7 +35,7 @@ internal sealed class LohFragmentationSynthesisRule : ISynthesisRule
         ObservationTypes = ["heap.loh-fragmentation", "heap.loh-fragmentation-summary"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         long segmentCount = 0;
@@ -65,7 +65,7 @@ internal sealed class LohFragmentationSynthesisRule : ISynthesisRule
             : fragmentationPercent >= WarningThreshold ? Severity.Warning
             : Severity.Info;
 
-        Finding finding = new()
+        Claim finding = new()
         {
             Fingerprint = $"{AnalyzerName}::loh-fragmentation-assessment".ToLowerInvariant(),
             Analyzer = AnalyzerName,
@@ -91,7 +91,7 @@ internal sealed class LohFragmentationSynthesisRule : ISynthesisRule
             Confidence = ConfidenceBreakdown.MeasurementCertain,
         };
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>([finding]);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>([finding]);
     }
 
     private static string BuildNarrative(ulong totalBytes, ulong freeBytes, long segmentCount, Observation? summary)

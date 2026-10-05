@@ -18,7 +18,7 @@ internal sealed class RecurringTimeoutPatternInsightRule : ISynthesisRule
         ObservationTypes = ["runtime.crash-population", "runtime.exception-type"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? population = null;
@@ -33,7 +33,7 @@ internal sealed class RecurringTimeoutPatternInsightRule : ISynthesisRule
 
         long totalExceptions = (long)(population?.Measures["total.count"].Value ?? 0);
         if (population is null || totalExceptions == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long timeoutCount = 0;
         long objectDisposedCount = 0;
@@ -52,16 +52,16 @@ internal sealed class RecurringTimeoutPatternInsightRule : ISynthesisRule
         }
 
         if (timeoutCount < 10)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         string disposedNote = objectDisposedCount >= 5
             ? $" Combined with {objectDisposedCount:N0} ObjectDisposedException(s), this may indicate connections " +
               "being used after pool exhaustion or channel faults."
             : string.Empty;
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::recurring-timeout-pattern",
                 Analyzer = "InsightEngine",

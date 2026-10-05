@@ -30,7 +30,7 @@ internal sealed class ObjectShapeSynthesisRule : ISynthesisRule
         ObservationTypes = ["type.shape-composition", "type.reference-heavy", "type.value-heavy", "type.finalizable-reference-heavy"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? composition = null;
@@ -58,18 +58,18 @@ internal sealed class ObjectShapeSynthesisRule : ISynthesisRule
         }
 
         if (composition is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         int totalTypesAnalyzed = (int)composition.Measures["type.count"].Value;
         if (totalTypesAnalyzed == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         double avgRefFieldsPerType = composition.Measures["avg-reference-fields"].Value;
         long totalGcScanWork = (long)composition.Measures["gc-scan-work"].Value;
         long referenceHeavyTypeCount = (long)composition.Measures["reference-heavy-type.count"].Value;
         long valueHeavyTypeCount = (long)composition.Measures["value-heavy-type.count"].Value;
 
-        var findings = new List<Finding>(3);
+        var findings = new List<Claim>(3);
 
         // ── High reference-field density ──────────────────────────────────────────
         if (avgRefFieldsPerType >= 4.0)
@@ -88,7 +88,7 @@ internal sealed class ObjectShapeSynthesisRule : ISynthesisRule
             var derivedFrom = new List<ObservationId> { composition.Id };
             foreach (Observation o in referenceHeavyTypes) derivedFrom.Add(o.Id);
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("reference-field-density"),
                 Analyzer = AnalyzerName,
@@ -115,7 +115,7 @@ internal sealed class ObjectShapeSynthesisRule : ISynthesisRule
             long topValCount = (long)topValueHeavy.Measures["instance.count"].Value;
             if (topValCount >= 10_000)
             {
-                findings.Add(new Finding
+                findings.Add(new Claim
                 {
                     Fingerprint = Fingerprint("value-heavy-instance-count"),
                     Analyzer = AnalyzerName,
@@ -144,7 +144,7 @@ internal sealed class ObjectShapeSynthesisRule : ISynthesisRule
             string typeList = string.Join(", ", finalizableReferenceHeavyTypes.Take(3).Select(o =>
                 $"{FormatTypeName(((TypeRef)o.Subjects[0]).CanonicalName)} ({(long)o.Measures["instance.count"].Value:N0} instances, {(long)o.Measures["reference-field.count"].Value} ref fields)"));
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("finalizable-reference-heavy"),
                 Analyzer = AnalyzerName,
@@ -166,7 +166,7 @@ internal sealed class ObjectShapeSynthesisRule : ISynthesisRule
             });
         }
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
     private static string FormatTypeName(string name)

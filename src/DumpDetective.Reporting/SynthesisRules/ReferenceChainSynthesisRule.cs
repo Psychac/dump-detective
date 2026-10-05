@@ -33,7 +33,7 @@ internal sealed class ReferenceChainSynthesisRule : ISynthesisRule
         ObservationTypes = ["reference-chain.type-sample", "reference-chain.population", "reference-chain.shared-root-group"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? population = null;
@@ -57,13 +57,13 @@ internal sealed class ReferenceChainSynthesisRule : ISynthesisRule
         }
 
         if (population is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long analyzedSamples = (long)population.Measures["analyzed.count"].Value;
 
         if (analyzedSamples == 0)
         {
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([new Finding
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([new Claim
             {
                 Fingerprint = Fingerprint("no-samples"),
                 Analyzer = AnalyzerName,
@@ -84,9 +84,9 @@ internal sealed class ReferenceChainSynthesisRule : ISynthesisRule
         double retainedPercent = population.Measures["retained.percent"].Value;
         long traversalLimitedSamples = (long)population.Measures["traversal-limited.count"].Value;
 
-        var findings = new List<Finding>(4);
+        var findings = new List<Claim>(4);
 
-        findings.Add(new Finding
+        findings.Add(new Claim
         {
             Fingerprint = Fingerprint("retention-coverage"),
             Analyzer = AnalyzerName,
@@ -105,7 +105,7 @@ internal sealed class ReferenceChainSynthesisRule : ISynthesisRule
         if (traversalLimitedSamples > 0)
         {
             double limitedPct = analyzedSamples == 0 ? 0 : traversalLimitedSamples * 100.0 / analyzedSamples;
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("traversal-limit"),
                 Analyzer = AnalyzerName,
@@ -122,16 +122,16 @@ internal sealed class ReferenceChainSynthesisRule : ISynthesisRule
             });
         }
 
-        Finding? finalizerFinding = BuildFinalizerOnlyFinding(typeSamples);
+        Claim? finalizerFinding = BuildFinalizerOnlyFinding(typeSamples);
         if (finalizerFinding is not null) findings.Add(finalizerFinding);
 
-        Finding? sharedRootFinding = BuildSharedRootFinding(sharedRootGroups);
+        Claim? sharedRootFinding = BuildSharedRootFinding(sharedRootGroups);
         if (sharedRootFinding is not null) findings.Add(sharedRootFinding);
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
-    private static Finding? BuildFinalizerOnlyFinding(IReadOnlyList<Observation> typeSamples)
+    private static Claim? BuildFinalizerOnlyFinding(IReadOnlyList<Observation> typeSamples)
     {
         var finalizerOnly = new List<Observation>();
         foreach (Observation sample in typeSamples)
@@ -165,7 +165,7 @@ internal sealed class ReferenceChainSynthesisRule : ISynthesisRule
             derivedFrom.Add(sample.Id);
         }
 
-        return new Finding
+        return new Claim
         {
             Fingerprint = Fingerprint("finalizer-only-retention"),
             Analyzer = AnalyzerName,
@@ -182,7 +182,7 @@ internal sealed class ReferenceChainSynthesisRule : ISynthesisRule
         };
     }
 
-    private static Finding? BuildSharedRootFinding(IReadOnlyList<Observation> sharedRootGroups)
+    private static Claim? BuildSharedRootFinding(IReadOnlyList<Observation> sharedRootGroups)
     {
         if (sharedRootGroups.Count == 0) return null;
 
@@ -201,7 +201,7 @@ internal sealed class ReferenceChainSynthesisRule : ISynthesisRule
             derivedFrom.Add(group.Id);
         }
 
-        return new Finding
+        return new Claim
         {
             Fingerprint = Fingerprint("shared-root-retention"),
             Analyzer = AnalyzerName,

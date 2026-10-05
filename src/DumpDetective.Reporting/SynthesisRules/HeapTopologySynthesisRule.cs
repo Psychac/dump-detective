@@ -29,7 +29,7 @@ internal sealed class HeapTopologySynthesisRule : ISynthesisRule
         ObservationTypes = ["heap.segment-kind-composition", "heap.topology-population"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? population = null;
@@ -49,7 +49,7 @@ internal sealed class HeapTopologySynthesisRule : ISynthesisRule
         }
 
         if (population is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         ulong totalCommittedBytes = 0, totalSegmentsUlong = 0;
         ulong sohBytes = 0, lohBytes = 0, pohBytes = 0, frozenBytes = 0;
@@ -101,14 +101,14 @@ internal sealed class HeapTopologySynthesisRule : ISynthesisRule
 
         var derivedFrom = new List<ObservationId>(kindIds) { population.Id };
 
-        var findings = new List<Finding>();
+        var findings = new List<Claim>();
 
         // ── Heap segment distribution snapshot (always) ─────────────────────────
         Severity lohSeverity = lohPercent >= 40 ? Severity.Critical
             : lohPercent >= 25 ? Severity.Warning
             : Severity.Info;
 
-        findings.Add(new Finding
+        findings.Add(new Claim
         {
             Fingerprint = Fingerprint("segment-distribution"),
             Analyzer = AnalyzerName,
@@ -132,7 +132,7 @@ internal sealed class HeapTopologySynthesisRule : ISynthesisRule
         // ── Elevated POH usage ────────────────────────────────────────────────────
         if (pohPercent >= 10)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("poh-usage"),
                 Analyzer = AnalyzerName,
@@ -153,7 +153,7 @@ internal sealed class HeapTopologySynthesisRule : ISynthesisRule
         if (logicalHeapCount > 1 && minLogicalHeapBytes > 0 && maxLogicalHeapBytes > minLogicalHeapBytes * 2)
         {
             double skewRatio = maxLogicalHeapBytes / (double)minLogicalHeapBytes;
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("logical-heap-skew"),
                 Analyzer = AnalyzerName,
@@ -183,7 +183,7 @@ internal sealed class HeapTopologySynthesisRule : ISynthesisRule
 
             if (unknownSegmentCount > 0)
             {
-                findings.Add(new Finding
+                findings.Add(new Claim
                 {
                     Fingerprint = Fingerprint("unrecognized-kind"),
                     Analyzer = AnalyzerName,
@@ -210,7 +210,7 @@ internal sealed class HeapTopologySynthesisRule : ISynthesisRule
             if (sohFragPct >= 25.0)
             {
                 Severity sohFragSev = sohFragPct >= 45.0 ? Severity.Warning : Severity.Info;
-                findings.Add(new Finding
+                findings.Add(new Claim
                 {
                     Fingerprint = Fingerprint("soh-fragmentation"),
                     Analyzer = AnalyzerName,
@@ -237,7 +237,7 @@ internal sealed class HeapTopologySynthesisRule : ISynthesisRule
             if (lohFragPct >= 30.0)
             {
                 Severity lohFragSev = lohFragPct >= 50.0 ? Severity.Critical : Severity.Warning;
-                findings.Add(new Finding
+                findings.Add(new Claim
                 {
                     Fingerprint = Fingerprint("loh-fragmentation"),
                     Analyzer = AnalyzerName,
@@ -263,7 +263,7 @@ internal sealed class HeapTopologySynthesisRule : ISynthesisRule
             double pohFragPct = pohFragmentedBytes * 100.0 / pohBytes;
             if (pohFragPct >= 20.0)
             {
-                findings.Add(new Finding
+                findings.Add(new Claim
                 {
                     Fingerprint = Fingerprint("poh-fragmentation"),
                     Analyzer = AnalyzerName,
@@ -288,7 +288,7 @@ internal sealed class HeapTopologySynthesisRule : ISynthesisRule
             double frozenFragPct = frozenFragmentedBytes * 100.0 / frozenBytes;
             if (frozenFragPct >= 30.0)
             {
-                findings.Add(new Finding
+                findings.Add(new Claim
                 {
                     Fingerprint = Fingerprint("frozen-fragmentation"),
                     Analyzer = AnalyzerName,
@@ -307,7 +307,7 @@ internal sealed class HeapTopologySynthesisRule : ISynthesisRule
             }
         }
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
     // Mirrors DumpDetective.Analysis.Models.HeapSegmentKind's ordinal values, encoded as

@@ -32,7 +32,7 @@ internal sealed class SqlConnectionPoolSynthesisRule : ISynthesisRule
         ObservationTypes = ["infra.sql-connection-pool"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         int totalPools = 0;
@@ -54,7 +54,7 @@ internal sealed class SqlConnectionPoolSynthesisRule : ISynthesisRule
         }
 
         if (totalPools == 0 || poolsNearCapacity == 0 || worst is null || worstPct < 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long currentSize = (long)worst.Measures["current.size"].Value;
         long maxPoolSize = worst.Measures.TryGetValue("max.size", out Measure maxMeasure) ? (long)maxMeasure.Value : -1;
@@ -64,7 +64,7 @@ internal sealed class SqlConnectionPoolSynthesisRule : ISynthesisRule
 
         Severity sev = worstPct >= CriticalUtilizationPct ? Severity.Critical : Severity.Warning;
 
-        var finding = new Finding
+        var finding = new Claim
         {
             Fingerprint = Fingerprint("near-capacity"),
             Analyzer = AnalyzerName,
@@ -84,7 +84,7 @@ internal sealed class SqlConnectionPoolSynthesisRule : ISynthesisRule
             Confidence = ConfidenceBreakdown.MeasurementCertain,
         };
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>([finding]);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>([finding]);
     }
 
     /// <summary>Mirrors <c>SqlConnectionPoolAnalyzer.UtilizationPercent</c> exactly: -1 (never "the

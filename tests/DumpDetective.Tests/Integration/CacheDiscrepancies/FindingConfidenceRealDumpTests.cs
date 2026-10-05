@@ -64,12 +64,12 @@ public sealed class FindingConfidenceRealDumpTests
         int failedRuns = runs.Count(r => r.Status == AnalyzerExecutionStatus.Failed);
         var synthesisContext = new SynthesisContext { AnalyzerRunSummary = (runs.Count, failedRuns) };
 
-        IReadOnlyList<Finding> withLineage = await new SynthesisEngine(rules).SynthesizeAsync(observations, synthesisContext);
-        List<Finding> ruleOnly = await SynthesizeWithoutLineageAsync(rules, observations, synthesisContext);
+        IReadOnlyList<Claim> withLineage = await new SynthesisEngine(rules).SynthesizeAsync(observations, synthesisContext);
+        List<Claim> ruleOnly = await SynthesizeWithoutLineageAsync(rules, observations, synthesisContext);
 
         Assert.Equal(ruleOnly.Count, withLineage.Count);
 
-        var ruleOnlyByKey = new Dictionary<(string, int), Finding>();
+        var ruleOnlyByKey = new Dictionary<(string, int), Claim>();
         foreach (var (key, finding) in KeyByOccurrence(ruleOnly))
             ruleOnlyByKey[key] = finding;
 
@@ -86,7 +86,7 @@ public sealed class FindingConfidenceRealDumpTests
         var movedLines = new List<string>();
         foreach (var (key, after) in KeyByOccurrence(withLineage))
         {
-            Finding before = ruleOnlyByKey[key];
+            Claim before = ruleOnlyByKey[key];
             double? beforeScore = FindingSynthesisAdapter.ToInsightFinding(before).ConfidenceScore;
             double? afterScore = FindingSynthesisAdapter.ToInsightFinding(after).ConfidenceScore;
             if (beforeScore == afterScore)
@@ -112,7 +112,7 @@ public sealed class FindingConfidenceRealDumpTests
 
     // Exit criterion "full observation lineage": every finding resolves to observations, and each
     // of those to an artifact, an analyzer, and the capabilities it used.
-    private static List<string> DescribeLineageGaps(IReadOnlyList<Finding> findings, IReadOnlyList<Observation> observations)
+    private static List<string> DescribeLineageGaps(IReadOnlyList<Claim> findings, IReadOnlyList<Observation> observations)
     {
         var byId = new Dictionary<ObservationId, Observation>(observations.Count);
         foreach (Observation observation in observations)
@@ -120,7 +120,7 @@ public sealed class FindingConfidenceRealDumpTests
 
         var gaps = new List<string>();
         int fullyResolved = 0;
-        foreach (Finding finding in findings)
+        foreach (Claim finding in findings)
         {
             int unresolved = 0, missingProvenance = 0;
             foreach (ObservationId id in finding.DerivedFrom)
@@ -156,10 +156,10 @@ public sealed class FindingConfidenceRealDumpTests
         return provider.GetRequiredService<ISynthesisRuleFactory>().CreateRules();
     }
 
-    private static async Task<List<Finding>> SynthesizeWithoutLineageAsync(
+    private static async Task<List<Claim>> SynthesizeWithoutLineageAsync(
         IReadOnlyList<ISynthesisRule> rules, IReadOnlyList<Observation> observations, SynthesisContext context)
     {
-        var findings = new List<Finding>();
+        var findings = new List<Claim>();
         foreach (ISynthesisRule rule in rules)
         {
             var matched = observations.Where(o => rule.Query.Matches(o)).ToList();
@@ -177,10 +177,10 @@ public sealed class FindingConfidenceRealDumpTests
         return findings;
     }
 
-    private static IEnumerable<((string Fingerprint, int Occurrence) Key, Finding Finding)> KeyByOccurrence(IReadOnlyList<Finding> findings)
+    private static IEnumerable<((string Fingerprint, int Occurrence) Key, Claim Claim)> KeyByOccurrence(IReadOnlyList<Claim> findings)
     {
         var seen = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (Finding finding in findings)
+        foreach (Claim finding in findings)
         {
             seen.TryGetValue(finding.Fingerprint, out int occurrence);
             seen[finding.Fingerprint] = occurrence + 1;

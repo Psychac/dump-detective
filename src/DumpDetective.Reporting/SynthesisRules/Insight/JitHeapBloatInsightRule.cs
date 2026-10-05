@@ -19,7 +19,7 @@ internal sealed class JitHeapBloatInsightRule : ISynthesisRule
         ObservationTypes = ["runtime.jit-activity", "runtime.thread-triage"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? jit = null, threadTriage = null;
@@ -33,23 +33,23 @@ internal sealed class JitHeapBloatInsightRule : ISynthesisRule
         }
 
         if (jit is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         ulong totalJitHeapBytes = (ulong)jit.Measures["jit-heap.bytes"].Value;
         if (totalJitHeapBytes < ThresholdBytes)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         // The per-analyzer JitFindingGenerator already warns on this; this rule only fires a
         // cross-cutting finding when thread data correlates (many threads -> JIT contention).
         long aliveThreadCount = (long)(threadTriage?.Measures["alive-thread.count"].Value ?? 0);
         if (aliveThreadCount <= 100)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long jitManagerCount = (long)jit.Measures["jit-manager.count"].Value;
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::jit-heap-bloat",
                 Analyzer = "InsightEngine",

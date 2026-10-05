@@ -3,13 +3,13 @@ using DumpDetective.Sdk.Observations;
 namespace DumpDetective.Sdk.Synthesis;
 
 /// <summary>
-/// A synthesized narrative over one or more observations, produced by an
+/// A synthesized claim over one or more observations (named <c>Finding</c> until M1 step 3), produced by an
 /// <see cref="ISynthesisRule"/> — not authored per-analyzer. <see cref="DerivedFrom"/> is the field
 /// that matters most: it traces a finding to the exact observations that produced it, and each of
 /// those traces to the artifact + analyzer + capabilities that produced it in turn. See
 /// docs/refactor/modularity/observation-and-correlation-model.md § 2.
 /// </summary>
-public sealed record Finding
+public sealed record Claim
 {
     /// <summary>Stable across runs — dedup/trend identity.</summary>
     public required string Fingerprint { get; init; }
@@ -51,11 +51,10 @@ public sealed record Finding
     /// rule migration (<c>ArraySynthesisRule</c>), not speculatively: the report pipeline reads all
     /// five today (<c>ActionPriorityService</c>/<c>CorrelationBuilder</c> group and score by
     /// <c>Category</c>/<c>Tags</c>; several section builders render <c>MetricValue</c>/<c>MetricUnit</c>
-    /// on charts), so a rule-produced <see cref="Finding"/> with nowhere to carry them couldn't
+    /// on charts), so a rule-produced <see cref="Claim"/> with nowhere to carry them couldn't
     /// actually replace an <c>IFindingGenerator</c> in the real report, only in an isolated test.
-    /// Unlike the deferred <c>Claim</c>-shaped fields (support/counter/falsifiedBy — see
-    /// docs/refactor/modularity/phase-5-observations-synthesis.md's judgment-call entry), these are
-    /// not forward-looking: they're what today's pipeline already requires.
+    /// Unlike <see cref="Assertion"/>, <see cref="Support"/>, <see cref="Counter"/> and
+    /// <see cref="FalsifiedBy"/>, these are not forward-looking: they're what today's pipeline already requires.
     /// </summary>
     public required string Analyzer { get; init; }
 

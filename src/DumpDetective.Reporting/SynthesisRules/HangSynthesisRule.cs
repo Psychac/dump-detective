@@ -30,7 +30,7 @@ internal sealed class HangSynthesisRule : ISynthesisRule
         ObservationTypes = ["runtime.hang-pressure", "thread.wait-state"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? pressure = null;
@@ -53,7 +53,7 @@ internal sealed class HangSynthesisRule : ISynthesisRule
         }
 
         if (pressure is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         derivedFrom.Insert(0, pressure.Id);
 
@@ -77,7 +77,7 @@ internal sealed class HangSynthesisRule : ISynthesisRule
             : waitingPercent >= 50 || queuedWorkItems > HighThreadPoolThreshold ? Severity.Warning
             : Severity.Info;
 
-        var finding = new Finding
+        var finding = new Claim
         {
             Fingerprint = Fingerprint("hang-risk"),
             Analyzer = AnalyzerName,
@@ -96,7 +96,7 @@ internal sealed class HangSynthesisRule : ISynthesisRule
             Confidence = ConfidenceBreakdown.MeasurementCertain,
         };
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>([finding]);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>([finding]);
     }
 
     private static int ComputeHealthScore(

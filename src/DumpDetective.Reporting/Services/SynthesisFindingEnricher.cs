@@ -12,10 +12,10 @@ namespace DumpDetective.Reporting.Services;
 /// synthesis rules are the only source of analyzer findings.
 /// </summary>
 /// <remarks>
-/// Groups synthesized findings by <see cref="Finding.Analyzer"/>, not by re-querying per run — a
+/// Groups synthesized findings by <see cref="Claim.Analyzer"/>, not by re-querying per run — a
 /// single <see cref="SynthesisEngine.SynthesizeAsync"/> pass over the whole observation set, same
 /// as a real report run would do once more than one analyzer has a rule. Findings whose
-/// <see cref="Finding.Analyzer"/> matches no run (the cross-analyzer rules, all named
+/// <see cref="Claim.Analyzer"/> matches no run (the cross-analyzer rules, all named
 /// <c>"InsightEngine"</c>) are returned separately as <see cref="SynthesisEnrichment.UnattachedFindings"/>
 /// rather than dropped.
 /// </remarks>
@@ -51,13 +51,13 @@ internal sealed class SynthesisFindingEnricher
         }
         var context = new SynthesisContext { AnalyzerRunSummary = (runs.Count, failedCount) };
 
-        IReadOnlyList<Finding> findings = await _engine.SynthesizeAsync(observations, context, cancellationToken);
+        IReadOnlyList<Claim> findings = await _engine.SynthesizeAsync(observations, context, cancellationToken);
         if (findings.Count == 0)
             return new SynthesisEnrichment(runs, [], EmptyLineage);
 
         var lineageByFingerprint = new Dictionary<string, FindingLineage>(StringComparer.Ordinal);
         var byAnalyzer = new Dictionary<string, List<InsightFinding>>(StringComparer.Ordinal);
-        foreach (Finding finding in findings)
+        foreach (Claim finding in findings)
         {
             if (!byAnalyzer.TryGetValue(finding.Analyzer, out List<InsightFinding>? bucket))
             {

@@ -24,7 +24,7 @@ public sealed class SectionNotesMovedToRulesTests
     [InlineData(0, false)]
     public async Task LohFragmentationRule_NotesSmallGapDominance_AboveEightyPercent(int subKbGaps, bool expectNote)
     {
-        IReadOnlyList<Finding> findings = await new LohFragmentationSynthesisRule().SynthesizeAsync(
+        IReadOnlyList<Claim> findings = await new LohFragmentationSynthesisRule().SynthesizeAsync(
             new ObservationMatchSet([
                 MakeObservation("heap.loh-fragmentation", "LOH & POH Fragmentation Analysis", new()
                 {
@@ -42,7 +42,7 @@ public sealed class SectionNotesMovedToRulesTests
             ]),
             new SynthesisContext());
 
-        Finding finding = findings.Should().ContainSingle().Subject;
+        Claim finding = findings.Should().ContainSingle().Subject;
         if (expectNote)
             finding.Narrative.Should().Contain($"{subKbGaps}% of free gaps are under 1 KB");
         else
@@ -52,7 +52,7 @@ public sealed class SectionNotesMovedToRulesTests
     [Fact]
     public async Task LockGraphRule_CountsContestedLocksWithRecursionAtLeastThree()
     {
-        IReadOnlyList<Finding> findings = await new LockGraphSynthesisRule().SynthesizeAsync(
+        IReadOnlyList<Claim> findings = await new LockGraphSynthesisRule().SynthesizeAsync(
             new ObservationMatchSet([
                 MakeObservation("runtime.lock-pressure", "Lock Graph Analysis", new() { ["held-lock.count"] = Count(3) }),
                 MakeContestedLock(recursionCount: 3),
@@ -68,7 +68,7 @@ public sealed class SectionNotesMovedToRulesTests
     [Fact]
     public async Task LockGraphRule_NoRecursionNote_WhenNoLockReachesThreshold()
     {
-        IReadOnlyList<Finding> findings = await new LockGraphSynthesisRule().SynthesizeAsync(
+        IReadOnlyList<Claim> findings = await new LockGraphSynthesisRule().SynthesizeAsync(
             new ObservationMatchSet([
                 MakeObservation("runtime.lock-pressure", "Lock Graph Analysis", new() { ["held-lock.count"] = Count(1) }),
                 MakeContestedLock(recursionCount: 2),
@@ -84,7 +84,7 @@ public sealed class SectionNotesMovedToRulesTests
     [InlineData(1_000UL, "≈", "largely self-contained", "1.00x")]
     public async Task DominatorRule_DescribesTopLongLivedTypeRetentionShape(ulong retainedBytes, string relation, string shape, string ratio)
     {
-        IReadOnlyList<Finding> findings = await new DominatorSynthesisRule().SynthesizeAsync(
+        IReadOnlyList<Claim> findings = await new DominatorSynthesisRule().SynthesizeAsync(
             new ObservationMatchSet([
                 MakeRetention("App.Gen0Heavy", gen2: 0, lohBytes: 0, shallow: 1_000, retained: 50_000),
                 MakeRetention("App.LongLivedA", gen2: 10, lohBytes: 0, shallow: 1_000, retained: 1_000),
@@ -99,7 +99,7 @@ public sealed class SectionNotesMovedToRulesTests
     [Fact]
     public async Task DominatorRule_NoRetentionShapeSentence_WithoutAnyGen2OrLohType()
     {
-        IReadOnlyList<Finding> findings = await new DominatorSynthesisRule().SynthesizeAsync(
+        IReadOnlyList<Claim> findings = await new DominatorSynthesisRule().SynthesizeAsync(
             new ObservationMatchSet([MakeRetention("App.Gen0Heavy", gen2: 0, lohBytes: 0, shallow: 1_000, retained: 50_000)]),
             new SynthesisContext());
 

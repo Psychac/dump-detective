@@ -132,9 +132,9 @@ public sealed class ConfidenceCalculatorTests
         Observation degraded = MakeObservation("Static Root Leak Detection", confidence: 0.5, fidelity: FidelityLevel.Degraded);
         var engine = new SynthesisEngine([new DerivedFromRule(degraded.Id, RootPathSupported)]);
 
-        IReadOnlyList<Finding> findings = await engine.SynthesizeAsync([degraded], new SynthesisContext());
+        IReadOnlyList<Claim> findings = await engine.SynthesizeAsync([degraded], new SynthesisContext());
 
-        Finding finding = findings.Should().ContainSingle().Subject;
+        Claim finding = findings.Should().ContainSingle().Subject;
         finding.Confidence.Composite.Should().Be(0.82 * 0.5);
         finding.Confidence.LimitingFactors.Should().HaveCount(2);
     }
@@ -169,9 +169,9 @@ public sealed class ConfidenceCalculatorTests
 
         public ObservationQuery Query { get; } = new() { ObservationTypes = ["test.observation"] };
 
-        public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+        public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
             ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default) =>
-            ValueTask.FromResult<IReadOnlyList<Finding>>([new Finding
+            ValueTask.FromResult<IReadOnlyList<Claim>>([new Claim
             {
                 Fingerprint = "test::derived-from",
                 Analyzer = "Test Analyzer",

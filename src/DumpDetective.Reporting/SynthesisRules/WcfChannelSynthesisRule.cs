@@ -35,7 +35,7 @@ internal sealed class WcfChannelSynthesisRule : ISynthesisRule
         ObservationTypes = ["infra.wcf-channel", "infra.wcf-channel-type-population", "infra.wcf-channel-population"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? population = null;
@@ -72,7 +72,7 @@ internal sealed class WcfChannelSynthesisRule : ISynthesisRule
             }
         }
 
-        if (population is null) return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+        if (population is null) return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         IReadOnlyDictionary<string, Measure> m = population.Measures;
         long totalChannels = (long)m["total.count"].Value;
@@ -86,7 +86,7 @@ internal sealed class WcfChannelSynthesisRule : ISynthesisRule
         long sessionChannelCount = (long)m["session.count"].Value;
         long factoryCount = (long)m["factory.count"].Value;
 
-        var findings = new List<Finding>(3);
+        var findings = new List<Claim>(3);
 
         // ── Faulted channels finding (always actionable) ────────────────────────
         if (faultedChannels > 0)
@@ -97,7 +97,7 @@ internal sealed class WcfChannelSynthesisRule : ISynthesisRule
 
             var derivedFrom = new List<ObservationId>(faultedIds) { population.Id };
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("faulted-channels"),
                 Analyzer = AnalyzerName,
@@ -125,7 +125,7 @@ internal sealed class WcfChannelSynthesisRule : ISynthesisRule
         {
             Severity sev = totalChannels >= TotalChannelsCriticalThreshold ? Severity.Critical : Severity.Warning;
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("channel-count"),
                 Analyzer = AnalyzerName,
@@ -152,7 +152,7 @@ internal sealed class WcfChannelSynthesisRule : ISynthesisRule
         // ── ChannelFactory detection ──────────────────────────────────────────────
         if (factoryCount > 0)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("channel-factory"),
                 Analyzer = AnalyzerName,
@@ -171,7 +171,7 @@ internal sealed class WcfChannelSynthesisRule : ISynthesisRule
             });
         }
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
     private static string BuildFaultedBreakdown(

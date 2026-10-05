@@ -24,5 +24,5 @@ public interface ISynthesisRule
     /// (<c>rule.Match.Matches(observation)</c> read awkwardly); named after its own type instead.</summary>
     ObservationQuery Query { get; }
 
-    ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default);
+    ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default);
 }

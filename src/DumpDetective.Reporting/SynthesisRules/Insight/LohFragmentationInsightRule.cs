@@ -26,26 +26,26 @@ internal sealed class LohFragmentationInsightRule : ISynthesisRule
 
     public ObservationQuery Query { get; } = new() { ObservationTypes = ["heap.loh-fragmentation-summary"] };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         if (matched.Matched.Count == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         Observation summary = matched.Matched[0];
         double fragmentationPercent = summary.Measures["fragmentation.percent"].Value;
 
         if (fragmentationPercent < WarningPct)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         Severity severity = fragmentationPercent >= CriticalPct ? Severity.Critical : Severity.Warning;
         ulong freeBytes = (ulong)summary.Measures["free.bytes"].Value;
         int freeBlockCount = (int)summary.Measures["free-block.count"].Value;
         ulong largestFreeBlock = (ulong)summary.Measures["largest-free-block.bytes"].Value;
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::loh-fragmentation",
                 Analyzer = "InsightEngine",

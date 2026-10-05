@@ -31,7 +31,7 @@ internal sealed class MemoryTypeGenerationInsightRule : ISynthesisRule
         ObservationTypes = ["gc.generation-type-profile"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         var matches = new List<(Observation Observation, string TypeName, ulong TotalBytes, double Gen2FractionPct)>();
@@ -49,7 +49,7 @@ internal sealed class MemoryTypeGenerationInsightRule : ISynthesisRule
         }
 
         if (matches.Count == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         matches.Sort(static (a, b) => b.TotalBytes.CompareTo(a.TotalBytes));
 
@@ -59,9 +59,9 @@ internal sealed class MemoryTypeGenerationInsightRule : ISynthesisRule
 
         var largest = matches[0];
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::memory-type-generation",
                 Analyzer = "InsightEngine",

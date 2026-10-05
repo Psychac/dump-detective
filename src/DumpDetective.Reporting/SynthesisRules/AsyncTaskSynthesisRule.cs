@@ -41,7 +41,7 @@ internal sealed class AsyncTaskSynthesisRule : ISynthesisRule
         ObservationTypes = ["async.task-population", "type.orphaned-task"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? population = null;
@@ -60,7 +60,7 @@ internal sealed class AsyncTaskSynthesisRule : ISynthesisRule
             }
         }
 
-        if (population is null) return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+        if (population is null) return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         IReadOnlyDictionary<string, Measure> m = population.Measures;
         long totalTasks = (long)m["total.count"].Value;
@@ -218,7 +218,7 @@ internal sealed class AsyncTaskSynthesisRule : ISynthesisRule
                 MetricUnit: "pending-tasks"));
         }
 
-        if (signals.Count == 0) return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+        if (signals.Count == 0) return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         AsyncSignal top = signals[0];
         Severity aggregateSeverity = top.Severity;
@@ -239,12 +239,12 @@ internal sealed class AsyncTaskSynthesisRule : ISynthesisRule
 
         if (signals.Count == 1)
         {
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([ToFinding(top, derivedFrom)]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([ToFinding(top, derivedFrom)]);
         }
 
-        var findings = new List<Finding>(2)
+        var findings = new List<Claim>(2)
         {
-            new Finding
+            new Claim
             {
                 Fingerprint = Fingerprint("risk-cluster"),
                 Analyzer = AnalyzerName,
@@ -262,10 +262,10 @@ internal sealed class AsyncTaskSynthesisRule : ISynthesisRule
             ToFinding(top, derivedFrom),
         };
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
-    private static Finding ToFinding(AsyncSignal signal, IReadOnlyList<ObservationId> derivedFrom) => new()
+    private static Claim ToFinding(AsyncSignal signal, IReadOnlyList<ObservationId> derivedFrom) => new()
     {
         Fingerprint = Fingerprint(signal.Key),
         Analyzer = AnalyzerName,

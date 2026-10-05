@@ -31,7 +31,7 @@ internal sealed class CollectionSynthesisRule : ISynthesisRule
         ObservationTypes = ["collection.waste-summary", "collection.kind-waste", "collection.element-type-waste", "collection.wasteful"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? summary = null;
@@ -59,7 +59,7 @@ internal sealed class CollectionSynthesisRule : ISynthesisRule
         }
 
         if (summary is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         int totalCollections = (int)summary.Measures["total-collection.count"].Value;
         ulong totalWastedMemory = (ulong)summary.Measures["total-wasted.bytes"].Value;
@@ -112,7 +112,7 @@ internal sealed class CollectionSynthesisRule : ISynthesisRule
         foreach (Observation o in kindWaste) derivedFrom.Add(o.Id);
         foreach (Observation o in elementTypeWaste) derivedFrom.Add(o.Id);
 
-        var finding = new Finding
+        var finding = new Claim
         {
             Fingerprint = Fingerprint("capacity-efficiency"),
             Analyzer = AnalyzerName,
@@ -128,7 +128,7 @@ internal sealed class CollectionSynthesisRule : ISynthesisRule
             Confidence = ConfidenceBreakdown.MeasurementCertain,
         };
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>([finding]);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>([finding]);
     }
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();

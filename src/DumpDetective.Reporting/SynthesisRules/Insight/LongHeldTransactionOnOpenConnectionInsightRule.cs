@@ -34,7 +34,7 @@ internal sealed class LongHeldTransactionOnOpenConnectionInsightRule : ISynthesi
         ObservationTypes = ["infra.sql-transaction", "infra.db-connection"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         var openConnectionsByAddress = new Dictionary<ulong, ObservationId>();
@@ -57,7 +57,7 @@ internal sealed class LongHeldTransactionOnOpenConnectionInsightRule : ISynthesi
         }
 
         if (transactions.Count == 0 || openConnectionCount == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         int correlatedCount = 0;
         var derivedFrom = new List<ObservationId>();
@@ -73,13 +73,13 @@ internal sealed class LongHeldTransactionOnOpenConnectionInsightRule : ISynthesi
         }
 
         if (correlatedCount < WarningCount)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         Severity severity = correlatedCount >= CriticalCount ? Severity.Critical : Severity.Warning;
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::long-held-transaction-on-open-connection",
                 Analyzer = "InsightEngine",

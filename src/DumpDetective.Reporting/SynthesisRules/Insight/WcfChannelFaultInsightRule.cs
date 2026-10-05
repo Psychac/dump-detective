@@ -18,7 +18,7 @@ internal sealed class WcfChannelFaultInsightRule : ISynthesisRule
         ObservationTypes = ["infra.wcf-channel-population", "runtime.exception-type"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? wcf = null;
@@ -32,11 +32,11 @@ internal sealed class WcfChannelFaultInsightRule : ISynthesisRule
         }
 
         if (wcf is null || wcf.Measures["total.count"].Value == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long faultedChannels = (long)wcf.Measures["faulted.count"].Value;
         if (faultedChannels == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long commExCount = 0;
         var derivedFrom = new List<ObservationId> { wcf.Id };
@@ -52,11 +52,11 @@ internal sealed class WcfChannelFaultInsightRule : ISynthesisRule
         }
 
         if (commExCount == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::wcf-channel-fault",
                 Analyzer = "InsightEngine",

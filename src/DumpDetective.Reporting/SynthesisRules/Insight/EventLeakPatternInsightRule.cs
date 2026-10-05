@@ -24,7 +24,7 @@ internal sealed class EventLeakPatternInsightRule : ISynthesisRule
         ObservationTypes = ["event.publisher-leak-population", "gc.generation-composition", "finalizer.queue-population"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? eventLeaks = null, gcGen = null, finalizerQueue = null;
@@ -40,7 +40,7 @@ internal sealed class EventLeakPatternInsightRule : ISynthesisRule
 
         long totalEventLeakInstances = (long)(eventLeaks?.Measures["total.count"].Value ?? 0);
         if (eventLeaks is null || totalEventLeakInstances == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         double gen2Pct = gcGen?.Measures["gen2.percent"].Value ?? 0.0;
         bool highGen2 = gcGen is not null && gen2Pct >= HighGen2Pct;
@@ -50,7 +50,7 @@ internal sealed class EventLeakPatternInsightRule : ISynthesisRule
 
         // Only emit a cross-cutting finding when at least one other signal correlates.
         if (!highGen2 && !highFinalizer)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         string gen2Note = highGen2
             ? $" Gen2 holds {gen2Pct:F1}% of the managed heap — event subscribers may be keeping objects alive across GC generations."
@@ -66,9 +66,9 @@ internal sealed class EventLeakPatternInsightRule : ISynthesisRule
         if (gcGen is not null) derivedFrom.Add(gcGen.Id);
         if (finalizerQueue is not null) derivedFrom.Add(finalizerQueue.Id);
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::event-leak-pattern",
                 Analyzer = "InsightEngine",

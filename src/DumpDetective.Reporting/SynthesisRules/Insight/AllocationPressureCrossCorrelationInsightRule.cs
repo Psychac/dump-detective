@@ -24,7 +24,7 @@ internal sealed class AllocationPressureCrossCorrelationInsightRule : ISynthesis
         ObservationTypes = ["gc.allocation-composition", "runtime.thread-triage"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? allocPattern = null, threadTriage = null;
@@ -38,7 +38,7 @@ internal sealed class AllocationPressureCrossCorrelationInsightRule : ISynthesis
         }
 
         if (allocPattern is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         double gen0CountPct = allocPattern.Measures["gen0.count-fraction"].Value * 100.0;
         double gen2CountPct = allocPattern.Measures["gen2.count-fraction"].Value * 100.0;
@@ -65,9 +65,9 @@ internal sealed class AllocationPressureCrossCorrelationInsightRule : ISynthesis
 
             var derivedFrom = threadTriage is not null ? new[] { allocPattern.Id, threadTriage.Id } : [allocPattern.Id];
 
-            return ValueTask.FromResult<IReadOnlyList<Finding>>(
+            return ValueTask.FromResult<IReadOnlyList<Claim>>(
             [
-                new Finding
+                new Claim
                 {
                     Fingerprint = "insightengine::allocation-pressure-critical",
                     Analyzer = "InsightEngine",
@@ -91,9 +91,9 @@ internal sealed class AllocationPressureCrossCorrelationInsightRule : ISynthesis
         // Standalone: GC pressure is High
         if (gcPressure == GcPressureLevel.High)
         {
-            return ValueTask.FromResult<IReadOnlyList<Finding>>(
+            return ValueTask.FromResult<IReadOnlyList<Claim>>(
             [
-                new Finding
+                new Claim
                 {
                     Fingerprint = "insightengine::allocation-pressure-high",
                     Analyzer = "InsightEngine",
@@ -113,7 +113,7 @@ internal sealed class AllocationPressureCrossCorrelationInsightRule : ISynthesis
             ]);
         }
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
     }
 
     // Duplicated from AllocationPatternPressureClassifier (internal to a different assembly) —

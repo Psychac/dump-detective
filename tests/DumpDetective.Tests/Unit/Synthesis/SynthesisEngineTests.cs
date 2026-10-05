@@ -33,11 +33,11 @@ public sealed class SynthesisEngineTests
     [Fact]
     public async Task SynthesizeAsync_StampsEveryFindingWithItsRulesIdAndVersion_OverridingWhatTheRuleSet()
     {
-        Finding claimingAnotherRule = FixedFinding("fp-1") with { Rule = new RuleRef("someone.else", 99) };
+        Claim claimingAnotherRule = FixedFinding("fp-1") with { Rule = new RuleRef("someone.else", 99) };
         RecordingRule rule = new("rule.stamped", ["type.retention"], claimingAnotherRule);
         SynthesisEngine engine = new([rule]);
 
-        IReadOnlyList<Finding> findings = await engine.SynthesizeAsync([MakeObservation("type.retention")], new SynthesisContext());
+        IReadOnlyList<Claim> findings = await engine.SynthesizeAsync([MakeObservation("type.retention")], new SynthesisContext());
 
         findings.Should().ContainSingle().Which.Rule.Should().Be(new RuleRef("rule.stamped", 1));
     }
@@ -63,7 +63,7 @@ public sealed class SynthesisEngineTests
 
         SynthesisEngine engine = new([badRule, goodRule]);
 
-        IReadOnlyList<Finding> findings = await engine.SynthesizeAsync(
+        IReadOnlyList<Claim> findings = await engine.SynthesizeAsync(
             [MakeObservation("type.retention")], new SynthesisContext());
 
         findings.Should().ContainSingle(f => f.Fingerprint == "z-finding");
@@ -77,7 +77,7 @@ public sealed class SynthesisEngineTests
 
         SynthesisEngine engine = new([ruleZ, ruleA]);
 
-        IReadOnlyList<Finding> findings = await engine.SynthesizeAsync(
+        IReadOnlyList<Claim> findings = await engine.SynthesizeAsync(
             [MakeObservation("type.retention")], new SynthesisContext());
 
         findings.Select(f => f.Fingerprint).Should().Equal("a-finding", "z-finding");
@@ -100,7 +100,7 @@ public sealed class SynthesisEngineTests
         Confidence = 1.0,
     };
 
-    private static Finding FixedFinding(string fingerprint) => new()
+    private static Claim FixedFinding(string fingerprint) => new()
     {
         Fingerprint = fingerprint,
         Severity = Severity.Info,
@@ -115,9 +115,9 @@ public sealed class SynthesisEngineTests
 
     private sealed class RecordingRule : ISynthesisRule
     {
-        private readonly Finding? _findingToReturn;
+        private readonly Claim? _findingToReturn;
 
-        public RecordingRule(string ruleId, IReadOnlyList<string> observationTypes, Finding? findingToReturn = null)
+        public RecordingRule(string ruleId, IReadOnlyList<string> observationTypes, Claim? findingToReturn = null)
         {
             RuleId = ruleId;
             Query = new ObservationQuery { ObservationTypes = observationTypes };
@@ -130,12 +130,12 @@ public sealed class SynthesisEngineTests
         public bool WasInvoked { get; private set; }
         public IReadOnlyList<Observation> ReceivedMatches { get; private set; } = [];
 
-        public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+        public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
             ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
         {
             WasInvoked = true;
             ReceivedMatches = matched.Matched;
-            IReadOnlyList<Finding> result = _findingToReturn is null ? [] : [_findingToReturn];
+            IReadOnlyList<Claim> result = _findingToReturn is null ? [] : [_findingToReturn];
             return ValueTask.FromResult(result);
         }
     }
@@ -152,7 +152,7 @@ public sealed class SynthesisEngineTests
         public int Version => 1;
         public ObservationQuery Query { get; }
 
-        public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+        public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
             ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("synthesis rule under test always throws");
     }

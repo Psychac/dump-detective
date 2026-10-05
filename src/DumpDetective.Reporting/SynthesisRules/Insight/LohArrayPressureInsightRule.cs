@@ -24,7 +24,7 @@ internal sealed class LohArrayPressureInsightRule : ISynthesisRule
         ObservationTypes = ["type.array-population", "heap.loh-fragmentation-summary"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? arrays = null, lohFrag = null;
@@ -38,11 +38,11 @@ internal sealed class LohArrayPressureInsightRule : ISynthesisRule
         }
 
         if (arrays is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         ulong lohArrayBytes = (ulong)arrays.Measures["loh.bytes"].Value;
         if (lohArrayBytes < PressureThresholdBytes)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long lohArrayCount = (long)arrays.Measures["loh.count"].Value;
         double fragmentationPercent = lohFrag?.Measures["fragmentation.percent"].Value ?? 0.0;
@@ -58,9 +58,9 @@ internal sealed class LohArrayPressureInsightRule : ISynthesisRule
         var derivedFrom = new List<ObservationId> { arrays.Id };
         if (lohFrag is not null) derivedFrom.Add(lohFrag.Id);
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::loh-array-pressure",
                 Analyzer = "InsightEngine",

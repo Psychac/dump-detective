@@ -56,7 +56,7 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
         ObservationTypes = ["type.finalizable-population", "finalizer.queue-entry", "finalizer.queue-population"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         long totalObjects = 0;
@@ -139,7 +139,7 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
             }
         }
 
-        var findings = new List<Finding>();
+        var findings = new List<Claim>();
 
         // ── Gen2 finalizable accumulation ─────────────────────────────────────
         if (gen2Count >= Gen2WarningThreshold)
@@ -147,7 +147,7 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
             Severity sev = gen2Count >= Gen2CriticalThreshold ? Severity.Critical : Severity.Warning;
             string topType = topGen2Type is not null ? ((TypeRef)topGen2Type.Subjects[0]).CanonicalName : "N/A";
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("gen2-accumulation"),
                 Analyzer = AnalyzerName,
@@ -173,7 +173,7 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
         {
             Severity sev = queueCount > QueueCountCriticalThreshold ? Severity.Critical : Severity.Warning;
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("queue-backlog"),
                 Analyzer = AnalyzerName,
@@ -206,7 +206,7 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
                 ? " (exact dominator-tree retained bytes unavailable for some entries—shallow size used instead, an underestimate)"
                 : " (exact, from the dominator tree)";
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("queue-retained-bytes"),
                 Analyzer = AnalyzerName,
@@ -243,7 +243,7 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
                 }
             }
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("critical-finalizer-accumulation"),
                 Analyzer = AnalyzerName,
@@ -268,7 +268,7 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
         // ── Undisposed IDisposable in queue ────────────────────────────────────
         if (undisposedCount > 0)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("undisposed-in-queue"),
                 Analyzer = AnalyzerName,
@@ -291,14 +291,14 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
 
         AppendKnownQueuePatternFindings(findings, queueTypeCounts);
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
     // Well-known problematic types actually sitting in the finalizer queue right now, each
     // indicating a specific resource-management anti-pattern (uncached dynamic code generation,
     // abandoned threads, undisposed timers, legacy lock abandonment).
     private static void AppendKnownQueuePatternFindings(
-        List<Finding> findings, Dictionary<string, (long Count, List<ObservationId> Ids)> queueTypeCounts)
+        List<Claim> findings, Dictionary<string, (long Count, List<ObservationId> Ids)> queueTypeCounts)
     {
         long dynamicResolverCount = 0;
         long threadCount = 0;
@@ -336,7 +336,7 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
 
         if (dynamicResolverCount >= DynamicResolverQueueInfoThreshold)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("dynamic-resolver-accumulation"),
                 Analyzer = AnalyzerName,
@@ -357,7 +357,7 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
 
         if (threadCount >= ThreadQueueInfoThreshold)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("abandoned-thread-objects"),
                 Analyzer = AnalyzerName,
@@ -378,7 +378,7 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
 
         if (timerHolderCount >= TimerHolderQueueInfoThreshold)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("undisposed-timer-instances"),
                 Analyzer = AnalyzerName,
@@ -400,7 +400,7 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
 
         if (readerWriterLockCount >= ReaderWriterLockQueueWarningThreshold)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("abandoned-reader-writer-lock"),
                 Analyzer = AnalyzerName,

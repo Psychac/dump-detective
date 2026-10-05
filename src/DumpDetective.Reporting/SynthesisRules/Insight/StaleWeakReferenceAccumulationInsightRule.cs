@@ -23,21 +23,21 @@ internal sealed class StaleWeakReferenceAccumulationInsightRule : ISynthesisRule
 
     public ObservationQuery Query { get; } = new() { ObservationTypes = ["weakreference.population"] };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         if (matched.Matched.Count == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         Observation weakRef = matched.Matched[0];
         long totalWeakHandles = (long)weakRef.Measures["total-handles.count"].Value;
         if (totalWeakHandles == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long deadWeakTargets = (long)weakRef.Measures["dead-targets.count"].Value;
         double deadTargetRatio = (double)deadWeakTargets / totalWeakHandles;
         if (deadTargetRatio < WarningRatio)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         Severity severity = deadTargetRatio >= 0.80 ? Severity.Warning : Severity.Info;
 
@@ -48,9 +48,9 @@ internal sealed class StaleWeakReferenceAccumulationInsightRule : ISynthesisRule
             ? $" {staleWrapperCount:N0}{(staleWrapperCountIsExact ? "" : " (estimated)")} stale WeakReference<T> wrapper object(s) detected."
             : string.Empty;
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::stale-weak-reference-accumulation",
                 Analyzer = "InsightEngine",

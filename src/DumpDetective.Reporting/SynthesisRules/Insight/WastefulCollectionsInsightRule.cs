@@ -14,23 +14,23 @@ internal sealed class WastefulCollectionsInsightRule : ISynthesisRule
 
     public ObservationQuery Query { get; } = new() { ObservationTypes = ["collection.waste-summary"] };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         if (matched.Matched.Count == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         Observation collections = matched.Matched[0];
         long wastefulCollectionCount = (long)collections.Measures["wasteful-collection.count"].Value;
         if (wastefulCollectionCount == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         ulong totalWastedMemory = (ulong)collections.Measures["total-wasted.bytes"].Value;
         long totalCollections = (long)collections.Measures["total-collection.count"].Value;
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::wasteful-collections",
                 Analyzer = "InsightEngine",

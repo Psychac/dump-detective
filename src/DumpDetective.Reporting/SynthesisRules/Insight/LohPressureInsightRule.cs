@@ -26,7 +26,7 @@ internal sealed class LohPressureInsightRule : ISynthesisRule
         ObservationTypes = ["heap.memory-composition", "gc.generation-composition", "heap.topology-population"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? memory = null, gcGen = null, segments = null;
@@ -46,7 +46,7 @@ internal sealed class LohPressureInsightRule : ISynthesisRule
             ?? -1;
 
         if (lohPct < WarningPct)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         Severity severity = lohPct >= CriticalPct ? Severity.Critical : Severity.Warning;
 
@@ -57,9 +57,9 @@ internal sealed class LohPressureInsightRule : ISynthesisRule
 
         Observation source = memory ?? gcGen ?? segments!;
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::loh-pressure",
                 Analyzer = "InsightEngine",

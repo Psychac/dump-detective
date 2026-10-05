@@ -43,7 +43,7 @@ internal sealed class AllocationPatternSynthesisRule : ISynthesisRule
         ObservationTypes = ["gc.allocation-composition"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? composition = null;
@@ -57,7 +57,7 @@ internal sealed class AllocationPatternSynthesisRule : ISynthesisRule
         }
 
         if (composition is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         double gen0CountPct = composition.Measures["gen0.count-fraction"].Value * 100.0;
         double gen2CountPct = composition.Measures["gen2.count-fraction"].Value * 100.0;
@@ -73,7 +73,7 @@ internal sealed class AllocationPatternSynthesisRule : ISynthesisRule
         // Suppress findings at Low pressure (reduces noise) — no finding at all, not even an
         // info-level "nothing to report" one, matching the old generator exactly.
         if (gcPressure == GcPressureLevel.Low)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         double promotionPressureScore = ComputePromotionPressureScore(gen2CountPct, lohSizePct);
         AllocationProfile profile = ClassifyProfile(gen0CountPct, gen2CountPct, transientClassificationThreshold);
@@ -111,7 +111,7 @@ internal sealed class AllocationPatternSynthesisRule : ISynthesisRule
                 "GC pressure is within normal bounds.",
         };
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>([new Finding
+        return ValueTask.FromResult<IReadOnlyList<Claim>>([new Claim
         {
             Fingerprint = Fingerprint("gc-allocation-pattern"),
             Analyzer = AnalyzerName,

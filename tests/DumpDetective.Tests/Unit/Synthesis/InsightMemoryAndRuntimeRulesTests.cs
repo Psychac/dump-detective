@@ -62,7 +62,7 @@ public sealed class InsightMemoryAndRuntimeRulesTests
                     subjects: [targetType]),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Narrative.Should().Contain("StaticVar").And.Contain("MyApp.Cache");
@@ -79,7 +79,7 @@ public sealed class InsightMemoryAndRuntimeRulesTests
                     subjects: [targetType]),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -108,7 +108,7 @@ public sealed class InsightMemoryAndRuntimeRulesTests
                 }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Critical);
@@ -130,7 +130,7 @@ public sealed class InsightMemoryAndRuntimeRulesTests
                 }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -155,7 +155,7 @@ public sealed class InsightMemoryAndRuntimeRulesTests
                 }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
         }
@@ -175,7 +175,7 @@ public sealed class InsightMemoryAndRuntimeRulesTests
                 }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -197,7 +197,7 @@ public sealed class InsightMemoryAndRuntimeRulesTests
                 }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Warning);
@@ -227,7 +227,7 @@ public sealed class InsightMemoryAndRuntimeRulesTests
                 Obs("type.async-state-machine-population", new Dictionary<string, Measure> { ["total.count"] = Count(110), ["total.bytes"] = Bytes(2000), ["gen2.count"] = Count(0), ["gen2.percent"] = Pct(0) }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Narrative.Should().Contain("110").And.Contain("MyApp.Service.FireAndForgetAsync");
@@ -256,7 +256,7 @@ public sealed class InsightMemoryAndRuntimeRulesTests
                 }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Warning);
@@ -292,7 +292,7 @@ public sealed class InsightMemoryAndRuntimeRulesTests
                 }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle(f => f.Title == "Managed heap virtual address space pressure");
             findings[0].Narrative.Should().Contain("ratio");
@@ -321,7 +321,7 @@ public sealed class InsightMemoryAndRuntimeRulesTests
                 }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle(f => f.Title == "Ephemeral GC segments critically full");
         }
@@ -344,7 +344,7 @@ public sealed class InsightMemoryAndRuntimeRulesTests
                 }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Warning);
@@ -364,7 +364,7 @@ public sealed class InsightMemoryAndRuntimeRulesTests
                 Obs("runtime.thread-triage", new Dictionary<string, Measure> { ["alive-thread.count"] = Count(150), ["blocked-thread.count"] = Count(0) }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
         }
@@ -378,7 +378,7 @@ public sealed class InsightMemoryAndRuntimeRulesTests
                 Obs("runtime.thread-triage", new Dictionary<string, Measure> { ["alive-thread.count"] = Count(10), ["blocked-thread.count"] = Count(0) }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -402,7 +402,7 @@ public sealed class InsightMemoryAndRuntimeRulesTests
                 }),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
         }
@@ -438,7 +438,7 @@ public sealed class InsightMemoryAndRuntimeRulesTests
                 ConflictGroup("MyApp.Plugins.dll"),
             ]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
             findings[0].Severity.Should().Be(Severity.Info);
@@ -451,7 +451,7 @@ public sealed class InsightMemoryAndRuntimeRulesTests
         {
             var matched = new ObservationMatchSet([Frames("myapp.plugins.dll", 200), ConflictGroup("MyApp.Plugins.dll")]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().ContainSingle();
         }
@@ -461,7 +461,7 @@ public sealed class InsightMemoryAndRuntimeRulesTests
         {
             var matched = new ObservationMatchSet([Frames("MyApp.Plugins.dll", 49), ConflictGroup("MyApp.Plugins.dll")]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }
@@ -471,7 +471,7 @@ public sealed class InsightMemoryAndRuntimeRulesTests
         {
             var matched = new ObservationMatchSet([Frames("MyApp.Plugins.dll", 200), ConflictGroup("Other.dll")]);
 
-            IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+            IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
             findings.Should().BeEmpty();
         }

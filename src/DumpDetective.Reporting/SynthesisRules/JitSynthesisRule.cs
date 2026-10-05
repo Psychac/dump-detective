@@ -34,7 +34,7 @@ internal sealed class JitSynthesisRule : ISynthesisRule
         ObservationTypes = ["runtime.jit-activity"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? activity = null;
@@ -48,7 +48,7 @@ internal sealed class JitSynthesisRule : ISynthesisRule
         }
 
         if (activity is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         ulong totalJitHeapBytes = (ulong)activity.Measures["jit-heap.bytes"].Value;
         long jitManagerCount = (long)activity.Measures["jit-manager.count"].Value;
@@ -62,12 +62,12 @@ internal sealed class JitSynthesisRule : ISynthesisRule
         long maxThreadFrameDepth = (long)activity.Measures["max-thread-frame-depth.count"].Value;
         uint maxThreadFrameDepthOSThreadId = (uint)activity.Measures["max-thread-frame-depth.os-thread-id"].Value;
 
-        var signals = new List<Finding>(6);
+        var signals = new List<Claim>(6);
 
         // JIT heap bloat.
         if (totalJitHeapBytes > JitHeapBloatThreshold)
         {
-            signals.Add(new Finding
+            signals.Add(new Claim
             {
                 Fingerprint = Fingerprint("heap-bloat"),
                 Analyzer = AnalyzerName,
@@ -94,7 +94,7 @@ internal sealed class JitSynthesisRule : ISynthesisRule
             double unmanagedRatio = (double)unmanagedFrameCount / totalFrames;
             if (unmanagedRatio >= HighUnmanagedFrameRatio && unmanagedFrameCount > 50)
             {
-                signals.Add(new Finding
+                signals.Add(new Claim
                 {
                     Fingerprint = Fingerprint("unmanaged-frame-ratio"),
                     Analyzer = AnalyzerName,
@@ -118,7 +118,7 @@ internal sealed class JitSynthesisRule : ISynthesisRule
         // Tiered compilation.
         if (tieredMethodCount > 0)
         {
-            signals.Add(new Finding
+            signals.Add(new Claim
             {
                 Fingerprint = Fingerprint("tiered-compilation"),
                 Analyzer = AnalyzerName,
@@ -147,7 +147,7 @@ internal sealed class JitSynthesisRule : ISynthesisRule
             ulong topSize = topHotSize + topColdSize;
             string thresholdDisplay = FormatHelper.FormatBytes(largeMethodThresholdBytes);
 
-            signals.Add(new Finding
+            signals.Add(new Claim
             {
                 Fingerprint = Fingerprint("large-methods"),
                 Analyzer = AnalyzerName,
@@ -170,7 +170,7 @@ internal sealed class JitSynthesisRule : ISynthesisRule
         // Dynamic codegen.
         if (dynamicMethodFrameCount > 0)
         {
-            signals.Add(new Finding
+            signals.Add(new Claim
             {
                 Fingerprint = Fingerprint("dynamic-codegen"),
                 Analyzer = AnalyzerName,
@@ -193,7 +193,7 @@ internal sealed class JitSynthesisRule : ISynthesisRule
         // Deep thread stack.
         if (maxThreadFrameDepth > DeepStackFrameThreshold)
         {
-            signals.Add(new Finding
+            signals.Add(new Claim
             {
                 Fingerprint = Fingerprint("deep-stack"),
                 Analyzer = AnalyzerName,
@@ -219,7 +219,7 @@ internal sealed class JitSynthesisRule : ISynthesisRule
                 summarySeverity = signals[i].Severity;
         }
 
-        var findings = new List<Finding>(1 + signals.Count)
+        var findings = new List<Claim>(1 + signals.Count)
         {
             new()
             {
@@ -246,7 +246,7 @@ internal sealed class JitSynthesisRule : ISynthesisRule
 
         findings.AddRange(signals);
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
     private static int SeverityRank(Severity severity) => severity switch

@@ -30,7 +30,7 @@ internal sealed class SynthesisEngine
         _logger = logger ?? NullLogger<SynthesisEngine>.Instance;
     }
 
-    public async ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public async ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         IReadOnlyList<Observation> observations,
         SynthesisContext context,
         CancellationToken cancellationToken = default)
@@ -50,7 +50,7 @@ internal sealed class SynthesisEngine
             bucket.Add(observation);
         }
 
-        var findings = new List<Finding>();
+        var findings = new List<Claim>();
 
         // Sequential, not parallel: rule cost is trivial at measured scale, and sequential
         // execution is the safer default while the byte-identical golden-file bar is in force —
@@ -67,10 +67,10 @@ internal sealed class SynthesisEngine
             // for a rule to decide rather than short-circuited here.
             try
             {
-                IReadOnlyList<Finding> ruleFindings = await rule.SynthesizeAsync(
+                IReadOnlyList<Claim> ruleFindings = await rule.SynthesizeAsync(
                     new ObservationMatchSet(matched), context, cancellationToken);
                 var ruleRef = new RuleRef(rule.RuleId, rule.Version);
-                foreach (Finding finding in ruleFindings)
+                foreach (Claim finding in ruleFindings)
                     findings.Add(WithLineageConfidence(finding, byId) with { Rule = ruleRef });
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -85,7 +85,7 @@ internal sealed class SynthesisEngine
 
     // A rule judges how well its evidence supports its claim; the engine adds what the observations
     // underneath can vouch for, so no rule has to re-derive measurement caps from its own lineage.
-    private static Finding WithLineageConfidence(Finding finding, Dictionary<ObservationId, Observation> byId)
+    private static Claim WithLineageConfidence(Claim finding, Dictionary<ObservationId, Observation> byId)
     {
         var lineage = new List<Observation>(finding.DerivedFrom.Count);
         foreach (ObservationId id in finding.DerivedFrom)

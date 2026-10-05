@@ -27,15 +27,15 @@ internal sealed class AnalyzerFailuresInsightRule : ISynthesisRule
 
     public ObservationQuery Query { get; } = new() { ObservationTypes = [] };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         if (context.AnalyzerRunSummary is not (int total, int failed) || failed < WarningCount)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::analyzer-failures",
                 Analyzer = "InsightEngine",

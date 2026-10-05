@@ -41,7 +41,7 @@ internal sealed class LeakCandidateSynthesisRule : ISynthesisRule
         ],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         var pinnedTargetTypes = new HashSet<string>(StringComparer.Ordinal);
@@ -69,7 +69,7 @@ internal sealed class LeakCandidateSynthesisRule : ISynthesisRule
         }
 
         if (candidateObservations.Count == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         var candidates = new List<CandidateRow>(candidateObservations.Count);
         foreach (Observation observation in candidateObservations)
@@ -115,7 +115,7 @@ internal sealed class LeakCandidateSynthesisRule : ISynthesisRule
             return StringComparer.Ordinal.Compare(a.TypeName, b.TypeName);
         });
 
-        var findings = new List<Finding>();
+        var findings = new List<Claim>();
 
         var criticalCandidates = new List<CandidateRow>();
         foreach (CandidateRow candidate in candidates)
@@ -126,7 +126,7 @@ internal sealed class LeakCandidateSynthesisRule : ISynthesisRule
 
         foreach (CandidateRow candidate in criticalCandidates)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint($"critical.{candidate.TypeName}"),
                 Analyzer = AnalyzerName,
@@ -201,7 +201,7 @@ internal sealed class LeakCandidateSynthesisRule : ISynthesisRule
                 narrative += ".";
             }
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("aggregate"),
                 Analyzer = AnalyzerName,
@@ -220,7 +220,7 @@ internal sealed class LeakCandidateSynthesisRule : ISynthesisRule
             });
         }
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
     private readonly record struct CandidateRow(

@@ -5,17 +5,17 @@ using DumpDetective.Sdk.Synthesis;
 namespace DumpDetective.Reporting.Services;
 
 /// <summary>
-/// Translates a synthesis-rule <see cref="Finding"/> into the report pipeline's
+/// Translates a synthesis-rule <see cref="Claim"/> into the report pipeline's
 /// <see cref="InsightFinding"/> — Option 1 from
 /// docs/refactor/modularity/phase-5-observations-synthesis.md's per-analyzer playbook: the report
 /// pipeline (<c>ActionPriorityService</c>, <c>CorrelationBuilder</c>, every section builder and
 /// formatter) keeps reading <see cref="InsightFinding"/> unchanged; only the point where
 /// <c>IFindingGenerator</c> used to sit is replaced. Throwaway once the report pipeline itself
-/// reads <see cref="Finding"/> natively — not a permanent architecture.
+/// reads <see cref="Claim"/> natively — not a permanent architecture.
 /// </summary>
 internal static class FindingSynthesisAdapter
 {
-    public static InsightFinding ToInsightFinding(Finding finding) => new(
+    public static InsightFinding ToInsightFinding(Claim finding) => new(
         Analyzer: finding.Analyzer,
         Category: finding.Category,
         Severity: ToFindingSeverity(finding.Severity),

@@ -40,7 +40,7 @@ internal sealed class TimerLeakSynthesisRule : ISynthesisRule
         ObservationTypes = ["infra.timer", "infra.timer-population"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         long totalTimers = 0;
@@ -89,17 +89,17 @@ internal sealed class TimerLeakSynthesisRule : ISynthesisRule
             }
         }
 
-        if (totalTimers == 0) return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+        if (totalTimers == 0) return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long logicalTimerCount = timerQueueTimerCount;
-        var findings = new List<Finding>(2);
+        var findings = new List<Claim>(2);
 
         // ── Logical timers (undisposed) ──────────────────────────────────────────
         if (logicalTimerCount >= LogicalTimerCountWarningThreshold)
         {
             Severity severity = logicalTimerCount >= LogicalTimerCountCriticalThreshold ? Severity.Critical : Severity.Warning;
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("logical-timers"),
                 Analyzer = AnalyzerName,
@@ -124,7 +124,7 @@ internal sealed class TimerLeakSynthesisRule : ISynthesisRule
         long queuePressure = timerHolderCount + timerQueueTimerCount;
         if (queuePressure >= QueuePressureInfoThreshold)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("queue-pressure"),
                 Analyzer = AnalyzerName,
@@ -142,7 +142,7 @@ internal sealed class TimerLeakSynthesisRule : ISynthesisRule
             });
         }
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();

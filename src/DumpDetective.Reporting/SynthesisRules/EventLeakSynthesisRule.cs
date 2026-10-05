@@ -38,7 +38,7 @@ internal sealed class EventLeakSynthesisRule : ISynthesisRule
         ObservationTypes = ["event.publisher-leak-group", "event.publisher-leak-population"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? population = null;
@@ -58,13 +58,13 @@ internal sealed class EventLeakSynthesisRule : ISynthesisRule
         }
 
         if (population is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long totalEventLeakInstances = (long)population.Measures["total.count"].Value;
 
         if (totalEventLeakInstances == 0)
         {
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([new Finding
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([new Claim
             {
                 Fingerprint = Fingerprint("no-signatures"),
                 Analyzer = AnalyzerName,
@@ -84,18 +84,18 @@ internal sealed class EventLeakSynthesisRule : ISynthesisRule
         long instanceLeakCount = (long)population.Measures["instance-leak.count"].Value;
         long staticLeakCount = (long)population.Measures["static-leak.count"].Value;
 
-        var findings = new List<Finding>(2);
+        var findings = new List<Claim>(2);
 
-        Finding? instanceFinding = BuildAggregateFinding(groups, isStatic: false, instanceLeakCount, population);
+        Claim? instanceFinding = BuildAggregateFinding(groups, isStatic: false, instanceLeakCount, population);
         if (instanceFinding is not null) findings.Add(instanceFinding);
 
-        Finding? staticFinding = BuildAggregateFinding(groups, isStatic: true, staticLeakCount, population);
+        Claim? staticFinding = BuildAggregateFinding(groups, isStatic: true, staticLeakCount, population);
         if (staticFinding is not null) findings.Add(staticFinding);
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
-    private static Finding? BuildAggregateFinding(
+    private static Claim? BuildAggregateFinding(
         IReadOnlyList<Observation> groups, bool isStatic, long fallbackGroupCount, Observation population)
     {
         int groupCount = 0;
@@ -192,7 +192,7 @@ internal sealed class EventLeakSynthesisRule : ISynthesisRule
         if (anyTimerEvent) tags.Add("timer-leak");
         if (anyPropertyChangedEvent) tags.Add("property-changed-leak");
 
-        return new Finding
+        return new Claim
         {
             Fingerprint = Fingerprint(isStatic ? "static-retention" : "instance-retention"),
             Analyzer = AnalyzerName,

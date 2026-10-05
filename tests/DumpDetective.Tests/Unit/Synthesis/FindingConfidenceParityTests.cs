@@ -84,7 +84,7 @@ public sealed class FindingConfidenceParityTests
         var populationMeasures = new Dictionary<string, Measure>();
         RootPathEvidenceMeasures.Add(populationMeasures, "top-type.", evidence);
 
-        IReadOnlyList<Finding> findings = await new TimerLeakSynthesisRule().SynthesizeAsync(
+        IReadOnlyList<Claim> findings = await new TimerLeakSynthesisRule().SynthesizeAsync(
             new ObservationMatchSet([
                 MakeObservation("infra.timer", "Timer Leak Analysis", new() { ["instance.count"] = Count(300) }, "System.Threading.TimerQueueTimer"),
                 MakeObservation("infra.timer-population", "Timer Leak Analysis", populationMeasures),
@@ -111,7 +111,7 @@ public sealed class FindingConfidenceParityTests
         RootPathEvidenceMeasures.Add(populationMeasures, "top-static-publisher.", staticEvidence);
         RootPathEvidenceMeasures.Add(populationMeasures, "top-instance-publisher.", (EventLeakEvidence?)null);
 
-        IReadOnlyList<Finding> findings = await new EventLeakSynthesisRule().SynthesizeAsync(
+        IReadOnlyList<Claim> findings = await new EventLeakSynthesisRule().SynthesizeAsync(
             new ObservationMatchSet([
                 MakeObservation("event.publisher-leak-population", "Event Leak Analysis", populationMeasures),
                 MakeLeakGroup(isStatic: true),
@@ -128,7 +128,7 @@ public sealed class FindingConfidenceParityTests
     [Fact]
     public async Task CrashRule_ActiveExceptionsFinding_WeightsTiersByActiveExceptionCount_AndSummarizesThem()
     {
-        IReadOnlyList<Finding> findings = await new CrashSynthesisRule().SynthesizeAsync(
+        IReadOnlyList<Claim> findings = await new CrashSynthesisRule().SynthesizeAsync(
             new ObservationMatchSet([
                 MakeCrashPopulation(total: 5, active: 4),
                 MakeCrashCandidate(activeExceptions: 3, tier: "Exact"),
@@ -137,7 +137,7 @@ public sealed class FindingConfidenceParityTests
             ]),
             new SynthesisContext());
 
-        Finding finding = findings.Should().ContainSingle().Subject;
+        Claim finding = findings.Should().ContainSingle().Subject;
         double weightedScore = 0.95 * 3 + 0.65 * 1 + 0.95 * 1;
         finding.Confidence.Composite.Should().Be(weightedScore / 5);
         finding.Caveats.Should().Equal(
@@ -148,11 +148,11 @@ public sealed class FindingConfidenceParityTests
     [Fact]
     public async Task CrashRule_ActiveExceptionsWithoutCandidates_ScoresNoCandidateStrength()
     {
-        IReadOnlyList<Finding> findings = await new CrashSynthesisRule().SynthesizeAsync(
+        IReadOnlyList<Claim> findings = await new CrashSynthesisRule().SynthesizeAsync(
             new ObservationMatchSet([MakeCrashPopulation(total: 1, active: 1)]),
             new SynthesisContext());
 
-        Finding finding = findings.Should().ContainSingle().Subject;
+        Claim finding = findings.Should().ContainSingle().Subject;
         finding.Confidence.Composite.Should().Be(0.5);
         finding.Caveats.Should().Equal("Active exception count is based on measured runtime objects and thread snapshots.");
     }
@@ -162,7 +162,7 @@ public sealed class FindingConfidenceParityTests
     [InlineData(true)]
     public async Task FinalizableObjectRule_OnlyTheRetainedBytesFindingReflectsEstimatedRetainedSizes(bool retainedIsExact)
     {
-        IReadOnlyList<Finding> findings = await new FinalizableObjectSynthesisRule().SynthesizeAsync(
+        IReadOnlyList<Claim> findings = await new FinalizableObjectSynthesisRule().SynthesizeAsync(
             new ObservationMatchSet([
                 MakeObservation("finalizer.queue-entry", "Finalizable Object Analysis", new()
                 {
@@ -175,7 +175,7 @@ public sealed class FindingConfidenceParityTests
             ]),
             new SynthesisContext());
 
-        Finding retained = findings.Single(f => f.Fingerprint.EndsWith("queue-retained-bytes", StringComparison.Ordinal));
+        Claim retained = findings.Single(f => f.Fingerprint.EndsWith("queue-retained-bytes", StringComparison.Ordinal));
         retained.Confidence.Composite.Should().Be(retainedIsExact ? 1.0 : 0.7);
         retained.Narrative.Should().Contain(retainedIsExact ? "(exact, from the dominator tree)" : "shallow size used instead");
     }
@@ -200,7 +200,7 @@ public sealed class FindingConfidenceParityTests
 
     private static Measure Count(double value) => new(value, MeasureUnit.Count, MeasureSemantics.Absolute);
 
-    private static Finding MakeFinding(Severity severity, ConfidenceBreakdown confidence) => new()
+    private static Claim MakeFinding(Severity severity, ConfidenceBreakdown confidence) => new()
     {
         Fingerprint = "test::finding",
         Analyzer = "Test Analyzer",

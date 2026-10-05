@@ -28,7 +28,7 @@ internal sealed class GCHandleSynthesisRule : ISynthesisRule
         ObservationTypes = ["handle.population", "handle.refcounted-target"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? population = null;
@@ -50,7 +50,7 @@ internal sealed class GCHandleSynthesisRule : ISynthesisRule
             }
         }
 
-        if (population is null) return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+        if (population is null) return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         IReadOnlyDictionary<string, Measure> m = population.Measures;
         long totalHandles = (long)m["total.count"].Value;
@@ -82,7 +82,7 @@ internal sealed class GCHandleSynthesisRule : ISynthesisRule
         long weakLongGen2MinimumCountThreshold = (long)m["weaklong-gen2-minimum-count.threshold"].Value;
         double dependentUnresolvedPercentWarningThreshold = m["dependent-unresolved-percent-warning.threshold"].Value;
 
-        var findings = new List<Finding>(capacity: 6);
+        var findings = new List<Claim>(capacity: 6);
         var populationIds = new List<ObservationId> { population.Id };
 
         // ── Summary — always emitted ────────────────────────────────────────────
@@ -90,7 +90,7 @@ internal sealed class GCHandleSynthesisRule : ISynthesisRule
             || totalHandles >= totalHandlesWarningThreshold
             ? Severity.Warning : Severity.Info;
 
-        findings.Add(new Finding
+        findings.Add(new Claim
         {
             Fingerprint = Fingerprint("summary"),
             Analyzer = AnalyzerName,
@@ -111,7 +111,7 @@ internal sealed class GCHandleSynthesisRule : ISynthesisRule
         // ── Pinned retained bytes — only above the warning threshold ────────────
         if (pinnedRetainedBytes > 0 && pinnedRetainedBytes >= pinnedRetainedBytesWarningThreshold)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("pinned-retained-bytes"),
                 Analyzer = AnalyzerName,
@@ -132,7 +132,7 @@ internal sealed class GCHandleSynthesisRule : ISynthesisRule
         long sohPinnedTargets = pinnedSohCount + asyncPinnedSohCount;
         if (sohPinnedTargets > 0 && sohPinnedTargets >= pinnedSohWarningThreshold)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("soh-pinned"),
                 Analyzer = AnalyzerName,
@@ -160,7 +160,7 @@ internal sealed class GCHandleSynthesisRule : ISynthesisRule
             var derivedFrom = new List<ObservationId>(populationIds);
             derivedFrom.AddRange(refCountedTypeIds);
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("refcounted-pressure"),
                 Analyzer = AnalyzerName,
@@ -188,7 +188,7 @@ internal sealed class GCHandleSynthesisRule : ISynthesisRule
                 long weakShortGen2PlusCount = weakShortGen2 + weakShortLoh;
                 long weakShortResolvedCount = weakShortGen0 + weakShortGen1 + weakShortGen2PlusCount;
 
-                findings.Add(new Finding
+                findings.Add(new Claim
                 {
                     Fingerprint = Fingerprint("weaklong-gen2-backlog"),
                     Analyzer = AnalyzerName,
@@ -215,7 +215,7 @@ internal sealed class GCHandleSynthesisRule : ISynthesisRule
                 ? Severity.Warning
                 : Severity.Info;
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("dependent-handle-summary"),
                 Analyzer = AnalyzerName,
@@ -233,7 +233,7 @@ internal sealed class GCHandleSynthesisRule : ISynthesisRule
             });
         }
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();

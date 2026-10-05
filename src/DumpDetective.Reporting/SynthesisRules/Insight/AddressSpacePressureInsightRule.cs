@@ -25,7 +25,7 @@ internal sealed class AddressSpacePressureInsightRule : ISynthesisRule
         ObservationTypes = ["heap.segment-reservation", "heap.topology-population"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? segReservation = null, segments = null;
@@ -39,9 +39,9 @@ internal sealed class AddressSpacePressureInsightRule : ISynthesisRule
         }
 
         if (segReservation is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
-        var findings = new List<Finding>();
+        var findings = new List<Claim>();
 
         int dumpPointerSize = (int)segReservation.Measures["dump-pointer-size"].Value;
         ulong totalReserved = (ulong)segReservation.Measures["reserved.bytes"].Value;
@@ -56,7 +56,7 @@ internal sealed class AddressSpacePressureInsightRule : ISynthesisRule
         {
             ulong totalCommitted = (ulong)segReservation.Measures["committed.bytes"].Value;
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = "insightengine::address-space-pressure",
                 Analyzer = "InsightEngine",
@@ -88,7 +88,7 @@ internal sealed class AddressSpacePressureInsightRule : ISynthesisRule
 
             var derivedFrom = segments is not null ? new[] { segReservation.Id, segments.Id } : [segReservation.Id];
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = "insightengine::address-space-ephemeral-fill",
                 Analyzer = "InsightEngine",
@@ -109,7 +109,7 @@ internal sealed class AddressSpacePressureInsightRule : ISynthesisRule
             });
         }
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
     // Duplicated verbatim from SegmentReservationAnalyzer.Analyze's §25.3 address space pressure

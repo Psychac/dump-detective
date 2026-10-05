@@ -30,7 +30,7 @@ internal sealed class StaticRootFinalizableCorrelationInsightRule : ISynthesisRu
         ObservationTypes = ["heap.static-root-retained-type", "finalizer.queue-entry"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         var queueCountByType = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -55,7 +55,7 @@ internal sealed class StaticRootFinalizableCorrelationInsightRule : ISynthesisRu
         }
 
         if (queueCountByType.Count == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         string? bestRootDescription = null;
         string? bestTypeName = null;
@@ -77,15 +77,15 @@ internal sealed class StaticRootFinalizableCorrelationInsightRule : ISynthesisRu
         }
 
         if (bestRootDescription is null || bestRetainedTypeObservation is null || bestTypeName is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         var derivedFrom = new List<ObservationId> { bestRetainedTypeObservation.Id };
         if (queueEntryIdByType.TryGetValue(bestTypeName, out ObservationId queueEntryId))
             derivedFrom.Add(queueEntryId);
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::static-root-finalizable-correlation",
                 Analyzer = "InsightEngine",

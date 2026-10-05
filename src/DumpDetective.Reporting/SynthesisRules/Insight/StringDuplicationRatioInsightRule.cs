@@ -23,31 +23,31 @@ internal sealed class StringDuplicationRatioInsightRule : ISynthesisRule
 
     public ObservationQuery Query { get; } = new() { ObservationTypes = ["type.string-composition"] };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         if (matched.Matched.Count == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         Observation strings = matched.Matched[0];
         long totalStrings = (long)strings.Measures["total-string.count"].Value;
         if (totalStrings == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         double duplicationRatio = strings.Measures["duplication.ratio"].Value;
         if (duplicationRatio < WarningRatio)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         ulong duplicateWastedBytes = (ulong)strings.Measures["duplicate-wasted.bytes"].Value;
         if (duplicateWastedBytes >= DuplicateWasteThresholdBytes)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long uniquePatterns = (long)strings.Measures["unique-pattern.count"].Value;
         double samplingCoverage = strings.Measures["sampling-coverage.ratio"].Value;
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::string-duplication-ratio",
                 Analyzer = "InsightEngine",

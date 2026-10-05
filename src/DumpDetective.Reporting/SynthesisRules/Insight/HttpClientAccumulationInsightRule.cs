@@ -14,27 +14,27 @@ internal sealed class HttpClientAccumulationInsightRule : ISynthesisRule
 
     public ObservationQuery Query { get; } = new() { ObservationTypes = ["infra.http-object-population"] };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         if (matched.Matched.Count == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         Observation http = matched.Matched[0];
         long totalHttpObjects = (long)http.Measures["total.count"].Value;
         if (totalHttpObjects == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long httpClientCount = (long)http.Measures["http-client.count"].Value;
         long httpWebResponseCount = (long)http.Measures["http-web-response.count"].Value;
 
         // Only flag when HttpClient and HttpWebResponse are both present, suggesting mixed API usage.
         if (httpClientCount < 3 || httpWebResponseCount < 10)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::http-client-accumulation",
                 Analyzer = "InsightEngine",

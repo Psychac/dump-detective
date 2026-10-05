@@ -36,7 +36,7 @@ internal sealed class WeakReferenceSynthesisRule : ISynthesisRule
         ObservationTypes = ["weakhandle.target", "weakreference.stale-wrapper", "weakreference.population"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? population = null;
@@ -78,7 +78,7 @@ internal sealed class WeakReferenceSynthesisRule : ISynthesisRule
             }
         }
 
-        if (population is null) return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+        if (population is null) return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         IReadOnlyDictionary<string, Measure> m = population.Measures;
         long totalWeakHandles = (long)m["total-handles.count"].Value;
@@ -91,12 +91,12 @@ internal sealed class WeakReferenceSynthesisRule : ISynthesisRule
         double deadTargetRatio = totalWeakHandles == 0 ? 0.0 : (double)deadWeakTargets / totalWeakHandles;
         const string staleWrapperQualifier = "";
 
-        var signals = new List<(Finding Finding, int Priority)>(4);
+        var signals = new List<(Claim Claim, int Priority)>(4);
 
         // High dead-target ratio — stale wrapper accumulation.
         if (totalWeakHandles > 0 && deadTargetRatio >= HighDeadRatioWarningThreshold)
         {
-            signals.Add((new Finding
+            signals.Add((new Claim
             {
                 Fingerprint = Fingerprint("high-dead-ratio"),
                 Analyzer = AnalyzerName,
@@ -119,7 +119,7 @@ internal sealed class WeakReferenceSynthesisRule : ISynthesisRule
         // Absolute dead-count threshold signal (complementary to ratio).
         if (deadWeakTargets > AbsoluteDeadCountThreshold)
         {
-            signals.Add((new Finding
+            signals.Add((new Claim
             {
                 Fingerprint = Fingerprint("high-dead-count"),
                 Analyzer = AnalyzerName,
@@ -141,7 +141,7 @@ internal sealed class WeakReferenceSynthesisRule : ISynthesisRule
         // Dependent handle dead-key signal.
         if (dependentHandleDeadKeyCount > 0)
         {
-            signals.Add((new Finding
+            signals.Add((new Claim
             {
                 Fingerprint = Fingerprint("dependent-dead-key"),
                 Analyzer = AnalyzerName,
@@ -177,7 +177,7 @@ internal sealed class WeakReferenceSynthesisRule : ISynthesisRule
             }
             if (topCount > 0) topTypeSuffix = $" Most common: {topType} ({topCount:N0}).";
 
-            signals.Add((new Finding
+            signals.Add((new Claim
             {
                 Fingerprint = Fingerprint("held-only-via-weak-reference"),
                 Analyzer = AnalyzerName,
@@ -199,15 +199,15 @@ internal sealed class WeakReferenceSynthesisRule : ISynthesisRule
 
         // Summary finding (always).
         Severity summarySeverity = Severity.Info;
-        foreach ((Finding signal, _) in signals)
+        foreach ((Claim signal, _) in signals)
         {
             if (SeverityRank(signal.Severity) > SeverityRank(summarySeverity))
                 summarySeverity = signal.Severity;
         }
 
-        var findings = new List<Finding>(signals.Count + 1)
+        var findings = new List<Claim>(signals.Count + 1)
         {
-            new Finding
+            new Claim
             {
                 Fingerprint = Fingerprint("overview"),
                 Analyzer = AnalyzerName,
@@ -236,15 +236,15 @@ internal sealed class WeakReferenceSynthesisRule : ISynthesisRule
             // Sort by severity (descending) then priority (descending) — mirrors the old
             // generator's OrderByDescending(severity).ThenByDescending(priority) over its own
             // fixed-priority WeakRefSignal records (200, 150, 100, 120).
-            IEnumerable<Finding> sortedSignals = signals
-                .OrderByDescending(s => SeverityRank(s.Finding.Severity))
+            IEnumerable<Claim> sortedSignals = signals
+                .OrderByDescending(s => SeverityRank(s.Claim.Severity))
                 .ThenByDescending(s => s.Priority)
-                .Select(s => s.Finding);
+                .Select(s => s.Claim);
 
             findings.AddRange(sortedSignals);
         }
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
     private static int SeverityRank(Severity severity) => severity switch

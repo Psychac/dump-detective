@@ -20,7 +20,7 @@ internal sealed class PinnedHandlePressureInsightRule : ISynthesisRule
         ObservationTypes = ["handle.population", "heap.loh-fragmentation-summary"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? handles = null, lohFrag = null;
@@ -34,11 +34,11 @@ internal sealed class PinnedHandlePressureInsightRule : ISynthesisRule
         }
 
         if (handles is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long pinnedHandleTargets = (long)handles.Measures["pinned-target.count"].Value;
         if (pinnedHandleTargets < WarningCount)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         double fragmentationPercent = lohFrag?.Measures["fragmentation.percent"].Value ?? 0.0;
         bool correlatedWithFrag = lohFrag is not null && fragmentationPercent >= FragWarningPct;
@@ -51,9 +51,9 @@ internal sealed class PinnedHandlePressureInsightRule : ISynthesisRule
         var derivedFrom = new List<ObservationId> { handles.Id };
         if (lohFrag is not null) derivedFrom.Add(lohFrag.Id);
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::pinned-handle-pressure",
                 Analyzer = "InsightEngine",

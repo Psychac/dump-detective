@@ -26,7 +26,7 @@ internal sealed class ActiveCrashInsightRule : ISynthesisRule
         ObservationTypes = ["runtime.crash-population", "runtime.active-exception"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? population = null;
@@ -41,7 +41,7 @@ internal sealed class ActiveCrashInsightRule : ISynthesisRule
 
         long activeCount = (long)(population?.Measures["active.count"].Value ?? 0);
         if (population is null || activeCount == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         var countByType = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (Observation instance in activeExceptions)
@@ -69,9 +69,9 @@ internal sealed class ActiveCrashInsightRule : ISynthesisRule
         foreach (Observation instance in activeExceptions)
             derivedFrom.Add(instance.Id);
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::active-crash",
                 Analyzer = "InsightEngine",

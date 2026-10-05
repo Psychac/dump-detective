@@ -32,7 +32,7 @@ internal sealed class BoxingSynthesisRule : ISynthesisRule
         ObservationTypes = ["type.boxing-pressure", "type.boxing", "type.oversized-value", "type.struct-padding-waste"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? pressure = null;
@@ -60,7 +60,7 @@ internal sealed class BoxingSynthesisRule : ISynthesisRule
         }
 
         if (pressure is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long totalBoxedObjects = (long)pressure.Measures["total-boxed.count"].Value;
         ulong totalBoxedBytes = (ulong)pressure.Measures["total-boxed.bytes"].Value;
@@ -72,7 +72,7 @@ internal sealed class BoxingSynthesisRule : ISynthesisRule
         long paddingWasteTypeCount = (long)pressure.Measures["padding-waste-type.count"].Value;
         long totalGen2BoxedCount = (long)pressure.Measures["gen2-boxed.count"].Value;
 
-        var findings = new List<Finding>();
+        var findings = new List<Claim>();
 
         // ── Boxed enum anti-pattern ──────────────────────────────────────────────
         if (boxedEnumCount > 1000)
@@ -83,7 +83,7 @@ internal sealed class BoxingSynthesisRule : ISynthesisRule
             Observation? topEnumType = boxedTypes.FirstOrDefault(o => o.Measures["is-enum"].Value >= 1.0);
             string topEnumName = topEnumType is not null ? ((TypeRef)topEnumType.Subjects[0]).CanonicalName : "—";
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("boxed-enum"),
                 Analyzer = AnalyzerName,
@@ -106,7 +106,7 @@ internal sealed class BoxingSynthesisRule : ISynthesisRule
         // ── Nullable<T> boxing anti-pattern ──────────────────────────────────────
         if (nullableBoxedCount > 100)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("nullable-boxing"),
                 Analyzer = AnalyzerName,
@@ -136,7 +136,7 @@ internal sealed class BoxingSynthesisRule : ISynthesisRule
             long structSize = (long)worstPadding.Measures["struct-size.bytes"].Value;
             long fieldBytes = (long)worstPadding.Measures["field.bytes"].Value;
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("struct-padding"),
                 Analyzer = AnalyzerName,
@@ -167,7 +167,7 @@ internal sealed class BoxingSynthesisRule : ISynthesisRule
                 : oversizedValueTypeInstanceCount > 100_000 ? Severity.Warning
                 : Severity.Info;
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("oversized-value-types"),
                 Analyzer = AnalyzerName,
@@ -192,7 +192,7 @@ internal sealed class BoxingSynthesisRule : ISynthesisRule
             double gen2Fraction = (double)totalGen2BoxedCount / totalBoxedObjects;
             if (gen2Fraction > 0.5)
             {
-                findings.Add(new Finding
+                findings.Add(new Claim
                 {
                     Fingerprint = Fingerprint("retained-boxing"),
                     Analyzer = AnalyzerName,
@@ -224,7 +224,7 @@ internal sealed class BoxingSynthesisRule : ISynthesisRule
             string offenderList = string.Join(", ", missingEquatable.Take(5).Select(o =>
                 $"{((TypeRef)o.Subjects[0]).CanonicalName} ({(long)o.Measures["instance.count"].Value:N0}x)"));
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("missing-iequatable"),
                 Analyzer = AnalyzerName,
@@ -249,7 +249,7 @@ internal sealed class BoxingSynthesisRule : ISynthesisRule
             : totalBoxedObjects > 500_000 ? Severity.Warning
             : Severity.Info;
 
-        findings.Add(new Finding
+        findings.Add(new Claim
         {
             Fingerprint = Fingerprint("overview"),
             Analyzer = AnalyzerName,
@@ -271,7 +271,7 @@ internal sealed class BoxingSynthesisRule : ISynthesisRule
             Confidence = ConfidenceBreakdown.MeasurementCertain,
         });
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();

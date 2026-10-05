@@ -23,7 +23,7 @@ internal sealed class DbConnectionLeakInsightRule : ISynthesisRule
         ObservationTypes = ["infra.db-connection-population", "runtime.exception-type"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? dbConn = null;
@@ -37,15 +37,15 @@ internal sealed class DbConnectionLeakInsightRule : ISynthesisRule
         }
 
         if (dbConn is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long totalConnections = (long)dbConn.Measures["total.count"].Value;
         if (totalConnections == 0 || totalConnections < 10)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long openConnections = (long)dbConn.Measures["open.count"].Value;
         if (openConnections < 10)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long timeoutCount = 0;
         var derivedFrom = new List<ObservationId> { dbConn.Id };
@@ -61,11 +61,11 @@ internal sealed class DbConnectionLeakInsightRule : ISynthesisRule
         }
 
         if (timeoutCount < 5)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::db-connection-leak",
                 Analyzer = "InsightEngine",

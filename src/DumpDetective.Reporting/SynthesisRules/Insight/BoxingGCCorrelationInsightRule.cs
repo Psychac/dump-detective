@@ -20,7 +20,7 @@ internal sealed class BoxingGCCorrelationInsightRule : ISynthesisRule
         ObservationTypes = ["type.boxing-pressure", "gc.generation-composition"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? boxing = null, gcGen = null;
@@ -34,11 +34,11 @@ internal sealed class BoxingGCCorrelationInsightRule : ISynthesisRule
         }
 
         if (boxing is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long totalBoxedObjects = (long)boxing.Measures["total-boxed.count"].Value;
         if (totalBoxedObjects == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long boxedEnumCount = (long)boxing.Measures["boxed-enum.count"].Value;
         bool highBoxedEnums = boxedEnumCount > BoxedEnumThreshold;
@@ -56,7 +56,7 @@ internal sealed class BoxingGCCorrelationInsightRule : ISynthesisRule
         }
 
         if (!highBoxedEnums && !highGen0Pct)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         string gen0Note = highGen0Pct
             ? $" Gen0 holds {gen0Fraction:F1}% of managed heap objects — consistent with high transient boxing."
@@ -70,9 +70,9 @@ internal sealed class BoxingGCCorrelationInsightRule : ISynthesisRule
 
         var derivedFrom = gcGen is not null ? new[] { boxing.Id, gcGen.Id } : [boxing.Id];
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::boxing-gc-correlation",
                 Analyzer = "InsightEngine",

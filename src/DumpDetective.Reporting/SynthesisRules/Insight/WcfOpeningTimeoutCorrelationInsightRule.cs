@@ -18,7 +18,7 @@ internal sealed class WcfOpeningTimeoutCorrelationInsightRule : ISynthesisRule
         ObservationTypes = ["infra.wcf-channel-population", "runtime.exception-type"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? wcf = null;
@@ -32,11 +32,11 @@ internal sealed class WcfOpeningTimeoutCorrelationInsightRule : ISynthesisRule
         }
 
         if (wcf is null || wcf.Measures["total.count"].Value == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long openingChannels = (long)wcf.Measures["opening.count"].Value;
         if (openingChannels == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long timeoutCount = 0;
         var derivedFrom = new List<ObservationId> { wcf.Id };
@@ -51,13 +51,13 @@ internal sealed class WcfOpeningTimeoutCorrelationInsightRule : ISynthesisRule
         }
 
         if (timeoutCount == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         Severity severity = openingChannels >= 5 || timeoutCount >= 10 ? Severity.Warning : Severity.Info;
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::wcf-opening-timeout-correlation",
                 Analyzer = "InsightEngine",

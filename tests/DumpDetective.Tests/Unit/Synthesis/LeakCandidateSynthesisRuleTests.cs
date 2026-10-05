@@ -25,7 +25,7 @@ public sealed class LeakCandidateSynthesisRuleTests
     [Fact]
     public async Task SynthesizeAsync_NoCandidates_ReturnsEmpty()
     {
-        IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(new ObservationMatchSet([]), new SynthesisContext());
+        IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(new ObservationMatchSet([]), new SynthesisContext());
 
         findings.Should().BeEmpty();
     }
@@ -40,10 +40,10 @@ public sealed class LeakCandidateSynthesisRuleTests
             CandidateType("C.Type", totalSizeBytes: 20_000_000, instanceCount: 220, gen2Pct: 54.0, gen2Count: 120, isContainer: false),
         ]);
 
-        IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+        IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
         findings.Should().ContainSingle();
-        Finding finding = findings[0];
+        Claim finding = findings[0];
         finding.Title.Should().Contain("cluster");
         finding.Narrative.Should().Contain("3 leak candidate(s)");
         finding.Narrative.Should().Contain("Top examples:");
@@ -67,10 +67,10 @@ public sealed class LeakCandidateSynthesisRuleTests
             HandleDependentTargetType("A.Type"),
         ]);
 
-        IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+        IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
         findings.Should().ContainSingle();
-        Finding finding = findings[0];
+        Claim finding = findings[0];
         finding.Title.Should().Contain("Critical leak candidate: A.Type");
         finding.Severity.Should().Be(Severity.Critical);
         finding.Tags.Should().Contain("critical");
@@ -86,7 +86,7 @@ public sealed class LeakCandidateSynthesisRuleTests
             TimerPopulation(logicalTimerCount: 150),
         ]);
 
-        IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+        IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
         findings.Should().ContainSingle();
         findings[0].Tags.Should().Contain("TimerLeak");

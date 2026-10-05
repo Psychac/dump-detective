@@ -25,7 +25,7 @@ internal sealed class FinalizerQueueBacklogInsightRule : ISynthesisRule
         ObservationTypes = ["finalizer.queue-population", "runtime.finalizer-thread"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? queue = null, finalizerThread = null;
@@ -40,7 +40,7 @@ internal sealed class FinalizerQueueBacklogInsightRule : ISynthesisRule
 
         long queueCount = (long)(queue?.Measures["queue.count"].Value ?? 0);
         if (queueCount < WarningCount)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         Severity severity = queueCount >= CriticalCount ? Severity.Critical : Severity.Warning;
 
@@ -58,9 +58,9 @@ internal sealed class FinalizerQueueBacklogInsightRule : ISynthesisRule
         var derivedFrom = new List<ObservationId> { queue!.Id };
         if (finalizerThread is not null) derivedFrom.Add(finalizerThread.Id);
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::finalizer-queue-backlog",
                 Analyzer = "InsightEngine",

@@ -28,7 +28,7 @@ internal sealed class JitModuleHotspotInsightRule : ISynthesisRule
         ObservationTypes = ["runtime.jit-module-frames", "runtime.module-disk-footprint", "runtime.module-conflict-group"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? topModule = null;
@@ -54,14 +54,14 @@ internal sealed class JitModuleHotspotInsightRule : ISynthesisRule
         }
 
         if (topModule is null || FrameCount(topModule) < MinFrameHits)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         string topModuleName = ((ModuleRef)topModule.Subjects[0]).SimpleName;
         bool hasSizeMatch = diskFootprintByModule.TryGetValue(topModuleName, out Observation? sizeMatch);
         bool inConflict = conflictedModules.TryGetValue(topModuleName, out ObservationId conflictObservationId);
 
         if (!hasSizeMatch && !inConflict)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]); // no cross-analyzer signal beyond the JIT section's own heatmap
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]); // no cross-analyzer signal beyond the JIT section's own heatmap
 
         var derivedFrom = new List<ObservationId> { topModule.Id };
         if (hasSizeMatch)
@@ -73,9 +73,9 @@ internal sealed class JitModuleHotspotInsightRule : ISynthesisRule
         string sizeNote = hasSizeMatch ? $" and is {InsightByteFormat.FormatBytes((ulong)sizeMatch!.Measures["disk.bytes"].Value)} on disk" : string.Empty;
         string conflictNote = inConflict ? " and is involved in an assembly version conflict" : string.Empty;
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::jit-module-hotspot",
                 Analyzer = "InsightEngine",

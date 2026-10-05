@@ -35,7 +35,7 @@ internal sealed class KnownLeakPatternsInsightRule : ISynthesisRule
         ObservationTypes = ["type.known-pattern-population"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         long tdsClosureCount = 0;
@@ -66,11 +66,11 @@ internal sealed class KnownLeakPatternsInsightRule : ISynthesisRule
             }
         }
 
-        var findings = new List<Finding>(2);
+        var findings = new List<Claim>(2);
 
         if (tdsClosureCount >= TdsClosureThreshold)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = "insightengine::sqlclient-tdsparser-closure",
                 Analyzer = "InsightEngine",
@@ -93,7 +93,7 @@ internal sealed class KnownLeakPatternsInsightRule : ISynthesisRule
         // indicates hot-path reflection (Type.GetMethod / GetProperty) without result caching.
         if (reflectionCount >= ReflectionThreshold)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = "insightengine::uncached-reflection-metadata",
                 Analyzer = "InsightEngine",
@@ -112,6 +112,6 @@ internal sealed class KnownLeakPatternsInsightRule : ISynthesisRule
             });
         }
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 }

@@ -147,10 +147,10 @@ public sealed class SynthesisFindingEnricherTests
         public int Version => 1;
         public ObservationQuery Query { get; }
 
-        public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+        public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
             ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
         {
-            IReadOnlyList<Finding> findings = [new Finding
+            IReadOnlyList<Claim> findings = [new Claim
             {
                 Fingerprint = _fingerprint,
                 Severity = Severity.Info,

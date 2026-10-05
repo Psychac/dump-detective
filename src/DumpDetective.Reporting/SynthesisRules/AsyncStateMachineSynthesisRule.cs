@@ -40,7 +40,7 @@ internal sealed class AsyncStateMachineSynthesisRule : ISynthesisRule
         ObservationTypes = ["type.async-state-machine", "type.async-captured-closure"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         var stateMachines = new List<Observation>();
@@ -51,16 +51,16 @@ internal sealed class AsyncStateMachineSynthesisRule : ISynthesisRule
             else if (observation.ObservationType == "type.async-captured-closure") capturedClosures.Add(observation);
         }
 
-        var findings = new List<Finding>(4);
+        var findings = new List<Claim>(4);
         EmitHighTotalCount(stateMachines, findings);
         EmitFireAndForget(stateMachines, findings);
         EmitAsyncVoid(stateMachines, findings);
         EmitLargeCapturedClosures(capturedClosures, findings);
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
-    private static void EmitHighTotalCount(List<Observation> stateMachines, List<Finding> findings)
+    private static void EmitHighTotalCount(List<Observation> stateMachines, List<Claim> findings)
     {
         long totalCount = 0;
         ulong totalBytes = 0;
@@ -79,7 +79,7 @@ internal sealed class AsyncStateMachineSynthesisRule : ISynthesisRule
         Severity sev = totalCount >= HighCountCritical ? Severity.Critical : Severity.Warning;
         string topType = topByCount is null ? "N/A" : MethodSubject(topByCount).Name;
 
-        findings.Add(new Finding
+        findings.Add(new Claim
         {
             Fingerprint = Fingerprint("high-async-state-machine-count"),
             Analyzer = AnalyzerName,
@@ -100,7 +100,7 @@ internal sealed class AsyncStateMachineSynthesisRule : ISynthesisRule
         });
     }
 
-    private static void EmitFireAndForget(List<Observation> stateMachines, List<Finding> findings)
+    private static void EmitFireAndForget(List<Observation> stateMachines, List<Claim> findings)
     {
         var byMethod = new Dictionary<(string DeclaringType, string Method), (long Count, ulong Bytes, List<ObservationId> Sources)>();
         foreach (Observation sm in stateMachines)
@@ -136,7 +136,7 @@ internal sealed class AsyncStateMachineSynthesisRule : ISynthesisRule
 
             Severity sev = candidate.Count >= HighCountCritical ? Severity.Critical : Severity.Warning;
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint($"fire-and-forget-{emitted}"),
                 Analyzer = AnalyzerName,
@@ -161,7 +161,7 @@ internal sealed class AsyncStateMachineSynthesisRule : ISynthesisRule
         }
     }
 
-    private static void EmitAsyncVoid(List<Observation> stateMachines, List<Finding> findings)
+    private static void EmitAsyncVoid(List<Observation> stateMachines, List<Claim> findings)
     {
         var asyncVoidMethods = new List<(string Method, string Type, long Count, ObservationId Source)>();
         foreach (Observation sm in stateMachines)
@@ -180,7 +180,7 @@ internal sealed class AsyncStateMachineSynthesisRule : ISynthesisRule
         (string Method, string Type, long Count, ObservationId Source) top = asyncVoidMethods[0];
         string topAsyncVoid = $"{top.Method} (on {top.Type})";
 
-        findings.Add(new Finding
+        findings.Add(new Claim
         {
             Fingerprint = Fingerprint("async-void-method"),
             Analyzer = AnalyzerName,
@@ -200,7 +200,7 @@ internal sealed class AsyncStateMachineSynthesisRule : ISynthesisRule
         });
     }
 
-    private static void EmitLargeCapturedClosures(List<Observation> capturedClosures, List<Finding> findings)
+    private static void EmitLargeCapturedClosures(List<Observation> capturedClosures, List<Claim> findings)
     {
         if (capturedClosures.Count == 0) return;
 
@@ -221,7 +221,7 @@ internal sealed class AsyncStateMachineSynthesisRule : ISynthesisRule
             ? "N/A"
             : $"{((TypeRef)top.Subjects[0]).CanonicalName} ({FormatHelper.FormatBytes((ulong)top.Measures["captured.bytes"].Value)})";
 
-        findings.Add(new Finding
+        findings.Add(new Claim
         {
             Fingerprint = Fingerprint("large-captured-closures"),
             Analyzer = AnalyzerName,

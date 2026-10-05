@@ -34,7 +34,7 @@ internal sealed class FatalExceptionOnHeapInsightRule : ISynthesisRule
         ObservationTypes = ["runtime.crash-population", "runtime.exception-type"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? population = null;
@@ -49,7 +49,7 @@ internal sealed class FatalExceptionOnHeapInsightRule : ISynthesisRule
 
         long totalExceptions = (long)(population?.Measures["total.count"].Value ?? 0);
         if (population is null || totalExceptions == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         var fatalFound = new List<string>();
         var derivedFrom = new List<ObservationId> { population.Id };
@@ -65,11 +65,11 @@ internal sealed class FatalExceptionOnHeapInsightRule : ISynthesisRule
         }
 
         if (fatalFound.Count == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::fatal-exception-on-heap",
                 Analyzer = "InsightEngine",

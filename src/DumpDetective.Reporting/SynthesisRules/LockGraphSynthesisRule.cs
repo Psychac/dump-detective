@@ -30,7 +30,7 @@ internal sealed class LockGraphSynthesisRule : ISynthesisRule
         ObservationTypes = ["runtime.lock-pressure", "lock.contested", "thread.blocked"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? pressure = null;
@@ -60,7 +60,7 @@ internal sealed class LockGraphSynthesisRule : ISynthesisRule
         }
 
         if (pressure is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         derivedFrom.Insert(0, pressure.Id);
 
@@ -87,7 +87,7 @@ internal sealed class LockGraphSynthesisRule : ISynthesisRule
         if (highRecursionLockCount > 0)
             evidence += $" {highRecursionLockCount} contested lock(s) show a recursion count ≥ {HighRecursionThreshold} — the holder is re-entering the lock repeatedly while other threads wait, a potential re-entrancy issue.";
 
-        var finding = new Finding
+        var finding = new Claim
         {
             Fingerprint = Fingerprint("lock-contention"),
             Analyzer = AnalyzerName,
@@ -107,7 +107,7 @@ internal sealed class LockGraphSynthesisRule : ISynthesisRule
             Confidence = ConfidenceBreakdown.MeasurementCertain,
         };
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>([finding]);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>([finding]);
     }
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();

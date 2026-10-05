@@ -39,7 +39,7 @@ internal sealed class SegmentReservationSynthesisRule : ISynthesisRule
         ObservationTypes = ["heap.segment-reservation", "heap.region-composition"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? composition = null;
@@ -65,7 +65,7 @@ internal sealed class SegmentReservationSynthesisRule : ISynthesisRule
         }
 
         if (composition is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         ulong totalCommittedBytes = (ulong)composition.Measures["committed.bytes"].Value;
         ulong totalReservedBytes = (ulong)composition.Measures["reserved.bytes"].Value;
@@ -83,13 +83,13 @@ internal sealed class SegmentReservationSynthesisRule : ISynthesisRule
         (bool pressureRisk, string pressureReason) = EvaluatePressureRisk(
             dumpPointerSize, totalReservedBytes, ratio, ratioHighPressureThreshold, thirtyTwoBitPressureThresholdBytes);
 
-        var findings = new List<Finding>();
+        var findings = new List<Claim>();
 
         // ── Address space pressure ──────────────────────────────────────────────
         if (pressureRisk)
         {
             bool is32Bit = dumpPointerSize == 4;
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("address-space-pressure"),
                 Analyzer = AnalyzerName,
@@ -116,7 +116,7 @@ internal sealed class SegmentReservationSynthesisRule : ISynthesisRule
                 ? pressureReason
                 : $"Reserved/committed ratio is {ratio:F1}x (threshold: {ratioMediumPressureThreshold:F0}x).";
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("reservation-ratio"),
                 Analyzer = AnalyzerName,
@@ -140,7 +140,7 @@ internal sealed class SegmentReservationSynthesisRule : ISynthesisRule
         // ── Ephemeral segment fill critical (> 90%) ──────────────────────────────
         if (avgEphemeralFillPct > 90.0)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("ephemeral-fill"),
                 Analyzer = AnalyzerName,
@@ -167,7 +167,7 @@ internal sealed class SegmentReservationSynthesisRule : ISynthesisRule
             var derivedFrom = new List<ObservationId>(1 + regionIds.Count) { composition.Id };
             derivedFrom.AddRange(regionIds);
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("near-empty-regions"),
                 Analyzer = AnalyzerName,
@@ -185,7 +185,7 @@ internal sealed class SegmentReservationSynthesisRule : ISynthesisRule
         }
 
         // ── Summary finding (always) ─────────────────────────────────────────────
-        findings.Add(new Finding
+        findings.Add(new Claim
         {
             Fingerprint = Fingerprint("overview"),
             Analyzer = AnalyzerName,
@@ -207,7 +207,7 @@ internal sealed class SegmentReservationSynthesisRule : ISynthesisRule
             Confidence = ConfidenceBreakdown.MeasurementCertain,
         });
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
     /// <summary>Duplicated verbatim from <c>SegmentReservationAnalyzer.Analyze</c>'s §25.3 address

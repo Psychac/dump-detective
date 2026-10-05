@@ -33,7 +33,7 @@ internal sealed class ThreadContentionInsightRule : ISynthesisRule
         ObservationTypes = ["runtime.hang-pressure", "runtime.thread-triage", "runtime.finalizer-thread"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? hang = null, threadTriage = null, finalizerThread = null;
@@ -58,9 +58,9 @@ internal sealed class ThreadContentionInsightRule : ISynthesisRule
             var derivedFrom = new List<ObservationId> { hang.Id };
             if (threadTriage is not null) derivedFrom.Add(threadTriage.Id);
 
-            return ValueTask.FromResult<IReadOnlyList<Finding>>(
+            return ValueTask.FromResult<IReadOnlyList<Claim>>(
             [
-                new Finding
+                new Claim
                 {
                     Fingerprint = "insightengine::thread-contention-hang",
                     Analyzer = "InsightEngine",
@@ -79,23 +79,23 @@ internal sealed class ThreadContentionInsightRule : ISynthesisRule
         }
 
         if (threadTriage is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long alive = (long)threadTriage.Measures["alive-thread.count"].Value;
         if (alive == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long blocked = (long)threadTriage.Measures["blocked-thread.count"].Value;
         bool finalizerThreadBlocked = finalizerThread is not null && finalizerThread.Measures["is-blocked"].Value != 0;
 
         double blockedPct = blocked * 100.0 / alive;
-        var findings = new List<Finding>();
+        var findings = new List<Claim>();
 
         if (blockedPct >= WarningPct)
         {
             Severity severity = blockedPct >= CriticalPct ? Severity.Critical : Severity.Warning;
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = "insightengine::thread-contention-blocked",
                 Analyzer = "InsightEngine",
@@ -119,7 +119,7 @@ internal sealed class ThreadContentionInsightRule : ISynthesisRule
             uint osThreadId = ((ThreadRef)finalizerThread!.Subjects[0]).OsThreadId;
             long lockCount = (long)finalizerThread.Measures["locks-held.count"].Value;
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = "insightengine::thread-contention-finalizer-blocked",
                 Analyzer = "InsightEngine",
@@ -136,6 +136,6 @@ internal sealed class ThreadContentionInsightRule : ISynthesisRule
             });
         }
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 }

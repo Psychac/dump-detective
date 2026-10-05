@@ -27,7 +27,7 @@ internal sealed class SqlTransactionSynthesisRule : ISynthesisRule
         ObservationTypes = ["infra.sql-transaction", "infra.sql-transaction-population"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? population = null;
@@ -48,7 +48,7 @@ internal sealed class SqlTransactionSynthesisRule : ISynthesisRule
         }
 
         if (population is null || activeCount < ActiveCountWarningThreshold)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long totalTransactions = (long)population.Measures["total.count"].Value;
         long disposedCount = (long)population.Measures["disposed.count"].Value;
@@ -58,7 +58,7 @@ internal sealed class SqlTransactionSynthesisRule : ISynthesisRule
 
         var derivedFrom = new List<ObservationId>(activeIds) { population.Id };
 
-        var finding = new Finding
+        var finding = new Claim
         {
             Fingerprint = Fingerprint("active-transactions"),
             Analyzer = AnalyzerName,
@@ -80,7 +80,7 @@ internal sealed class SqlTransactionSynthesisRule : ISynthesisRule
             Confidence = ConfidenceBreakdown.MeasurementCertain,
         };
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>([finding]);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>([finding]);
     }
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();

@@ -31,7 +31,7 @@ public sealed class ReferenceChainDominatorCorrelationInsightRuleTests
             TypeSample("App.SmallCache", retainedBytes: 5_000),
         ]);
 
-        IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+        IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
         findings.Should().BeEmpty();
     }
@@ -45,10 +45,10 @@ public sealed class ReferenceChainDominatorCorrelationInsightRuleTests
             TypeSample("App.BigCache", retainedBytes: 150_000),
         ]);
 
-        IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+        IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
         findings.Should().ContainSingle(f => f.Title == "Reference-chain type dominates a large heap fraction");
-        Finding finding = findings[0];
+        Claim finding = findings[0];
         finding.Severity.Should().Be(Severity.Warning);
         finding.Narrative.Should().Contain("App.BigCache");
     }
@@ -62,7 +62,7 @@ public sealed class ReferenceChainDominatorCorrelationInsightRuleTests
             TypeSample("App.HugeCache", retainedBytes: 300_000),
         ]);
 
-        IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+        IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
         findings.Should().ContainSingle(f => f.Title == "Reference-chain type dominates a large heap fraction")
             .Which.Severity.Should().Be(Severity.Critical);
@@ -78,7 +78,7 @@ public sealed class ReferenceChainDominatorCorrelationInsightRuleTests
             TypeSample("App.HugeCache", retainedBytes: 300_000),
         ]);
 
-        IReadOnlyList<Finding> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
+        IReadOnlyList<Claim> findings = await _rule.SynthesizeAsync(matched, new SynthesisContext());
 
         findings.Should().ContainSingle();
         // 1 retention-population observation + 2 offending type-sample observations.

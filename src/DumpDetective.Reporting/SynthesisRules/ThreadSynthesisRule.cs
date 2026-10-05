@@ -31,7 +31,7 @@ internal sealed class ThreadSynthesisRule : ISynthesisRule
         ObservationTypes = ["runtime.thread-triage", "runtime.finalizer-thread"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? triage = null;
@@ -51,9 +51,9 @@ internal sealed class ThreadSynthesisRule : ISynthesisRule
         }
 
         if (triage is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
-        var findings = new List<Finding>(5);
+        var findings = new List<Claim>(5);
 
         int aliveThreadCount = (int)triage.Measures["alive-thread.count"].Value;
         int blockedThreadCount = (int)triage.Measures["blocked-thread.count"].Value;
@@ -67,7 +67,7 @@ internal sealed class ThreadSynthesisRule : ISynthesisRule
         Severity summarySeverity = threadsWithActiveExceptionsCount > 0 || blockedThreadCount >= 10
             ? Severity.Warning : Severity.Info;
 
-        findings.Add(new Finding
+        findings.Add(new Claim
         {
             Fingerprint = Fingerprint("triage-summary"),
             Analyzer = AnalyzerName,
@@ -89,7 +89,7 @@ internal sealed class ThreadSynthesisRule : ISynthesisRule
             int finalizerLockCount = (int)finalizerThread.Measures["locks-held.count"].Value;
             string threadId = finalizerRef.ManagedThreadId.HasValue ? $"managed thread {finalizerRef.ManagedThreadId.Value}" : "the finalizer thread";
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("finalizer-blocked"),
                 Analyzer = AnalyzerName,
@@ -109,7 +109,7 @@ internal sealed class ThreadSynthesisRule : ISynthesisRule
 
         if (blockedThreadRatio > HighBlockedRatioThreshold)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("high-blocked-ratio"),
                 Analyzer = AnalyzerName,
@@ -129,7 +129,7 @@ internal sealed class ThreadSynthesisRule : ISynthesisRule
 
         if (aliveThreadCount > 0 && activeProcessingThreadCount == 0)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("zero-active-threads"),
                 Analyzer = AnalyzerName,
@@ -149,7 +149,7 @@ internal sealed class ThreadSynthesisRule : ISynthesisRule
 
         if (maxAsyncChainDepth > DeepAsyncChainThreshold)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("deep-async-chain"),
                 Analyzer = AnalyzerName,
@@ -167,7 +167,7 @@ internal sealed class ThreadSynthesisRule : ISynthesisRule
             });
         }
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();

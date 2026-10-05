@@ -37,7 +37,7 @@ internal sealed class DbConnectionSynthesisRule : ISynthesisRule
         ObservationTypes = ["infra.db-connection", "infra.db-connection-type-population", "infra.db-connection-population"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? population = null;
@@ -91,7 +91,7 @@ internal sealed class DbConnectionSynthesisRule : ISynthesisRule
             }
         }
 
-        if (population is null) return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+        if (population is null) return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long totalConnections = (long)population.Measures["total.count"].Value;
         long closedConnections = (long)population.Measures["closed.count"].Value;
@@ -99,7 +99,7 @@ internal sealed class DbConnectionSynthesisRule : ISynthesisRule
         long otherConnections = (long)population.Measures["other.count"].Value;
         long unknownStateConnections = (long)population.Measures["unknown-state.count"].Value;
 
-        var findings = new List<Finding>(4);
+        var findings = new List<Claim>(4);
         var populationIds = new List<ObservationId> { population.Id };
 
         // ── Connection count finding ─────────────────────────────────────────────
@@ -108,7 +108,7 @@ internal sealed class DbConnectionSynthesisRule : ISynthesisRule
             Severity sev = totalConnections >= TotalConnectionsCriticalThreshold ? Severity.Critical : Severity.Warning;
             string typeBreakdown = BuildTypeBreakdown(typeCounts);
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("connection-count"),
                 Analyzer = AnalyzerName,
@@ -136,7 +136,7 @@ internal sealed class DbConnectionSynthesisRule : ISynthesisRule
         // ── Open connections finding ─────────────────────────────────────────────
         if (openConnections >= OpenConnectionsWarningThreshold)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("open-connections"),
                 Analyzer = AnalyzerName,
@@ -159,7 +159,7 @@ internal sealed class DbConnectionSynthesisRule : ISynthesisRule
         // ── Broken connections finding ───────────────────────────────────────────
         if (brokenConnections >= BrokenConnectionsWarningThreshold)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("broken-connections"),
                 Analyzer = AnalyzerName,
@@ -188,7 +188,7 @@ internal sealed class DbConnectionSynthesisRule : ISynthesisRule
             var derivedFrom = new List<ObservationId>(gen2Ids);
             if (bestGen2RootPathSource is not null) derivedFrom.Add(bestGen2RootPathSource.Id);
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("gen2-open-connections"),
                 Analyzer = AnalyzerName,
@@ -210,7 +210,7 @@ internal sealed class DbConnectionSynthesisRule : ISynthesisRule
             });
         }
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
     /// <summary>Trusts matched-observation order rather than re-sorting — the real analyzer's own

@@ -19,7 +19,7 @@ internal sealed class LeakSuspicionInsightRule : ISynthesisRule
         ObservationTypes = ["type.retention-population", "type.string-composition"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? retention = null, strings = null;
@@ -32,14 +32,14 @@ internal sealed class LeakSuspicionInsightRule : ISynthesisRule
             }
         }
 
-        var findings = new List<Finding>();
+        var findings = new List<Claim>();
 
         if (retention is not null)
         {
             long highlyReferenced = (long)retention.Measures["highly-referenced.count"].Value;
             if (highlyReferenced > 0)
             {
-                findings.Add(new Finding
+                findings.Add(new Claim
                 {
                     Fingerprint = "insightengine::leak-suspicion-highly-referenced",
                     Analyzer = "InsightEngine",
@@ -68,7 +68,7 @@ internal sealed class LeakSuspicionInsightRule : ISynthesisRule
                 long totalStrings = (long)strings.Measures["total-string.count"].Value;
                 ulong totalStringMemoryBytes = (ulong)strings.Measures["total-string-memory.bytes"].Value;
 
-                findings.Add(new Finding
+                findings.Add(new Claim
                 {
                     Fingerprint = "insightengine::leak-suspicion-duplicate-strings",
                     Analyzer = "InsightEngine",
@@ -87,6 +87,6 @@ internal sealed class LeakSuspicionInsightRule : ISynthesisRule
             }
         }
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 }

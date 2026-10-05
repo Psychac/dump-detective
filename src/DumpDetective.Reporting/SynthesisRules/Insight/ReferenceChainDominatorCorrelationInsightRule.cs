@@ -11,17 +11,17 @@ namespace DumpDetective.Reporting.SynthesisRules.Insight;
 /// <remarks>
 /// <para>
 /// The original attached a <c>FindingEvidenceTable</c> listing every offending type (name,
-/// retained bytes, % of heap). <c>Sdk.Synthesis.Finding</c> has no equivalent field, deliberately —
+/// retained bytes, % of heap). <c>Sdk.Synthesis.Claim</c> has no equivalent field, deliberately —
 /// see docs/ReportStructure/ReportSystemVision.md § 6.2, which already decided not to pre-add
-/// <c>Claim</c>-shaped/report-rendering fields to <c>Finding</c> ahead of the report phase, and
+/// <c>Claim</c>-shaped/report-rendering fields to <c>Claim</c> ahead of the report phase, and
 /// Appendix C, which lists <c>CompactTable</c> (what the old table became) as a shape the future
 /// <c>dd-table</c> widget replaces — rendered live from cited observations, not carried as a blob
-/// on the finding. Adding a table field to <c>Finding</c> now would mean building exactly the
+/// on the finding. Adding a table field to <c>Claim</c> now would mean building exactly the
 /// structure that decision already deferred. So this rule keeps the headline (offender count, the
-/// single worst offender's name/bytes/%) in <see cref="Finding.Narrative"/> — unchanged from the
+/// single worst offender's name/bytes/%) in <see cref="Claim.Narrative"/> — unchanged from the
 /// original's own <c>Evidence</c> text — and drops the supplementary full-list table. Nothing is
 /// lost from the observation layer: every offending type is still an individual
-/// <c>reference-chain.type-sample</c> observation, all cited via <see cref="Finding.DerivedFrom"/>,
+/// <c>reference-chain.type-sample</c> observation, all cited via <see cref="Claim.DerivedFrom"/>,
 /// so a future <c>dd-table</c> can render the exact same ranked list directly from those
 /// observations without this rule changing at all.
 /// </para>
@@ -45,7 +45,7 @@ internal sealed class ReferenceChainDominatorCorrelationInsightRule : ISynthesis
         ObservationTypes = ["type.retention-population", "reference-chain.type-sample"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? retention = null;
@@ -60,7 +60,7 @@ internal sealed class ReferenceChainDominatorCorrelationInsightRule : ISynthesis
 
         ulong totalHeapBytes = (ulong)(retention?.Measures["total.bytes"].Value ?? 0);
         if (retention is null || totalHeapBytes == 0 || typeSamples.Count == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         var offenders = new List<(string TypeName, ulong RetainedBytes, double Pct, ObservationId Id)>();
         bool anyCritical = false;
@@ -81,7 +81,7 @@ internal sealed class ReferenceChainDominatorCorrelationInsightRule : ISynthesis
         }
 
         if (offenders.Count == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         offenders.Sort(static (a, b) => b.Pct.CompareTo(a.Pct));
         (string TypeName, ulong RetainedBytes, double Pct, ObservationId Id) top = offenders[0];
@@ -90,9 +90,9 @@ internal sealed class ReferenceChainDominatorCorrelationInsightRule : ISynthesis
         foreach (var offender in offenders)
             derivedFrom.Add(offender.Id);
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::reference-chain-dominator-correlation",
                 Analyzer = "InsightEngine",

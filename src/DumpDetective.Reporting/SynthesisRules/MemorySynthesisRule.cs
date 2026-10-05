@@ -34,7 +34,7 @@ internal sealed class MemorySynthesisRule : ISynthesisRule
         ObservationTypes = ["heap.memory-composition"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? composition = null;
@@ -48,7 +48,7 @@ internal sealed class MemorySynthesisRule : ISynthesisRule
         }
 
         if (composition is null)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         ulong totalBytes = (ulong)composition.Measures["total.bytes"].Value;
         ulong lohBytes = (ulong)composition.Measures["loh.bytes"].Value;
@@ -63,12 +63,12 @@ internal sealed class MemorySynthesisRule : ISynthesisRule
 
         double memoryPressureScore = ComputeMemoryPressureScore(lohPercent, top5Percent, smallObjectCountPercent, smallObjectBytesPercent, objectsPerMb);
 
-        var findings = new List<Finding>();
+        var findings = new List<Claim>();
 
         // ── Finding 1: High memory pressure score (>= 70) ───────────────────────────
         if (memoryPressureScore >= 70)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("pressure-score"),
                 Analyzer = AnalyzerName,
@@ -88,7 +88,7 @@ internal sealed class MemorySynthesisRule : ISynthesisRule
         // ── Finding 2: High type concentration (top-5 > 80%) ────────────────────────
         if (top5Percent > 80)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("concentration"),
                 Analyzer = AnalyzerName,
@@ -111,7 +111,7 @@ internal sealed class MemorySynthesisRule : ISynthesisRule
             string dominantTypeName = composition.Evidence[0].Description ?? "";
             ulong dominantTypeBytes = composition.Measures.TryGetValue("top1-type.bytes", out Measure m) ? (ulong)m.Value : 0;
 
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("dominant-type"),
                 Analyzer = AnalyzerName,
@@ -133,7 +133,7 @@ internal sealed class MemorySynthesisRule : ISynthesisRule
         // ── Finding 3: High small-object pressure (>85% by count) ──────────────────
         if (smallObjectCountPercent > 85)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("small-object-density"),
                 Analyzer = AnalyzerName,
@@ -153,7 +153,7 @@ internal sealed class MemorySynthesisRule : ISynthesisRule
         // ── Finding 4: High LOH percentage ──────────────────────────────────────────
         if (lohPercent >= 40)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("loh-usage"),
                 Analyzer = AnalyzerName,
@@ -173,7 +173,7 @@ internal sealed class MemorySynthesisRule : ISynthesisRule
         // ── Baseline snapshot when nothing else triggered ───────────────────────────
         if (findings.Count == 0)
         {
-            findings.Add(new Finding
+            findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("baseline-snapshot"),
                 Analyzer = AnalyzerName,
@@ -190,7 +190,7 @@ internal sealed class MemorySynthesisRule : ISynthesisRule
             });
         }
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(findings);
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
     // Duplicated from MemoryPressureClassifier (internal to a different assembly) — see remarks.

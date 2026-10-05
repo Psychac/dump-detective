@@ -60,7 +60,7 @@ internal sealed class ClusterHangCorrelationInsightRule : ISynthesisRule
         ],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? dominantCluster = null;
@@ -111,10 +111,10 @@ internal sealed class ClusterHangCorrelationInsightRule : ISynthesisRule
         }
 
         if (dominantCluster is null || waitingByOsThreadId.Count == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         if (!memberObservationsByRank.TryGetValue(dominantRank, out List<Observation>? dominantMembers) || dominantMembers.Count == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         var derivedFrom = new List<ObservationId> { dominantCluster.Id };
         int overlapCount = 0;
@@ -140,7 +140,7 @@ internal sealed class ClusterHangCorrelationInsightRule : ISynthesisRule
 
         double overlapRatio = overlapCount / (double)dominantMembers.Count;
         if (overlapRatio < OverlapWarningRatio)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         string? dominantWaitReason = null;
         int dominantWaitReasonCount = 0;
@@ -212,9 +212,9 @@ internal sealed class ClusterHangCorrelationInsightRule : ISynthesisRule
             tags.Add("deadlock-candidate");
         }
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::cluster-hang-correlation",
                 Analyzer = "InsightEngine",

@@ -28,7 +28,7 @@ internal sealed class AsyncStateMachineFireAndForgetInsightRule : ISynthesisRule
         ObservationTypes = ["type.async-state-machine", "type.async-state-machine-population", "heap.memory-composition"],
     };
 
-    public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(
+    public ValueTask<IReadOnlyList<Claim>> SynthesizeAsync(
         ObservationMatchSet matched, SynthesisContext context, CancellationToken cancellationToken = default)
     {
         Observation? population = null, memory = null;
@@ -44,7 +44,7 @@ internal sealed class AsyncStateMachineFireAndForgetInsightRule : ISynthesisRule
         }
 
         if (perMethod.Count == 0)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         // Group by (DeclaringType, Method) — the same key SuspendedMethodMap used.
         var byMethod = new Dictionary<string, (MethodRef Method, long SuspendedCount, List<ObservationId> Ids)>(StringComparer.Ordinal);
@@ -67,7 +67,7 @@ internal sealed class AsyncStateMachineFireAndForgetInsightRule : ISynthesisRule
         }
 
         if (worst is null || worst.Value.SuspendedCount < FireAndForgetThreshold)
-            return ValueTask.FromResult<IReadOnlyList<Finding>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([]);
 
         long totalStateMachines = (long)(population?.Measures["total.count"].Value ?? 0);
         ulong totalStateMachineBytes = (ulong)(population?.Measures["total.bytes"].Value ?? 0);
@@ -87,9 +87,9 @@ internal sealed class AsyncStateMachineFireAndForgetInsightRule : ISynthesisRule
         var derivedFrom = new List<ObservationId>(worst.Value.Ids);
         if (population is not null) derivedFrom.Add(population.Id);
 
-        return ValueTask.FromResult<IReadOnlyList<Finding>>(
+        return ValueTask.FromResult<IReadOnlyList<Claim>>(
         [
-            new Finding
+            new Claim
             {
                 Fingerprint = "insightengine::async-state-machine-fire-and-forget",
                 Analyzer = "InsightEngine",

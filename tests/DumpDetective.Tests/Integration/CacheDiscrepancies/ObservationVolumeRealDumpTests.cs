@@ -106,6 +106,60 @@ public sealed class ObservationVolumeRealDumpTests
         foreach (var group in byType)
             _output.WriteLine($"  {group.Key}: {group.Count():N0}");
 
+        ReportSerializedObservationSize(observations);
+
         Assert.True(observations.Count > 0, "Phase 5 step 1's retyped analyzers should emit at least one observation on a real dump.");
+    }
+
+    // M1 decision D2 (docs/ReportStructure/m1-claims-plan.md): inline vs side-car observations in report.json.
+    private void ReportSerializedObservationSize(IReadOnlyList<Observation> observations)
+    {
+        string outputPath = Environment.GetEnvironmentVariable("DD_OBSERVATION_JSON_OUT")
+            ?? Path.Combine(Path.GetTempPath(), "observations-d2.json");
+        var options = new System.Text.Json.JsonSerializerOptions
+        {
+            Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() },
+        };
+
+        long compactBytes;
+        using (FileStream file = File.Create(outputPath))
+        using (var writer = new System.Text.Json.Utf8JsonWriter(file))
+        {
+            writer.WriteStartArray();
+            for (int i = 0; i < observations.Count; i++)
+                System.Text.Json.JsonSerializer.Serialize(writer, observations[i], options);
+            writer.WriteEndArray();
+            writer.Flush();
+            compactBytes = file.Length;
+        }
+
+        long gzipBytes;
+        using (FileStream source = File.OpenRead(outputPath))
+        using (var sizeCounter = new CountingStream())
+        {
+            using (var gzip = new System.IO.Compression.GZipStream(sizeCounter, System.IO.Compression.CompressionLevel.Optimal, leaveOpen: true))
+                source.CopyTo(gzip);
+            gzipBytes = sizeCounter.Length;
+        }
+
+        _output.WriteLine($"Serialized observations (compact JSON): {compactBytes / 1024.0 / 1024.0:N1} MB at {outputPath}");
+        _output.WriteLine($"Serialized observations (gzip): {gzipBytes / 1024.0 / 1024.0:N1} MB");
+        _output.WriteLine($"Compact JSON bytes per observation: {(double)compactBytes / observations.Count:N0}");
+    }
+
+    private sealed class CountingStream : Stream
+    {
+        private long _length;
+        public override long Length => _length;
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Position { get => _length; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => _length += count;
+        public override void Write(ReadOnlySpan<byte> buffer) => _length += buffer.Length;
     }
 }

@@ -64,6 +64,7 @@ internal sealed class RunAnalyzersNode(
             SynthesisEnrichment enrichment = await synthesisFindingEnricher.EnrichAsync(state.Runs, observations, cancellationToken);
             state.Runs = enrichment.Runs;
             state.Insights = enrichment.UnattachedFindings;
+            state.FindingLineage = enrichment.LineageByFingerprint;
         }
 
         state.IncidentContext = IncidentContextFactory.Create(

@@ -203,7 +203,8 @@ internal sealed class ConfigurationResolver
         {
             Format = config.Report?.Format ?? ConfigurationParseHelpers.ParseReportFormat(config.ReportFormat) ?? request.OutputFormat ?? ReportFormat.Html,
             StyleVersion = config.Report?.StyleVersion ?? ConfigurationParseHelpers.ParseReportStyle(config.ReportStyleVersion) ?? request.ReportStyleVersion ?? ReportStyleVersion.V1,
-            PreRender = config.Report?.PreRender ?? request.PreRender
+            PreRender = config.Report?.PreRender ?? request.PreRender,
+            ObservationsUncompressed = config.Report?.ObservationsUncompressed ?? request.ObservationsUncompressed
         };
     }
 

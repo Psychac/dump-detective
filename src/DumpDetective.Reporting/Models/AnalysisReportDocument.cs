@@ -99,6 +99,9 @@ internal abstract record AnalysisReportDocument
     public ReportAppendix? Appendix { get; init; } = null;
     public ExecutiveSummaryRecord? ExecutiveSummary { get; init; }        // optional executive summary
 
+    /// <summary>Where the observations behind this report's findings were written; null when none were emitted.</summary>
+    public ObservationsReference? Observations { get; init; } = null;
+
     /// <summary>
     /// Cross-table string pool for compact-table cells (docs/refactor/report-payload-size-reduction-design.md,
     /// F1). Populated only by the HTML renderer (<see cref="DumpDetective.Reporting.Formatters.ReportStringPool"/>); null for other
@@ -169,6 +172,9 @@ internal sealed record AnalyzerRunStatusRecord(
     string? ErrorMessage,
     string? SkipReason = null);
 
+/// <summary>Points at the observations side-car by file name (relative to this report) and content hash.</summary>
+internal sealed record ObservationsReference(string File, string Sha256, long Count, bool Compressed);
+
 // Compact serializable projection of InsightFinding used in generated JSON
 internal sealed record FindingRecord(
     [property: JsonPropertyName("id")] string Id,
@@ -184,6 +190,14 @@ internal sealed record FindingRecord(
     // Traceability & actionability extensions (optional)
     [property: JsonPropertyName("confidence")]
     public double? Confidence { get; init; } = null;
+
+    /// <summary>Observations this finding was synthesized from; resolvable in the observations side-car.</summary>
+    [JsonPropertyName("derivedFrom")]
+    public IReadOnlyList<DumpDetective.Sdk.Observations.ObservationId>? DerivedFrom { get; init; } = null;
+
+    /// <summary>The scored parts behind <see cref="Confidence"/>, which stays the single headline number.</summary>
+    [JsonPropertyName("confidenceBreakdown")]
+    public DumpDetective.Sdk.Synthesis.ConfidenceBreakdown? ConfidenceBreakdown { get; init; } = null;
 
     [JsonPropertyName("confidenceBand")]
     public string? ConfidenceBand => Confidence is double score ? ConfidenceLadder.For(score).Key : null;

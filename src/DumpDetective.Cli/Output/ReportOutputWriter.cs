@@ -3,6 +3,7 @@ using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Models;
 using DumpDetective.Cli.Models;
 using DumpDetective.Cli.Diagnostics;
+using DumpDetective.Sdk.Observations;
 
 using System.Text.Json;
 
@@ -15,6 +16,7 @@ internal sealed class ReportOutputWriter(IEnumerable<IReportSink> sinks)
     public async Task WriteAsync(
         ResolvedExecutionOptions resolved,
         AnalysisReportDocument? document,
+        IReadOnlyList<Observation> observations,
         IReadOnlyList<ReportArtifact>? artifacts,
         CancellationToken cancellationToken)
     {
@@ -28,6 +30,13 @@ internal sealed class ReportOutputWriter(IEnumerable<IReportSink> sinks)
             string outPath = resolved.OutputPath;
             if (document is not null)
             {
+                if (observations.Count > 0)
+                {
+                    ObservationsReference sideCar = await ObservationsSideCarWriter.WriteAsync(
+                        outPath, observations, compressed: !resolved.Report.ObservationsUncompressed, cancellationToken);
+                    document = document with { Observations = sideCar };
+                }
+
                 foreach (IReportSink sink in _sinks)
                     await sink.PublishAsync(resolved, document, cancellationToken);
             }

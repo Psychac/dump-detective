@@ -26,7 +26,8 @@ internal sealed class BuildReportNode(ReportBuilderFacade reportBuilderFacade) :
             state.Runs,
             state.AnalysisElapsed,
             state.IncidentContext,
-            state.Insights);
+            state.Insights,
+            state.FindingLineage);
         state.ReportDocument = doc;
 
         context.Set(SingleDumpPipelineKeys.ReportDocument, doc);

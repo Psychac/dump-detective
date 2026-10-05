@@ -46,22 +46,9 @@ public sealed class ReportSinksTests : IDisposable
         var resolved = ResolvedExecutionOptionsFactory.Create(outputPath) with { Report = new ReportOptions { Format = format } };
         var writer = new ReportOutputWriter([new FileReportSink(_facade), new ReportJsonSink(_facade)]);
 
-        await writer.WriteAsync(resolved, document, artifacts: null, CancellationToken.None);
+        await writer.WriteAsync(resolved, document, observations: [], artifacts: null, CancellationToken.None);
 
         File.ReadAllText(outputPath).Should().Be(_facade.RenderDocument(document, format, new HtmlRenderSettings(false, resolved.Report.StyleVersion)));
-        File.ReadAllText(Path.Combine(_tempDir, ReportJsonSink.FileName)).Should().Be(_facade.RenderDocument(document, ReportFormat.Json));
-    }
-
-    [Fact]
-    public async Task WriteAsync_PrimaryOutputIsReportJson_WritesItOnce()
-    {
-        string outputPath = Path.Combine(_tempDir, ReportJsonSink.FileName);
-        AnalysisReportDocument document = _facade.BuildReportDocument("C:/dumps/sink-test.dmp", [], TimeSpan.FromSeconds(1));
-        var resolved = ResolvedExecutionOptionsFactory.Create(outputPath) with { Report = new ReportOptions { Format = ReportFormat.Json } };
-        var writer = new ReportOutputWriter([new FileReportSink(_facade), new ReportJsonSink(_facade)]);
-
-        await writer.WriteAsync(resolved, document, artifacts: null, CancellationToken.None);
-
-        File.ReadAllText(outputPath).Should().Be(_facade.RenderDocument(document, ReportFormat.Json));
+        File.ReadAllText(Path.Combine(_tempDir, Path.GetFileNameWithoutExtension(outputFileName) + ReportJsonSink.Suffix)).Should().Be(_facade.RenderDocument(document, ReportFormat.Json));
     }
 }

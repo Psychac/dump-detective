@@ -41,7 +41,7 @@ internal sealed class HtmlReportRenderer : IReportFormatter
 
     public string Render(AnalysisReportDocument doc, HtmlRenderSettings settings)
     {
-        string reportJson = JsonSerializer.Serialize(doc, ReportJsonContext.Default.AnalysisReportDocument);
+        string reportJson = JsonSerializer.Serialize(doc, HtmlEmbeddedReportJson.DocumentTypeInfo);
         string preFindings = string.Empty;
         string preHealthScorecard = string.Empty;
         string preAnalyzers = string.Empty;
@@ -91,7 +91,7 @@ internal sealed class HtmlReportRenderer : IReportFormatter
             }
         }
 
-        reportJson = JsonSerializer.Serialize(docForClient, ReportJsonContext.Default.AnalysisReportDocument);
+        reportJson = JsonSerializer.Serialize(docForClient, HtmlEmbeddedReportJson.DocumentTypeInfo);
         reportJson = CompactReportJson(docForClient, reportJson);
 
         // For trend reports: serialize each per-dump document independently using the proven
@@ -103,7 +103,7 @@ internal sealed class HtmlReportRenderer : IReportFormatter
             for (int i = 0; i < trend.PerDumpDocuments.Count; i++)
             {
                 if (i > 0) sb.Append(',');
-                string perDumpDocJson = JsonSerializer.Serialize(trend.PerDumpDocuments[i], ReportJsonContext.Default.AnalysisReportDocument);
+                string perDumpDocJson = JsonSerializer.Serialize(trend.PerDumpDocuments[i], HtmlEmbeddedReportJson.DocumentTypeInfo);
                 sb.Append(CompactPerDumpJson(perDumpDocJson));
             }
             sb.Append(']');

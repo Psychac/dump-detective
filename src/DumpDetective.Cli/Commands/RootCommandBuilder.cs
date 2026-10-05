@@ -62,6 +62,8 @@ internal sealed class RootCommandBuilder
     private readonly Option<bool> _preRenderOption = new("--pre-render") { Description = "Pre-render findings and analyzer sections server-side for faster initial paint." };
     
     
+    private readonly Option<bool> _observationsUncompressedOption = new("--observations-uncompressed") { Description = "Write the observations side-car as plain JSON instead of gzip." };
+
     private readonly Option<string?> _cacheDirectoryOption = new("--cache-dir")
     {
         Description = "Directory to store the disk-based heap index cache. Falls back to a folder next to the dump, then to a temp-folder location if neither is writable."
@@ -91,6 +93,7 @@ internal sealed class RootCommandBuilder
             _reportFormatOption,
             _reportStyleOption,
             _preRenderOption,
+            _observationsUncompressedOption,
             _outputPathOption,
             _cacheDirectoryOption,
             _tracePathOption
@@ -114,6 +117,7 @@ internal sealed class RootCommandBuilder
             parseResult.GetValue(_performanceDiagnosticsOption),
             ParseReportStyle(parseResult.GetValue(_reportStyleOption)),
             parseResult.GetValue(_preRenderOption),
+            parseResult.GetValue(_observationsUncompressedOption),
             parseResult.GetValue(_cacheDirectoryOption),
             parseResult.GetValue(_tracePathOption));
     }

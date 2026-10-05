@@ -1,3 +1,4 @@
+using DumpDetective.Reporting.Models;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Synthesis;
 using DumpDetective.Sdk.Observations;
@@ -20,6 +21,8 @@ namespace DumpDetective.Reporting.Services;
 /// </remarks>
 internal sealed class SynthesisFindingEnricher
 {
+    private static readonly IReadOnlyDictionary<string, FindingLineage> EmptyLineage = new Dictionary<string, FindingLineage>();
+
     private readonly SynthesisEngine _engine;
 
     public SynthesisFindingEnricher(ISynthesisRuleFactory ruleFactory)
@@ -38,7 +41,7 @@ internal sealed class SynthesisFindingEnricher
         // ignoring its match set) fire on a zero-observation pass too, which broke that test's own
         // "nothing to synthesize, return runs unchanged" contract for every rule, not just this one.
         if (observations.Count == 0)
-            return new SynthesisEnrichment(runs, []);
+            return new SynthesisEnrichment(runs, [], EmptyLineage);
 
         int failedCount = 0;
         for (int i = 0; i < runs.Count; i++)
@@ -50,8 +53,9 @@ internal sealed class SynthesisFindingEnricher
 
         IReadOnlyList<Finding> findings = await _engine.SynthesizeAsync(observations, context, cancellationToken);
         if (findings.Count == 0)
-            return new SynthesisEnrichment(runs, []);
+            return new SynthesisEnrichment(runs, [], EmptyLineage);
 
+        var lineageByFingerprint = new Dictionary<string, FindingLineage>(StringComparer.Ordinal);
         var byAnalyzer = new Dictionary<string, List<InsightFinding>>(StringComparer.Ordinal);
         foreach (Finding finding in findings)
         {
@@ -61,7 +65,14 @@ internal sealed class SynthesisFindingEnricher
                 byAnalyzer[finding.Analyzer] = bucket;
             }
 
-            bucket.Add(FindingSynthesisAdapter.ToInsightFinding(finding));
+            InsightFinding insightFinding = FindingSynthesisAdapter.ToInsightFinding(finding);
+            bucket.Add(insightFinding);
+
+            var lineage = new FindingLineage(finding.DerivedFrom, finding.Confidence);
+            string fingerprint = insightFinding.EffectiveFingerprint;
+            lineageByFingerprint[fingerprint] = lineageByFingerprint.TryGetValue(fingerprint, out FindingLineage? existing)
+                ? existing.MergeWith(lineage)
+                : lineage;
         }
 
         var updated = new List<AnalyzerRunResult>(runs.Count);
@@ -80,10 +91,11 @@ internal sealed class SynthesisFindingEnricher
         foreach (List<InsightFinding> bucket in byAnalyzer.Values)
             unattached.AddRange(bucket);
 
-        return new SynthesisEnrichment(updated, unattached);
+        return new SynthesisEnrichment(updated, unattached, lineageByFingerprint);
     }
 }
 
 internal readonly record struct SynthesisEnrichment(
     IReadOnlyList<AnalyzerRunResult> Runs,
-    IReadOnlyList<InsightFinding> UnattachedFindings);
+    IReadOnlyList<InsightFinding> UnattachedFindings,
+    IReadOnlyDictionary<string, FindingLineage> LineageByFingerprint);

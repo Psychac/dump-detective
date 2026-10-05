@@ -24,7 +24,8 @@ internal static class AnalyzerOptionsBuilder
         {
             Format = request.OutputFormat ?? ReportFormat.Html,
             StyleVersion = request.ReportStyleVersion ?? ReportStyleVersion.V1,
-            PreRender = request.PreRender
+            PreRender = request.PreRender,
+            ObservationsUncompressed = request.ObservationsUncompressed
         };
     }
 

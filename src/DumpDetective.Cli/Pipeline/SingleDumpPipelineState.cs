@@ -61,6 +61,10 @@ internal sealed class SingleDumpPipelineState : IDisposable
     /// </summary>
     public IReadOnlyList<InsightFinding> Insights { get; set; } = [];
 
+    /// <summary>Observation lineage and confidence breakdown per finding fingerprint, for the report document.</summary>
+    public IReadOnlyDictionary<string, DumpDetective.Reporting.Models.FindingLineage> FindingLineage { get; set; }
+        = new Dictionary<string, DumpDetective.Reporting.Models.FindingLineage>();
+
     // ── Stage 5: BuildReportStage ────────────────────────────────────────────
     public DumpDetective.Reporting.Models.AnalysisReportDocument? ReportDocument { get; set; }
     public DumpDetective.Core.Models.AnalysisIncidentContext? IncidentContext { get; set; }

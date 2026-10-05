@@ -15,7 +15,7 @@ internal sealed class WriteOutputNode(ReportOutputWriter outputWriter) : IPipeli
         SingleDumpPipelineState state = context.Get<SingleDumpPipelineState>(SingleDumpPipelineKeys.State);
 
         IReadOnlyList<ReportArtifact> artifacts = state.Runs.SelectMany(r => r.Artifacts ?? Array.Empty<ReportArtifact>()).ToArray();
-        await outputWriter.WriteAsync(state.Resolved, state.ReportDocument, artifacts, cancellationToken);
+        await outputWriter.WriteAsync(state.Resolved, state.ReportDocument, state.Observations, artifacts, cancellationToken);
 
         context.Set(SingleDumpPipelineKeys.Output, artifacts);
     }

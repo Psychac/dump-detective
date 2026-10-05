@@ -75,17 +75,30 @@ system. It gates M4.
 
 1. **Sinks + unconditional `report.json`** *(done 2026-10-05)* — Phase 8 steps 1–2.
    - `IReportSink` in `Cli/Output`; `FileReportSink` renders through the existing formatters unchanged.
-   - `ReportJsonSink` writes `report.json` beside the primary output file (which defaults to beside
-     the dump) on every run, single-dump and trend alike, regardless of `--format`.
+   - `ReportJsonSink` writes `<output>.report.json` beside the primary output file (which defaults to
+     beside the dump) on every run, single-dump and trend alike, regardless of `--format`.
    - `--separate-json` retired (it extracted JSON from the rendered HTML by regex; `report.json` now
      comes from the document). The `_external` loader in `report.main.js` is now unreachable.
    - Gate met: full suite green (1452 passed), per-format output asserted equal to the formatter's
      own render, real run on the 3.35 GB reference dump wrote `out.html` 2.6 MB + `report.json` 66.3 MB.
    - Open: `report.json` is 66.3 MB uncompressed; the HTML embeds the same JSON gzip-base64.
-2. **Lineage into the report** *(pending)* — closes the Phase 5 open item.
-   - Carry `DerivedFrom` and the full `ConfidenceBreakdown` through to the report document.
-   - Observations into `report.json`, inline or side-car per D2.
-   - Gate: golden-equal rendered HTML/MD/text; `report.json` gains fields only.
+2. **Lineage into the report** *(done 2026-10-05)* — closes the Phase 5 open item.
+   - `FindingRecord` gains `derivedFrom` (observation ids) and `confidenceBreakdown`; `confidence` stays
+     the single headline number. Carried by a fingerprint-keyed side map (`FindingLineage`) from
+     `SynthesisFindingEnricher`, so `InsightFinding` is untouched. Findings sharing a fingerprint merge:
+     union of observations, lower-confidence breakdown.
+   - Observations go to a side-car per D2: `<output>.observations.json.gz` (`--observations-uncompressed`
+     for plain `.observations.json`). `report.json` gains `observations: { file, sha256, count, compressed }`.
+   - Companion files are named after the primary output (`Crash.html` → `Crash.report.json`,
+     `Crash.observations.json.gz`) so reports sharing a folder don't collide. Step 1's fixed `report.json` is gone.
+   - The HTML's embedded JSON omits lineage and the side-car reference (`HtmlEmbeddedReportJson`): left in,
+     they grew the real report 2.6 → 6.3 MB for fields the HTML never reads.
+   - Verified on the 3.35 GB reference dump: HTML 2.7 MB (unchanged), `report.json` 76.5 MB, side-car 6.0 MB
+     gzipped for 97,408 observations; hash and count match, 82 findings carry lineage, 0 unresolved ids.
+   - Open: the D2 estimate was 3.7 MB gzipped; the real side-car is 6.0 MB. Lineage is large for population
+     findings (one finding cites 68,576 observations; 145,781 ids total), which is why `report.json` grew ~10 MB.
+   - Open: trend runs write the side-car (all dumps' observations) but trend findings come from deltas, so
+     they carry no lineage yet.
 3. **`Claim` record** *(pending)* — per D1, in `Sdk/Synthesis`.
    - Fields from [vision § 6.2](ReportSystemVision.md#62-the-claim-record) that M1 owns:
      `assertion` (closed predicate vocabulary, § 6.8), `subjects`, `support`, `counter`,

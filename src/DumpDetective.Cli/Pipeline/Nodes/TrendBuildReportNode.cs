@@ -85,6 +85,7 @@ internal sealed class TrendBuildReportNode(
             currentExecution.IncidentContext,
             trendData);
 
+        sessionState.Observations = executions.SelectMany(e => e.Observations).ToArray();
         sessionState.ReportDocument = trendDoc;
         sessionState.Runs = executions.SelectMany(e => e.Runs).ToArray();
         sessionState.AnalysisElapsed = sessionState.PipelineStopwatch.Elapsed;

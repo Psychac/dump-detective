@@ -76,8 +76,9 @@ internal sealed class ReportBuilderFacade(
         IReadOnlyList<AnalyzerRunResult> runs,
         TimeSpan elapsed,
         AnalysisIncidentContext? incidentContext = null,
-        IReadOnlyList<InsightFinding>? additionalFindings = null)
-        => _serializer.Serialize(dumpPath, runs, elapsed, _analyzerBuilders, _reportBuilders, incidentContext, additionalFindings);
+        IReadOnlyList<InsightFinding>? additionalFindings = null,
+        IReadOnlyDictionary<string, FindingLineage>? lineageByFingerprint = null)
+        => _serializer.Serialize(dumpPath, runs, elapsed, _analyzerBuilders, _reportBuilders, incidentContext, additionalFindings, lineageByFingerprint);
 
     public string RenderDocument(AnalysisReportDocument doc, ReportFormat format, HtmlRenderSettings? htmlRenderSettings = null)
     {

@@ -153,8 +153,25 @@ system. It gates M4.
    - Each batch verified on the reference dump, one run at a time.
 5. **Generated prose + `dd-claim`** *(pending)* — per D3.
    - One prose generator over `assertion`; HTML, Markdown, text all call it.
-   - `dd-claim` widget: support, counter, falsification tests, both confidence numbers with limiting
-     factors; conflict state per § 6.3.
+   - `dd-claim` widget design *(decided 2026-10-05; not yet built)*:
+     - **Assertion line:** a full generated sentence on its own line under the title, wrapping allowed, not
+       a chip. The authored title, narrative and recommendation stay; replacing titles waits until generated
+       wording proves as good on migrated rules.
+     - **Confidence:** one headline chip (band + number, as today). Only when below the top band, one plain
+       reason line naming the binding dimension and the remedy: data-limited ("get better data") or
+       inference-limited ("use judgment"). Dimension is picked from the breakdown numbers (measurement:
+       identity, temporal, capability fidelity; inference: evidence strength × conflict penalty), so the
+       flat `limitingFactors` list needn't be split. Exact field mapping to be confirmed when building.
+       The full breakdown sits in the expanded "Why".
+     - **"Why" block:** collapsed by default, showing counts (support / counter / tests); expanded it lists
+       supports, "weakened by", and "wrong if" tests with copyable commands.
+     - **HTML carries a slim projection with no observation ids.** Each support/counter entry links to the
+       analyzer section that produced its observations (analyzer name per entry, not ids). Per-observation
+       drill stays in `<output>.report.json` and the side-car; true per-observation navigation needs
+       observations in the page and belongs to M4.
+     - **Unmigrated claims** (no assertion) render exactly as today, so steps 4 and 5 can interleave.
+     - **Markdown/text:** the same parts as plain lines from the shared generator (D3), no collapse.
+     - **Deferred:** conflict state (§ 6.3; needs `relations`, after M1), next-capture row (M3), actions row.
 6. **Retire `InsightFinding` and `FindingSynthesisAdapter`** *(pending)*.
    - Trend and action consumers read `Claim`; fingerprints unchanged so trend identity holds.
    - Done when `InsightFinding` has zero references.

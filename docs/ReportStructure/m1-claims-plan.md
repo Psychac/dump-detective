@@ -99,7 +99,11 @@ system. It gates M4.
      findings (one finding cites 68,576 observations; 145,781 ids total), which is why `report.json` grew ~10 MB.
    - Open: trend runs write the side-car (all dumps' observations) but trend findings come from deltas, so
      they carry no lineage yet.
-3. **`Claim` record** *(pending)* — per D1, in `Sdk/Synthesis`.
+3. **`Claim` record** *(in progress — types and engine stamping done 2026-10-05; rename pending)* — per D1, in `Sdk/Synthesis`.
+   - Done: `Assertion`, `AssertionPredicate` (15), `Reference`, `EvidenceStatement`, `Counter`, `FalsificationTest`,
+     `RuleRef`, added to `Finding` as optional; `ISynthesisRule.Version` on the interface (the 76 rules already
+     declared `Version => 1`); `SynthesisEngine` stamps `Finding.Rule` and `report.json` carries it per finding.
+   - Pending: `Finding` → `Claim` rename; the per-rule golden test that fails on a shape change without a version bump.
    - Fields from [vision § 6.2](ReportSystemVision.md#62-the-claim-record) that M1 owns:
      `assertion` (closed predicate vocabulary, § 6.8), `subjects`, `support`, `counter`,
      `falsifiedBy`, split `confidence`, `derivedFrom` with rule id + version.

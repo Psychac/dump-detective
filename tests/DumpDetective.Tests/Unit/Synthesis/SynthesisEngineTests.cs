@@ -31,6 +31,18 @@ public sealed class SynthesisEngineTests
     }
 
     [Fact]
+    public async Task SynthesizeAsync_StampsEveryFindingWithItsRulesIdAndVersion_OverridingWhatTheRuleSet()
+    {
+        Finding claimingAnotherRule = FixedFinding("fp-1") with { Rule = new RuleRef("someone.else", 99) };
+        RecordingRule rule = new("rule.stamped", ["type.retention"], claimingAnotherRule);
+        SynthesisEngine engine = new([rule]);
+
+        IReadOnlyList<Finding> findings = await engine.SynthesizeAsync([MakeObservation("type.retention")], new SynthesisContext());
+
+        findings.Should().ContainSingle().Which.Rule.Should().Be(new RuleRef("rule.stamped", 1));
+    }
+
+    [Fact]
     public async Task SynthesizeAsync_StillInvokesARuleWithZeroMatches()
     {
         RecordingRule rule = new("rule.no-match", ["some.type-nobody-emitted"]);
@@ -113,6 +125,7 @@ public sealed class SynthesisEngineTests
         }
 
         public string RuleId { get; }
+        public int Version => 1;
         public ObservationQuery Query { get; }
         public bool WasInvoked { get; private set; }
         public IReadOnlyList<Observation> ReceivedMatches { get; private set; } = [];
@@ -136,6 +149,7 @@ public sealed class SynthesisEngineTests
         }
 
         public string RuleId { get; }
+        public int Version => 1;
         public ObservationQuery Query { get; }
 
         public ValueTask<IReadOnlyList<Finding>> SynthesizeAsync(

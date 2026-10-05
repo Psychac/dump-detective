@@ -69,8 +69,9 @@ internal sealed class SynthesisEngine
             {
                 IReadOnlyList<Finding> ruleFindings = await rule.SynthesizeAsync(
                     new ObservationMatchSet(matched), context, cancellationToken);
+                var ruleRef = new RuleRef(rule.RuleId, rule.Version);
                 foreach (Finding finding in ruleFindings)
-                    findings.Add(WithLineageConfidence(finding, byId));
+                    findings.Add(WithLineageConfidence(finding, byId) with { Rule = ruleRef });
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

@@ -12,6 +12,12 @@ public interface ISynthesisRule
 {
     string RuleId { get; }
 
+    /// <summary>
+    /// Hand-bumped whenever the rule's emitted findings change meaning or shape, and recorded on every
+    /// claim it produces so a report says which rule version it came from.
+    /// </summary>
+    int Version { get; }
+
     /// <summary>Named <c>Query</c>, not <c>Match</c> — renamed 2026-09-10
     /// (docs/refactor/modularity/phase-1-sdk-review-findings.md item 19) to remove the collision
     /// with <see cref="ObservationQuery.Matches"/> sitting right next to it

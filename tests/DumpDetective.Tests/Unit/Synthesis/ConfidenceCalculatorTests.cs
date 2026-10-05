@@ -165,6 +165,7 @@ public sealed class ConfidenceCalculatorTests
     private sealed class DerivedFromRule(ObservationId derivedFrom, ConfidenceBreakdown confidence) : ISynthesisRule
     {
         public string RuleId => "test.derived-from";
+        public int Version => 1;
 
         public ObservationQuery Query { get; } = new() { ObservationTypes = ["test.observation"] };
 

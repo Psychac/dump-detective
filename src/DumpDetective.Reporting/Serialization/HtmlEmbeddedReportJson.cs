@@ -11,7 +11,7 @@ namespace DumpDetective.Reporting.Serialization;
 /// </summary>
 internal static class HtmlEmbeddedReportJson
 {
-    private static readonly HashSet<string> LineagePropertyNames = new(StringComparer.Ordinal) { "derivedFrom", "confidenceBreakdown" };
+    private static readonly HashSet<string> LineagePropertyNames = new(StringComparer.Ordinal) { "derivedFrom", "confidenceBreakdown", "rule" };
     private const string ObservationsReferencePropertyName = "observations";
 
     private static readonly JsonSerializerOptions Options = new(ReportJsonContext.Default.Options)

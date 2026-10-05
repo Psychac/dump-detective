@@ -199,6 +199,10 @@ internal sealed record FindingRecord(
     [JsonPropertyName("confidenceBreakdown")]
     public DumpDetective.Sdk.Synthesis.ConfidenceBreakdown? ConfidenceBreakdown { get; init; } = null;
 
+    /// <summary>The synthesis rule and version that produced this finding.</summary>
+    [JsonPropertyName("rule")]
+    public DumpDetective.Sdk.Synthesis.RuleRef? Rule { get; init; } = null;
+
     [JsonPropertyName("confidenceBand")]
     public string? ConfidenceBand => Confidence is double score ? ConfidenceLadder.For(score).Key : null;
 

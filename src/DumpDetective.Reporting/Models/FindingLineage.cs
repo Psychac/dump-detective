@@ -3,7 +3,7 @@ using DumpDetective.Sdk.Synthesis;
 
 namespace DumpDetective.Reporting.Models;
 
-internal sealed record FindingLineage(IReadOnlyList<ObservationId> DerivedFrom, ConfidenceBreakdown Confidence)
+internal sealed record FindingLineage(IReadOnlyList<ObservationId> DerivedFrom, ConfidenceBreakdown Confidence, RuleRef? Rule = null)
 {
     /// <summary>
     /// Two findings sharing a fingerprint are merged: every contributing observation is kept and the
@@ -20,6 +20,6 @@ internal sealed record FindingLineage(IReadOnlyList<ObservationId> DerivedFrom, 
         }
 
         ConfidenceBreakdown lowerConfidence = other.Confidence.Composite < Confidence.Composite ? other.Confidence : Confidence;
-        return new FindingLineage(merged, lowerConfidence);
+        return new FindingLineage(merged, lowerConfidence, Rule ?? other.Rule);
     }
 }

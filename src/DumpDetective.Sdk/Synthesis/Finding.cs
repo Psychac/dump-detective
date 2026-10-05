@@ -30,6 +30,22 @@ public sealed record Finding
     public IReadOnlyList<string> Caveats { get; init; } = [];
 
     /// <summary>
+    /// The structured statement this finding makes. Null until a rule has been migrated to author one
+    /// (docs/ReportStructure/m1-claims-plan.md step 4); becomes <c>required</c> once the last rule has.
+    /// </summary>
+    public Assertion? Assertion { get; init; }
+
+    public IReadOnlyList<EvidenceStatement> Support { get; init; } = [];
+
+    /// <summary>Null means counter-evidence was never examined; <see cref="Synthesis.Counter.None"/> means none was found.</summary>
+    public Counter? Counter { get; init; }
+
+    public IReadOnlyList<FalsificationTest> FalsifiedBy { get; init; } = [];
+
+    /// <summary>Stamped by <c>SynthesisEngine</c> from the rule that returned this finding.</summary>
+    public RuleRef? Rule { get; init; }
+
+    /// <summary>
     /// Mirror <c>Core.Models.InsightFinding</c>'s <c>Analyzer</c>/<c>Category</c>/<c>Tags</c>/
     /// <c>MetricValue</c>/<c>MetricUnit</c> — added 2026-09-18 during Phase 5 step 2's first real
     /// rule migration (<c>ArraySynthesisRule</c>), not speculatively: the report pipeline reads all

@@ -105,6 +105,30 @@ system. It gates M4.
      `falsifiedBy`, split `confidence`, `derivedFrom` with rule id + version.
    - Deferred, with the milestone that owns each: `coverage` (M3), `nextCapture` (§ 6.5, after M3),
      `relations` and `actions` re-homing (after M1), verdict (§ 6.6, after M3).
+   - **Predicate vocabulary** *(decided 2026-10-05)* — 15 values: the vision's 12 (`Retains`, `Grows`,
+     `Blocks`, `Leaks`, `Exceeds`, `Fragments`, `Faults`, `Stalls`, `Duplicates`, `Conflicts`, `Missing`,
+     `Normal`) plus `Composes` (descriptive snapshots, Info), `Dominates` (concentration; share is the
+     measure) and `Exhibits` (a pattern is present, no threshold). Chosen by reading the existing rule
+     titles; not a rule-by-rule audit.
+     - `Grows` needs a reference snapshot, so it is trend-only in M1.
+     - Cross-analyzer correlation rules keep their own predicate and cite related claims in `support`
+       until `relations` lands; there is no `Correlates` predicate.
+     - Tool-limitation findings ("reference tracking was capped", "traversal limit reached", "low sampling
+       coverage") stay claims in M1 with `Missing` as a stand-in, then move to coverage in M3.
+   - **`reference`** *(decided 2026-10-05)* — nullable; M1 implements only the budget case (a rule's own
+     threshold becomes the reference, so `Exceeds` states what it exceeded). Prior snapshot, rate and
+     distribution arrive with § 8.
+   - **`support` / `counter` / `falsifiedBy` shapes** *(decided 2026-10-05)*
+     - `support` and `counter`: lists of `{ observation ids, why }`, `why` a short rule-authored phrase.
+     - `falsifiedBy`: list of `{ kind, test, command? }`, `kind` one of `capture`, `windbg`, `code-inspection`.
+     - Guard 1: a test flags near-identical `falsifiedBy` text across claims.
+     - Guard 2: an empty `counter` must be stated explicitly (`Counter.None("reason")`), so "none exists"
+       is distinguishable from "never looked". `falsifiedBy` may not be empty.
+     - Revisit if rules start padding; the plan's execution risk is boilerplate, not missing fields.
+   - **Rule versioning** *(decided 2026-10-05; closes the D4 open item)* — hand-bumped `int Version` on
+     `ISynthesisRule`, recorded in `derivedFrom` as rule id + version. A per-rule golden-output test fails
+     when a rule's emitted findings change shape without a version bump. Derived (hash) versions rejected:
+     they change on any rebuild, so identical rules from different builds would look different.
 4. **Rule migration** *(pending)* — all 76 rules author `assertion`, `counter`, `falsifiedBy`.
    - Batched by domain package, per-analyzer rule and its cross-analyzer rules together.
    - The single biggest execution risk ([§ 21 assumption 3](ReportSystemVision.md#21-risks-assumptions-and-open-questions)):

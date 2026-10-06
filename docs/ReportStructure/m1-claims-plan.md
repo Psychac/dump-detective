@@ -84,9 +84,9 @@ system. It gates M4.
    - Open: `report.json` is 66.3 MB uncompressed; the HTML embeds the same JSON gzip-base64.
 2. **Lineage into the report** *(done 2026-10-05)* — closes the Phase 5 open item.
    - `FindingRecord` gains `derivedFrom` (observation ids) and `confidenceBreakdown`; `confidence` stays
-     the single headline number. Carried by a fingerprint-keyed side map (`FindingLineage`) from
-     `SynthesisFindingEnricher`, so `InsightFinding` is untouched. Findings sharing a fingerprint merge:
-     union of observations, lower-confidence breakdown.
+     the single headline number. Originally carried by a fingerprint-keyed side map from
+     `SynthesisFindingEnricher`; since 6b the claim itself carries it and `ReportFindingMapper` maps it directly
+     (see step 6).
    - Observations go to a side-car per D2: `<output>.observations.json.gz` (`--observations-uncompressed`
      for plain `.observations.json`). `report.json` gains `observations: { file, sha256, count, compressed }`.
    - Companion files are named after the primary output (`Crash.html` → `Crash.report.json`,
@@ -284,8 +284,13 @@ system. It gates M4.
      - Shown confidence is **unchanged** (deliberate deviation from "accept the confidence change"):
        `ClaimReportExtensions.ReportConfidence()` keeps the adapter's rule (composite if < 1.0, else the severity
        default 0.9 / 0.7 / 0.5). Changing shown confidence stays a separate decision (see inference confidence).
-   - Fingerprints unchanged so trend identity holds. `FindingLineage` is now redundant (claims carry the fields)
-     and can be simplified later.
+   - Fingerprints unchanged so trend identity holds. `FindingLineage` is **removed** (done 2026-10-06).
+     - `ReportFindingMapper` maps `DerivedFrom`, confidence breakdown, rule, assertion, support, counter and
+       falsification tests straight from the claim (only when it has observations, so trend claims stay bare).
+     - The only side map left is `EvidenceSourcesByFingerprint`: analyzer attribution needs the observation list,
+       which a claim does not carry.
+     - Dropped with it: the merge of same-fingerprint claims (union of observations, lower breakdown); each
+       record now keeps its own lineage.
 
 ## Adjacent milestones — state today
 

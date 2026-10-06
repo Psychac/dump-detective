@@ -101,11 +101,6 @@ public sealed class ObservationsSideCarTests : IDisposable
     [Fact]
     public void BuildReportDocument_AttachesLineageAndBreakdownToTheMatchingFinding()
     {
-        var finding = ClaimFactory.Create("Stub Analyzer", "Leak", DumpDetective.Sdk.Synthesis.Severity.Warning, "title", "evidence", "rec", [], fingerprint: "stub-fingerprint");
-        var run = new AnalyzerRunResult("Stub Analyzer", AnalyzerExecutionStatus.Success, TimeSpan.Zero, Result: null, ErrorMessage: null, ErrorType: null)
-        {
-            Findings = [finding],
-        };
         ObservationId derivedFrom = ObservationId.NewId();
         ConfidenceBreakdown breakdown = new()
         {
@@ -117,10 +112,14 @@ public sealed class ObservationsSideCarTests : IDisposable
             ConflictPenalty = 1.0,
             LimitingFactors = ["sampled"],
         };
-        var lineage = new Dictionary<string, FindingLineage> { ["stub-fingerprint"] = new([derivedFrom], breakdown) };
-
+        Claim finding = ClaimFactory.Create("Stub Analyzer", "Leak", DumpDetective.Sdk.Synthesis.Severity.Warning, "title", "evidence", "rec", [], fingerprint: "stub-fingerprint")
+            with { DerivedFrom = [derivedFrom], Confidence = breakdown };
+        var run = new AnalyzerRunResult("Stub Analyzer", AnalyzerExecutionStatus.Success, TimeSpan.Zero, Result: null, ErrorMessage: null, ErrorType: null)
+        {
+            Findings = [finding],
+        };
         AnalysisReportDocument document = _facade.BuildReportDocument(
-            "C:/dumps/Crash.dmp", [run], TimeSpan.FromSeconds(1), lineageByFingerprint: lineage);
+            "C:/dumps/Crash.dmp", [run], TimeSpan.FromSeconds(1));
 
         FindingRecord record = document.Findings.Should().ContainSingle().Which;
         record.DerivedFrom.Should().Equal(derivedFrom);
@@ -155,11 +154,6 @@ public sealed class ObservationsSideCarTests : IDisposable
     public void StructuredClaimFields_ReachReportJson_AndTheEmbeddedHtmlGetsOnlyTheSlimClaimView()
     {
         ObservationId cited = ObservationId.NewId();
-        var finding = ClaimFactory.Create("Stub Analyzer", "Leak", DumpDetective.Sdk.Synthesis.Severity.Warning, "title", "evidence", "rec", [], fingerprint: "stub-fingerprint");
-        var run = new AnalyzerRunResult("Stub Analyzer", AnalyzerExecutionStatus.Success, TimeSpan.Zero, Result: null, ErrorMessage: null, ErrorType: null)
-        {
-            Findings = [finding],
-        };
         var claim = new Claim
         {
             Fingerprint = "stub-fingerprint",
@@ -176,10 +170,12 @@ public sealed class ObservationsSideCarTests : IDisposable
             Counter = Counter.None("STRUCTURED_COUNTER_REASON"),
             FalsifiedBy = [new FalsificationTest { Kind = FalsificationKind.Windbg, Test = "STRUCTURED_TEST", Command = "!cmd" }],
         };
-        var lineage = new Dictionary<string, FindingLineage> { ["stub-fingerprint"] = FindingLineage.From(claim) };
-
+        var run = new AnalyzerRunResult("Stub Analyzer", AnalyzerExecutionStatus.Success, TimeSpan.Zero, Result: null, ErrorMessage: null, ErrorType: null)
+        {
+            Findings = [claim],
+        };
         AnalysisReportDocument built = _facade.BuildReportDocument(
-            "C:/dumps/Crash.dmp", [run], TimeSpan.FromSeconds(1), lineageByFingerprint: lineage);
+            "C:/dumps/Crash.dmp", [run], TimeSpan.FromSeconds(1));
         FindingRecord record = built.Findings.Should().ContainSingle().Which;
         AnalysisReportDocument document = new SingleDumpReportDocument { DumpPath = "C:/dumps/Crash.dmp", CrossDomainInsights = [record] };
 

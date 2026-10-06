@@ -59,7 +59,7 @@ public sealed class SynthesisFindingEnricherTests
     }
 
     [Fact]
-    public async Task EnrichAsync_RecordsLineageAndBreakdownPerFingerprint()
+    public async Task EnrichAsync_AttachesLineageAndBreakdownToTheClaimItself()
     {
         var enricher = new SynthesisFindingEnricher(new FakeRuleFactory([new StubRule("Stub Analyzer", "stub-fingerprint")]));
         AnalyzerRunResult run = new("Stub Analyzer", AnalyzerExecutionStatus.Success, TimeSpan.Zero, Result: null, ErrorMessage: null, ErrorType: null);
@@ -67,32 +67,9 @@ public sealed class SynthesisFindingEnricherTests
 
         SynthesisEnrichment result = await enricher.EnrichAsync([run], [observation], CancellationToken.None);
 
-        FindingLineage lineage = result.LineageByFingerprint.Should().ContainKey("stub-fingerprint").WhoseValue;
-        lineage.DerivedFrom.Should().Equal(observation.Id);
-        lineage.Confidence.Should().BeEquivalentTo(ConfidenceBreakdown.MeasurementCertain);
-    }
-
-    [Fact]
-    public void FindingLineage_MergeWith_KeepsEveryObservationAndTheLessConfidentBreakdown()
-    {
-        ObservationId shared = ObservationId.NewId();
-        ObservationId onlyInSecond = ObservationId.NewId();
-        ConfidenceBreakdown lessConfident = new()
-        {
-            Composite = 0.4,
-            EvidenceStrength = 1.0,
-            IdentityFidelityCap = 1.0,
-            TemporalAlignmentCap = 1.0,
-            CapabilityFidelity = 1.0,
-            ConflictPenalty = 1.0,
-        };
-        var first = new FindingLineage([shared], ConfidenceBreakdown.MeasurementCertain);
-        var second = new FindingLineage([shared, onlyInSecond], lessConfident);
-
-        FindingLineage merged = first.MergeWith(second);
-
-        merged.DerivedFrom.Should().Equal(shared, onlyInSecond);
-        merged.Confidence.Should().Be(lessConfident);
+        Claim claim = result.Runs.Should().ContainSingle().Which.Findings.Should().ContainSingle().Which;
+        claim.DerivedFrom.Should().Equal(observation.Id);
+        claim.Confidence.Should().BeEquivalentTo(ConfidenceBreakdown.MeasurementCertain);
     }
 
     [Fact]

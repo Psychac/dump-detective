@@ -16,7 +16,7 @@ internal static class ReportFindingMapper
     {
         IReadOnlyList<string>? details = SplitLines(f.Narrative);
 
-        return new(
+        FindingRecord record = new(
             Id: f.Fingerprint,
             Analyzer: f.Analyzer,
             Category: f.Category,
@@ -29,6 +29,17 @@ internal static class ReportFindingMapper
             Confidence = BuildConfidenceScore(f),
             Refs = BuildEvidenceRefs(f, artifacts, snapshotIndex),
             Caveats = f.Caveats.Count > 0 ? f.Caveats : null
+        };
+
+        return f.DerivedFrom.Count == 0 ? record : record with
+        {
+            DerivedFrom = f.DerivedFrom,
+            ConfidenceBreakdown = f.Confidence,
+            Rule = f.Rule,
+            Assertion = f.Assertion,
+            Support = f.Support.Count > 0 ? f.Support : null,
+            Counter = f.Counter,
+            FalsifiedBy = f.FalsifiedBy.Count > 0 ? f.FalsifiedBy : null,
         };
     }
 

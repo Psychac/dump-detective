@@ -22,7 +22,7 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
         IReadOnlyList<IReportSectionBuilder> reportBuilders,
         DumpDetective.Core.Models.AnalysisIncidentContext? incidentContext = null,
         IReadOnlyList<Claim>? additionalFindings = null,
-        IReadOnlyDictionary<string, FindingLineage>? lineageByFingerprint = null)
+        IReadOnlyDictionary<string, EvidenceSources>? evidenceSourcesByFingerprint = null)
     {
         // ── 1. Build per-analyzer sections ───────────────────────────────────
         List<AnalyzerDetailSection> analyzerSections = ReportSectionAssembler.BuildAnalyzerSections(runs, analyzerBuilders);
@@ -42,7 +42,7 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
         ReportSectionAssembler.ApplyDomainOrdering(mergedSections);
 
         // ── 2. Map all findings to FindingRecord + collect pipeline failures ──
-        List<FindingRecord> deduped = MapAllFindings(runs, additionalFindings, lineageByFingerprint);
+        List<FindingRecord> deduped = MapAllFindings(runs, additionalFindings, evidenceSourcesByFingerprint);
 
         IReadOnlyList<ReportDomainSection> domains = ReportDomainProjector.BuildDomainSections(mergedSections, deduped);
         IReadOnlyList<FindingRecord> crossDomainInsights = ReportDomainProjector.BuildCrossDomainInsights(deduped);
@@ -122,7 +122,7 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
     private static List<FindingRecord> MapAllFindings(
         IReadOnlyList<AnalyzerRunResult> runs,
         IReadOnlyList<Claim>? additionalFindings,
-        IReadOnlyDictionary<string, FindingLineage>? lineageByFingerprint = null)
+        IReadOnlyDictionary<string, EvidenceSources>? evidenceSourcesByFingerprint = null)
     {
         List<FindingRecord> allFindings = [];
 
@@ -132,7 +132,7 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
             {
                 foreach (Claim finding in run.Findings)
                 {
-                    allFindings.Add(WithLineage(ReportFindingMapper.MapFinding(finding, run.Artifacts), lineageByFingerprint));
+                    allFindings.Add(WithEvidenceSources(ReportFindingMapper.MapFinding(finding, run.Artifacts), evidenceSourcesByFingerprint));
                 }
             }
 
@@ -154,22 +154,15 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
         if (additionalFindings is { Count: > 0 })
         {
             foreach (Claim finding in additionalFindings)
-                allFindings.Add(WithLineage(ReportFindingMapper.MapFinding(finding), lineageByFingerprint));
+                allFindings.Add(WithEvidenceSources(ReportFindingMapper.MapFinding(finding), evidenceSourcesByFingerprint));
         }
 
         return allFindings;
     }
 
-    private static FindingRecord WithLineage(FindingRecord record, IReadOnlyDictionary<string, FindingLineage>? lineageByFingerprint)
-        => lineageByFingerprint is not null && lineageByFingerprint.TryGetValue(record.Id, out FindingLineage? lineage)
-            ? record with { DerivedFrom = lineage.DerivedFrom, ConfidenceBreakdown = lineage.Confidence,
-                Rule = lineage.Rule,
-                Assertion = lineage.Assertion,
-                Support = lineage.Support.Count > 0 ? lineage.Support : null,
-                Counter = lineage.Counter,
-                FalsifiedBy = lineage.FalsifiedBy.Count > 0 ? lineage.FalsifiedBy : null,
-                EvidenceSources = lineage.EvidenceSources,
-            }
+    private static FindingRecord WithEvidenceSources(FindingRecord record, IReadOnlyDictionary<string, EvidenceSources>? evidenceSourcesByFingerprint)
+        => evidenceSourcesByFingerprint is not null && evidenceSourcesByFingerprint.TryGetValue(record.Id, out EvidenceSources? sources)
+            ? record with { EvidenceSources = sources }
             : record;
 
     private static void SortFindingsBySeverity(List<FindingRecord> findings)

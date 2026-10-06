@@ -21,7 +21,7 @@ namespace DumpDetective.Reporting.Services;
 /// </remarks>
 internal sealed class SynthesisFindingEnricher
 {
-    private static readonly IReadOnlyDictionary<string, FindingLineage> EmptyLineage = new Dictionary<string, FindingLineage>();
+    private static readonly IReadOnlyDictionary<string, EvidenceSources> EmptyEvidenceSources = new Dictionary<string, EvidenceSources>();
 
     private readonly SynthesisEngine _engine;
 
@@ -80,7 +80,7 @@ internal sealed class SynthesisFindingEnricher
         // ignoring its match set) fire on a zero-observation pass too, which broke that test's own
         // "nothing to synthesize, return runs unchanged" contract for every rule, not just this one.
         if (observations.Count == 0)
-            return new SynthesisEnrichment(runs, [], EmptyLineage);
+            return new SynthesisEnrichment(runs, [], EmptyEvidenceSources);
 
         int failedCount = 0;
         for (int i = 0; i < runs.Count; i++)
@@ -92,9 +92,9 @@ internal sealed class SynthesisFindingEnricher
 
         IReadOnlyList<Claim> findings = await _engine.SynthesizeAsync(observations, context, cancellationToken);
         if (findings.Count == 0)
-            return new SynthesisEnrichment(runs, [], EmptyLineage);
+            return new SynthesisEnrichment(runs, [], EmptyEvidenceSources);
 
-        var lineageByFingerprint = new Dictionary<string, FindingLineage>(StringComparer.Ordinal);
+        var evidenceSourcesByFingerprint = new Dictionary<string, EvidenceSources>(StringComparer.Ordinal);
         Dictionary<ObservationId, string>? analyzerByObservation = null;
         var byAnalyzer = new Dictionary<string, List<Claim>>(StringComparer.Ordinal);
         foreach (Claim finding in findings)
@@ -108,11 +108,9 @@ internal sealed class SynthesisFindingEnricher
             bucket.Add(finding);
 
             analyzerByObservation ??= IndexAnalyzers(observations);
-            FindingLineage lineage = FindingLineage.From(finding) with { EvidenceSources = ResolveSources(finding, analyzerByObservation) };
-            string fingerprint = finding.Fingerprint;
-            lineageByFingerprint[fingerprint] = lineageByFingerprint.TryGetValue(fingerprint, out FindingLineage? existing)
-                ? existing.MergeWith(lineage)
-                : lineage;
+            EvidenceSources? sources = ResolveSources(finding, analyzerByObservation);
+            if (sources is not null)
+                evidenceSourcesByFingerprint[finding.Fingerprint] = sources;
         }
 
         var updated = new List<AnalyzerRunResult>(runs.Count);
@@ -131,11 +129,11 @@ internal sealed class SynthesisFindingEnricher
         foreach (List<Claim> bucket in byAnalyzer.Values)
             unattached.AddRange(bucket);
 
-        return new SynthesisEnrichment(updated, unattached, lineageByFingerprint);
+        return new SynthesisEnrichment(updated, unattached, evidenceSourcesByFingerprint);
     }
 }
 
 internal readonly record struct SynthesisEnrichment(
     IReadOnlyList<AnalyzerRunResult> Runs,
     IReadOnlyList<Claim> UnattachedFindings,
-    IReadOnlyDictionary<string, FindingLineage> LineageByFingerprint);
+    IReadOnlyDictionary<string, EvidenceSources> EvidenceSourcesByFingerprint);

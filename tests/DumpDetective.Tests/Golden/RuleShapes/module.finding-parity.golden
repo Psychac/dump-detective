@@ -1,0 +1,515 @@
+rule: module.finding-parity
+version: 1
+[
+  {
+    "name": "quiet-snapshot",
+    "claims": [
+      {
+        "fingerprint": "module analysis::version-conflicts",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Normal",
+          "measure": {
+            "value": 0,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "loaded modules with more than one identity"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "200 modules loaded, 0 dynamic, 0 version conflict group(s)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Every duplicate module had a comparable identity, so nothing observed hides a conflict."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If lm lists the same module at two different versions, a conflict was missed.",
+            "command": "lm"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "snapshot-with-unidentifiable-duplicates",
+    "claims": [
+      {
+        "fingerprint": "module analysis::version-conflicts",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Normal",
+          "measure": {
+            "value": 0,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "loaded modules with more than one identity"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "200 modules loaded, 0 dynamic, 0 version conflict group(s)."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "2 duplicate modules have no identifiable version, so a conflict among them could not be detected."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If lm lists the same module at two different versions, a conflict was missed.",
+            "command": "lm"
+          }
+        ]
+      },
+      {
+        "fingerprint": "module analysis::unknown-identity-duplicates",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Missing",
+          "measure": {
+            "value": 2,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "duplicate modules with no version, public-key token or file hash"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]",
+              "observations[2]"
+            ],
+            "why": "2 modules appear more than once without an identifiable version."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Duplicates may be an intentional repeated load of one assembly; the missing identity is exactly why that cannot be told."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If lmv shows distinct versions or paths for the duplicates, their identity is recoverable and they are not unknown.",
+            "command": "lmv"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "everything-fires",
+    "claims": [
+      {
+        "fingerprint": "module analysis::version-conflicts",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Conflicts",
+          "measure": {
+            "value": 3,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 3,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "critical conflict-count threshold"
+          },
+          "qualifiers": {
+            "location": "loaded modules with more than one identity"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]",
+              "observations[1]"
+            ],
+            "why": "200 modules loaded, 120 dynamic, 3 version conflict group(s)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Two versions loaded side by side can be intentional isolation; whether a binding redirect resolves them is not observed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If lm lists a single version for each module reported as conflicting, there is no conflict.",
+            "command": "lm"
+          }
+        ]
+      },
+      {
+        "fingerprint": "module analysis::heavy-modules",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 314572800,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 104857600,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "heavy-module threshold"
+          },
+          "qualifiers": {
+            "location": "heap objects of module Contoso.Data"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[2]"
+            ],
+            "why": "Contoso.Data accounts for 300 MB across 40,00,000 objects and 120 type(s)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A module that owns the application\u0027s main data structures is expected to dominate the heap; its share alone does not show a leak."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the types from Contoso.Data in !dumpheap -stat total far less than 300 MB, the module\u0027s footprint is overstated.",
+            "command": "!dumpheap -stat"
+          }
+        ]
+      },
+      {
+        "fingerprint": "module analysis::type-density",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 1,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "modules with five or fewer types and a large heap footprint"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[3]"
+            ],
+            "why": "1 module(s) have five or fewer types; the worst is Contoso.Buffers with 3 type(s) holding 200 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Few-type modules with large footprints are often intentional buffer pools or caches; the density alone does not show a leak."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "CodeInspection",
+            "test": "If Contoso.Buffers owns a bounded buffer pool or cache, the concentration is by design."
+          }
+        ]
+      },
+      {
+        "fingerprint": "module analysis::dynamic-module-accumulation",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 120,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 100,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "dynamic in-memory modules",
+            "scope": "3 AppDomain(s)"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "120 dynamic modules are loaded across 3 AppDomain(s)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Serializers and expression compilers create dynamic modules and usually cache them; the count does not show repeated regeneration."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the dynamic module count does not grow, the modules are cached, not regenerated."
+          },
+          {
+            "kind": "Windbg",
+            "test": "If !dumpdomain lists far fewer than 120 dynamic modules, the count is overstated.",
+            "command": "!dumpdomain"
+          }
+        ]
+      },
+      {
+        "fingerprint": "module analysis::anonymous-module-accumulation",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 8,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 5,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "modules with no file-system path"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "8 loaded modules have no file name."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Delegates, serializer proxies and woven code create anonymous modules in ordinary use; their presence does not show a defect."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If lm shows file paths for most of the 8 modules, they are not anonymous.",
+            "command": "lm"
+          }
+        ]
+      },
+      {
+        "fingerprint": "module analysis::cross-domain-loads",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 1,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "a separate managed copy per domain",
+            "location": "non-framework modules loaded into more than one AppDomain"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[4]"
+            ],
+            "why": "1 non-framework modules are loaded into more than one AppDomain."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A plugin or isolation architecture loads shared assemblies into several domains by design."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !dumpdomain shows each listed module loaded in only one domain, the cross-domain loads are wrong.",
+            "command": "!dumpdomain"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the application deliberately hosts plugins in separate domains, the repeated loads are intentional."
+          }
+        ]
+      },
+      {
+        "fingerprint": "module analysis::assemblyref-mismatches",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Conflicts",
+          "measure": {
+            "value": 1,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "assembly references that do not match the loaded version"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[5]"
+            ],
+            "why": "1 assembly reference(s) name a different version than the one loaded."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A mismatched reference only fails when the mismatched member is called; the dump does not show whether it ever is."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "CodeInspection",
+            "test": "If a binding redirect or runtime unification maps the referenced version to the loaded one, the mismatch is resolved."
+          }
+        ]
+      },
+      {
+        "fingerprint": "module analysis::unknown-identity-duplicates",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Missing",
+          "measure": {
+            "value": 2,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "duplicate modules with no version, public-key token or file hash"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[6]"
+            ],
+            "why": "2 modules appear more than once without an identifiable version."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Duplicates may be an intentional repeated load of one assembly; the missing identity is exactly why that cannot be told."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If lmv shows distinct versions or paths for the duplicates, their identity is recoverable and they are not unknown.",
+            "command": "lmv"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "warning-conflict-and-light-heap",
+    "claims": [
+      {
+        "fingerprint": "module analysis::version-conflicts",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Conflicts",
+          "measure": {
+            "value": 1,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "loaded modules with more than one identity"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]",
+              "observations[1]"
+            ],
+            "why": "200 modules loaded, 0 dynamic, 1 version conflict group(s)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Two versions loaded side by side can be intentional isolation; whether a binding redirect resolves them is not observed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If lm lists a single version for each module reported as conflicting, there is no conflict.",
+            "command": "lm"
+          }
+        ]
+      },
+      {
+        "fingerprint": "module analysis::heavy-modules",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Composes",
+          "measure": {
+            "value": 1048576,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "qualifiers": {
+            "location": "heap objects of module Contoso.Data"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[2]"
+            ],
+            "why": "Contoso.Data accounts for 1 MB across 100 objects and 5 type(s)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This describes how heap memory divides across modules and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the types from Contoso.Data in !dumpheap -stat total far less than 1 MB, the module\u0027s footprint is overstated.",
+            "command": "!dumpheap -stat"
+          }
+        ]
+      }
+    ]
+  }
+]

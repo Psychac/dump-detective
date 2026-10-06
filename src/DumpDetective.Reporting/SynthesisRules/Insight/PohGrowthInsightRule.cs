@@ -1,3 +1,4 @@
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -34,6 +35,29 @@ internal sealed class PohGrowthInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::poh-growth",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Percent(pohPercent),
+                    Reference = ClaimParts.Budget(ClaimParts.Percent(WarningPct), "POH share threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "the Pinned Object Heap's share of the heap" },
+                },
+                Support = [new EvidenceStatement([segments.Id], $"The POH is {pohPercent:F1}% of the heap, {InsightByteFormat.FormatBytes(pohBytes)}.")],
+                Counter = Counter.None("The POH holds buffers pinned on purpose for I/O; a large share does not by itself show pinning is excessive."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!eeheap -gc",
+                        Test = $"If the POH size in !eeheap -gc is far from {InsightByteFormat.FormatBytes(pohBytes)}, the POH share is wrong.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the POH share does not grow, it is a stable buffer pool, not growth.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Memory",
                 Severity = Severity.Warning,

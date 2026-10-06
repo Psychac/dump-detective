@@ -111,6 +111,31 @@ internal sealed class HeapTopologySynthesisRule : ISynthesisRule
         findings.Add(new Claim
         {
             Fingerprint = Fingerprint("segment-distribution"),
+            Assertion = new Assertion
+            {
+                Predicate = lohSeverity == Severity.Info ? AssertionPredicate.Composes : AssertionPredicate.Exceeds,
+                Measure = ClaimParts.Percent(lohPercent),
+                Reference = lohSeverity switch
+                {
+                    Severity.Critical => ClaimParts.Budget(ClaimParts.Percent(40), "critical LOH-share threshold"),
+                    Severity.Warning => ClaimParts.Budget(ClaimParts.Percent(25), "warning LOH-share threshold"),
+                    _ => null,
+                },
+                Qualifiers = new AssertionQualifiers { Location = "the Large Object Heap's share of committed memory" },
+            },
+            Support = [new EvidenceStatement(derivedFrom, $"{totalCommittedBytes / (1024 * 1024):N0} MB committed across {totalSegments} segments; the LOH is {lohPercent:F1}% of it.")],
+            Counter = Counter.None(lohSeverity == Severity.Info
+                ? "This describes segment distribution and asserts no problem, so there is nothing to weaken."
+                : "A large LOH share is normal for a service that holds large buffers; the share does not show the LOH is growing."),
+            FalsifiedBy =
+            [
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.Windbg,
+                    Command = "!eeheap -gc",
+                    Test = $"If the LOH and total committed sizes in !eeheap -gc do not give a {lohPercent:F1}% LOH share, the distribution is wrong.",
+                },
+            ],
             Analyzer = AnalyzerName,
             Category = "Memory",
             Severity = lohSeverity,
@@ -135,6 +160,24 @@ internal sealed class HeapTopologySynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("poh-usage"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Percent(pohPercent),
+                    Reference = ClaimParts.Budget(ClaimParts.Percent(10), "POH share threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "the Pinned Object Heap's share of committed memory" },
+                },
+                Support = [new EvidenceStatement(derivedFrom, $"The POH holds {pohBytes / (1024 * 1024):N0} MB across {pohSegmentCount} segments, {pohPercent:F1}% of committed memory.")],
+                Counter = Counter.None("The POH holds buffers pinned on purpose for I/O; a large share does not by itself show pinning is excessive."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!eeheap -gc",
+                        Test = $"If the POH size in !eeheap -gc is far from {pohBytes / (1024 * 1024):N0} MB, the POH share is wrong.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = Severity.Warning,
@@ -156,6 +199,31 @@ internal sealed class HeapTopologySynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("logical-heap-skew"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Ratio(skewRatio),
+                    Reference = ClaimParts.Budget(ClaimParts.Ratio(2), "skew threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = $"{logicalHeapCount} logical heaps", Mechanism = isServerGc ? "Server GC per-CPU heaps" : null },
+                },
+                Support = [new EvidenceStatement([population.Id], $"The largest logical heap is {FormatBytes(maxLogicalHeapBytes)} and the smallest {FormatBytes(minLogicalHeapBytes)}.")],
+                Counter = Counter.None(isServerGc
+                    ? "Server GC heaps differ in size whenever allocation is uneven across threads; the ratio does not show a defect."
+                    : "Uneven logical heaps outside Server GC are unexpected, and nothing observed explains them."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!eeheap -gc",
+                        Test = $"If the per-heap sizes in !eeheap -gc are within a factor of {skewRatio:F1} of each other, the skew is overstated.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump; if a different heap is now the largest, the skew is transient.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = Severity.Warning,
@@ -186,6 +254,23 @@ internal sealed class HeapTopologySynthesisRule : ISynthesisRule
                 findings.Add(new Claim
                 {
                     Fingerprint = Fingerprint("unrecognized-kind"),
+                    Assertion = new Assertion
+                    {
+                        Predicate = AssertionPredicate.Missing,
+                        Measure = ClaimParts.Count(unknownSegmentCount),
+                        Qualifiers = new AssertionQualifiers { Location = "GC segments of an unrecognized kind", Scope = FormatBytes(unknownBytes) },
+                    },
+                    Support = [new EvidenceStatement([unknownKind.Id], $"{unknownSegmentCount} segment(s) totaling {FormatBytes(unknownBytes)} matched no known kind.")],
+                    Counter = Counter.None("A newer runtime can introduce segment kinds this analyzer does not know; that is a tool gap, not evidence of a corrupt dump."),
+                    FalsifiedBy =
+                    [
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.Windbg,
+                            Command = "!eeheap -gc",
+                            Test = "If !eeheap -gc classifies every segment as SOH, LOH, POH or frozen, the analyzer's classification is at fault.",
+                        },
+                    ],
                     Analyzer = AnalyzerName,
                     Category = "Memory",
                     Severity = Severity.Warning,
@@ -213,6 +298,31 @@ internal sealed class HeapTopologySynthesisRule : ISynthesisRule
                 findings.Add(new Claim
                 {
                     Fingerprint = Fingerprint("soh-fragmentation"),
+                    Assertion = new Assertion
+                    {
+                        Predicate = AssertionPredicate.Fragments,
+                        Measure = ClaimParts.Percent(sohFragPct),
+                        Reference = sohFragSev == Severity.Warning
+                            ? ClaimParts.Budget(ClaimParts.Percent(45), "warning threshold")
+                            : ClaimParts.Budget(ClaimParts.Percent(25), "notice threshold"),
+                        Qualifiers = new AssertionQualifiers { Location = "the Small Object Heap", Mechanism = "pinned handles blocking compaction" },
+                    },
+                    Support = [new EvidenceStatement(derivedFrom, $"The SOH has {FormatBytes(sohFragmentedBytes)} of {FormatBytes(sohBytes)} committed free.")],
+                    Counter = Counter.None("The SOH is compacted during Gen2 collections; one snapshot does not show the free space persists."),
+                    FalsifiedBy =
+                    [
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.Windbg,
+                            Command = "!eeheap -gc",
+                            Test = $"If the free space on SOH segments in !eeheap -gc is far from {FormatBytes(sohFragmentedBytes)}, the fragmentation is wrong.",
+                        },
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.Capture,
+                            Test = "Capture a second dump after a Gen2 collection; if the free space is gone, it was reclaimed by compaction.",
+                        },
+                    ],
                     Analyzer = AnalyzerName,
                     Category = "Memory",
                     Severity = sohFragSev,
@@ -240,6 +350,31 @@ internal sealed class HeapTopologySynthesisRule : ISynthesisRule
                 findings.Add(new Claim
                 {
                     Fingerprint = Fingerprint("loh-fragmentation"),
+                    Assertion = new Assertion
+                    {
+                        Predicate = AssertionPredicate.Fragments,
+                        Measure = ClaimParts.Percent(lohFragPct),
+                        Reference = lohFragSev == Severity.Critical
+                            ? ClaimParts.Budget(ClaimParts.Percent(50), "critical threshold")
+                            : ClaimParts.Budget(ClaimParts.Percent(30), "warning threshold"),
+                        Qualifiers = new AssertionQualifiers { Location = "the Large Object Heap" },
+                    },
+                    Support = [new EvidenceStatement(derivedFrom, $"The LOH has {FormatBytes(lohFragmentedBytes)} of {FormatBytes(lohBytes)} committed free.")],
+                    Counter = Counter.None("Free LOH space can be reused by the next large allocation; its size does not show it is unusable."),
+                    FalsifiedBy =
+                    [
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.Windbg,
+                            Command = "!eeheap -gc",
+                            Test = $"If the free space on LOH segments in !eeheap -gc is far from {FormatBytes(lohFragmentedBytes)}, the fragmentation is wrong.",
+                        },
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.Capture,
+                            Test = "Capture a second dump under comparable load; if the free LOH space is reused and the percentage falls, it was reusable, not stranded.",
+                        },
+                    ],
                     Analyzer = AnalyzerName,
                     Category = "Memory",
                     Severity = lohFragSev,
@@ -266,6 +401,24 @@ internal sealed class HeapTopologySynthesisRule : ISynthesisRule
                 findings.Add(new Claim
                 {
                     Fingerprint = Fingerprint("poh-fragmentation"),
+                    Assertion = new Assertion
+                    {
+                        Predicate = AssertionPredicate.Fragments,
+                        Measure = ClaimParts.Percent(pohFragPct),
+                        Reference = ClaimParts.Budget(ClaimParts.Percent(20), "warning threshold"),
+                        Qualifiers = new AssertionQualifiers { Location = "the Pinned Object Heap" },
+                    },
+                    Support = [new EvidenceStatement(derivedFrom, $"The POH has {FormatBytes(pohFragmentedBytes)} of {FormatBytes(pohBytes)} committed free.")],
+                    Counter = Counter.Of(new EvidenceStatement(derivedFrom, "Free space in the POH is typical of pinned allocations, so the percentage alone does not show a problem.")),
+                    FalsifiedBy =
+                    [
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.Windbg,
+                            Command = "!eeheap -gc",
+                            Test = $"If the free space on POH segments in !eeheap -gc is far from {FormatBytes(pohFragmentedBytes)}, the fragmentation is wrong.",
+                        },
+                    ],
                     Analyzer = AnalyzerName,
                     Category = "Memory",
                     Severity = Severity.Info,
@@ -291,6 +444,24 @@ internal sealed class HeapTopologySynthesisRule : ISynthesisRule
                 findings.Add(new Claim
                 {
                     Fingerprint = Fingerprint("frozen-fragmentation"),
+                    Assertion = new Assertion
+                    {
+                        Predicate = AssertionPredicate.Fragments,
+                        Measure = ClaimParts.Percent(frozenFragPct),
+                        Reference = ClaimParts.Budget(ClaimParts.Percent(30), "warning threshold"),
+                        Qualifiers = new AssertionQualifiers { Location = "the frozen object heap" },
+                    },
+                    Support = [new EvidenceStatement(derivedFrom, $"The frozen heap has {FormatBytes(frozenFragmentedBytes)} of {FormatBytes(frozenBytes)} committed free.")],
+                    Counter = Counter.Of(new EvidenceStatement(derivedFrom, "Frozen segments hold immutable data that is never collected; this is address-space overhead, not reclaimable fragmentation.")),
+                    FalsifiedBy =
+                    [
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.Windbg,
+                            Command = "!eeheap -gc",
+                            Test = $"If the free space on frozen segments in !eeheap -gc is far from {FormatBytes(frozenFragmentedBytes)}, the figure is wrong.",
+                        },
+                    ],
                     Analyzer = AnalyzerName,
                     Category = "Memory",
                     Severity = Severity.Info,

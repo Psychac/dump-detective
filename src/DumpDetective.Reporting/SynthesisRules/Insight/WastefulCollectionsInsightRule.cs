@@ -1,3 +1,4 @@
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -33,6 +34,28 @@ internal sealed class WastefulCollectionsInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::wasteful-collections",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Measure = ClaimParts.Bytes(totalWastedMemory),
+                    Qualifiers = new AssertionQualifiers { Location = "unused capacity in wasteful collections" },
+                },
+                Support = [new EvidenceStatement([collections.Id], $"{wastefulCollectionCount:N0} of {totalCollections:N0} collections are wasteful, with {InsightByteFormat.FormatBytes(totalWastedMemory)} of unused capacity.")],
+                Counter = Counter.None("Unused capacity in short-lived collections is reclaimed with them; their lifetime is not observed."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!do <collection address>",
+                        Test = $"If a flagged collection's backing array is close to its element count, the estimate of {InsightByteFormat.FormatBytes(totalWastedMemory)} unused is too high.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the flagged collections are request-scoped, the capacity is reclaimed with each request, not held.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Memory",
                 Severity = Severity.Info,

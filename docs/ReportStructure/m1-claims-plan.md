@@ -135,7 +135,7 @@ system. It gates M4.
      `ISynthesisRule`, recorded in `derivedFrom` as rule id + version. A per-rule golden-output test fails
      when a rule's emitted findings change shape without a version bump. Derived (hash) versions rejected:
      they change on any rebuild, so identical rules from different builds would look different.
-4. **Rule migration** *(in progress — 33 of 76 rules; pilot 2026-10-05, batches 1-7 2026-10-06)* — all 76 rules author `assertion`, `counter`, `falsifiedBy`.
+4. **Rule migration** *(in progress — 38 of 76 rules; pilot 2026-10-05, batches 1-8 2026-10-06)* — all 76 rules author `assertion`, `counter`, `falsifiedBy`.
    - Done: `LohFragmentationSynthesisRule` (pilot), with the per-rule golden mechanism
      (`Golden/RuleShapeGolden.cs`, goldens in `Golden/RuleShapes/`; `DD_BLESS_RULE_SHAPES=1` to bless). Fails when
      a rule's claim shape changes without a `Version` bump, or the version changes without a re-bless.
@@ -175,6 +175,12 @@ system. It gates M4.
      severity; they now say `Exhibits` until they reach Warning. Verified on the reference dump: 50 of 82
      findings carry an assertion. Remaining per-analyzer rules: `HeapTopology`, `Module`, `FinalizableObject`;
      the ~37 cross-analyzer rules in `Insight/` follow.
+   - Batch 8 (2026-10-06): `HeapTopology` (9 claims), `Module` (8), `FinalizableObject` (9) — the three largest
+     per-analyzer rules — plus the first two cross-analyzer rules, `PohGrowthInsightRule` and
+     `WastefulCollectionsInsightRule`. Tests in `TopologyModuleFinalizableAndInsightRuleClaimTests`. All 36
+     per-analyzer rules are now migrated. Verified on the reference dump: 64 of 82 findings carry an assertion.
+     The 76 count is confirmed: 76 `ISynthesisRule` implementers, 38 of them in `Insight/`; 36 remain after this
+     batch, all in `Insight/`.
    - `RuleShapeGolden` now enforces the plan's per-claim gates on every migrated rule: an assertion, at least one
      falsification test, an explicit counter (evidence or `None` with a reason), non-empty support, and every cited
      observation inside the claim's own `DerivedFrom`. Long evidence lists collapse to ranges in goldens.

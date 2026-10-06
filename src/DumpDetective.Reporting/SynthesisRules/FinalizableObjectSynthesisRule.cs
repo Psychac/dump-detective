@@ -150,6 +150,31 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("gen2-accumulation"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(gen2Count),
+                    Reference = ClaimParts.Budget(
+                        ClaimParts.Count(sev == Severity.Critical ? Gen2CriticalThreshold : Gen2WarningThreshold),
+                        sev == Severity.Critical ? "critical threshold" : "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "finalizable objects that survived into Gen2" },
+                },
+                Support = [new EvidenceStatement(populationIds, $"{gen2Count:N0} of {totalObjects:N0} finalizable objects are in Gen2; the top type is {topType}.")],
+                Counter = Counter.None("A finalizable object in Gen2 may simply be live and in use; surviving into Gen2 does not mean it is waiting for finalization."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!finalizequeue",
+                        Test = $"If !finalizequeue shows far fewer registered finalizable objects than {totalObjects:N0}, the population is overstated.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the objects are long-lived singletons or pooled resources disposed at shutdown, their Gen2 residency is by design.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = sev,
@@ -176,6 +201,34 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("queue-backlog"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(queueCount),
+                    Reference = ClaimParts.Budget(
+                        ClaimParts.Count(sev == Severity.Critical ? QueueCountCriticalThreshold : QueueCountWarningThreshold),
+                        sev == Severity.Critical ? "critical threshold" : "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "objects in the finalizer queue" },
+                },
+                Support = queuePopulationId is ObservationId queueObservationId
+                    ? [new EvidenceStatement([queueObservationId], $"The finalizer queue holds {queueCount:N0} objects.")]
+                    : [],
+                Counter = Counter.None("The queue fills briefly after a burst of finalizable allocations and drains once the finalizer thread runs; one snapshot does not show it is stuck."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!finalizequeue",
+                        Test = $"If !finalizequeue reports far fewer than {queueCount:N0} objects ready for finalization, the backlog is overstated.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!threads",
+                        Test = "If the finalizer thread is running and not blocked, the queue is draining.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = sev,
@@ -209,6 +262,28 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("queue-retained-bytes"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Retains,
+                    Measure = ClaimParts.Bytes(queueRetainedBytes),
+                    Reference = ClaimParts.Budget(
+                        ClaimParts.Bytes(sev == Severity.Critical ? QueueRetainedCriticalBytes : QueueRetainedWarningBytes),
+                        sev == Severity.Critical ? "critical threshold" : "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "memory retained by finalizer-queue entries" },
+                },
+                Support = [new EvidenceStatement(queueEntryIds, $"The top {queueEntryIds.Count} queue entries retain about {FormatBytes(queueRetainedBytes)}.")],
+                Counter = isRetainedEstimatePartial
+                    ? Counter.Of(new EvidenceStatement(queueEntryIds, "Some entries had no exact dominator-tree retained size and used shallow size instead, so the figure underestimates the real retention."))
+                    : Counter.None("Exact dominator-tree sizes count only memory freed with the queued objects, so nothing observed qualifies the figure."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gcroot <queued object address>",
+                        Test = "On a sampled queued object: if its sub-graph is also reachable from a normal root, the finalizer queue is not what retains it.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = sev,
@@ -246,6 +321,31 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("critical-finalizer-accumulation"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Measure = ClaimParts.Count(criticalCount),
+                    Reference = ClaimParts.Budget(
+                        ClaimParts.Count(sev == Severity.Critical ? CriticalFinalizerCriticalThreshold : CriticalFinalizerWarningThreshold),
+                        sev == Severity.Critical ? "critical threshold" : "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "CriticalFinalizerObject-derived objects in the finalizer queue", Mechanism = "SafeHandle and CriticalHandle wrappers" },
+                },
+                Support = [new EvidenceStatement(criticalIds, $"{criticalCount:N0} of {queueCount:N0} queued objects derive from CriticalFinalizerObject, retaining about {FormatBytes(criticalBytes)}.")],
+                Counter = Counter.None("SafeHandle-derived objects are routine in code that owns OS handles; their number alone does not show unreleased handles."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpheap -type SafeHandle -stat",
+                        Test = $"If !dumpheap finds far fewer than {criticalCount:N0} SafeHandle-derived objects, the count is overstated.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = $"If the top type ({topCriticalType}) is disposed on the normal path, the queued instances are waiting on collection, not leaking handles.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = sev,
@@ -271,6 +371,28 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("undisposed-in-queue"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Measure = ClaimParts.Count(undisposedCount),
+                    Qualifiers = new AssertionQualifiers { Location = "finalizer-queue entries implementing IDisposable with a false _disposed field" },
+                },
+                Support = [new EvidenceStatement(undisposedIds, $"{undisposedCount:N0} queued objects implement IDisposable and have a false _disposed field.")],
+                Counter = Counter.None("The disposed state is read from the object's own field, which some IDisposable types do not maintain; for those it can read false after disposal."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!do <queued object address>",
+                        Test = "On a sampled entry: if !do shows the _disposed field true, or the type keeps no such field, it was not left undisposed.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the type's Dispose does not set a _disposed field, the false reading says nothing about disposal.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = Severity.Warning,
@@ -339,6 +461,30 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("dynamic-resolver-accumulation"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(dynamicResolverCount),
+                    Reference = dynamicResolverCount >= DynamicResolverQueueWarningThreshold
+                        ? ClaimParts.Budget(ClaimParts.Count(DynamicResolverQueueWarningThreshold), "warning threshold")
+                        : ClaimParts.Budget(ClaimParts.Count(DynamicResolverQueueInfoThreshold), "notice threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "DynamicResolver objects", Mechanism = "uncached dynamic code generation" },
+                },
+                Support = [new EvidenceStatement(dynamicResolverIds, $"{dynamicResolverCount:N0} DynamicResolver objects are in the finalizer queue.")],
+                Counter = Counter.None("DynamicMethods that are compiled once and cached still leave resolvers awaiting finalization; the count does not show regeneration."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the compiled delegates and expression trees are cached in static fields, the resolvers are from one-time compilation.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the DynamicResolver count does not grow, code generation is not repeating.",
+                    }
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = dynamicResolverCount >= DynamicResolverQueueWarningThreshold ? Severity.Warning : Severity.Info,
@@ -360,6 +506,31 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("abandoned-thread-objects"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(threadCount),
+                    Reference = threadCount >= ThreadQueueWarningThreshold
+                        ? ClaimParts.Budget(ClaimParts.Count(ThreadQueueWarningThreshold), "warning threshold")
+                        : ClaimParts.Budget(ClaimParts.Count(ThreadQueueInfoThreshold), "notice threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "Thread objects", Mechanism = "threads not joined or tracked" },
+                },
+                Support = [new EvidenceStatement(threadIds, $"{threadCount:N0} Thread objects are in the finalizer queue.")],
+                Counter = Counter.None("A Thread object stays queued after its thread has exited normally; queued Thread objects do not show a thread was abandoned."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!threads",
+                        Test = "If !threads shows these threads exited normally, the queued Thread objects are finished, not abandoned.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the code joins or tracks each thread it starts, the queued objects are completed threads.",
+                    }
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Threads",
                 Severity = threadCount >= ThreadQueueWarningThreshold ? Severity.Warning : Severity.Info,
@@ -381,6 +552,31 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("undisposed-timer-instances"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(timerHolderCount),
+                    Reference = timerHolderCount >= TimerHolderQueueWarningThreshold
+                        ? ClaimParts.Budget(ClaimParts.Count(TimerHolderQueueWarningThreshold), "warning threshold")
+                        : ClaimParts.Budget(ClaimParts.Count(TimerHolderQueueInfoThreshold), "notice threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "TimerHolder and TimerQueueTimer objects", Mechanism = "undisposed System.Threading.Timer" },
+                },
+                Support = [new EvidenceStatement(timerHolderIds, $"{timerHolderCount:N0} TimerHolder and TimerQueueTimer objects are in the finalizer queue.")],
+                Counter = Counter.None("A disposed timer's holder can still sit in the queue until finalization runs; presence does not show it was never disposed."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!do <timer address>",
+                        Test = "On a sampled TimerQueueTimer: if its state shows it was disposed, it is not an undisposed timer.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the owning code disposes each timer on completion or shutdown, the queued holders are awaiting finalization of disposed timers.",
+                    }
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = timerHolderCount >= TimerHolderQueueWarningThreshold ? Severity.Warning : Severity.Info,
@@ -403,6 +599,23 @@ internal sealed class FinalizableObjectSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("abandoned-reader-writer-lock"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(readerWriterLockCount),
+                    Reference = ClaimParts.Budget(ClaimParts.Count(ReaderWriterLockQueueWarningThreshold), "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "ReaderWriterLock objects", Mechanism = "legacy lock with a finalizer and kernel resources" },
+                },
+                Support = [new EvidenceStatement(readerWriterLockIds, $"{readerWriterLockCount:N0} ReaderWriterLock objects are in the finalizer queue.")],
+                Counter = Counter.None("A lock released correctly can still be queued for finalization until collection; presence does not show it was abandoned."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the code releases every lock in a finally block, the queued locks were released, only awaiting finalization.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Threads",
                 Severity = Severity.Warning,

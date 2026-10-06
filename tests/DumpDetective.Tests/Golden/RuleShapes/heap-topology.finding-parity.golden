@@ -1,0 +1,454 @@
+rule: heap-topology.finding-parity
+version: 1
+[
+  {
+    "name": "quiet",
+    "claims": [
+      {
+        "fingerprint": "heap topology::segment-distribution",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Composes",
+          "measure": {
+            "value": 11.11111111111111,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "qualifiers": {
+            "location": "the Large Object Heap\u0027s share of committed memory"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0..2]"
+            ],
+            "why": "900 MB committed across 12 segments; the LOH is 11.1% of it."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This describes segment distribution and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the LOH and total committed sizes in !eeheap -gc do not give a 11.1% LOH share, the distribution is wrong.",
+            "command": "!eeheap -gc"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "everything-fires",
+    "claims": [
+      {
+        "fingerprint": "heap topology::segment-distribution",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 44.776119402985074,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 40,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "critical LOH-share threshold"
+          },
+          "qualifiers": {
+            "location": "the Large Object Heap\u0027s share of committed memory"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0..5]"
+            ],
+            "why": "1,005 MB committed across 19 segments; the LOH is 44.8% of it."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A large LOH share is normal for a service that holds large buffers; the share does not show the LOH is growing."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the LOH and total committed sizes in !eeheap -gc do not give a 44.8% LOH share, the distribution is wrong.",
+            "command": "!eeheap -gc"
+          }
+        ]
+      },
+      {
+        "fingerprint": "heap topology::logical-heap-skew",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 4,
+            "unit": "Ratio",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 2,
+              "unit": "Ratio",
+              "semantics": "Ratio"
+            },
+            "basis": "skew threshold"
+          },
+          "qualifiers": {
+            "mechanism": "Server GC per-CPU heaps",
+            "location": "4 logical heaps"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[5]"
+            ],
+            "why": "The largest logical heap is 400.00 MB and the smallest 100.00 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Server GC heaps differ in size whenever allocation is uneven across threads; the ratio does not show a defect."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the per-heap sizes in !eeheap -gc are within a factor of 4.0 of each other, the skew is overstated.",
+            "command": "!eeheap -gc"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump; if a different heap is now the largest, the skew is transient."
+          }
+        ]
+      },
+      {
+        "fingerprint": "heap topology::unrecognized-kind",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Missing",
+          "measure": {
+            "value": 2,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "GC segments of an unrecognized kind",
+            "scope": "5.00 MB"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[4]"
+            ],
+            "why": "2 segment(s) totaling 5.00 MB matched no known kind."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A newer runtime can introduce segment kinds this analyzer does not know; that is a tool gap, not evidence of a corrupt dump."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !eeheap -gc classifies every segment as SOH, LOH, POH or frozen, the analyzer\u0027s classification is at fault.",
+            "command": "!eeheap -gc"
+          }
+        ]
+      },
+      {
+        "fingerprint": "heap topology::soh-fragmentation",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Fragments",
+          "measure": {
+            "value": 50,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 45,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "mechanism": "pinned handles blocking compaction",
+            "location": "the Small Object Heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0..5]"
+            ],
+            "why": "The SOH has 200.00 MB of 400.00 MB committed free."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The SOH is compacted during Gen2 collections; one snapshot does not show the free space persists."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the free space on SOH segments in !eeheap -gc is far from 200.00 MB, the fragmentation is wrong.",
+            "command": "!eeheap -gc"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump after a Gen2 collection; if the free space is gone, it was reclaimed by compaction."
+          }
+        ]
+      },
+      {
+        "fingerprint": "heap topology::loh-fragmentation",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Fragments",
+          "measure": {
+            "value": 66.66666666666667,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "the Large Object Heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0..5]"
+            ],
+            "why": "The LOH has 300.00 MB of 450.00 MB committed free."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Free LOH space can be reused by the next large allocation; its size does not show it is unusable."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the free space on LOH segments in !eeheap -gc is far from 300.00 MB, the fragmentation is wrong.",
+            "command": "!eeheap -gc"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the free LOH space is reused and the percentage falls, it was reusable, not stranded."
+          }
+        ]
+      },
+      {
+        "fingerprint": "heap topology::poh-fragmentation",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Fragments",
+          "measure": {
+            "value": 30,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 20,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "the Pinned Object Heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0..5]"
+            ],
+            "why": "The POH has 30.00 MB of 100.00 MB committed free."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0..5]"
+              ],
+              "why": "Free space in the POH is typical of pinned allocations, so the percentage alone does not show a problem."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the free space on POH segments in !eeheap -gc is far from 30.00 MB, the fragmentation is wrong.",
+            "command": "!eeheap -gc"
+          }
+        ]
+      },
+      {
+        "fingerprint": "heap topology::frozen-fragmentation",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Fragments",
+          "measure": {
+            "value": 40,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 30,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "the frozen object heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0..5]"
+            ],
+            "why": "The frozen heap has 20.00 MB of 50.00 MB committed free."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0..5]"
+              ],
+              "why": "Frozen segments hold immutable data that is never collected; this is address-space overhead, not reclaimable fragmentation."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the free space on frozen segments in !eeheap -gc is far from 20.00 MB, the figure is wrong.",
+            "command": "!eeheap -gc"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "lohwarning-workstation-skew",
+    "claims": [
+      {
+        "fingerprint": "heap topology::segment-distribution",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 30,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 25,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "warning LOH-share threshold"
+          },
+          "qualifiers": {
+            "location": "the Large Object Heap\u0027s share of committed memory"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0..2]"
+            ],
+            "why": "1,000 MB committed across 12 segments; the LOH is 30.0% of it."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A large LOH share is normal for a service that holds large buffers; the share does not show the LOH is growing."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the LOH and total committed sizes in !eeheap -gc do not give a 30.0% LOH share, the distribution is wrong.",
+            "command": "!eeheap -gc"
+          }
+        ]
+      },
+      {
+        "fingerprint": "heap topology::logical-heap-skew",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 5,
+            "unit": "Ratio",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 2,
+              "unit": "Ratio",
+              "semantics": "Ratio"
+            },
+            "basis": "skew threshold"
+          },
+          "qualifiers": {
+            "location": "2 logical heaps"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[2]"
+            ],
+            "why": "The largest logical heap is 500.00 MB and the smallest 100.00 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Uneven logical heaps outside Server GC are unexpected, and nothing observed explains them."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the per-heap sizes in !eeheap -gc are within a factor of 5.0 of each other, the skew is overstated.",
+            "command": "!eeheap -gc"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump; if a different heap is now the largest, the skew is transient."
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -108,6 +108,30 @@ internal sealed class ModuleSynthesisRule : ISynthesisRule
         findings.Add(new Claim
         {
             Fingerprint = Fingerprint("version-conflicts"),
+            Assertion = new Assertion
+            {
+                Predicate = conflicts > 0 ? AssertionPredicate.Conflicts : AssertionPredicate.Normal,
+                Measure = ClaimParts.Count(conflicts),
+                Reference = conflictSeverity == Severity.Critical ? ClaimParts.Budget(ClaimParts.Count(3), "critical conflict-count threshold") : null,
+                Qualifiers = new AssertionQualifiers { Location = "loaded modules with more than one identity" },
+            },
+            Support = [new EvidenceStatement(conflictDerivedFrom, $"{totalModules:N0} modules loaded, {dynamicModules:N0} dynamic, {conflicts:N0} version conflict group(s).")],
+            Counter = conflicts > 0
+                ? Counter.None("Two versions loaded side by side can be intentional isolation; whether a binding redirect resolves them is not observed.")
+                : unknownIdentityDuplicateCount > 0
+                    ? Counter.Of(new EvidenceStatement([population.Id], $"{unknownIdentityDuplicateCount:N0} duplicate modules have no identifiable version, so a conflict among them could not be detected."))
+                    : Counter.None("Every duplicate module had a comparable identity, so nothing observed hides a conflict."),
+            FalsifiedBy =
+            [
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.Windbg,
+                    Command = "lm",
+                    Test = conflicts > 0
+                        ? "If lm lists a single version for each module reported as conflicting, there is no conflict."
+                        : "If lm lists the same module at two different versions, a conflict was missed.",
+                },
+            ],
             Analyzer = AnalyzerName,
             Category = "Dependency",
             Severity = conflictSeverity,
@@ -137,6 +161,28 @@ internal sealed class ModuleSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("heavy-modules"),
+                Assertion = new Assertion
+                {
+                    Predicate = heavySeverity == Severity.Warning ? AssertionPredicate.Exceeds : AssertionPredicate.Composes,
+                    Measure = ClaimParts.Bytes(totalBytes),
+                    Reference = heavySeverity == Severity.Warning
+                        ? ClaimParts.Budget(ClaimParts.Bytes(heavyModuleWarningThresholdBytes), "heavy-module threshold")
+                        : null,
+                    Qualifiers = new AssertionQualifiers { Location = $"heap objects of module {moduleName}" },
+                },
+                Support = [new EvidenceStatement([heaviest.Id], $"{moduleName} accounts for {FormatHelper.FormatBytes(totalBytes)} across {objectCount:N0} objects and {uniqueTypeCount} type(s).")],
+                Counter = Counter.None(heavySeverity == Severity.Warning
+                    ? "A module that owns the application's main data structures is expected to dominate the heap; its share alone does not show a leak."
+                    : "This describes how heap memory divides across modules and asserts no problem, so there is nothing to weaken."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpheap -stat",
+                        Test = $"If the types from {moduleName} in !dumpheap -stat total far less than {FormatHelper.FormatBytes(totalBytes)}, the module's footprint is overstated.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = heavySeverity,
@@ -165,6 +211,22 @@ internal sealed class ModuleSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("type-density"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Measure = ClaimParts.Count(typeDensities.Count),
+                    Qualifiers = new AssertionQualifiers { Location = "modules with five or fewer types and a large heap footprint" },
+                },
+                Support = [new EvidenceStatement(ClaimParts.IdsOf(typeDensities), $"{typeDensities.Count} module(s) have five or fewer types; the worst is {moduleName} with {uniqueTypeCount} type(s) holding {FormatHelper.FormatBytes(totalBytes)}.")],
+                Counter = Counter.None("Few-type modules with large footprints are often intentional buffer pools or caches; the density alone does not show a leak."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = $"If {moduleName} owns a bounded buffer pool or cache, the concentration is by design.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = Severity.Warning,
@@ -187,6 +249,31 @@ internal sealed class ModuleSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("dynamic-module-accumulation"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(totalDynamicModules),
+                    Reference = ClaimParts.Budget(
+                        ClaimParts.Count(sev == Severity.Critical ? DynamicModuleCriticalCount : DynamicModuleWarningCount),
+                        sev == Severity.Critical ? "critical threshold" : "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "dynamic in-memory modules", Scope = $"{totalDomains:N0} AppDomain(s)" },
+                },
+                Support = [new EvidenceStatement([population.Id], $"{totalDynamicModules:N0} dynamic modules are loaded across {totalDomains:N0} AppDomain(s).")],
+                Counter = Counter.None("Serializers and expression compilers create dynamic modules and usually cache them; the count does not show repeated regeneration."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the dynamic module count does not grow, the modules are cached, not regenerated.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpdomain",
+                        Test = $"If !dumpdomain lists far fewer than {totalDynamicModules:N0} dynamic modules, the count is overstated.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Modules",
                 Severity = sev,
@@ -212,6 +299,24 @@ internal sealed class ModuleSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("anonymous-module-accumulation"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(anonymousModuleCount),
+                    Reference = ClaimParts.Budget(ClaimParts.Count(AnonymousModuleWarningCount), "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "modules with no file-system path" },
+                },
+                Support = [new EvidenceStatement([population.Id], $"{anonymousModuleCount:N0} loaded modules have no file name.")],
+                Counter = Counter.None("Delegates, serializer proxies and woven code create anonymous modules in ordinary use; their presence does not show a defect."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "lm",
+                        Test = $"If lm shows file paths for most of the {anonymousModuleCount:N0} modules, they are not anonymous.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Modules",
                 Severity = Severity.Warning,
@@ -260,6 +365,28 @@ internal sealed class ModuleSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("cross-domain-loads"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Measure = ClaimParts.Count(crossDomainLoads.Count),
+                    Qualifiers = new AssertionQualifiers { Location = "non-framework modules loaded into more than one AppDomain", Mechanism = "a separate managed copy per domain" },
+                },
+                Support = [new EvidenceStatement(ClaimParts.IdsOf(crossDomainLoads), $"{crossDomainLoads.Count:N0} non-framework modules are loaded into more than one AppDomain.")],
+                Counter = Counter.None("A plugin or isolation architecture loads shared assemblies into several domains by design."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpdomain",
+                        Test = "If !dumpdomain shows each listed module loaded in only one domain, the cross-domain loads are wrong.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the application deliberately hosts plugins in separate domains, the repeated loads are intentional.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Modules",
                 Severity = anyHeavyOrWidelyLoaded ? Severity.Warning : Severity.Info,
@@ -294,6 +421,22 @@ internal sealed class ModuleSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("assemblyref-mismatches"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Conflicts,
+                    Measure = ClaimParts.Count(assemblyRefMismatches.Count),
+                    Qualifiers = new AssertionQualifiers { Location = "assembly references that do not match the loaded version" },
+                },
+                Support = [new EvidenceStatement(ClaimParts.IdsOf(assemblyRefMismatches), $"{assemblyRefMismatches.Count:N0} assembly reference(s) name a different version than the one loaded.")],
+                Counter = Counter.None("A mismatched reference only fails when the mismatched member is called; the dump does not show whether it ever is."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If a binding redirect or runtime unification maps the referenced version to the loaded one, the mismatch is resolved.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Dependency",
                 Severity = Severity.Warning,
@@ -319,6 +462,23 @@ internal sealed class ModuleSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("unknown-identity-duplicates"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Missing,
+                    Measure = ClaimParts.Count(unknownIdentityDuplicateCount),
+                    Qualifiers = new AssertionQualifiers { Location = "duplicate modules with no version, public-key token or file hash" },
+                },
+                Support = [new EvidenceStatement(unknownIdentityModules.Count > 0 ? ClaimParts.IdsOf(unknownIdentityModules) : [population.Id], $"{unknownIdentityDuplicateCount:N0} modules appear more than once without an identifiable version.")],
+                Counter = Counter.None("Duplicates may be an intentional repeated load of one assembly; the missing identity is exactly why that cannot be told."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "lmv",
+                        Test = "If lmv shows distinct versions or paths for the duplicates, their identity is recoverable and they are not unknown.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Dependency",
                 Severity = Severity.Warning,

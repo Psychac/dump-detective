@@ -1,0 +1,526 @@
+rule: finalizable-object.finding-parity
+version: 1
+[
+  {
+    "name": "gen2-accumulation",
+    "claims": [
+      {
+        "fingerprint": "finalizable object analysis::gen2-accumulation",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 12000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 10000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "finalizable objects that survived into Gen2"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "12,000 of 20,000 finalizable objects are in Gen2; the top type is App.Handle."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A finalizable object in Gen2 may simply be live and in use; surviving into Gen2 does not mean it is waiting for finalization."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !finalizequeue shows far fewer registered finalizable objects than 20,000, the population is overstated.",
+            "command": "!finalizequeue"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the objects are long-lived singletons or pooled resources disposed at shutdown, their Gen2 residency is by design."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "queue-backlog-critical",
+    "claims": [
+      {
+        "fingerprint": "finalizable object analysis::queue-backlog",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 20000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 10000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "objects in the finalizer queue"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The finalizer queue holds 20,000 objects."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The queue fills briefly after a burst of finalizable allocations and drains once the finalizer thread runs; one snapshot does not show it is stuck."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !finalizequeue reports far fewer than 20,000 objects ready for finalization, the backlog is overstated.",
+            "command": "!finalizequeue"
+          },
+          {
+            "kind": "Windbg",
+            "test": "If the finalizer thread is running and not blocked, the queue is draining.",
+            "command": "!threads"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "retained-bytes-exact",
+    "claims": [
+      {
+        "fingerprint": "finalizable object analysis::queue-retained-bytes",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 157286400,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 100000000,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "memory retained by finalizer-queue entries"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The top 1 queue entries retain about 150.0 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Exact dominator-tree sizes count only memory freed with the queued objects, so nothing observed qualifies the figure."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled queued object: if its sub-graph is also reachable from a normal root, the finalizer queue is not what retains it.",
+            "command": "!gcroot \u003Cqueued object address\u003E"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "retained-bytes-estimated-and-undisposed",
+    "claims": [
+      {
+        "fingerprint": "finalizable object analysis::queue-retained-bytes",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 20971520,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 10000000,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "memory retained by finalizer-queue entries"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The top 1 queue entries retain about 20.0 MB."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "Some entries had no exact dominator-tree retained size and used shallow size instead, so the figure underestimates the real retention."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled queued object: if its sub-graph is also reachable from a normal root, the finalizer queue is not what retains it.",
+            "command": "!gcroot \u003Cqueued object address\u003E"
+          }
+        ]
+      },
+      {
+        "fingerprint": "finalizable object analysis::undisposed-in-queue",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 1,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "finalizer-queue entries implementing IDisposable with a false _disposed field"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "1 queued objects implement IDisposable and have a false _disposed field."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The disposed state is read from the object\u0027s own field, which some IDisposable types do not maintain; for those it can read false after disposal."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled entry: if !do shows the _disposed field true, or the type keeps no such field, it was not left undisposed.",
+            "command": "!do \u003Cqueued object address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the type\u0027s Dispose does not set a _disposed field, the false reading says nothing about disposal."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "critical-finalizers",
+    "claims": [
+      {
+        "fingerprint": "finalizable object analysis::queue-retained-bytes",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 15728550,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 10000000,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "memory retained by finalizer-queue entries"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0..149]"
+            ],
+            "why": "The top 150 queue entries retain about 15.0 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Exact dominator-tree sizes count only memory freed with the queued objects, so nothing observed qualifies the figure."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled queued object: if its sub-graph is also reachable from a normal root, the finalizer queue is not what retains it.",
+            "command": "!gcroot \u003Cqueued object address\u003E"
+          }
+        ]
+      },
+      {
+        "fingerprint": "finalizable object analysis::critical-finalizer-accumulation",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 150,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 100,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "mechanism": "SafeHandle and CriticalHandle wrappers",
+            "location": "CriticalFinalizerObject-derived objects in the finalizer queue"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0..149]"
+            ],
+            "why": "150 of 0 queued objects derive from CriticalFinalizerObject, retaining about 7.5 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "SafeHandle-derived objects are routine in code that owns OS handles; their number alone does not show unreleased handles."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !dumpheap finds far fewer than 150 SafeHandle-derived objects, the count is overstated.",
+            "command": "!dumpheap -type SafeHandle -stat"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the top type (Microsoft.Win32.SafeHandles.SafeFileHandle) is disposed on the normal path, the queued instances are waiting on collection, not leaking handles."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "known-queue-patterns",
+    "claims": [
+      {
+        "fingerprint": "finalizable object analysis::dynamic-resolver-accumulation",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 12,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 10,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "notice threshold"
+          },
+          "qualifiers": {
+            "mechanism": "uncached dynamic code generation",
+            "location": "DynamicResolver objects"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0..11]"
+            ],
+            "why": "12 DynamicResolver objects are in the finalizer queue."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "DynamicMethods that are compiled once and cached still leave resolvers awaiting finalization; the count does not show regeneration."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "CodeInspection",
+            "test": "If the compiled delegates and expression trees are cached in static fields, the resolvers are from one-time compilation."
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the DynamicResolver count does not grow, code generation is not repeating."
+          }
+        ]
+      },
+      {
+        "fingerprint": "finalizable object analysis::abandoned-thread-objects",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 6,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 5,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "notice threshold"
+          },
+          "qualifiers": {
+            "mechanism": "threads not joined or tracked",
+            "location": "Thread objects"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[12..17]"
+            ],
+            "why": "6 Thread objects are in the finalizer queue."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A Thread object stays queued after its thread has exited normally; queued Thread objects do not show a thread was abandoned."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !threads shows these threads exited normally, the queued Thread objects are finished, not abandoned.",
+            "command": "!threads"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the code joins or tracks each thread it starts, the queued objects are completed threads."
+          }
+        ]
+      },
+      {
+        "fingerprint": "finalizable object analysis::undisposed-timer-instances",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 7,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 5,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "notice threshold"
+          },
+          "qualifiers": {
+            "mechanism": "undisposed System.Threading.Timer",
+            "location": "TimerHolder and TimerQueueTimer objects"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[18..24]"
+            ],
+            "why": "7 TimerHolder and TimerQueueTimer objects are in the finalizer queue."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A disposed timer\u0027s holder can still sit in the queue until finalization runs; presence does not show it was never disposed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled TimerQueueTimer: if its state shows it was disposed, it is not an undisposed timer.",
+            "command": "!do \u003Ctimer address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the owning code disposes each timer on completion or shutdown, the queued holders are awaiting finalization of disposed timers."
+          }
+        ]
+      },
+      {
+        "fingerprint": "finalizable object analysis::abandoned-reader-writer-lock",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 4,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 3,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "mechanism": "legacy lock with a finalizer and kernel resources",
+            "location": "ReaderWriterLock objects"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[25..28]"
+            ],
+            "why": "4 ReaderWriterLock objects are in the finalizer queue."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A lock released correctly can still be queued for finalization until collection; presence does not show it was abandoned."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "CodeInspection",
+            "test": "If the code releases every lock in a finally block, the queued locks were released, only awaiting finalization."
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -1,0 +1,51 @@
+rule: insight.wasteful-collections
+version: 1
+[
+  {
+    "name": "no-waste-says-nothing",
+    "claims": []
+  },
+  {
+    "name": "some-waste",
+    "claims": [
+      {
+        "fingerprint": "insightengine::wasteful-collections",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 62914560,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "qualifiers": {
+            "location": "unused capacity in wasteful collections"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "12 of 1,000 collections are wasteful, with 60.0 MB of unused capacity."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Unused capacity in short-lived collections is reclaimed with them; their lifetime is not observed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If a flagged collection\u0027s backing array is close to its element count, the estimate of 60.0 MB unused is too high.",
+            "command": "!do \u003Ccollection address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the flagged collections are request-scoped, the capacity is reclaimed with each request, not held."
+          }
+        ]
+      }
+    ]
+  }
+]

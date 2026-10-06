@@ -1,0 +1,59 @@
+rule: insight.poh-growth
+version: 1
+[
+  {
+    "name": "below-threshold-says-nothing",
+    "claims": []
+  },
+  {
+    "name": "above-threshold",
+    "claims": [
+      {
+        "fingerprint": "insightengine::poh-growth",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 15,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 10,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "POH share threshold"
+          },
+          "qualifiers": {
+            "location": "the Pinned Object Heap\u0027s share of the heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The POH is 15.0% of the heap, 80.0 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The POH holds buffers pinned on purpose for I/O; a large share does not by itself show pinning is excessive."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the POH size in !eeheap -gc is far from 80.0 MB, the POH share is wrong.",
+            "command": "!eeheap -gc"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the POH share does not grow, it is a stable buffer pool, not growth."
+          }
+        ]
+      }
+    ]
+  }
+]

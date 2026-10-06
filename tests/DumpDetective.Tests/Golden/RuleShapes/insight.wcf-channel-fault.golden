@@ -1,0 +1,63 @@
+rule: insight.wcf-channel-fault
+version: 1
+[
+  {
+    "name": "faulted-with-communication-exceptions",
+    "claims": [
+      {
+        "fingerprint": "insightengine::wcf-channel-fault",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Faults",
+          "measure": {
+            "value": 3,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "9 WCF or communication exceptions on the heap",
+            "location": "faulted WCF channels"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "3 WCF channels are in the Faulted state."
+          },
+          {
+            "observations": [
+              "observations[1]",
+              "observations[2]"
+            ],
+            "why": "9 WCF or communication exception objects are on the heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Exception objects on the heap may be handled exceptions awaiting collection; they do not show the faulted channels caused them."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled communication exception: if !gcroot finds no root, it is garbage from a handled exception, unrelated to the faulted channels.",
+            "command": "!gcroot \u003Cexception address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the calling code aborts a channel on any exception and creates a fresh one, the faulted instances are awaiting collection, not in use."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "faulted-without-matching-exceptions-says-nothing",
+    "claims": []
+  },
+  {
+    "name": "no-faulted-says-nothing",
+    "claims": []
+  }
+]

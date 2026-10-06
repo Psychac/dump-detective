@@ -1,3 +1,4 @@
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -62,6 +63,31 @@ internal sealed class LohPressureInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::loh-pressure",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Percent(lohPct),
+                    Reference = severity == Severity.Critical
+                        ? ClaimParts.Budget(ClaimParts.Percent(CriticalPct), "critical threshold")
+                        : ClaimParts.Budget(ClaimParts.Percent(WarningPct), "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "the Large Object Heap's share of the heap" },
+                },
+                Support = [new EvidenceStatement([source.Id], $"The LOH holds {InsightByteFormat.FormatBytes(lohBytes)}, {lohPct:F1}% of the heap.")],
+                Counter = Counter.None("Large objects that die young cost fragmentation, not growth; their lifetime is not observed."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!eeheap -gc",
+                        Test = $"If the LOH size in !eeheap -gc is far from {InsightByteFormat.FormatBytes(lohBytes)}, the LOH share is wrong.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the LOH share does not grow, it is a stable buffer working set.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Memory",
                 Severity = severity,

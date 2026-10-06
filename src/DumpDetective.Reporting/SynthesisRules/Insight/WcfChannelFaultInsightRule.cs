@@ -1,4 +1,5 @@
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -59,6 +60,32 @@ internal sealed class WcfChannelFaultInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::wcf-channel-fault",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Faults,
+                    Measure = ClaimParts.Count(faultedChannels),
+                    Qualifiers = new AssertionQualifiers { Location = "faulted WCF channels", Mechanism = $"{commExCount:N0} WCF or communication exceptions on the heap" },
+                },
+                Support =
+                [
+                    new EvidenceStatement([wcf.Id], $"{faultedChannels:N0} WCF channels are in the Faulted state."),
+                    new EvidenceStatement(derivedFrom.GetRange(1, derivedFrom.Count - 1), $"{commExCount:N0} WCF or communication exception objects are on the heap."),
+                ],
+                Counter = Counter.None("Exception objects on the heap may be handled exceptions awaiting collection; they do not show the faulted channels caused them."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gcroot <exception address>",
+                        Test = "On a sampled communication exception: if !gcroot finds no root, it is garbage from a handled exception, unrelated to the faulted channels.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the calling code aborts a channel on any exception and creates a fresh one, the faulted instances are awaiting collection, not in use.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Infrastructure",
                 Severity = Severity.Critical,

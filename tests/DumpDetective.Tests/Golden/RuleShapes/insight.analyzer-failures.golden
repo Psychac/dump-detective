@@ -1,0 +1,48 @@
+rule: insight.analyzer-failures
+version: 1
+[
+  {
+    "name": "three-failed",
+    "claims": [
+      {
+        "fingerprint": "insightengine::analyzer-failures",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Missing",
+          "measure": {
+            "value": 3,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 3,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "failed-analyzer threshold"
+          },
+          "qualifiers": {
+            "location": "analyzers that did not complete",
+            "scope": "3 of 36 analyzers"
+          }
+        },
+        "support": [],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The failure count describes this analysis run, not the process; which findings are missing depends on which analyzers failed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "CodeInspection",
+            "test": "Re-run with --diagnostic; if the failed analyzers succeed on a second run, the failures were transient."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "two-failed-says-nothing",
+    "claims": []
+  }
+]

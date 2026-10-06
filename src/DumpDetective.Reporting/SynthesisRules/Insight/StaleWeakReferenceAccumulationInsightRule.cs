@@ -1,3 +1,4 @@
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -53,6 +54,29 @@ internal sealed class StaleWeakReferenceAccumulationInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::stale-weak-reference-accumulation",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Percent(deadTargetRatio * 100.0),
+                    Reference = ClaimParts.Budget(ClaimParts.Percent(WarningRatio * 100.0), "dead-target threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "weak handles whose target is already collected" },
+                },
+                Support = [new EvidenceStatement([weakRef.Id], $"{deadWeakTargets:N0} of {totalWeakHandles:N0} weak handles point at collected objects; {staleWrapperCount:N0} stale wrapper(s).")],
+                Counter = Counter.None("Entries in a weak cache are expected to go stale between purges; the ratio does not show purging has stopped."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gchandles -type WeakShort",
+                        Test = $"If !gchandles shows far fewer dead weak handles than {deadWeakTargets:N0}, the dead ratio is overstated.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the owning cache purges stale entries on a schedule, the dead handles are awaiting the next sweep.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Memory",
                 Severity = severity,

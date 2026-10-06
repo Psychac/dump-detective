@@ -30,7 +30,7 @@ internal static class RuleShapeGolden
         Converters = { new JsonStringEnumConverter() },
     };
 
-    public sealed record Scenario(string Name, IReadOnlyList<Observation> Observations);
+    public sealed record Scenario(string Name, IReadOnlyList<Observation> Observations, SynthesisContext? Context = null);
 
     public static async Task AssertMatchesAsync(ISynthesisRule rule, IReadOnlyList<Scenario> scenarios)
     {
@@ -91,7 +91,7 @@ internal static class RuleShapeGolden
             for (int i = 0; i < scenario.Observations.Count; i++)
                 positions[scenario.Observations[i].Id] = i;
 
-            IReadOnlyList<Claim> claims = await rule.SynthesizeAsync(new ObservationMatchSet(scenario.Observations), new SynthesisContext());
+            IReadOnlyList<Claim> claims = await rule.SynthesizeAsync(new ObservationMatchSet(scenario.Observations), scenario.Context ?? new SynthesisContext());
             var claimShapes = new List<object>(claims.Count);
             foreach (Claim claim in claims)
             {
@@ -135,7 +135,8 @@ internal static class RuleShapeGolden
             throw new XunitException($"{where}: counter-evidence was neither stated nor explicitly marked none.");
         if (claim.Counter.Statements.Count == 0 && string.IsNullOrWhiteSpace(claim.Counter.NoneFoundBecause))
             throw new XunitException($"{where}: counter is empty without saying why none was found.");
-        if (claim.Support.Count == 0)
+        // A claim about the tool's own run (e.g. analyzer failures) has no observation lineage to cite.
+        if (claim.Support.Count == 0 && claim.DerivedFrom.Count > 0)
             throw new XunitException($"{where}: claim cites no support.");
 
         var lineage = new HashSet<ObservationId>(claim.DerivedFrom);

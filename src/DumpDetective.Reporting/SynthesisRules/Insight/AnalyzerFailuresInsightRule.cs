@@ -1,3 +1,4 @@
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -38,6 +39,22 @@ internal sealed class AnalyzerFailuresInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::analyzer-failures",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Missing,
+                    Measure = ClaimParts.Count(failed),
+                    Reference = ClaimParts.Budget(ClaimParts.Count(WarningCount), "failed-analyzer threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "analyzers that did not complete", Scope = $"{failed} of {total} analyzers" },
+                },
+                Counter = Counter.None("The failure count describes this analysis run, not the process; which findings are missing depends on which analyzers failed."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "Re-run with --diagnostic; if the failed analyzers succeed on a second run, the failures were transient.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Analysis",
                 Severity = Severity.Warning,

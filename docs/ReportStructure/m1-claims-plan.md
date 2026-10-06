@@ -135,7 +135,7 @@ system. It gates M4.
      `ISynthesisRule`, recorded in `derivedFrom` as rule id + version. A per-rule golden-output test fails
      when a rule's emitted findings change shape without a version bump. Derived (hash) versions rejected:
      they change on any rebuild, so identical rules from different builds would look different.
-4. **Rule migration** *(in progress — 43 of 76 rules; pilot 2026-10-05, batches 1-9 2026-10-06)* — all 76 rules author `assertion`, `counter`, `falsifiedBy`.
+4. **Rule migration** *(in progress — 48 of 76 rules; pilot 2026-10-05, batches 1-10 2026-10-06)* — all 76 rules author `assertion`, `counter`, `falsifiedBy`.
    - Done: `LohFragmentationSynthesisRule` (pilot), with the per-rule golden mechanism
      (`Golden/RuleShapeGolden.cs`, goldens in `Golden/RuleShapes/`; `DD_BLESS_RULE_SHAPES=1` to bless). Fails when
      a rule's claim shape changes without a `Version` bump, or the version changes without a re-bless.
@@ -186,6 +186,10 @@ system. It gates M4.
      observations, in two separate support statements). Tests in `InsightRulesBatchOneClaimTests`. Only one rule of
      the five fires on the reference dump (`wasteful-collections` from batch 8), so the real-dump check is thin
      here; the goldens carry the coverage.
+   - Batch 10 (2026-10-06): `AnalyzerFailures`, `LohPressure`, `PinnedHandlePressure`,
+     `StaleWeakReferenceAccumulation`, `WcfChannelFault`. Tests in `InsightRulesBatchTwoClaimTests`. Gate change:
+     a claim with an empty `DerivedFrom` (`AnalyzerFailures`, about the tool's own run) may have empty support; every
+     other gate still applies. `RuleShapeGolden` scenarios may now carry a `SynthesisContext`.
    - **Open: intermittent hang, not caused by this migration.** One real-dump run sat 42 minutes in Stage 3 inside
      `EventLeakAnalyzer`'s "building publisher registry" setup and was killed; the same dump finished in ~74 s on
      the next run with my changes, and on the committed state before them. Needs its own investigation.

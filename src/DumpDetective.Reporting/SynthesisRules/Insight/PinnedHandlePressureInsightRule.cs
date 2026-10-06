@@ -1,3 +1,4 @@
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -56,6 +57,41 @@ internal sealed class PinnedHandlePressureInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::pinned-handle-pressure",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(pinnedHandleTargets),
+                    Reference = ClaimParts.Budget(ClaimParts.Count(WarningCount), "warning threshold"),
+                    Qualifiers = new AssertionQualifiers
+                    {
+                        Location = "pinned GC handle targets",
+                        Mechanism = correlatedWithFrag ? $"LOH fragmentation of {fragmentationPercent:F1}%" : null,
+                    },
+                },
+                Support =
+                [
+                    new EvidenceStatement([handles.Id], $"{pinnedHandleTargets:N0} pinned handle targets exist."),
+                    .. lohFrag is not null
+                        ? [new EvidenceStatement([lohFrag.Id], $"LOH fragmentation is {fragmentationPercent:F1}%, read alongside the pin count.")]
+                        : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = correlatedWithFrag
+                    ? Counter.Of(new EvidenceStatement([lohFrag!.Id], "Fragmentation can come from short-lived large allocations as well as pinning, so the two co-occurring does not show pinning is the cause."))
+                    : Counter.None("Handles pinned for short-lived I/O come and go; one snapshot does not show they persist."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gchandles -type Pinned",
+                        Test = $"If !gchandles lists far fewer pinned targets than {pinnedHandleTargets:N0}, the count is overstated.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the pinned targets are different ones, they are in-flight buffers.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Memory",
                 Severity = severity,

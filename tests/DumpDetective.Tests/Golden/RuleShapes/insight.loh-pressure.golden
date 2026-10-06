@@ -1,0 +1,110 @@
+rule: insight.loh-pressure
+version: 1
+[
+  {
+    "name": "warning-from-memory",
+    "claims": [
+      {
+        "fingerprint": "insightengine::loh-pressure",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 30,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 25,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "the Large Object Heap\u0027s share of the heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The LOH holds 200.0 MB, 30.0% of the heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Large objects that die young cost fragmentation, not growth; their lifetime is not observed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the LOH size in !eeheap -gc is far from 200.0 MB, the LOH share is wrong.",
+            "command": "!eeheap -gc"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the LOH share does not grow, it is a stable buffer working set."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "critical-from-generations",
+    "claims": [
+      {
+        "fingerprint": "insightengine::loh-pressure",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 45,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 40,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "the Large Object Heap\u0027s share of the heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The LOH holds 300.0 MB, 45.0% of the heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Large objects that die young cost fragmentation, not growth; their lifetime is not observed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the LOH size in !eeheap -gc is far from 300.0 MB, the LOH share is wrong.",
+            "command": "!eeheap -gc"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the LOH share does not grow, it is a stable buffer working set."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "below-threshold-says-nothing",
+    "claims": []
+  }
+]

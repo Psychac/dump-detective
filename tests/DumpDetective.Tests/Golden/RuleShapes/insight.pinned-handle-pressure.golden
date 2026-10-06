@@ -1,0 +1,180 @@
+rule: insight.pinned-handle-pressure
+version: 1
+[
+  {
+    "name": "pinning-alone",
+    "claims": [
+      {
+        "fingerprint": "insightengine::pinned-handle-pressure",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 150,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 100,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "pinned GC handle targets"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "150 pinned handle targets exist."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Handles pinned for short-lived I/O come and go; one snapshot does not show they persist."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles lists far fewer pinned targets than 150, the count is overstated.",
+            "command": "!gchandles -type Pinned"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the pinned targets are different ones, they are in-flight buffers."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "pinning-with-fragmentation",
+    "claims": [
+      {
+        "fingerprint": "insightengine::pinned-handle-pressure",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 150,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 100,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "mechanism": "LOH fragmentation of 40.0%",
+            "location": "pinned GC handle targets"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "150 pinned handle targets exist."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "LOH fragmentation is 40.0%, read alongside the pin count."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[1]"
+              ],
+              "why": "Fragmentation can come from short-lived large allocations as well as pinning, so the two co-occurring does not show pinning is the cause."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles lists far fewer pinned targets than 150, the count is overstated.",
+            "command": "!gchandles -type Pinned"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the pinned targets are different ones, they are in-flight buffers."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "pinning-with-low-fragmentation",
+    "claims": [
+      {
+        "fingerprint": "insightengine::pinned-handle-pressure",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 150,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 100,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "pinned GC handle targets"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "150 pinned handle targets exist."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "LOH fragmentation is 5.0%, read alongside the pin count."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Handles pinned for short-lived I/O come and go; one snapshot does not show they persist."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles lists far fewer pinned targets than 150, the count is overstated.",
+            "command": "!gchandles -type Pinned"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the pinned targets are different ones, they are in-flight buffers."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "below-threshold-says-nothing",
+    "claims": []
+  }
+]

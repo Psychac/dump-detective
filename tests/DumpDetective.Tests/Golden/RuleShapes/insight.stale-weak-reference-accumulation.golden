@@ -1,0 +1,110 @@
+rule: insight.stale-weak-reference-accumulation
+version: 1
+[
+  {
+    "name": "info",
+    "claims": [
+      {
+        "fingerprint": "insightengine::stale-weak-reference-accumulation",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 60,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "dead-target threshold"
+          },
+          "qualifiers": {
+            "location": "weak handles whose target is already collected"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "60 of 100 weak handles point at collected objects; 4 stale wrapper(s)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Entries in a weak cache are expected to go stale between purges; the ratio does not show purging has stopped."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles shows far fewer dead weak handles than 60, the dead ratio is overstated.",
+            "command": "!gchandles -type WeakShort"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the owning cache purges stale entries on a schedule, the dead handles are awaiting the next sweep."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "warning",
+    "claims": [
+      {
+        "fingerprint": "insightengine::stale-weak-reference-accumulation",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 90,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "dead-target threshold"
+          },
+          "qualifiers": {
+            "location": "weak handles whose target is already collected"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "90 of 100 weak handles point at collected objects; 0 stale wrapper(s)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Entries in a weak cache are expected to go stale between purges; the ratio does not show purging has stopped."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles shows far fewer dead weak handles than 90, the dead ratio is overstated.",
+            "command": "!gchandles -type WeakShort"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the owning cache purges stale entries on a schedule, the dead handles are awaiting the next sweep."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "below-threshold-says-nothing",
+    "claims": []
+  }
+]

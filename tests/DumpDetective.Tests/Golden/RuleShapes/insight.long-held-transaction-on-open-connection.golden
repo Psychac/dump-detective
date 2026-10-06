@@ -1,0 +1,146 @@
+rule: insight.long-held-transaction-on-open-connection
+version: 1
+[
+  {
+    "name": "warning",
+    "claims": [
+      {
+        "fingerprint": "insightengine::long-held-transaction-on-open-connection",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 3,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 3,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "mechanism": "a connection cannot return to the pool until its transaction completes",
+            "location": "open DB connections referenced by a live transaction"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]",
+              "observations[0]",
+              "observations[3]",
+              "observations[2]",
+              "observations[5]",
+              "observations[4]"
+            ],
+            "why": "3 of 3 open connections are referenced by a transaction object."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A transaction object on the heap may be in flight for a normal short request; the dump does not show how long it has been held."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If each transaction is referenced from an in-flight request frame, the transactions are short-lived work, not held.",
+            "command": "!clrstack -all"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the same transactions are gone, they were in flight, not long-held."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "critical",
+    "claims": [
+      {
+        "fingerprint": "insightengine::long-held-transaction-on-open-connection",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 15,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 15,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "mechanism": "a connection cannot return to the pool until its transaction completes",
+            "location": "open DB connections referenced by a live transaction"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]",
+              "observations[0]",
+              "observations[3]",
+              "observations[2]",
+              "observations[5]",
+              "observations[4]",
+              "observations[7]",
+              "observations[6]",
+              "observations[9]",
+              "observations[8]",
+              "observations[11]",
+              "observations[10]",
+              "observations[13]",
+              "observations[12]",
+              "observations[15]",
+              "observations[14]",
+              "observations[17]",
+              "observations[16]",
+              "observations[19]",
+              "observations[18]",
+              "observations[21]",
+              "observations[20]",
+              "observations[23]",
+              "observations[22]",
+              "observations[25]",
+              "observations[24]",
+              "observations[27]",
+              "observations[26]",
+              "observations[29]",
+              "observations[28]"
+            ],
+            "why": "15 of 15 open connections are referenced by a transaction object."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A transaction object on the heap may be in flight for a normal short request; the dump does not show how long it has been held."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If each transaction is referenced from an in-flight request frame, the transactions are short-lived work, not held.",
+            "command": "!clrstack -all"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the same transactions are gone, they were in flight, not long-held."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "below-threshold-says-nothing",
+    "claims": []
+  }
+]

@@ -1,0 +1,201 @@
+rule: insight.jit-module-hotspot
+version: 1
+[
+  {
+    "name": "large-on-disk",
+    "claims": [
+      {
+        "fingerprint": "insightengine::jit-module-hotspot",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exhibits",
+          "subject": {
+            "$kind": "module",
+            "kind": "Module",
+            "simpleName": "Contoso.Core",
+            "joinKey": "Contoso.Core",
+            "fidelity": "Exact"
+          },
+          "measure": {
+            "value": 80,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "frame-presence threshold"
+          },
+          "qualifiers": {
+            "mechanism": "large on disk",
+            "location": "active JIT stack frames in module Contoso.Core"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Module \u0027Contoso.Core\u0027 accounts for 80 active JIT stack frames."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "The module\u0027s on-disk footprint."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A module that carries the application\u0027s hot path is expected to dominate stacks; its presence there does not show the size or conflict matters."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the 80 frames from \u0027Contoso.Core\u0027 are mostly parked in waits, not executing, the presence is idle, not hot.",
+            "command": "!eestack"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "in-conflict",
+    "claims": [
+      {
+        "fingerprint": "insightengine::jit-module-hotspot",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exhibits",
+          "subject": {
+            "$kind": "module",
+            "kind": "Module",
+            "simpleName": "Contoso.Core",
+            "joinKey": "Contoso.Core",
+            "fidelity": "Exact"
+          },
+          "measure": {
+            "value": 80,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "frame-presence threshold"
+          },
+          "qualifiers": {
+            "mechanism": "in a version conflict",
+            "location": "active JIT stack frames in module Contoso.Core"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Module \u0027Contoso.Core\u0027 accounts for 80 active JIT stack frames."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "The module is part of an assembly version conflict group."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A module that carries the application\u0027s hot path is expected to dominate stacks; its presence there does not show the size or conflict matters."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the 80 frames from \u0027Contoso.Core\u0027 are mostly parked in waits, not executing, the presence is idle, not hot.",
+            "command": "!eestack"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "both",
+    "claims": [
+      {
+        "fingerprint": "insightengine::jit-module-hotspot",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exhibits",
+          "subject": {
+            "$kind": "module",
+            "kind": "Module",
+            "simpleName": "Contoso.Core",
+            "joinKey": "Contoso.Core",
+            "fidelity": "Exact"
+          },
+          "measure": {
+            "value": 80,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "frame-presence threshold"
+          },
+          "qualifiers": {
+            "mechanism": "large on disk and in a version conflict",
+            "location": "active JIT stack frames in module Contoso.Core"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Module \u0027Contoso.Core\u0027 accounts for 80 active JIT stack frames."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "The module\u0027s on-disk footprint."
+          },
+          {
+            "observations": [
+              "observations[2]"
+            ],
+            "why": "The module is part of an assembly version conflict group."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A module that carries the application\u0027s hot path is expected to dominate stacks; its presence there does not show the size or conflict matters."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the 80 frames from \u0027Contoso.Core\u0027 are mostly parked in waits, not executing, the presence is idle, not hot.",
+            "command": "!eestack"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "hot-but-uncorrelated-says-nothing",
+    "claims": []
+  },
+  {
+    "name": "below-threshold-says-nothing",
+    "claims": []
+  }
+]

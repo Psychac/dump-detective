@@ -1,4 +1,5 @@
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -78,6 +79,34 @@ internal sealed class JitModuleHotspotInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::jit-module-hotspot",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Subject = topModule.Subjects[0],
+                    Measure = ClaimParts.Count(frameCount),
+                    Reference = ClaimParts.Budget(ClaimParts.Count(MinFrameHits), "frame-presence threshold"),
+                    Qualifiers = new AssertionQualifiers
+                    {
+                        Location = $"active JIT stack frames in module {topModuleName}",
+                        Mechanism = hasSizeMatch && inConflict ? "large on disk and in a version conflict" : hasSizeMatch ? "large on disk" : "in a version conflict",
+                    },
+                },
+                Support =
+                [
+                    new EvidenceStatement([topModule.Id], $"Module '{topModuleName}' accounts for {frameCount:N0} active JIT stack frames."),
+                    .. hasSizeMatch ? [new EvidenceStatement([sizeMatch!.Id], "The module's on-disk footprint.")] : Array.Empty<EvidenceStatement>(),
+                    .. inConflict ? [new EvidenceStatement([conflictObservationId], "The module is part of an assembly version conflict group.")] : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = Counter.None("A module that carries the application's hot path is expected to dominate stacks; its presence there does not show the size or conflict matters."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!eestack",
+                        Test = $"If the {frameCount:N0} frames from '{topModuleName}' are mostly parked in waits, not executing, the presence is idle, not hot.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Performance",
                 Severity = Severity.Info,

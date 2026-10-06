@@ -1,0 +1,158 @@
+rule: insight.boxing-gc-correlation
+version: 1
+[
+  {
+    "name": "enums-and-gen0",
+    "claims": [
+      {
+        "fingerprint": "insightengine::boxing-gc-correlation",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 50000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "boxed enums and elevated Gen0 churn",
+            "location": "boxed value type instances"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "50,000 boxed instances hold 1.1 MB; 20,000 are enums."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Gen0 holds 50.0% of managed heap objects."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A high Gen0 share is normal for request-processing code and does not show boxing causes it."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the boxed types account for a small share of the Gen0 objects, boxing is not what drives Gen0 churn.",
+            "command": "!dumpheap -stat"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the boxed count is flat, the boxes are not accumulating."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "enums-only",
+    "claims": [
+      {
+        "fingerprint": "insightengine::boxing-gc-correlation",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 50000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "boxed enums",
+            "location": "boxed value type instances"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "50,000 boxed instances hold 1.1 MB; 20,000 are enums."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Gen0 holds 10.0% of managed heap objects."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A high Gen0 share is normal for request-processing code and does not show boxing causes it."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the boxed types account for a small share of the Gen0 objects, boxing is not what drives Gen0 churn.",
+            "command": "!dumpheap -stat"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the boxed count is flat, the boxes are not accumulating."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "gen0-only-no-generation-observation-for-enums",
+    "claims": [
+      {
+        "fingerprint": "insightengine::boxing-gc-correlation",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 50000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "elevated Gen0 churn",
+            "location": "boxed value type instances"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "50,000 boxed instances hold 1.1 MB; 100 are enums."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Gen0 holds 50.0% of managed heap objects."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A high Gen0 share is normal for request-processing code and does not show boxing causes it."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the boxed types account for a small share of the Gen0 objects, boxing is not what drives Gen0 churn.",
+            "command": "!dumpheap -stat"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the boxed count is flat, the boxes are not accumulating."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "neither-says-nothing",
+    "claims": []
+  }
+]

@@ -1,0 +1,109 @@
+rule: insight.memory-type-generation
+version: 1
+[
+  {
+    "name": "info",
+    "claims": [
+      {
+        "fingerprint": "insightengine::memory-type-generation",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 20971520,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "qualifiers": {
+            "mechanism": "95.0% in Gen2",
+            "location": "the largest long-lived type, App.Cache"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "1 types of at least 10.0 MB are at least 85% Gen2; the largest is \u0027App.Cache\u0027 at 20.0 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A cache or working set that is meant to be long-lived sits in Gen2 by design; high residency alone does not show it is unintended."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled App.Cache: if its root is a request frame, the instances are short-lived despite their generation.",
+            "command": "!gcroot \u003Cinstance address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the type\u0027s size does not grow, it is a stable working set."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "warning-with-two-types",
+    "claims": [
+      {
+        "fingerprint": "insightengine::memory-type-generation",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 209715200,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 104857600,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "warning size threshold"
+          },
+          "qualifiers": {
+            "mechanism": "95.0% in Gen2",
+            "location": "the largest long-lived type, App.Cache"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]",
+              "observations[1]"
+            ],
+            "why": "2 types of at least 10.0 MB are at least 85% Gen2; the largest is \u0027App.Cache\u0027 at 200.0 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A cache or working set that is meant to be long-lived sits in Gen2 by design; high residency alone does not show it is unintended."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled App.Cache: if its root is a request frame, the instances are short-lived despite their generation.",
+            "command": "!gcroot \u003Cinstance address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the type\u0027s size does not grow, it is a stable working set."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "not-long-lived-says-nothing",
+    "claims": []
+  },
+  {
+    "name": "too-small-says-nothing",
+    "claims": []
+  }
+]

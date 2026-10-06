@@ -1,0 +1,207 @@
+rule: insight.orphaned-task-accumulation
+version: 1
+[
+  {
+    "name": "faulted-with-blocked-finalizer",
+    "claims": [
+      {
+        "fingerprint": "insightengine::orphaned-task-finalizer-blocked",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Blocks",
+          "measure": {
+            "value": 4,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "the finalizer thread is blocked",
+            "location": "faulted tasks"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "4 tasks are in the Faulted state."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "The finalizer thread is blocked, so finalization of resources held by faulted tasks cannot proceed."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A blocked finalizer and faulted tasks are independent conditions; nothing observed shows the faulted tasks hold finalizable resources."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the finalizer thread is running and not blocked, finalization is proceeding.",
+            "command": "!threads"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the faulted tasks hold no finalizable resources, a blocked finalizer does not affect them."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "high-orphan-ratio",
+    "claims": [
+      {
+        "fingerprint": "insightengine::orphaned-task-ratio",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 60,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 30,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "orphan-ratio threshold"
+          },
+          "qualifiers": {
+            "mechanism": "fire-and-forget",
+            "location": "tasks with no continuation"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "60 of 100 tasks have no continuation."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A task with no continuation can still be observed by polling or blocking on it; the missing continuation does not show it is unobserved."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled orphaned task: if a thread stack references it, such as a blocked Wait, it is observed.",
+            "command": "!gcroot \u003Ctask address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the code that creates these tasks observes them by polling IsCompleted or by Wait, they are not fire-and-forget."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "both",
+    "claims": [
+      {
+        "fingerprint": "insightengine::orphaned-task-finalizer-blocked",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Blocks",
+          "measure": {
+            "value": 4,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "the finalizer thread is blocked",
+            "location": "faulted tasks"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "4 tasks are in the Faulted state."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "The finalizer thread is blocked, so finalization of resources held by faulted tasks cannot proceed."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A blocked finalizer and faulted tasks are independent conditions; nothing observed shows the faulted tasks hold finalizable resources."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the finalizer thread is running and not blocked, finalization is proceeding.",
+            "command": "!threads"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the faulted tasks hold no finalizable resources, a blocked finalizer does not affect them."
+          }
+        ]
+      },
+      {
+        "fingerprint": "insightengine::orphaned-task-ratio",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 60,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 30,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "orphan-ratio threshold"
+          },
+          "qualifiers": {
+            "mechanism": "fire-and-forget",
+            "location": "tasks with no continuation"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "60 of 100 tasks have no continuation."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A task with no continuation can still be observed by polling or blocking on it; the missing continuation does not show it is unobserved."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled orphaned task: if a thread stack references it, such as a blocked Wait, it is observed.",
+            "command": "!gcroot \u003Ctask address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the code that creates these tasks observes them by polling IsCompleted or by Wait, they are not fire-and-forget."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "faulted-but-finalizer-running-says-nothing",
+    "claims": []
+  }
+]

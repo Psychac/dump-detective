@@ -1,4 +1,5 @@
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -64,6 +65,29 @@ internal sealed class MemoryTypeGenerationInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::memory-type-generation",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Retains,
+                    Measure = ClaimParts.Bytes(largest.TotalBytes),
+                    Reference = largest.TotalBytes >= WarningBytes ? ClaimParts.Budget(ClaimParts.Bytes(WarningBytes), "warning size threshold") : null,
+                    Qualifiers = new AssertionQualifiers { Location = $"the largest long-lived type, {largest.TypeName}", Mechanism = $"{largest.Gen2FractionPct:F1}% in Gen2" },
+                },
+                Support = [new EvidenceStatement(derivedFrom, $"{matches.Count:N0} types of at least {InsightByteFormat.FormatBytes(MinBytes)} are at least {Gen2FractionPct:F0}% Gen2; the largest is '{largest.TypeName}' at {InsightByteFormat.FormatBytes(largest.TotalBytes)}.")],
+                Counter = Counter.None("A cache or working set that is meant to be long-lived sits in Gen2 by design; high residency alone does not show it is unintended."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gcroot <instance address>",
+                        Test = $"On a sampled {largest.TypeName}: if its root is a request frame, the instances are short-lived despite their generation.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the type's size does not grow, it is a stable working set.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Memory",
                 Severity = largest.TotalBytes >= WarningBytes ? Severity.Warning : Severity.Info,

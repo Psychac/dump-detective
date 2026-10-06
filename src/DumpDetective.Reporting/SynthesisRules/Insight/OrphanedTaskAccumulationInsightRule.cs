@@ -1,3 +1,4 @@
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -47,6 +48,32 @@ internal sealed class OrphanedTaskAccumulationInsightRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = "insightengine::orphaned-task-finalizer-blocked",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Blocks,
+                    Measure = ClaimParts.Count(faultedTasks),
+                    Qualifiers = new AssertionQualifiers { Location = "faulted tasks", Mechanism = "the finalizer thread is blocked" },
+                },
+                Support =
+                [
+                    new EvidenceStatement([asyncTasks.Id], $"{faultedTasks:N0} tasks are in the Faulted state."),
+                    new EvidenceStatement([finalizerThread!.Id], "The finalizer thread is blocked, so finalization of resources held by faulted tasks cannot proceed."),
+                ],
+                Counter = Counter.None("A blocked finalizer and faulted tasks are independent conditions; nothing observed shows the faulted tasks hold finalizable resources."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!threads",
+                        Test = "If the finalizer thread is running and not blocked, finalization is proceeding.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the faulted tasks hold no finalizable resources, a blocked finalizer does not affect them.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Async",
                 Severity = Severity.Warning,
@@ -72,6 +99,29 @@ internal sealed class OrphanedTaskAccumulationInsightRule : ISynthesisRule
                 findings.Add(new Claim
                 {
                     Fingerprint = "insightengine::orphaned-task-ratio",
+                    Assertion = new Assertion
+                    {
+                        Predicate = AssertionPredicate.Exceeds,
+                        Measure = ClaimParts.Percent(orphanPct),
+                        Reference = ClaimParts.Budget(ClaimParts.Percent(OrphanRatioThresholdPct), "orphan-ratio threshold"),
+                        Qualifiers = new AssertionQualifiers { Location = "tasks with no continuation", Mechanism = "fire-and-forget" },
+                    },
+                    Support = [new EvidenceStatement([asyncTasks.Id], $"{orphanedTasks:N0} of {totalTasks:N0} tasks have no continuation.")],
+                    Counter = Counter.None("A task with no continuation can still be observed by polling or blocking on it; the missing continuation does not show it is unobserved."),
+                    FalsifiedBy =
+                    [
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.Windbg,
+                            Command = "!gcroot <task address>",
+                            Test = "On a sampled orphaned task: if a thread stack references it, such as a blocked Wait, it is observed.",
+                        },
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.CodeInspection,
+                            Test = "If the code that creates these tasks observes them by polling IsCompleted or by Wait, they are not fire-and-forget.",
+                        },
+                    ],
                     Analyzer = "InsightEngine",
                     Category = "Async",
                     Severity = Severity.Warning,

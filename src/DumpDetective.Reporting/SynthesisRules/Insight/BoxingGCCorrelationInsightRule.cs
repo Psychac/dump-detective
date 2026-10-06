@@ -1,3 +1,4 @@
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -75,6 +76,38 @@ internal sealed class BoxingGCCorrelationInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::boxing-gc-correlation",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Measure = ClaimParts.Count(totalBoxedObjects),
+                    Qualifiers = new AssertionQualifiers
+                    {
+                        Location = "boxed value type instances",
+                        Mechanism = highBoxedEnums && highGen0Pct ? "boxed enums and elevated Gen0 churn" : highBoxedEnums ? "boxed enums" : "elevated Gen0 churn",
+                    },
+                },
+                Support =
+                [
+                    new EvidenceStatement([boxing.Id], $"{totalBoxedObjects:N0} boxed instances hold {InsightByteFormat.FormatBytes(totalBoxedBytes)}; {boxedEnumCount:N0} are enums."),
+                    .. gcGen is not null
+                        ? [new EvidenceStatement([gcGen.Id], $"Gen0 holds {gen0Fraction:F1}% of managed heap objects.")]
+                        : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = Counter.None("A high Gen0 share is normal for request-processing code and does not show boxing causes it."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpheap -stat",
+                        Test = "If the boxed types account for a small share of the Gen0 objects, boxing is not what drives Gen0 churn.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the boxed count is flat, the boxes are not accumulating.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Memory",
                 Severity = Severity.Info,

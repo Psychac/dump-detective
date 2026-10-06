@@ -1,4 +1,5 @@
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -82,6 +83,31 @@ internal sealed class LongHeldTransactionOnOpenConnectionInsightRule : ISynthesi
             new Claim
             {
                 Fingerprint = "insightengine::long-held-transaction-on-open-connection",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Retains,
+                    Measure = ClaimParts.Count(correlatedCount),
+                    Reference = severity == Severity.Critical
+                        ? ClaimParts.Budget(ClaimParts.Count(CriticalCount), "critical threshold")
+                        : ClaimParts.Budget(ClaimParts.Count(WarningCount), "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "open DB connections referenced by a live transaction", Mechanism = "a connection cannot return to the pool until its transaction completes" },
+                },
+                Support = [new EvidenceStatement(derivedFrom, $"{correlatedCount:N0} of {openConnectionCount:N0} open connections are referenced by a transaction object.")],
+                Counter = Counter.None("A transaction object on the heap may be in flight for a normal short request; the dump does not show how long it has been held."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!clrstack -all",
+                        Test = "If each transaction is referenced from an in-flight request frame, the transactions are short-lived work, not held.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the same transactions are gone, they were in flight, not long-held.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Infrastructure",
                 Severity = severity,

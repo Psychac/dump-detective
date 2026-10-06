@@ -214,6 +214,11 @@ system. It gates M4.
    - **Still not built (step 4 follow-ups):** the cross-claim check for near-identical `falsifiedBy` text; and the
      counter quality problem — most counters are `Counter.None` with a reason, so "none exists" is the common case
      and the plan's padding risk applies. Neither blocks step 5.
+   - **Open decision: inference confidence is unpopulated.** On the reference dump 72 of 82 claims sit at 1.0;
+     10 are lower, all from measurement limits (missing root path, estimates, heuristics, degraded analyzers).
+     73 rules still use the default `MeasurementCertain`. Counters that argue a claim may be transient or
+     heuristic do not lower confidence, so a claim can concede its own counter-evidence and still read as certain.
+     Vision § 6.4 wants measurement and inference confidence separate; only measurement is populated today.
    - **Open: intermittent test-host early stop.** One full-suite run reported 362 tests instead of ~1,700 and the
      next completed normally; the flaky `ArrayAnalyzerRetypingCharacterizationTests` failure appears most runs.
    - **Open: intermittent hang, not caused by this migration.** One real-dump run sat 42 minutes in Stage 3 inside

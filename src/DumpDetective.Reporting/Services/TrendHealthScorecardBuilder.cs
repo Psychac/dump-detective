@@ -32,7 +32,7 @@ internal static class TrendHealthScorecardBuilder
 
         // Accumulate counts per domain from current (latest) findings
         var currentCounts = new Dictionary<string, (int FindingCount, int CriticalCount, int WarningCount)>(StringComparer.Ordinal);
-        foreach (InsightFinding f in snapshots[^1].Findings)
+        foreach (Claim f in snapshots[^1].Findings)
         {
             string domain = SectionIdDomainMap.GetDomain(f.Analyzer);
             if (string.IsNullOrEmpty(domain)) continue;
@@ -45,7 +45,7 @@ internal static class TrendHealthScorecardBuilder
 
         // Also accumulate baseline counts for delta calculations
         var baselineCounts = new Dictionary<string, (int FindingCount, int CriticalCount, int WarningCount)>(StringComparer.Ordinal);
-        foreach (InsightFinding f in snapshots[0].Findings)
+        foreach (Claim f in snapshots[0].Findings)
         {
             string domain = SectionIdDomainMap.GetDomain(f.Analyzer);
             if (string.IsNullOrEmpty(domain)) continue;
@@ -238,12 +238,12 @@ internal static class TrendHealthScorecardBuilder
         return new HealthScorecard(domains, overallSeverity, trend);
     }
 
-    private static Dictionary<string, DomainSeverity> ComputeDomainSeverities(IReadOnlyList<InsightFinding> findings)
+    private static Dictionary<string, DomainSeverity> ComputeDomainSeverities(IReadOnlyList<Claim> findings)
     {
         // domain → maxSeverity among findings with at least one finding
         var map = new Dictionary<string, DomainSeverity>(StringComparer.Ordinal);
 
-        foreach (InsightFinding f in findings)
+        foreach (Claim f in findings)
         {
             string domain = SectionIdDomainMap.GetDomain(f.Analyzer);
             if (string.IsNullOrEmpty(domain)) continue;

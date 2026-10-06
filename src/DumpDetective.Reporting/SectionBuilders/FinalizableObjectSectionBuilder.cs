@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
@@ -98,7 +99,7 @@ internal sealed class FinalizableObjectSectionBuilder : SectionBuilderBase, IAna
             }
         }
 
-        // LeadFinding is derived from FinalizableObjectFindingGenerator's InsightFinding by
+        // LeadFinding is derived from FinalizableObjectFindingGenerator's Claim by
         // ReportSectionAssembler.NormalizeSectionContractSlots \u2014 see
         // docs/refactor/analyzer-pipeline-stages-and-leadfinding-dedup.md P0 fix plan.
         SectionLeadFinding? leadFinding = null;

@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
@@ -23,7 +24,7 @@ internal sealed class SegmentReservationSectionBuilder : SectionBuilderBase, IAn
         var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
-        // LeadFinding is derived from SegmentReservationFindingGenerator's InsightFinding by
+        // LeadFinding is derived from SegmentReservationFindingGenerator's Claim by
         // ReportSectionAssembler.NormalizeSectionContractSlots \u2014 see
         // docs/refactor/analyzer-pipeline-stages-and-leadfinding-dedup.md P0 fix plan.
         SectionLeadFinding? leadFinding = null;

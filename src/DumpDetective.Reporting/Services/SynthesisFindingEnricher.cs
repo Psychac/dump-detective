@@ -8,7 +8,7 @@ namespace DumpDetective.Reporting.Services;
 
 /// <summary>
 /// Runs every registered <see cref="ISynthesisRule"/> over a run's collected observations and
-/// attaches the <see cref="FindingSynthesisAdapter"/>-translated output to each analyzer's run —
+/// attaches the resulting claims to each analyzer's run —
 /// synthesis rules are the only source of analyzer findings.
 /// </summary>
 /// <remarks>
@@ -96,21 +96,20 @@ internal sealed class SynthesisFindingEnricher
 
         var lineageByFingerprint = new Dictionary<string, FindingLineage>(StringComparer.Ordinal);
         Dictionary<ObservationId, string>? analyzerByObservation = null;
-        var byAnalyzer = new Dictionary<string, List<InsightFinding>>(StringComparer.Ordinal);
+        var byAnalyzer = new Dictionary<string, List<Claim>>(StringComparer.Ordinal);
         foreach (Claim finding in findings)
         {
-            if (!byAnalyzer.TryGetValue(finding.Analyzer, out List<InsightFinding>? bucket))
+            if (!byAnalyzer.TryGetValue(finding.Analyzer, out List<Claim>? bucket))
             {
                 bucket = [];
                 byAnalyzer[finding.Analyzer] = bucket;
             }
 
-            InsightFinding insightFinding = FindingSynthesisAdapter.ToInsightFinding(finding);
-            bucket.Add(insightFinding);
+            bucket.Add(finding);
 
             analyzerByObservation ??= IndexAnalyzers(observations);
             FindingLineage lineage = FindingLineage.From(finding) with { EvidenceSources = ResolveSources(finding, analyzerByObservation) };
-            string fingerprint = insightFinding.EffectiveFingerprint;
+            string fingerprint = finding.Fingerprint;
             lineageByFingerprint[fingerprint] = lineageByFingerprint.TryGetValue(fingerprint, out FindingLineage? existing)
                 ? existing.MergeWith(lineage)
                 : lineage;
@@ -119,7 +118,7 @@ internal sealed class SynthesisFindingEnricher
         var updated = new List<AnalyzerRunResult>(runs.Count);
         foreach (AnalyzerRunResult run in runs)
         {
-            if (!byAnalyzer.Remove(run.AnalyzerName, out List<InsightFinding>? replacementFindings))
+            if (!byAnalyzer.Remove(run.AnalyzerName, out List<Claim>? replacementFindings))
             {
                 updated.Add(run);
                 continue;
@@ -128,8 +127,8 @@ internal sealed class SynthesisFindingEnricher
             updated.Add(run with { Findings = replacementFindings, FindingCount = replacementFindings.Count });
         }
 
-        var unattached = new List<InsightFinding>();
-        foreach (List<InsightFinding> bucket in byAnalyzer.Values)
+        var unattached = new List<Claim>();
+        foreach (List<Claim> bucket in byAnalyzer.Values)
             unattached.AddRange(bucket);
 
         return new SynthesisEnrichment(updated, unattached, lineageByFingerprint);
@@ -138,5 +137,5 @@ internal sealed class SynthesisFindingEnricher
 
 internal readonly record struct SynthesisEnrichment(
     IReadOnlyList<AnalyzerRunResult> Runs,
-    IReadOnlyList<InsightFinding> UnattachedFindings,
+    IReadOnlyList<Claim> UnattachedFindings,
     IReadOnlyDictionary<string, FindingLineage> LineageByFingerprint);

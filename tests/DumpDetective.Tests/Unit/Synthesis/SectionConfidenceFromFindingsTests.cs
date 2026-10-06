@@ -58,9 +58,9 @@ public sealed class SectionConfidenceFromFindingsTests
     [Fact]
     public void Assembler_DerivesBadgeFromLeastConfidentLimitedFinding()
     {
-        InsightFinding limited = MakeFinding("Duplication", 0.65, ["Sampling coverage is below 5% (1.0%)."]);
-        InsightFinding alsoLimited = MakeFinding("Other", 0.85, ["Sampling coverage is 20.0%."]);
-        InsightFinding unlimited = MakeFinding("Exact", null, []);
+        Claim limited = MakeFinding("Duplication", 0.65, ["Sampling coverage is below 5% (1.0%)."]);
+        Claim alsoLimited = MakeFinding("Other", 0.85, ["Sampling coverage is 20.0%."]);
+        Claim unlimited = MakeFinding("Exact", null, []);
         List<AnalyzerDetailSection> sections = [new AnalyzerDetailSection("String Analysis", "Strings", 0, [])];
         AnalyzerRunResult run = MakeRun([limited, alsoLimited, unlimited]);
 
@@ -153,13 +153,13 @@ public sealed class SectionConfidenceFromFindingsTests
             .Confidence.Composite.Should().BeApproximately(expected, 1e-12);
     }
 
-    private static InsightFinding MakeFinding(string title, double? score, IReadOnlyList<string> limitingFactors) =>
-        new("String Analysis", "Memory", Severity.Info, title, "evidence", "recommendation", [], ConfidenceScore: score)
-        {
-            ConfidenceLimitingFactors = limitingFactors,
-        };
+    private static Claim MakeFinding(string title, double? score, IReadOnlyList<string> limitingFactors)
+    {
+        Claim claim = ClaimFactory.Create("String Analysis", "Memory", Severity.Info, title, "evidence", "recommendation", [], confidenceScore: score);
+        return claim with { Confidence = claim.Confidence with { LimitingFactors = limitingFactors } };
+    }
 
-    private static AnalyzerRunResult MakeRun(IReadOnlyList<InsightFinding> findings) => new(
+    private static AnalyzerRunResult MakeRun(IReadOnlyList<Claim> findings) => new(
         AnalyzerName: "String Analysis",
         Status: AnalyzerExecutionStatus.Success,
         Duration: TimeSpan.Zero,

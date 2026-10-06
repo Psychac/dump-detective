@@ -41,15 +41,15 @@ public sealed class P0SmokeTests
 
     private static AnalyzerRunResult MakeRun(string name, Severity sev, string title, AnalyzerExecutionStatus status = AnalyzerExecutionStatus.Success)
     {
-        InsightFinding f = new(
-            Analyzer: name,
-            Category: "Leak",
-            Severity: sev,
-            Title: title,
-            Evidence: $"Evidence from {name}",
-            Recommendation: $"Fix from {name}",
-            Tags: [],
-            Fingerprint: $"{name}-{title}");
+        Claim f = ClaimFactory.Create(
+            analyzer: name,
+            category: "Leak",
+            severity: sev,
+            title: title,
+            narrative: $"Evidence from {name}",
+            recommendation: $"Fix from {name}",
+            tags: [],
+            fingerprint: $"{name}-{title}");
 
         GenericAnalyzerDomainResult result = new()
         {
@@ -203,15 +203,15 @@ public sealed class P0SmokeTests
     [Fact]
     public void TrendHtml_PerDumpJson_ContainsFullSingleDumpDocuments()
     {
-        InsightFinding finding = new(
-            Analyzer: "LeakAnalyzer",
-            Category: "Leaks",
-            Severity: Severity.Warning,
-            Title: "Potential leak in ServiceProvider",
-            Evidence: "50MB retained",
-            Recommendation: "Investigate retention path",
-            Tags: ["leaks"],
-            Fingerprint: "leak-sp-1");
+        Claim finding = ClaimFactory.Create(
+            analyzer: "LeakAnalyzer",
+            category: "Leaks",
+            severity: Severity.Warning,
+            title: "Potential leak in ServiceProvider",
+            narrative: "50MB retained",
+            recommendation: "Investigate retention path",
+            tags: ["leaks"],
+            fingerprint: "leak-sp-1");
 
         AnalyzerRunResult run = MakeRun("LeakAnalyzer", Severity.Warning, "Potential leak");
 

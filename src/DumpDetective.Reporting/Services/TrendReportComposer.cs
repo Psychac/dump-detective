@@ -33,12 +33,12 @@ internal sealed class TrendReportComposer(
             trendData.ResolvedFindings,
             trendData.SeverityChanges);
 
-        var trendFindings = new List<InsightFinding>();
-        foreach (InsightFinding f in BuildTrendFindings(trendData.Overall, lifecycle))
+        var trendFindings = new List<Claim>();
+        foreach (Claim f in BuildTrendFindings(trendData.Overall, lifecycle))
             trendFindings.Add(f);
-        foreach (InsightFinding f in BuildTopRegressionFindings(trendData.Overall))
+        foreach (Claim f in BuildTopRegressionFindings(trendData.Overall))
             trendFindings.Add(f);
-        foreach (InsightFinding f in BuildTopImprovementFindings(trendData.Overall))
+        foreach (Claim f in BuildTopImprovementFindings(trendData.Overall))
             trendFindings.Add(f);
 
         AnalysisReportDocument baseDoc = _serializer.SerializeBaseProjection(dumpPath, currentRuns, elapsed, currentIncidentContext);
@@ -63,10 +63,10 @@ internal sealed class TrendReportComposer(
         if (trendData.Snapshots.Count >= 1)
         {
             var baselineSeverityByFingerprint = trendData.Snapshots[0].Findings
-                .GroupBy(f => f.EffectiveFingerprint, StringComparer.Ordinal)
+                .GroupBy(f => f.Fingerprint, StringComparer.Ordinal)
                 .ToDictionary(g => g.Key, g => g.First().Severity.ToString(), StringComparer.Ordinal);
 
-            var newFingerprints = new HashSet<string>(trendData.NewFindings.Select(f => f.EffectiveFingerprint), StringComparer.Ordinal);
+            var newFingerprints = new HashSet<string>(trendData.NewFindings.Select(f => f.Fingerprint), StringComparer.Ordinal);
 
             for (int i = 0; i < mappedFindings.Length; i++)
             {
@@ -189,7 +189,7 @@ internal sealed class TrendReportComposer(
 
     // ── Trend findings ────────────────────────────────────────────────────────
 
-    private static IReadOnlyList<InsightFinding> BuildTopRegressionFindings(IReadOnlyList<AnalyzerTrendResult> overall)
+    private static IReadOnlyList<Claim> BuildTopRegressionFindings(IReadOnlyList<AnalyzerTrendResult> overall)
     {
         var collected = new List<(string Analyzer, MetricDelta Delta)>();
         foreach (var r in overall)
@@ -203,7 +203,7 @@ internal sealed class TrendReportComposer(
             .Take(8)
             .ToArray();
 
-        List<InsightFinding> findings = new(topRegressions.Length);
+        List<Claim> findings = new(topRegressions.Length);
         foreach (var (analyzerName, delta) in topRegressions)
         {
             string scopeSuffix = string.IsNullOrWhiteSpace(delta.Scope) ? string.Empty : $" ({delta.Scope})";
@@ -211,27 +211,27 @@ internal sealed class TrendReportComposer(
                 ? $"{(delta.DeltaPercent.Value >= 0 ? "+" : string.Empty)}{delta.DeltaPercent.Value:F1}%"
                 : $"{(delta.Delta >= 0 ? "+" : string.Empty)}{delta.Delta:F1} {delta.Unit}";
 
-            findings.Add(new InsightFinding(
-                Analyzer: "TrendAnalyzer",
-                Category: "Comparison",
-                Severity: delta.Severity switch
+            findings.Add(ClaimFactory.Create(
+                analyzer: "TrendAnalyzer",
+                category: "Comparison",
+                severity: delta.Severity switch
                 {
                     RegressionSeverity.Severe => Severity.Critical,
                     RegressionSeverity.Moderate => Severity.Warning,
                     _ => Severity.Info
                 },
-                Title: $"Trend regression: {analyzerName} / {delta.Key}{scopeSuffix}",
-                Evidence: $"Metric moved from {FormatHelper.FormatMetricValue(delta.Baseline, delta.Unit)} to {FormatHelper.FormatMetricValue(delta.Current, delta.Unit)} ({deltaText}).",
-                Recommendation: "Prioritize this regression in the trend timeline and correlate with dump-to-dump finding lifecycle changes.",
-                Tags: new[] { "trend", "regression", analyzerName, BuildMetricIdentityToken(delta) },
-                MetricValue: delta.DeltaPercent ?? delta.Delta,
-                MetricUnit: delta.DeltaPercent.HasValue ? "%" : delta.Unit));
+                title: $"Trend regression: {analyzerName} / {delta.Key}{scopeSuffix}",
+                narrative: $"Metric moved from {FormatHelper.FormatMetricValue(delta.Baseline, delta.Unit)} to {FormatHelper.FormatMetricValue(delta.Current, delta.Unit)} ({deltaText}).",
+                recommendation: "Prioritize this regression in the trend timeline and correlate with dump-to-dump finding lifecycle changes.",
+                tags: new[] { "trend", "regression", analyzerName, BuildMetricIdentityToken(delta) },
+                metricValue: delta.DeltaPercent ?? delta.Delta,
+                metricUnit: delta.DeltaPercent.HasValue ? "%" : delta.Unit));
         }
 
         return findings;
     }
 
-    private static IReadOnlyList<InsightFinding> BuildTopImprovementFindings(IReadOnlyList<AnalyzerTrendResult> overall)
+    private static IReadOnlyList<Claim> BuildTopImprovementFindings(IReadOnlyList<AnalyzerTrendResult> overall)
     {
         var collectedImprovements = new List<(string Analyzer, MetricDelta Delta)>();
         foreach (var r in overall)
@@ -245,7 +245,7 @@ internal sealed class TrendReportComposer(
             .Take(5)
             .ToArray();
 
-        List<InsightFinding> findings = new(topImprovements.Length);
+        List<Claim> findings = new(topImprovements.Length);
         foreach (var (analyzerName, delta) in topImprovements)
         {
             string scopeSuffix = string.IsNullOrWhiteSpace(delta.Scope) ? string.Empty : $" ({delta.Scope})";
@@ -253,22 +253,22 @@ internal sealed class TrendReportComposer(
                 ? $"{(delta.DeltaPercent.Value >= 0 ? "+" : string.Empty)}{delta.DeltaPercent.Value:F1}%"
                 : $"{(delta.Delta >= 0 ? "+" : string.Empty)}{delta.Delta:F1} {delta.Unit}";
 
-            findings.Add(new InsightFinding(
-                Analyzer: "TrendAnalyzer",
-                Category: "Comparison",
-                Severity: Severity.Info,
-                Title: $"Trend improvement: {analyzerName} / {delta.Key}{scopeSuffix}",
-                Evidence: $"Metric moved from {FormatHelper.FormatMetricValue(delta.Baseline, delta.Unit)} to {FormatHelper.FormatMetricValue(delta.Current, delta.Unit)} ({deltaText}).",
-                Recommendation: "Validate this improvement is stable across subsequent snapshots before closing related investigations.",
-                Tags: new[] { "trend", "improvement", analyzerName, BuildMetricIdentityToken(delta) },
-                MetricValue: delta.DeltaPercent ?? delta.Delta,
-                MetricUnit: delta.DeltaPercent.HasValue ? "%" : delta.Unit));
+            findings.Add(ClaimFactory.Create(
+                analyzer: "TrendAnalyzer",
+                category: "Comparison",
+                severity: Severity.Info,
+                title: $"Trend improvement: {analyzerName} / {delta.Key}{scopeSuffix}",
+                narrative: $"Metric moved from {FormatHelper.FormatMetricValue(delta.Baseline, delta.Unit)} to {FormatHelper.FormatMetricValue(delta.Current, delta.Unit)} ({deltaText}).",
+                recommendation: "Validate this improvement is stable across subsequent snapshots before closing related investigations.",
+                tags: new[] { "trend", "improvement", analyzerName, BuildMetricIdentityToken(delta) },
+                metricValue: delta.DeltaPercent ?? delta.Delta,
+                metricUnit: delta.DeltaPercent.HasValue ? "%" : delta.Unit));
         }
 
         return findings;
     }
 
-    private static List<InsightFinding> BuildTrendFindings(
+    private static List<Claim> BuildTrendFindings(
         IReadOnlyList<AnalyzerTrendResult> overall,
         FindingLifecycleResult lifecycle)
     {
@@ -279,28 +279,28 @@ internal sealed class TrendReportComposer(
             ? Severity.Info
             : lifecycle.NewFindings.Select(f => f.Severity).OrderByDescending(s => s).First();
 
-        return new List<InsightFinding>
+        return new List<Claim>
         {
-            new(
-                Analyzer: "TrendAnalyzer",
-                Category: "Comparison",
-                Severity: lifecycleSeverity,
-                Title: "Trend finding lifecycle summary",
-                Evidence: $"New {lifecycle.NewFindings.Count}, Persistent {lifecycle.PersistentFindings.Count}, Resolved {lifecycle.ResolvedFindings.Count}",
-                Recommendation: "Focus first on new and persistent high-severity findings.",
-                Tags: new[] { "trend", "lifecycle", "comparison" },
-                MetricValue: lifecycle.NewFindings.Count - lifecycle.ResolvedFindings.Count,
-                MetricUnit: "net-findings"),
-            new(
-                Analyzer: "TrendAnalyzer",
-                Category: "Comparison",
-                Severity: regressionSeverity,
-                Title: "Trend metric regression summary",
-                Evidence: $"{topRegressions} metric regression(s) across {overall.Count} analyzer(s) compared.",
-                Recommendation: topRegressions > 0
+            ClaimFactory.Create(
+                analyzer: "TrendAnalyzer",
+                category: "Comparison",
+                severity: lifecycleSeverity,
+                title: "Trend finding lifecycle summary",
+                narrative: $"New {lifecycle.NewFindings.Count}, Persistent {lifecycle.PersistentFindings.Count}, Resolved {lifecycle.ResolvedFindings.Count}",
+                recommendation: "Focus first on new and persistent high-severity findings.",
+                tags: new[] { "trend", "lifecycle", "comparison" },
+                metricValue: lifecycle.NewFindings.Count - lifecycle.ResolvedFindings.Count,
+                metricUnit: "net-findings"),
+            ClaimFactory.Create(
+                analyzer: "TrendAnalyzer",
+                category: "Comparison",
+                severity: regressionSeverity,
+                title: "Trend metric regression summary",
+                narrative: $"{topRegressions} metric regression(s) across {overall.Count} analyzer(s) compared.",
+                recommendation: topRegressions > 0
                     ? "Review per-analyzer metric regressions in the trend comparison section."
                     : "No metric regressions detected across compared analyzers.",
-                Tags: new[] { "trend", "metrics", "comparison" })
+                tags: new[] { "trend", "metrics", "comparison" })
         };
     }
 
@@ -459,7 +459,7 @@ internal sealed class TrendReportComposer(
     }
 
     private static FindingRecord MapTrendFinding(
-        InsightFinding finding,
+        Claim finding,
         int? snapshotIndex,
         Dictionary<string, MetricDelta> regressionLookup)
     {
@@ -518,12 +518,12 @@ internal sealed class TrendReportComposer(
             ? delta.Key
             : delta.Key + "\u001f" + delta.Scope;
 
-    private static FindingRecord MapFinding(InsightFinding finding, int? snapshotIndex = null)
+    private static FindingRecord MapFinding(Claim finding, int? snapshotIndex = null)
     {
-        IReadOnlyList<string>? details = SplitLines(finding.Evidence);
+        IReadOnlyList<string>? details = SplitLines(finding.Narrative);
 
         return new FindingRecord(
-            Id: finding.EffectiveFingerprint,
+            Id: finding.Fingerprint,
             Analyzer: finding.Analyzer,
             Category: finding.Category,
             Severity: finding.Severity.ToString(),
@@ -532,8 +532,8 @@ internal sealed class TrendReportComposer(
             Recommendation: finding.Recommendation,
             Tags: finding.Tags)
         {
-            Confidence = finding.ConfidenceScore,
-            Caveats = finding.EffectiveCaveats.Count > 0 ? finding.EffectiveCaveats : null,
+            Confidence = finding.ReportConfidence(),
+            Caveats = finding.Caveats.Count > 0 ? finding.Caveats : null,
             Refs = new[]
             {
                 new EvidenceRef(
@@ -564,7 +564,7 @@ internal sealed record TrendReportData(
     IReadOnlyList<AnalyzerMetricTimeline> Timeline,
     IReadOnlyList<AnalyzerMetricTimeline> ScopedTimeline,
     IReadOnlyList<AnalysisSnapshot> Snapshots,
-    IReadOnlyList<InsightFinding> NewFindings,
-    IReadOnlyList<InsightFinding> PersistentFindings,
-    IReadOnlyList<InsightFinding> ResolvedFindings,
+    IReadOnlyList<Claim> NewFindings,
+    IReadOnlyList<Claim> PersistentFindings,
+    IReadOnlyList<Claim> ResolvedFindings,
     IReadOnlyList<FindingSeverityChange> SeverityChanges);

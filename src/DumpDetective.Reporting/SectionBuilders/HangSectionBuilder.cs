@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Analysis.Utilities;
 using DumpDetective.Core.Enums;
@@ -30,7 +31,7 @@ internal sealed class HangSectionBuilder : SectionBuilderBase, IAnalyzerSectionB
         var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>();
 
-        // LeadFinding is derived from HangFindingGenerator's InsightFinding by
+        // LeadFinding is derived from HangFindingGenerator's Claim by
         // ReportSectionAssembler.NormalizeSectionContractSlots — see
         // docs/refactor/analyzer-pipeline-stages-and-leadfinding-dedup.md P0 fix plan.
         SectionLeadFinding? leadFinding = null;

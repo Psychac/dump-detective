@@ -5,13 +5,13 @@ using DumpDetective.Core.Models;
 namespace DumpDetective.Reporting.Trend;
 
 internal sealed record FindingLifecycleResult(
-    IReadOnlyList<InsightFinding> NewFindings,
-    IReadOnlyList<InsightFinding> PersistentFindings,
-    IReadOnlyList<InsightFinding> ResolvedFindings,
+    IReadOnlyList<Claim> NewFindings,
+    IReadOnlyList<Claim> PersistentFindings,
+    IReadOnlyList<Claim> ResolvedFindings,
     IReadOnlyList<FindingSeverityChange> SeverityChanges);
 
 /// <summary>
-/// A persistent finding (same <see cref="InsightFinding.EffectiveFingerprint"/> in both snapshots)
+/// A persistent finding (same <see cref="Claim.Fingerprint"/> in both snapshots)
 /// whose severity differs between them — in either direction, not just escalation. Consolidates
 /// what used to be three separate hand-rolled fingerprint joins doing the same Warning→Critical-only
 /// check: <c>TrendRegressionDashboardBuilder.BuildSeverityEscalations</c>,
@@ -19,7 +19,7 @@ internal sealed record FindingLifecycleResult(
 /// growth-rather-than-severity case) <c>TrendAnalyzer.ComputeNewLeakSignals</c>. One generic
 /// mechanism, computed once here.
 /// </summary>
-internal sealed record FindingSeverityChange(InsightFinding Current, Severity BaselineSeverity)
+internal sealed record FindingSeverityChange(Claim Current, Severity BaselineSeverity)
 {
     public bool IsEscalation => (int)Current.Severity > (int)BaselineSeverity;
 }
@@ -29,19 +29,19 @@ internal static class FindingLifecycleComparer
     public static FindingLifecycleResult Compare(AnalysisSnapshot baseline, AnalysisSnapshot current)
     {
         var baselineByKey = baseline.Findings
-            .GroupBy(f => f.EffectiveFingerprint, StringComparer.Ordinal)
+            .GroupBy(f => f.Fingerprint, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
 
         var currentByKey = current.Findings
-            .GroupBy(f => f.EffectiveFingerprint, StringComparer.Ordinal)
+            .GroupBy(f => f.Fingerprint, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
 
         var allKeys = new HashSet<string>(baselineByKey.Keys, StringComparer.Ordinal);
         allKeys.UnionWith(currentByKey.Keys);
 
-        var newFindings = new List<InsightFinding>();
-        var persistentFindings = new List<InsightFinding>();
-        var resolvedFindings = new List<InsightFinding>();
+        var newFindings = new List<Claim>();
+        var persistentFindings = new List<Claim>();
+        var resolvedFindings = new List<Claim>();
         var severityChanges = new List<FindingSeverityChange>();
 
         foreach (string key in allKeys)
@@ -55,8 +55,8 @@ internal static class FindingLifecycleComparer
             }
             else if (inCurrent && inBaseline)
             {
-                InsightFinding currentFinding = currentByKey[key];
-                InsightFinding baselineFinding = baselineByKey[key];
+                Claim currentFinding = currentByKey[key];
+                Claim baselineFinding = baselineByKey[key];
                 persistentFindings.Add(currentFinding);
 
                 if (currentFinding.Severity != baselineFinding.Severity)

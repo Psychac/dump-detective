@@ -1,4 +1,5 @@
-﻿using DumpDetective.Analysis.Models;
+﻿using DumpDetective.Sdk.Synthesis;
+using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
@@ -88,7 +89,7 @@ internal sealed class HeapTopologySectionBuilder : SectionBuilderBase, IAnalyzer
                     Cell(heap.SegmentCount.ToString("N0"), heap.SegmentCount)));
             }
             compactTables.Add(STCompact("Per logical heap", new[] { CH("Heap"), CH("Committed Bytes","bytes"), CH("% of Total", "number", "percent"), CH("Objects","number"), CH("Segments","number") }, rows.Select(r => R(r.Cells.Select(c => (object?)(c.RawValue ?? (object?)c.Display)).ToArray())).ToArray()));
-            // Skew is reported as a proper InsightFinding by HeapTopologyFindingGenerator (severity,
+            // Skew is reported as a proper Claim by HeapTopologyFindingGenerator (severity,
             // tags, MetricValue, trend-tracked) instead of an inline text block here.
         }
 

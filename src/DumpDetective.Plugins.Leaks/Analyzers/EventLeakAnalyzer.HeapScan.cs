@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Analysis.Analyzers.Leaks.EventLeak;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Indexing;
@@ -49,7 +50,7 @@ namespace DumpDetective.Analysis.Analyzers.Leaks;
 /// <b>Dropped, not ported</b>: <c>HasDelegateFields(ClrType)</c>, <c>MergeAccumulatorEntry</c>, and
 /// <c>IsFieldBackedDelegate</c> -- all three were dead code with zero callers anywhere in the
 /// codebase (confirmed by search, not assumed) even before this retyping. <c>AddFindings</c>
-/// (an <c>InsightFinding</c> builder) was likewise dead -- defined but never invoked from
+/// (an <c>Claim</c> builder) was likewise dead -- defined but never invoked from
 /// <c>AnalyzeAsync</c> or anywhere else.
 /// </remarks>
 public sealed partial class EventLeakAnalyzer : IHeapIndexScanParticipant, IRequiresReachableGraphIndex, IRequiresDominatorTreeIndex, ICustomizesAnalysisContext

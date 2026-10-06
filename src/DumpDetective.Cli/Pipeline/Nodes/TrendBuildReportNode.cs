@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Analysis.Trend;
 using DumpDetective.Cli.Execution;
 using DumpDetective.Core.Abstractions;
@@ -97,7 +98,7 @@ internal sealed class TrendBuildReportNode(
     private static AnalysisSnapshot BuildSnapshot(int index, TrendDumpExecution execution)
     {
         Dictionary<string, AnalyzerDomainResult> domains = new(StringComparer.Ordinal);
-        var findings = new List<InsightFinding>();
+        var findings = new List<Claim>();
 
         foreach (AnalyzerRunResult run in execution.Runs)
         {

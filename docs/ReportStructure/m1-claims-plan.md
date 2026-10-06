@@ -272,20 +272,20 @@ system. It gates M4.
      - **Known gap, accepted for now:** Why-block support lines carry no link on this card (their source is the
        card's own analyzer, and "Investigate" already goes to that section). Per-observation navigation needs
        observations in the page, which belongs to M4.
-6. **Retire `InsightFinding` and `FindingSynthesisAdapter`** *(in progress — 6a done 2026-10-06)*.
+6. **Retire `InsightFinding` and `FindingSynthesisAdapter`** *(done 2026-10-06)*.
    - **6a done:** `Core` now references `Sdk` (decided 2026-10-06: Core is leftover report-side models shrinking
      toward Sdk, Sdk depends on nothing so no cycle; dissolving Core is a separate, unscheduled job). Core's
      `FindingSeverity` is deleted and every use is the Sdk's `Severity` (identical members); 39 files, behavior
      unchanged, suite green.
-   - **6b pending:** `AnalyzerRunResult.Findings` and the report pipeline carry `Claim`. Sized: `InsightFinding` in ~25
-     Reporting files, Cli, one Leaks analyzer, ~12 test files; 56 typed finding lists; ~50 `.Evidence` reads
-     (becomes `Narrative`); ~25 `ConfidenceScore` reads (becomes `Confidence.Composite`).
-     Open questions for 6b: `EvidenceTables` has no production producer (one test) so it is dropped with its
-     `InsightsSectionBuilder` rendering; trend findings are built in `TrendReportComposer` without observation
-     lineage and need a `Claim` form (empty `DerivedFrom`); `InsightFinding` falls back to severity-based confidence
-     (0.9 / 0.7 / 0.5) where `Claim` always has a breakdown, which changes shown confidence for those findings.
-   - Trend and action consumers read `Claim`; fingerprints unchanged so trend identity holds.
-   - Done when `InsightFinding` has zero references.
+   - **6b done:** `AnalyzerRunResult.Findings` and the report pipeline carry `Claim`; `InsightFinding`,
+     `FindingEvidenceTable` and `FindingSynthesisAdapter` are deleted.
+     - Evidence tables dropped (no production producer), with their `InsightsSectionBuilder` rendering and test.
+     - Trend/test/benchmark claims are built by `ClaimFactory` with empty `DerivedFrom`.
+     - Shown confidence is **unchanged** (deliberate deviation from "accept the confidence change"):
+       `ClaimReportExtensions.ReportConfidence()` keeps the adapter's rule (composite if < 1.0, else the severity
+       default 0.9 / 0.7 / 0.5). Changing shown confidence stays a separate decision (see inference confidence).
+   - Fingerprints unchanged so trend identity holds. `FindingLineage` is now redundant (claims carry the fields)
+     and can be simplified later.
 
 ## Adjacent milestones — state today
 

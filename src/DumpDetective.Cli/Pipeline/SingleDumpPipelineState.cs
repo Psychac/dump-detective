@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Analysis.Cache;
 using DumpDetective.Analysis.Dump;
 using DumpDetective.Analysis.Indexing;
@@ -59,7 +60,7 @@ internal sealed class SingleDumpPipelineState : IDisposable
     /// Cross-analyzer synthesis findings that belong to no single analyzer run — see
     /// <see cref="DumpDetective.Reporting.Services.SynthesisEnrichment.UnattachedFindings"/>.
     /// </summary>
-    public IReadOnlyList<InsightFinding> Insights { get; set; } = [];
+    public IReadOnlyList<Claim> Insights { get; set; } = [];
 
     /// <summary>Observation lineage and confidence breakdown per finding fingerprint, for the report document.</summary>
     public IReadOnlyDictionary<string, DumpDetective.Reporting.Models.FindingLineage> FindingLineage { get; set; }

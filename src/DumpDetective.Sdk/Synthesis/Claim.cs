@@ -46,7 +46,7 @@ public sealed record Claim
     public RuleRef? Rule { get; init; }
 
     /// <summary>
-    /// Mirror <c>Core.Models.InsightFinding</c>'s <c>Analyzer</c>/<c>Category</c>/<c>Tags</c>/
+    /// Mirror <c>Core.Models.Claim</c>'s <c>Analyzer</c>/<c>Category</c>/<c>Tags</c>/
     /// <c>MetricValue</c>/<c>MetricUnit</c> — added 2026-09-18 during Phase 5 step 2's first real
     /// rule migration (<c>ArraySynthesisRule</c>), not speculatively: the report pipeline reads all
     /// five today (<c>ActionPriorityService</c>/<c>CorrelationBuilder</c> group and score by

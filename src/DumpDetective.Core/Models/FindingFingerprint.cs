@@ -1,10 +1,11 @@
-﻿using System.Text;
+﻿using DumpDetective.Sdk.Synthesis;
+using System.Text;
 
 namespace DumpDetective.Core.Models;
 
 internal static class FindingFingerprint
 {
-    public static string Build(InsightFinding finding)
+    public static string Build(Claim finding)
     {
         return Build(finding.Analyzer, finding.Category, finding.Title, finding.Tags);
     }

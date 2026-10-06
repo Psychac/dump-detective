@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using System.Linq;
 
 using DumpDetective.Core.Models;
@@ -6,17 +7,17 @@ using DumpDetective.Reporting.Models;
 namespace DumpDetective.Reporting.Services;
 
 /// <summary>
-/// Maps <see cref="InsightFinding"/> → <see cref="FindingRecord"/>, attaching evidence refs
+/// Maps <see cref="Claim"/> → <see cref="FindingRecord"/>, attaching evidence refs
 /// derived from artifacts and tag-based metric keys.
 /// </summary>
 internal static class ReportFindingMapper
 {
-    public static FindingRecord MapFinding(InsightFinding f, IReadOnlyList<ReportArtifact>? artifacts = null, int? snapshotIndex = null)
+    public static FindingRecord MapFinding(Claim f, IReadOnlyList<ReportArtifact>? artifacts = null, int? snapshotIndex = null)
     {
-        IReadOnlyList<string>? details = SplitLines(f.Evidence);
+        IReadOnlyList<string>? details = SplitLines(f.Narrative);
 
         return new(
-            Id: f.EffectiveFingerprint,
+            Id: f.Fingerprint,
             Analyzer: f.Analyzer,
             Category: f.Category,
             Severity: f.Severity.ToString(),
@@ -27,12 +28,12 @@ internal static class ReportFindingMapper
         {
             Confidence = BuildConfidenceScore(f),
             Refs = BuildEvidenceRefs(f, artifacts, snapshotIndex),
-            Caveats = f.EffectiveCaveats.Count > 0 ? f.EffectiveCaveats : null
+            Caveats = f.Caveats.Count > 0 ? f.Caveats : null
         };
     }
 
     private static IReadOnlyList<EvidenceRef> BuildEvidenceRefs(
-        InsightFinding finding,
+        Claim finding,
         IReadOnlyList<ReportArtifact>? artifacts,
         int? snapshotIndex)
     {
@@ -64,7 +65,7 @@ internal static class ReportFindingMapper
         };
     }
 
-    private static string? BuildMetricKey(InsightFinding finding)
+    private static string? BuildMetricKey(Claim finding)
     {
         for (int i = 0; i < finding.Tags.Count; i++)
         {
@@ -86,5 +87,5 @@ internal static class ReportFindingMapper
         return parts.Length == 0 ? null : parts;
     }
 
-    private static double BuildConfidenceScore(InsightFinding finding) => finding.EffectiveConfidenceScore;
+    private static double BuildConfidenceScore(Claim finding) => finding.ReportConfidence();
 }

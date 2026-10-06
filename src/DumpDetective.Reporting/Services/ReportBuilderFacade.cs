@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
@@ -76,7 +77,7 @@ internal sealed class ReportBuilderFacade(
         IReadOnlyList<AnalyzerRunResult> runs,
         TimeSpan elapsed,
         AnalysisIncidentContext? incidentContext = null,
-        IReadOnlyList<InsightFinding>? additionalFindings = null,
+        IReadOnlyList<Claim>? additionalFindings = null,
         IReadOnlyDictionary<string, FindingLineage>? lineageByFingerprint = null)
         => _serializer.Serialize(dumpPath, runs, elapsed, _analyzerBuilders, _reportBuilders, incidentContext, additionalFindings, lineageByFingerprint);
 

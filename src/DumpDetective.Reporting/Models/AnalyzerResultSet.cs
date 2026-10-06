@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Core.Models;
 
 namespace DumpDetective.Reporting.Models;
@@ -5,13 +6,13 @@ namespace DumpDetective.Reporting.Models;
 internal sealed class AnalyzerResultSet
 {
     private readonly IReadOnlyList<AnalyzerRunResult> _runs;
-    private readonly IReadOnlyList<InsightFinding> _additionalFindings;
+    private readonly IReadOnlyList<Claim> _additionalFindings;
     private readonly Dictionary<Type, AnalyzerDomainResult?> _cache = new();
 
     public AnalyzerResultSet(
         IReadOnlyList<AnalyzerRunResult> runs,
         AnalysisIncidentContext? incidentContext = null,
-        IReadOnlyList<InsightFinding>? additionalFindings = null)
+        IReadOnlyList<Claim>? additionalFindings = null)
     {
         _runs = runs;
         IncidentContext = incidentContext;
@@ -42,9 +43,9 @@ internal sealed class AnalyzerResultSet
 
     public IReadOnlyList<AnalyzerRunResult> AllRuns => _runs;
 
-    public IReadOnlyList<InsightFinding> AllFindingsSorted()
+    public IReadOnlyList<Claim> AllFindingsSorted()
     {
-        List<InsightFinding> all = [];
+        List<Claim> all = [];
 
         foreach (AnalyzerRunResult run in _runs)
         {

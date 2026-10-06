@@ -83,15 +83,15 @@ public class ReportingHotspotBenchmark
             string fingerprint = $"dup-{i % 50}";
             string longValue = "VeryLongTypeName_" + new string('X', 120) + i;
 
-            InsightFinding finding = new(
-                Analyzer: $"Analyzer-{i % 10}",
-                Category: "Leak",
-                Severity: i % 7 == 0 ? Severity.Warning : Severity.Info,
-                Title: "Duplicate candidate finding",
-                Evidence: $"Evidence {i} {longValue}",
-                Recommendation: "Review ownership and remove stale references.",
-                    Tags: new[] { "benchmark", "duplicate" },
-                Fingerprint: fingerprint);
+            Claim finding = ClaimFactory.Create(
+                analyzer: $"Analyzer-{i % 10}",
+                category: "Leak",
+                severity: i % 7 == 0 ? Severity.Warning : Severity.Info,
+                title: "Duplicate candidate finding",
+                narrative: $"Evidence {i} {longValue}",
+                recommendation: "Review ownership and remove stale references.",
+                    tags: new[] { "benchmark", "duplicate" },
+                fingerprint: fingerprint);
 
             GenericAnalyzerDomainResult result = new()
             {
@@ -125,9 +125,9 @@ public class ReportingHotspotBenchmark
         List<AnalyzerTrendResult> overall = new(10);
         List<AnalyzerMetricTimeline> timeline = new(10);
         List<AnalyzerMetricTimeline> scopedTimeline = new(10);
-        List<InsightFinding> newFindings = new();
-        List<InsightFinding> persistentFindings = new();
-        List<InsightFinding> resolvedFindings = new();
+        List<Claim> newFindings = new();
+        List<Claim> persistentFindings = new();
+        List<Claim> resolvedFindings = new();
 
         for (int analyzerIndex = 0; analyzerIndex < 10; analyzerIndex++)
         {
@@ -154,25 +154,25 @@ public class ReportingHotspotBenchmark
                     new MetricTimelinePoint("type.count", "objects", MetricTrendDirection.HigherIsWorse, Enumerable.Range(0, snapshotCount).Select(i => (double)(2_000 + analyzerIndex + i * 30)).ToArray(), Scope: "System.String")
                 }));
 
-            newFindings.Add(new InsightFinding(
-                Analyzer: analyzerName,
-                Category: "Trend",
-                Severity: Severity.Warning,
-                Title: $"New trend finding {analyzerIndex}",
-                Evidence: "Synthetic trend evidence.",
-                Recommendation: "Inspect the synthetic trend signal.",
-                Tags: ["trend", "benchmark"],
-                Fingerprint: $"trend-new-{analyzerIndex}"));
+            newFindings.Add(ClaimFactory.Create(
+                analyzer: analyzerName,
+                category: "Trend",
+                severity: Severity.Warning,
+                title: $"New trend finding {analyzerIndex}",
+                narrative: "Synthetic trend evidence.",
+                recommendation: "Inspect the synthetic trend signal.",
+                tags: ["trend", "benchmark"],
+                fingerprint: $"trend-new-{analyzerIndex}"));
 
-            persistentFindings.Add(new InsightFinding(
-                Analyzer: analyzerName,
-                Category: "Trend",
-                Severity: Severity.Info,
-                Title: $"Persistent trend finding {analyzerIndex}",
-                Evidence: "Synthetic persistent evidence.",
-                Recommendation: "Track the synthetic trend signal.",
-                Tags: ["trend", "benchmark"],
-                Fingerprint: $"trend-persistent-{analyzerIndex}"));
+            persistentFindings.Add(ClaimFactory.Create(
+                analyzer: analyzerName,
+                category: "Trend",
+                severity: Severity.Info,
+                title: $"Persistent trend finding {analyzerIndex}",
+                narrative: "Synthetic persistent evidence.",
+                recommendation: "Track the synthetic trend signal.",
+                tags: ["trend", "benchmark"],
+                fingerprint: $"trend-persistent-{analyzerIndex}"));
         }
 
         for (int snapshotIndex = 0; snapshotIndex < snapshotCount; snapshotIndex++)
@@ -194,7 +194,7 @@ public class ReportingHotspotBenchmark
                     Result: result,
                     ErrorMessage: null,
                     ErrorType: null,
-                    Findings: Array.Empty<InsightFinding>(),
+                    Findings: Array.Empty<Claim>(),
                     FindingCount: 0,
                     WarningCount: 0,
                     Diagnostics: new AnalyzerExecutionDiagnostics(

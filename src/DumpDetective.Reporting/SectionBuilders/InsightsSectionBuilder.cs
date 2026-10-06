@@ -17,7 +17,7 @@ internal sealed class InsightsSectionBuilder : SectionBuilderBase, IReportSectio
 
     public AnalyzerDetailSection Build(AnalyzerResultSet results)
     {
-        IReadOnlyList<InsightFinding> findings = GetCrossDomainFindings(results);
+        IReadOnlyList<Claim> findings = GetCrossDomainFindings(results);
 
         int criticalCount = 0;
         int warningCount = 0;
@@ -25,7 +25,7 @@ internal sealed class InsightsSectionBuilder : SectionBuilderBase, IReportSectio
 
         for (int i = 0; i < findings.Count; i++)
         {
-            InsightFinding finding = findings[i];
+            Claim finding = findings[i];
             switch (finding.Severity)
             {
                 case Severity.Critical:
@@ -36,12 +36,11 @@ internal sealed class InsightsSectionBuilder : SectionBuilderBase, IReportSectio
                     break;
             }
 
-            confidenceSum += finding.EffectiveConfidenceScore;
+            confidenceSum += finding.ReportConfidence();
         }
 
         double averageConfidence = findings.Count == 0 ? 0.0 : confidenceSum / findings.Count;
 
-        var compactTables = new List<CompactTable>();
         var blocks = new List<SectionBlock>
         {
             H("RANKED FINDINGS"),
@@ -63,16 +62,16 @@ internal sealed class InsightsSectionBuilder : SectionBuilderBase, IReportSectio
 
             for (int i = 0; i < findings.Count; i++)
             {
-                InsightFinding finding = findings[i];
+                Claim finding = findings[i];
                 blocks.Add(CollapseBegin($"[{i + 1}] {finding.Severity}: {finding.Title}"));
                 blocks.Add(M("Analyzer", string.IsNullOrWhiteSpace(finding.Analyzer) ? "n/a" : finding.Analyzer));
                 blocks.Add(M("Category", string.IsNullOrWhiteSpace(finding.Category) ? "n/a" : finding.Category));
-                blocks.Add(M("Confidence", finding.EffectiveConfidenceScore.ToString("F2"), (long)Math.Round(finding.EffectiveConfidenceScore * 100)));
-                blocks.Add(T(FormatText("Evidence", finding.Evidence)));
+                blocks.Add(M("Confidence", finding.ReportConfidence().ToString("F2"), (long)Math.Round(finding.ReportConfidence() * 100)));
+                blocks.Add(T(FormatText("Evidence", finding.Narrative)));
                 blocks.Add(T(FormatText("Recommendation", finding.Recommendation)));
 
-                if (finding.EffectiveCaveats.Count > 0)
-                    blocks.Add(T(FormatText("Caveats", string.Join(" ", finding.EffectiveCaveats))));
+                if (finding.Caveats.Count > 0)
+                    blocks.Add(T(FormatText("Caveats", string.Join(" ", finding.Caveats))));
 
                 if (finding.Tags is { Count: > 0 })
                 {
@@ -80,9 +79,6 @@ internal sealed class InsightsSectionBuilder : SectionBuilderBase, IReportSectio
                     for (int tagIndex = 0; tagIndex < finding.Tags.Count; tagIndex++)
                         blocks.Add(Li(finding.Tags[tagIndex]));
                 }
-
-                for (int tableIndex = 0; tableIndex < finding.EffectiveEvidenceTables.Count; tableIndex++)
-                    compactTables.Add(ToCompactTable(i + 1, finding.EffectiveEvidenceTables[tableIndex]));
 
                 blocks.Add(CollapseEnd());
 
@@ -97,18 +93,17 @@ internal sealed class InsightsSectionBuilder : SectionBuilderBase, IReportSectio
             SortOrder: SortOrder,
             Blocks: blocks,
             SectionId: SectionId,
-            Domain: "CrossDomain",
-            CompactTables: compactTables.Count > 0 ? compactTables : null);
+            Domain: "CrossDomain");
     }
 
-    private static IReadOnlyList<InsightFinding> GetCrossDomainFindings(AnalyzerResultSet results)
+    private static IReadOnlyList<Claim> GetCrossDomainFindings(AnalyzerResultSet results)
     {
-        IReadOnlyList<InsightFinding> allFindings = results.AllFindingsSorted();
-        var crossDomain = new List<InsightFinding>();
+        IReadOnlyList<Claim> allFindings = results.AllFindingsSorted();
+        var crossDomain = new List<Claim>();
 
         for (int i = 0; i < allFindings.Count; i++)
         {
-            InsightFinding finding = allFindings[i];
+            Claim finding = allFindings[i];
             if (string.Equals(finding.Analyzer, "InsightEngine", StringComparison.OrdinalIgnoreCase)
                 || finding.Tags.Any(tag => string.Equals(tag, "cross-analyzer", StringComparison.OrdinalIgnoreCase)))
             {
@@ -117,19 +112,6 @@ internal sealed class InsightsSectionBuilder : SectionBuilderBase, IReportSectio
         }
 
         return crossDomain;
-    }
-
-    private static CompactTable ToCompactTable(int findingNumber, FindingEvidenceTable table)
-    {
-        var headers = new CompactHeader[table.Headers.Count];
-        for (int i = 0; i < table.Headers.Count; i++)
-            headers[i] = CH(table.Headers[i]);
-
-        var rows = new CompactRow[table.Rows.Count];
-        for (int i = 0; i < table.Rows.Count; i++)
-            rows[i] = R(table.Rows[i].ToArray());
-
-        return STCompact($"[{findingNumber}] {table.Title}", headers, rows);
     }
 
     private static string FormatText(string label, string? value)

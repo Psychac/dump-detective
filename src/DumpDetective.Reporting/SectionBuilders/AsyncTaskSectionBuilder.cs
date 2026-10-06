@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
@@ -26,7 +27,7 @@ internal sealed class AsyncTaskSectionBuilder : SectionBuilderBase, IAnalyzerSec
             T("Task counts, orphaned tasks, and continuation pressure are summarized here."),
         };
 
-        // LeadFinding is derived from AsyncTaskFindingGenerator's InsightFinding by
+        // LeadFinding is derived from AsyncTaskFindingGenerator's Claim by
         // ReportSectionAssembler.NormalizeSectionContractSlots — see
         // docs/refactor/analyzer-pipeline-stages-and-leadfinding-dedup.md P1 fix plan. The
         // generator already aggregates 7 other signals (cycle detected, orphaned/faulted/pending

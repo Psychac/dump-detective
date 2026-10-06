@@ -16,8 +16,8 @@ namespace DumpDetective.Tests
         public void BuildFrom_AppliesTimelineBoost()
         {
             // AnalyzerA shows strong metric jump at snapshot 1
-            var findingA = new InsightFinding("AnalyzerA", "Cat", Severity.Warning, "TitleA", "E", "R", new[] { "regression" }, "fpA", 1.0, "u", 0.8, null);
-            var findingB = new InsightFinding("AnalyzerB", "Cat", Severity.Warning, "TitleB", "E", "R", new[] { "regression" }, "fpB", 1.0, "u", 0.7, null);
+            var findingA = ClaimFactory.Create("AnalyzerA", "Cat", Severity.Warning, "TitleA", "E", "R", new[] { "regression" }, "fpA", 1.0, "u", 0.8, null);
+            var findingB = ClaimFactory.Create("AnalyzerB", "Cat", Severity.Warning, "TitleB", "E", "R", new[] { "regression" }, "fpB", 1.0, "u", 0.7, null);
 
             var snap0 = new AnalysisSnapshot(0, "dump0", new AnalyzerRunResult[0], new[] { findingA }, new System.Collections.Generic.Dictionary<string, AnalyzerDomainResult>(System.StringComparer.Ordinal), System.DateTime.UtcNow, null);
             var snap1 = new AnalysisSnapshot(1, "dump1", new AnalyzerRunResult[0], new[] { findingA, findingB }, new System.Collections.Generic.Dictionary<string, AnalyzerDomainResult>(System.StringComparer.Ordinal), System.DateTime.UtcNow, null);
@@ -31,9 +31,9 @@ namespace DumpDetective.Tests
                 Timeline: new[] { timelineA },
                 ScopedTimeline: System.Array.Empty<AnalyzerMetricTimeline>(),
                 Snapshots: new[] { snap0, snap1 },
-                NewFindings: System.Array.Empty<InsightFinding>(),
-                PersistentFindings: System.Array.Empty<InsightFinding>(),
-                ResolvedFindings: System.Array.Empty<InsightFinding>(),
+                NewFindings: System.Array.Empty<Claim>(),
+                PersistentFindings: System.Array.Empty<Claim>(),
+                ResolvedFindings: System.Array.Empty<Claim>(),
                 SeverityChanges: System.Array.Empty<DumpDetective.Reporting.Trend.FindingSeverityChange>());
 
             var events = CorrelationBuilder.BuildFrom(trendData);

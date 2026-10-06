@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
@@ -36,7 +37,7 @@ internal sealed class CrashSectionBuilder : SectionBuilderBase, IAnalyzerSection
             T("Crash analysis is summarized here with active-vs-total counts, likely hotspots, and inferred trace provenance."),
         };
 
-        // LeadFinding is derived from CrashFindingGenerator's InsightFinding by
+        // LeadFinding is derived from CrashFindingGenerator's Claim by
         // ReportSectionAssembler.NormalizeSectionContractSlots — see
         // docs/refactor/analyzer-pipeline-stages-and-leadfinding-dedup.md P1 fix plan. The
         // weighted per-candidate confidence computation formerly here now lives in the generator.

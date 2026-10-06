@@ -1,10 +1,11 @@
-﻿using DumpDetective.Core.Models;
+﻿using DumpDetective.Sdk.Synthesis;
+using DumpDetective.Core.Models;
 
 namespace DumpDetective.Core.Utilities;
 
 internal static class FindingTagger
 {
-    public static void Normalize(List<InsightFinding> findings)
+    public static void Normalize(List<Claim> findings)
     {
         if (findings.Count == 0)
         {
@@ -12,7 +13,7 @@ internal static class FindingTagger
         }
 
         var normalized = findings
-            .DistinctBy(f => f.EffectiveFingerprint)
+            .DistinctBy(f => f.Fingerprint)
             .OrderByDescending(f => f.Severity)
             .ThenBy(f => f.Analyzer, StringComparer.Ordinal)
             .ToArray();

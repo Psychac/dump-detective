@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Core.Enums;
 using DumpDetective.Core.Models;
 using DumpDetective.Core.Utilities;
@@ -127,7 +128,7 @@ internal sealed class LockGraphSectionBuilder : SectionBuilderBase, IAnalyzerSec
                 }
         }
 
-        // LeadFinding is derived from LockGraphFindingGenerator's InsightFinding by
+        // LeadFinding is derived from LockGraphFindingGenerator's Claim by
         // ReportSectionAssembler.NormalizeSectionContractSlots \u2014 see
         // docs/refactor/analyzer-pipeline-stages-and-leadfinding-dedup.md P0 fix plan.
         SectionLeadFinding? leadFinding = null;

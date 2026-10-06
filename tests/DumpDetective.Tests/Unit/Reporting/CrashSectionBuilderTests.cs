@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Analysis.Models;
 using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.SectionBuilders;
@@ -14,7 +15,7 @@ public sealed class CrashSectionBuilderTests
 
     // LeadFinding is no longer built here — the per-candidate confidence-weighting logic moved to
     // CrashFindingGeneratorTests, since LeadFinding is now derived from CrashFindingGenerator's
-    // InsightFinding by ReportSectionAssembler.NormalizeSectionContractSlots. See
+    // Claim by ReportSectionAssembler.NormalizeSectionContractSlots. See
     // docs/refactor/analyzer-pipeline-stages-and-leadfinding-dedup.md P1 fix plan.
 
     [Fact]

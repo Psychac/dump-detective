@@ -29,25 +29,25 @@ public sealed class FindingConfidenceParityTests
     private static readonly ArtifactId Artifact = new("finding-confidence-parity-test");
 
     [Fact]
-    public void Adapter_CertainBreakdown_FallsBackToSeverityDefault()
+    public void ReportConfidence_CertainBreakdown_FallsBackToSeverityDefault()
     {
-        InsightFinding critical = FindingSynthesisAdapter.ToInsightFinding(MakeFinding(Severity.Critical, ConfidenceBreakdown.MeasurementCertain));
-        InsightFinding warning = FindingSynthesisAdapter.ToInsightFinding(MakeFinding(Severity.Warning, ConfidenceBreakdown.MeasurementCertain));
-        InsightFinding info = FindingSynthesisAdapter.ToInsightFinding(MakeFinding(Severity.Info, ConfidenceBreakdown.MeasurementCertain));
+        Claim critical = MakeFinding(Severity.Critical, ConfidenceBreakdown.MeasurementCertain);
+        Claim warning = MakeFinding(Severity.Warning, ConfidenceBreakdown.MeasurementCertain);
+        Claim info = MakeFinding(Severity.Info, ConfidenceBreakdown.MeasurementCertain);
 
-        critical.ConfidenceScore.Should().Be(0.9);
-        warning.ConfidenceScore.Should().Be(0.7);
-        info.ConfidenceScore.Should().Be(0.5);
+        critical.ReportConfidence().Should().Be(0.9);
+        warning.ReportConfidence().Should().Be(0.7);
+        info.ReportConfidence().Should().Be(0.5);
     }
 
     [Fact]
-    public void Adapter_LimitedBreakdown_PassesCompositeThrough()
+    public void ReportConfidence_LimitedBreakdown_PassesCompositeThrough()
     {
         ConfidenceBreakdown limited = ConfidenceBreakdown.MeasurementCertain with { Composite = 0.62, EvidenceStrength = 0.62 };
 
-        InsightFinding finding = FindingSynthesisAdapter.ToInsightFinding(MakeFinding(Severity.Critical, limited));
+        Claim finding = MakeFinding(Severity.Critical, limited);
 
-        finding.ConfidenceScore.Should().Be(0.62);
+        finding.ReportConfidence().Should().Be(0.62);
     }
 
     [Theory]

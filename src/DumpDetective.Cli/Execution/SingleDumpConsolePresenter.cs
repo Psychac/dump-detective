@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using System.Diagnostics;
 
 using DumpDetective.Cli.Console;
@@ -10,14 +11,14 @@ namespace DumpDetective.Cli.Execution;
 /// </summary>
 internal static class SingleDumpConsolePresenter
 {
-    public static void PrintInsights(IReadOnlyList<InsightFinding> insights, bool diagnosticMode)
+    public static void PrintInsights(IReadOnlyList<Claim> insights, bool diagnosticMode)
     {
         ConsoleUx.InsightsHeader(insights.Count);
 
         // Most severe first; OrderByDescending is stable, so equal severities keep the synthesis
         // engine's deterministic fingerprint order.
-        foreach (InsightFinding f in insights.OrderByDescending(static insight => insight.Severity))
-            ConsoleUx.InsightLine(f.Severity, f.Title, f.Evidence, diagnosticMode);
+        foreach (Claim f in insights.OrderByDescending(static insight => insight.Severity))
+            ConsoleUx.InsightLine(f.Severity, f.Title, f.Narrative, diagnosticMode);
     }
 
     public static void PrintMemorySummary(

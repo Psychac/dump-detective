@@ -21,7 +21,7 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
         IReadOnlyList<IAnalyzerSectionBuilder> analyzerBuilders,
         IReadOnlyList<IReportSectionBuilder> reportBuilders,
         DumpDetective.Core.Models.AnalysisIncidentContext? incidentContext = null,
-        IReadOnlyList<InsightFinding>? additionalFindings = null,
+        IReadOnlyList<Claim>? additionalFindings = null,
         IReadOnlyDictionary<string, FindingLineage>? lineageByFingerprint = null)
     {
         // ── 1. Build per-analyzer sections ───────────────────────────────────
@@ -94,7 +94,7 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
         IReadOnlyList<AnalyzerRunResult> runs,
         TimeSpan elapsed,
         DumpDetective.Core.Models.AnalysisIncidentContext? incidentContext = null,
-        IReadOnlyList<InsightFinding>? additionalFindings = null)
+        IReadOnlyList<Claim>? additionalFindings = null)
     {
         List<FindingRecord> deduped = MapAllFindings(runs, additionalFindings);
         SortFindingsBySeverity(deduped);
@@ -121,7 +121,7 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
 
     private static List<FindingRecord> MapAllFindings(
         IReadOnlyList<AnalyzerRunResult> runs,
-        IReadOnlyList<InsightFinding>? additionalFindings,
+        IReadOnlyList<Claim>? additionalFindings,
         IReadOnlyDictionary<string, FindingLineage>? lineageByFingerprint = null)
     {
         List<FindingRecord> allFindings = [];
@@ -130,7 +130,7 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
         {
             if (run.Findings is { Count: > 0 })
             {
-                foreach (InsightFinding finding in run.Findings)
+                foreach (Claim finding in run.Findings)
                 {
                     allFindings.Add(WithLineage(ReportFindingMapper.MapFinding(finding, run.Artifacts), lineageByFingerprint));
                 }
@@ -153,7 +153,7 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
 
         if (additionalFindings is { Count: > 0 })
         {
-            foreach (InsightFinding finding in additionalFindings)
+            foreach (Claim finding in additionalFindings)
                 allFindings.Add(WithLineage(ReportFindingMapper.MapFinding(finding), lineageByFingerprint));
         }
 

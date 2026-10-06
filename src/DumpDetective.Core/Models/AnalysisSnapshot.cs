@@ -1,4 +1,6 @@
-﻿namespace DumpDetective.Core.Models;
+﻿using DumpDetective.Sdk.Synthesis;
+
+namespace DumpDetective.Core.Models;
 
 /// <summary>
 /// Lightweight snapshot of the entire analysis state at a specific point in time, 
@@ -17,7 +19,7 @@ internal sealed record AnalysisSnapshot(
 	string DumpPath,
 	// TODO: analyzer run result already seems to have DomainResult per analyzer
 	IReadOnlyList<AnalyzerRunResult> Runs,
-	IReadOnlyList<InsightFinding> Findings,
+	IReadOnlyList<Claim> Findings,
 	IReadOnlyDictionary<string, AnalyzerDomainResult> DomainResults,
 	DateTime GeneratedAtUtc,
 	AnalysisIncidentContext? IncidentContext = null);

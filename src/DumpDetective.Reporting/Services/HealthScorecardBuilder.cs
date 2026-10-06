@@ -33,7 +33,7 @@ internal static class HealthScorecardBuilder
             if (run.Status == AnalyzerExecutionStatus.Success)
                 acc.HasSuccessfulRun = true;
 
-            foreach (InsightFinding finding in run.Findings)
+            foreach (Claim finding in run.Findings)
             {
                 acc.FindingCount++;
                 switch (finding.Severity)

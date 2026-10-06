@@ -19,36 +19,36 @@ namespace DumpDetective.Tests.Unit.Reporting;
 /// </summary>
 public sealed class FindingLifecycleComparerTests
 {
-    private static InsightFinding MakeFinding(string fingerprint, Severity severity) =>
-        new(
-            Analyzer: "TestAnalyzer",
-            Category: "Cat",
-            Severity: severity,
-            Title: "Title " + fingerprint,
-            Evidence: "Evidence",
-            Recommendation: "Recommendation",
-            Tags: [],
-            Fingerprint: fingerprint);
+    private static Claim MakeFinding(string fingerprint, Severity severity) =>
+        ClaimFactory.Create(
+            analyzer: "TestAnalyzer",
+            category: "Cat",
+            severity: severity,
+            title: "Title " + fingerprint,
+            narrative: "Evidence",
+            recommendation: "Recommendation",
+            tags: [],
+            fingerprint: fingerprint);
 
-    private static AnalysisSnapshot MakeSnapshot(int index, params InsightFinding[] findings) =>
+    private static AnalysisSnapshot MakeSnapshot(int index, params Claim[] findings) =>
         new(index, $"dump{index}.dmp", [], findings, new Dictionary<string, AnalyzerDomainResult>(), System.DateTime.UtcNow);
 
     [Fact]
     public void Compare_ClassifiesByFingerprintPresence()
     {
-        InsightFinding onlyInBaseline = MakeFinding("resolved-one", Severity.Warning);
-        InsightFinding unchanged = MakeFinding("persistent-one", Severity.Warning);
-        InsightFinding onlyInCurrentBaselineVersion = unchanged;
-        InsightFinding onlyInCurrent = MakeFinding("new-one", Severity.Critical);
+        Claim onlyInBaseline = MakeFinding("resolved-one", Severity.Warning);
+        Claim unchanged = MakeFinding("persistent-one", Severity.Warning);
+        Claim onlyInCurrentBaselineVersion = unchanged;
+        Claim onlyInCurrent = MakeFinding("new-one", Severity.Critical);
 
         AnalysisSnapshot baseline = MakeSnapshot(0, onlyInBaseline, onlyInCurrentBaselineVersion);
         AnalysisSnapshot current = MakeSnapshot(1, unchanged, onlyInCurrent);
 
         FindingLifecycleResult result = FindingLifecycleComparer.Compare(baseline, current);
 
-        result.NewFindings.Should().ContainSingle(f => f.EffectiveFingerprint == "new-one");
-        result.PersistentFindings.Should().ContainSingle(f => f.EffectiveFingerprint == "persistent-one");
-        result.ResolvedFindings.Should().ContainSingle(f => f.EffectiveFingerprint == "resolved-one");
+        result.NewFindings.Should().ContainSingle(f => f.Fingerprint == "new-one");
+        result.PersistentFindings.Should().ContainSingle(f => f.Fingerprint == "persistent-one");
+        result.ResolvedFindings.Should().ContainSingle(f => f.Fingerprint == "resolved-one");
     }
 
     [Fact]

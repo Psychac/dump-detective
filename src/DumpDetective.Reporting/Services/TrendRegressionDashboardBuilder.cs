@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Core.Models;
 using DumpDetective.Reporting.Models;
 using DumpDetective.Reporting.Trend;
@@ -73,8 +74,8 @@ internal static class TrendRegressionDashboardBuilder
             var rows = new List<TableRow>(capped);
             for (int i = 0; i < capped; i++)
             {
-                InsightFinding f = newFindingsSorted[i];
-                string evidence = f.Evidence.Length > 120 ? f.Evidence[..117] + "…" : f.Evidence;
+                Claim f = newFindingsSorted[i];
+                string evidence = f.Narrative.Length > 120 ? f.Narrative[..117] + "…" : f.Narrative;
                 rows.Add(new TableRow(new[]
                 {
                     new TableCell(f.Severity.ToString()),
@@ -82,7 +83,7 @@ internal static class TrendRegressionDashboardBuilder
                     new TableCell(f.Category),
                     new TableCell(f.Title),
                     new TableCell(evidence),
-                    new TableCell($"{f.ConfidenceScore:P0}")
+                    new TableCell($"{f.ReportConfidence():P0}")
                 }));
             }
             blocks.Add(new TableBlock(

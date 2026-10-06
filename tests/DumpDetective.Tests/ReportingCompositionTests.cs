@@ -21,25 +21,25 @@ public sealed class ReportingCompositionTests
     [Fact]
     public void Serialize_ShouldMergeDuplicateFindings_AndPreserveEvidenceAndRemediation()
     {
-        InsightFinding findingA = new(
-            Analyzer: "DominatorAnalyzer",
-            Category: "Leak",
-            Severity: Severity.Warning,
-            Title: "Duplicate strings detected",
-            Evidence: "Evidence A",
-            Recommendation: "Recommendation A",
-            Tags: ["memory", "string"],
-            Fingerprint: "dup-key");
+        Claim findingA = ClaimFactory.Create(
+            analyzer: "DominatorAnalyzer",
+            category: "Leak",
+            severity: Severity.Warning,
+            title: "Duplicate strings detected",
+            narrative: "Evidence A",
+            recommendation: "Recommendation A",
+            tags: ["memory", "string"],
+            fingerprint: "dup-key");
 
-        InsightFinding findingB = new(
-            Analyzer: "DominatorAnalyzer",
-            Category: "Leak",
-            Severity: Severity.Critical,
-            Title: "Duplicate strings detected",
-            Evidence: "Evidence B",
-            Recommendation: "Recommendation B",
-            Tags: ["memory", "string"],
-            Fingerprint: "dup-key");
+        Claim findingB = ClaimFactory.Create(
+            analyzer: "DominatorAnalyzer",
+            category: "Leak",
+            severity: Severity.Critical,
+            title: "Duplicate strings detected",
+            narrative: "Evidence B",
+            recommendation: "Recommendation B",
+            tags: ["memory", "string"],
+            fingerprint: "dup-key");
 
         AnalyzerRunResult runA = CreateRun("DominatorAnalyzer", findingA);
         AnalyzerRunResult runB = CreateRun("DominatorAnalyzer", findingB);
@@ -60,35 +60,35 @@ public sealed class ReportingCompositionTests
     [Fact]
     public void Serialize_ShouldClusterNearDuplicateTopActions()
     {
-        InsightFinding leakA = new(
-            Analyzer: "DominatorAnalyzer",
-            Category: "Leak",
-            Severity: Severity.Critical,
-            Title: "Event handler retention pressure",
-            Evidence: "Subscribers retain roots.",
-            Recommendation: "Detach leaked handlers and re-check retention.",
-            Tags: ["leak", "event"],
-            Fingerprint: "cluster-a");
+        Claim leakA = ClaimFactory.Create(
+            analyzer: "DominatorAnalyzer",
+            category: "Leak",
+            severity: Severity.Critical,
+            title: "Event handler retention pressure",
+            narrative: "Subscribers retain roots.",
+            recommendation: "Detach leaked handlers and re-check retention.",
+            tags: ["leak", "event"],
+            fingerprint: "cluster-a");
 
-        InsightFinding leakB = new(
-            Analyzer: "DominatorAnalyzer",
-            Category: "Leak",
-            Severity: Severity.Warning,
-            Title: "Event handler retention pressure",
-            Evidence: "Duplicate retention pattern in related type.",
-            Recommendation: "Detach leaked handlers and re-check retention.",
-            Tags: ["leak", "event"],
-            Fingerprint: "cluster-b");
+        Claim leakB = ClaimFactory.Create(
+            analyzer: "DominatorAnalyzer",
+            category: "Leak",
+            severity: Severity.Warning,
+            title: "Event handler retention pressure",
+            narrative: "Duplicate retention pattern in related type.",
+            recommendation: "Detach leaked handlers and re-check retention.",
+            tags: ["leak", "event"],
+            fingerprint: "cluster-b");
 
-        InsightFinding threadFinding = new(
-            Analyzer: "ThreadAnalyzer",
-            Category: "Thread",
-            Severity: Severity.Warning,
-            Title: "Blocked worker thread hotspot",
-            Evidence: "Multiple workers blocked on lock.",
-            Recommendation: "Inspect lock ownership and reduce contention.",
-            Tags: ["thread", "lock"],
-            Fingerprint: "cluster-c");
+        Claim threadFinding = ClaimFactory.Create(
+            analyzer: "ThreadAnalyzer",
+            category: "Thread",
+            severity: Severity.Warning,
+            title: "Blocked worker thread hotspot",
+            narrative: "Multiple workers blocked on lock.",
+            recommendation: "Inspect lock ownership and reduce contention.",
+            tags: ["thread", "lock"],
+            fingerprint: "cluster-c");
 
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/cluster.dmp",
@@ -174,14 +174,14 @@ public sealed class ReportingCompositionTests
     [Fact]
     public void Serialize_ShouldStampSchemaVersion()
     {
-        InsightFinding finding = new(
-            Analyzer: "CrashAnalyzer",
-            Category: "Crash",
-            Severity: Severity.Warning,
-            Title: "Contract versioning",
-            Evidence: "Version metadata should be stamped.",
-            Recommendation: "Keep schema changes backward-compatible.",
-            Tags: ["contract"]);
+        Claim finding = ClaimFactory.Create(
+            analyzer: "CrashAnalyzer",
+            category: "Crash",
+            severity: Severity.Warning,
+            title: "Contract versioning",
+            narrative: "Version metadata should be stamped.",
+            recommendation: "Keep schema changes backward-compatible.",
+            tags: ["contract"]);
 
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/contract.dmp",
@@ -222,25 +222,25 @@ public sealed class ReportingCompositionTests
     [Fact]
     public void CrossDomainInsightsSection_ShouldRenderOnlyInsightEngineFindings()
     {
-        InsightFinding regularFinding = new(
-            Analyzer: "MemoryAnalyzer",
-            Category: "Memory",
-            Severity: Severity.Warning,
-            Title: "Regular finding",
-            Evidence: "Regular evidence",
-            Recommendation: "Regular recommendation",
-            Tags: ["memory"],
-            Fingerprint: "regular-finding");
+        Claim regularFinding = ClaimFactory.Create(
+            analyzer: "MemoryAnalyzer",
+            category: "Memory",
+            severity: Severity.Warning,
+            title: "Regular finding",
+            narrative: "Regular evidence",
+            recommendation: "Regular recommendation",
+            tags: ["memory"],
+            fingerprint: "regular-finding");
 
-        InsightFinding insightFinding = new(
-            Analyzer: "InsightEngine",
-            Category: "CrossDomain",
-            Severity: Severity.Critical,
-            Title: "Cross-domain correlation",
-            Evidence: "Insight evidence",
-            Recommendation: "Insight recommendation",
-            Tags: ["cross-analyzer"],
-            Fingerprint: "insight-finding");
+        Claim insightFinding = ClaimFactory.Create(
+            analyzer: "InsightEngine",
+            category: "CrossDomain",
+            severity: Severity.Critical,
+            title: "Cross-domain correlation",
+            narrative: "Insight evidence",
+            recommendation: "Insight recommendation",
+            tags: ["cross-analyzer"],
+            fingerprint: "insight-finding");
 
         AnalyzerDomainResult result = new GenericAnalyzerDomainResult
         {
@@ -279,38 +279,6 @@ public sealed class ReportingCompositionTests
 
         output.Should().Contain("Cross-domain correlation");
         output.Should().NotContain("Regular finding");
-    }
-
-    [Fact]
-    public void CrossDomainInsightsSection_ShouldRenderEvidenceTable_WhenFindingCarriesOne()
-    {
-        FindingEvidenceTable evidenceTable = new(
-            "Per-module JIT stack heatmap (top active modules)",
-            ["Module", "Active JIT Frames", "Module Size", "Version Conflict"],
-            [["MyApp.Plugins.dll", 200, "4.8 MB", "Yes"]]);
-
-        InsightFinding insightFinding = new(
-            Analyzer: "InsightEngine",
-            Category: "Performance",
-            Severity: Severity.Info,
-            Title: "Module with heavy active JIT stack presence also flagged by module analysis",
-            Evidence: "Module 'MyApp.Plugins.dll' accounts for 200 active JIT stack frames.",
-            Recommendation: "Correlate module size/version-conflict status with the JIT stack heatmap.",
-            Tags: ["jit", "modules", "cross-analyzer"],
-            Fingerprint: "jit-module-hotspot",
-            EvidenceTables: [evidenceTable]);
-
-        AnalyzerResultSet resultSet = new([], additionalFindings: [insightFinding]);
-        InsightsSectionBuilder builder = new();
-
-        AnalyzerDetailSection section = builder.Build(resultSet);
-
-        section.CompactTables.Should().NotBeNull();
-        section.CompactTables!.Should().ContainSingle(t => t.Title.Contains(evidenceTable.Title));
-        CompactTable table = section.CompactTables!.Single(t => t.Title.Contains(evidenceTable.Title));
-        table.Headers.Select(h => h.Name).Should().BeEquivalentTo(evidenceTable.Headers);
-        table.Rows.Should().ContainSingle();
-        table.Rows[0].Values.Should().BeEquivalentTo(evidenceTable.Rows[0]);
     }
 
     [Fact]
@@ -425,25 +393,25 @@ public sealed class ReportingCompositionTests
     [Fact]
     public void Serialize_ShouldMapDisplayNameFindings_ToTheirDomains()
     {
-        InsightFinding memoryFinding = new(
-            Analyzer: "Memory Analysis",
-            Category: "Memory",
-            Severity: Severity.Warning,
-            Title: "Memory pressure",
-            Evidence: "Heap pressure observed",
-            Recommendation: "Investigate retention",
-            Tags: ["memory"],
-            Fingerprint: "mem-1");
+        Claim memoryFinding = ClaimFactory.Create(
+            analyzer: "Memory Analysis",
+            category: "Memory",
+            severity: Severity.Warning,
+            title: "Memory pressure",
+            narrative: "Heap pressure observed",
+            recommendation: "Investigate retention",
+            tags: ["memory"],
+            fingerprint: "mem-1");
 
-        InsightFinding threadFinding = new(
-            Analyzer: "Thread Analysis",
-            Category: "Threads",
-            Severity: Severity.Warning,
-            Title: "Thread contention",
-            Evidence: "Blocked threads observed",
-            Recommendation: "Inspect lock owners",
-            Tags: ["threads"],
-            Fingerprint: "thr-1");
+        Claim threadFinding = ClaimFactory.Create(
+            analyzer: "Thread Analysis",
+            category: "Threads",
+            severity: Severity.Warning,
+            title: "Thread contention",
+            narrative: "Blocked threads observed",
+            recommendation: "Inspect lock owners",
+            tags: ["threads"],
+            fingerprint: "thr-1");
 
         AnalyzerRunResult memoryRun = CreateRun("MemoryAnalyzer", memoryFinding);
         AnalyzerRunResult threadRun = CreateRun("ThreadAnalyzer", threadFinding);
@@ -473,35 +441,35 @@ public sealed class ReportingCompositionTests
     [Fact]
     public void Serialize_ShouldExcludeInfoConfidenceAndDiagnostics_FromDomainInsights()
     {
-        InsightFinding analyzerSignal = new(
-            Analyzer: "Dominator Analysis",
-            Category: "Retention",
-            Severity: Severity.Warning,
-            Title: "Retention hotspot",
-            Evidence: "Large retained graph detected",
-            Recommendation: "Inspect root paths",
-            Tags: ["retention"],
-            Fingerprint: "ret-main");
+        Claim analyzerSignal = ClaimFactory.Create(
+            analyzer: "Dominator Analysis",
+            category: "Retention",
+            severity: Severity.Warning,
+            title: "Retention hotspot",
+            narrative: "Large retained graph detected",
+            recommendation: "Inspect root paths",
+            tags: ["retention"],
+            fingerprint: "ret-main");
 
-        InsightFinding confidenceInfo = new(
-            Analyzer: "GC Root Analysis",
-            Category: "Confidence",
-            Severity: Severity.Info,
-            Title: "Root path search capped (10 paths truncated)",
-            Evidence: "Traversal budget capped some paths.",
-            Recommendation: "Treat as indicative only.",
-            Tags: ["confidence", "cap"],
-            Fingerprint: "conf-cap");
+        Claim confidenceInfo = ClaimFactory.Create(
+            analyzer: "GC Root Analysis",
+            category: "Confidence",
+            severity: Severity.Info,
+            title: "Root path search capped (10 paths truncated)",
+            narrative: "Traversal budget capped some paths.",
+            recommendation: "Treat as indicative only.",
+            tags: ["confidence", "cap"],
+            fingerprint: "conf-cap");
 
-        InsightFinding diagnosticsInfo = new(
-            Analyzer: "Dominator Analysis",
-            Category: "Diagnostics",
-            Severity: Severity.Info,
-            Title: "Reference tracking was capped",
-            Evidence: "Tracking limit reached.",
-            Recommendation: "Increase tracking caps.",
-            Tags: ["analysis-quality"],
-            Fingerprint: "diag-cap");
+        Claim diagnosticsInfo = ClaimFactory.Create(
+            analyzer: "Dominator Analysis",
+            category: "Diagnostics",
+            severity: Severity.Info,
+            title: "Reference tracking was capped",
+            narrative: "Tracking limit reached.",
+            recommendation: "Increase tracking caps.",
+            tags: ["analysis-quality"],
+            fingerprint: "diag-cap");
 
         AnalyzerRunResult run = CreateRun("DominatorAnalyzer", analyzerSignal);
         AnalyzerRunResult gcRun = CreateRun("GCRootAnalyzer", confidenceInfo);
@@ -533,25 +501,25 @@ public sealed class ReportingCompositionTests
     [Fact]
     public void Serialize_ShouldEmitDeterministicTopActions_WithFactorBreakdown()
     {
-        InsightFinding warningA = new(
-            Analyzer: "DominatorAnalyzer",
-            Category: "Leak",
-            Severity: Severity.Warning,
-            Title: "Retention risk alpha",
-            Evidence: "Growing retained graph",
-            Recommendation: "Break retention chain",
-            Tags: ["memory", "runtime"],
-            Fingerprint: "same-priority-a");
+        Claim warningA = ClaimFactory.Create(
+            analyzer: "DominatorAnalyzer",
+            category: "Leak",
+            severity: Severity.Warning,
+            title: "Retention risk alpha",
+            narrative: "Growing retained graph",
+            recommendation: "Break retention chain",
+            tags: ["memory", "runtime"],
+            fingerprint: "same-priority-a");
 
-        InsightFinding warningB = new(
-            Analyzer: "DominatorAnalyzer",
-            Category: "Leak",
-            Severity: Severity.Warning,
-            Title: "Retention risk beta",
-            Evidence: "Growing retained graph",
-            Recommendation: "Break retention chain",
-            Tags: ["memory", "runtime"],
-            Fingerprint: "same-priority-b");
+        Claim warningB = ClaimFactory.Create(
+            analyzer: "DominatorAnalyzer",
+            category: "Leak",
+            severity: Severity.Warning,
+            title: "Retention risk beta",
+            narrative: "Growing retained graph",
+            recommendation: "Break retention chain",
+            tags: ["memory", "runtime"],
+            fingerprint: "same-priority-b");
 
         AnalyzerRunResult runA = CreateRun("DominatorAnalyzer", warningA);
         AnalyzerRunResult runB = CreateRun("DominatorAnalyzer", warningB);
@@ -585,15 +553,15 @@ public sealed class ReportingCompositionTests
     [Fact]
     public void Serialize_ShouldEmitTopLevelScoringModelVersionMetadata()
     {
-        InsightFinding warning = new(
-            Analyzer: "DominatorAnalyzer",
-            Category: "Leak",
-            Severity: Severity.Warning,
-            Title: "Retention risk",
-            Evidence: "Growing retained graph",
-            Recommendation: "Break retention chain",
-            Tags: ["memory", "runtime"],
-            Fingerprint: "score-meta");
+        Claim warning = ClaimFactory.Create(
+            analyzer: "DominatorAnalyzer",
+            category: "Leak",
+            severity: Severity.Warning,
+            title: "Retention risk",
+            narrative: "Growing retained graph",
+            recommendation: "Break retention chain",
+            tags: ["memory", "runtime"],
+            fingerprint: "score-meta");
 
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/score-meta.dmp",
@@ -610,35 +578,35 @@ public sealed class ReportingCompositionTests
     [Fact]
     public void Serialize_ShouldKeepDeterministicRankedOrdering_AcrossRepeatedRuns()
     {
-        InsightFinding f1 = new(
-            Analyzer: "MemoryAnalyzer",
-            Category: "Memory",
-            Severity: Severity.Warning,
-            Title: "Retention trend alpha",
-            Evidence: "retained objects increasing",
-            Recommendation: "inspect retention roots",
-            Tags: ["pipeline-correlation", "latency-bridge"],
-            Fingerprint: "det-a");
+        Claim f1 = ClaimFactory.Create(
+            analyzer: "MemoryAnalyzer",
+            category: "Memory",
+            severity: Severity.Warning,
+            title: "Retention trend alpha",
+            narrative: "retained objects increasing",
+            recommendation: "inspect retention roots",
+            tags: ["pipeline-correlation", "latency-bridge"],
+            fingerprint: "det-a");
 
-        InsightFinding f2 = new(
-            Analyzer: "ThreadAnalyzer",
-            Category: "Threads",
-            Severity: Severity.Warning,
-            Title: "Worker saturation beta",
-            Evidence: "queue latency increasing",
-            Recommendation: "inspect scheduler pressure",
-            Tags: ["pipeline-correlation", "latency-bridge"],
-            Fingerprint: "det-b");
+        Claim f2 = ClaimFactory.Create(
+            analyzer: "ThreadAnalyzer",
+            category: "Threads",
+            severity: Severity.Warning,
+            title: "Worker saturation beta",
+            narrative: "queue latency increasing",
+            recommendation: "inspect scheduler pressure",
+            tags: ["pipeline-correlation", "latency-bridge"],
+            fingerprint: "det-b");
 
-        InsightFinding f3 = new(
-            Analyzer: "RuntimeAnalyzer",
-            Category: "Runtime",
-            Severity: Severity.Warning,
-            Title: "Timeout pressure gamma",
-            Evidence: "timeouts align with queue pressure",
-            Recommendation: "inspect timeout source",
-            Tags: ["pipeline-correlation"],
-            Fingerprint: "det-c");
+        Claim f3 = ClaimFactory.Create(
+            analyzer: "RuntimeAnalyzer",
+            category: "Runtime",
+            severity: Severity.Warning,
+            title: "Timeout pressure gamma",
+            narrative: "timeouts align with queue pressure",
+            recommendation: "inspect timeout source",
+            tags: ["pipeline-correlation"],
+            fingerprint: "det-c");
 
         ReportSerializer serializer = new();
 
@@ -678,16 +646,16 @@ public sealed class ReportingCompositionTests
     [Fact]
     public void Serialize_ShouldRequireVerification_ForLowConfidenceCriticalTopAction()
     {
-        InsightFinding critical = new(
-            Analyzer: "CrashAnalyzer",
-            Category: "Crash",
-            Severity: Severity.Critical,
-            Title: "Intermittent crash signature",
-            Evidence: "Partial dump evidence",
-            Recommendation: "Guard failing call path",
-            Tags: ["runtime"],
-            Fingerprint: "crit-low-conf",
-            ConfidenceScore: 0.30);
+        Claim critical = ClaimFactory.Create(
+            analyzer: "CrashAnalyzer",
+            category: "Crash",
+            severity: Severity.Critical,
+            title: "Intermittent crash signature",
+            narrative: "Partial dump evidence",
+            recommendation: "Guard failing call path",
+            tags: ["runtime"],
+            fingerprint: "crit-low-conf",
+            confidenceScore: 0.30);
 
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/crit-low-conf.dmp",
@@ -709,17 +677,17 @@ public sealed class ReportingCompositionTests
     [Fact]
     public void Serialize_ShouldPropagateConfidenceCaveats_InTopActions()
     {
-        InsightFinding warning = new(
-            Analyzer: "DominatorAnalyzer",
-            Category: "Leak",
-            Severity: Severity.Warning,
-            Title: "Heuristic retention signature",
-            Evidence: "Approximate object growth estimate",
-            Recommendation: "Verify retained roots before cleanup",
-            Tags: ["memory", "retention"],
-            Fingerprint: "warn-caveat",
-            ConfidenceScore: 0.42,
-            Caveats: ["heuristic estimate", "partial evidence"]);
+        Claim warning = ClaimFactory.Create(
+            analyzer: "DominatorAnalyzer",
+            category: "Leak",
+            severity: Severity.Warning,
+            title: "Heuristic retention signature",
+            narrative: "Approximate object growth estimate",
+            recommendation: "Verify retained roots before cleanup",
+            tags: ["memory", "retention"],
+            fingerprint: "warn-caveat",
+            confidenceScore: 0.42,
+            caveats: ["heuristic estimate", "partial evidence"]);
 
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/warn-caveat.dmp",
@@ -737,25 +705,25 @@ public sealed class ReportingCompositionTests
     [Fact]
     public void Serialize_ShouldGenerateCorrelationEvents_ForSharedCrossDomainTags()
     {
-        InsightFinding memory = new(
-            Analyzer: "MemoryAnalyzer",
-            Category: "Memory",
-            Severity: Severity.Warning,
-            Title: "Pinned object increase",
-            Evidence: "Pinned segment occupancy rising",
-            Recommendation: "Review pinning usage",
-            Tags: ["runtime-coupling", "memory"],
-            Fingerprint: "corr-memory");
+        Claim memory = ClaimFactory.Create(
+            analyzer: "MemoryAnalyzer",
+            category: "Memory",
+            severity: Severity.Warning,
+            title: "Pinned object increase",
+            narrative: "Pinned segment occupancy rising",
+            recommendation: "Review pinning usage",
+            tags: ["runtime-coupling", "memory"],
+            fingerprint: "corr-memory");
 
-        InsightFinding threads = new(
-            Analyzer: "ThreadAnalyzer",
-            Category: "Threads",
-            Severity: Severity.Warning,
-            Title: "Worker starvation pattern",
-            Evidence: "Thread pool starvation observed",
-            Recommendation: "Tune worker scheduling",
-            Tags: ["runtime-coupling", "threads"],
-            Fingerprint: "corr-threads");
+        Claim threads = ClaimFactory.Create(
+            analyzer: "ThreadAnalyzer",
+            category: "Threads",
+            severity: Severity.Warning,
+            title: "Worker starvation pattern",
+            narrative: "Thread pool starvation observed",
+            recommendation: "Tune worker scheduling",
+            tags: ["runtime-coupling", "threads"],
+            fingerprint: "corr-threads");
 
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/correlation.dmp",
@@ -775,25 +743,25 @@ public sealed class ReportingCompositionTests
     [Fact]
     public void Serialize_ShouldDeterministicallyMergeSignalKeys_ForDuplicateCorrelationCandidates()
     {
-        InsightFinding memory = new(
-            Analyzer: "MemoryAnalyzer",
-            Category: "Memory",
-            Severity: Severity.Warning,
-            Title: "Request latency and retention increase",
-            Evidence: "Latency increase observed with shared metric key",
-            Recommendation: "Correlate with thread pressure",
-            Tags: ["pipeline-correlation", "latency-bridge"],
-            Fingerprint: "merge-memory");
+        Claim memory = ClaimFactory.Create(
+            analyzer: "MemoryAnalyzer",
+            category: "Memory",
+            severity: Severity.Warning,
+            title: "Request latency and retention increase",
+            narrative: "Latency increase observed with shared metric key",
+            recommendation: "Correlate with thread pressure",
+            tags: ["pipeline-correlation", "latency-bridge"],
+            fingerprint: "merge-memory");
 
-        InsightFinding threads = new(
-            Analyzer: "ThreadAnalyzer",
-            Category: "Threads",
-            Severity: Severity.Warning,
-            Title: "Request latency and thread pool saturation",
-            Evidence: "Latency increase observed with shared metric key",
-            Recommendation: "Correlate with retention pressure",
-            Tags: ["pipeline-correlation", "latency-bridge"],
-            Fingerprint: "merge-threads");
+        Claim threads = ClaimFactory.Create(
+            analyzer: "ThreadAnalyzer",
+            category: "Threads",
+            severity: Severity.Warning,
+            title: "Request latency and thread pool saturation",
+            narrative: "Latency increase observed with shared metric key",
+            recommendation: "Correlate with retention pressure",
+            tags: ["pipeline-correlation", "latency-bridge"],
+            fingerprint: "merge-threads");
 
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/correlation-merge.dmp",
@@ -816,35 +784,35 @@ public sealed class ReportingCompositionTests
     [Fact]
     public void Serialize_ShouldClusterOverlappingCorrelationCandidates_BeyondExactSourceMatch()
     {
-        InsightFinding memory = new(
-            Analyzer: "MemoryAnalyzer",
-            Category: "Memory",
-            Severity: Severity.Warning,
-            Title: "Latency bridge signal in memory path",
-            Evidence: "Retention pressure aligns with latency increase",
-            Recommendation: "Inspect retention path",
-            Tags: ["alpha-bridge"],
-            Fingerprint: "cluster-mem");
+        Claim memory = ClaimFactory.Create(
+            analyzer: "MemoryAnalyzer",
+            category: "Memory",
+            severity: Severity.Warning,
+            title: "Latency bridge signal in memory path",
+            narrative: "Retention pressure aligns with latency increase",
+            recommendation: "Inspect retention path",
+            tags: ["alpha-bridge"],
+            fingerprint: "cluster-mem");
 
-        InsightFinding threads = new(
-            Analyzer: "ThreadAnalyzer",
-            Category: "Threads",
-            Severity: Severity.Warning,
-            Title: "Latency bridge signal in thread pool",
-            Evidence: "Scheduling pressure aligns with latency increase",
-            Recommendation: "Inspect pool saturation",
-            Tags: ["alpha-bridge", "beta-bridge"],
-            Fingerprint: "cluster-thr");
+        Claim threads = ClaimFactory.Create(
+            analyzer: "ThreadAnalyzer",
+            category: "Threads",
+            severity: Severity.Warning,
+            title: "Latency bridge signal in thread pool",
+            narrative: "Scheduling pressure aligns with latency increase",
+            recommendation: "Inspect pool saturation",
+            tags: ["alpha-bridge", "beta-bridge"],
+            fingerprint: "cluster-thr");
 
-        InsightFinding runtime = new(
-            Analyzer: "RuntimeAnalyzer",
-            Category: "Runtime",
-            Severity: Severity.Warning,
-            Title: "Timeout bridge signal in runtime",
-            Evidence: "Connection timeout pattern aligns with pressure",
-            Recommendation: "Inspect timeout root cause",
-            Tags: ["beta-bridge"],
-            Fingerprint: "cluster-run");
+        Claim runtime = ClaimFactory.Create(
+            analyzer: "RuntimeAnalyzer",
+            category: "Runtime",
+            severity: Severity.Warning,
+            title: "Timeout bridge signal in runtime",
+            narrative: "Connection timeout pattern aligns with pressure",
+            recommendation: "Inspect timeout root cause",
+            tags: ["beta-bridge"],
+            fingerprint: "cluster-run");
 
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/correlation-cluster.dmp",
@@ -870,27 +838,27 @@ public sealed class ReportingCompositionTests
     [Fact]
     public void Serialize_ShouldEmitConflictCorrelationEvent_WhenSeverityDisagreesAcrossDomains()
     {
-        InsightFinding critical = new(
-            Analyzer: "MemoryAnalyzer",
-            Category: "Memory",
-            Severity: Severity.Critical,
-            Title: "Pinned object surge",
-            Evidence: "Pinned segment pressure rising",
-            Recommendation: "Review pinning behavior",
-            Tags: ["pipeline-correlation"],
-            Fingerprint: "corr-critical",
-            ConfidenceScore: 0.91);
+        Claim critical = ClaimFactory.Create(
+            analyzer: "MemoryAnalyzer",
+            category: "Memory",
+            severity: Severity.Critical,
+            title: "Pinned object surge",
+            narrative: "Pinned segment pressure rising",
+            recommendation: "Review pinning behavior",
+            tags: ["pipeline-correlation"],
+            fingerprint: "corr-critical",
+            confidenceScore: 0.91);
 
-        InsightFinding info = new(
-            Analyzer: "ThreadAnalyzer",
-            Category: "Threads",
-            Severity: Severity.Info,
-            Title: "Scheduler stall hint",
-            Evidence: "Intermittent scheduling delays",
-            Recommendation: "Validate worker distribution",
-            Tags: ["pipeline-correlation"],
-            Fingerprint: "corr-info",
-            ConfidenceScore: 0.22);
+        Claim info = ClaimFactory.Create(
+            analyzer: "ThreadAnalyzer",
+            category: "Threads",
+            severity: Severity.Info,
+            title: "Scheduler stall hint",
+            narrative: "Intermittent scheduling delays",
+            recommendation: "Validate worker distribution",
+            tags: ["pipeline-correlation"],
+            fingerprint: "corr-info",
+            confidenceScore: 0.22);
 
         AnalysisReportDocument doc = new ReportSerializer().Serialize(
             dumpPath: "C:/dumps/correlation-conflict.dmp",
@@ -965,7 +933,7 @@ public sealed class ReportingCompositionTests
         output.Should().Contain("runtime-coupling");
     }
 
-    private static AnalyzerRunResult CreateRun(string analyzerName, InsightFinding finding)
+    private static AnalyzerRunResult CreateRun(string analyzerName, Claim finding)
     {
         GenericAnalyzerDomainResult result = new()
         {

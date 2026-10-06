@@ -203,15 +203,15 @@ public sealed class ExplainableScoringEngineTests
     [Fact]
     public void ReportSerializer_ScoreBreakdowns_PopulatedInExecutiveSummary()
     {
-        var finding = new InsightFinding(
-            Analyzer: "LeakAnalyzer",
-            Category: "Leak",
-            Severity: Severity.Critical,
-            Title: "Heap leak detected",
-            Evidence: "Top type: byte[] 200MB",
-            Recommendation: "Investigate retention chain",
-            Tags: ["memory"],
-            Fingerprint: "leak-001");
+        var finding = ClaimFactory.Create(
+            analyzer: "LeakAnalyzer",
+            category: "Leak",
+            severity: Severity.Critical,
+            title: "Heap leak detected",
+            narrative: "Top type: byte[] 200MB",
+            recommendation: "Investigate retention chain",
+            tags: ["memory"],
+            fingerprint: "leak-001");
 
         var run = new AnalyzerRunResult(
             AnalyzerName: "LeakAnalyzer",

@@ -21,15 +21,15 @@ public sealed class HtmlRendererCssTests
     {
         // Arrange: build a minimal document
         var serializer = new ReportSerializer();
-        var finding = new InsightFinding(
-            Analyzer: "X",
-            Category: "Memory",
-            Severity: Severity.Warning,
-            Title: "Actionable item",
-            Evidence: "Evidence",
-            Recommendation: "Do something",
-            Tags: ["memory"],
-            Fingerprint: "x-1");
+        var finding = ClaimFactory.Create(
+            analyzer: "X",
+            category: "Memory",
+            severity: Severity.Warning,
+            title: "Actionable item",
+            narrative: "Evidence",
+            recommendation: "Do something",
+            tags: ["memory"],
+            fingerprint: "x-1");
 
         var fakeRun = new AnalyzerRunResult(
             "X",
@@ -68,7 +68,7 @@ public sealed class HtmlRendererCssTests
             new GenericAnalyzerDomainResult(),
             null,
             null,
-            Findings: Array.Empty<InsightFinding>());
+            Findings: Array.Empty<Claim>());
 
         AnalysisReportDocument doc = serializer.Serialize(
             "dump.dmp",
@@ -90,15 +90,15 @@ public sealed class HtmlRendererCssTests
     public void Render_ContainsV2AccessibilityAndPrintHooks()
     {
         var serializer = new ReportSerializer();
-        var finding = new InsightFinding(
-            Analyzer: "RetentionAnalyzer",
-            Category: "Leak",
-            Severity: Severity.Warning,
-            Title: "Potential retention",
-            Evidence: "Object growth observed",
-            Recommendation: "Investigate root path",
-            Tags: ["leak"],
-            Fingerprint: "retention-1");
+        var finding = ClaimFactory.Create(
+            analyzer: "RetentionAnalyzer",
+            category: "Leak",
+            severity: Severity.Warning,
+            title: "Potential retention",
+            narrative: "Object growth observed",
+            recommendation: "Investigate root path",
+            tags: ["leak"],
+            fingerprint: "retention-1");
 
         var fakeRun = new AnalyzerRunResult(
             "RetentionAnalyzer",
@@ -138,7 +138,7 @@ public sealed class HtmlRendererCssTests
             new GenericAnalyzerDomainResult(),
             null,
             null,
-            Findings: Array.Empty<InsightFinding>());
+            Findings: Array.Empty<Claim>());
 
         AnalysisReportDocument doc = serializer.Serialize(
             "dump.dmp",
@@ -169,15 +169,15 @@ public sealed class HtmlRendererCssTests
     public void Render_V2Style_KeepsActionPanelsInMainFlowByDefault()
     {
         var serializer = new ReportSerializer();
-        var finding = new InsightFinding(
-            Analyzer: "RetentionAnalyzer",
-            Category: "Memory",
-            Severity: Severity.Warning,
-            Title: "Potential retention",
-            Evidence: "Object growth observed",
-            Recommendation: "Investigate root path",
-            Tags: ["memory"],
-            Fingerprint: "retention-1");
+        var finding = ClaimFactory.Create(
+            analyzer: "RetentionAnalyzer",
+            category: "Memory",
+            severity: Severity.Warning,
+            title: "Potential retention",
+            narrative: "Object growth observed",
+            recommendation: "Investigate root path",
+            tags: ["memory"],
+            fingerprint: "retention-1");
 
         var fakeRun = new AnalyzerRunResult(
             "RetentionAnalyzer",
@@ -209,15 +209,15 @@ public sealed class HtmlRendererCssTests
     public void Render_PreRenderedHealthScorecard_UsesCardGridMarkup()
     {
         var serializer = new ReportSerializer();
-        var finding = new InsightFinding(
-            Analyzer: "RetentionAnalyzer",
-            Category: "Memory",
-            Severity: Severity.Warning,
-            Title: "Potential retention",
-            Evidence: "Object growth observed",
-            Recommendation: "Investigate root path",
-            Tags: ["memory"],
-            Fingerprint: "retention-1");
+        var finding = ClaimFactory.Create(
+            analyzer: "RetentionAnalyzer",
+            category: "Memory",
+            severity: Severity.Warning,
+            title: "Potential retention",
+            narrative: "Object growth observed",
+            recommendation: "Investigate root path",
+            tags: ["memory"],
+            fingerprint: "retention-1");
 
         var fakeRun = new AnalyzerRunResult(
             "RetentionAnalyzer",
@@ -248,15 +248,15 @@ public sealed class HtmlRendererCssTests
     public void Render_PreRenderedMode_InsertsExecutiveSummaryAfterHealthScorecard()
     {
         var serializer = new ReportSerializer();
-        var finding = new InsightFinding(
-            Analyzer: "RetentionAnalyzer",
-            Category: "Memory",
-            Severity: Severity.Warning,
-            Title: "Potential retention",
-            Evidence: "Object growth observed",
-            Recommendation: "Investigate root path",
-            Tags: ["memory"],
-            Fingerprint: "retention-1");
+        var finding = ClaimFactory.Create(
+            analyzer: "RetentionAnalyzer",
+            category: "Memory",
+            severity: Severity.Warning,
+            title: "Potential retention",
+            narrative: "Object growth observed",
+            recommendation: "Investigate root path",
+            tags: ["memory"],
+            fingerprint: "retention-1");
 
         var fakeRun = new AnalyzerRunResult(
             "RetentionAnalyzer",
@@ -292,7 +292,7 @@ public sealed class HtmlRendererCssTests
             new GenericAnalyzerDomainResult(),
             null,
             null,
-            Findings: Array.Empty<InsightFinding>());
+            Findings: Array.Empty<Claim>());
 
         AnalysisReportDocument doc = serializer.Serialize(
             "dump.dmp",
@@ -323,7 +323,7 @@ public sealed class HtmlRendererCssTests
             new GenericAnalyzerDomainResult(),
             null,
             null,
-            Findings: Array.Empty<InsightFinding>());
+            Findings: Array.Empty<Claim>());
 
         AnalysisReportDocument doc = serializer.Serialize(
             "dump.dmp",
@@ -359,7 +359,7 @@ public sealed class HtmlRendererCssTests
             new GenericAnalyzerDomainResult(),
             null,
             null,
-            Findings: Array.Empty<InsightFinding>());
+            Findings: Array.Empty<Claim>());
 
         AnalysisReportDocument doc = serializer.Serialize(
             "dump.dmp",
@@ -393,15 +393,15 @@ public sealed class HtmlRendererCssTests
     public void Render_V1AndV2_PreserveSemanticReportPayloadExceptStyleField()
     {
         var serializer = new ReportSerializer();
-        var finding = new InsightFinding(
-            Analyzer: "RetentionAnalyzer",
-            Category: "Leak",
-            Severity: Severity.Warning,
-            Title: "Potential retention",
-            Evidence: "Object growth observed",
-            Recommendation: "Investigate root path",
-            Tags: ["leak"],
-            Fingerprint: "retention-1");
+        var finding = ClaimFactory.Create(
+            analyzer: "RetentionAnalyzer",
+            category: "Leak",
+            severity: Severity.Warning,
+            title: "Potential retention",
+            narrative: "Object growth observed",
+            recommendation: "Investigate root path",
+            tags: ["leak"],
+            fingerprint: "retention-1");
 
         var fakeRun = new AnalyzerRunResult(
             "RetentionAnalyzer",

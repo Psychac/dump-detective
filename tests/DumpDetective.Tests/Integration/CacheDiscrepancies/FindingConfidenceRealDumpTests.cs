@@ -87,8 +87,8 @@ public sealed class FindingConfidenceRealDumpTests
         foreach (var (key, after) in KeyByOccurrence(withLineage))
         {
             Claim before = ruleOnlyByKey[key];
-            double? beforeScore = FindingSynthesisAdapter.ToInsightFinding(before).ConfidenceScore;
-            double? afterScore = FindingSynthesisAdapter.ToInsightFinding(after).ConfidenceScore;
+            double beforeScore = before.ReportConfidence();
+            double afterScore = after.ReportConfidence();
             if (beforeScore == afterScore)
                 continue;
 

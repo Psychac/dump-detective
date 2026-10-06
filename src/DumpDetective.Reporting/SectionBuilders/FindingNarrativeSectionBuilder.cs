@@ -18,10 +18,10 @@ internal sealed class FindingNarrativeSectionBuilder : SectionBuilderBase, IRepo
 
     public AnalyzerDetailSection Build(AnalyzerResultSet results)
     {
-        IReadOnlyList<InsightFinding> findings = results.AllFindingsSorted();
-        var highSeverity = new List<InsightFinding>(findings.Count);
+        IReadOnlyList<Claim> findings = results.AllFindingsSorted();
+        var highSeverity = new List<Claim>(findings.Count);
 
-        foreach (InsightFinding finding in findings)
+        foreach (Claim finding in findings)
         {
             if (finding.Severity is Severity.Critical or Severity.Warning)
                 highSeverity.Add(finding);
@@ -46,7 +46,7 @@ internal sealed class FindingNarrativeSectionBuilder : SectionBuilderBase, IRepo
             blocks.Add(Blank());
             for (int i = 0; i < limit; i++)
             {
-                InsightFinding finding = highSeverity[i];
+                Claim finding = highSeverity[i];
                 blocks.Add(CollapseBegin($"{finding.Severity}: {finding.Title}"));
                 blocks.Add(H("CAUSE"));
                 blocks.Add(T(BuildCause(finding)));
@@ -83,7 +83,7 @@ internal sealed class FindingNarrativeSectionBuilder : SectionBuilderBase, IRepo
             CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
-    private static string BuildCause(InsightFinding finding)
+    private static string BuildCause(Claim finding)
     {
         string category = string.IsNullOrWhiteSpace(finding.Category) ? "the analyzer signal" : finding.Category;
         string analyzer = string.IsNullOrWhiteSpace(finding.Analyzer) ? "an analyzer" : finding.Analyzer;
@@ -96,7 +96,7 @@ internal sealed class FindingNarrativeSectionBuilder : SectionBuilderBase, IRepo
         };
     }
 
-    private static string BuildEffect(InsightFinding finding)
+    private static string BuildEffect(Claim finding)
     {
         return finding.Severity switch
         {
@@ -106,15 +106,15 @@ internal sealed class FindingNarrativeSectionBuilder : SectionBuilderBase, IRepo
         };
     }
 
-    private static string FormatEvidence(InsightFinding finding)
+    private static string FormatEvidence(Claim finding)
     {
-        if (!string.IsNullOrWhiteSpace(finding.Evidence))
-            return finding.Evidence;
+        if (!string.IsNullOrWhiteSpace(finding.Narrative))
+            return finding.Narrative;
 
         return "No evidence text was provided by the analyzer.";
     }
 
-    private static string FormatFix(InsightFinding finding)
+    private static string FormatFix(Claim finding)
     {
         if (!string.IsNullOrWhiteSpace(finding.Recommendation))
             return finding.Recommendation;

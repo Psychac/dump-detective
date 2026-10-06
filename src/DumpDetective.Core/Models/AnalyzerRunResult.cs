@@ -1,3 +1,5 @@
+using DumpDetective.Sdk.Synthesis;
+
 namespace DumpDetective.Core.Models;
 
 /// <summary>
@@ -61,14 +63,14 @@ internal sealed record AnalyzerRunResult(
     string? ErrorMessage,
     string? ErrorType,
     string? SkipReason = null,
-    IReadOnlyList<InsightFinding>? Findings = null,
+    IReadOnlyList<Claim>? Findings = null,
     int FindingCount = 0,
     int WarningCount = 0,
     IReadOnlyList<ReportArtifact>? Artifacts = null,
     AnalyzerExecutionDiagnostics? Diagnostics = null)
 {
     /// <summary>Findings for this run, attached by <c>SynthesisFindingEnricher</c> from the analyzer's synthesis rule.</summary>
-    public IReadOnlyList<InsightFinding> Findings { get; init; } = Findings ?? Array.Empty<InsightFinding>();
+    public IReadOnlyList<Claim> Findings { get; init; } = Findings ?? Array.Empty<Claim>();
     public IReadOnlyList<ReportArtifact> Artifacts { get; init; } = Artifacts ?? Array.Empty<ReportArtifact>();
 
     /// <summary>

@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Synthesis;
 using DumpDetective.Analysis.Analyzers.Async;
 using DumpDetective.Analysis.Analyzers.Gc;
 using DumpDetective.Analysis.Analyzers.Infra;
@@ -106,7 +107,7 @@ internal static class AnalyzerFilterService
                 "Excluded by --include-analyzers / --exclude-analyzers filter.",
                 null,
                 SkipReason: "Excluded by analyzer filter.",
-                Findings: Array.Empty<InsightFinding>(),
+                Findings: Array.Empty<Claim>(),
                 FindingCount: 0,
                 WarningCount: 0,
                 Artifacts: Array.Empty<ReportArtifact>(),

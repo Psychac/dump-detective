@@ -20,7 +20,7 @@ public sealed class DependencyDirectionTests
         IReadOnlyCollection<string> cliRefs = ReadProjectReferenceNames(Path.Combine(repoRoot, "src", "DumpDetective.Cli", "DumpDetective.Cli.csproj"));
 
         // DumpDetective.Sdk added 2026-10-06 (M1 step 6): AnalyzerRunResult now carries the Sdk's Claim and Severity
-        // instead of Core's InsightFinding and Severity. Core was never meant to be a leaf by design — it is the
+        // instead of Core's Claim and Severity. Core was never meant to be a leaf by design — it is the
         // leftover report-side model layer, shrinking toward Sdk — and the Sdk depends on nothing, so no cycle is possible.
         coreRefs.Should().Equal(["DumpDetective.Sdk"]);
         // DumpDetective.Sdk added 2026-09-10: the Phase 1 retyping pilot's dump-side Tier-1

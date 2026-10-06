@@ -40,7 +40,7 @@ internal static class CorrelationBuilder
             // Candidate findings: regression-tagged OR warning/critical, and not too-low confidence
             var candidates = snapshot.Findings
                 .Where(f => (f.Tags?.Contains("regression") == true || f.Severity == Severity.Warning || f.Severity == Severity.Critical)
-                            && (f.ConfidenceScore ?? f.EffectiveConfidenceScore) >= MinConfidenceThreshold)
+                            && f.ReportConfidence() >= MinConfidenceThreshold)
                 .ToArray();
 
             var distinctAnalyzers = candidates.Select(f => f.Analyzer).Distinct(StringComparer.Ordinal).ToArray();
@@ -57,7 +57,7 @@ internal static class CorrelationBuilder
                 var adjSnap = trendData.Snapshots[idx];
                 var adjCandidates = adjSnap.Findings
                     .Where(f => (f.Tags?.Contains("regression") == true || f.Severity == Severity.Warning || f.Severity == Severity.Critical)
-                                && (f.ConfidenceScore ?? f.EffectiveConfidenceScore) >= MinConfidenceThreshold)
+                                && f.ReportConfidence() >= MinConfidenceThreshold)
                     .Select(f => f.Analyzer)
                     .Distinct(StringComparer.Ordinal)
                     .ToArray();
@@ -68,9 +68,9 @@ internal static class CorrelationBuilder
 
             var domains = distinctAnalyzers;
             var signalKeys = candidates.Select(f => f.Category).Distinct(StringComparer.Ordinal).ToArray();
-            var sourceFingerprints = candidates.Select(f => f.EffectiveFingerprint).Distinct(StringComparer.Ordinal).ToArray();
+            var sourceFingerprints = candidates.Select(f => f.Fingerprint).Distinct(StringComparer.Ordinal).ToArray();
 
-            double avgConfidence = candidates.Select(f => f.EffectiveConfidenceScore).DefaultIfEmpty(0.5).Average();
+            double avgConfidence = candidates.Select(f => f.ReportConfidence()).DefaultIfEmpty(0.5).Average();
 
             // Severity weighting: Critical=1.2, Warning=1.0, default=0.9
             double avgSeverityWeight = candidates.Select(f => f.Severity == Severity.Critical ? 1.2 : (f.Severity == Severity.Warning ? 1.0 : 0.9)).DefaultIfEmpty(1.0).Average();

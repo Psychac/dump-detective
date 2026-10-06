@@ -176,7 +176,7 @@ internal sealed record AnalyzerRunStatusRecord(
 /// <summary>Points at the observations side-car by file name (relative to this report) and content hash.</summary>
 internal sealed record ObservationsReference(string File, string Sha256, long Count, bool Compressed);
 
-// Compact serializable projection of InsightFinding used in generated JSON
+// Compact serializable projection of Claim used in generated JSON
 internal sealed record FindingRecord(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("analyzer")] string Analyzer,

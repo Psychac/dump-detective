@@ -36,9 +36,9 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
         CrashDomainResult? crash = results.Get<CrashDomainResult>();
         FinalizableObjectDomainResult? finalizable = results.Get<FinalizableObjectDomainResult>();
         HangDomainResult? hang = results.Get<HangDomainResult>();
-        IReadOnlyList<InsightFinding> findings = results.AllFindingsSorted();
-        IReadOnlyList<InsightFinding> criticalFindings = BuildFindingsBySeverity(findings, Severity.Critical, 5);
-        IReadOnlyList<InsightFinding> warningFindings = BuildFindingsBySeverity(findings, Severity.Warning, 5);
+        IReadOnlyList<Claim> findings = results.AllFindingsSorted();
+        IReadOnlyList<Claim> criticalFindings = BuildFindingsBySeverity(findings, Severity.Critical, 5);
+        IReadOnlyList<Claim> warningFindings = BuildFindingsBySeverity(findings, Severity.Warning, 5);
 
         var keyMetrics = new System.Collections.Generic.Dictionary<string, MetricValue>();
         if (memory is not null)
@@ -109,11 +109,11 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
         {
             for (int i = 0; i < criticalFindings.Count; i++)
             {
-                InsightFinding finding = criticalFindings[i];
+                Claim finding = criticalFindings[i];
                 blocks.Add(CollapseBegin($"[{i + 1}] {finding.Title}"));
                 blocks.Add(M("Analyzer", finding.Analyzer));
-                blocks.Add(M("Confidence", finding.EffectiveConfidenceScore.ToString("F2"), (long)Math.Round(finding.EffectiveConfidenceScore * 100)));
-                blocks.Add(T($"Details: {finding.Evidence}"));
+                blocks.Add(M("Confidence", finding.ReportConfidence().ToString("F2"), (long)Math.Round(finding.ReportConfidence() * 100)));
+                blocks.Add(T($"Details: {finding.Narrative}"));
                 blocks.Add(T($"Recommendation: {finding.Recommendation}"));
                 blocks.Add(CollapseEnd());
 
@@ -132,11 +132,11 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
         {
             for (int i = 0; i < warningFindings.Count; i++)
             {
-                InsightFinding finding = warningFindings[i];
+                Claim finding = warningFindings[i];
                 blocks.Add(CollapseBegin($"[{i + 1}] {finding.Title}"));
                 blocks.Add(M("Analyzer", finding.Analyzer));
-                blocks.Add(M("Confidence", finding.EffectiveConfidenceScore.ToString("F2"), (long)Math.Round(finding.EffectiveConfidenceScore * 100)));
-                blocks.Add(T($"Details: {finding.Evidence}"));
+                blocks.Add(M("Confidence", finding.ReportConfidence().ToString("F2"), (long)Math.Round(finding.ReportConfidence() * 100)));
+                blocks.Add(T($"Details: {finding.Narrative}"));
                 blocks.Add(T($"Recommendation: {finding.Recommendation}"));
                 blocks.Add(CollapseEnd());
 
@@ -149,7 +149,7 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
         blocks.Add(H("TOP ACTIONABLE RECOMMENDATIONS"));
         blocks.Add(T("Recommendations are taken from the highest-severity findings across all analyzers."));
 
-        IReadOnlyList<InsightFinding> topRecommendations = BuildTopRecommendations(findings);
+        IReadOnlyList<Claim> topRecommendations = BuildTopRecommendations(findings);
         if (topRecommendations.Count == 0)
         {
             blocks.Add(T("No Critical or Warning findings were available to summarize."));
@@ -158,14 +158,14 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
         {
             for (int i = 0; i < topRecommendations.Count; i++)
             {
-                InsightFinding finding = topRecommendations[i];
+                Claim finding = topRecommendations[i];
                 blocks.Add(CollapseBegin($"[{i + 1}] {finding.Severity}: {finding.Title}"));
                 blocks.Add(M("Analyzer", finding.Analyzer));
-                blocks.Add(M("Confidence", finding.EffectiveConfidenceScore.ToString("F2"), (long)Math.Round(finding.EffectiveConfidenceScore * 100)));
-                blocks.Add(T($"Details: {finding.Evidence}"));
+                blocks.Add(M("Confidence", finding.ReportConfidence().ToString("F2"), (long)Math.Round(finding.ReportConfidence() * 100)));
+                blocks.Add(T($"Details: {finding.Narrative}"));
                 blocks.Add(T($"Recommendation: {finding.Recommendation}"));
-                if (finding.EffectiveCaveats.Count > 0)
-                    blocks.Add(T($"Caveats: {string.Join(" ", finding.EffectiveCaveats)}"));
+                if (finding.Caveats.Count > 0)
+                    blocks.Add(T($"Caveats: {string.Join(" ", finding.Caveats)}"));
                 blocks.Add(CollapseEnd());
 
                 if (i + 1 < topRecommendations.Count)
@@ -175,10 +175,10 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
 
         blocks.Add(Blank());
         blocks.Add(H("LEAK LIKELIHOOD"));
-        InsightFinding? leakSignal = FindTopLeakSignal(findings);
+        Claim? leakSignal = FindTopLeakSignal(findings);
         blocks.Add(leakSignal is null
             ? T("No explicit leak signal was produced by the current analyzer set.")
-            : T($"{leakSignal.Title} — {leakSignal.Evidence}"));
+            : T($"{leakSignal.Title} — {leakSignal.Narrative}"));
 
         return new AnalyzerDetailSection(
             AnalyzerName: "Executive Summary",
@@ -189,13 +189,13 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
             CompactTables: compactTables.Count > 0 ? compactTables : null);
     }
 
-    private static IReadOnlyList<InsightFinding> BuildTopRecommendations(IReadOnlyList<InsightFinding> findings)
+    private static IReadOnlyList<Claim> BuildTopRecommendations(IReadOnlyList<Claim> findings)
     {
-        var recommendations = new List<InsightFinding>(TopRecommendationItems);
+        var recommendations = new List<Claim>(TopRecommendationItems);
 
         for (int i = 0; i < findings.Count; i++)
         {
-            InsightFinding finding = findings[i];
+            Claim finding = findings[i];
             if (finding.Severity is not (Severity.Critical or Severity.Warning))
                 continue;
 
@@ -207,12 +207,12 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
         return recommendations;
     }
 
-    private static IReadOnlyList<InsightFinding> BuildFindingsBySeverity(IReadOnlyList<InsightFinding> findings, Severity severity, int limit)
+    private static IReadOnlyList<Claim> BuildFindingsBySeverity(IReadOnlyList<Claim> findings, Severity severity, int limit)
     {
-        var selected = new List<InsightFinding>(limit);
+        var selected = new List<Claim>(limit);
         for (int i = 0; i < findings.Count; i++)
         {
-            InsightFinding finding = findings[i];
+            Claim finding = findings[i];
             if (finding.Severity != severity)
                 continue;
 
@@ -224,11 +224,11 @@ internal sealed class ExecutiveSummarySectionBuilder : SectionBuilderBase, IRepo
         return selected;
     }
 
-    private static InsightFinding? FindTopLeakSignal(IReadOnlyList<InsightFinding> findings)
+    private static Claim? FindTopLeakSignal(IReadOnlyList<Claim> findings)
     {
         for (int i = 0; i < findings.Count; i++)
         {
-            InsightFinding finding = findings[i];
+            Claim finding = findings[i];
             if (finding.Category.Contains("Leak", StringComparison.OrdinalIgnoreCase)
                 || finding.Category.Contains("Retention", StringComparison.OrdinalIgnoreCase)
                 || finding.Title.Contains("leak", StringComparison.OrdinalIgnoreCase))

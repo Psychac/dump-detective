@@ -11,7 +11,7 @@ namespace DumpDetective.Reporting.SynthesisRules.Insight;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The original attached a <c>FindingEvidenceTable</c> listing every offending type (name,
+/// The original attached an evidence table listing every offending type (name,
 /// retained bytes, % of heap). <c>Sdk.Synthesis.Claim</c> has no equivalent field, deliberately —
 /// see docs/ReportStructure/ReportSystemVision.md § 6.2, which already decided not to pre-add
 /// <c>Claim</c>-shaped/report-rendering fields to <c>Claim</c> ahead of the report phase, and

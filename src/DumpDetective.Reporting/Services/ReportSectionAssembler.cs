@@ -108,7 +108,7 @@ internal static class ReportSectionAssembler
         foreach (AnalyzerRunResult run in runs)
         {
             Severity maxSev = Severity.Info;
-            foreach (InsightFinding f in run.Findings)
+            foreach (Claim f in run.Findings)
             {
                 if (f.Severity > maxSev) maxSev = f.Severity;
             }
@@ -184,25 +184,25 @@ internal static class ReportSectionAssembler
 
             if (leadFinding is null && matchedRun is { } run && run.Findings.Count > 0)
             {
-                InsightFinding? top = null;
+                Claim? top = null;
                 for (int f = 0; f < run.Findings.Count; f++)
                 {
-                    InsightFinding finding = run.Findings[f];
+                    Claim finding = run.Findings[f];
                     if (top is null || finding.Severity > top.Severity)
                         top = finding;
                 }
 
                 if (top is not null && top.Severity != Severity.Info)
                 {
-                    double score = top.EffectiveConfidenceScore;
+                    double score = top.ReportConfidence();
 
                     leadFinding = new SectionLeadFinding(
                         Severity:          top.Severity.ToString(),
                         Title:             top.Title,
-                        Summary:           top.Evidence,
+                        Summary:           top.Narrative,
                         Recommendation:    top.Recommendation,
                         ConfidenceScore:   score,
-                        Caveats:           top.EffectiveCaveats);
+                        Caveats:           top.Caveats);
                 }
             }
 
@@ -237,14 +237,14 @@ internal static class ReportSectionAssembler
         var caveats = new List<string>();
         for (int f = 0; f < run.Findings.Count; f++)
         {
-            InsightFinding finding = run.Findings[f];
-            if (finding.ConfidenceLimitingFactors.Count == 0)
+            Claim finding = run.Findings[f];
+            if (finding.ReportConfidenceLimitingFactors().Count == 0)
                 continue;
 
-            double score = finding.EffectiveConfidenceScore;
+            double score = finding.ReportConfidence();
             if (lowestScore is null || score < lowestScore)
                 lowestScore = score;
-            foreach (string factor in finding.ConfidenceLimitingFactors)
+            foreach (string factor in finding.ReportConfidenceLimitingFactors())
             {
                 if (!caveats.Contains(factor, StringComparer.Ordinal))
                     caveats.Add(factor);

@@ -28,25 +28,25 @@ public sealed class ReportFlowIntegrationTests
             _ => throw new ArgumentOutOfRangeException(nameof(formatCode))
         };
 
-        InsightFinding findingA = new(
-            Analyzer: "RetentionAnalyzer",
-            Category: "Leak",
-            Severity: Severity.Warning,
-            Title: "UNIQUE_DUP_TITLE",
-            Evidence: "Evidence A",
-            Recommendation: "Remediation A",
-            Tags: ["dup"],
-            Fingerprint: "same-key");
+        Claim findingA = ClaimFactory.Create(
+            analyzer: "RetentionAnalyzer",
+            category: "Leak",
+            severity: Severity.Warning,
+            title: "UNIQUE_DUP_TITLE",
+            narrative: "Evidence A",
+            recommendation: "Remediation A",
+            tags: ["dup"],
+            fingerprint: "same-key");
 
-        InsightFinding findingB = new(
-            Analyzer: "RetentionAnalyzer",
-            Category: "Leak",
-            Severity: Severity.Critical,
-            Title: "UNIQUE_DUP_TITLE",
-            Evidence: "Evidence B",
-            Recommendation: "Remediation B",
-            Tags: ["dup"],
-            Fingerprint: "same-key");
+        Claim findingB = ClaimFactory.Create(
+            analyzer: "RetentionAnalyzer",
+            category: "Leak",
+            severity: Severity.Critical,
+            title: "UNIQUE_DUP_TITLE",
+            narrative: "Evidence B",
+            recommendation: "Remediation B",
+            tags: ["dup"],
+            fingerprint: "same-key");
 
         AnalyzerRunResult runA = CreateRun("RetentionAnalyzer", findingA);
         AnalyzerRunResult runB = CreateRun("RetentionAnalyzer", findingB);
@@ -76,15 +76,15 @@ public sealed class ReportFlowIntegrationTests
     [Fact]
     public void BuildRenderedReport_ShouldHonorCancellationToken()
     {
-        InsightFinding finding = new(
-            Analyzer: "RetentionAnalyzer",
-            Category: "Leak",
-            Severity: Severity.Warning,
-            Title: "Canceled",
-            Evidence: "Should not render",
-            Recommendation: "n/a",
-            Tags: ["cancel"],
-            Fingerprint: "cancel");
+        Claim finding = ClaimFactory.Create(
+            analyzer: "RetentionAnalyzer",
+            category: "Leak",
+            severity: Severity.Warning,
+            title: "Canceled",
+            narrative: "Should not render",
+            recommendation: "n/a",
+            tags: ["cancel"],
+            fingerprint: "cancel");
 
         AnalyzerRunResult run = CreateRun("RetentionAnalyzer", finding);
         ReportBuilderFacade facade = new(
@@ -113,15 +113,15 @@ public sealed class ReportFlowIntegrationTests
     [Fact]
     public void BuildRenderedTrendReport_ShouldIncludeTrendComparisonContent()
     {
-        InsightFinding finding = new(
-            Analyzer: "CrashAnalyzer",
-            Category: "Crash",
-            Severity: Severity.Warning,
-            Title: "Current snapshot finding",
-            Evidence: "Unhandled exception",
-            Recommendation: "Inspect crash thread",
-            Tags: ["crash"],
-            Fingerprint: "crash-1");
+        Claim finding = ClaimFactory.Create(
+            analyzer: "CrashAnalyzer",
+            category: "Crash",
+            severity: Severity.Warning,
+            title: "Current snapshot finding",
+            narrative: "Unhandled exception",
+            recommendation: "Inspect crash thread",
+            tags: ["crash"],
+            fingerprint: "crash-1");
 
         AnalyzerRunResult currentRun = CreateRun("CrashAnalyzer", finding);
 
@@ -200,7 +200,7 @@ public sealed class ReportFlowIntegrationTests
         htmlOutput.Should().Contain("trendAnalyzerSections");
     }
 
-    private static AnalyzerRunResult CreateRun(string analyzerName, InsightFinding finding)
+    private static AnalyzerRunResult CreateRun(string analyzerName, Claim finding)
     {
         GenericAnalyzerDomainResult result = new()
         {

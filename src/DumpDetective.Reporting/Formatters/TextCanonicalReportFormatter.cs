@@ -2,6 +2,7 @@ using System.Text;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Reporting.Models;
+using DumpDetective.Reporting.Services;
 
 namespace DumpDetective.Reporting.Formatters;
 
@@ -49,6 +50,8 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
             RenderExecutiveSummaryText(executiveSummary, sb);
         }
 
+        RenderClaims(doc.Findings, sb);
+
         if (doc.IncidentContext is { } ctx)
         {
             sb.AppendLine("INCIDENT CONTEXT");
@@ -90,6 +93,45 @@ internal sealed class TextCanonicalReportFormatter : IReportFormatter
         }
 
         return sb.ToString();
+    }
+
+    private static void RenderClaims(IReadOnlyList<FindingRecord> findings, StringBuilder sb)
+    {
+        List<ClaimListingEntry> claims = ClaimListing.Build(findings);
+        if (claims.Count == 0)
+            return;
+
+        sb.AppendLine("FINDINGS");
+        sb.AppendLine(StringConstants.Equals80);
+        foreach (ClaimListingEntry claim in claims)
+        {
+            sb.AppendLine($"[{claim.Severity}] {claim.Title}");
+            sb.AppendLine($"  {claim.Analyzer} - {claim.Assertion}");
+            if (claim.Confidence is not null)
+                sb.AppendLine($"  Confidence: {claim.Confidence}{(claim.ConfidenceReason is null ? string.Empty : $" - {claim.ConfidenceReason}")}");
+            AppendTextList(sb, "Why", claim.Support);
+            AppendTextList(sb, "Weakened by", claim.Counter);
+            if (claim.Tests.Count > 0)
+            {
+                sb.AppendLine("  Wrong if:");
+                foreach (ClaimListingTest test in claim.Tests)
+                    sb.AppendLine($"    - {test.Description}{(test.Command is null ? string.Empty : $" -> {test.Command}")}");
+            }
+
+            if (claim.Recommendation is not null)
+                sb.AppendLine($"  Recommendation: {claim.Recommendation}");
+            sb.AppendLine();
+        }
+    }
+
+    private static void AppendTextList(StringBuilder sb, string label, IReadOnlyList<string> lines)
+    {
+        if (lines.Count == 0)
+            return;
+
+        sb.AppendLine($"  {label}:");
+        foreach (string line in lines)
+            sb.AppendLine($"    - {line}");
     }
 
     private static void RenderBlocksText(IReadOnlyList<SectionBlock> blocks, StringBuilder sb)

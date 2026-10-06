@@ -241,7 +241,7 @@ system. It gates M4.
    - Gates: [§ 17.1](ReportSystemVision.md#171-editorial-gates) rows for assertion, `falsifiedBy`,
      `counter`, registry; plus a test flagging near-verbatim `falsifiedBy` text across claims.
    - Each batch verified on the reference dump, one run at a time.
-5. **Generated prose + `dd-claim`** *(card built 2026-10-06 for the one migrated claim; Markdown/text claim listing and remaining rules pending)* — per D3.
+5. **Generated prose + `dd-claim`** *(done 2026-10-06: HTML card and Markdown/text claim listing)* — per D3.
    - One prose generator over `assertion`; HTML, Markdown, text all call it.
    - `dd-claim` widget design *(decided 2026-10-05; not yet built)*:
      - **Assertion line:** a full generated sentence on its own line under the title, wrapping allowed, not
@@ -261,6 +261,12 @@ system. It gates M4.
        observations in the page and belongs to M4.
      - **Unmigrated claims** (no assertion) render exactly as today, so steps 4 and 5 can interleave.
      - **Markdown/text:** the same parts as plain lines from the shared generator (D3), no collapse.
+       - **Built 2026-10-06:** a `Findings` section (after the executive summary) listing every finding with an
+         assertion: title, assertion line, confidence plus reason, why, weakened by, wrong if (with command),
+         recommendation. `ClaimListing` produces labelled parts from `ClaimProse`; each formatter adds only its
+         markup. Findings without an assertion (trend deltas, analyzer failures) are not listed.
+       - Verified on the reference dump: 83 claims in both Markdown and text. Note `config.json` beside the
+         binary overrides `--report-format`, so format checks need `--config`.
      - **Deferred:** conflict state (§ 6.3; needs `relations`, after M1), next-capture row (M3), actions row.
      - **Built and reviewed on the real dump (2026-10-06):** assertion line with a muted predicate label;
        "Confidence" label on the existing four-bar chip, bars and number taken from the breakdown (the old chip

@@ -1,6 +1,7 @@
 using System.Text;
 using DumpDetective.Core.Configuration;
 using DumpDetective.Reporting.Models;
+using DumpDetective.Reporting.Services;
 
 namespace DumpDetective.Reporting.Formatters;
 
@@ -69,6 +70,8 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
                 doc.CorrelationEvents,
                 sb);
         }
+
+        RenderClaims(doc.Findings, sb);
 
         if (doc.IncidentContext is { } ctx)
         {
@@ -231,6 +234,55 @@ internal sealed class MarkdownCanonicalReportFormatter : IReportFormatter
             }
         }
 
+        sb.AppendLine();
+    }
+
+    private static void RenderClaims(IReadOnlyList<FindingRecord> findings, StringBuilder sb)
+    {
+        List<ClaimListingEntry> claims = ClaimListing.Build(findings);
+        if (claims.Count == 0)
+            return;
+
+        sb.AppendLine("## Findings");
+        sb.AppendLine();
+        foreach (ClaimListingEntry claim in claims)
+        {
+            sb.AppendLine($"### [{claim.Severity}] {Esc(claim.Title)}");
+            sb.AppendLine();
+            sb.AppendLine($"*{Esc(claim.Analyzer)}* — {Esc(claim.Assertion)}");
+            sb.AppendLine();
+            if (claim.Confidence is not null)
+            {
+                sb.AppendLine($"**Confidence:** {claim.Confidence}{(claim.ConfidenceReason is null ? string.Empty : $" — {Esc(claim.ConfidenceReason)}")}");
+                sb.AppendLine();
+            }
+
+            AppendMarkdownList(sb, "Why", claim.Support);
+            AppendMarkdownList(sb, "Weakened by", claim.Counter);
+            if (claim.Tests.Count > 0)
+            {
+                sb.AppendLine("**Wrong if:**");
+                foreach (ClaimListingTest test in claim.Tests)
+                    sb.AppendLine($"- {Esc(test.Description)}{(test.Command is null ? string.Empty : $" — `{test.Command}`")}");
+                sb.AppendLine();
+            }
+
+            if (claim.Recommendation is not null)
+            {
+                sb.AppendLine($"**Recommendation:** {Esc(claim.Recommendation)}");
+                sb.AppendLine();
+            }
+        }
+    }
+
+    private static void AppendMarkdownList(StringBuilder sb, string label, IReadOnlyList<string> lines)
+    {
+        if (lines.Count == 0)
+            return;
+
+        sb.AppendLine($"**{label}:**");
+        foreach (string line in lines)
+            sb.AppendLine($"- {Esc(line)}");
         sb.AppendLine();
     }
 

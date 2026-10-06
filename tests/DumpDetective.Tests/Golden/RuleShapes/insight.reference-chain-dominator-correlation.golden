@@ -1,0 +1,125 @@
+rule: insight.reference-chain-dominator-correlation
+version: 1
+[
+  {
+    "name": "warning",
+    "claims": [
+      {
+        "fingerprint": "insightengine::reference-chain-dominator-correlation",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 15,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 10,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "warning share threshold"
+          },
+          "qualifiers": {
+            "location": "the managed heap retained through App.Cache",
+            "scope": "1 type(s) over the threshold"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The managed heap totals 1000.0 MB."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "App.Cache retains 150.0 MB, 15.0% of it, and has a sampled reference chain."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A sampled type\u0027s retained size counts everything reachable from it, including objects that other roots also keep alive."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled App.Cache: if its path is short-lived or unrooted, the retained share is overstated.",
+            "command": "!gcroot \u003Cinstance address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the share does not grow, it is a stable working set."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "critical-with-two-offenders",
+    "claims": [
+      {
+        "fingerprint": "insightengine::reference-chain-dominator-correlation",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 30,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 25,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "critical share threshold"
+          },
+          "qualifiers": {
+            "location": "the managed heap retained through App.Cache",
+            "scope": "2 type(s) over the threshold"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The managed heap totals 1000.0 MB."
+          },
+          {
+            "observations": [
+              "observations[1]",
+              "observations[2]"
+            ],
+            "why": "App.Cache retains 300.0 MB, 30.0% of it, and has a sampled reference chain."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A sampled type\u0027s retained size counts everything reachable from it, including objects that other roots also keep alive."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled App.Cache: if its path is short-lived or unrooted, the retained share is overstated.",
+            "command": "!gcroot \u003Cinstance address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the share does not grow, it is a stable working set."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "below-threshold-says-nothing",
+    "claims": []
+  }
+]

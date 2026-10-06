@@ -1,0 +1,118 @@
+rule: insight.gcroot-large-retention
+version: 1
+[
+  {
+    "name": "one-large-root-with-kind-summaries",
+    "claims": [
+      {
+        "fingerprint": "insightengine::gcroot-large-retention",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 125829120,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 52428800,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "large-retention threshold"
+          },
+          "qualifiers": {
+            "mechanism": "dominant root kind StrongHandle",
+            "location": "the largest root, StrongHandle to App.Cache"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The largest root retains 120.0 MB; 1 root(s) each retain at least 50.0 MB."
+          },
+          {
+            "observations": [
+              "observations[2]",
+              "observations[3]"
+            ],
+            "why": "Each summarises the retained size by root kind."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A root that owns the application\u0027s main data structures legitimately retains a large graph; its size alone does not show a leak."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gcroot on an instance of App.Cache finds a different root, the attribution to this root is wrong.",
+            "command": "!gcroot \u003Ctarget address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the root\u0027s retained size does not grow, it is a stable working set."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "one-large-root-alone",
+    "claims": [
+      {
+        "fingerprint": "insightengine::gcroot-large-retention",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 83886080,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 52428800,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "large-retention threshold"
+          },
+          "qualifiers": {
+            "location": "the largest root, Stack to App.Cache"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The largest root retains 80.0 MB; 1 root(s) each retain at least 50.0 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A root that owns the application\u0027s main data structures legitimately retains a large graph; its size alone does not show a leak."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gcroot on an instance of App.Cache finds a different root, the attribution to this root is wrong.",
+            "command": "!gcroot \u003Ctarget address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the root\u0027s retained size does not grow, it is a stable working set."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "below-threshold-says-nothing",
+    "claims": []
+  }
+]

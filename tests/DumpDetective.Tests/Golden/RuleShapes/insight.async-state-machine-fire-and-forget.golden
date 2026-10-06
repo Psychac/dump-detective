@@ -1,0 +1,146 @@
+rule: insight.async-state-machine-fire-and-forget
+version: 1
+[
+  {
+    "name": "worst-method-with-population-and-heap-share",
+    "claims": [
+      {
+        "fingerprint": "insightengine::async-state-machine-fire-and-forget",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Leaks",
+          "subject": {
+            "$kind": "method",
+            "kind": "Method",
+            "declaringType": {
+              "kind": "Type",
+              "canonicalName": "App.Worker",
+              "joinKey": "App.Worker",
+              "fidelity": "Exact"
+            },
+            "name": "RunAsync",
+            "normalizedSignature": "()",
+            "joinKey": "App.Worker::RunAsync()",
+            "fidelity": "Exact"
+          },
+          "measure": {
+            "value": 150,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 100,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "fire-and-forget threshold"
+          },
+          "qualifiers": {
+            "mechanism": "callers not awaiting completion",
+            "location": "suspended instances of async method RunAsync"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "150 suspended state machine instances belong to \u0027App.Worker.RunAsync\u0027."
+          },
+          {
+            "observations": [
+              "observations[2]"
+            ],
+            "why": "200 state machines in total hold 30.0 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Many suspended instances of one method are also what a busy endpoint under load looks like; the count does not show callers are not awaiting."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the suspended \u0027RunAsync\u0027 instances in !dumpasync are each awaited by a parent state machine, they are not fire-and-forget.",
+            "command": "!dumpasync"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If every call site of \u0027RunAsync\u0027 awaits it, the instances are in-flight awaited work."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "worst-method-alone",
+    "claims": [
+      {
+        "fingerprint": "insightengine::async-state-machine-fire-and-forget",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Leaks",
+          "subject": {
+            "$kind": "method",
+            "kind": "Method",
+            "declaringType": {
+              "kind": "Type",
+              "canonicalName": "App.Worker",
+              "joinKey": "App.Worker",
+              "fidelity": "Exact"
+            },
+            "name": "RunAsync",
+            "normalizedSignature": "()",
+            "joinKey": "App.Worker::RunAsync()",
+            "fidelity": "Exact"
+          },
+          "measure": {
+            "value": 150,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 100,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "fire-and-forget threshold"
+          },
+          "qualifiers": {
+            "mechanism": "callers not awaiting completion",
+            "location": "suspended instances of async method RunAsync"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "150 suspended state machine instances belong to \u0027App.Worker.RunAsync\u0027."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Many suspended instances of one method are also what a busy endpoint under load looks like; the count does not show callers are not awaiting."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the suspended \u0027RunAsync\u0027 instances in !dumpasync are each awaited by a parent state machine, they are not fire-and-forget.",
+            "command": "!dumpasync"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If every call site of \u0027RunAsync\u0027 awaits it, the instances are in-flight awaited work."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "below-threshold-says-nothing",
+    "claims": []
+  }
+]

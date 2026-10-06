@@ -1,0 +1,122 @@
+rule: insight.static-root-finalizable-correlation
+version: 1
+[
+  {
+    "name": "overlap",
+    "claims": [
+      {
+        "fingerprint": "insightengine::static-root-finalizable-correlation",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Retains",
+          "subject": {
+            "$kind": "type",
+            "kind": "Type",
+            "canonicalName": "App.Handle",
+            "joinKey": "App.Handle",
+            "fidelity": "Exact"
+          },
+          "measure": {
+            "value": 40,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "5 instances are also queued for finalization",
+            "location": "instances of App.Handle retained by static root \u0027static App.Cache.Items\u0027"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Static root \u0027static App.Cache.Items\u0027 retains 40 instance(s) of App.Handle."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "An instance of App.Handle is in the finalizer queue."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A static cache that holds instances on purpose also holds the ones queued for finalization; the overlap does not show the root delays their collection."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a queued App.Handle: if its only root is the finalizer queue, the static root is not what retains it.",
+            "command": "!gcroot \u003Cqueued instance address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the static root is a bounded cache that disposes evicted entries, the retention is by design."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "picks-the-type-with-most-queued",
+    "claims": [
+      {
+        "fingerprint": "insightengine::static-root-finalizable-correlation",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Retains",
+          "subject": {
+            "$kind": "type",
+            "kind": "Type",
+            "canonicalName": "App.B",
+            "joinKey": "App.B",
+            "fidelity": "Exact"
+          },
+          "measure": {
+            "value": 10,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "7 instances are also queued for finalization",
+            "location": "instances of App.B retained by static root \u0027static B\u0027"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Static root \u0027static B\u0027 retains 10 instance(s) of App.B."
+          },
+          {
+            "observations": [
+              "observations[4]"
+            ],
+            "why": "An instance of App.B is in the finalizer queue."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A static cache that holds instances on purpose also holds the ones queued for finalization; the overlap does not show the root delays their collection."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a queued App.B: if its only root is the finalizer queue, the static root is not what retains it.",
+            "command": "!gcroot \u003Cqueued instance address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the static root is a bounded cache that disposes evicted entries, the retention is by design."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "no-overlap-says-nothing",
+    "claims": []
+  }
+]

@@ -1,4 +1,5 @@
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -97,6 +98,35 @@ internal sealed class DataTableLifecycleInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::datatable-lifecycle",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Measure = ClaimParts.Count(dataColumnFinalizer),
+                    Reference = dataColumnFinalizer >= DataColumnFinalizerThreshold
+                        ? ClaimParts.Budget(ClaimParts.Count(DataColumnFinalizerThreshold), "DataColumn finalizer threshold")
+                        : ClaimParts.Budget(ClaimParts.Count(DataRowHeapThreshold), "DataRow heap threshold"),
+                    Qualifiers = new AssertionQualifiers
+                    {
+                        Location = "DataColumn and DataRow objects",
+                        Mechanism = "DataColumn has a finalizer and is released late without Dispose",
+                    },
+                },
+                Support = [new EvidenceStatement(derivedFrom, string.Join("; ", evidenceParts) + ".")],
+                Counter = Counter.None("A data-heavy service holds DataTables on purpose; the counts alone do not show they should have been disposed."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gcroot <DataTable address>",
+                        Test = "On a sampled DataTable: if its root is a request frame, the tables are short-lived and are released with the request.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the DataColumn and DataRow counts do not grow, they are a stable working set.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Memory",
                 Severity = Severity.Warning,

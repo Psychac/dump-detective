@@ -1,5 +1,6 @@
 using DumpDetective.Sdk.Analysis;
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -96,6 +97,39 @@ internal sealed class GCRootLargeRetentionInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::gcroot-large-retention",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Retains,
+                    Measure = ClaimParts.Bytes(maxRetained),
+                    Reference = ClaimParts.Budget(ClaimParts.Bytes(LargeRetentionThresholdBytes), "large-retention threshold"),
+                    Qualifiers = new AssertionQualifiers
+                    {
+                        Location = $"the largest root, {rootKind ?? "unknown"} to {targetType ?? "?"}",
+                        Mechanism = dominantKind is null ? null : $"dominant root kind {dominantKind}",
+                    },
+                },
+                Support =
+                [
+                    new EvidenceStatement([maxRoot!.Id], $"The largest root retains {InsightByteFormat.FormatBytes(maxRetained)}; {largeRootCount:N0} root(s) each retain at least {InsightByteFormat.FormatBytes(LargeRetentionThresholdBytes)}."),
+                    .. kindSummaries.Count > 0
+                        ? [new EvidenceStatement(ClaimParts.IdsOf(kindSummaries), "Each summarises the retained size by root kind.")]
+                        : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = Counter.None("A root that owns the application's main data structures legitimately retains a large graph; its size alone does not show a leak."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gcroot <target address>",
+                        Test = $"If !gcroot on an instance of {targetType ?? "the target type"} finds a different root, the attribution to this root is wrong.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the root's retained size does not grow, it is a stable working set.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Memory",
                 Severity = Severity.Warning,

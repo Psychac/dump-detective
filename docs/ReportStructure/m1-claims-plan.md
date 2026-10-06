@@ -135,7 +135,7 @@ system. It gates M4.
      `ISynthesisRule`, recorded in `derivedFrom` as rule id + version. A per-rule golden-output test fails
      when a rule's emitted findings change shape without a version bump. Derived (hash) versions rejected:
      they change on any rebuild, so identical rules from different builds would look different.
-4. **Rule migration** *(in progress — 63 of 76 rules; pilot 2026-10-05, batches 1-13 2026-10-06)* — all 76 rules author `assertion`, `counter`, `falsifiedBy`.
+4. **Rule migration** *(in progress — 68 of 76 rules; pilot 2026-10-05, batches 1-14 2026-10-06)* — all 76 rules author `assertion`, `counter`, `falsifiedBy`.
    - Done: `LohFragmentationSynthesisRule` (pilot), with the per-rule golden mechanism
      (`Golden/RuleShapeGolden.cs`, goldens in `Golden/RuleShapes/`; `DD_BLESS_RULE_SHAPES=1` to bless). Fails when
      a rule's claim shape changes without a `Version` bump, or the version changes without a re-bless.
@@ -199,6 +199,9 @@ system. It gates M4.
    - Batch 13 (2026-10-06): `OrphanedTaskAccumulation` (2 claims), `BoxingGCCorrelation`, `JitModuleHotspot`,
      `LongHeldTransactionOnOpenConnection`, `MemoryTypeGeneration`. Tests in `InsightRulesBatchFiveClaimTests`.
      Verified on the reference dump (79 s): 76 of 82 findings carry an assertion.
+   - Batch 14 (2026-10-06): `StaticRootFinalizableCorrelation`, `AsyncStateMachineFireAndForget`,
+     `DataTableLifecycle`, `GCRootLargeRetention`, `ReferenceChainDominatorCorrelation`. Tests in
+     `InsightRulesBatchSixClaimTests`. Verified on the reference dump (78 s): 78 of 82 findings carry an assertion.
    - **Open: intermittent test-host early stop.** One full-suite run reported 362 tests instead of ~1,700 and the
      next completed normally; the flaky `ArrayAnalyzerRetypingCharacterizationTests` failure appears most runs.
    - **Open: intermittent hang, not caused by this migration.** One real-dump run sat 42 minutes in Stage 3 inside

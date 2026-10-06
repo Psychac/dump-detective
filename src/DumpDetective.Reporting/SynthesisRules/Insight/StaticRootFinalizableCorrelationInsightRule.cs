@@ -1,4 +1,5 @@
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -88,6 +89,39 @@ internal sealed class StaticRootFinalizableCorrelationInsightRule : ISynthesisRu
             new Claim
             {
                 Fingerprint = "insightengine::static-root-finalizable-correlation",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Retains,
+                    Subject = bestRetainedTypeObservation.Subjects[0],
+                    Measure = ClaimParts.Count(bestRetainedCount),
+                    Qualifiers = new AssertionQualifiers
+                    {
+                        Location = $"instances of {bestTypeName} retained by static root '{bestRootDescription}'",
+                        Mechanism = $"{bestQueueCount:N0} instances are also queued for finalization",
+                    },
+                },
+                Support =
+                [
+                    new EvidenceStatement([bestRetainedTypeObservation.Id], $"Static root '{bestRootDescription}' retains {bestRetainedCount:N0} instance(s) of {bestTypeName}."),
+                    .. derivedFrom.Count > 1
+                        ? [new EvidenceStatement(derivedFrom.GetRange(1, derivedFrom.Count - 1), $"An instance of {bestTypeName} is in the finalizer queue.")]
+                        : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = Counter.None("A static cache that holds instances on purpose also holds the ones queued for finalization; the overlap does not show the root delays their collection."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gcroot <queued instance address>",
+                        Test = $"On a queued {bestTypeName}: if its only root is the finalizer queue, the static root is not what retains it.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the static root is a bounded cache that disposes evicted entries, the retention is by design.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Memory",
                 Severity = Severity.Info,

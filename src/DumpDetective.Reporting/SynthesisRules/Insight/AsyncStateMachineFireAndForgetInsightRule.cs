@@ -1,4 +1,5 @@
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -92,6 +93,36 @@ internal sealed class AsyncStateMachineFireAndForgetInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::async-state-machine-fire-and-forget",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Leaks,
+                    Subject = worst.Value.Method,
+                    Measure = ClaimParts.Count(worst.Value.SuspendedCount),
+                    Reference = ClaimParts.Budget(ClaimParts.Count(FireAndForgetThreshold), "fire-and-forget threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = $"suspended instances of async method {worst.Value.Method.Name}", Mechanism = "callers not awaiting completion" },
+                },
+                Support =
+                [
+                    new EvidenceStatement(worst.Value.Ids, $"{worst.Value.SuspendedCount:N0} suspended state machine instances belong to '{worst.Value.Method.DeclaringType.CanonicalName}.{worst.Value.Method.Name}'."),
+                    .. population is not null
+                        ? [new EvidenceStatement([population.Id], $"{totalStateMachines:N0} state machines in total hold {InsightByteFormat.FormatBytes(totalStateMachineBytes)}.")]
+                        : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = Counter.None("Many suspended instances of one method are also what a busy endpoint under load looks like; the count does not show callers are not awaiting."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpasync",
+                        Test = $"If the suspended '{worst.Value.Method.Name}' instances in !dumpasync are each awaited by a parent state machine, they are not fire-and-forget.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = $"If every call site of '{worst.Value.Method.Name}' awaits it, the instances are in-flight awaited work.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Async",
                 Severity = Severity.Warning,

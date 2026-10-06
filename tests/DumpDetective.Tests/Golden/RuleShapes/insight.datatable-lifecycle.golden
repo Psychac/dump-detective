@@ -1,0 +1,112 @@
+rule: insight.datatable-lifecycle
+version: 1
+[
+  {
+    "name": "columns-in-finalizer-queue",
+    "claims": [
+      {
+        "fingerprint": "insightengine::datatable-lifecycle",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 120,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 100,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "DataColumn finalizer threshold"
+          },
+          "qualifiers": {
+            "mechanism": "DataColumn has a finalizer and is released late without Dispose",
+            "location": "DataColumn and DataRow objects"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0..124]"
+            ],
+            "why": "DataColumn \u00D7120 in finalizer queue; DataTable \u00D75 in finalizer queue."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A data-heavy service holds DataTables on purpose; the counts alone do not show they should have been disposed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled DataTable: if its root is a request frame, the tables are short-lived and are released with the request.",
+            "command": "!gcroot \u003CDataTable address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the DataColumn and DataRow counts do not grow, they are a stable working set."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "rows-on-heap",
+    "claims": [
+      {
+        "fingerprint": "insightengine::datatable-lifecycle",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 0,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 10000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "DataRow heap threshold"
+          },
+          "qualifiers": {
+            "mechanism": "DataColumn has a finalizer and is released late without Dispose",
+            "location": "DataColumn and DataRow objects"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "DataRow \u00D720,000 on heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A data-heavy service holds DataTables on purpose; the counts alone do not show they should have been disposed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled DataTable: if its root is a request frame, the tables are short-lived and are released with the request.",
+            "command": "!gcroot \u003CDataTable address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the DataColumn and DataRow counts do not grow, they are a stable working set."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "below-threshold-says-nothing",
+    "claims": []
+  }
+]

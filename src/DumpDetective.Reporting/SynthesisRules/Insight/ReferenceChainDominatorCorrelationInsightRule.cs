@@ -1,4 +1,5 @@
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -95,6 +96,35 @@ internal sealed class ReferenceChainDominatorCorrelationInsightRule : ISynthesis
             new Claim
             {
                 Fingerprint = "insightengine::reference-chain-dominator-correlation",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Percent(top.Pct),
+                    Reference = anyCritical
+                        ? ClaimParts.Budget(ClaimParts.Percent(CriticalPct), "critical share threshold")
+                        : ClaimParts.Budget(ClaimParts.Percent(WarningPct), "warning share threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = $"the managed heap retained through {top.TypeName}", Scope = $"{offenders.Count} type(s) over the threshold" },
+                },
+                Support =
+                [
+                    new EvidenceStatement([retention.Id], $"The managed heap totals {InsightByteFormat.FormatBytes(totalHeapBytes)}."),
+                    new EvidenceStatement(derivedFrom.GetRange(1, derivedFrom.Count - 1), $"{top.TypeName} retains {InsightByteFormat.FormatBytes(top.RetainedBytes)}, {top.Pct:F1}% of it, and has a sampled reference chain."),
+                ],
+                Counter = Counter.None("A sampled type's retained size counts everything reachable from it, including objects that other roots also keep alive."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gcroot <instance address>",
+                        Test = $"On a sampled {top.TypeName}: if its path is short-lived or unrooted, the retained share is overstated.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the share does not grow, it is a stable working set.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Memory",
                 Severity = anyCritical ? Severity.Critical : Severity.Warning,

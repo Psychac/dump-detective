@@ -99,6 +99,37 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("top-dominator-type"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Retains,
+                    Measure = ClaimParts.Bytes(estimatedRetainedBytes),
+                    Reference = severity switch
+                    {
+                        Severity.Critical => ClaimParts.Budget(ClaimParts.Bytes(TopSuspectCriticalBytes), "critical threshold"),
+                        Severity.Warning => ClaimParts.Budget(ClaimParts.Bytes(TopSuspectWarningBytes), "warning threshold"),
+                        _ => null,
+                    },
+                    Qualifiers = new AssertionQualifiers { Location = $"instances of {typeName}" },
+                },
+                Support = [new EvidenceStatement([topRetention.Id], $"{typeName} is estimated to retain {FormatHelper.FormatBytes(estimatedRetainedBytes)} across {instanceCount:N0} instances.")],
+                Counter = Counter.Of(new EvidenceStatement(
+                    [topRetention.Id],
+                    "The retained size is a bounded BFS estimate, not a true dominator tree, so the real figure may be smaller or larger.")),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gcroot <instance address>",
+                        Test = $"On a sampled {typeName}: if its root is a request frame, the instances are short-lived working data, not retained.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpheap -stat",
+                        Test = $"If {typeName} is not among the largest types by total size in !dumpheap -stat, the dominance is wrong.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = severity,
@@ -124,6 +155,26 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
                 findings.Add(new Claim
                 {
                     Fingerprint = Fingerprint("highly-referenced-objects"),
+                    Assertion = new Assertion
+                    {
+                        Predicate = AssertionPredicate.Exhibits,
+                        Measure = ClaimParts.Count(highlyReferencedCount),
+                        Reference = highlyReferencedCount >= HighlyReferencedCriticalThreshold
+                            ? ClaimParts.Budget(ClaimParts.Count(HighlyReferencedCriticalThreshold), "critical threshold")
+                            : null,
+                        Qualifiers = new AssertionQualifiers { Location = "objects with abnormally high incoming reference counts" },
+                    },
+                    Support = [new EvidenceStatement([population.Id], $"{highlyReferencedCount:N0} objects have abnormally high incoming reference counts.")],
+                    Counter = ReferenceCountingCounter(population, "Incoming-reference counts were bounded, so the number of highly referenced objects may be understated."),
+                    FalsifiedBy =
+                    [
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.Windbg,
+                            Command = "!gcroot <object address>",
+                            Test = "On a sampled highly referenced object: if its referrers are short-lived, the high count is transient, not a retention hub.",
+                        },
+                    ],
                     Analyzer = AnalyzerName,
                     Category = "Retention",
                     Severity = highlyReferencedCount >= HighlyReferencedCriticalThreshold ? Severity.Critical : Severity.Warning,
@@ -153,6 +204,31 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
                 findings.Add(new Claim
                 {
                     Fingerprint = Fingerprint("dominant-retained-type-hotspot"),
+                    Assertion = new Assertion
+                    {
+                        Predicate = AssertionPredicate.Retains,
+                        Measure = ClaimParts.Count(totalIncomingReferences),
+                        Reference = ClaimParts.Budget(
+                            ClaimParts.Count(totalIncomingReferences >= TypeHotspotCriticalThreshold ? TypeHotspotCriticalThreshold : TypeHotspotWarningThreshold),
+                            totalIncomingReferences >= TypeHotspotCriticalThreshold ? "critical threshold" : "warning threshold"),
+                        Qualifiers = new AssertionQualifiers { Location = $"incoming references to {typeName}" },
+                    },
+                    Support = [new EvidenceStatement([topHotspot.Id], $"{typeName} receives {totalIncomingReferences:N0} incoming references across {objectCount:N0} top hotspot object(s), {FormatHelper.FormatBytes(totalBytes)}.")],
+                    Counter = ReferenceCountingCounter(population, "Incoming-reference counts were bounded, so the hotspot's reference total may be understated or approximate."),
+                    FalsifiedBy =
+                    [
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.Windbg,
+                            Command = "!gcroot <object address>",
+                            Test = $"On a sampled {typeName}: if the incoming references come from short-lived objects, the hotspot is transient.",
+                        },
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.CodeInspection,
+                            Test = $"If {typeName} is a shared lookup object referenced widely by design, many incoming references are expected.",
+                        },
+                    ],
                     Analyzer = AnalyzerName,
                     Category = "Retention",
                     Severity = totalIncomingReferences >= TypeHotspotCriticalThreshold ? Severity.Critical : Severity.Warning,
@@ -163,7 +239,8 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
                     Tags = ["retention", "type-hotspot", "references"],
                     MetricValue = totalIncomingReferences,
                     MetricUnit = "references",
-                    DerivedFrom = [topHotspot.Id],
+                    // The population is part of the lineage because its reference-counting limits set this claim's confidence.
+                    DerivedFrom = population is null ? [topHotspot.Id] : [topHotspot.Id, population.Id],
                     Confidence = WithReferenceCountingLimits(ConfidenceBreakdown.MeasurementCertain, population),
                 });
             }
@@ -179,6 +256,22 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
                 findings.Add(new Claim
                 {
                     Fingerprint = Fingerprint("reference-tracking-capped"),
+                    Assertion = new Assertion
+                    {
+                        Predicate = AssertionPredicate.Missing,
+                        Measure = ClaimParts.Count(approximatedReferenceAddresses),
+                        Qualifiers = new AssertionQualifiers { Location = "incoming-reference counts", Scope = "addresses past the tracking limit" },
+                    },
+                    Support = [new EvidenceStatement([population.Id], $"{approximatedReferenceAddresses:N0} references have approximated, bounded-error counts.")],
+                    Counter = Counter.None("The limit is a tracking budget set by the analysis, and Space-Saving admission bounds the error; it is not a property of the process."),
+                    FalsifiedBy =
+                    [
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.CodeInspection,
+                            Test = "Re-run with a larger MaxReferenceAddresses; if the highly referenced objects stay the same, the cap did not change the findings.",
+                        },
+                    ],
                     Analyzer = AnalyzerName,
                     Category = "Diagnostics",
                     Severity = Severity.Info,
@@ -254,6 +347,20 @@ internal sealed class DominatorSynthesisRule : ISynthesisRule
                 ? $"retained > shallow ({ratioText}) — holds some external references."
                 : $"retained ≈ shallow ({ratioText}) — largely self-contained.";
         return $" Top long-lived (Gen2/LOH) type {typeName}: {shape}";
+    }
+
+    private static Counter ReferenceCountingCounter(Observation? population, string whyBounded)
+    {
+        if (population is null)
+            return Counter.None("No reference-counting summary was available to qualify this figure.");
+
+        bool bounded = population.Measures["is-object-scan-capped"].Value != 0
+            || population.Measures["is-reference-counting-skipped"].Value != 0
+            || population.Measures["approximated-reference-addresses.count"].Value > 0;
+
+        return bounded
+            ? Counter.Of(new EvidenceStatement([population.Id], whyBounded))
+            : Counter.None("Reference counting ran to completion and was not capped, so nothing observed qualifies this figure.");
     }
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();

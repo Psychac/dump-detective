@@ -1,0 +1,370 @@
+rule: weak-reference.finding-parity
+version: 1
+[
+  {
+    "name": "quiet-overview-only",
+    "claims": [
+      {
+        "fingerprint": "weak reference analysis::overview",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Composes",
+          "measure": {
+            "value": 100,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "weak handles by target state"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "100 weak handles: 0 alive targets and 10 dead."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This describes weak handle counts and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles lists a number of weak handles other than 100, the overview is wrong.",
+            "command": "!gchandles"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "high-ratio-warning",
+    "claims": [
+      {
+        "fingerprint": "weak reference analysis::overview",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Composes",
+          "measure": {
+            "value": 100,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "weak handles by target state"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "100 weak handles: 0 alive targets and 60 dead."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This describes weak handle counts and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles lists a number of weak handles other than 100, the overview is wrong.",
+            "command": "!gchandles"
+          }
+        ]
+      },
+      {
+        "fingerprint": "weak reference analysis::high-dead-ratio",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 60,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "weak handles whose target is already collected"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "60 of 100 weak handles point at collected objects."
+          },
+          {
+            "observations": [
+              "observations[1]",
+              "observations[2]"
+            ],
+            "why": "Each is a WeakReference wrapper whose target is gone."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Entries in a weak cache are expected to go stale between purges; the ratio does not show purging has stopped."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles shows far fewer dead weak handles than 60, the dead ratio is overstated.",
+            "command": "!gchandles -type WeakShort"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the owning cache purges stale entries on a schedule, the dead handles are awaiting the next sweep."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "high-ratio-critical-and-high-count",
+    "claims": [
+      {
+        "fingerprint": "weak reference analysis::overview",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Composes",
+          "measure": {
+            "value": 200000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "weak handles by target state"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "2,00,000 weak handles: 0 alive targets and 1,50,000 dead."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This describes weak handle counts and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles lists a number of weak handles other than 2,00,000, the overview is wrong.",
+            "command": "!gchandles"
+          }
+        ]
+      },
+      {
+        "fingerprint": "weak reference analysis::high-dead-count",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 150000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 100000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "weak handles whose target is already collected"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "1,50,000 dead weak handles have accumulated."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "In a process with millions of weak handles a large dead count can be a small fraction; the absolute count does not show unbounded growth."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the dead count does not grow, it is a steady-state backlog, not accumulation."
+          }
+        ]
+      },
+      {
+        "fingerprint": "weak reference analysis::high-dead-ratio",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 75,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "weak handles whose target is already collected"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "1,50,000 of 2,00,000 weak handles point at collected objects."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Entries in a weak cache are expected to go stale between purges; the ratio does not show purging has stopped."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles shows far fewer dead weak handles than 1,50,000, the dead ratio is overstated.",
+            "command": "!gchandles -type WeakShort"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the owning cache purges stale entries on a schedule, the dead handles are awaiting the next sweep."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "dead-keys-and-held-only",
+    "claims": [
+      {
+        "fingerprint": "weak reference analysis::overview",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Composes",
+          "measure": {
+            "value": 100,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "weak handles by target state"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "100 weak handles: 3 alive targets and 10 dead."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This describes weak handle counts and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles lists a number of weak handles other than 100, the overview is wrong.",
+            "command": "!gchandles"
+          }
+        ]
+      },
+      {
+        "fingerprint": "weak reference analysis::held-only-via-weak-reference",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 2,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "pending collection",
+            "location": "alive weak targets unreachable from any GC root"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]",
+              "observations[2]"
+            ],
+            "why": "2 alive weak targets have no GC-root path; the weak handle is the only known reference."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This describes objects pending collection and asserts no leak, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled target: if !gcroot finds a root, it is reachable, not held only by the weak handle.",
+            "command": "!gcroot \u003Ctarget address\u003E"
+          }
+        ]
+      },
+      {
+        "fingerprint": "weak reference analysis::dependent-dead-key",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 4,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "ConditionalWeakTable entries",
+            "location": "dependent handles with a collected primary key"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "4 dependent handles have a dead primary key."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The GC removes dead-key entries on its own; their presence at capture time shows only that cleanup is pending."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump after a GC; if the dead-key entries are gone, they were pending cleanup."
+          }
+        ]
+      }
+    ]
+  }
+]

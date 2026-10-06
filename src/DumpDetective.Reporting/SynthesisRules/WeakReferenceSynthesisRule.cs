@@ -99,6 +99,37 @@ internal sealed class WeakReferenceSynthesisRule : ISynthesisRule
             signals.Add((new Claim
             {
                 Fingerprint = Fingerprint("high-dead-ratio"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Percent(deadTargetRatio * 100.0),
+                    Reference = ClaimParts.Budget(
+                        ClaimParts.Percent((deadTargetRatio >= HighDeadRatioCriticalThreshold ? HighDeadRatioCriticalThreshold : HighDeadRatioWarningThreshold) * 100.0),
+                        deadTargetRatio >= HighDeadRatioCriticalThreshold ? "critical threshold" : "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "weak handles whose target is already collected" },
+                },
+                Support =
+                [
+                    new EvidenceStatement([population.Id], $"{deadWeakTargets:N0} of {totalWeakHandles:N0} weak handles point at collected objects."),
+                    .. staleWrapperIds.Count > 0
+                        ? [new EvidenceStatement(staleWrapperIds, "Each is a WeakReference wrapper whose target is gone.")]
+                        : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = Counter.None("Entries in a weak cache are expected to go stale between purges; the ratio does not show purging has stopped."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gchandles -type WeakShort",
+                        Test = $"If !gchandles shows far fewer dead weak handles than {deadWeakTargets:N0}, the dead ratio is overstated.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the owning cache purges stale entries on a schedule, the dead handles are awaiting the next sweep.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = deadTargetRatio >= HighDeadRatioCriticalThreshold ? Severity.Critical : Severity.Warning,
@@ -122,6 +153,25 @@ internal sealed class WeakReferenceSynthesisRule : ISynthesisRule
             signals.Add((new Claim
             {
                 Fingerprint = Fingerprint("high-dead-count"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(deadWeakTargets),
+                    Reference = ClaimParts.Budget(
+                        ClaimParts.Count(deadWeakTargets > AbsoluteDeadCountCriticalThreshold ? AbsoluteDeadCountCriticalThreshold : AbsoluteDeadCountThreshold),
+                        deadWeakTargets > AbsoluteDeadCountCriticalThreshold ? "critical threshold" : "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "weak handles whose target is already collected" },
+                },
+                Support = [new EvidenceStatement([population.Id], $"{deadWeakTargets:N0} dead weak handles have accumulated.")],
+                Counter = Counter.None("In a process with millions of weak handles a large dead count can be a small fraction; the absolute count does not show unbounded growth."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the dead count does not grow, it is a steady-state backlog, not accumulation.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = deadWeakTargets > AbsoluteDeadCountCriticalThreshold ? Severity.Critical : Severity.Warning,
@@ -144,6 +194,22 @@ internal sealed class WeakReferenceSynthesisRule : ISynthesisRule
             signals.Add((new Claim
             {
                 Fingerprint = Fingerprint("dependent-dead-key"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Measure = ClaimParts.Count(dependentHandleDeadKeyCount),
+                    Qualifiers = new AssertionQualifiers { Location = "dependent handles with a collected primary key", Mechanism = "ConditionalWeakTable entries" },
+                },
+                Support = [new EvidenceStatement([population.Id], $"{dependentHandleDeadKeyCount:N0} dependent handles have a dead primary key.")],
+                Counter = Counter.None("The GC removes dead-key entries on its own; their presence at capture time shows only that cleanup is pending."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump after a GC; if the dead-key entries are gone, they were pending cleanup.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = Severity.Info,
@@ -180,6 +246,23 @@ internal sealed class WeakReferenceSynthesisRule : ISynthesisRule
             signals.Add((new Claim
             {
                 Fingerprint = Fingerprint("held-only-via-weak-reference"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Measure = ClaimParts.Count(heldOnlyCount),
+                    Qualifiers = new AssertionQualifiers { Location = "alive weak targets unreachable from any GC root", Mechanism = "pending collection" },
+                },
+                Support = [new EvidenceStatement(heldOnlyIds, $"{heldOnlyCount:N0} alive weak targets have no GC-root path; the weak handle is the only known reference.")],
+                Counter = Counter.None("This describes objects pending collection and asserts no leak, so there is nothing to weaken."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gcroot <target address>",
+                        Test = "On a sampled target: if !gcroot finds a root, it is reachable, not held only by the weak handle.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = Severity.Info,
@@ -210,6 +293,23 @@ internal sealed class WeakReferenceSynthesisRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = Fingerprint("overview"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Composes,
+                    Measure = ClaimParts.Count(totalWeakHandles),
+                    Qualifiers = new AssertionQualifiers { Location = "weak handles by target state" },
+                },
+                Support = [new EvidenceStatement([population.Id], $"{totalWeakHandles:N0} weak handles: {aliveWeakTargets:N0} alive targets and {deadWeakTargets:N0} dead.")],
+                Counter = Counter.None("This describes weak handle counts and asserts no problem, so there is nothing to weaken."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gchandles",
+                        Test = $"If !gchandles lists a number of weak handles other than {totalWeakHandles:N0}, the overview is wrong.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = summarySeverity,

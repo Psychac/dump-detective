@@ -1,0 +1,421 @@
+rule: gc-handle.finding-parity
+version: 1
+[
+  {
+    "name": "quiet-summary-only",
+    "claims": [
+      {
+        "fingerprint": "gc handle analysis::summary",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Composes",
+          "measure": {
+            "value": 100,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "GC handles by kind"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "100 GC handles, 10 of them pinning a target."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This describes handle counts and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles lists a total other than 100, or 10 pinned targets, the handle counts are wrong.",
+            "command": "!gchandles"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "summary-warning-by-pinned",
+    "claims": [
+      {
+        "fingerprint": "gc handle analysis::summary",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 600,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 500,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "pinned-target warning threshold"
+          },
+          "qualifiers": {
+            "location": "pinned handle targets"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "100 GC handles, 600 of them pinning a target."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Handles held for in-flight interop and I/O come and go; one snapshot does not show they persist."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles lists a total other than 100, or 600 pinned targets, the handle counts are wrong.",
+            "command": "!gchandles"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "summary-warning-by-total",
+    "claims": [
+      {
+        "fingerprint": "gc handle analysis::summary",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 20000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 10000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "total-handle warning threshold"
+          },
+          "qualifiers": {
+            "location": "GC handles"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "20,000 GC handles, 10 of them pinning a target."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Handles held for in-flight interop and I/O come and go; one snapshot does not show they persist."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles lists a total other than 20,000, or 10 pinned targets, the handle counts are wrong.",
+            "command": "!gchandles"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "everything-fires",
+    "claims": [
+      {
+        "fingerprint": "gc handle analysis::summary",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 600,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 500,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "pinned-target warning threshold"
+          },
+          "qualifiers": {
+            "location": "pinned handle targets"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "20,000 GC handles, 600 of them pinning a target."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Handles held for in-flight interop and I/O come and go; one snapshot does not show they persist."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles lists a total other than 20,000, or 600 pinned targets, the handle counts are wrong.",
+            "command": "!gchandles"
+          }
+        ]
+      },
+      {
+        "fingerprint": "gc handle analysis::pinned-retained-bytes",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 209715200,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 104857600,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "objects retained by pinned handles"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Pinned handles retain 200.0 MB across 600 targets."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Retained size counts everything reachable from a pinned target, including objects that would be live without the pin."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled pinned target: if it is also reachable from a normal root, the pin is not what keeps its graph alive.",
+            "command": "!gcroot \u003Cpinned target address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the pinned targets are different ones, they are in-flight buffers."
+          }
+        ]
+      },
+      {
+        "fingerprint": "gc handle analysis::soh-pinned",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Blocks",
+          "measure": {
+            "value": 110,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 100,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "mechanism": "pinned objects cannot be moved by compaction",
+            "location": "small-object-heap pinned targets"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "110 pinned targets are on the small object heap (80 pinned, 30 async-pinned)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Pinned objects only block compaction while pinned; short-lived pins release as I/O completes."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles shows far fewer pinned targets on the small object heap than 110, the count is overstated.",
+            "command": "!gchandles -type Pinned"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the small-heap pins are gone, they were transient."
+          }
+        ]
+      },
+      {
+        "fingerprint": "gc handle analysis::refcounted-pressure",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 600,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 500,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "mechanism": "keeps COM runtime callable wrappers alive",
+            "location": "RefCounted (COM interop) handles"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "600 RefCounted handles are held."
+          },
+          {
+            "observations": [
+              "observations[1]",
+              "observations[2]"
+            ],
+            "why": "Each is a target type held by RefCounted handles."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A RefCounted handle is released when its count reaches zero; the count at capture time does not show it is leaked."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles lists a number of RefCounted handles other than 600, the count is wrong.",
+            "command": "!gchandles -type RefCounted"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the owning code calls Marshal.ReleaseComObject or disposes the wrapper deterministically, the handles are released promptly."
+          }
+        ]
+      },
+      {
+        "fingerprint": "gc handle analysis::weaklong-gen2-backlog",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 90.9090909090909,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 80,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "Gen2/LOH concentration threshold"
+          },
+          "qualifiers": {
+            "mechanism": "WeakLong clears only after finalization",
+            "location": "WeakLong handle targets in Gen2 or the LOH"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "1,000 of 1,100 resolved WeakLong targets are in Gen2 or the LOH; for WeakShort it is 5 of 20."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Long-lived objects naturally sit in Gen2, so a high Gen2 share of WeakLong targets does not by itself show a finalization backlog."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !finalizequeue shows a short queue and the finalizer thread is idle, there is no finalization backlog.",
+            "command": "!finalizequeue"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump later; if the Gen2 WeakLong targets are cleared, they were awaiting finalization, not leaked."
+          }
+        ]
+      },
+      {
+        "fingerprint": "gc handle analysis::dependent-handle-summary",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 60,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "unresolved-target threshold"
+          },
+          "qualifiers": {
+            "mechanism": "ConditionalWeakTable entries",
+            "location": "dependent handles"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "100 dependent handles, 40 resolved edges and 60 unresolved targets."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "An unresolved target is one the walk could not follow; it does not show the target is retained."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles lists a number of dependent handles other than 100, the count is wrong.",
+            "command": "!gchandles -type Dependent"
+          }
+        ]
+      }
+    ]
+  }
+]

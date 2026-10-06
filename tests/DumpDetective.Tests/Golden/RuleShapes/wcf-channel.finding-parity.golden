@@ -1,0 +1,235 @@
+rule: wcf-channel.finding-parity
+version: 1
+[
+  {
+    "name": "one-factory-only",
+    "claims": [
+      {
+        "fingerprint": "wcf channel analysis::channel-factory",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 1,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "ChannelFactory\u003CT\u003E objects on the managed heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "1 ChannelFactory objects were found."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "Only 1 factory object(s) exist; one factory per endpoint is the recommended pattern."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the same factory objects are present and the count does not grow, they are shared, not per-call."
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If each factory is created once at startup and reused, its presence on the heap is by design."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "many-factories-and-warning-count",
+    "claims": [
+      {
+        "fingerprint": "wcf channel analysis::channel-count",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 150,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 100,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "WCF channel objects on the managed heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "150 channel objects: 100 opened, 0 faulted, 20 closed."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Channel objects on the heap include ones awaiting collection; nothing observed shows how long they have lived."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If far fewer than 150 channel objects are live, the count includes garbage awaiting collection.",
+            "command": "!dumpheap -live -stat -type ChannelBase"
+          }
+        ]
+      },
+      {
+        "fingerprint": "wcf channel analysis::channel-factory",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 6,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "ChannelFactory\u003CT\u003E objects on the managed heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "6 ChannelFactory objects were found."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The count alone does not show factories are created per call; long-lived factories for several endpoints look the same."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the same factory objects are present and the count does not grow, they are shared, not per-call."
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If each factory is created once at startup and reused, its presence on the heap is by design."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "faulted-and-critical-count-mostly-closed",
+    "claims": [
+      {
+        "fingerprint": "wcf channel analysis::faulted-channels",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Faults",
+          "measure": {
+            "value": 2,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "a faulted channel cannot be reused",
+            "location": "WCF channels in the Faulted state"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]",
+              "observations[2]"
+            ],
+            "why": "Each is a WCF channel recorded in the Faulted state."
+          },
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "2 of 600 channel objects are faulted."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A channel seen faulted at capture time may already have been aborted and replaced; the dump does not show whether the owner handles faults."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the channel objects of the faulted types are not in the Faulted state when inspected with !do, the state reading is wrong.",
+            "command": "!dumpheap -type ChannelBase"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the calling code aborts a channel on any exception and creates a fresh one, the faulted instances are awaiting collection, not in use."
+          }
+        ]
+      },
+      {
+        "fingerprint": "wcf channel analysis::channel-count",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 600,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 500,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "WCF channel objects on the managed heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "600 channel objects: 50 opened, 2 faulted, 400 closed."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "400 channels are closed, more than the 50 opened, so most are not holding a connection."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If far fewer than 600 channel objects are live, the count includes garbage awaiting collection.",
+            "command": "!dumpheap -live -stat -type ChannelBase"
+          }
+        ]
+      }
+    ]
+  }
+]

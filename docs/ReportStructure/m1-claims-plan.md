@@ -135,7 +135,7 @@ system. It gates M4.
      `ISynthesisRule`, recorded in `derivedFrom` as rule id + version. A per-rule golden-output test fails
      when a rule's emitted findings change shape without a version bump. Derived (hash) versions rejected:
      they change on any rebuild, so identical rules from different builds would look different.
-4. **Rule migration** *(in progress — 23 of 76 rules; pilot 2026-10-05, batches 1-5 2026-10-06)* — all 76 rules author `assertion`, `counter`, `falsifiedBy`.
+4. **Rule migration** *(in progress — 28 of 76 rules; pilot 2026-10-05, batches 1-6 2026-10-06)* — all 76 rules author `assertion`, `counter`, `falsifiedBy`.
    - Done: `LohFragmentationSynthesisRule` (pilot), with the per-rule golden mechanism
      (`Golden/RuleShapeGolden.cs`, goldens in `Golden/RuleShapes/`; `DD_BLESS_RULE_SHAPES=1` to bless). Fails when
      a rule's claim shape changes without a `Version` bump, or the version changes without a re-bless.
@@ -162,6 +162,13 @@ system. It gates M4.
      either of two thresholds (multi-dimensional and pinned arrays, address-space pressure), the claim's measure and
      reference follow whichever threshold actually fired, so they always compare like with like. Verified on the
      reference dump: 31 of 82 findings carry an assertion. Also re-indented one unindented block from batch 4.
+   - Batch 6 (2026-10-06): `GCHandle` (6 claims), `WcfChannel` (3), `AsyncStateMachine` (4 kinds), `WeakReference`
+     (5), `Dominator` (4). Tests in `HandlesAsyncAndRetentionRuleClaimTests`. The per-claim gate caught a real
+     mistake of mine: the Dominator hotspot claim's counter cited the population observation, which was not in
+     the claim's lineage. The claim's confidence does read the population, so it was added to `DerivedFrom`
+     (a lineage change for that one claim, in `report.json` only). Verified on the reference dump: 40 of 82
+     findings carry an assertion. Known oddity kept as the rule defines it: the `WeakReference` overview claim
+     takes the highest severity of its signals but asserts `Composes`.
    - `RuleShapeGolden` now enforces the plan's per-claim gates on every migrated rule: an assertion, at least one
      falsification test, an explicit counter (evidence or `None` with a reason), non-empty support, and every cited
      observation inside the claim's own `DerivedFrom`. Long evidence lists collapse to ranges in goldens.

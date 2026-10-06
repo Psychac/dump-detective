@@ -93,6 +93,21 @@ internal sealed class GCHandleSynthesisRule : ISynthesisRule
         findings.Add(new Claim
         {
             Fingerprint = Fingerprint("summary"),
+            Assertion = BuildSummaryAssertion(
+                severity, totalHandles, totalHandlesWarningThreshold, pinnedHandleTargets, pinnedHandleTargetsWarningThreshold),
+            Support = [new EvidenceStatement(populationIds, $"{totalHandles:N0} GC handles, {pinnedHandleTargets:N0} of them pinning a target.")],
+            Counter = Counter.None(severity == Severity.Warning
+                ? "Handles held for in-flight interop and I/O come and go; one snapshot does not show they persist."
+                : "This describes handle counts and asserts no problem, so there is nothing to weaken."),
+            FalsifiedBy =
+            [
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.Windbg,
+                    Command = "!gchandles",
+                    Test = $"If !gchandles lists a total other than {totalHandles:N0}, or {pinnedHandleTargets:N0} pinned targets, the handle counts are wrong.",
+                },
+            ],
             Analyzer = AnalyzerName,
             Category = "GC",
             Severity = severity,
@@ -114,6 +129,29 @@ internal sealed class GCHandleSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("pinned-retained-bytes"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Retains,
+                    Measure = ClaimParts.Bytes(pinnedRetainedBytes),
+                    Reference = ClaimParts.Budget(ClaimParts.Bytes(pinnedRetainedBytesWarningThreshold), "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "objects retained by pinned handles" },
+                },
+                Support = [new EvidenceStatement(populationIds, $"Pinned handles retain {FormatBytes(pinnedRetainedBytes)} across {pinnedHandleTargets:N0} targets.")],
+                Counter = Counter.None("Retained size counts everything reachable from a pinned target, including objects that would be live without the pin."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gcroot <pinned target address>",
+                        Test = "On a sampled pinned target: if it is also reachable from a normal root, the pin is not what keeps its graph alive.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the pinned targets are different ones, they are in-flight buffers.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "GC",
                 Severity = Severity.Warning,
@@ -135,6 +173,29 @@ internal sealed class GCHandleSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("soh-pinned"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Blocks,
+                    Measure = ClaimParts.Count(sohPinnedTargets),
+                    Reference = ClaimParts.Budget(ClaimParts.Count(pinnedSohWarningThreshold), "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "small-object-heap pinned targets", Mechanism = "pinned objects cannot be moved by compaction" },
+                },
+                Support = [new EvidenceStatement(populationIds, $"{sohPinnedTargets:N0} pinned targets are on the small object heap ({pinnedSohCount:N0} pinned, {asyncPinnedSohCount:N0} async-pinned).")],
+                Counter = Counter.None("Pinned objects only block compaction while pinned; short-lived pins release as I/O completes."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gchandles -type Pinned",
+                        Test = $"If !gchandles shows far fewer pinned targets on the small object heap than {sohPinnedTargets:N0}, the count is overstated.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the small-heap pins are gone, they were transient.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "GC",
                 Severity = Severity.Warning,
@@ -163,6 +224,35 @@ internal sealed class GCHandleSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("refcounted-pressure"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(refCountedCount),
+                    Reference = ClaimParts.Budget(ClaimParts.Count(refCountedWarningThreshold), "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "RefCounted (COM interop) handles", Mechanism = "keeps COM runtime callable wrappers alive" },
+                },
+                Support =
+                [
+                    new EvidenceStatement(populationIds, $"{refCountedCount:N0} RefCounted handles are held."),
+                    .. refCountedTypeIds.Count > 0
+                        ? [new EvidenceStatement(refCountedTypeIds, "Each is a target type held by RefCounted handles.")]
+                        : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = Counter.None("A RefCounted handle is released when its count reaches zero; the count at capture time does not show it is leaked."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gchandles -type RefCounted",
+                        Test = $"If !gchandles lists a number of RefCounted handles other than {refCountedCount:N0}, the count is wrong.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the owning code calls Marshal.ReleaseComObject or disposes the wrapper deterministically, the handles are released promptly.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "GC",
                 Severity = Severity.Warning,
@@ -191,6 +281,29 @@ internal sealed class GCHandleSynthesisRule : ISynthesisRule
                 findings.Add(new Claim
                 {
                     Fingerprint = Fingerprint("weaklong-gen2-backlog"),
+                    Assertion = new Assertion
+                    {
+                        Predicate = AssertionPredicate.Exceeds,
+                        Measure = ClaimParts.Percent(weakLongGen2PlusFraction),
+                        Reference = ClaimParts.Budget(ClaimParts.Percent(weakLongGen2FractionWarningThreshold), "Gen2/LOH concentration threshold"),
+                        Qualifiers = new AssertionQualifiers { Location = "WeakLong handle targets in Gen2 or the LOH", Mechanism = "WeakLong clears only after finalization" },
+                    },
+                    Support = [new EvidenceStatement(populationIds, $"{weakLongGen2PlusCount:N0} of {weakLongResolvedCount:N0} resolved WeakLong targets are in Gen2 or the LOH; for WeakShort it is {weakShortGen2PlusCount:N0} of {weakShortResolvedCount:N0}.")],
+                    Counter = Counter.None("Long-lived objects naturally sit in Gen2, so a high Gen2 share of WeakLong targets does not by itself show a finalization backlog."),
+                    FalsifiedBy =
+                    [
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.Windbg,
+                            Command = "!finalizequeue",
+                            Test = "If !finalizequeue shows a short queue and the finalizer thread is idle, there is no finalization backlog.",
+                        },
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.Capture,
+                            Test = "Capture a second dump later; if the Gen2 WeakLong targets are cleared, they were awaiting finalization, not leaked.",
+                        },
+                    ],
                     Analyzer = AnalyzerName,
                     Category = "GC",
                     Severity = Severity.Warning,
@@ -218,6 +331,28 @@ internal sealed class GCHandleSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("dependent-handle-summary"),
+                Assertion = new Assertion
+                {
+                    Predicate = dependentSeverity == Severity.Warning ? AssertionPredicate.Exceeds : AssertionPredicate.Composes,
+                    Measure = dependentSeverity == Severity.Warning ? ClaimParts.Percent(dependentUnresolvedPercent) : ClaimParts.Count(dependentCount),
+                    Reference = dependentSeverity == Severity.Warning
+                        ? ClaimParts.Budget(ClaimParts.Percent(dependentUnresolvedPercentWarningThreshold), "unresolved-target threshold")
+                        : null,
+                    Qualifiers = new AssertionQualifiers { Location = "dependent handles", Mechanism = "ConditionalWeakTable entries" },
+                },
+                Support = [new EvidenceStatement(populationIds, $"{dependentCount:N0} dependent handles, {dependentResolvedEdges:N0} resolved edges and {dependentUnresolvedTargets:N0} unresolved targets.")],
+                Counter = Counter.None(dependentSeverity == Severity.Warning
+                    ? "An unresolved target is one the walk could not follow; it does not show the target is retained."
+                    : "This describes dependent handles and asserts no problem, so there is nothing to weaken."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gchandles -type Dependent",
+                        Test = $"If !gchandles lists a number of dependent handles other than {dependentCount:N0}, the count is wrong.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Retention",
                 Severity = dependentSeverity,
@@ -234,6 +369,29 @@ internal sealed class GCHandleSynthesisRule : ISynthesisRule
         }
 
         return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
+    }
+
+    private static Assertion BuildSummaryAssertion(
+        Severity severity, long totalHandles, long totalHandlesWarningThreshold, long pinnedHandleTargets, long pinnedHandleTargetsWarningThreshold)
+    {
+        if (severity != Severity.Warning)
+            return new Assertion
+            {
+                Predicate = AssertionPredicate.Composes,
+                Measure = ClaimParts.Count(totalHandles),
+                Qualifiers = new AssertionQualifiers { Location = "GC handles by kind" },
+            };
+
+        bool byPinned = pinnedHandleTargets >= pinnedHandleTargetsWarningThreshold;
+        return new Assertion
+        {
+            Predicate = AssertionPredicate.Exceeds,
+            Measure = ClaimParts.Count(byPinned ? pinnedHandleTargets : totalHandles),
+            Reference = ClaimParts.Budget(
+                ClaimParts.Count(byPinned ? pinnedHandleTargetsWarningThreshold : totalHandlesWarningThreshold),
+                byPinned ? "pinned-target warning threshold" : "total-handle warning threshold"),
+            Qualifiers = new AssertionQualifiers { Location = byPinned ? "pinned handle targets" : "GC handles" },
+        };
     }
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();

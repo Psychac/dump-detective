@@ -1,0 +1,350 @@
+rule: async-state-machine.finding-parity
+version: 1
+[
+  {
+    "name": "high-count-and-fire-and-forget",
+    "claims": [
+      {
+        "fingerprint": "async state machine analysis::high-async-state-machine-count",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 1500,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 1000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "suspended async state machines on the heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "1,500 suspended state machines hold 3 MB; the most numerous belongs to RunAsync."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A busy service legitimately has many in-flight async operations; the count alone does not show they are not progressing."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !dumpasync shows most of the 1,500 state machines are completed or about to resume, they are not stuck.",
+            "command": "!dumpasync"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the state machines are different ones and the count is flat, they are normal in-flight work."
+          }
+        ]
+      },
+      {
+        "fingerprint": "async state machine analysis::fire-and-forget-0",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Leaks",
+          "measure": {
+            "value": 1500,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 100,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "fire-and-forget threshold"
+          },
+          "qualifiers": {
+            "mechanism": "callers not awaiting completion",
+            "location": "suspended instances of async method RunAsync"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "1,500 suspended instances of \u0027RunAsync\u0027 on \u0027App.Worker\u0027 hold 3 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Many suspended instances of one method are also what a busy endpoint under load looks like; the count does not show callers are not awaiting."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the suspended \u0027RunAsync\u0027 instances in !dumpasync are each awaited by a parent state machine, they are not fire-and-forget.",
+            "command": "!dumpasync"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If every call site of \u0027RunAsync\u0027 awaits it, the instances are in-flight awaited work."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "critical-count-and-async-void",
+    "claims": [
+      {
+        "fingerprint": "async state machine analysis::high-async-state-machine-count",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 12000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 10000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "suspended async state machines on the heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "12,000 suspended state machines hold 30 MB; the most numerous belongs to OnClick."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A busy service legitimately has many in-flight async operations; the count alone does not show they are not progressing."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !dumpasync shows most of the 12,000 state machines are completed or about to resume, they are not stuck.",
+            "command": "!dumpasync"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the state machines are different ones and the count is flat, they are normal in-flight work."
+          }
+        ]
+      },
+      {
+        "fingerprint": "async state machine analysis::fire-and-forget-0",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Leaks",
+          "measure": {
+            "value": 12000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 10000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "mechanism": "callers not awaiting completion",
+            "location": "suspended instances of async method OnClick"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "12,000 suspended instances of \u0027OnClick\u0027 on \u0027App.Handlers\u0027 hold 30 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Many suspended instances of one method are also what a busy endpoint under load looks like; the count does not show callers are not awaiting."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the suspended \u0027OnClick\u0027 instances in !dumpasync are each awaited by a parent state machine, they are not fire-and-forget.",
+            "command": "!dumpasync"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If every call site of \u0027OnClick\u0027 awaits it, the instances are in-flight awaited work."
+          }
+        ]
+      },
+      {
+        "fingerprint": "async state machine analysis::async-void-method",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 12000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 10,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "per-method instance threshold"
+          },
+          "qualifiers": {
+            "mechanism": "fire-and-forget by construction",
+            "location": "async void method OnClick"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "1 async void method(s) have suspended state machines on the heap; the top one has 12,000."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Async void is the only option for event handlers, so its presence alone is not a defect."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "CodeInspection",
+            "test": "If \u0027OnClick\u0027 is an event handler, async void is required, not an antipattern."
+          },
+          {
+            "kind": "Windbg",
+            "test": "If the \u0027OnClick\u0027 state machines in !dumpasync are about to complete, they are not accumulating.",
+            "command": "!dumpasync"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "large-captures",
+    "claims": [
+      {
+        "fingerprint": "async state machine analysis::large-captured-closures",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 73400320,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 50000000,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "objects captured by async closures"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]",
+              "observations[1]"
+            ],
+            "why": "Closures capture 70 MB; the largest is App.Context (60 MB)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Captured size counts everything reachable from a closure; a service singleton captured by design is not a leak."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On the largest captured closure: if its root is a short-lived request frame, the capture is released when the request ends.",
+            "command": "!gcroot \u003Cclosure address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the captured objects are shared singletons, capturing them copies a reference, not the object."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "large-captures-critical",
+    "claims": [
+      {
+        "fingerprint": "async state machine analysis::large-captured-closures",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 262144000,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 200000000,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "objects captured by async closures"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Closures capture 250 MB; the largest is App.Context (250 MB)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Captured size counts everything reachable from a closure; a service singleton captured by design is not a leak."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On the largest captured closure: if its root is a short-lived request frame, the capture is released when the request ends.",
+            "command": "!gcroot \u003Cclosure address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the captured objects are shared singletons, capturing them copies a reference, not the object."
+          }
+        ]
+      }
+    ]
+  }
+]

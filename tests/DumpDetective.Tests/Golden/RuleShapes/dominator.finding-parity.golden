@@ -1,0 +1,423 @@
+rule: dominator.finding-parity
+version: 1
+[
+  {
+    "name": "critical-retention-with-complete-counting",
+    "claims": [
+      {
+        "fingerprint": "dominator analysis::top-dominator-type",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 629145600,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 524288000,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "instances of App.Cache"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "App.Cache is estimated to retain 600 MB across 5,000 instances."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "The retained size is a bounded BFS estimate, not a true dominator tree, so the real figure may be smaller or larger."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled App.Cache: if its root is a request frame, the instances are short-lived working data, not retained.",
+            "command": "!gcroot \u003Cinstance address\u003E"
+          },
+          {
+            "kind": "Windbg",
+            "test": "If App.Cache is not among the largest types by total size in !dumpheap -stat, the dominance is wrong.",
+            "command": "!dumpheap -stat"
+          }
+        ]
+      },
+      {
+        "fingerprint": "dominator analysis::highly-referenced-objects",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 12,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 10,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "objects with abnormally high incoming reference counts"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "12 objects have abnormally high incoming reference counts."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Reference counting ran to completion and was not capped, so nothing observed qualifies this figure."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled highly referenced object: if its referrers are short-lived, the high count is transient, not a retention hub.",
+            "command": "!gcroot \u003Cobject address\u003E"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "warning-retention-with-bounded-counting",
+    "claims": [
+      {
+        "fingerprint": "dominator analysis::top-dominator-type",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 157286400,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 104857600,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "instances of App.Cache"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "App.Cache is estimated to retain 150 MB across 5,000 instances."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "The retained size is a bounded BFS estimate, not a true dominator tree, so the real figure may be smaller or larger."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled App.Cache: if its root is a request frame, the instances are short-lived working data, not retained.",
+            "command": "!gcroot \u003Cinstance address\u003E"
+          },
+          {
+            "kind": "Windbg",
+            "test": "If App.Cache is not among the largest types by total size in !dumpheap -stat, the dominance is wrong.",
+            "command": "!dumpheap -stat"
+          }
+        ]
+      },
+      {
+        "fingerprint": "dominator analysis::highly-referenced-objects",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 3,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "objects with abnormally high incoming reference counts"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "3 objects have abnormally high incoming reference counts."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[1]"
+              ],
+              "why": "Incoming-reference counts were bounded, so the number of highly referenced objects may be understated."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled highly referenced object: if its referrers are short-lived, the high count is transient, not a retention hub.",
+            "command": "!gcroot \u003Cobject address\u003E"
+          }
+        ]
+      },
+      {
+        "fingerprint": "dominator analysis::dominant-retained-type-hotspot",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 12000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 10000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "incoming references to App.Hub"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[2]"
+            ],
+            "why": "App.Hub receives 12,000 incoming references across 20 top hotspot object(s), 30 MB."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[1]"
+              ],
+              "why": "Incoming-reference counts were bounded, so the hotspot\u0027s reference total may be understated or approximate."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled App.Hub: if the incoming references come from short-lived objects, the hotspot is transient.",
+            "command": "!gcroot \u003Cobject address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If App.Hub is a shared lookup object referenced widely by design, many incoming references are expected."
+          }
+        ]
+      },
+      {
+        "fingerprint": "dominator analysis::reference-tracking-capped",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Missing",
+          "measure": {
+            "value": 40,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "incoming-reference counts",
+            "scope": "addresses past the tracking limit"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "40 references have approximated, bounded-error counts."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The limit is a tracking budget set by the analysis, and Space-Saving admission bounds the error; it is not a property of the process."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "CodeInspection",
+            "test": "Re-run with a larger MaxReferenceAddresses; if the highly referenced objects stay the same, the cap did not change the findings."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "info-retention-hotspot-warning",
+    "claims": [
+      {
+        "fingerprint": "dominator analysis::top-dominator-type",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 10485760,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "qualifiers": {
+            "location": "instances of App.Small"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "App.Small is estimated to retain 10 MB across 100 instances."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "The retained size is a bounded BFS estimate, not a true dominator tree, so the real figure may be smaller or larger."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled App.Small: if its root is a request frame, the instances are short-lived working data, not retained.",
+            "command": "!gcroot \u003Cinstance address\u003E"
+          },
+          {
+            "kind": "Windbg",
+            "test": "If App.Small is not among the largest types by total size in !dumpheap -stat, the dominance is wrong.",
+            "command": "!dumpheap -stat"
+          }
+        ]
+      },
+      {
+        "fingerprint": "dominator analysis::dominant-retained-type-hotspot",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 2000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 1000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "incoming references to App.Hub"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[2]"
+            ],
+            "why": "App.Hub receives 2,000 incoming references across 20 top hotspot object(s), 30 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Reference counting ran to completion and was not capped, so nothing observed qualifies this figure."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled App.Hub: if the incoming references come from short-lived objects, the hotspot is transient.",
+            "command": "!gcroot \u003Cobject address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If App.Hub is a shared lookup object referenced widely by design, many incoming references are expected."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "reference-tracking-capped",
+    "claims": [
+      {
+        "fingerprint": "dominator analysis::reference-tracking-capped",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Missing",
+          "measure": {
+            "value": 25,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "incoming-reference counts",
+            "scope": "addresses past the tracking limit"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "25 references have approximated, bounded-error counts."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The limit is a tracking budget set by the analysis, and Space-Saving admission bounds the error; it is not a property of the process."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "CodeInspection",
+            "test": "Re-run with a larger MaxReferenceAddresses; if the highly referenced objects stay the same, the cap did not change the findings."
+          }
+        ]
+      }
+    ]
+  }
+]

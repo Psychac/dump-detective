@@ -82,6 +82,31 @@ internal sealed class AsyncStateMachineSynthesisRule : ISynthesisRule
         findings.Add(new Claim
         {
             Fingerprint = Fingerprint("high-async-state-machine-count"),
+            Assertion = new Assertion
+            {
+                Predicate = AssertionPredicate.Exceeds,
+                Measure = ClaimParts.Count(totalCount),
+                Reference = ClaimParts.Budget(
+                    ClaimParts.Count(sev == Severity.Critical ? HighCountCritical : HighCountWarning),
+                    sev == Severity.Critical ? "critical threshold" : "warning threshold"),
+                Qualifiers = new AssertionQualifiers { Location = "suspended async state machines on the heap" },
+            },
+            Support = [new EvidenceStatement(ClaimParts.IdsOf(stateMachines), $"{totalCount:N0} suspended state machines hold {FormatHelper.FormatBytes(totalBytes)}; the most numerous belongs to {topType}.")],
+            Counter = Counter.None("A busy service legitimately has many in-flight async operations; the count alone does not show they are not progressing."),
+            FalsifiedBy =
+            [
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.Windbg,
+                    Command = "!dumpasync",
+                    Test = $"If !dumpasync shows most of the {totalCount:N0} state machines are completed or about to resume, they are not stuck.",
+                },
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.Capture,
+                    Test = "Capture a second dump under comparable load; if the state machines are different ones and the count is flat, they are normal in-flight work.",
+                },
+            ],
             Analyzer = AnalyzerName,
             Category = "Memory",
             Severity = sev,
@@ -139,6 +164,31 @@ internal sealed class AsyncStateMachineSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint($"fire-and-forget-{emitted}"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Leaks,
+                    Measure = ClaimParts.Count(candidate.Count),
+                    Reference = ClaimParts.Budget(
+                        ClaimParts.Count(sev == Severity.Critical ? HighCountCritical : FireAndForgetThreshold),
+                        sev == Severity.Critical ? "critical threshold" : "fire-and-forget threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = $"suspended instances of async method {candidate.Method}", Mechanism = "callers not awaiting completion" },
+                },
+                Support = [new EvidenceStatement(candidate.Sources, $"{candidate.Count:N0} suspended instances of '{candidate.Method}' on '{candidate.DeclaringType}' hold {FormatHelper.FormatBytes(candidate.Bytes)}.")],
+                Counter = Counter.None("Many suspended instances of one method are also what a busy endpoint under load looks like; the count does not show callers are not awaiting."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpasync",
+                        Test = $"If the suspended '{candidate.Method}' instances in !dumpasync are each awaited by a parent state machine, they are not fire-and-forget.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = $"If every call site of '{candidate.Method}' awaits it, the instances are in-flight awaited work.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = sev,
@@ -183,6 +233,29 @@ internal sealed class AsyncStateMachineSynthesisRule : ISynthesisRule
         findings.Add(new Claim
         {
             Fingerprint = Fingerprint("async-void-method"),
+            Assertion = new Assertion
+            {
+                Predicate = AssertionPredicate.Exhibits,
+                Measure = ClaimParts.Count(top.Count),
+                Reference = ClaimParts.Budget(ClaimParts.Count(AsyncVoidCountThreshold), "per-method instance threshold"),
+                Qualifiers = new AssertionQualifiers { Location = $"async void method {top.Method}", Mechanism = "fire-and-forget by construction" },
+            },
+            Support = [new EvidenceStatement(asyncVoidMethods.Select(m => m.Source).ToList(), $"{asyncVoidMethods.Count} async void method(s) have suspended state machines on the heap; the top one has {top.Count:N0}.")],
+            Counter = Counter.None("Async void is the only option for event handlers, so its presence alone is not a defect."),
+            FalsifiedBy =
+            [
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.CodeInspection,
+                    Test = $"If '{top.Method}' is an event handler, async void is required, not an antipattern.",
+                },
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.Windbg,
+                    Command = "!dumpasync",
+                    Test = $"If the '{top.Method}' state machines in !dumpasync are about to complete, they are not accumulating.",
+                },
+            ],
             Analyzer = AnalyzerName,
             Category = "Memory",
             Severity = Severity.Warning,
@@ -224,6 +297,31 @@ internal sealed class AsyncStateMachineSynthesisRule : ISynthesisRule
         findings.Add(new Claim
         {
             Fingerprint = Fingerprint("large-captured-closures"),
+            Assertion = new Assertion
+            {
+                Predicate = AssertionPredicate.Exceeds,
+                Measure = ClaimParts.Bytes(totalCaptured),
+                Reference = ClaimParts.Budget(
+                    ClaimParts.Bytes(sev == Severity.Critical ? LargeCaptureCritical : LargeCaptureWarning),
+                    sev == Severity.Critical ? "critical threshold" : "warning threshold"),
+                Qualifiers = new AssertionQualifiers { Location = "objects captured by async closures" },
+            },
+            Support = [new EvidenceStatement(ClaimParts.IdsOf(capturedClosures), $"Closures capture {FormatHelper.FormatBytes(totalCaptured)}; the largest is {topCapture}.")],
+            Counter = Counter.None("Captured size counts everything reachable from a closure; a service singleton captured by design is not a leak."),
+            FalsifiedBy =
+            [
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.Windbg,
+                    Command = "!gcroot <closure address>",
+                    Test = "On the largest captured closure: if its root is a short-lived request frame, the capture is released when the request ends.",
+                },
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.CodeInspection,
+                    Test = "If the captured objects are shared singletons, capturing them copies a reference, not the object.",
+                },
+            ],
             Analyzer = AnalyzerName,
             Category = "Memory",
             Severity = sev,

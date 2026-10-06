@@ -100,6 +100,32 @@ internal sealed class WcfChannelSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("faulted-channels"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Faults,
+                    Measure = ClaimParts.Count(faultedChannels),
+                    Qualifiers = new AssertionQualifiers { Location = "WCF channels in the Faulted state", Mechanism = "a faulted channel cannot be reused" },
+                },
+                Support =
+                [
+                    new EvidenceStatement(faultedIds, "Each is a WCF channel recorded in the Faulted state."),
+                    new EvidenceStatement([population.Id], $"{faultedChannels:N0} of {totalChannels:N0} channel objects are faulted."),
+                ],
+                Counter = Counter.None("A channel seen faulted at capture time may already have been aborted and replaced; the dump does not show whether the owner handles faults."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpheap -type ChannelBase",
+                        Test = $"If the channel objects of the faulted types are not in the Faulted state when inspected with !do, the state reading is wrong.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the calling code aborts a channel on any exception and creates a fresh one, the faulted instances are awaiting collection, not in use.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Infrastructure",
                 Severity = Severity.Critical,
@@ -128,6 +154,28 @@ internal sealed class WcfChannelSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("channel-count"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(totalChannels),
+                    Reference = ClaimParts.Budget(
+                        ClaimParts.Count(sev == Severity.Critical ? TotalChannelsCriticalThreshold : TotalChannelsWarningThreshold),
+                        sev == Severity.Critical ? "critical threshold" : "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "WCF channel objects on the managed heap" },
+                },
+                Support = [new EvidenceStatement([population.Id], $"{totalChannels:N0} channel objects: {openedChannels:N0} opened, {faultedChannels:N0} faulted, {closedChannels:N0} closed.")],
+                Counter = closedChannels > openedChannels
+                    ? Counter.Of(new EvidenceStatement([population.Id], $"{closedChannels:N0} channels are closed, more than the {openedChannels:N0} opened, so most are not holding a connection."))
+                    : Counter.None("Channel objects on the heap include ones awaiting collection; nothing observed shows how long they have lived."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpheap -live -stat -type ChannelBase",
+                        Test = $"If far fewer than {totalChannels:N0} channel objects are live, the count includes garbage awaiting collection.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Infrastructure",
                 Severity = sev,
@@ -155,6 +203,29 @@ internal sealed class WcfChannelSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("channel-factory"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Measure = ClaimParts.Count(factoryCount),
+                    Qualifiers = new AssertionQualifiers { Location = "ChannelFactory<T> objects on the managed heap" },
+                },
+                Support = [new EvidenceStatement([population.Id], $"{factoryCount:N0} ChannelFactory objects were found.")],
+                Counter = factoryCount <= MaxExpectedFactories
+                    ? Counter.Of(new EvidenceStatement([population.Id], $"Only {factoryCount:N0} factory object(s) exist; one factory per endpoint is the recommended pattern."))
+                    : Counter.None("The count alone does not show factories are created per call; long-lived factories for several endpoints look the same."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the same factory objects are present and the count does not grow, they are shared, not per-call.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If each factory is created once at startup and reused, its presence on the heap is by design.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Infrastructure",
                 Severity = Severity.Warning,
@@ -251,6 +322,8 @@ internal sealed class WcfChannelSynthesisRule : ISynthesisRule
         sb.Append(". ");
         return sb.ToString();
     }
+
+    private const int MaxExpectedFactories = 2;
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();
 }

@@ -2,7 +2,8 @@
 
 ## Status
 
-Vision + specification. Nothing here is implemented, and adopting it whole is a multi-quarter
+Vision + specification. **M1 (claims) shipped 2026-10-06** — see [m1-claims-plan.md](m1-claims-plan.md) for what
+was built and where it deviated; the rest is not implemented, and adopting it whole is a multi-quarter
 program. [§19](#19-minimum-viable-path) gives the subset worth building regardless.
 
 Third sibling to [ReportFormatCleanSlate.md](ReportFormatCleanSlate.md) (what the report contains)
@@ -1549,7 +1550,7 @@ platform refactor to complete first.
 
 | Step | Scope | Reader-visible effect | Depends on |
 |---|---|---|---|
-| **M1 — Claims** | `Claim` record + rule registry + generated prose, over today's domain results. No new UI beyond `dd-claim`. Findings become claims; `falsifiedBy` and `counter` required from day one | every conclusion states its support, its refutation and what would disprove it | nothing |
+| **M1 — Claims** *(done 2026-10-06; [plan](m1-claims-plan.md))* | `Claim` record + rule registry + generated prose, over today's domain results. No new UI beyond `dd-claim`. Findings become claims; `falsifiedBy` and `counter` required from day one | every conclusion states its support, its refutation and what would disprove it | nothing |
 | **M2 — Entities** | entity table replacing the string pool; type + thread dossier | investigate by type and thread instead of by analyzer; ~9.9 MB of duplicate names disappears as a side effect; per-thread retention finally surfaces | nothing |
 | **M3 — Coverage** | `CoverageRecord` promoted out of the appendix; `unknown` as a real value with a reason; negative claims published | "we looked and did not find it" becomes visible; caveats become specific | M1 |
 | **M4 — Payload** | segmented envelope + column store + virtualized tables | opens instantly; full 68,576 rows genuinely navigable | nothing |
@@ -1559,7 +1560,7 @@ After M1–M5, the rest is mostly *consequence*: trend is a series over observat
 ([§3](#3-the-session-model)), diff is a two-anchor query, and a trace source adds artifacts to a
 session without touching the report.
 
-**A bound on the M1 adapter, stated up front because [§21 open question 1](#21-risks-assumptions-and-open-questions)
+**(Moot: M1 shipped with no adapter. Phase 5 landed first, so the synthesis rules author `Claim` themselves and no judgment lives in a mapping layer.) A bound on the M1 adapter, stated up front because [§21 open question 1](#21-risks-assumptions-and-open-questions)
 names the risk without resolving it.** M1 builds `Claim` over today's `AnalyzerDomainResult`, before
 Phase 5's observations exist to back it — that's the right call, but only if the adapter stays an
 adapter. Concretely: the M1 adapter may map an existing domain result's already-computed fields

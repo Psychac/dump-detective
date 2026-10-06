@@ -4,7 +4,8 @@ Everything about DumpDetective's reporting layer: where it is going, and where i
 
 ## The design baseline
 
-Three documents. All are design proposals — **none of them describes what ships today.**
+Three documents. All are design proposals — **none of them describes what ships today**, except that vision § 19
+step M1 (claims) has shipped; [m1-claims-plan.md](m1-claims-plan.md) records what it built.
 
 | Doc | Defines |
 |---|---|
@@ -20,7 +21,7 @@ states the disagreement explicitly in its §20.
 
 | Doc | Covers |
 |---|---|
-| [m1-claims-plan.md](m1-claims-plan.md) | vision § 19 step M1 (claims), with Phase 8's sinks and unconditional `report.json` folded in |
+| [m1-claims-plan.md](m1-claims-plan.md) | vision § 19 step M1 (claims), with Phase 8's sinks and unconditional `report.json` folded in. **Done 2026-10-06** |
 
 ## Where current-state truth lives
 

@@ -1,0 +1,112 @@
+rule: insight.dynamic-assembly-accumulation
+version: 1
+[
+  {
+    "name": "notice",
+    "claims": [
+      {
+        "fingerprint": "insightengine::dynamic-assembly-accumulation",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 50,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 20,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "notice threshold"
+          },
+          "qualifiers": {
+            "location": "dynamic in-memory assemblies",
+            "scope": "2 AppDomain(s)"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "50 dynamic modules across 2 AppDomain(s); 3 have no file path."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Serializers and expression compilers create dynamic assemblies and usually cache them; the count does not show repeated regeneration."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the dynamic assembly count does not grow, they are cached, not regenerated."
+          },
+          {
+            "kind": "Windbg",
+            "test": "If !dumpdomain lists far fewer than 50 dynamic assemblies, the count is overstated.",
+            "command": "!dumpdomain"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "warning",
+    "claims": [
+      {
+        "fingerprint": "insightengine::dynamic-assembly-accumulation",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 150,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 100,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "dynamic in-memory assemblies",
+            "scope": "1 AppDomain(s)"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "150 dynamic modules across 1 AppDomain(s); 0 have no file path."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Serializers and expression compilers create dynamic assemblies and usually cache them; the count does not show repeated regeneration."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the dynamic assembly count does not grow, they are cached, not regenerated."
+          },
+          {
+            "kind": "Windbg",
+            "test": "If !dumpdomain lists far fewer than 150 dynamic assemblies, the count is overstated.",
+            "command": "!dumpdomain"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "below-threshold-says-nothing",
+    "claims": []
+  }
+]

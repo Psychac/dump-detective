@@ -1,3 +1,4 @@
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -48,6 +49,31 @@ internal sealed class LohFragmentationInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::loh-fragmentation",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Fragments,
+                    Measure = ClaimParts.Percent(fragmentationPercent),
+                    Reference = severity == Severity.Critical
+                        ? ClaimParts.Budget(ClaimParts.Percent(CriticalPct), "critical threshold")
+                        : ClaimParts.Budget(ClaimParts.Percent(WarningPct), "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "the Large Object Heap" },
+                },
+                Support = [new EvidenceStatement([summary.Id], $"{InsightByteFormat.FormatBytes(freeBytes)} is free in {freeBlockCount} blocks; the largest is {InsightByteFormat.FormatBytes(largestFreeBlock)}.")],
+                Counter = Counter.None("Free LOH space can be reused by the next large allocation; its size alone does not show it is unusable."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!eeheap -gc",
+                        Test = $"If the free space on LOH segments in !eeheap -gc is far from {InsightByteFormat.FormatBytes(freeBytes)}, the fragmentation is wrong.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the free LOH space is reused and the percentage falls, it was reusable, not stranded.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Memory",
                 Severity = severity,

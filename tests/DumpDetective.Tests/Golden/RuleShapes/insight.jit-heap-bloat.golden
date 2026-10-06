@@ -1,0 +1,70 @@
+rule: insight.jit-heap-bloat
+version: 1
+[
+  {
+    "name": "large-heap-many-threads",
+    "claims": [
+      {
+        "fingerprint": "insightengine::jit-heap-bloat",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 629145600,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 524288000,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "JIT heap threshold"
+          },
+          "qualifiers": {
+            "mechanism": "150 alive threads compiling concurrently",
+            "location": "the JIT code heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The JIT code heap holds 600.0 MB across 3 JIT manager(s)."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "150 threads are alive, enough for concurrent compilation to contend."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A large JIT heap and many threads are both normal for a large busy service; their co-occurrence does not show compilation contention."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the code heap sizes in !eeheap -loader total far less than 600.0 MB, the JIT footprint is overstated.",
+            "command": "!eeheap -loader"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump after warm-up; if latency is flat and the JIT heap has stopped growing, there is no warm-up contention."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "large-heap-few-threads-says-nothing",
+    "claims": []
+  },
+  {
+    "name": "small-heap-says-nothing",
+    "claims": []
+  }
+]

@@ -1,3 +1,4 @@
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -50,6 +51,26 @@ internal sealed class StringDuplicationRatioInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::string-duplication-ratio",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Duplicates,
+                    Measure = ClaimParts.Percent(duplicationRatio * 100.0),
+                    Reference = ClaimParts.Budget(ClaimParts.Percent(WarningRatio * 100.0), "duplication-ratio threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "string instances", Scope = $"{samplingCoverage:P1} sampling coverage" },
+                },
+                Support = [new EvidenceStatement([strings.Id], $"{duplicationRatio:P0} of {totalStrings:N0} strings are duplicates, wasting {InsightByteFormat.FormatBytes(duplicateWastedBytes)}.")],
+                Counter = Counter.Of(new EvidenceStatement(
+                    [strings.Id],
+                    $"The duplicated strings waste only {InsightByteFormat.FormatBytes(duplicateWastedBytes)}, under the {InsightByteFormat.FormatBytes(DuplicateWasteThresholdBytes)} that would make it costly, so the ratio overstates the cost.")),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpheap -strings",
+                        Test = "If the most repeated strings in !dumpheap -strings are a small number of short tokens, the ratio is high but the cost is small.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Memory",
                 Severity = Severity.Info,

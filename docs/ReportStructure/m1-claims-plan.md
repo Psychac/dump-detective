@@ -135,7 +135,7 @@ system. It gates M4.
      `ISynthesisRule`, recorded in `derivedFrom` as rule id + version. A per-rule golden-output test fails
      when a rule's emitted findings change shape without a version bump. Derived (hash) versions rejected:
      they change on any rebuild, so identical rules from different builds would look different.
-4. **Rule migration** *(in progress — 38 of 76 rules; pilot 2026-10-05, batches 1-8 2026-10-06)* — all 76 rules author `assertion`, `counter`, `falsifiedBy`.
+4. **Rule migration** *(in progress — 43 of 76 rules; pilot 2026-10-05, batches 1-9 2026-10-06)* — all 76 rules author `assertion`, `counter`, `falsifiedBy`.
    - Done: `LohFragmentationSynthesisRule` (pilot), with the per-rule golden mechanism
      (`Golden/RuleShapeGolden.cs`, goldens in `Golden/RuleShapes/`; `DD_BLESS_RULE_SHAPES=1` to bless). Fails when
      a rule's claim shape changes without a `Version` bump, or the version changes without a re-bless.
@@ -181,6 +181,14 @@ system. It gates M4.
      per-analyzer rules are now migrated. Verified on the reference dump: 64 of 82 findings carry an assertion.
      The 76 count is confirmed: 76 `ISynthesisRule` implementers, 38 of them in `Insight/`; 36 remain after this
      batch, all in `Insight/`.
+   - Batch 9 (2026-10-06): cross-analyzer rules `HttpClientAccumulation`, `DynamicAssemblyAccumulation`,
+     `LohFragmentation`, `StringDuplicationRatio`, `JitHeapBloat` (the first claim citing two analyzers'
+     observations, in two separate support statements). Tests in `InsightRulesBatchOneClaimTests`. Only one rule of
+     the five fires on the reference dump (`wasteful-collections` from batch 8), so the real-dump check is thin
+     here; the goldens carry the coverage.
+   - **Open: intermittent hang, not caused by this migration.** One real-dump run sat 42 minutes in Stage 3 inside
+     `EventLeakAnalyzer`'s "building publisher registry" setup and was killed; the same dump finished in ~74 s on
+     the next run with my changes, and on the committed state before them. Needs its own investigation.
    - `RuleShapeGolden` now enforces the plan's per-claim gates on every migrated rule: an assertion, at least one
      falsification test, an explicit counter (evidence or `None` with a reason), non-empty support, and every cited
      observation inside the claim's own `DerivedFrom`. Long evidence lists collapse to ranges in goldens.

@@ -1,0 +1,110 @@
+rule: insight.loh-fragmentation
+version: 1
+[
+  {
+    "name": "warning",
+    "claims": [
+      {
+        "fingerprint": "insightengine::loh-fragmentation",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Fragments",
+          "measure": {
+            "value": 40,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 30,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "the Large Object Heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "40.0 MB is free in 300 blocks; the largest is 4.0 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Free LOH space can be reused by the next large allocation; its size alone does not show it is unusable."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the free space on LOH segments in !eeheap -gc is far from 40.0 MB, the fragmentation is wrong.",
+            "command": "!eeheap -gc"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the free LOH space is reused and the percentage falls, it was reusable, not stranded."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "critical",
+    "claims": [
+      {
+        "fingerprint": "insightengine::loh-fragmentation",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Fragments",
+          "measure": {
+            "value": 70,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 60,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "the Large Object Heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "40.0 MB is free in 300 blocks; the largest is 4.0 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Free LOH space can be reused by the next large allocation; its size alone does not show it is unusable."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the free space on LOH segments in !eeheap -gc is far from 40.0 MB, the fragmentation is wrong.",
+            "command": "!eeheap -gc"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the free LOH space is reused and the percentage falls, it was reusable, not stranded."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "below-threshold-says-nothing",
+    "claims": []
+  }
+]

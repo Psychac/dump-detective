@@ -1,0 +1,66 @@
+rule: insight.string-duplication-ratio
+version: 1
+[
+  {
+    "name": "high-ratio-small-waste",
+    "claims": [
+      {
+        "fingerprint": "insightengine::string-duplication-ratio",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Duplicates",
+          "measure": {
+            "value": 60,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "duplication-ratio threshold"
+          },
+          "qualifiers": {
+            "location": "string instances",
+            "scope": "90.0% sampling coverage"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "60% of 10,00,000 strings are duplicates, wasting 2.0 MB."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "The duplicated strings waste only 2.0 MB, under the 10.0 MB that would make it costly, so the ratio overstates the cost."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the most repeated strings in !dumpheap -strings are a small number of short tokens, the ratio is high but the cost is small.",
+            "command": "!dumpheap -strings"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "high-waste-says-nothing-here",
+    "claims": []
+  },
+  {
+    "name": "low-ratio-says-nothing",
+    "claims": []
+  }
+]

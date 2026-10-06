@@ -1,0 +1,64 @@
+rule: insight.http-client-accumulation
+version: 1
+[
+  {
+    "name": "mixed-usage",
+    "claims": [
+      {
+        "fingerprint": "insightengine::http-client-accumulation",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 40,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 10,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "legacy-response threshold"
+          },
+          "qualifiers": {
+            "mechanism": "mixed legacy and modern HTTP APIs",
+            "location": "HttpWebResponse objects alongside HttpClient"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "5 HttpClient instances and 40 HttpWebResponse objects are on the heap together."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Some libraries use HttpWebRequest internally, so legacy objects can appear without the application\u0027s own code having stayed on the old API."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled HttpWebResponse: if its root is a third-party library, the legacy usage is not the application\u0027s own.",
+            "command": "!gcroot \u003CHttpWebResponse address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the application code contains no HttpWebRequest calls, the legacy objects come from dependencies."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "too-few-clients-says-nothing",
+    "claims": []
+  },
+  {
+    "name": "too-few-responses-says-nothing",
+    "claims": []
+  }
+]

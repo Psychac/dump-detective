@@ -1,3 +1,4 @@
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -37,6 +38,29 @@ internal sealed class HttpClientAccumulationInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::http-client-accumulation",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Measure = ClaimParts.Count(httpWebResponseCount),
+                    Reference = ClaimParts.Budget(ClaimParts.Count(10), "legacy-response threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "HttpWebResponse objects alongside HttpClient", Mechanism = "mixed legacy and modern HTTP APIs" },
+                },
+                Support = [new EvidenceStatement([http.Id], $"{httpClientCount:N0} HttpClient instances and {httpWebResponseCount:N0} HttpWebResponse objects are on the heap together.")],
+                Counter = Counter.None("Some libraries use HttpWebRequest internally, so legacy objects can appear without the application's own code having stayed on the old API."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gcroot <HttpWebResponse address>",
+                        Test = "On a sampled HttpWebResponse: if its root is a third-party library, the legacy usage is not the application's own.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the application code contains no HttpWebRequest calls, the legacy objects come from dependencies.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Infrastructure",
                 Severity = Severity.Warning,

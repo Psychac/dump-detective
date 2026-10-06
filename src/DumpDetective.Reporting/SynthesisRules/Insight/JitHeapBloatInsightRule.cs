@@ -1,3 +1,4 @@
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -52,6 +53,33 @@ internal sealed class JitHeapBloatInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::jit-heap-bloat",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Bytes(totalJitHeapBytes),
+                    Reference = ClaimParts.Budget(ClaimParts.Bytes(ThresholdBytes), "JIT heap threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "the JIT code heap", Mechanism = $"{aliveThreadCount:N0} alive threads compiling concurrently" },
+                },
+                Support =
+                [
+                    new EvidenceStatement([jit.Id], $"The JIT code heap holds {InsightByteFormat.FormatBytes(totalJitHeapBytes)} across {jitManagerCount} JIT manager(s)."),
+                    new EvidenceStatement([threadTriage!.Id], $"{aliveThreadCount:N0} threads are alive, enough for concurrent compilation to contend."),
+                ],
+                Counter = Counter.None("A large JIT heap and many threads are both normal for a large busy service; their co-occurrence does not show compilation contention."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!eeheap -loader",
+                        Test = $"If the code heap sizes in !eeheap -loader total far less than {InsightByteFormat.FormatBytes(totalJitHeapBytes)}, the JIT footprint is overstated.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump after warm-up; if latency is flat and the JIT heap has stopped growing, there is no warm-up contention.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Performance",
                 Severity = Severity.Warning,

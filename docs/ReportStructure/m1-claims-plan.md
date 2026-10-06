@@ -135,7 +135,7 @@ system. It gates M4.
      `ISynthesisRule`, recorded in `derivedFrom` as rule id + version. A per-rule golden-output test fails
      when a rule's emitted findings change shape without a version bump. Derived (hash) versions rejected:
      they change on any rebuild, so identical rules from different builds would look different.
-4. **Rule migration** *(in progress — 18 of 76 rules; pilot 2026-10-05, batches 1-4 2026-10-06)* — all 76 rules author `assertion`, `counter`, `falsifiedBy`.
+4. **Rule migration** *(in progress — 23 of 76 rules; pilot 2026-10-05, batches 1-5 2026-10-06)* — all 76 rules author `assertion`, `counter`, `falsifiedBy`.
    - Done: `LohFragmentationSynthesisRule` (pilot), with the per-rule golden mechanism
      (`Golden/RuleShapeGolden.cs`, goldens in `Golden/RuleShapes/`; `DD_BLESS_RULE_SHAPES=1` to bless). Fails when
      a rule's claim shape changes without a `Version` bump, or the version changes without a re-bless.
@@ -157,6 +157,11 @@ system. It gates M4.
      findings carry an assertion; the two event-leak claims (confidence 0.4) are the first real claims where the
      confidence reason line should read as limited by data. Tool-limitation claims (`GCRoot` walk cap,
      `ReferenceChain` traversal limit, no samples) use `Missing`, per the step 3 decision.
+   - Batch 5 (2026-10-06): `Crash` (3 claims), `SegmentReservation` (5), `DbConnection` (4), `Array` (4 kinds, sparse
+     emitted per array), `GCGeneration` (4). Tests in `StabilityAndHeapLayoutRuleClaimTests`. Where a rule fires on
+     either of two thresholds (multi-dimensional and pinned arrays, address-space pressure), the claim's measure and
+     reference follow whichever threshold actually fired, so they always compare like with like. Verified on the
+     reference dump: 31 of 82 findings carry an assertion. Also re-indented one unindented block from batch 4.
    - `RuleShapeGolden` now enforces the plan's per-claim gates on every migrated rule: an assertion, at least one
      falsification test, an explicit counter (evidence or `None` with a reason), non-empty support, and every cited
      observation inside the claim's own `DerivedFrom`. Long evidence lists collapse to ranges in goldens.

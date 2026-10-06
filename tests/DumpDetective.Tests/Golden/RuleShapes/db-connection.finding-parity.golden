@@ -1,0 +1,325 @@
+rule: db-connection.finding-parity
+version: 1
+[
+  {
+    "name": "count-warning-mostly-closed",
+    "claims": [
+      {
+        "fingerprint": "db connection analysis::connection-count",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 60,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "DB connection objects on the managed heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "60 connection objects: 10 open, 40 closed, 0 broken."
+          },
+          {
+            "observations": [
+              "observations[11]"
+            ],
+            "why": "Breaks the connection objects down by type."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "40 connections are closed, more than the 10 open, so most are not holding a pool slot."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If far fewer than 60 connection objects are live, the count includes garbage awaiting collection.",
+            "command": "!dumpheap -live -stat -type Connection"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the connection string sets Max Pool Size above the reported count, the pool has headroom and this is not exhaustion."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "count-warning-mostly-open",
+    "claims": [
+      {
+        "fingerprint": "db connection analysis::connection-count",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 60,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "DB connection objects on the managed heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "60 connection objects: 10 open, 5 closed, 0 broken."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Connection objects on the heap include ones awaiting collection; nothing observed shows how long they have lived."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If far fewer than 60 connection objects are live, the count includes garbage awaiting collection.",
+            "command": "!dumpheap -live -stat -type Connection"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the connection string sets Max Pool Size above the reported count, the pool has headroom and this is not exhaustion."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "everything-fires",
+    "claims": [
+      {
+        "fingerprint": "db connection analysis::connection-count",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 250,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 200,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "DB connection objects on the managed heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "250 connection objects: 20 open, 100 closed, 6 broken."
+          },
+          {
+            "observations": [
+              "observations[21]"
+            ],
+            "why": "Breaks the connection objects down by type."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "100 connections are closed, more than the 20 open, so most are not holding a pool slot."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If far fewer than 250 connection objects are live, the count includes garbage awaiting collection.",
+            "command": "!dumpheap -live -stat -type Connection"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the connection string sets Max Pool Size above the reported count, the pool has headroom and this is not exhaustion."
+          }
+        ]
+      },
+      {
+        "fingerprint": "db connection analysis::open-connections",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 20,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 20,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "DB connections in the Open state"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1..20]"
+            ],
+            "why": "Each is a connection object in the Open state."
+          },
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "20 of 250 connection objects are open."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "An open connection may be serving an in-flight request; state at capture time does not show it is idle."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If each open connection is referenced from an in-flight request frame, the connections are in use, not leaked.",
+            "command": "!clrstack -all"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the open count falls back, the connections were in-flight work."
+          }
+        ]
+      },
+      {
+        "fingerprint": "db connection analysis::broken-connections",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Faults",
+          "measure": {
+            "value": 6,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 5,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "DB connections in the Broken state"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "6 of 250 connection objects are broken."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The pool discards a broken connection on its next use, so a few are expected after a network interruption."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump later; if the broken connections have been evicted and not replaced, they were from a one-off interruption."
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the broken connections are caught by retry logic that reopens them, the failures are handled, not accumulating."
+          }
+        ]
+      },
+      {
+        "fingerprint": "db connection analysis::gen2-open-connections",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Leaks",
+          "measure": {
+            "value": 5,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 5,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "Gen2 open-connection threshold"
+          },
+          "qualifiers": {
+            "mechanism": "long-lived objects",
+            "location": "open DB connections in Generation 2"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[16..20]"
+            ],
+            "why": "5 open connections have survived into Generation 2."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A connection held open on purpose, such as a dedicated listener, is long-lived without being leaked."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled Gen2 connection: if its root is a deliberately long-lived owner such as a service singleton, the connection is held by design.",
+            "command": "!gcroot \u003Cconnection address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump later; if the 5 connections are the same ones and the count does not grow, they are a fixed set, not a leak."
+          }
+        ]
+      }
+    ]
+  }
+]

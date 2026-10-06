@@ -1,0 +1,319 @@
+rule: gc-generation.finding-parity
+version: 1
+[
+  {
+    "name": "everything-fires",
+    "claims": [
+      {
+        "fingerprint": "gc generation analysis::poh-share",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 25,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 10,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "POH share threshold"
+          },
+          "qualifiers": {
+            "mechanism": "pinned objects",
+            "location": "the Pinned Object Heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The POH holds 250 of 1,000 objects, 10.00 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Objects pinned for short I/O leave the POH quickly; one snapshot does not show they persist."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the POH size in !eeheap -gc is far from 10.00 MB, the POH share is wrong.",
+            "command": "!eeheap -gc"
+          }
+        ]
+      },
+      {
+        "fingerprint": "gc generation analysis::loh-share",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 40,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 20,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "LOH share threshold"
+          },
+          "qualifiers": {
+            "location": "the Large Object Heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The LOH holds 100.00 MB, 40.0% of the managed heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Large objects that die young cost fragmentation, not growth; their lifetime is not observed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the LOH size in !eeheap -gc is far from 100.00 MB, the LOH share is wrong.",
+            "command": "!eeheap -gc"
+          }
+        ]
+      },
+      {
+        "fingerprint": "gc generation analysis::gen0-pressure",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 80,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 70,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "Gen0 pressure threshold"
+          },
+          "qualifiers": {
+            "location": "objects in Generation 0"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Gen0 holds 800 of 1,000 objects, 50.00 MB."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Each is one of the types allocating most of Gen0."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A high Gen0 share is normal for request-processing code; Gen0 is cheap to collect, and survival is not measured here."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If Gen0 in !eeheap -gc holds far fewer than the 800 objects counted, the share is overstated.",
+            "command": "!eeheap -gc"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if Gen0 is a small share after a collection, the first reading was the point before a GC."
+          }
+        ]
+      },
+      {
+        "fingerprint": "gc generation analysis::gen2-pressure",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 80,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 75,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "critical Gen2 threshold"
+          },
+          "qualifiers": {
+            "mechanism": "promotion of long-lived objects",
+            "location": "objects in Generation 2"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Gen2 holds 500 of 1,000 objects, 500.00 MB."
+          },
+          {
+            "observations": [
+              "observations[2]"
+            ],
+            "why": "Each is one of the types accumulating most in Gen2."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A large Gen2 share is normal for a service holding a warm cache; the share alone does not show it is growing."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If Gen2 in !eeheap -gc is far from 500.00 MB, the Gen2 share is wrong.",
+            "command": "!eeheap -gc"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if Gen2 does not grow, it is a stable working set, not accumulation."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "gen2-warning-bytes-approximate",
+    "claims": [
+      {
+        "fingerprint": "gc generation analysis::gen2-pressure",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 60,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "warning Gen2 threshold"
+          },
+          "qualifiers": {
+            "mechanism": "promotion of long-lived objects",
+            "location": "objects in Generation 2"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Gen2 holds 500 of 1,000 objects, 500.00 MB."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "Byte values are approximate, so the per-generation split may not be exact."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If Gen2 in !eeheap -gc is far from 500.00 MB, the Gen2 share is wrong.",
+            "command": "!eeheap -gc"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if Gen2 does not grow, it is a stable working set, not accumulation."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "gen2-warning-fallback-mode",
+    "claims": [
+      {
+        "fingerprint": "gc generation analysis::gen2-pressure",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 60,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "warning Gen2 threshold"
+          },
+          "qualifiers": {
+            "mechanism": "promotion of long-lived objects",
+            "location": "objects in Generation 2"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Gen2 holds 500 of 1,000 objects, 500.00 MB."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "Gen0 and Gen1 are unknown in fallback mode, so the Gen2 percentage is unreliable and may be a false positive."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If Gen2 in !eeheap -gc is far from 500.00 MB, the Gen2 share is wrong.",
+            "command": "!eeheap -gc"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if Gen2 does not grow, it is a stable working set, not accumulation."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "quiet",
+    "claims": []
+  }
+]

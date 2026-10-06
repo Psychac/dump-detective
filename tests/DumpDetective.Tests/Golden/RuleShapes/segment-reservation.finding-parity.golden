@@ -1,0 +1,513 @@
+rule: segment-reservation.finding-parity
+version: 1
+[
+  {
+    "name": "everything-fires-64-bit",
+    "claims": [
+      {
+        "fingerprint": "segment reservation analysis::address-space-pressure",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 5,
+            "unit": "Ratio",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 4,
+              "unit": "Ratio",
+              "semantics": "Ratio"
+            },
+            "basis": "high-pressure threshold"
+          },
+          "qualifiers": {
+            "location": "reserved-to-committed ratio"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Reserved-to-committed ratio is 5.0x (\u003E4x threshold). GC is holding large uncommitted reservations."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Reserved address space is not committed memory; a large reservation matters only if the process nears its address-space limit."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the reserved total in !address -summary is far from 6 GB, the reservation figure is wrong.",
+            "command": "!address -summary"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the process sets a GC heap hard limit, the reservation is capped by design, not unbounded."
+          }
+        ]
+      },
+      {
+        "fingerprint": "segment reservation analysis::reservation-ratio",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 5,
+            "unit": "Ratio",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 4,
+              "unit": "Ratio",
+              "semantics": "Ratio"
+            },
+            "basis": "high-pressure threshold"
+          },
+          "qualifiers": {
+            "location": "reserved-to-committed ratio"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Reserved 6 GB against 2 GB committed."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Server GC reserves large address ranges up front by design; the ratio alone does not show the process is short of address space."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the committed and reserved sizes in !eeheap -gc do not give a 5.0x ratio, the figure is wrong.",
+            "command": "!eeheap -gc"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the reservation does not grow, it is a stable GC policy, not creeping pressure."
+          }
+        ]
+      },
+      {
+        "fingerprint": "segment reservation analysis::ephemeral-fill",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 95,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 90,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "critical fill threshold"
+          },
+          "qualifiers": {
+            "location": "2 ephemeral segment(s)"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Average fill is 95.0% across 2 ephemeral segment(s)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Ephemeral segments fill and are collected in the normal allocation cycle; a high fill just before a GC is expected."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the ephemeral segments in !eeheap -gc show substantial unused allocation space, the 95.0% fill is wrong.",
+            "command": "!eeheap -gc"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump; if the ephemeral fill is low after a GC, the first reading was the point before collection."
+          }
+        ]
+      },
+      {
+        "fingerprint": "segment reservation analysis::near-empty-regions",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 62914560,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 52428800,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "3 GC region(s) below 10% fill"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "3 region(s) are nearly empty and hold 60 MB committed."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Regions-based GC decommits near-empty regions over time; one snapshot does not show they persist."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the regions in !eeheap -gc are not mostly empty, or hold much less than 60 MB, the figure is wrong.",
+            "command": "!eeheap -gc"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump later; if the near-empty regions have been decommitted, they were transient."
+          }
+        ]
+      },
+      {
+        "fingerprint": "segment reservation analysis::overview",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Composes",
+          "measure": {
+            "value": 6442450944,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "qualifiers": {
+            "location": "GC segment reservation"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "2 GB committed and 6 GB reserved across 4 logical heap(s)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This describes reservation and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the committed or reserved totals in !eeheap -gc differ from 2 GB and 6 GB, the overview is wrong.",
+            "command": "!eeheap -gc"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "32-bit-by-reservation",
+    "claims": [
+      {
+        "fingerprint": "segment reservation analysis::address-space-pressure",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 3221225472,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 2000000000,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "32-bit address-space threshold"
+          },
+          "qualifiers": {
+            "location": "reserved address space in a 32-bit process"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "32-bit process has 3,072 MB reserved (\u003E1,907 MB threshold)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Reserved address space is not committed memory; a large reservation matters only if the process nears its address-space limit."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the reserved total in !address -summary is far from 3 GB, the reservation figure is wrong.",
+            "command": "!address -summary"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the process sets a GC heap hard limit, the reservation is capped by design, not unbounded."
+          }
+        ]
+      },
+      {
+        "fingerprint": "segment reservation analysis::overview",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Composes",
+          "measure": {
+            "value": 3221225472,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "qualifiers": {
+            "location": "GC segment reservation"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "2 GB committed and 3 GB reserved across 4 logical heap(s)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This describes reservation and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the committed or reserved totals in !eeheap -gc differ from 2 GB and 3 GB, the overview is wrong.",
+            "command": "!eeheap -gc"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "medium-ratio-only",
+    "claims": [
+      {
+        "fingerprint": "segment reservation analysis::reservation-ratio",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 3,
+            "unit": "Ratio",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 2,
+              "unit": "Ratio",
+              "semantics": "Ratio"
+            },
+            "basis": "elevated threshold"
+          },
+          "qualifiers": {
+            "location": "reserved-to-committed ratio"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Reserved 6 GB against 2 GB committed."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Server GC reserves large address ranges up front by design; the ratio alone does not show the process is short of address space."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the committed and reserved sizes in !eeheap -gc do not give a 3.0x ratio, the figure is wrong.",
+            "command": "!eeheap -gc"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the reservation does not grow, it is a stable GC policy, not creeping pressure."
+          }
+        ]
+      },
+      {
+        "fingerprint": "segment reservation analysis::overview",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Composes",
+          "measure": {
+            "value": 6442450944,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "qualifiers": {
+            "location": "GC segment reservation"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "2 GB committed and 6 GB reserved across 4 logical heap(s)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This describes reservation and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the committed or reserved totals in !eeheap -gc differ from 2 GB and 6 GB, the overview is wrong.",
+            "command": "!eeheap -gc"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "regions-below-the-warning-size",
+    "claims": [
+      {
+        "fingerprint": "segment reservation analysis::near-empty-regions",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 10485760,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "qualifiers": {
+            "location": "2 GC region(s) below 10% fill"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "2 region(s) are nearly empty and hold 10 MB committed."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Regions-based GC decommits near-empty regions over time; one snapshot does not show they persist."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the regions in !eeheap -gc are not mostly empty, or hold much less than 10 MB, the figure is wrong.",
+            "command": "!eeheap -gc"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump later; if the near-empty regions have been decommitted, they were transient."
+          }
+        ]
+      },
+      {
+        "fingerprint": "segment reservation analysis::overview",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Composes",
+          "measure": {
+            "value": 6442450944,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "qualifiers": {
+            "location": "GC segment reservation"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "2 GB committed and 6 GB reserved across 4 logical heap(s)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This describes reservation and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the committed or reserved totals in !eeheap -gc differ from 2 GB and 6 GB, the overview is wrong.",
+            "command": "!eeheap -gc"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "quiet",
+    "claims": [
+      {
+        "fingerprint": "segment reservation analysis::overview",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Composes",
+          "measure": {
+            "value": 6442450944,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "qualifiers": {
+            "location": "GC segment reservation"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "2 GB committed and 6 GB reserved across 4 logical heap(s)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This describes reservation and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the committed or reserved totals in !eeheap -gc differ from 2 GB and 6 GB, the overview is wrong.",
+            "command": "!eeheap -gc"
+          }
+        ]
+      }
+    ]
+  }
+]

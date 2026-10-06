@@ -1,0 +1,194 @@
+rule: crash.finding-parity
+version: 1
+[
+  {
+    "name": "none",
+    "claims": [
+      {
+        "fingerprint": "crash analysis::no-exceptions",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Normal",
+          "measure": {
+            "value": 0,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "exception objects on the managed heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Counted no exception objects on the managed heap."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "A dump taken after a handled exception was collected shows none; absence describes this snapshot only."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !dumpheap lists exception objects, the count of none is wrong.",
+            "command": "!dumpheap -type Exception -stat"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "pressure-without-active",
+    "claims": [
+      {
+        "fingerprint": "crash analysis::exception-pressure",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 5,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "exception objects on the managed heap",
+            "scope": "none on a thread stack"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "5 exception objects across 2 types, none on a thread stack."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Exception objects on the heap may be handled exceptions awaiting collection; they do not show a fault in progress."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled exception object: if !gcroot finds no root, it is garbage from a handled exception, not a standing fault.",
+            "command": "!gcroot \u003Cexception address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the same exception types do not recur, the pressure was a one-off."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "active-with-candidate",
+    "claims": [
+      {
+        "fingerprint": "crash analysis::active-exceptions",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Faults",
+          "measure": {
+            "value": 2,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "primary type System.InvalidOperationException",
+            "location": "exceptions on thread stacks"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "2 of 5 exception objects are on thread stacks."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Identifies the crash thread candidate, or the exceptions themselves when no candidate exists."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "An exception on a thread stack may be caught and handled further up the stack; nothing observed shows it was unhandled."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On each thread carrying one of the 2 exceptions: if !pe shows no exception object, or one already handled, there is no active failure.",
+            "command": "!pe"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If System.InvalidOperationException is thrown and caught by design, for example for control flow, it is not a crash."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "active-without-candidate",
+    "claims": [
+      {
+        "fingerprint": "crash analysis::active-exceptions",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Faults",
+          "measure": {
+            "value": 2,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "primary type System.TimeoutException",
+            "location": "exceptions on thread stacks"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "2 of 5 exception objects are on thread stacks."
+          },
+          {
+            "observations": [
+              "observations[1]",
+              "observations[2]"
+            ],
+            "why": "Identifies the crash thread candidate, or the exceptions themselves when no candidate exists."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "An exception on a thread stack may be caught and handled further up the stack; nothing observed shows it was unhandled."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On each thread carrying one of the 2 exceptions: if !pe shows no exception object, or one already handled, there is no active failure.",
+            "command": "!pe"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If System.TimeoutException is thrown and caught by design, for example for control flow, it is not a crash."
+          }
+        ]
+      }
+    ]
+  }
+]

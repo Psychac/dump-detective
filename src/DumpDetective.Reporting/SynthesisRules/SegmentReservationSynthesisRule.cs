@@ -92,6 +92,23 @@ internal sealed class SegmentReservationSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("address-space-pressure"),
+                Assertion = BuildAddressSpaceAssertion(dumpPointerSize, totalReservedBytes, ratio, ratioHighPressureThreshold, thirtyTwoBitPressureThresholdBytes),
+                Support = [new EvidenceStatement([composition.Id], pressureReason)],
+                Counter = Counter.None("Reserved address space is not committed memory; a large reservation matters only if the process nears its address-space limit."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!address -summary",
+                        Test = $"If the reserved total in !address -summary is far from {FormatHelper.FormatBytes(totalReservedBytes)}, the reservation figure is wrong.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the process sets a GC heap hard limit, the reservation is capped by design, not unbounded.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = is32Bit ? Severity.Critical : Severity.Warning,
@@ -119,6 +136,31 @@ internal sealed class SegmentReservationSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("reservation-ratio"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Ratio(ratio),
+                    Reference = ClaimParts.Budget(
+                        ClaimParts.Ratio(critical ? ratioHighPressureThreshold : ratioMediumPressureThreshold),
+                        critical ? "high-pressure threshold" : "elevated threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "reserved-to-committed ratio" },
+                },
+                Support = [new EvidenceStatement([composition.Id], $"Reserved {FormatHelper.FormatBytes(totalReservedBytes)} against {FormatHelper.FormatBytes(totalCommittedBytes)} committed.")],
+                Counter = Counter.None("Server GC reserves large address ranges up front by design; the ratio alone does not show the process is short of address space."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!eeheap -gc",
+                        Test = $"If the committed and reserved sizes in !eeheap -gc do not give a {ratio:F1}x ratio, the figure is wrong.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the reservation does not grow, it is a stable GC policy, not creeping pressure.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = critical ? Severity.Critical : Severity.Warning,
@@ -143,6 +185,29 @@ internal sealed class SegmentReservationSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("ephemeral-fill"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Percent(avgEphemeralFillPct),
+                    Reference = ClaimParts.Budget(ClaimParts.Percent(90), "critical fill threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = $"{ephemeralSegmentCount} ephemeral segment(s)" },
+                },
+                Support = [new EvidenceStatement([composition.Id], $"Average fill is {avgEphemeralFillPct:F1}% across {ephemeralSegmentCount} ephemeral segment(s).")],
+                Counter = Counter.None("Ephemeral segments fill and are collected in the normal allocation cycle; a high fill just before a GC is expected."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!eeheap -gc",
+                        Test = $"If the ephemeral segments in !eeheap -gc show substantial unused allocation space, the {avgEphemeralFillPct:F1}% fill is wrong.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump; if the ephemeral fill is low after a GC, the first reading was the point before collection.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = Severity.Warning,
@@ -170,6 +235,29 @@ internal sealed class SegmentReservationSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("near-empty-regions"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Measure = ClaimParts.Bytes(nearEmptyRegionCommittedBytes),
+                    Reference = warning ? ClaimParts.Budget(ClaimParts.Bytes(WarningReclaimableBytesThreshold), "warning threshold") : null,
+                    Qualifiers = new AssertionQualifiers { Location = $"{nearEmptyRegionCount} GC region(s) below {nearEmptyRegionFillPctThreshold:F0}% fill" },
+                },
+                Support = [new EvidenceStatement(regionIds, $"{nearEmptyRegionCount} region(s) are nearly empty and hold {FormatHelper.FormatBytes(nearEmptyRegionCommittedBytes)} committed.")],
+                Counter = Counter.None("Regions-based GC decommits near-empty regions over time; one snapshot does not show they persist."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!eeheap -gc",
+                        Test = $"If the regions in !eeheap -gc are not mostly empty, or hold much less than {FormatHelper.FormatBytes(nearEmptyRegionCommittedBytes)}, the figure is wrong.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump later; if the near-empty regions have been decommitted, they were transient.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = warning ? Severity.Warning : Severity.Info,
@@ -188,6 +276,23 @@ internal sealed class SegmentReservationSynthesisRule : ISynthesisRule
         findings.Add(new Claim
         {
             Fingerprint = Fingerprint("overview"),
+            Assertion = new Assertion
+            {
+                Predicate = AssertionPredicate.Composes,
+                Measure = ClaimParts.Bytes(totalReservedBytes),
+                Qualifiers = new AssertionQualifiers { Location = "GC segment reservation" },
+            },
+            Support = [new EvidenceStatement([composition.Id], $"{FormatHelper.FormatBytes(totalCommittedBytes)} committed and {FormatHelper.FormatBytes(totalReservedBytes)} reserved across {logicalHeapCount} logical heap(s).")],
+            Counter = Counter.None("This describes reservation and asserts no problem, so there is nothing to weaken."),
+            FalsifiedBy =
+            [
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.Windbg,
+                    Command = "!eeheap -gc",
+                    Test = $"If the committed or reserved totals in !eeheap -gc differ from {FormatHelper.FormatBytes(totalCommittedBytes)} and {FormatHelper.FormatBytes(totalReservedBytes)}, the overview is wrong.",
+                },
+            ],
             Analyzer = AnalyzerName,
             Category = "Memory",
             Severity = Severity.Info,
@@ -228,6 +333,28 @@ internal sealed class SegmentReservationSynthesisRule : ISynthesisRule
         }
 
         return (false, string.Empty);
+    }
+
+    private static Assertion BuildAddressSpaceAssertion(
+        int dumpPointerSize, ulong totalReservedBytes, double ratio, double ratioHighPressureThreshold, ulong thirtyTwoBitPressureThresholdBytes)
+    {
+        bool by32BitReservation = dumpPointerSize == 4 && totalReservedBytes > thirtyTwoBitPressureThresholdBytes;
+        if (by32BitReservation)
+            return new Assertion
+            {
+                Predicate = AssertionPredicate.Exceeds,
+                Measure = ClaimParts.Bytes(totalReservedBytes),
+                Reference = ClaimParts.Budget(ClaimParts.Bytes(thirtyTwoBitPressureThresholdBytes), "32-bit address-space threshold"),
+                Qualifiers = new AssertionQualifiers { Location = "reserved address space in a 32-bit process" },
+            };
+
+        return new Assertion
+        {
+            Predicate = AssertionPredicate.Exceeds,
+            Measure = ClaimParts.Ratio(ratio),
+            Reference = ClaimParts.Budget(ClaimParts.Ratio(ratioHighPressureThreshold), "high-pressure threshold"),
+            Qualifiers = new AssertionQualifiers { Location = "reserved-to-committed ratio" },
+        };
     }
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();

@@ -74,6 +74,25 @@ internal sealed class CrashSynthesisRule : ISynthesisRule
             return ValueTask.FromResult<IReadOnlyList<Claim>>([new Claim
             {
                 Fingerprint = Fingerprint("no-exceptions"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Normal,
+                    Measure = ClaimParts.Count(0),
+                    Qualifiers = new AssertionQualifiers { Location = "exception objects on the managed heap" },
+                },
+                Support = [new EvidenceStatement([population.Id], "Counted no exception objects on the managed heap.")],
+                Counter = Counter.Of(new EvidenceStatement(
+                    [population.Id],
+                    "A dump taken after a handled exception was collected shows none; absence describes this snapshot only.")),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpheap -type Exception -stat",
+                        Test = "If !dumpheap lists exception objects, the count of none is wrong.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Stability",
                 Severity = Severity.Info,
@@ -127,6 +146,32 @@ internal sealed class CrashSynthesisRule : ISynthesisRule
             return ValueTask.FromResult<IReadOnlyList<Claim>>([new Claim
             {
                 Fingerprint = Fingerprint("active-exceptions"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Faults,
+                    Measure = ClaimParts.Count(activeExceptions),
+                    Qualifiers = new AssertionQualifiers
+                    {
+                        Location = "exceptions on thread stacks",
+                        Mechanism = topType == "Unknown" ? null : $"primary type {topType}",
+                    },
+                },
+                Support = ActiveExceptionSupport(population, derivedFrom, activeExceptions, totalExceptions),
+                Counter = Counter.None("An exception on a thread stack may be caught and handled further up the stack; nothing observed shows it was unhandled."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!pe",
+                        Test = $"On each thread carrying one of the {activeExceptions:N0} exceptions: if !pe shows no exception object, or one already handled, there is no active failure.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = $"If {topType} is thrown and caught by design, for example for control flow, it is not a crash.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Stability",
                 Severity = Severity.Critical,
@@ -148,6 +193,28 @@ internal sealed class CrashSynthesisRule : ISynthesisRule
         return ValueTask.FromResult<IReadOnlyList<Claim>>([new Claim
         {
             Fingerprint = Fingerprint("exception-pressure"),
+            Assertion = new Assertion
+            {
+                Predicate = AssertionPredicate.Exhibits,
+                Measure = ClaimParts.Count(totalExceptions),
+                Qualifiers = new AssertionQualifiers { Location = "exception objects on the managed heap", Scope = "none on a thread stack" },
+            },
+            Support = [new EvidenceStatement([population.Id], $"{totalExceptions:N0} exception objects across {uniqueTypes:N0} types, none on a thread stack.")],
+            Counter = Counter.None("Exception objects on the heap may be handled exceptions awaiting collection; they do not show a fault in progress."),
+            FalsifiedBy =
+            [
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.Windbg,
+                    Command = "!gcroot <exception address>",
+                    Test = "On a sampled exception object: if !gcroot finds no root, it is garbage from a handled exception, not a standing fault.",
+                },
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.Capture,
+                    Test = "Capture a second dump under comparable load; if the same exception types do not recur, the pressure was a one-off.",
+                },
+            ],
             Analyzer = AnalyzerName,
             Category = "Stability",
             Severity = Severity.Warning,
@@ -225,6 +292,20 @@ internal sealed class CrashSynthesisRule : ISynthesisRule
         return string.Join(", ", tierCounts
             .OrderByDescending(kvp => kvp.Value)
             .Select(kvp => $"{kvp.Value:N0} {kvp.Key}"));
+    }
+
+    private static List<EvidenceStatement> ActiveExceptionSupport(
+        Observation population, List<ObservationId> derivedFrom, long activeExceptions, long totalExceptions)
+    {
+        var support = new List<EvidenceStatement>(2)
+        {
+            new([population.Id], $"{activeExceptions:N0} of {totalExceptions:N0} exception objects are on thread stacks."),
+        };
+
+        if (derivedFrom.Count > 1)
+            support.Add(new(derivedFrom.GetRange(1, derivedFrom.Count - 1), "Identifies the crash thread candidate, or the exceptions themselves when no candidate exists."));
+
+        return support;
     }
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();

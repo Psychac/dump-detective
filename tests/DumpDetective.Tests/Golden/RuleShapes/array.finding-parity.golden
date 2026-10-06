@@ -1,0 +1,468 @@
+rule: array.finding-parity
+version: 1
+[
+  {
+    "name": "loh-warning-with-a-largest-array",
+    "claims": [
+      {
+        "fingerprint": "array analysis::loh-array-pressure",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 629145600,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 500000000,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "arrays on the Large Object Heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "12 arrays on the LOH hold 600.0 MB."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Each is one of the largest arrays on the LOH."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Large arrays that die young cost fragmentation, not growth; their lifetime is not observed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the arrays of 85,000 bytes or more total far less than 600.0 MB, the LOH array figure is overstated.",
+            "command": "!dumpheap -stat -min 85000"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the large arrays are different ones and the total is flat, they are churn, not retention."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "loh-critical",
+    "claims": [
+      {
+        "fingerprint": "array analysis::loh-array-pressure",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 2621440000,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 2000000000,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "arrays on the Large Object Heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "40 arrays on the LOH hold 2.4 GB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Large arrays that die young cost fragmentation, not growth; their lifetime is not observed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the arrays of 85,000 bytes or more total far less than 2.4 GB, the LOH array figure is overstated.",
+            "command": "!dumpheap -stat -min 85000"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the large arrays are different ones and the total is flat, they are churn, not retention."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "multidim-by-count",
+    "claims": [
+      {
+        "fingerprint": "array analysis::multidim-array-anti-pattern",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 1500,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 1000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "array-count threshold"
+          },
+          "qualifiers": {
+            "location": "multi-dimensional arrays (rank 2 or more)"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "1,500 arrays of rank 2 or more hold 10.0 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Multi-dimensional arrays cost access time, not memory; their effect on this process\u0027s performance is not measured."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "CodeInspection",
+            "test": "If the multi-dimensional arrays are not indexed on a hot path, the slower access does not matter."
+          },
+          {
+            "kind": "Windbg",
+            "test": "If the multi-dimensional array types in !dumpheap -stat total far fewer than 1,500 instances, the count is overstated.",
+            "command": "!dumpheap -stat"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "multidim-by-bytes",
+    "claims": [
+      {
+        "fingerprint": "array analysis::multidim-array-anti-pattern",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 157286400,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 100000000,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "array-size threshold"
+          },
+          "qualifiers": {
+            "location": "multi-dimensional arrays (rank 2 or more)"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "10 arrays of rank 2 or more hold 150.0 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Multi-dimensional arrays cost access time, not memory; their effect on this process\u0027s performance is not measured."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "CodeInspection",
+            "test": "If the multi-dimensional arrays are not indexed on a hot path, the slower access does not matter."
+          },
+          {
+            "kind": "Windbg",
+            "test": "If the multi-dimensional array types in !dumpheap -stat total far fewer than 10 instances, the count is overstated.",
+            "command": "!dumpheap -stat"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "two-sparse-arrays",
+    "claims": [
+      {
+        "fingerprint": "array analysis::sparse-array-0",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 90,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 70,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "sparse-ratio threshold"
+          },
+          "qualifiers": {
+            "location": "System.Object[] of 1,00,000 elements"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "90% of the array\u0027s 1,00,000 elements are null or default, wasting about 20.0 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A mostly empty array may be a pre-sized buffer that fills later; nothing observed shows whether it will."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !da shows most elements are populated, the sparse ratio is wrong.",
+            "command": "!da 0x1000"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the array is a pre-sized buffer that the code fills incrementally, the empty slots are reserved capacity, not waste."
+          }
+        ]
+      },
+      {
+        "fingerprint": "array analysis::sparse-array-1",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 80,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 70,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "sparse-ratio threshold"
+          },
+          "qualifiers": {
+            "location": "System.String[] of 50,000 elements"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "80% of the array\u0027s 50,000 elements are null or default, wasting about 12.0 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A mostly empty array may be a pre-sized buffer that fills later; nothing observed shows whether it will."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !da shows most elements are populated, the sparse ratio is wrong.",
+            "command": "!da 0x2000"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the array is a pre-sized buffer that the code fills incrementally, the empty slots are reserved capacity, not waste."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "pinned-by-count",
+    "claims": [
+      {
+        "fingerprint": "array analysis::pinned-array-accumulation",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 150,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 100,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "array-count threshold"
+          },
+          "qualifiers": {
+            "mechanism": "pinned arrays cannot be moved by the GC",
+            "location": "arrays targeted by a pinned GC handle"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]",
+              "observations[1]"
+            ],
+            "why": "150 arrays are targeted by a pinned or async-pinned GC handle and hold 10.0 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Arrays pinned for in-flight I/O are released on completion; one snapshot does not show they persist."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles lists far fewer pinned array targets than 150, the count is overstated.",
+            "command": "!gchandles -type Pinned"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the same arrays are no longer pinned, they were in-flight I/O buffers."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "pinned-by-size",
+    "claims": [
+      {
+        "fingerprint": "array analysis::pinned-array-accumulation",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 62914560,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 50000000,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "warning size threshold"
+          },
+          "qualifiers": {
+            "mechanism": "pinned arrays cannot be moved by the GC",
+            "location": "arrays targeted by a pinned GC handle"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "5 arrays are targeted by a pinned or async-pinned GC handle and hold 60.0 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Arrays pinned for in-flight I/O are released on completion; one snapshot does not show they persist."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles lists far fewer pinned array targets than 5, the count is overstated.",
+            "command": "!gchandles -type Pinned"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the same arrays are no longer pinned, they were in-flight I/O buffers."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "pinned-critical",
+    "claims": [
+      {
+        "fingerprint": "array analysis::pinned-array-accumulation",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 314572800,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 200000000,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "critical size threshold"
+          },
+          "qualifiers": {
+            "mechanism": "pinned arrays cannot be moved by the GC",
+            "location": "arrays targeted by a pinned GC handle"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "5 arrays are targeted by a pinned or async-pinned GC handle and hold 300.0 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Arrays pinned for in-flight I/O are released on completion; one snapshot does not show they persist."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles lists far fewer pinned array targets than 5, the count is overstated.",
+            "command": "!gchandles -type Pinned"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the same arrays are no longer pinned, they were in-flight I/O buffers."
+          }
+        ]
+      }
+    ]
+  }
+]

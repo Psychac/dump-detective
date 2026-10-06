@@ -214,42 +214,42 @@ internal sealed class EventLeakSynthesisRule : ISynthesisRule
         return new Claim
         {
             Fingerprint = Fingerprint(isStatic ? "static-retention" : "instance-retention"),
-Assertion = new Assertion
-{
-    Predicate = AssertionPredicate.Leaks,
-    Measure = ClaimParts.Count(totalSubscribers),
-    Qualifiers = new AssertionQualifiers
-    {
-        Location = isStatic ? "subscribers held by static event publishers" : "subscribers held by instance event publishers",
-        Mechanism = "event subscriptions",
-    },
-},
-Support =
-[
-    new EvidenceStatement([population.Id], $"Counts {totalPublisherInstances:N0} publisher instance(s) with {totalSubscribers:N0} subscribers in {groupCount:N0} leak group(s)."),
-    .. contributingIds.Count > 0
-        ? [new EvidenceStatement(contributingIds, "Each is a group of publisher instances sharing a type and event field.")]
-        : Array.Empty<EvidenceStatement>(),
-],
-Counter = Counter.None(isStatic
-    ? "A static event keeps every subscriber alive until it unsubscribes; that is harmless only if the subscribers are meant to live as long as the process."
-    : "An instance publisher retains its subscribers only while the publisher itself is alive; if the publishers are short-lived, so is the retention."),
-FalsifiedBy =
-[
-    new FalsificationTest
-    {
-        Kind = FalsificationKind.Windbg,
-        Command = "!gcroot <subscriber address>",
-        Test = isStatic
-            ? "On a sampled subscriber: if its path does not run through a static event field, it is not held by a static publisher."
-            : "On a sampled subscriber: if its path runs only through a publisher that is itself unreachable, the subscribers are not retained.",
-    },
-    new FalsificationTest
-    {
-        Kind = FalsificationKind.Capture,
-        Test = $"Capture a second dump under comparable load; if the {totalSubscribers:N0} subscribers do not grow, the retention is bounded, not accumulating.",
-    },
-],
+            Assertion = new Assertion
+            {
+                Predicate = AssertionPredicate.Leaks,
+                Measure = ClaimParts.Count(totalSubscribers),
+                Qualifiers = new AssertionQualifiers
+                {
+                    Location = isStatic ? "subscribers held by static event publishers" : "subscribers held by instance event publishers",
+                    Mechanism = "event subscriptions",
+                },
+            },
+            Support =
+            [
+                new EvidenceStatement([population.Id], $"Counts {totalPublisherInstances:N0} publisher instance(s) with {totalSubscribers:N0} subscribers in {groupCount:N0} leak group(s)."),
+                .. contributingIds.Count > 0
+                    ? [new EvidenceStatement(contributingIds, "Each is a group of publisher instances sharing a type and event field.")]
+                    : Array.Empty<EvidenceStatement>(),
+            ],
+            Counter = Counter.None(isStatic
+                ? "A static event keeps every subscriber alive until it unsubscribes; that is harmless only if the subscribers are meant to live as long as the process."
+                : "An instance publisher retains its subscribers only while the publisher itself is alive; if the publishers are short-lived, so is the retention."),
+            FalsifiedBy =
+            [
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.Windbg,
+                    Command = "!gcroot <subscriber address>",
+                    Test = isStatic
+                        ? "On a sampled subscriber: if its path does not run through a static event field, it is not held by a static publisher."
+                        : "On a sampled subscriber: if its path runs only through a publisher that is itself unreachable, the subscribers are not retained.",
+                },
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.Capture,
+                    Test = $"Capture a second dump under comparable load; if the {totalSubscribers:N0} subscribers do not grow, the retention is bounded, not accumulating.",
+                },
+            ],
             Analyzer = AnalyzerName,
             Category = "Leak",
             Severity = severity,

@@ -12,6 +12,16 @@ internal static class ClaimParts
 
     public static Measure Percent(double value) => new(value, MeasureUnit.Percent, MeasureSemantics.Ratio);
 
+    public static Measure Ratio(double value) => new(value, MeasureUnit.Ratio, MeasureSemantics.Ratio);
+
+    public static List<ObservationId> IdsOf(IEnumerable<Observation> observations)
+    {
+        var ids = new List<ObservationId>();
+        foreach (Observation observation in observations)
+            ids.Add(observation.Id);
+        return ids;
+    }
+
     /// <summary>The rule's own threshold as the reference an <see cref="AssertionPredicate.Exceeds"/> compares against.</summary>
     public static Reference Budget(Measure threshold, string basis) => new() { Value = threshold, Basis = basis };
 }

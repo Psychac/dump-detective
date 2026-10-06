@@ -111,6 +111,39 @@ internal sealed class DbConnectionSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("connection-count"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(totalConnections),
+                    Reference = ClaimParts.Budget(
+                        ClaimParts.Count(sev == Severity.Critical ? TotalConnectionsCriticalThreshold : TotalConnectionsWarningThreshold),
+                        sev == Severity.Critical ? "critical threshold" : "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "DB connection objects on the managed heap" },
+                },
+                Support =
+                [
+                    new EvidenceStatement(populationIds, $"{totalConnections:N0} connection objects: {openConnections:N0} open, {closedConnections:N0} closed, {brokenConnections:N0} broken."),
+                    .. typeCounts.Count > 0
+                        ? [new EvidenceStatement(typeCounts.Select(t => t.Id).ToList(), "Breaks the connection objects down by type.")]
+                        : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = closedConnections > openConnections
+                    ? Counter.Of(new EvidenceStatement(populationIds, $"{closedConnections:N0} connections are closed, more than the {openConnections:N0} open, so most are not holding a pool slot."))
+                    : Counter.None("Connection objects on the heap include ones awaiting collection; nothing observed shows how long they have lived."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpheap -live -stat -type Connection",
+                        Test = $"If far fewer than {totalConnections:N0} connection objects are live, the count includes garbage awaiting collection.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the connection string sets Max Pool Size above the reported count, the pool has headroom and this is not exhaustion.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Infrastructure",
                 Severity = sev,
@@ -139,6 +172,33 @@ internal sealed class DbConnectionSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("open-connections"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Retains,
+                    Measure = ClaimParts.Count(openConnections),
+                    Reference = ClaimParts.Budget(ClaimParts.Count(OpenConnectionsWarningThreshold), "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "DB connections in the Open state" },
+                },
+                Support =
+                [
+                    new EvidenceStatement(openIds, "Each is a connection object in the Open state."),
+                    new EvidenceStatement(populationIds, $"{openConnections:N0} of {totalConnections:N0} connection objects are open."),
+                ],
+                Counter = Counter.None("An open connection may be serving an in-flight request; state at capture time does not show it is idle."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!clrstack -all",
+                        Test = "If each open connection is referenced from an in-flight request frame, the connections are in use, not leaked.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the open count falls back, the connections were in-flight work.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Infrastructure",
                 Severity = Severity.Warning,
@@ -162,6 +222,28 @@ internal sealed class DbConnectionSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("broken-connections"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Faults,
+                    Measure = ClaimParts.Count(brokenConnections),
+                    Reference = ClaimParts.Budget(ClaimParts.Count(BrokenConnectionsWarningThreshold), "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "DB connections in the Broken state" },
+                },
+                Support = [new EvidenceStatement(populationIds, $"{brokenConnections:N0} of {totalConnections:N0} connection objects are broken.")],
+                Counter = Counter.None("The pool discards a broken connection on its next use, so a few are expected after a network interruption."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump later; if the broken connections have been evicted and not replaced, they were from a one-off interruption.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the broken connections are caught by retry logic that reopens them, the failures are handled, not accumulating.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Infrastructure",
                 Severity = Severity.Warning,
@@ -191,6 +273,29 @@ internal sealed class DbConnectionSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("gen2-open-connections"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Leaks,
+                    Measure = ClaimParts.Count(gen2OpenConnections),
+                    Reference = ClaimParts.Budget(ClaimParts.Count(Gen2OpenConnectionsThreshold), "Gen2 open-connection threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "open DB connections in Generation 2", Mechanism = "long-lived objects" },
+                },
+                Support = [new EvidenceStatement(gen2Ids, $"{gen2OpenConnections:N0} open connections have survived into Generation 2.")],
+                Counter = Counter.None("A connection held open on purpose, such as a dedicated listener, is long-lived without being leaked."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gcroot <connection address>",
+                        Test = "On a sampled Gen2 connection: if its root is a deliberately long-lived owner such as a service singleton, the connection is held by design.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = $"Capture a second dump later; if the {gen2OpenConnections:N0} connections are the same ones and the count does not grow, they are a fixed set, not a leak.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Infrastructure",
                 Severity = Severity.Critical,

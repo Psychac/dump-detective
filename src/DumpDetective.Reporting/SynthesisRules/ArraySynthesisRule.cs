@@ -96,6 +96,37 @@ internal sealed class ArraySynthesisRule : ISynthesisRule
         findings.Add(new Claim
         {
             Fingerprint = Fingerprint("loh-array-pressure"),
+            Assertion = new Assertion
+            {
+                Predicate = AssertionPredicate.Exceeds,
+                Measure = ClaimParts.Bytes(lohArrayBytes),
+                Reference = ClaimParts.Budget(
+                    ClaimParts.Bytes(sev == Severity.Critical ? LohCriticalBytes : LohWarningBytes),
+                    sev == Severity.Critical ? "critical threshold" : "warning threshold"),
+                Qualifiers = new AssertionQualifiers { Location = "arrays on the Large Object Heap" },
+            },
+            Support =
+            [
+                new EvidenceStatement(ClaimParts.IdsOf(compositions), $"{lohArrayCount:N0} arrays on the LOH hold {FormatBytes(lohArrayBytes)}."),
+                .. largeArrays.Count > 0
+                    ? [new EvidenceStatement(ClaimParts.IdsOf(largeArrays), "Each is one of the largest arrays on the LOH.")]
+                    : Array.Empty<EvidenceStatement>(),
+            ],
+            Counter = Counter.None("Large arrays that die young cost fragmentation, not growth; their lifetime is not observed."),
+            FalsifiedBy =
+            [
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.Windbg,
+                    Command = "!dumpheap -stat -min 85000",
+                    Test = $"If the arrays of 85,000 bytes or more total far less than {FormatBytes(lohArrayBytes)}, the LOH array figure is overstated.",
+                },
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.Capture,
+                    Test = "Capture a second dump under comparable load; if the large arrays are different ones and the total is flat, they are churn, not retention.",
+                },
+            ],
             Analyzer = AnalyzerName,
             Category = "Memory",
             Severity = sev,
@@ -132,6 +163,31 @@ internal sealed class ArraySynthesisRule : ISynthesisRule
         findings.Add(new Claim
         {
             Fingerprint = Fingerprint("multidim-array-anti-pattern"),
+            Assertion = new Assertion
+            {
+                Predicate = AssertionPredicate.Exhibits,
+                Measure = multiDimCount >= MultiDimWarningCount ? ClaimParts.Count(multiDimCount) : ClaimParts.Bytes(multiDimBytes),
+                Reference = multiDimCount >= MultiDimWarningCount
+                    ? ClaimParts.Budget(ClaimParts.Count(MultiDimWarningCount), "array-count threshold")
+                    : ClaimParts.Budget(ClaimParts.Bytes(MultiDimWarningBytes), "array-size threshold"),
+                Qualifiers = new AssertionQualifiers { Location = "multi-dimensional arrays (rank 2 or more)" },
+            },
+            Support = [new EvidenceStatement(contributing, $"{multiDimCount:N0} arrays of rank 2 or more hold {FormatBytes(multiDimBytes)}.")],
+            Counter = Counter.None("Multi-dimensional arrays cost access time, not memory; their effect on this process's performance is not measured."),
+            FalsifiedBy =
+            [
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.CodeInspection,
+                    Test = "If the multi-dimensional arrays are not indexed on a hot path, the slower access does not matter.",
+                },
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.Windbg,
+                    Command = "!dumpheap -stat",
+                    Test = $"If the multi-dimensional array types in !dumpheap -stat total far fewer than {multiDimCount:N0} instances, the count is overstated.",
+                },
+            ],
             Analyzer = AnalyzerName,
             Category = "Memory",
             Severity = Severity.Warning,
@@ -169,6 +225,29 @@ internal sealed class ArraySynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint($"sparse-array-{emitted}"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Percent(sparseRatio * 100.0),
+                    Reference = ClaimParts.Budget(ClaimParts.Percent(SparseRatioThreshold * 100.0), "sparse-ratio threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = $"{elementTypeName}[] of {length:N0} elements" },
+                },
+                Support = [new EvidenceStatement([s.Id], $"{sparseRatio:P0} of the array's {length:N0} elements are null or default, wasting about {FormatBytes(wastedBytes)}.")],
+                Counter = Counter.None("A mostly empty array may be a pre-sized buffer that fills later; nothing observed shows whether it will."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = $"!da 0x{address:X}",
+                        Test = "If !da shows most elements are populated, the sparse ratio is wrong.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the array is a pre-sized buffer that the code fills incrementally, the empty slots are reserved capacity, not waste.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = Severity.Warning,
@@ -213,6 +292,23 @@ internal sealed class ArraySynthesisRule : ISynthesisRule
         findings.Add(new Claim
         {
             Fingerprint = Fingerprint("pinned-array-accumulation"),
+            Assertion = BuildPinnedAssertion(sev, pinnedArrayCount, pinnedArrayBytes),
+            Support = [new EvidenceStatement(contributing, $"{pinnedArrayCount:N0} arrays are targeted by a pinned or async-pinned GC handle and hold {FormatBytes(pinnedArrayBytes)}.")],
+            Counter = Counter.None("Arrays pinned for in-flight I/O are released on completion; one snapshot does not show they persist."),
+            FalsifiedBy =
+            [
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.Windbg,
+                    Command = "!gchandles -type Pinned",
+                    Test = $"If !gchandles lists far fewer pinned array targets than {pinnedArrayCount:N0}, the count is overstated.",
+                },
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.Capture,
+                    Test = "Capture a second dump under comparable load; if the same arrays are no longer pinned, they were in-flight I/O buffers.",
+                },
+            ],
             Analyzer = AnalyzerName,
             Category = "Memory",
             Severity = sev,
@@ -230,6 +326,23 @@ internal sealed class ArraySynthesisRule : ISynthesisRule
             DerivedFrom = contributing,
             Confidence = ConfidenceBreakdown.MeasurementCertain,
         });
+    }
+
+    private static Assertion BuildPinnedAssertion(Severity severity, long pinnedArrayCount, ulong pinnedArrayBytes)
+    {
+        (Measure measure, Reference reference) = severity == Severity.Critical
+            ? (ClaimParts.Bytes(pinnedArrayBytes), ClaimParts.Budget(ClaimParts.Bytes(PinnedArrayCriticalBytes), "critical size threshold"))
+            : pinnedArrayCount >= PinnedArrayWarningCount
+                ? (ClaimParts.Count(pinnedArrayCount), ClaimParts.Budget(ClaimParts.Count(PinnedArrayWarningCount), "array-count threshold"))
+                : (ClaimParts.Bytes(pinnedArrayBytes), ClaimParts.Budget(ClaimParts.Bytes(PinnedArrayWarningBytes), "warning size threshold"));
+
+        return new Assertion
+        {
+            Predicate = AssertionPredicate.Exceeds,
+            Measure = measure,
+            Reference = reference,
+            Qualifiers = new AssertionQualifiers { Location = "arrays targeted by a pinned GC handle", Mechanism = "pinned arrays cannot be moved by the GC" },
+        };
     }
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();

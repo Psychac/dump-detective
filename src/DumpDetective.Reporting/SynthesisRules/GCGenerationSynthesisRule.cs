@@ -94,6 +94,24 @@ internal sealed class GCGenerationSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("poh-share"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Percent(pohPct),
+                    Reference = ClaimParts.Budget(ClaimParts.Percent(pohThresholdPercent), "POH share threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "the Pinned Object Heap", Mechanism = "pinned objects" },
+                },
+                Support = [new EvidenceStatement([composition.Id], $"The POH holds {pohObjects:N0} of {totalObjects:N0} objects, {FormatBytes(pohBytes)}.")],
+                Counter = Counter.None("Objects pinned for short I/O leave the POH quickly; one snapshot does not show they persist."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!eeheap -gc",
+                        Test = $"If the POH size in !eeheap -gc is far from {FormatBytes(pohBytes)}, the POH share is wrong.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "GC",
                 Severity = pohPct >= 20 ? Severity.Warning : Severity.Info,
@@ -116,6 +134,24 @@ internal sealed class GCGenerationSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("loh-share"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Percent(lohPercent),
+                    Reference = ClaimParts.Budget(ClaimParts.Percent(lohThresholdPercent), "LOH share threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "the Large Object Heap" },
+                },
+                Support = [new EvidenceStatement([composition.Id], $"The LOH holds {FormatBytes(lohBytes)}, {lohPercent:F1}% of the managed heap.")],
+                Counter = Counter.None("Large objects that die young cost fragmentation, not growth; their lifetime is not observed."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!eeheap -gc",
+                        Test = $"If the LOH size in !eeheap -gc is far from {FormatBytes(lohBytes)}, the LOH share is wrong.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "GC",
                 Severity = lohPercent >= 35 ? Severity.Warning : Severity.Info,
@@ -150,6 +186,35 @@ internal sealed class GCGenerationSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("gen0-pressure"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Percent(gen0Pct),
+                    Reference = ClaimParts.Budget(ClaimParts.Percent(gen0PressureThresholdPercent), "Gen0 pressure threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "objects in Generation 0" },
+                },
+                Support =
+                [
+                    new EvidenceStatement([composition.Id], $"Gen0 holds {gen0Objects:N0} of {totalObjects:N0} objects, {FormatBytes(gen0Bytes)}."),
+                    .. topAllocators.Count > 0
+                        ? [new EvidenceStatement(ClaimParts.IdsOf(topAllocators), "Each is one of the types allocating most of Gen0.")]
+                        : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = Counter.None("A high Gen0 share is normal for request-processing code; Gen0 is cheap to collect, and survival is not measured here."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!eeheap -gc",
+                        Test = $"If Gen0 in !eeheap -gc holds far fewer than the {gen0Objects:N0} objects counted, the share is overstated.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if Gen0 is a small share after a collection, the first reading was the point before a GC.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "GC",
                 Severity = Severity.Warning,
@@ -200,6 +265,41 @@ internal sealed class GCGenerationSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("gen2-pressure"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Percent(gen2Pct),
+                    Reference = ClaimParts.Budget(
+                        ClaimParts.Percent(sev == Severity.Critical ? 75.0 : 50.0),
+                        sev == Severity.Critical ? "critical Gen2 threshold" : "warning Gen2 threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "objects in Generation 2", Mechanism = "promotion of long-lived objects" },
+                },
+                Support =
+                [
+                    new EvidenceStatement([composition.Id], $"Gen2 holds {gen2Objects:N0} of {totalObjects:N0} objects, {FormatBytes(gen2Bytes)}."),
+                    .. topAccumulators.Count > 0
+                        ? [new EvidenceStatement(ClaimParts.IdsOf(topAccumulators), "Each is one of the types accumulating most in Gen2.")]
+                        : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = fallbackMode
+                    ? Counter.Of(new EvidenceStatement([composition.Id], "Gen0 and Gen1 are unknown in fallback mode, so the Gen2 percentage is unreliable and may be a false positive."))
+                    : genBytesAreApproximate
+                        ? Counter.Of(new EvidenceStatement([composition.Id], "Byte values are approximate, so the per-generation split may not be exact."))
+                        : Counter.None("A large Gen2 share is normal for a service holding a warm cache; the share alone does not show it is growing."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!eeheap -gc",
+                        Test = $"If Gen2 in !eeheap -gc is far from {FormatBytes(gen2Bytes)}, the Gen2 share is wrong.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if Gen2 does not grow, it is a stable working set, not accumulation.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = sev,

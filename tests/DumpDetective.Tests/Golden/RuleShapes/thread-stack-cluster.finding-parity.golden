@@ -1,0 +1,367 @@
+rule: thread-stack-cluster.finding-parity
+version: 1
+[
+  {
+    "name": "low-diversity-no-dominant-cluster",
+    "claims": [
+      {
+        "fingerprint": "thread stack signature clustering::diversity",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Dominates",
+          "measure": {
+            "value": 12.5,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 25,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "low-diversity threshold"
+          },
+          "qualifiers": {
+            "location": "thread stack-signature diversity"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "5 unique stack signatures across 40 alive threads."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Idle framework threads also produce low diversity; whether the largest cluster is such a pattern is judged in the dominant-cluster finding."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the managed stacks of the 40 alive threads fall into a number of distinct shapes other than 5, the clustering is wrong.",
+            "command": "!eestack"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump a few minutes later; if the shared signatures are different ones, the low diversity is a transient pile-up, not a standing pattern."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "low-diversity-application-hotspot",
+    "claims": [
+      {
+        "fingerprint": "thread stack signature clustering::diversity",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Dominates",
+          "measure": {
+            "value": 20,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 25,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "low-diversity threshold"
+          },
+          "qualifiers": {
+            "location": "thread stack-signature diversity"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "8 unique stack signatures across 40 alive threads."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Idle framework threads also produce low diversity; whether the largest cluster is such a pattern is judged in the dominant-cluster finding."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the managed stacks of the 40 alive threads fall into a number of distinct shapes other than 8, the clustering is wrong.",
+            "command": "!eestack"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump a few minutes later; if the shared signatures are different ones, the low diversity is a transient pile-up, not a standing pattern."
+          }
+        ]
+      },
+      {
+        "fingerprint": "thread stack signature clustering::dominant-cluster",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Dominates",
+          "measure": {
+            "value": 75,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "dominant-cluster threshold"
+          },
+          "qualifiers": {
+            "location": "alive threads sharing one stack signature"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "30 threads share the same stack signature."
+          },
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Supplies the alive thread count (40) the share is measured against."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Idle threads can look like a hotspot; no known framework idle pattern matched this signature."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If sampled threads from this cluster show a different top frame than \u0022App.Service.Wait\u0022, the 30-thread grouping is wrong.",
+            "command": "!eestack"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the shared frame is a deliberate wait (a queue consumer parked on a signal), the cluster is by design, not a bottleneck."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "dominant-framework-idle-pattern",
+    "claims": [
+      {
+        "fingerprint": "thread stack signature clustering::diversity",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Dominates",
+          "measure": {
+            "value": 20,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 25,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "low-diversity threshold"
+          },
+          "qualifiers": {
+            "location": "thread stack-signature diversity"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "8 unique stack signatures across 40 alive threads."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Idle framework threads also produce low diversity; whether the largest cluster is such a pattern is judged in the dominant-cluster finding."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the managed stacks of the 40 alive threads fall into a number of distinct shapes other than 8, the clustering is wrong.",
+            "command": "!eestack"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump a few minutes later; if the shared signatures are different ones, the low diversity is a transient pile-up, not a standing pattern."
+          }
+        ]
+      },
+      {
+        "fingerprint": "thread stack signature clustering::dominant-cluster",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Normal",
+          "measure": {
+            "value": 75,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "dominant-cluster threshold"
+          },
+          "qualifiers": {
+            "mechanism": "a known framework idle pattern",
+            "location": "alive threads sharing one stack signature"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "30 threads share the same stack signature."
+          },
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Supplies the alive thread count (40) the share is measured against."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[1]"
+              ],
+              "why": "75% of alive threads share this stack, so even an idle pattern (Monitor idle wait) leaves little capacity doing application work."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If sampled threads from this cluster show a different top frame than \u0022System.Threading.Monitor.Wait\u0022, the 30-thread grouping is wrong.",
+            "command": "!eestack"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the shared frame is a deliberate wait (a queue consumer parked on a signal), the cluster is by design, not a bottleneck."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "healthy-diversity",
+    "claims": [
+      {
+        "fingerprint": "thread stack signature clustering::diversity",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Normal",
+          "measure": {
+            "value": 60,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 25,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "low-diversity threshold"
+          },
+          "qualifiers": {
+            "location": "thread stack-signature diversity"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "24 unique stack signatures across 40 alive threads."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Diversity is above the low-diversity threshold; no observation points at concentration."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the managed stacks of the 40 alive threads fall into a number of distinct shapes other than 24, the clustering is wrong.",
+            "command": "!eestack"
+          }
+        ]
+      },
+      {
+        "fingerprint": "thread stack signature clustering::dominant-cluster",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Normal",
+          "measure": {
+            "value": 25,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "dominant-cluster threshold"
+          },
+          "qualifiers": {
+            "location": "alive threads sharing one stack signature"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "10 threads share the same stack signature."
+          },
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Supplies the alive thread count (40) the share is measured against."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The largest cluster covers under half of the threads; no observation points at a shared bottleneck."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If sampled threads from this cluster show a different top frame than \u0022App.Handler.Run\u0022, the 10-thread grouping is wrong.",
+            "command": "!eestack"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the shared frame is a deliberate wait (a queue consumer parked on a signal), the cluster is by design, not a bottleneck."
+          }
+        ]
+      }
+    ]
+  }
+]

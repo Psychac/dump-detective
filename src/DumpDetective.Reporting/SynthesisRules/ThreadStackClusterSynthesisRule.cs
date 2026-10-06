@@ -74,6 +74,12 @@ internal sealed class ThreadStackClusterSynthesisRule : ISynthesisRule
             MetricUnit = "% signature-diversity",
             DerivedFrom = [diversity.Id],
             Confidence = ConfidenceBreakdown.MeasurementCertain,
+            Assertion = BuildDiversityAssertion(severity, diversityPercent),
+            Support = [new EvidenceStatement([diversity.Id], $"{uniqueClusters:N0} unique stack signatures across {aliveThreadCount:N0} alive threads.")],
+            Counter = severity == Severity.Warning
+                ? Counter.None("Idle framework threads also produce low diversity; whether the largest cluster is such a pattern is judged in the dominant-cluster finding.")
+                : Counter.None("Diversity is above the low-diversity threshold; no observation points at concentration."),
+            FalsifiedBy = BuildDiversityFalsifiedBy(severity, uniqueClusters, aliveThreadCount),
         });
 
         if (dominantCluster is not null)
@@ -109,11 +115,94 @@ internal sealed class ThreadStackClusterSynthesisRule : ISynthesisRule
                 MetricUnit = "% dominant-cluster",
                 DerivedFrom = [diversity.Id, dominantCluster.Id],
                 Confidence = ConfidenceBreakdown.MeasurementCertain,
+                Assertion = BuildDominantAssertion(dominantSeverity, isExpectedPattern, dominantPercent),
+                Support =
+                [
+                    new EvidenceStatement([dominantCluster.Id], $"{dominantCount:N0} threads share the same stack signature."),
+                    new EvidenceStatement([diversity.Id], $"Supplies the alive thread count ({aliveThreadCount:N0}) the share is measured against."),
+                ],
+                Counter = BuildDominantCounter(dominantSeverity, isExpectedPattern, frameworkPattern, dominantPercent, dominantCluster),
+                FalsifiedBy = BuildDominantFalsifiedBy(signature, dominantCount),
             });
         }
 
         return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
+
+    private const double LowDiversityPercent = 25;
+    private const double DominantClusterPercent = 50;
+
+    private static Assertion BuildDiversityAssertion(Severity severity, double diversityPercent) => new()
+    {
+        Predicate = severity == Severity.Warning ? AssertionPredicate.Dominates : AssertionPredicate.Normal,
+        Measure = ClaimParts.Percent(diversityPercent),
+        Reference = ClaimParts.Budget(ClaimParts.Percent(LowDiversityPercent), "low-diversity threshold"),
+        Qualifiers = new AssertionQualifiers { Location = "thread stack-signature diversity" },
+    };
+
+    private static IReadOnlyList<FalsificationTest> BuildDiversityFalsifiedBy(Severity severity, int uniqueClusters, int aliveThreadCount)
+    {
+        var tests = new List<FalsificationTest>(2)
+        {
+            new()
+            {
+                Kind = FalsificationKind.Windbg,
+                Command = "!eestack",
+                Test = $"If the managed stacks of the {aliveThreadCount:N0} alive threads fall into a number of distinct shapes other than {uniqueClusters:N0}, the clustering is wrong.",
+            },
+        };
+
+        if (severity == Severity.Warning)
+            tests.Add(new()
+            {
+                Kind = FalsificationKind.Capture,
+                Test = "Capture a second dump a few minutes later; if the shared signatures are different ones, the low diversity is a transient pile-up, not a standing pattern.",
+            });
+
+        return tests;
+    }
+
+    private static Assertion BuildDominantAssertion(Severity severity, bool isExpectedPattern, double dominantPercent) => new()
+    {
+        Predicate = severity == Severity.Warning ? AssertionPredicate.Dominates : AssertionPredicate.Normal,
+        Measure = ClaimParts.Percent(dominantPercent),
+        Reference = ClaimParts.Budget(ClaimParts.Percent(DominantClusterPercent), "dominant-cluster threshold"),
+        Qualifiers = new AssertionQualifiers
+        {
+            Location = "alive threads sharing one stack signature",
+            Mechanism = isExpectedPattern ? "a known framework idle pattern" : null,
+        },
+    };
+
+    private static Counter BuildDominantCounter(
+        Severity severity, bool isExpectedPattern, string? frameworkPattern, double dominantPercent, Observation dominantCluster)
+    {
+        if (isExpectedPattern)
+            return dominantPercent >= DominantClusterPercent
+                ? Counter.Of(new EvidenceStatement(
+                    [dominantCluster.Id],
+                    $"{dominantPercent:F0}% of alive threads share this stack, so even an idle pattern ({frameworkPattern}) leaves little capacity doing application work."))
+                : Counter.None("The signature matches a known idle pattern and covers under half of the threads; nothing observed suggests application-level contention.");
+
+        return severity == Severity.Warning
+            ? Counter.None("Idle threads can look like a hotspot; no known framework idle pattern matched this signature.")
+            : Counter.None("The largest cluster covers under half of the threads; no observation points at a shared bottleneck.");
+    }
+
+    private static IReadOnlyList<FalsificationTest> BuildDominantFalsifiedBy(string signature, int dominantCount) =>
+    [
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.Windbg,
+            Command = "!eestack",
+            Test = $"If sampled threads from this cluster show a different top frame than \"{signature}\", the {dominantCount:N0}-thread grouping is wrong.",
+        },
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.CodeInspection,
+            Test = "If the shared frame is a deliberate wait (a queue consumer parked on a signal), the cluster is by design, not a bottleneck.",
+        },
+    ];
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();
 }

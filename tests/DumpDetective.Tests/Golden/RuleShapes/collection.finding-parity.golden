@@ -1,0 +1,175 @@
+rule: collection.finding-parity
+version: 1
+[
+  {
+    "name": "warning",
+    "claims": [
+      {
+        "fingerprint": "collection analysis::capacity-efficiency",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 62914560,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 52428800,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "unused collection capacity"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "1,000 collections were scanned; 12 are wasteful, with an estimated 60 MB of unused capacity."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Breaks the waste down by collection kind."
+          },
+          {
+            "observations": [
+              "observations[2]"
+            ],
+            "why": "Breaks the waste down by element type."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Collection lifetime is not observed; unused capacity in short-lived collections is reclaimed with them and is not a leak."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If a flagged collection\u0027s backing array is close to its element count, the estimate of 60 MB unused is too high.",
+            "command": "!do \u003Ccollection address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the flagged collections are request-scoped, the capacity is reclaimed with each request, not held."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "info-with-some-waste",
+    "claims": [
+      {
+        "fingerprint": "collection analysis::capacity-efficiency",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Normal",
+          "measure": {
+            "value": 10485760,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 52428800,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "unused collection capacity"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "1,000 collections were scanned; 3 are wasteful, with an estimated 10 MB of unused capacity."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "3 wasteful collections exist even though the total is below the warning threshold."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If a flagged collection\u0027s backing array is close to its element count, the estimate of 10 MB unused is too high.",
+            "command": "!do \u003Ccollection address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the flagged collections are request-scoped, the capacity is reclaimed with each request, not held."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "info-no-waste",
+    "claims": [
+      {
+        "fingerprint": "collection analysis::capacity-efficiency",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Normal",
+          "measure": {
+            "value": 0,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 52428800,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "unused collection capacity"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "1,000 collections were scanned; 0 are wasteful, with an estimated 0 B of unused capacity."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "No wasteful collections were found."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If a flagged collection\u0027s backing array is close to its element count, the estimate of 0 B unused is too high.",
+            "command": "!do \u003Ccollection address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the flagged collections are request-scoped, the capacity is reclaimed with each request, not held."
+          }
+        ]
+      }
+    ]
+  }
+]

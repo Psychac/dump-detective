@@ -124,12 +124,74 @@ internal sealed class CollectionSynthesisRule : ISynthesisRule
             Tags = ["collections", "memory-waste", "capacity"],
             MetricValue = totalWastedMemory,
             MetricUnit = "wasted-bytes",
+            Assertion = BuildAssertion(severity, totalWastedMemory),
+            Support = BuildSupport(summary, kindWaste, elementTypeWaste, totalCollections, wastefulCollectionCount, totalWastedMemory),
+            Counter = BuildCounter(severity, summary, wastefulCollectionCount),
+            FalsifiedBy = BuildFalsifiedBy(totalWastedMemory),
             DerivedFrom = derivedFrom,
             Confidence = ConfidenceBreakdown.MeasurementCertain,
         };
 
         return ValueTask.FromResult<IReadOnlyList<Claim>>([finding]);
     }
+
+    private static Assertion BuildAssertion(Severity severity, ulong totalWastedMemory) => new()
+    {
+        Predicate = severity == Severity.Warning ? AssertionPredicate.Exceeds : AssertionPredicate.Normal,
+        Measure = ClaimParts.Bytes(totalWastedMemory),
+        Reference = ClaimParts.Budget(ClaimParts.Bytes(SummaryWarnBytes), "warning threshold"),
+        Qualifiers = new AssertionQualifiers { Location = "unused collection capacity" },
+    };
+
+    private static IReadOnlyList<EvidenceStatement> BuildSupport(
+        Observation summary, List<Observation> kindWaste, List<Observation> elementTypeWaste,
+        int totalCollections, int wastefulCollectionCount, ulong totalWastedMemory)
+    {
+        var support = new List<EvidenceStatement>(3)
+        {
+            new([summary.Id], $"{totalCollections:N0} collections were scanned; {wastefulCollectionCount:N0} are wasteful, with an estimated {FormatHelper.FormatBytes(totalWastedMemory)} of unused capacity."),
+        };
+
+        if (kindWaste.Count > 0)
+            support.Add(new(IdsOf(kindWaste), "Breaks the waste down by collection kind."));
+        if (elementTypeWaste.Count > 0)
+            support.Add(new(IdsOf(elementTypeWaste), "Breaks the waste down by element type."));
+
+        return support;
+    }
+
+    private static List<ObservationId> IdsOf(List<Observation> observations)
+    {
+        var ids = new List<ObservationId>(observations.Count);
+        foreach (Observation observation in observations)
+            ids.Add(observation.Id);
+        return ids;
+    }
+
+    private static Counter BuildCounter(Severity severity, Observation summary, int wastefulCollectionCount)
+    {
+        if (severity == Severity.Warning)
+            return Counter.None("Collection lifetime is not observed; unused capacity in short-lived collections is reclaimed with them and is not a leak.");
+
+        return wastefulCollectionCount > 0
+            ? Counter.Of(new EvidenceStatement([summary.Id], $"{wastefulCollectionCount:N0} wasteful collections exist even though the total is below the warning threshold."))
+            : Counter.None("No wasteful collections were found.");
+    }
+
+    private static IReadOnlyList<FalsificationTest> BuildFalsifiedBy(ulong totalWastedMemory) =>
+    [
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.Windbg,
+            Command = "!do <collection address>",
+            Test = $"If a flagged collection's backing array is close to its element count, the estimate of {FormatHelper.FormatBytes(totalWastedMemory)} unused is too high.",
+        },
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.CodeInspection,
+            Test = "If the flagged collections are request-scoped, the capacity is reclaimed with each request, not held.",
+        },
+    ];
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();
 }

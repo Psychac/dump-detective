@@ -1,0 +1,276 @@
+rule: hang.finding-parity
+version: 1
+[
+  {
+    "name": "info",
+    "claims": [
+      {
+        "fingerprint": "hang analysis::hang-risk",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Normal",
+          "measure": {
+            "value": 10,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "warning waiting threshold"
+          },
+          "qualifiers": {
+            "location": "alive threads in a wait state"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "10 of 100 alive threads are waiting; 0 work items are queued."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The waiting share is below the warning threshold and no faulted tasks were observed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If most of the 10 waiting threads are idle pool workers, the waiting share is spare capacity, not a stall.",
+            "command": "!threadpool"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "info-with-faulted-tasks",
+    "claims": [
+      {
+        "fingerprint": "hang analysis::hang-risk",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Normal",
+          "measure": {
+            "value": 10,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "warning waiting threshold"
+          },
+          "qualifiers": {
+            "location": "alive threads in a wait state"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "10 of 100 alive threads are waiting; 0 work items are queued."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "4 tasks are faulted, which can stall work even though few threads are waiting."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If most of the 10 waiting threads are idle pool workers, the waiting share is spare capacity, not a stall.",
+            "command": "!threadpool"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "warning-by-waiting-pool-busy",
+    "claims": [
+      {
+        "fingerprint": "hang analysis::hang-risk",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Stalls",
+          "measure": {
+            "value": 60,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "warning waiting threshold"
+          },
+          "qualifiers": {
+            "location": "alive threads in a wait state"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "60 of 100 alive threads are waiting; 0 work items are queued."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Each is a thread\u0027s recorded wait state."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "Thread-pool CPU utilisation is 70%, so much of the pool is doing work, not stalled."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If most of the 60 waiting threads are idle pool workers, the waiting share is spare capacity, not a stall.",
+            "command": "!threadpool"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump a few minutes later; if different threads are waiting at different frames, the waits are short-lived churn, not a stall."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "warning-by-queue-alone",
+    "claims": [
+      {
+        "fingerprint": "hang analysis::hang-risk",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Stalls",
+          "measure": {
+            "value": 600,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 500,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "queued work item threshold"
+          },
+          "qualifiers": {
+            "location": "thread-pool work queue"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "20 of 100 alive threads are waiting; 600 work items are queued."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Queue depth is a point-in-time read; nothing observed shows whether it is a burst that drains or a standing backlog."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !threadpool reports a work-item queue far shorter than the 600 counted here, the queue reading is wrong.",
+            "command": "!threadpool"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump a minute later; if the queue is nearly empty, it was a burst that drained, not a standing backlog."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "critical-pool-quiet",
+    "claims": [
+      {
+        "fingerprint": "hang analysis::hang-risk",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Stalls",
+          "measure": {
+            "value": 85,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 80,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "critical waiting threshold"
+          },
+          "qualifiers": {
+            "location": "alive threads in a wait state"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "85 of 100 alive threads are waiting; 0 work items are queued."
+          },
+          {
+            "observations": [
+              "observations[1]",
+              "observations[2]"
+            ],
+            "why": "Each is a thread\u0027s recorded wait state."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Waiting threads include idle thread-pool workers, and low pool CPU utilisation does not separate idle waits from stalled ones."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If most of the 85 waiting threads are idle pool workers, the waiting share is spare capacity, not a stall.",
+            "command": "!threadpool"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump a few minutes later; if different threads are waiting at different frames, the waits are short-lived churn, not a stall."
+          }
+        ]
+      }
+    ]
+  }
+]

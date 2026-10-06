@@ -1,0 +1,257 @@
+rule: timer-leak.finding-parity
+version: 1
+[
+  {
+    "name": "logical-warning-with-root-path",
+    "claims": [
+      {
+        "fingerprint": "timer leak analysis::logical-timers",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 100,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 100,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "undisposed logical timers on the managed heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Counts timer instances by type; 100 are TimerQueueTimer objects."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Supplies the sampled GC root path for the most numerous timer type."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A TimerQueueTimer on the heap is not necessarily undisposed; timers that are still scheduled on purpose look the same."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If far fewer than the reported 100 TimerQueueTimer objects are live, the count includes garbage awaiting collection.",
+            "command": "!dumpheap -live -stat -type TimerQueueTimer"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the owning code disposes each timer on completion or shutdown, the remaining instances are timers still running on purpose."
+          }
+        ]
+      },
+      {
+        "fingerprint": "timer leak analysis::queue-pressure",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 100,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "notice threshold"
+          },
+          "qualifiers": {
+            "location": "TimerHolder and TimerQueueTimer objects"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Each counts TimerHolder or TimerQueueTimer instances on the heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A TimerHolder and TimerQueueTimer exist for every scheduled timer; the count alone does not show that any is undisposed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the live TimerHolder and TimerQueueTimer total is well below 100, the pressure includes garbage awaiting collection.",
+            "command": "!dumpheap -live -stat -type TimerHolder"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the application creates timers per long-lived service and not per request, this count is the steady-state schedule, not accumulation."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "logical-critical-and-queue-warning",
+    "claims": [
+      {
+        "fingerprint": "timer leak analysis::logical-timers",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 250,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 250,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "undisposed logical timers on the managed heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]",
+              "observations[1]"
+            ],
+            "why": "Counts timer instances by type; 250 are TimerQueueTimer objects."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A TimerQueueTimer on the heap is not necessarily undisposed; timers that are still scheduled on purpose look the same."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If far fewer than the reported 250 TimerQueueTimer objects are live, the count includes garbage awaiting collection.",
+            "command": "!dumpheap -live -stat -type TimerQueueTimer"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the owning code disposes each timer on completion or shutdown, the remaining instances are timers still running on purpose."
+          }
+        ]
+      },
+      {
+        "fingerprint": "timer leak analysis::queue-pressure",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 350,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 150,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "TimerHolder and TimerQueueTimer objects"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]",
+              "observations[1]"
+            ],
+            "why": "Each counts TimerHolder or TimerQueueTimer instances on the heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A TimerHolder and TimerQueueTimer exist for every scheduled timer; the count alone does not show that any is undisposed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the live TimerHolder and TimerQueueTimer total is well below 350, the pressure includes garbage awaiting collection.",
+            "command": "!dumpheap -live -stat -type TimerHolder"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the application creates timers per long-lived service and not per request, this count is the steady-state schedule, not accumulation."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "queue-notice-only",
+    "claims": [
+      {
+        "fingerprint": "timer leak analysis::queue-pressure",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 60,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "notice threshold"
+          },
+          "qualifiers": {
+            "location": "TimerHolder and TimerQueueTimer objects"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Each counts TimerHolder or TimerQueueTimer instances on the heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A TimerHolder and TimerQueueTimer exist for every scheduled timer; the count alone does not show that any is undisposed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the live TimerHolder and TimerQueueTimer total is well below 60, the pressure includes garbage awaiting collection.",
+            "command": "!dumpheap -live -stat -type TimerHolder"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the application creates timers per long-lived service and not per request, this count is the steady-state schedule, not accumulation."
+          }
+        ]
+      }
+    ]
+  }
+]

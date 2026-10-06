@@ -113,6 +113,10 @@ internal sealed class TimerLeakSynthesisRule : ISynthesisRule
                 Tags = ["infrastructure", "timer", "leak", "dispose"],
                 MetricValue = logicalTimerCount,
                 MetricUnit = "timers",
+            Assertion = BuildLogicalTimersAssertion(severity, logicalTimerCount),
+            Support = BuildLogicalTimersSupport(allIds, population, logicalTimerCount),
+            Counter = Counter.None("A TimerQueueTimer on the heap is not necessarily undisposed; timers that are still scheduled on purpose look the same."),
+            FalsifiedBy = BuildLogicalTimersFalsifiedBy(logicalTimerCount),
                 DerivedFrom = population is null ? allIds : [.. allIds, population.Id],
                 Confidence = population is null
                     ? ConfidenceBreakdown.MeasurementCertain
@@ -137,6 +141,10 @@ internal sealed class TimerLeakSynthesisRule : ISynthesisRule
                 Tags = ["timer", "timerqueue", "finalizer", "dispose"],
                 MetricValue = queuePressure,
                 MetricUnit = "timer queue objects",
+                Assertion = BuildQueuePressureAssertion(queuePressure),
+                Support = [new EvidenceStatement(timerHolderAndQueueIds, "Each counts TimerHolder or TimerQueueTimer instances on the heap.")],
+                Counter = Counter.None("A TimerHolder and TimerQueueTimer exist for every scheduled timer; the count alone does not show that any is undisposed."),
+                FalsifiedBy = BuildQueuePressureFalsifiedBy(queuePressure),
                 DerivedFrom = timerHolderAndQueueIds,
                 Confidence = ConfidenceBreakdown.MeasurementCertain,
             });
@@ -144,6 +152,78 @@ internal sealed class TimerLeakSynthesisRule : ISynthesisRule
 
         return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
+
+    private static Assertion BuildLogicalTimersAssertion(Severity severity, long logicalTimerCount)
+    {
+        bool critical = severity == Severity.Critical;
+        return new Assertion
+        {
+            Predicate = AssertionPredicate.Retains,
+            Measure = ClaimParts.Count(logicalTimerCount),
+            Reference = ClaimParts.Budget(
+                ClaimParts.Count(critical ? LogicalTimerCountCriticalThreshold : LogicalTimerCountWarningThreshold),
+                critical ? "critical threshold" : "warning threshold"),
+            Qualifiers = new AssertionQualifiers { Location = "undisposed logical timers on the managed heap" },
+        };
+    }
+
+    private static IReadOnlyList<EvidenceStatement> BuildLogicalTimersSupport(
+        List<ObservationId> allIds, Observation? population, long logicalTimerCount)
+    {
+        var support = new List<EvidenceStatement>(2)
+        {
+            new(allIds, $"Counts timer instances by type; {logicalTimerCount:N0} are TimerQueueTimer objects."),
+        };
+
+        if (population is not null)
+            support.Add(new([population.Id], "Supplies the sampled GC root path for the most numerous timer type."));
+
+        return support;
+    }
+
+    private static IReadOnlyList<FalsificationTest> BuildLogicalTimersFalsifiedBy(long logicalTimerCount) =>
+    [
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.Windbg,
+            Command = "!dumpheap -live -stat -type TimerQueueTimer",
+            Test = $"If far fewer than the reported {logicalTimerCount:N0} TimerQueueTimer objects are live, the count includes garbage awaiting collection.",
+        },
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.CodeInspection,
+            Test = "If the owning code disposes each timer on completion or shutdown, the remaining instances are timers still running on purpose.",
+        },
+    ];
+
+    private static Assertion BuildQueuePressureAssertion(long queuePressure)
+    {
+        bool warning = queuePressure >= QueuePressureWarningThreshold;
+        return new Assertion
+        {
+            Predicate = AssertionPredicate.Exceeds,
+            Measure = ClaimParts.Count(queuePressure),
+            Reference = ClaimParts.Budget(
+                ClaimParts.Count(warning ? QueuePressureWarningThreshold : QueuePressureInfoThreshold),
+                warning ? "warning threshold" : "notice threshold"),
+            Qualifiers = new AssertionQualifiers { Location = "TimerHolder and TimerQueueTimer objects" },
+        };
+    }
+
+    private static IReadOnlyList<FalsificationTest> BuildQueuePressureFalsifiedBy(long queuePressure) =>
+    [
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.Windbg,
+            Command = "!dumpheap -live -stat -type TimerHolder",
+            Test = $"If the live TimerHolder and TimerQueueTimer total is well below {queuePressure:N0}, the pressure includes garbage awaiting collection.",
+        },
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.CodeInspection,
+            Test = "If the application creates timers per long-lived service and not per request, this count is the steady-state schedule, not accumulation.",
+        },
+    ];
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();
 }

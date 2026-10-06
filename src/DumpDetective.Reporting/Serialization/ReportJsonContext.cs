@@ -36,6 +36,7 @@ namespace DumpDetective.Reporting.Serialization;
 [JsonSerializable(typeof(ActionConfidenceRecord))]
 [JsonSerializable(typeof(RankedActionRecord))]
 [JsonSerializable(typeof(List<RankedActionRecord>))]
+[JsonSerializable(typeof(ClaimView))]
 [JsonSerializable(typeof(CorrelationEventRecord))]
 [JsonSerializable(typeof(List<CorrelationEventRecord>))]
 [JsonSerializable(typeof(ulong))]

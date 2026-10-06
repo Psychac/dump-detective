@@ -320,3 +320,114 @@
 }
 
 /* ΓöÇΓöÇ Tables ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */
+
+/* Claim card: assertion line, confidence reason, collapsible "Why" block */
+
+.finding-card__assertion {
+  margin: 2px 0 6px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: #334155;
+}
+
+.finding-card__confidence-reason {
+  margin: 0 0 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #92400e;
+  background: #fffbeb;
+  border-left: 3px solid #f59e0b;
+}
+
+.finding-card__why {
+  margin: 8px 0 0;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 6px;
+}
+
+.finding-card__why-summary {
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+  letter-spacing: .02em;
+  user-select: none;
+}
+
+.finding-card__why-group {
+  margin: 8px 0 0;
+}
+
+.finding-card__why-heading {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: #64748b;
+  margin-bottom: 3px;
+}
+
+.finding-card__why-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding: 2px 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #334155;
+}
+
+.finding-card__why-text {
+  flex: 1 1 280px;
+}
+
+.finding-card__why-none {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: #64748b;
+}
+
+.finding-card__why-kind {
+  text-transform: lowercase;
+}
+
+.finding-card__why-command {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-basis: 100%;
+}
+
+.finding-card__why-command code {
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 11.5px;
+  background: #f1f5f9;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.finding-card__predicate {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: #475569;
+  background: #e2e8f0;
+  border-radius: 3px;
+  vertical-align: 1px;
+}
+
+.finding-card__confidence-label {
+  margin-right: 4px;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+
+.finding-card__confidence-chip[tabindex] {
+  cursor: help;
+}

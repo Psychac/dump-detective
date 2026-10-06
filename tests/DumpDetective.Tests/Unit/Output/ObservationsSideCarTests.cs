@@ -152,7 +152,7 @@ public sealed class ObservationsSideCarTests : IDisposable
     }
 
     [Fact]
-    public void StructuredClaimFields_ReachReportJson_AndStayOutOfTheEmbeddedHtml()
+    public void StructuredClaimFields_ReachReportJson_AndTheEmbeddedHtmlGetsOnlyTheSlimClaimView()
     {
         ObservationId cited = ObservationId.NewId();
         var finding = new InsightFinding("Stub Analyzer", "Leak", DumpDetective.Core.Enums.FindingSeverity.Warning, "title", "evidence", "rec", [], Fingerprint: "stub-fingerprint");
@@ -188,7 +188,8 @@ public sealed class ObservationsSideCarTests : IDisposable
 
         json.Should().Contain("\"predicate\": \"Fragments\"").And.Contain("STRUCTURED_SUPPORT_WHY")
             .And.Contain("STRUCTURED_COUNTER_REASON").And.Contain("STRUCTURED_TEST").And.Contain("\"kind\": \"Windbg\"");
-        html.Should().NotContain("STRUCTURED_SUPPORT_WHY").And.NotContain("STRUCTURED_COUNTER_REASON").And.NotContain("STRUCTURED_TEST");
+        html.Should().Contain("\"claim\":").And.Contain("STRUCTURED_SUPPORT_WHY").And.Contain("STRUCTURED_COUNTER_REASON").And.Contain("STRUCTURED_TEST");
+        html.Should().NotContain(cited.ToString()).And.NotContain("derivedFrom").And.NotContain("evidenceSources");
     }
 
     private static Observation MakeObservation() => new()

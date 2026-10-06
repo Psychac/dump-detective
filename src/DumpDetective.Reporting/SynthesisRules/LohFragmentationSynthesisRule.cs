@@ -28,7 +28,7 @@ internal sealed class LohFragmentationSynthesisRule : ISynthesisRule
     private const string AnalyzerName = "LOH & POH Fragmentation Analysis";
 
     public string RuleId => "loh-fragmentation.finding-parity";
-    public int Version => 1;
+    public int Version => 2;
 
     public ObservationQuery Query { get; } = new()
     {
@@ -113,7 +113,7 @@ internal sealed class LohFragmentationSynthesisRule : ISynthesisRule
     private static Assertion BuildAssertion(Severity severity, double fragmentationPercent)
     {
         double budget = severity == Severity.Critical ? CriticalThreshold : WarningThreshold;
-        string budgetName = severity == Severity.Critical ? "LOH/POH fragmentation critical threshold" : "LOH/POH fragmentation warning threshold";
+        string budgetName = severity == Severity.Critical ? "critical threshold" : "warning threshold";
 
         return new Assertion
         {

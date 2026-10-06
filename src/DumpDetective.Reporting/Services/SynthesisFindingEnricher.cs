@@ -30,6 +30,45 @@ internal sealed class SynthesisFindingEnricher
         _engine = new SynthesisEngine(ruleFactory.CreateRules());
     }
 
+    private static Dictionary<ObservationId, string> IndexAnalyzers(IReadOnlyList<Observation> observations)
+    {
+        var analyzerByObservation = new Dictionary<ObservationId, string>(observations.Count);
+        foreach (Observation observation in observations)
+            analyzerByObservation[observation.Id] = observation.Provenance.AnalyzerKey;
+        return analyzerByObservation;
+    }
+
+    private static EvidenceSources? ResolveSources(Claim claim, Dictionary<ObservationId, string> analyzerByObservation)
+    {
+        if (claim.Support.Count == 0 && claim.Counter is not { Statements.Count: > 0 })
+            return null;
+
+        var support = new List<IReadOnlyList<string>>(claim.Support.Count);
+        foreach (EvidenceStatement statement in claim.Support)
+            support.Add(AnalyzersOf(statement, analyzerByObservation));
+
+        var counter = new List<IReadOnlyList<string>>(claim.Counter?.Statements.Count ?? 0);
+        if (claim.Counter is not null)
+        {
+            foreach (EvidenceStatement statement in claim.Counter.Statements)
+                counter.Add(AnalyzersOf(statement, analyzerByObservation));
+        }
+
+        return new EvidenceSources(support, counter);
+    }
+
+    private static List<string> AnalyzersOf(EvidenceStatement statement, Dictionary<ObservationId, string> analyzerByObservation)
+    {
+        var analyzers = new List<string>(1);
+        foreach (ObservationId id in statement.Observations)
+        {
+            if (analyzerByObservation.TryGetValue(id, out string? analyzer) && !analyzers.Contains(analyzer))
+                analyzers.Add(analyzer);
+        }
+
+        return analyzers;
+    }
+
     public async ValueTask<SynthesisEnrichment> EnrichAsync(
         IReadOnlyList<AnalyzerRunResult> runs, IReadOnlyList<Observation> observations, CancellationToken cancellationToken)
     {
@@ -56,6 +95,7 @@ internal sealed class SynthesisFindingEnricher
             return new SynthesisEnrichment(runs, [], EmptyLineage);
 
         var lineageByFingerprint = new Dictionary<string, FindingLineage>(StringComparer.Ordinal);
+        Dictionary<ObservationId, string>? analyzerByObservation = null;
         var byAnalyzer = new Dictionary<string, List<InsightFinding>>(StringComparer.Ordinal);
         foreach (Claim finding in findings)
         {
@@ -68,7 +108,8 @@ internal sealed class SynthesisFindingEnricher
             InsightFinding insightFinding = FindingSynthesisAdapter.ToInsightFinding(finding);
             bucket.Add(insightFinding);
 
-            var lineage = FindingLineage.From(finding);
+            analyzerByObservation ??= IndexAnalyzers(observations);
+            FindingLineage lineage = FindingLineage.From(finding) with { EvidenceSources = ResolveSources(finding, analyzerByObservation) };
             string fingerprint = insightFinding.EffectiveFingerprint;
             lineageByFingerprint[fingerprint] = lineageByFingerprint.TryGetValue(fingerprint, out FindingLineage? existing)
                 ? existing.MergeWith(lineage)

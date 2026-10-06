@@ -1,5 +1,5 @@
 rule: loh-fragmentation.finding-parity
-version: 1
+version: 2
 [
   {
     "name": "warning-with-reusable-gaps",
@@ -20,7 +20,7 @@ version: 1
               "unit": "Percent",
               "semantics": "Ratio"
             },
-            "basis": "LOH/POH fragmentation warning threshold"
+            "basis": "warning threshold"
           },
           "qualifiers": {
             "location": "LOH/POH",
@@ -84,7 +84,7 @@ version: 1
               "unit": "Percent",
               "semantics": "Ratio"
             },
-            "basis": "LOH/POH fragmentation critical threshold"
+            "basis": "critical threshold"
           },
           "qualifiers": {
             "location": "LOH/POH",
@@ -142,7 +142,7 @@ version: 1
               "unit": "Percent",
               "semantics": "Ratio"
             },
-            "basis": "LOH/POH fragmentation warning threshold"
+            "basis": "warning threshold"
           },
           "qualifiers": {
             "location": "LOH/POH",
@@ -190,7 +190,7 @@ version: 1
               "unit": "Percent",
               "semantics": "Ratio"
             },
-            "basis": "LOH/POH fragmentation warning threshold"
+            "basis": "warning threshold"
           },
           "qualifiers": {
             "location": "LOH/POH",

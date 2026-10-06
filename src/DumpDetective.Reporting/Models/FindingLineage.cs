@@ -13,6 +13,8 @@ internal sealed record FindingLineage(IReadOnlyList<ObservationId> DerivedFrom, 
 
     public IReadOnlyList<FalsificationTest> FalsifiedBy { get; init; } = [];
 
+    public EvidenceSources? EvidenceSources { get; init; }
+
     public static FindingLineage From(Claim claim) => new(claim.DerivedFrom, claim.Confidence, claim.Rule)
     {
         Assertion = claim.Assertion,

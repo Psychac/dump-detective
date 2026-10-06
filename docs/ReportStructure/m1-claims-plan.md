@@ -151,7 +151,7 @@ system. It gates M4.
    - Gates: [§ 17.1](ReportSystemVision.md#171-editorial-gates) rows for assertion, `falsifiedBy`,
      `counter`, registry; plus a test flagging near-verbatim `falsifiedBy` text across claims.
    - Each batch verified on the reference dump, one run at a time.
-5. **Generated prose + `dd-claim`** *(pending)* — per D3.
+5. **Generated prose + `dd-claim`** *(card built 2026-10-06 for the one migrated claim; Markdown/text claim listing and remaining rules pending)* — per D3.
    - One prose generator over `assertion`; HTML, Markdown, text all call it.
    - `dd-claim` widget design *(decided 2026-10-05; not yet built)*:
      - **Assertion line:** a full generated sentence on its own line under the title, wrapping allowed, not
@@ -172,6 +172,16 @@ system. It gates M4.
      - **Unmigrated claims** (no assertion) render exactly as today, so steps 4 and 5 can interleave.
      - **Markdown/text:** the same parts as plain lines from the shared generator (D3), no collapse.
      - **Deferred:** conflict state (§ 6.3; needs `relations`, after M1), next-capture row (M3), actions row.
+     - **Built and reviewed on the real dump (2026-10-06):** assertion line with a muted predicate label;
+       "Confidence" label on the existing four-bar chip, bars and number taken from the breakdown (the old chip
+       showed a severity default that contradicted the breakdown); breakdown as a hover/focus tooltip, not a
+       table; source chips only for analyzers other than the card's own. Number stays hidden, as on every card.
+     - **Known redundancy, accepted for now:** on a `Normal` claim the title, assertion line and recommendation
+       all say "within acceptable range". It goes away when title and narrative become generated from the
+       assertion (not yet scheduled; replacing them waits until generated wording proves as good).
+     - **Known gap, accepted for now:** Why-block support lines carry no link on this card (their source is the
+       card's own analyzer, and "Investigate" already goes to that section). Per-observation navigation needs
+       observations in the page, which belongs to M4.
 6. **Retire `InsightFinding` and `FindingSynthesisAdapter`** *(pending)*.
    - Trend and action consumers read `Claim`; fingerprints unchanged so trend identity holds.
    - Done when `InsightFinding` has zero references.

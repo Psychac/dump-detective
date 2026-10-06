@@ -167,6 +167,7 @@ internal sealed class ReportSerializer(ExecutiveSummaryProjector? executiveSumma
                 Support = lineage.Support.Count > 0 ? lineage.Support : null,
                 Counter = lineage.Counter,
                 FalsifiedBy = lineage.FalsifiedBy.Count > 0 ? lineage.FalsifiedBy : null,
+                EvidenceSources = lineage.EvidenceSources,
             }
             : record;
 

@@ -49,7 +49,11 @@ function buildAnalyzerSectionTargetMap(doc) {
 }
 
 function resolveFindingTarget(sectionTargetMap, finding) {
-  const analyzer = normalizeAnalyzerKey(finding && finding.analyzer);
+  return resolveAnalyzerTarget(sectionTargetMap, finding && finding.analyzer);
+}
+
+function resolveAnalyzerTarget(sectionTargetMap, analyzerName) {
+  const analyzer = normalizeAnalyzerKey(analyzerName);
   if (!analyzer) return '';
 
   if (sectionTargetMap.has(analyzer)) return sectionTargetMap.get(analyzer);
@@ -180,7 +184,7 @@ export function buildDomains(doc) {
       const insightsList = el('div', 'domain-insights__list');
       for (let k = 0; k < insights.length; k++) {
         const promoteTarget = resolveFindingTarget(sectionTargetMap, insights[k]);
-        insightsList.appendChild(buildFindingCard(insights[k], `${domainId}-insight-${k}`, { promoteTarget: promoteTarget }));
+        insightsList.appendChild(buildFindingCard(insights[k], `${domainId}-insight-${k}`, { promoteTarget: promoteTarget, sourceTarget: function (name) { return resolveAnalyzerTarget(sectionTargetMap, name); } }));
       }
       insightsSec.appendChild(insightsList);
       details.appendChild(insightsSec);
@@ -241,7 +245,7 @@ export function buildCrossDomainInsights(doc) {
   const list = el('div', 'cross-domain-insights__list');
   for (let i = 0; i < findings.length; i++) {
     const promoteTarget = resolveFindingTarget(sectionTargetMap, findings[i]);
-    list.appendChild(buildFindingCard(findings[i], 'cross-' + i, { promoteTarget: promoteTarget }));
+    list.appendChild(buildFindingCard(findings[i], 'cross-' + i, { promoteTarget: promoteTarget, sourceTarget: function (name) { return resolveAnalyzerTarget(sectionTargetMap, name); } }));
   }
   sec.appendChild(list);
 

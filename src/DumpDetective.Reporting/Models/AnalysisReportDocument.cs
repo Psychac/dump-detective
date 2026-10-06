@@ -215,6 +215,10 @@ internal sealed record FindingRecord(
     [JsonPropertyName("falsifiedBy")]
     public IReadOnlyList<DumpDetective.Sdk.Synthesis.FalsificationTest>? FalsifiedBy { get; init; } = null;
 
+    /// <summary>Analyzers behind each support / counter statement, so a reader can navigate to their sections.</summary>
+    [JsonPropertyName("evidenceSources")]
+    public EvidenceSources? EvidenceSources { get; init; } = null;
+
     [JsonPropertyName("confidenceBand")]
     public string? ConfidenceBand => Confidence is double score ? ConfidenceLadder.For(score).Key : null;
 

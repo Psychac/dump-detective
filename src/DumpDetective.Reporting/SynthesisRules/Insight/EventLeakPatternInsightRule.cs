@@ -1,3 +1,4 @@
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -71,6 +72,42 @@ internal sealed class EventLeakPatternInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::event-leak-pattern",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Leaks,
+                    Measure = ClaimParts.Count(totalSubscribers),
+                    Qualifiers = new AssertionQualifiers
+                    {
+                        Location = "event subscribers",
+                        Mechanism = highGen2 && highFinalizer ? "Gen2 and finalizer queue pressure"
+                            : highGen2 ? "Gen2 pressure" : "finalizer queue pressure",
+                    },
+                },
+                Support =
+                [
+                    new EvidenceStatement([eventLeaks.Id], $"{totalEventLeakInstances:N0} event-leak group(s) hold {totalSubscribers:N0} subscribers."),
+                    .. gcGen is not null
+                        ? [new EvidenceStatement([gcGen.Id], $"Gen2 holds {gen2Pct:F1}% of the managed heap.")]
+                        : Array.Empty<EvidenceStatement>(),
+                    .. finalizerQueue is not null
+                        ? [new EvidenceStatement([finalizerQueue.Id], $"The finalizer queue holds {finalizerQueueCount:N0} objects.")]
+                        : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = Counter.None("High Gen2 and a long finalizer queue are common for reasons unrelated to event subscriptions; their co-occurrence does not show subscriptions cause them."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gcroot <subscriber address>",
+                        Test = "On a sampled subscriber: if its root is a short-lived object, the subscriptions are not what keeps Gen2 objects alive.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the subscriber count does not grow, the subscriptions are bounded, not accumulating.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Memory",
                 Severity = Severity.Warning,

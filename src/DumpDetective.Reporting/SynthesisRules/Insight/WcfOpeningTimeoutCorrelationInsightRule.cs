@@ -1,4 +1,5 @@
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -60,6 +61,32 @@ internal sealed class WcfOpeningTimeoutCorrelationInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::wcf-opening-timeout-correlation",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Stalls,
+                    Measure = ClaimParts.Count(openingChannels),
+                    Qualifiers = new AssertionQualifiers { Location = "WCF channels in the Opening state", Mechanism = $"{timeoutCount:N0} timeout or cancellation exceptions on the heap" },
+                },
+                Support =
+                [
+                    new EvidenceStatement([wcf.Id], $"{openingChannels:N0} WCF channels are in the Opening state."),
+                    new EvidenceStatement(derivedFrom.GetRange(1, derivedFrom.Count - 1), $"{timeoutCount:N0} timeout or cancellation exception objects are on the heap."),
+                ],
+                Counter = Counter.None("A channel captured while Opening may simply have been opened a moment before the dump, and timeout exceptions may come from unrelated calls."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump a few seconds later; if the same channels have finished opening, they were not stuck.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!clrstack -all",
+                        Test = "If no thread stack shows Open or OpenAsync waiting on a connect, the Opening channels are not blocked.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Infrastructure",
                 Severity = severity,

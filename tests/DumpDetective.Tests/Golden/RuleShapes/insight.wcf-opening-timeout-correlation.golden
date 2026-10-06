@@ -1,0 +1,62 @@
+rule: insight.wcf-opening-timeout-correlation
+version: 1
+[
+  {
+    "name": "opening-with-timeouts",
+    "claims": [
+      {
+        "fingerprint": "insightengine::wcf-opening-timeout-correlation",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Stalls",
+          "measure": {
+            "value": 6,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "4 timeout or cancellation exceptions on the heap",
+            "location": "WCF channels in the Opening state"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "6 WCF channels are in the Opening state."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "4 timeout or cancellation exception objects are on the heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A channel captured while Opening may simply have been opened a moment before the dump, and timeout exceptions may come from unrelated calls."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump a few seconds later; if the same channels have finished opening, they were not stuck."
+          },
+          {
+            "kind": "Windbg",
+            "test": "If no thread stack shows Open or OpenAsync waiting on a connect, the Opening channels are not blocked.",
+            "command": "!clrstack -all"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "no-opening-says-nothing",
+    "claims": []
+  },
+  {
+    "name": "no-timeouts-says-nothing",
+    "claims": []
+  }
+]

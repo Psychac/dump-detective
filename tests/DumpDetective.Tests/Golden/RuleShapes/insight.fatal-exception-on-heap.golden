@@ -1,0 +1,52 @@
+rule: insight.fatal-exception-on-heap
+version: 1
+[
+  {
+    "name": "out-of-memory-and-stack-overflow",
+    "claims": [
+      {
+        "fingerprint": "insightengine::fatal-exception-on-heap",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 2,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "System.OutOfMemoryException \u00D72, System.StackOverflowException \u00D71",
+            "location": "fatal exception types on the managed heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0..2]"
+            ],
+            "why": "Fatal exception objects are present: System.OutOfMemoryException \u00D72, System.StackOverflowException \u00D71."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A fatal exception object on the heap may be a leftover that was caught and handled; the dump does not show the process was ever terminated."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled fatal exception: if !gcroot finds no root, it is garbage from a handled event, not a current condition.",
+            "command": "!gcroot \u003Cexception address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the application catches OutOfMemoryException deliberately to degrade gracefully, the object is an expected result."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "none-fatal-says-nothing",
+    "claims": []
+  }
+]

@@ -1,0 +1,183 @@
+rule: insight.leak-suspicion
+version: 1
+[
+  {
+    "name": "highly-referenced-and-duplicate-strings",
+    "claims": [
+      {
+        "fingerprint": "insightengine::leak-suspicion-highly-referenced",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 9,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "objects with abnormally high incoming reference counts"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "9 objects have abnormally high incoming reference counts."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A shared lookup object is referenced widely by design; a high incoming count does not show it is retained longer than intended."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled highly referenced object: if its referrers are short-lived, the high count is transient, not a retention hub.",
+            "command": "!gcroot \u003Cobject address\u003E"
+          }
+        ]
+      },
+      {
+        "fingerprint": "insightengine::leak-suspicion-duplicate-strings",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Duplicates",
+          "measure": {
+            "value": 20971520,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 10485760,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "duplicate-waste threshold"
+          },
+          "qualifiers": {
+            "location": "duplicate string instances"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "20.0 MB is wasted across 300 duplicate patterns among 10,00,000 strings."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Duplicates inside short-lived structures are reclaimed with them; lifetime is not observed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the most repeated strings in !dumpheap -strings add up to far less than 20.0 MB, the waste is overstated.",
+            "command": "!dumpheap -strings"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the repeated strings are already interned or pooled at the source, the duplicates are transient copies, not retained waste."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "highly-referenced-only",
+    "claims": [
+      {
+        "fingerprint": "insightengine::leak-suspicion-highly-referenced",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 9,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "objects with abnormally high incoming reference counts"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "9 objects have abnormally high incoming reference counts."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A shared lookup object is referenced widely by design; a high incoming count does not show it is retained longer than intended."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled highly referenced object: if its referrers are short-lived, the high count is transient, not a retention hub.",
+            "command": "!gcroot \u003Cobject address\u003E"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "duplicate-strings-only",
+    "claims": [
+      {
+        "fingerprint": "insightengine::leak-suspicion-duplicate-strings",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Duplicates",
+          "measure": {
+            "value": 20971520,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 10485760,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "duplicate-waste threshold"
+          },
+          "qualifiers": {
+            "location": "duplicate string instances"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "20.0 MB is wasted across 300 duplicate patterns among 10,00,000 strings."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Duplicates inside short-lived structures are reclaimed with them; lifetime is not observed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the most repeated strings in !dumpheap -strings add up to far less than 20.0 MB, the waste is overstated.",
+            "command": "!dumpheap -strings"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the repeated strings are already interned or pooled at the source, the duplicates are transient copies, not retained waste."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "neither-says-nothing",
+    "claims": []
+  }
+]

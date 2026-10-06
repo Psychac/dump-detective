@@ -1,0 +1,123 @@
+rule: insight.recurring-timeout-pattern
+version: 1
+[
+  {
+    "name": "notice",
+    "claims": [
+      {
+        "fingerprint": "insightengine::recurring-timeout-pattern",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 12,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 10,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "notice threshold"
+          },
+          "qualifiers": {
+            "location": "timeout and cancellation exception objects on the heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "12 timeout or cancellation exceptions are among 100 exception objects."
+          },
+          {
+            "observations": [
+              "observations[1]",
+              "observations[2]"
+            ],
+            "why": "Each is an exception type counted toward the timeout pattern."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A cancelled operation raises OperationCanceledException by design, so a count of them does not show a dependency is unstable."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled timeout exception: if !gcroot finds no root, it is garbage from a handled exception, not a current fault.",
+            "command": "!gcroot \u003Cexception address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the same timeout types do not recur, the instability was a one-off."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "warning",
+    "claims": [
+      {
+        "fingerprint": "insightengine::recurring-timeout-pattern",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 25,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 20,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "timeout and cancellation exception objects on the heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "25 timeout or cancellation exceptions are among 100 exception objects."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Each is an exception type counted toward the timeout pattern."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A cancelled operation raises OperationCanceledException by design, so a count of them does not show a dependency is unstable."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled timeout exception: if !gcroot finds no root, it is garbage from a handled exception, not a current fault.",
+            "command": "!gcroot \u003Cexception address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the same timeout types do not recur, the instability was a one-off."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "below-threshold-says-nothing",
+    "claims": []
+  }
+]

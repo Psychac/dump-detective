@@ -1,4 +1,5 @@
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -72,6 +73,28 @@ internal sealed class FatalExceptionOnHeapInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::fatal-exception-on-heap",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Measure = ClaimParts.Count(fatalFound.Count),
+                    Qualifiers = new AssertionQualifiers { Location = "fatal exception types on the managed heap", Mechanism = string.Join(", ", fatalFound) },
+                },
+                Support = [new EvidenceStatement(derivedFrom, $"Fatal exception objects are present: {string.Join(", ", fatalFound)}.")],
+                Counter = Counter.None("A fatal exception object on the heap may be a leftover that was caught and handled; the dump does not show the process was ever terminated."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gcroot <exception address>",
+                        Test = "On a sampled fatal exception: if !gcroot finds no root, it is garbage from a handled event, not a current condition.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the application catches OutOfMemoryException deliberately to degrade gracefully, the object is an expected result.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Crash",
                 Severity = Severity.Critical,

@@ -1,0 +1,164 @@
+rule: insight.event-leak-pattern
+version: 1
+[
+  {
+    "name": "with-high-gen2",
+    "claims": [
+      {
+        "fingerprint": "insightengine::event-leak-pattern",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Leaks",
+          "measure": {
+            "value": 500,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "Gen2 pressure",
+            "location": "event subscribers"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "3 event-leak group(s) hold 500 subscribers."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Gen2 holds 55.0% of the managed heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "High Gen2 and a long finalizer queue are common for reasons unrelated to event subscriptions; their co-occurrence does not show subscriptions cause them."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled subscriber: if its root is a short-lived object, the subscriptions are not what keeps Gen2 objects alive.",
+            "command": "!gcroot \u003Csubscriber address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the subscriber count does not grow, the subscriptions are bounded, not accumulating."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "with-large-finalizer-queue",
+    "claims": [
+      {
+        "fingerprint": "insightengine::event-leak-pattern",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Leaks",
+          "measure": {
+            "value": 500,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "finalizer queue pressure",
+            "location": "event subscribers"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "3 event-leak group(s) hold 500 subscribers."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "The finalizer queue holds 2,500 objects."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "High Gen2 and a long finalizer queue are common for reasons unrelated to event subscriptions; their co-occurrence does not show subscriptions cause them."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled subscriber: if its root is a short-lived object, the subscriptions are not what keeps Gen2 objects alive.",
+            "command": "!gcroot \u003Csubscriber address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the subscriber count does not grow, the subscriptions are bounded, not accumulating."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "with-both",
+    "claims": [
+      {
+        "fingerprint": "insightengine::event-leak-pattern",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Leaks",
+          "measure": {
+            "value": 500,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "Gen2 and finalizer queue pressure",
+            "location": "event subscribers"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "3 event-leak group(s) hold 500 subscribers."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Gen2 holds 55.0% of the managed heap."
+          },
+          {
+            "observations": [
+              "observations[2]"
+            ],
+            "why": "The finalizer queue holds 2,500 objects."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "High Gen2 and a long finalizer queue are common for reasons unrelated to event subscriptions; their co-occurrence does not show subscriptions cause them."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled subscriber: if its root is a short-lived object, the subscriptions are not what keeps Gen2 objects alive.",
+            "command": "!gcroot \u003Csubscriber address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the subscriber count does not grow, the subscriptions are bounded, not accumulating."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "no-correlating-signal-says-nothing",
+    "claims": []
+  }
+]

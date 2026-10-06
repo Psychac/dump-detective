@@ -1,4 +1,5 @@
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -64,6 +65,35 @@ internal sealed class RecurringTimeoutPatternInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::recurring-timeout-pattern",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Measure = ClaimParts.Count(timeoutCount),
+                    Reference = ClaimParts.Budget(ClaimParts.Count(timeoutCount >= 20 ? 20 : 10), timeoutCount >= 20 ? "warning threshold" : "notice threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "timeout and cancellation exception objects on the heap" },
+                },
+                Support =
+                [
+                    new EvidenceStatement([population.Id], $"{timeoutCount:N0} timeout or cancellation exceptions are among {totalExceptions:N0} exception objects."),
+                    .. derivedFrom.Count > 1
+                        ? [new EvidenceStatement(derivedFrom.GetRange(1, derivedFrom.Count - 1), "Each is an exception type counted toward the timeout pattern.")]
+                        : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = Counter.None("A cancelled operation raises OperationCanceledException by design, so a count of them does not show a dependency is unstable."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gcroot <exception address>",
+                        Test = "On a sampled timeout exception: if !gcroot finds no root, it is garbage from a handled exception, not a current fault.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the same timeout types do not recur, the instability was a one-off.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Exceptions",
                 Severity = timeoutCount >= 20 ? Severity.Warning : Severity.Info,

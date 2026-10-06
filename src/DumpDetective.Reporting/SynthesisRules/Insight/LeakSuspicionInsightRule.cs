@@ -1,3 +1,4 @@
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -42,6 +43,23 @@ internal sealed class LeakSuspicionInsightRule : ISynthesisRule
                 findings.Add(new Claim
                 {
                     Fingerprint = "insightengine::leak-suspicion-highly-referenced",
+                    Assertion = new Assertion
+                    {
+                        Predicate = AssertionPredicate.Exhibits,
+                        Measure = ClaimParts.Count(highlyReferenced),
+                        Qualifiers = new AssertionQualifiers { Location = "objects with abnormally high incoming reference counts" },
+                    },
+                    Support = [new EvidenceStatement([retention.Id], $"{highlyReferenced:N0} objects have abnormally high incoming reference counts.")],
+                    Counter = Counter.None("A shared lookup object is referenced widely by design; a high incoming count does not show it is retained longer than intended."),
+                    FalsifiedBy =
+                    [
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.Windbg,
+                            Command = "!gcroot <object address>",
+                            Test = "On a sampled highly referenced object: if its referrers are short-lived, the high count is transient, not a retention hub.",
+                        },
+                    ],
                     Analyzer = "InsightEngine",
                     Category = "Memory",
                     Severity = Severity.Warning,
@@ -71,6 +89,29 @@ internal sealed class LeakSuspicionInsightRule : ISynthesisRule
                 findings.Add(new Claim
                 {
                     Fingerprint = "insightengine::leak-suspicion-duplicate-strings",
+                    Assertion = new Assertion
+                    {
+                        Predicate = AssertionPredicate.Duplicates,
+                        Measure = ClaimParts.Bytes(duplicateWastedBytes),
+                        Reference = ClaimParts.Budget(ClaimParts.Bytes(DuplicateWasteThresholdBytes), "duplicate-waste threshold"),
+                        Qualifiers = new AssertionQualifiers { Location = "duplicate string instances" },
+                    },
+                    Support = [new EvidenceStatement([strings.Id], $"{InsightByteFormat.FormatBytes(duplicateWastedBytes)} is wasted across {duplicatePatternCount:N0} duplicate patterns among {totalStrings:N0} strings.")],
+                    Counter = Counter.None("Duplicates inside short-lived structures are reclaimed with them; lifetime is not observed."),
+                    FalsifiedBy =
+                    [
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.Windbg,
+                            Command = "!dumpheap -strings",
+                            Test = $"If the most repeated strings in !dumpheap -strings add up to far less than {InsightByteFormat.FormatBytes(duplicateWastedBytes)}, the waste is overstated.",
+                        },
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.CodeInspection,
+                            Test = "If the repeated strings are already interned or pooled at the source, the duplicates are transient copies, not retained waste.",
+                        },
+                    ],
                     Analyzer = "InsightEngine",
                     Category = "Memory",
                     Severity = Severity.Info,

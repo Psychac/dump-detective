@@ -239,7 +239,7 @@ internal sealed class AsyncTaskSynthesisRule : ISynthesisRule
 
         if (signals.Count == 1)
         {
-            return ValueTask.FromResult<IReadOnlyList<Claim>>([ToFinding(top, derivedFrom)]);
+            return ValueTask.FromResult<IReadOnlyList<Claim>>([ToFinding(top, derivedFrom, StructureOf(top, population, orphanedTaskIds))]);
         }
 
         var findings = new List<Claim>(2)
@@ -247,6 +247,23 @@ internal sealed class AsyncTaskSynthesisRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = Fingerprint("risk-cluster"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Measure = ClaimParts.Count(signals.Count),
+                    Qualifiers = new AssertionQualifiers { Location = "async task risk signals", Scope = $"highest-risk signal: {top.Key}" },
+                },
+                Support = [new EvidenceStatement([population.Id], $"{signals.Count:N0} async risk signals over {totalTasks:N0} tasks.")],
+                Counter = Counter.None("This groups the signals reported alongside it and adds nothing they do not already state."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpasync",
+                        Test = "If !dumpasync shows the tasks completing or about to resume, the cluster of signals is transient.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Async",
                 Severity = aggregateSeverity,
@@ -259,15 +276,19 @@ internal sealed class AsyncTaskSynthesisRule : ISynthesisRule
                 DerivedFrom = derivedFrom,
                 Confidence = ConfidenceBreakdown.MeasurementCertain,
             },
-            ToFinding(top, derivedFrom),
+            ToFinding(top, derivedFrom, StructureOf(top, population, orphanedTaskIds)),
         };
 
         return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
 
-    private static Claim ToFinding(AsyncSignal signal, IReadOnlyList<ObservationId> derivedFrom) => new()
+    private static Claim ToFinding(AsyncSignal signal, IReadOnlyList<ObservationId> derivedFrom, SignalStructure structure) => new()
     {
         Fingerprint = Fingerprint(signal.Key),
+        Assertion = structure.Assertion,
+        Support = structure.Support,
+        Counter = structure.Counter,
+        FalsifiedBy = structure.FalsifiedBy,
         Analyzer = AnalyzerName,
         Category = "Async",
         Severity = signal.Severity,
@@ -287,6 +308,88 @@ internal sealed class AsyncTaskSynthesisRule : ISynthesisRule
         Severity.Warning => 2,
         _ => 1,
     };
+
+    private sealed record SignalStructure(
+        Assertion Assertion, IReadOnlyList<EvidenceStatement> Support, Counter Counter, IReadOnlyList<FalsificationTest> FalsifiedBy);
+
+    private static SignalStructure StructureOf(AsyncSignal signal, Observation population, IReadOnlyList<ObservationId> orphanedTaskIds)
+    {
+        List<ObservationId> populationOnly = [population.Id];
+        Measure value = ClaimParts.Count(signal.MetricValue);
+        bool warning = signal.Severity == Severity.Warning;
+
+        FalsificationTest dumpAsync(string test) => new()
+        {
+            Kind = FalsificationKind.Windbg,
+            Command = "!dumpasync",
+            Test = test,
+        };
+
+        FalsificationTest capture(string test) => new() { Kind = FalsificationKind.Capture, Test = test };
+
+        FalsificationTest inspection(string test) => new() { Kind = FalsificationKind.CodeInspection, Test = test };
+
+        Assertion assertion(AssertionPredicate predicate, string location, Reference? reference = null) => new()
+        {
+            Predicate = predicate,
+            Measure = value,
+            Reference = reference,
+            Qualifiers = new AssertionQualifiers { Location = location },
+        };
+
+        return signal.Key switch
+        {
+            "cycle" => new SignalStructure(
+                assertion(AssertionPredicate.Faults, "task continuation chains"),
+                [new EvidenceStatement(populationOnly, "A task's continuation chain cycles back to itself.")],
+                Counter.None("A cycle found in captured continuation references can be a state caught mid-completion; the dump cannot show it never resolves."),
+                [dumpAsync("If !dumpasync shows the continuation chain advancing past the reported cycle, it is not a deadlock."), capture("Capture a second dump; if the same tasks are no longer pending, the cycle resolved.")]),
+            "pending-oldgen" => new SignalStructure(
+                assertion(AssertionPredicate.Exhibits, "pending tasks in Gen2 or the LOH"),
+                [new EvidenceStatement(populationOnly, $"{signal.MetricValue:N0} pending tasks have survived into Gen2 or the LOH.")],
+                Counter.None("Long-lived pending tasks are normal for tasks awaiting rare events such as a shutdown signal."),
+                [dumpAsync("If the old-generation pending tasks in !dumpasync are awaiting a known rare event, they are not leaked."), capture("Capture a second dump; if the same tasks complete or the count falls, they were not stuck.")]),
+            "tcs-unresolved-oldgen" => new SignalStructure(
+                assertion(warning ? AssertionPredicate.Leaks : AssertionPredicate.Exhibits, "unresolved TaskCompletionSource instances in Gen2 or the LOH",
+                    warning ? ClaimParts.Budget(ClaimParts.Count(20), "warning threshold") : null),
+                [new EvidenceStatement(populationOnly, $"{signal.MetricValue:N0} unresolved TaskCompletionSource instances are in Gen2 or the LOH.")],
+                Counter.None("An unresolved TaskCompletionSource may await a legitimate rare event; the dump cannot show whether its completion path exists."),
+                [inspection("If the owning code always completes or cancels the TaskCompletionSource on shutdown, it is not leaked."), capture("Capture a second dump; if the same instances are now resolved, they were pending, not leaked.")]),
+            "vts-pending-oldgen" => new SignalStructure(
+                assertion(warning ? AssertionPredicate.Leaks : AssertionPredicate.Exhibits, "pending IValueTaskSource instances in Gen2 or the LOH",
+                    warning ? ClaimParts.Budget(ClaimParts.Count(20), "warning threshold") : null),
+                [new EvidenceStatement(populationOnly, $"{signal.MetricValue:N0} pending IValueTaskSource instances are in Gen2 or the LOH.")],
+                Counter.None("A pending IValueTaskSource may await a legitimate rare event; the dump cannot show whether its completion path exists."),
+                [inspection("If the owning code always completes the source on shutdown, it is not leaked."), capture("Capture a second dump; if the same instances have completed, they were pending, not leaked.")]),
+            "orphaned" => new SignalStructure(
+                assertion(AssertionPredicate.Exhibits, "tasks with no continuation that are not completed"),
+                [new EvidenceStatement(orphanedTaskIds.ToList(), $"{signal.MetricValue:N0} tasks have no continuation and are not completed.")],
+                Counter.None("A task with no continuation can still be observed by polling or blocking on it; the missing continuation does not show it is unobserved."),
+                [new FalsificationTest { Kind = FalsificationKind.Windbg, Command = "!gcroot <task address>", Test = "On a sampled orphaned task: if a thread stack references it, such as a blocked Wait, it is observed." }, inspection("If the code that creates these tasks observes them by polling IsCompleted or by Wait, they are not fire-and-forget.")]),
+            "faulted" => new SignalStructure(
+                assertion(AssertionPredicate.Faults, "tasks in the Faulted state"),
+                [new EvidenceStatement(populationOnly, $"{signal.MetricValue:N0} tasks are in the Faulted state.")],
+                Counter.None("The Faulted state does not show whether the exception was observed through await, Wait or Task.Exception."),
+                [inspection("If the owning code awaits each task or reads Task.Exception, the exceptions are observed."), capture("Capture a second dump; if the faulted count does not grow, the failures were isolated.")]),
+            "continuation-depth" => new SignalStructure(
+                assertion(AssertionPredicate.Exceeds, "async continuation chain depth",
+                    ClaimParts.Budget(ClaimParts.Count(warning ? 15 : 10), warning ? "warning threshold" : "notice threshold")),
+                [new EvidenceStatement(populationOnly, $"The deepest continuation chain is {signal.MetricValue:N0} levels.")],
+                Counter.None("Layered async APIs legitimately produce deep chains; depth alone does not show async-over-sync."),
+                [dumpAsync("If the deepest chain in !dumpasync is a sequence of distinct awaited methods advancing normally, it is layered async, not a loop."), inspection("If the awaiting code is a deliberately layered pipeline, the chain depth is by design.")]),
+            "pending" => new SignalStructure(
+                assertion(AssertionPredicate.Exceeds, "pending tasks",
+                    ClaimParts.Budget(ClaimParts.Count(500), "pending-task notice threshold")),
+                [new EvidenceStatement(populationOnly, $"{signal.MetricValue:N0} tasks are pending.")],
+                Counter.None("Pending tasks are normal under load; one snapshot does not show the queue is not draining."),
+                [new FalsificationTest { Kind = FalsificationKind.Windbg, Command = "!threadpool", Test = "If !threadpool shows idle workers and a short work queue, the pending tasks are not starved of threads." }, capture("Capture a second dump under comparable load; if the pending tasks are different ones, the queue is draining.")]),
+            _ => new SignalStructure(
+                assertion(AssertionPredicate.Exhibits, signal.Key),
+                [new EvidenceStatement(populationOnly, signal.Title)],
+                Counter.None("No counter-evidence is defined for this signal."),
+                [dumpAsync("If !dumpasync disagrees with the reported count, the signal is wrong.")]),
+        };
+    }
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();
 }

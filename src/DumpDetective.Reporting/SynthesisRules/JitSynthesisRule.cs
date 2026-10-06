@@ -1,3 +1,4 @@
+using DumpDetective.Sdk.Identity;
 using DumpDetective.Core.Utilities;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
@@ -70,6 +71,29 @@ internal sealed class JitSynthesisRule : ISynthesisRule
             signals.Add(new Claim
             {
                 Fingerprint = Fingerprint("heap-bloat"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Bytes(totalJitHeapBytes),
+                    Reference = ClaimParts.Budget(ClaimParts.Bytes(JitHeapBloatThreshold), "heap-bloat threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "the JIT code heap" },
+                },
+                Support = [new EvidenceStatement([activity.Id], $"The JIT code heap totals {FormatHelper.FormatBytes(totalJitHeapBytes)} across {jitManagerCount} JIT manager(s).")],
+                Counter = Counter.None("A large JIT heap is normal for a large codebase; one snapshot does not show it is growing."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!eeheap -loader",
+                        Test = $"If the code heap sizes in !eeheap -loader total far less than {FormatHelper.FormatBytes(totalJitHeapBytes)}, the figure is overstated.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the JIT heap is the same size, it is a stable footprint, not growth.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Performance",
                 Severity = Severity.Warning,
@@ -97,6 +121,24 @@ internal sealed class JitSynthesisRule : ISynthesisRule
                 signals.Add(new Claim
                 {
                     Fingerprint = Fingerprint("unmanaged-frame-ratio"),
+                    Assertion = new Assertion
+                    {
+                        Predicate = AssertionPredicate.Exceeds,
+                        Measure = ClaimParts.Percent(unmanagedRatio * 100.0),
+                        Reference = ClaimParts.Budget(ClaimParts.Percent(HighUnmanagedFrameRatio * 100.0), "unmanaged-frame threshold"),
+                        Qualifiers = new AssertionQualifiers { Location = "runtime and internal frames on thread stacks" },
+                    },
+                    Support = [new EvidenceStatement([activity.Id], $"{unmanagedFrameCount:N0} of {totalFrames:N0} stack frames are runtime or internal frames.")],
+                    Counter = Counter.None("Runtime-internal frames sit on every thread parked in a wait, so the share does not separate interop work from idle waiting."),
+                    FalsifiedBy =
+                    [
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.Windbg,
+                            Command = "!eestack",
+                            Test = "If most of the runtime frames belong to threads parked in wait or sleep, the share reflects idle threads, not interop activity.",
+                        },
+                    ],
                     Analyzer = AnalyzerName,
                     Category = "Performance",
                     Severity = Severity.Info,
@@ -121,6 +163,22 @@ internal sealed class JitSynthesisRule : ISynthesisRule
             signals.Add(new Claim
             {
                 Fingerprint = Fingerprint("tiered-compilation"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Measure = ClaimParts.Count(tieredMethodCount),
+                    Qualifiers = new AssertionQualifiers { Location = "methods with more than one native code address", Mechanism = "tiered recompilation" },
+                },
+                Support = [new EvidenceStatement([activity.Id], $"About {tieredMethodCount:N0} stack-visible methods show multiple native code addresses.")],
+                Counter = Counter.None("Tiered recompilation is expected runtime behaviour and asserts no problem, so there is nothing to weaken."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If TieredCompilation is disabled in the runtime configuration, the multiple code addresses have another cause.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Performance",
                 Severity = Severity.Info,
@@ -150,6 +208,29 @@ internal sealed class JitSynthesisRule : ISynthesisRule
             signals.Add(new Claim
             {
                 Fingerprint = Fingerprint("large-methods"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Bytes(topSize),
+                    Reference = ClaimParts.Budget(ClaimParts.Bytes(largeMethodThresholdBytes), "large-method threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = $"the largest method on stacks, {largeMethodCount} over the threshold" },
+                },
+                Support = [new EvidenceStatement([activity.Id], $"The largest method on stacks is '{topSignature}' at {FormatHelper.FormatBytes(topSize)} of native code.")],
+                Counter = Counter.None("Large methods are often generated code, such as serializers or parsers, that cannot reasonably be split."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpmd <method descriptor>",
+                        Test = $"If the code size of '{topSignature}' in !dumpmd is far from {FormatHelper.FormatBytes(topSize)}, the size is wrong.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the method is machine-generated, refactoring it is not an option.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Performance",
                 Severity = Severity.Info,
@@ -173,6 +254,27 @@ internal sealed class JitSynthesisRule : ISynthesisRule
             signals.Add(new Claim
             {
                 Fingerprint = Fingerprint("dynamic-codegen"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Measure = ClaimParts.Count(dynamicMethodFrameCount),
+                    Qualifiers = new AssertionQualifiers { Location = "active frames in dynamic modules", Mechanism = "DynamicMethod, emitted types or compiled expression trees" },
+                },
+                Support = [new EvidenceStatement([activity.Id], $"{dynamicMethodFrameCount:N0} active frames resolve to a dynamic module.")],
+                Counter = Counter.None("Frameworks cache dynamic code; frames on stacks do not show it is regenerated repeatedly."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the dynamic methods are the same ones and the JIT heap is flat, the code is cached.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the expression trees or emitted types are compiled once and stored, they are not regenerated per call.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Performance",
                 Severity = Severity.Info,
@@ -196,6 +298,25 @@ internal sealed class JitSynthesisRule : ISynthesisRule
             signals.Add(new Claim
             {
                 Fingerprint = Fingerprint("deep-stack"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Subject = new ThreadRef { OsThreadId = maxThreadFrameDepthOSThreadId, Fidelity = MatchFidelity.Exact },
+                    Measure = ClaimParts.Count(maxThreadFrameDepth),
+                    Reference = ClaimParts.Budget(ClaimParts.Count(DeepStackFrameThreshold), "deep-stack threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "the deepest thread stack" },
+                },
+                Support = [new EvidenceStatement([activity.Id], $"OS thread {maxThreadFrameDepthOSThreadId} has {maxThreadFrameDepth:N0} frames.")],
+                Counter = Counter.None("Legitimate recursion, such as a tree walk, produces deep stacks; depth alone does not show unbounded recursion."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!clrstack",
+                        Test = $"On OS thread {maxThreadFrameDepthOSThreadId}: if the frames show a bounded walk with different methods at each level, not one repeating cycle, it is not runaway recursion.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Performance",
                 Severity = Severity.Warning,
@@ -224,6 +345,23 @@ internal sealed class JitSynthesisRule : ISynthesisRule
             new()
             {
                 Fingerprint = Fingerprint("overview"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Composes,
+                    Measure = ClaimParts.Bytes(totalJitHeapBytes),
+                    Qualifiers = new AssertionQualifiers { Location = "JIT code heap and stack activity" },
+                },
+                Support = [new EvidenceStatement([activity.Id], $"{FormatHelper.FormatBytes(totalJitHeapBytes)} JIT heap; {activeMethodsOnStacks:N0} managed and {unmanagedFrameCount:N0} runtime frames on stacks.")],
+                Counter = Counter.None("This describes JIT activity and asserts no problem, so there is nothing to weaken."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!eeheap -loader",
+                        Test = $"If the code heap total in !eeheap -loader is far from {FormatHelper.FormatBytes(totalJitHeapBytes)}, the overview is wrong.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Performance",
                 Severity = summarySeverity,

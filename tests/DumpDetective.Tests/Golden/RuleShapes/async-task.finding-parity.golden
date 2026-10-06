@@ -1,0 +1,455 @@
+rule: async-task.finding-parity
+version: 1
+[
+  {
+    "name": "cycle",
+    "claims": [
+      {
+        "fingerprint": "async task analysis::cycle",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Faults",
+          "measure": {
+            "value": 1,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "task continuation chains"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "A task\u0027s continuation chain cycles back to itself."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A cycle found in captured continuation references can be a state caught mid-completion; the dump cannot show it never resolves."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !dumpasync shows the continuation chain advancing past the reported cycle, it is not a deadlock.",
+            "command": "!dumpasync"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump; if the same tasks are no longer pending, the cycle resolved."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "pending-old-generation-warning",
+    "claims": [
+      {
+        "fingerprint": "async task analysis::pending-oldgen",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 30,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "pending tasks in Gen2 or the LOH"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "30 pending tasks have survived into Gen2 or the LOH."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Long-lived pending tasks are normal for tasks awaiting rare events such as a shutdown signal."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the old-generation pending tasks in !dumpasync are awaiting a known rare event, they are not leaked.",
+            "command": "!dumpasync"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump; if the same tasks complete or the count falls, they were not stuck."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "unresolved-tcs-warning",
+    "claims": [
+      {
+        "fingerprint": "async task analysis::tcs-unresolved-oldgen",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Leaks",
+          "measure": {
+            "value": 25,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 20,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "unresolved TaskCompletionSource instances in Gen2 or the LOH"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "25 unresolved TaskCompletionSource instances are in Gen2 or the LOH."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "An unresolved TaskCompletionSource may await a legitimate rare event; the dump cannot show whether its completion path exists."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "CodeInspection",
+            "test": "If the owning code always completes or cancels the TaskCompletionSource on shutdown, it is not leaked."
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump; if the same instances are now resolved, they were pending, not leaked."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "pending-vts-info",
+    "claims": [
+      {
+        "fingerprint": "async task analysis::vts-pending-oldgen",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 3,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "pending IValueTaskSource instances in Gen2 or the LOH"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "3 pending IValueTaskSource instances are in Gen2 or the LOH."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A pending IValueTaskSource may await a legitimate rare event; the dump cannot show whether its completion path exists."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "CodeInspection",
+            "test": "If the owning code always completes the source on shutdown, it is not leaked."
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump; if the same instances have completed, they were pending, not leaked."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "orphaned",
+    "claims": [
+      {
+        "fingerprint": "async task analysis::orphaned",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 3,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "tasks with no continuation that are not completed"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1..3]"
+            ],
+            "why": "3 tasks have no continuation and are not completed."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A task with no continuation can still be observed by polling or blocking on it; the missing continuation does not show it is unobserved."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled orphaned task: if a thread stack references it, such as a blocked Wait, it is observed.",
+            "command": "!gcroot \u003Ctask address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the code that creates these tasks observes them by polling IsCompleted or by Wait, they are not fire-and-forget."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "faulted",
+    "claims": [
+      {
+        "fingerprint": "async task analysis::faulted",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Faults",
+          "measure": {
+            "value": 5,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "tasks in the Faulted state"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "5 tasks are in the Faulted state."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The Faulted state does not show whether the exception was observed through await, Wait or Task.Exception."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "CodeInspection",
+            "test": "If the owning code awaits each task or reads Task.Exception, the exceptions are observed."
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump; if the faulted count does not grow, the failures were isolated."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "deep-continuation",
+    "claims": [
+      {
+        "fingerprint": "async task analysis::continuation-depth",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 16,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 15,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "async continuation chain depth"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The deepest continuation chain is 16 levels."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Layered async APIs legitimately produce deep chains; depth alone does not show async-over-sync."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the deepest chain in !dumpasync is a sequence of distinct awaited methods advancing normally, it is layered async, not a loop.",
+            "command": "!dumpasync"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the awaiting code is a deliberately layered pipeline, the chain depth is by design."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "pending-critical",
+    "claims": [
+      {
+        "fingerprint": "async task analysis::pending",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 3000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 500,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "pending-task notice threshold"
+          },
+          "qualifiers": {
+            "location": "pending tasks"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "3,000 tasks are pending."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Pending tasks are normal under load; one snapshot does not show the queue is not draining."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !threadpool shows idle workers and a short work queue, the pending tasks are not starved of threads.",
+            "command": "!threadpool"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the pending tasks are different ones, the queue is draining."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "cluster-faulted-and-pending",
+    "claims": [
+      {
+        "fingerprint": "async task analysis::risk-cluster",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 2,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "async task risk signals",
+            "scope": "highest-risk signal: pending"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "2 async risk signals over 4,000 tasks."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This groups the signals reported alongside it and adds nothing they do not already state."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !dumpasync shows the tasks completing or about to resume, the cluster of signals is transient.",
+            "command": "!dumpasync"
+          }
+        ]
+      },
+      {
+        "fingerprint": "async task analysis::pending",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 3000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 500,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "pending-task notice threshold"
+          },
+          "qualifiers": {
+            "location": "pending tasks"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "3,000 tasks are pending."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Pending tasks are normal under load; one snapshot does not show the queue is not draining."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !threadpool shows idle workers and a short work queue, the pending tasks are not starved of threads.",
+            "command": "!threadpool"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the pending tasks are different ones, the queue is draining."
+          }
+        ]
+      }
+    ]
+  }
+]

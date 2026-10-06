@@ -129,6 +129,15 @@ internal sealed class LeakCandidateSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint($"critical.{candidate.TypeName}"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Leaks,
+                    Measure = ClaimParts.Bytes(candidate.TotalSize),
+                    Qualifiers = new AssertionQualifiers { Location = $"instances of {candidate.TypeName}", Mechanism = candidate.Classification.ToString() },
+                },
+                Support = [new EvidenceStatement([candidate.ObservationId], $"{candidate.TypeName} scores {candidate.Score:N0}, classified {candidate.Classification}: {candidate.InstanceCount:N0} instances, {candidate.Gen2Pct:F1}% in Gen2.")],
+                Counter = HeuristicCounter(candidate.ObservationId),
+                FalsifiedBy = LeakFalsifiedBy(candidate.TypeName),
                 Analyzer = AnalyzerName,
                 Category = "Retention",
                 Severity = Severity.Critical,
@@ -204,6 +213,15 @@ internal sealed class LeakCandidateSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("aggregate"),
+                Assertion = new Assertion
+                {
+                    Predicate = maxSeverity == Severity.Info ? AssertionPredicate.Exhibits : AssertionPredicate.Leaks,
+                    Measure = ClaimParts.Bytes(totalShallowBytes),
+                    Qualifiers = new AssertionQualifiers { Location = $"the top {consideredCount} leak candidate type(s)", Mechanism = dominantClass.ToString() },
+                },
+                Support = [new EvidenceStatement(derivedFrom, $"{consideredCount:N0} candidate type(s) of {candidates.Count:N0} hold {FormatHelper.FormatBytes(totalShallowBytes)} across {totalInstances:N0} instances.")],
+                Counter = HeuristicCounter(derivedFrom[0]),
+                FalsifiedBy = LeakFalsifiedBy(exampleA),
                 Analyzer = AnalyzerName,
                 Category = "Retention",
                 Severity = maxSeverity,
@@ -238,6 +256,26 @@ internal sealed class LeakCandidateSynthesisRule : ISynthesisRule
     private static readonly ConfidenceBreakdown HeuristicClassificationConfidence = DataQualityPenalties.Apply(
         ConfidenceBreakdown.MeasurementCertain with { Composite = 0.75, EvidenceStrength = 0.75 },
         new DataQualityPenalty(true, 0.15, "Heuristic-only leak analysis; no full retention scan."));
+
+    private static Counter HeuristicCounter(ObservationId candidateObservation) =>
+        Counter.Of(new EvidenceStatement(
+            [candidateObservation],
+            "Suspicion scoring and classification are heuristics over per-type shape facts; no full retention scan shows this type is leaked."));
+
+    private static IReadOnlyList<FalsificationTest> LeakFalsifiedBy(string typeDescription) =>
+    [
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.Windbg,
+            Command = "!gcroot <instance address>",
+            Test = $"On a sampled instance of {typeDescription}: if its root is a request frame, the instances are short-lived, not retained.",
+        },
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.Capture,
+            Test = "Capture a second dump under comparable load; if the instance count and size do not grow, the type is a stable working set, not a leak.",
+        },
+    ];
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();
 

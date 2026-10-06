@@ -1,0 +1,360 @@
+rule: http-object.finding-parity
+version: 1
+[
+  {
+    "name": "httpclient-per-request-critical",
+    "claims": [
+      {
+        "fingerprint": "http object analysis::httpclient-count",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 20,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 20,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "HttpClient instances on the managed heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1..20]"
+            ],
+            "why": "20 HttpClient instances: 20 in Gen0, 0 in Gen1, 0 in Gen2."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Instances on the heap include ones awaiting collection; nothing observed shows they are created per request."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If far fewer than 20 HttpClient instances are live, the count includes garbage awaiting collection.",
+            "command": "!dumpheap -live -stat -type HttpClient"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If HttpClient instances are created by IHttpClientFactory, one per named client, the count is the number of clients by design."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "httpclient-long-lived",
+    "claims": [
+      {
+        "fingerprint": "http object analysis::httpclient-count",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 6,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 5,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "HttpClient instances on the managed heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1..6]"
+            ],
+            "why": "6 HttpClient instances: 0 in Gen0, 0 in Gen1, 6 in Gen2."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[1..6]"
+              ],
+              "why": "6 of the instances are in Gen2, consistent with long-lived reuse, so the count may be by design, for example one per named client."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If far fewer than 6 HttpClient instances are live, the count includes garbage awaiting collection.",
+            "command": "!dumpheap -live -stat -type HttpClient"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If HttpClient instances are created by IHttpClientFactory, one per named client, the count is the number of clients by design."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "webrequest-and-response",
+    "claims": [
+      {
+        "fingerprint": "http object analysis::httpwebrequest-accumulation",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 10,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 10,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "HttpWebRequest objects on the managed heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1..10]"
+            ],
+            "why": "10 HttpWebRequest objects are on the heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Requests awaiting collection also appear on the heap; nothing observed shows they are retained."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If far fewer than 10 HttpWebRequest objects are live, the count includes garbage awaiting collection.",
+            "command": "!dumpheap -live -stat -type HttpWebRequest"
+          }
+        ]
+      },
+      {
+        "fingerprint": "http object analysis::httpwebresponse-not-disposed",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 25,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 20,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "mechanism": "undisposed responses hold their network stream open",
+            "location": "HttpWebResponse objects on the managed heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "25 HttpWebResponse objects are on the heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A response awaiting collection after being disposed also appears on the heap; the count does not show it is undisposed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled response: if its stream and connection are already closed, it was disposed.",
+            "command": "!do \u003Cresponse address\u003E"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "handlers-with-a-module",
+    "claims": [
+      {
+        "fingerprint": "http object analysis::httpmessagehandler-accumulation",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 60,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "HttpMessageHandler instances on the managed heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "60 HttpMessageHandler instances are on the heap."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "The module that contributes the most handler instances."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A long DelegatingHandler pipeline contributes several handlers per client by design; the count alone does not show handlers are leaked."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If far fewer than 60 handler instances are live, the count includes garbage awaiting collection.",
+            "command": "!dumpheap -live -stat -type HttpMessageHandler"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the handlers are the pipeline stages of a fixed number of clients, the count is clients times pipeline depth, by design."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "service-points",
+    "claims": [
+      {
+        "fingerprint": "http object analysis::servicepoint-accumulation",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 50,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "ServicePoint objects on the managed heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1..50]"
+            ],
+            "why": "50 ServicePoint objects are on the heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "One ServicePoint exists per distinct endpoint; many endpoints produce many objects without any leak."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !dumpheap finds far fewer than 50 ServicePoint objects, the count is overstated.",
+            "command": "!dumpheap -stat -type ServicePoint"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the application talks to that many distinct hosts, the count reflects endpoints, not accumulation."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "handler-tracking-churn",
+    "claims": [
+      {
+        "fingerprint": "http object analysis::handler-tracking-churn",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 20,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 20,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "expired IHttpClientFactory handler tracking entries"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1..24]"
+            ],
+            "why": "20 expired and 4 active handler tracking entries."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Expired entries are freed once nothing references the old handler; their presence shows rotation, not that handlers are held."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump later; if the expired entries are gone, they were awaiting cleanup after normal rotation."
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the factory\u0027s HandlerLifetime is short by configuration, frequent rotation is expected."
+          }
+        ]
+      }
+    ]
+  }
+]

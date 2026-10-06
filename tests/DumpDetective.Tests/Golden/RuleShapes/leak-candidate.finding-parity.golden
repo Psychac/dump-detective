@@ -1,0 +1,155 @@
+rule: leak-candidate.finding-parity
+version: 1
+[
+  {
+    "name": "critical-candidate",
+    "claims": [
+      {
+        "fingerprint": "leak candidate analysis::critical.app.cache",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Leaks",
+          "measure": {
+            "value": 209715200,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "qualifiers": {
+            "mechanism": "DependentHandleLeak",
+            "location": "instances of App.Cache"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "App.Cache scores 100, classified DependentHandleLeak: 9,000 instances, 90.0% in Gen2."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "Suspicion scoring and classification are heuristics over per-type shape facts; no full retention scan shows this type is leaked."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled instance of App.Cache: if its root is a request frame, the instances are short-lived, not retained.",
+            "command": "!gcroot \u003Cinstance address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the instance count and size do not grow, the type is a stable working set, not a leak."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "warning-aggregate",
+    "claims": [
+      {
+        "fingerprint": "leak candidate analysis::aggregate",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Leaks",
+          "measure": {
+            "value": 209715200,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "qualifiers": {
+            "mechanism": "StaticRetention",
+            "location": "the top 1 leak candidate type(s)"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "1 candidate type(s) of 1 hold 200 MB across 9,000 instances."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "Suspicion scoring and classification are heuristics over per-type shape facts; no full retention scan shows this type is leaked."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled instance of App.Cache (score 75): if its root is a request frame, the instances are short-lived, not retained.",
+            "command": "!gcroot \u003Cinstance address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the instance count and size do not grow, the type is a stable working set, not a leak."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "info-cluster-of-two",
+    "claims": [
+      {
+        "fingerprint": "leak candidate analysis::aggregate",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 3145728,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "qualifiers": {
+            "mechanism": "Unknown",
+            "location": "the top 2 leak candidate type(s)"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]",
+              "observations[0]"
+            ],
+            "why": "2 candidate type(s) of 2 hold 3 MB across 30 instances."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[1]"
+              ],
+              "why": "Suspicion scoring and classification are heuristics over per-type shape facts; no full retention scan shows this type is leaked."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled instance of App.B (score 0): if its root is a request frame, the instances are short-lived, not retained.",
+            "command": "!gcroot \u003Cinstance address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the instance count and size do not grow, the type is a stable working set, not a leak."
+          }
+        ]
+      }
+    ]
+  }
+]

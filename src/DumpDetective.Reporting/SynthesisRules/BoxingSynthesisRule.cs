@@ -86,6 +86,21 @@ internal sealed class BoxingSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("boxed-enum"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(boxedEnumCount),
+                    Reference = enumSeverity switch
+                    {
+                        Severity.Critical => ClaimParts.Budget(ClaimParts.Count(1_000_000), "critical threshold"),
+                        Severity.Warning => ClaimParts.Budget(ClaimParts.Count(50_000), "warning threshold"),
+                        _ => ClaimParts.Budget(ClaimParts.Count(1_000), "notice threshold"),
+                    },
+                    Qualifiers = new AssertionQualifiers { Location = "boxed enum instances" },
+                },
+                Support = [new EvidenceStatement([pressure.Id], $"{boxedEnumCount:N0} boxed enum instances hold {FormatHelper.FormatBytes(boxedEnumBytes)}; the top type is {topEnumName}.")],
+                Counter = Counter.None("Live boxes are counted, not the allocation rate; boxes that die young cost little."),
+                FalsifiedBy = BoxingFalsifiedBy("enum"),
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = enumSeverity,
@@ -109,6 +124,18 @@ internal sealed class BoxingSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("nullable-boxing"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(nullableBoxedCount),
+                    Reference = nullableBoxedCount > 10_000
+                        ? ClaimParts.Budget(ClaimParts.Count(10_000), "warning threshold")
+                        : ClaimParts.Budget(ClaimParts.Count(100), "notice threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "boxed Nullable<T> instances" },
+                },
+                Support = [new EvidenceStatement([pressure.Id], $"{nullableBoxedCount:N0} boxed Nullable<T> instances hold {FormatHelper.FormatBytes(nullableBoxedBytes)}.")],
+                Counter = Counter.None("Live boxes are counted, not the allocation rate; boxes that die young cost little."),
+                FalsifiedBy = BoxingFalsifiedBy("Nullable"),
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = nullableBoxedCount > 10_000 ? Severity.Warning : Severity.Info,
@@ -139,6 +166,29 @@ internal sealed class BoxingSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("struct-padding"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Percent(wasteRatio * 100.0),
+                    Reference = ClaimParts.Budget(ClaimParts.Percent(25), "padding-waste threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = $"struct {typeName}", Mechanism = "field alignment padding" },
+                },
+                Support = [new EvidenceStatement([worstPadding.Id], $"'{typeName}' wastes {wastedPaddingBytes} of its {structSize} bytes per instance; its fields total {fieldBytes} bytes.")],
+                Counter = Counter.None("Padding waste is per instance; it matters only if there are many instances, which this figure does not show."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = $"!dumpmt -md <{typeName} method table>",
+                        Test = $"If the instance size of {typeName} is not {structSize} bytes, or its fields do not total {fieldBytes}, the waste is wrong.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the layout is fixed for native interop, reordering fields is not possible.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = Severity.Info,
@@ -170,6 +220,28 @@ internal sealed class BoxingSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("oversized-value-types"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(oversizedValueTypeInstanceCount),
+                    Reference = oversizedSeverity switch
+                    {
+                        Severity.Critical => ClaimParts.Budget(ClaimParts.Count(500_000), "critical threshold"),
+                        Severity.Warning => ClaimParts.Budget(ClaimParts.Count(100_000), "warning threshold"),
+                        _ => ClaimParts.Budget(ClaimParts.Count(100), "notice threshold"),
+                    },
+                    Qualifiers = new AssertionQualifiers { Location = "instances of value types over 64 bytes" },
+                },
+                Support = [new EvidenceStatement([pressure.Id], $"{oversizedValueTypeInstanceCount:N0} instances of value types larger than 64 bytes; top offenders: {oversizedTypeList}.")],
+                Counter = Counter.None("Large structs cost copy time, not retained memory; whether they are copied on a hot path is not observed."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the large structs are passed by reference, with in or ref parameters, the copy cost does not arise.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = oversizedSeverity,
@@ -195,6 +267,18 @@ internal sealed class BoxingSynthesisRule : ISynthesisRule
                 findings.Add(new Claim
                 {
                     Fingerprint = Fingerprint("retained-boxing"),
+                    Assertion = new Assertion
+                    {
+                        Predicate = AssertionPredicate.Exceeds,
+                        Measure = ClaimParts.Percent(gen2Fraction * 100.0),
+                        Reference = gen2Fraction > 0.8
+                            ? ClaimParts.Budget(ClaimParts.Percent(80), "warning threshold")
+                            : ClaimParts.Budget(ClaimParts.Percent(50), "notice threshold"),
+                        Qualifiers = new AssertionQualifiers { Location = "boxed instances in Generation 2" },
+                    },
+                    Support = [new EvidenceStatement([pressure.Id], $"{totalGen2BoxedCount:N0} of {totalBoxedObjects:N0} boxed instances are in Gen2.")],
+                    Counter = Counter.None("Boxes in Gen2 may be held by a long-lived cache on purpose; their presence does not show an unintended retention."),
+                    FalsifiedBy = BoxingFalsifiedBy("boxed"),
                     Analyzer = AnalyzerName,
                     Category = "Memory",
                     Severity = gen2Fraction > 0.8 ? Severity.Warning : Severity.Info,
@@ -227,6 +311,23 @@ internal sealed class BoxingSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("missing-iequatable"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Measure = ClaimParts.Count(missingEquatableInstances),
+                    Reference = ClaimParts.Budget(ClaimParts.Count(1_000), "notice threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "boxed value types without IEquatable<T>" },
+                },
+                Support = [new EvidenceStatement(ClaimParts.IdsOf(missingEquatable), $"{missingEquatableInstances:N0} boxed instances across {missingEquatable.Count} value type(s) do not implement IEquatable<T>.")],
+                Counter = Counter.None("Equality boxes only when instances are compared; boxed instances on the heap do not show that comparisons happen."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the listed types are not used as dictionary keys or compared via Contains, the missing interface costs nothing.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = Severity.Info,
@@ -252,6 +353,15 @@ internal sealed class BoxingSynthesisRule : ISynthesisRule
         findings.Add(new Claim
         {
             Fingerprint = Fingerprint("overview"),
+            Assertion = new Assertion
+            {
+                Predicate = AssertionPredicate.Composes,
+                Measure = ClaimParts.Bytes(totalBoxedBytes),
+                Qualifiers = new AssertionQualifiers { Location = "boxed value type instances" },
+            },
+            Support = [new EvidenceStatement([pressure.Id], $"{totalBoxedObjects:N0} boxed instances hold {FormatHelper.FormatBytes(totalBoxedBytes)}.")],
+            Counter = Counter.None("This describes boxing volume and asserts no problem, so there is nothing to weaken."),
+            FalsifiedBy = BoxingFalsifiedBy("boxed"),
             Analyzer = AnalyzerName,
             Category = "Memory",
             Severity = overallSeverity,
@@ -273,6 +383,21 @@ internal sealed class BoxingSynthesisRule : ISynthesisRule
 
         return ValueTask.FromResult<IReadOnlyList<Claim>>(findings);
     }
+
+    private static IReadOnlyList<FalsificationTest> BoxingFalsifiedBy(string kind) =>
+    [
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.Windbg,
+            Command = "!dumpheap -stat",
+            Test = $"If the {kind} types in !dumpheap -stat total far fewer instances than the reported count, the figure is overstated.",
+        },
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.Capture,
+            Test = "Capture a second dump under comparable load; if the boxes are different ones and the count is flat, they are churn, not accumulation.",
+        },
+    ];
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();
 }

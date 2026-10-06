@@ -1,0 +1,337 @@
+rule: jit.finding-parity
+version: 1
+[
+  {
+    "name": "everything-fires",
+    "claims": [
+      {
+        "fingerprint": "jit analysis::overview",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Composes",
+          "measure": {
+            "value": 629145600,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "qualifiers": {
+            "location": "JIT code heap and stack activity"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "600 MB JIT heap; 100 managed and 60 runtime frames on stacks."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This describes JIT activity and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the code heap total in !eeheap -loader is far from 600 MB, the overview is wrong.",
+            "command": "!eeheap -loader"
+          }
+        ]
+      },
+      {
+        "fingerprint": "jit analysis::heap-bloat",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 629145600,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 524288000,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "heap-bloat threshold"
+          },
+          "qualifiers": {
+            "location": "the JIT code heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The JIT code heap totals 600 MB across 3 JIT manager(s)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A large JIT heap is normal for a large codebase; one snapshot does not show it is growing."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the code heap sizes in !eeheap -loader total far less than 600 MB, the figure is overstated.",
+            "command": "!eeheap -loader"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the JIT heap is the same size, it is a stable footprint, not growth."
+          }
+        ]
+      },
+      {
+        "fingerprint": "jit analysis::unmanaged-frame-ratio",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 37.5,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 30,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "unmanaged-frame threshold"
+          },
+          "qualifiers": {
+            "location": "runtime and internal frames on thread stacks"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "60 of 160 stack frames are runtime or internal frames."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Runtime-internal frames sit on every thread parked in a wait, so the share does not separate interop work from idle waiting."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If most of the runtime frames belong to threads parked in wait or sleep, the share reflects idle threads, not interop activity.",
+            "command": "!eestack"
+          }
+        ]
+      },
+      {
+        "fingerprint": "jit analysis::tiered-compilation",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 5,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "tiered recompilation",
+            "location": "methods with more than one native code address"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "About 5 stack-visible methods show multiple native code addresses."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Tiered recompilation is expected runtime behaviour and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "CodeInspection",
+            "test": "If TieredCompilation is disabled in the runtime configuration, the multiple code addresses have another cause."
+          }
+        ]
+      },
+      {
+        "fingerprint": "jit analysis::large-methods",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 122880,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 65536,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "large-method threshold"
+          },
+          "qualifiers": {
+            "location": "the largest method on stacks, 2 over the threshold"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The largest method on stacks is \u0027App.Generated.Parse()\u0027 at 120 KB of native code."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Large methods are often generated code, such as serializers or parsers, that cannot reasonably be split."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the code size of \u0027App.Generated.Parse()\u0027 in !dumpmd is far from 120 KB, the size is wrong.",
+            "command": "!dumpmd \u003Cmethod descriptor\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the method is machine-generated, refactoring it is not an option."
+          }
+        ]
+      },
+      {
+        "fingerprint": "jit analysis::dynamic-codegen",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 3,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "DynamicMethod, emitted types or compiled expression trees",
+            "location": "active frames in dynamic modules"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "3 active frames resolve to a dynamic module."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Frameworks cache dynamic code; frames on stacks do not show it is regenerated repeatedly."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the dynamic methods are the same ones and the JIT heap is flat, the code is cached."
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the expression trees or emitted types are compiled once and stored, they are not regenerated per call."
+          }
+        ]
+      },
+      {
+        "fingerprint": "jit analysis::deep-stack",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "subject": {
+            "$kind": "thread",
+            "kind": "Thread",
+            "osThreadId": 100,
+            "joinKey": "100",
+            "fidelity": "Exact"
+          },
+          "measure": {
+            "value": 600,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 500,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "deep-stack threshold"
+          },
+          "qualifiers": {
+            "location": "the deepest thread stack"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "OS thread 100 has 600 frames."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Legitimate recursion, such as a tree walk, produces deep stacks; depth alone does not show unbounded recursion."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On OS thread 100: if the frames show a bounded walk with different methods at each level, not one repeating cycle, it is not runaway recursion.",
+            "command": "!clrstack"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "quiet",
+    "claims": [
+      {
+        "fingerprint": "jit analysis::overview",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Composes",
+          "measure": {
+            "value": 10485760,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "qualifiers": {
+            "location": "JIT code heap and stack activity"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "10 MB JIT heap; 100 managed and 10 runtime frames on stacks."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This describes JIT activity and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the code heap total in !eeheap -loader is far from 10 MB, the overview is wrong.",
+            "command": "!eeheap -loader"
+          }
+        ]
+      }
+    ]
+  }
+]

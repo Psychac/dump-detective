@@ -135,7 +135,7 @@ system. It gates M4.
      `ISynthesisRule`, recorded in `derivedFrom` as rule id + version. A per-rule golden-output test fails
      when a rule's emitted findings change shape without a version bump. Derived (hash) versions rejected:
      they change on any rebuild, so identical rules from different builds would look different.
-4. **Rule migration** *(in progress — 28 of 76 rules; pilot 2026-10-05, batches 1-6 2026-10-06)* — all 76 rules author `assertion`, `counter`, `falsifiedBy`.
+4. **Rule migration** *(in progress — 33 of 76 rules; pilot 2026-10-05, batches 1-7 2026-10-06)* — all 76 rules author `assertion`, `counter`, `falsifiedBy`.
    - Done: `LohFragmentationSynthesisRule` (pilot), with the per-rule golden mechanism
      (`Golden/RuleShapeGolden.cs`, goldens in `Golden/RuleShapes/`; `DD_BLESS_RULE_SHAPES=1` to bless). Fails when
      a rule's claim shape changes without a `Version` bump, or the version changes without a re-bless.
@@ -169,6 +169,12 @@ system. It gates M4.
      (a lineage change for that one claim, in `report.json` only). Verified on the reference dump: 40 of 82
      findings carry an assertion. Known oddity kept as the rule defines it: the `WeakReference` overview claim
      takes the highest severity of its signals but asserts `Composes`.
+   - Batch 7 (2026-10-06): `Jit` (7 claims), `LeakCandidate` (critical + aggregate), `Boxing` (7), `AsyncTask` (one
+     claim per signal plus the cluster; structure chosen by signal key), `HttpObject` (6). Tests in
+     `RuntimeBoxingAsyncAndHttpRuleClaimTests`. Review caught unresolved-promise claims asserting `Leaks` at Info
+     severity; they now say `Exhibits` until they reach Warning. Verified on the reference dump: 50 of 82
+     findings carry an assertion. Remaining per-analyzer rules: `HeapTopology`, `Module`, `FinalizableObject`;
+     the ~37 cross-analyzer rules in `Insight/` follow.
    - `RuleShapeGolden` now enforces the plan's per-claim gates on every migrated rule: an assertion, at least one
      falsification test, an explicit counter (evidence or `None` with a reason), non-empty support, and every cited
      observation inside the claim's own `DerivedFrom`. Long evidence lists collapse to ranges in goldens.

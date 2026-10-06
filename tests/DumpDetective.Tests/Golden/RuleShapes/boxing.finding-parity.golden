@@ -1,0 +1,357 @@
+rule: boxing.finding-parity
+version: 1
+[
+  {
+    "name": "everything-fires",
+    "claims": [
+      {
+        "fingerprint": "boxing analysis::boxed-enum",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 60000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 50000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "boxed enum instances"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "60,000 boxed enum instances hold 1.37 MB; the top type is App.Flags."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Live boxes are counted, not the allocation rate; boxes that die young cost little."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the enum types in !dumpheap -stat total far fewer instances than the reported count, the figure is overstated.",
+            "command": "!dumpheap -stat"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the boxes are different ones and the count is flat, they are churn, not accumulation."
+          }
+        ]
+      },
+      {
+        "fingerprint": "boxing analysis::nullable-boxing",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 20000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 10000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "boxed Nullable\u003CT\u003E instances"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "20,000 boxed Nullable\u003CT\u003E instances hold 468.75 KB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Live boxes are counted, not the allocation rate; boxes that die young cost little."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the Nullable types in !dumpheap -stat total far fewer instances than the reported count, the figure is overstated.",
+            "command": "!dumpheap -stat"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the boxes are different ones and the count is flat, they are churn, not accumulation."
+          }
+        ]
+      },
+      {
+        "fingerprint": "boxing analysis::struct-padding",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 50,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 25,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "padding-waste threshold"
+          },
+          "qualifiers": {
+            "mechanism": "field alignment padding",
+            "location": "struct App.Wasteful"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[3]"
+            ],
+            "why": "\u0027App.Wasteful\u0027 wastes 16 of its 32 bytes per instance; its fields total 16 bytes."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Padding waste is per instance; it matters only if there are many instances, which this figure does not show."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the instance size of App.Wasteful is not 32 bytes, or its fields do not total 16, the waste is wrong.",
+            "command": "!dumpmt -md \u003CApp.Wasteful method table\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the layout is fixed for native interop, reordering fields is not possible."
+          }
+        ]
+      },
+      {
+        "fingerprint": "boxing analysis::oversized-value-types",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 150000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 100000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "instances of value types over 64 bytes"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "1,50,000 instances of value types larger than 64 bytes; top offenders: App.Big (128B, 1,50,000x)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Large structs cost copy time, not retained memory; whether they are copied on a hot path is not observed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "CodeInspection",
+            "test": "If the large structs are passed by reference, with in or ref parameters, the copy cost does not arise."
+          }
+        ]
+      },
+      {
+        "fingerprint": "boxing analysis::retained-boxing",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 90,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 80,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "boxed instances in Generation 2"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "18,00,000 of 20,00,000 boxed instances are in Gen2."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Boxes in Gen2 may be held by a long-lived cache on purpose; their presence does not show an unintended retention."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the boxed types in !dumpheap -stat total far fewer instances than the reported count, the figure is overstated.",
+            "command": "!dumpheap -stat"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the boxes are different ones and the count is flat, they are churn, not accumulation."
+          }
+        ]
+      },
+      {
+        "fingerprint": "boxing analysis::missing-iequatable",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 5000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 1000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "notice threshold"
+          },
+          "qualifiers": {
+            "location": "boxed value types without IEquatable\u003CT\u003E"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[2]"
+            ],
+            "why": "5,000 boxed instances across 1 value type(s) do not implement IEquatable\u003CT\u003E."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Equality boxes only when instances are compared; boxed instances on the heap do not show that comparisons happen."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "CodeInspection",
+            "test": "If the listed types are not used as dictionary keys or compared via Contains, the missing interface costs nothing."
+          }
+        ]
+      },
+      {
+        "fingerprint": "boxing analysis::overview",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Composes",
+          "measure": {
+            "value": 48000000,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "qualifiers": {
+            "location": "boxed value type instances"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "20,00,000 boxed instances hold 45.78 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This describes boxing volume and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the boxed types in !dumpheap -stat total far fewer instances than the reported count, the figure is overstated.",
+            "command": "!dumpheap -stat"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the boxes are different ones and the count is flat, they are churn, not accumulation."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "quiet",
+    "claims": [
+      {
+        "fingerprint": "boxing analysis::overview",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Composes",
+          "measure": {
+            "value": 240,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "qualifiers": {
+            "location": "boxed value type instances"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "10 boxed instances hold 240 B."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This describes boxing volume and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the boxed types in !dumpheap -stat total far fewer instances than the reported count, the figure is overstated.",
+            "command": "!dumpheap -stat"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the boxes are different ones and the count is flat, they are churn, not accumulation."
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -122,6 +122,33 @@ internal sealed class HttpObjectSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("httpclient-count"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(httpClientCount),
+                    Reference = ClaimParts.Budget(
+                        ClaimParts.Count(sev == Severity.Critical ? HttpClientCriticalThreshold : HttpClientWarningThreshold),
+                        sev == Severity.Critical ? "critical threshold" : "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "HttpClient instances on the managed heap" },
+                },
+                Support = [new EvidenceStatement(httpClientIds, $"{httpClientCount:N0} HttpClient instances: {httpClientGen0:N0} in Gen0, {httpClientGen1:N0} in Gen1, {httpClientGen2:N0} in Gen2.")],
+                Counter = httpClientGen2 * 2 > httpClientGen0 + httpClientGen1 + httpClientGen2
+                    ? Counter.Of(new EvidenceStatement(httpClientIds, $"{httpClientGen2:N0} of the instances are in Gen2, consistent with long-lived reuse, so the count may be by design, for example one per named client."))
+                    : Counter.None("Instances on the heap include ones awaiting collection; nothing observed shows they are created per request."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpheap -live -stat -type HttpClient",
+                        Test = $"If far fewer than {httpClientCount:N0} HttpClient instances are live, the count includes garbage awaiting collection.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If HttpClient instances are created by IHttpClientFactory, one per named client, the count is the number of clients by design.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Infrastructure",
                 Severity = sev,
@@ -148,6 +175,24 @@ internal sealed class HttpObjectSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("httpwebrequest-accumulation"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(httpWebRequestCount),
+                    Reference = ClaimParts.Budget(ClaimParts.Count(HttpWebRequestWarningThreshold), "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "HttpWebRequest objects on the managed heap" },
+                },
+                Support = [new EvidenceStatement(httpWebRequestIds, $"{httpWebRequestCount:N0} HttpWebRequest objects are on the heap.")],
+                Counter = Counter.None("Requests awaiting collection also appear on the heap; nothing observed shows they are retained."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpheap -live -stat -type HttpWebRequest",
+                        Test = $"If far fewer than {httpWebRequestCount:N0} HttpWebRequest objects are live, the count includes garbage awaiting collection.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Infrastructure",
                 Severity = Severity.Warning,
@@ -173,6 +218,24 @@ internal sealed class HttpObjectSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("httpwebresponse-not-disposed"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(httpWebResponseCount),
+                    Reference = ClaimParts.Budget(ClaimParts.Count(HttpWebResponseWarningThreshold), "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "HttpWebResponse objects on the managed heap", Mechanism = "undisposed responses hold their network stream open" },
+                },
+                Support = [new EvidenceStatement([population.Id], $"{httpWebResponseCount:N0} HttpWebResponse objects are on the heap.")],
+                Counter = Counter.None("A response awaiting collection after being disposed also appears on the heap; the count does not show it is undisposed."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!do <response address>",
+                        Test = "On a sampled response: if its stream and connection are already closed, it was disposed.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Infrastructure",
                 Severity = Severity.Warning,
@@ -204,6 +267,37 @@ internal sealed class HttpObjectSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("httpmessagehandler-accumulation"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(httpMessageHandlerCount),
+                    Reference = ClaimParts.Budget(
+                        ClaimParts.Count(handlerSev == Severity.Critical ? HttpMessageHandlerCriticalThreshold : HttpMessageHandlerWarningThreshold),
+                        handlerSev == Severity.Critical ? "critical threshold" : "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "HttpMessageHandler instances on the managed heap" },
+                },
+                Support =
+                [
+                    new EvidenceStatement([population.Id], $"{httpMessageHandlerCount:N0} HttpMessageHandler instances are on the heap."),
+                    .. topHandlerModule is not null
+                        ? [new EvidenceStatement([topHandlerModule.Id], "The module that contributes the most handler instances.")]
+                        : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = Counter.None("A long DelegatingHandler pipeline contributes several handlers per client by design; the count alone does not show handlers are leaked."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpheap -live -stat -type HttpMessageHandler",
+                        Test = $"If far fewer than {httpMessageHandlerCount:N0} handler instances are live, the count includes garbage awaiting collection.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the handlers are the pipeline stages of a fixed number of clients, the count is clients times pipeline depth, by design.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Infrastructure",
                 Severity = handlerSev,
@@ -235,6 +329,29 @@ internal sealed class HttpObjectSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("servicepoint-accumulation"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(servicePointCount),
+                    Reference = ClaimParts.Budget(ClaimParts.Count(ServicePointWarningThreshold), "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "ServicePoint objects on the managed heap" },
+                },
+                Support = [new EvidenceStatement(servicePointIds, $"{servicePointCount:N0} ServicePoint objects are on the heap.")],
+                Counter = Counter.None("One ServicePoint exists per distinct endpoint; many endpoints produce many objects without any leak."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpheap -stat -type ServicePoint",
+                        Test = $"If !dumpheap finds far fewer than {servicePointCount:N0} ServicePoint objects, the count is overstated.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the application talks to that many distinct hosts, the count reflects endpoints, not accumulation.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Infrastructure",
                 Severity = Severity.Warning,
@@ -263,6 +380,28 @@ internal sealed class HttpObjectSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("handler-tracking-churn"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(expiredHandlerTrackingEntryCount),
+                    Reference = ClaimParts.Budget(ClaimParts.Count(ExpiredHandlerTrackingEntryWarningThreshold), "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "expired IHttpClientFactory handler tracking entries" },
+                },
+                Support = [new EvidenceStatement(derivedFrom, $"{expiredHandlerTrackingEntryCount:N0} expired and {activeHandlerTrackingEntryCount:N0} active handler tracking entries.")],
+                Counter = Counter.None("Expired entries are freed once nothing references the old handler; their presence shows rotation, not that handlers are held."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump later; if the expired entries are gone, they were awaiting cleanup after normal rotation.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the factory's HandlerLifetime is short by configuration, frequent rotation is expected.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Infrastructure",
                 Severity = Severity.Warning,

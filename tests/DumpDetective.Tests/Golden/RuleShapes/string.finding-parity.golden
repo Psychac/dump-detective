@@ -1,0 +1,322 @@
+rule: string.finding-parity
+version: 1
+[
+  {
+    "name": "extreme-duplication-small-sample",
+    "claims": [
+      {
+        "fingerprint": "string analysis::extreme-duplication",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Duplicates",
+          "measure": {
+            "value": 70,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "extreme-duplication threshold"
+          },
+          "qualifiers": {
+            "location": "string objects"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "50 duplicated patterns waste about 40 MB."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "Duplication was measured on a sample covering 20.0% of strings, so the ratio may not hold across the whole heap."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the most repeated strings in !dumpheap -strings add up to far less than 40 MB across 50 patterns, the waste is overstated.",
+            "command": "!dumpheap -strings"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the repeated strings are already interned or pooled at the source, the duplicates are transient copies, not retained waste."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "extreme-duplication-full-coverage",
+    "claims": [
+      {
+        "fingerprint": "string analysis::extreme-duplication",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Duplicates",
+          "measure": {
+            "value": 70,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 50,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "extreme-duplication threshold"
+          },
+          "qualifiers": {
+            "location": "string objects"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "50 duplicated patterns waste about 40 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Duplicates inside short-lived structures are reclaimed with them; lifetime is not observed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the most repeated strings in !dumpheap -strings add up to far less than 40 MB across 50 patterns, the waste is overstated.",
+            "command": "!dumpheap -strings"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the repeated strings are already interned or pooled at the source, the duplicates are transient copies, not retained waste."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "high-duplicate-pressure",
+    "claims": [
+      {
+        "fingerprint": "string analysis::high-duplicate-pressure",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Duplicates",
+          "measure": {
+            "value": 20,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "string objects"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "20 duplicated patterns waste about 5 MB (30% of strings are duplicates)."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Duplicates inside short-lived structures are reclaimed with them; lifetime is not observed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the most repeated strings in !dumpheap -strings add up to far less than 5 MB across 20 patterns, the waste is overstated.",
+            "command": "!dumpheap -strings"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the repeated strings are already interned or pooled at the source, the duplicates are transient copies, not retained waste."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "loh-and-very-long",
+    "claims": [
+      {
+        "fingerprint": "string analysis::loh-strings",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 12582912,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "qualifiers": {
+            "mechanism": "individual strings over 85 KB",
+            "location": "the Large Object Heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "12 MB of string data sits on the Large Object Heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A string on the LOH is not necessarily retained; short-lived ones are collected with Gen2 and cost fragmentation, not memory growth."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the strings of 85,000 bytes or more total much less than 12 MB, the LOH string figure is overstated.",
+            "command": "!dumpheap -type System.String -min 85000"
+          }
+        ]
+      },
+      {
+        "fingerprint": "string analysis::very-long-strings",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 3,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "blocks GC compaction and fragments the LOH",
+            "location": "strings over 85 KB"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "3 strings over 85 KB total 9 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Long strings only cost fragmentation if they churn; nothing observed shows whether these are allocated repeatedly."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !dumpheap -stat finds a number of strings other than 3 at or above 85,000 bytes, the count is wrong.",
+            "command": "!dumpheap -type System.String -min 85000 -stat"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "dominates-heap",
+    "claims": [
+      {
+        "fingerprint": "string analysis::dominates-managed-heap",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Dominates",
+          "measure": {
+            "value": 35,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 20,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "string dominance threshold"
+          },
+          "qualifiers": {
+            "mechanism": "string objects",
+            "location": "the managed heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Strings total 300 MB, 35.0% of the managed heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Nothing observed separates the volume of text a service legitimately holds from retained garbage."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If System.String in !dumpheap -stat totals well below 300 MB, or the managed heap total is much larger than assumed, the share is wrong.",
+            "command": "!dumpheap -stat"
+          },
+          {
+            "kind": "Windbg",
+            "test": "On a sampled large string: if its root is a request frame, the strings are short-lived working data, not retained.",
+            "command": "!gcroot \u003Cstring address\u003E"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "low-sampling-coverage",
+    "claims": [
+      {
+        "fingerprint": "string analysis::low-sampling-coverage",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Missing",
+          "measure": {
+            "value": 3,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "qualifiers": {
+            "location": "string deduplication analysis",
+            "scope": "strings within the maximum duplicate-string length"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Deduplication saw 3,000 strings, 3.0% of all strings."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Coverage is bounded by how many strings fall within the maximum duplicate-string length, not by a sampling budget, so more run time would not raise it."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "CodeInspection",
+            "test": "Re-run with a larger MaxDuplicateStringLength; if coverage rises above 5%, the gap was the length cap, not the heap."
+          }
+        ]
+      }
+    ]
+  }
+]

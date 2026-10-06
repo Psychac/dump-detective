@@ -54,6 +54,16 @@ internal sealed class StringSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("extreme-duplication"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Duplicates,
+                    Measure = ClaimParts.Percent(duplicationRatio * 100.0),
+                    Reference = ClaimParts.Budget(ClaimParts.Percent(ExtremeDuplicationRatio * 100.0), "extreme-duplication threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "string objects" },
+                },
+                Support = [new EvidenceStatement([composition.Id], $"{duplicatePatternCount:N0} duplicated patterns waste about {FormatHelper.FormatBytes(duplicateWastedBytes)}.")],
+                Counter = DuplicationCounter(composition, samplingCoverage),
+                FalsifiedBy = DuplicationFalsifiedBy(duplicatePatternCount, duplicateWastedBytes),
                 Analyzer = AnalyzerName,
                 Category = "Optimization",
                 Severity = Severity.Critical,
@@ -72,6 +82,15 @@ internal sealed class StringSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("high-duplicate-pressure"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Duplicates,
+                    Measure = ClaimParts.Count(duplicatePatternCount),
+                    Qualifiers = new AssertionQualifiers { Location = "string objects" },
+                },
+                Support = [new EvidenceStatement([composition.Id], $"{duplicatePatternCount:N0} duplicated patterns waste about {FormatHelper.FormatBytes(duplicateWastedBytes)} ({duplicationRatio:P0} of strings are duplicates).")],
+                Counter = DuplicationCounter(composition, samplingCoverage),
+                FalsifiedBy = DuplicationFalsifiedBy(duplicatePatternCount, duplicateWastedBytes),
                 Analyzer = AnalyzerName,
                 Category = "Optimization",
                 Severity = Severity.Warning,
@@ -91,6 +110,23 @@ internal sealed class StringSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("loh-strings"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Measure = ClaimParts.Bytes(lohStringBytes),
+                    Qualifiers = new AssertionQualifiers { Location = "the Large Object Heap", Mechanism = "individual strings over 85 KB" },
+                },
+                Support = [new EvidenceStatement([composition.Id], $"{FormatHelper.FormatBytes(lohStringBytes)} of string data sits on the Large Object Heap.")],
+                Counter = Counter.None("A string on the LOH is not necessarily retained; short-lived ones are collected with Gen2 and cost fragmentation, not memory growth."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpheap -type System.String -min 85000",
+                        Test = $"If the strings of 85,000 bytes or more total much less than {FormatHelper.FormatBytes(lohStringBytes)}, the LOH string figure is overstated.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = Severity.Warning,
@@ -110,6 +146,23 @@ internal sealed class StringSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("very-long-strings"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Measure = ClaimParts.Count(veryLongStringCount),
+                    Qualifiers = new AssertionQualifiers { Location = "strings over 85 KB", Mechanism = "blocks GC compaction and fragments the LOH" },
+                },
+                Support = [new EvidenceStatement([composition.Id], $"{veryLongStringCount:N0} strings over 85 KB total {FormatHelper.FormatBytes(veryLongStringBytes)}.")],
+                Counter = Counter.None("Long strings only cost fragmentation if they churn; nothing observed shows whether these are allocated repeatedly."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpheap -type System.String -min 85000 -stat",
+                        Test = $"If !dumpheap -stat finds a number of strings other than {veryLongStringCount:N0} at or above 85,000 bytes, the count is wrong.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = Severity.Info,
@@ -129,6 +182,30 @@ internal sealed class StringSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("dominates-managed-heap"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Dominates,
+                    Measure = ClaimParts.Percent(pctOfManagedHeap),
+                    Reference = ClaimParts.Budget(ClaimParts.Percent(StringDominancePercent), "string dominance threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "the managed heap", Mechanism = "string objects" },
+                },
+                Support = [new EvidenceStatement([composition.Id], $"Strings total {FormatHelper.FormatBytes(totalStringMemoryBytes)}, {pctOfManagedHeap:F1}% of the managed heap.")],
+                Counter = Counter.None("Nothing observed separates the volume of text a service legitimately holds from retained garbage."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpheap -stat",
+                        Test = $"If System.String in !dumpheap -stat totals well below {FormatHelper.FormatBytes(totalStringMemoryBytes)}, or the managed heap total is much larger than assumed, the share is wrong.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gcroot <string address>",
+                        Test = "On a sampled large string: if its root is a request frame, the strings are short-lived working data, not retained.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = Severity.Warning,
@@ -148,6 +225,22 @@ internal sealed class StringSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("low-sampling-coverage"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Missing,
+                    Measure = ClaimParts.Percent(samplingCoverage * 100.0),
+                    Qualifiers = new AssertionQualifiers { Location = "string deduplication analysis", Scope = "strings within the maximum duplicate-string length" },
+                },
+                Support = [new EvidenceStatement([composition.Id], $"Deduplication saw {stringsSampled:N0} strings, {samplingCoverage * 100.0:F1}% of all strings.")],
+                Counter = Counter.None("Coverage is bounded by how many strings fall within the maximum duplicate-string length, not by a sampling budget, so more run time would not raise it."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "Re-run with a larger MaxDuplicateStringLength; if coverage rises above 5%, the gap was the length cap, not the heap.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Analysis",
                 Severity = Severity.Info,
@@ -173,6 +266,32 @@ internal sealed class StringSynthesisRule : ISynthesisRule
             $"Sampling coverage is below 5% ({samplingCoverage * 100.0:F1}%); duplication and pattern statistics reflect only the sampled subset, not the full heap."),
         new DataQualityPenalty(samplingCoverage >= 0.05 && samplingCoverage < 0.5, 0.15,
             $"Sampling coverage is {samplingCoverage * 100.0:F1}%; results may not fully represent heap-wide patterns."));
+
+    private const double ExtremeDuplicationRatio = 0.5;
+    private const double StringDominancePercent = 20.0;
+    private const double PartialCoverageCeiling = 0.5;
+
+    private static Counter DuplicationCounter(Observation composition, double samplingCoverage) =>
+        samplingCoverage > 0 && samplingCoverage < PartialCoverageCeiling
+            ? Counter.Of(new EvidenceStatement(
+                [composition.Id],
+                $"Duplication was measured on a sample covering {samplingCoverage * 100.0:F1}% of strings, so the ratio may not hold across the whole heap."))
+            : Counter.None("Duplicates inside short-lived structures are reclaimed with them; lifetime is not observed.");
+
+    private static IReadOnlyList<FalsificationTest> DuplicationFalsifiedBy(int duplicatePatternCount, ulong duplicateWastedBytes) =>
+    [
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.Windbg,
+            Command = "!dumpheap -strings",
+            Test = $"If the most repeated strings in !dumpheap -strings add up to far less than {FormatHelper.FormatBytes(duplicateWastedBytes)} across {duplicatePatternCount:N0} patterns, the waste is overstated.",
+        },
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.CodeInspection,
+            Test = "If the repeated strings are already interned or pooled at the source, the duplicates are transient copies, not retained waste.",
+        },
+    ];
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();
 }

@@ -1,0 +1,170 @@
+rule: allocation-pattern.finding-parity
+version: 1
+[
+  {
+    "name": "critical-retained",
+    "claims": [
+      {
+        "fingerprint": "allocation pattern analysis::gc-allocation-pattern",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 71,
+            "unit": "Custom",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 70,
+              "unit": "Custom",
+              "semantics": "Ratio"
+            },
+            "basis": "critical pressure threshold"
+          },
+          "qualifiers": {
+            "mechanism": "Retained allocation profile",
+            "location": "GC pressure score"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Gen0 holds 10.0% of objects, Gen2 80.0% of objects, and the LOH 20.0% of bytes; these shares feed the pressure score."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The score combines generation and LOH shares from one snapshot; nothing observed shows whether Gen2 is growing or stable."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the Gen2 and LOH sizes in !eeheap -gc do not match a 80.0% Gen2 object share and 20.0% LOH byte share, the composition is wrong.",
+            "command": "!eeheap -gc"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the Gen2 share does not grow, the pressure is steady state, not accumulation."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "high",
+    "claims": [
+      {
+        "fingerprint": "allocation pattern analysis::gc-allocation-pattern",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 46,
+            "unit": "Custom",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 45,
+              "unit": "Custom",
+              "semantics": "Ratio"
+            },
+            "basis": "high pressure threshold"
+          },
+          "qualifiers": {
+            "mechanism": "Mixed allocation profile",
+            "location": "GC pressure score"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Gen0 holds 20.0% of objects, Gen2 40.0% of objects, and the LOH 10.0% of bytes; these shares feed the pressure score."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The score combines generation and LOH shares from one snapshot; nothing observed shows whether Gen2 is growing or stable."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the Gen2 and LOH sizes in !eeheap -gc do not match a 40.0% Gen2 object share and 10.0% LOH byte share, the composition is wrong.",
+            "command": "!eeheap -gc"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the Gen2 share does not grow, the pressure is steady state, not accumulation."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "moderate-transient",
+    "claims": [
+      {
+        "fingerprint": "allocation pattern analysis::gc-allocation-pattern",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 43.5,
+            "unit": "Custom",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 20,
+              "unit": "Custom",
+              "semantics": "Ratio"
+            },
+            "basis": "moderate pressure threshold"
+          },
+          "qualifiers": {
+            "mechanism": "Transient allocation profile",
+            "location": "GC pressure score"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Gen0 holds 75.0% of objects, Gen2 60.0% of objects, and the LOH 30.0% of bytes; these shares feed the pressure score."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "75.0% of objects are in Gen0, which is cheap to collect, so the pressure may be allocation churn, not retention."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the Gen2 and LOH sizes in !eeheap -gc do not match a 60.0% Gen2 object share and 30.0% LOH byte share, the composition is wrong.",
+            "command": "!eeheap -gc"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the Gen2 share does not grow, the pressure is steady state, not accumulation."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "low-pressure-says-nothing",
+    "claims": []
+  }
+]

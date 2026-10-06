@@ -114,6 +114,10 @@ internal sealed class AllocationPatternSynthesisRule : ISynthesisRule
         return ValueTask.FromResult<IReadOnlyList<Claim>>([new Claim
         {
             Fingerprint = Fingerprint("gc-allocation-pattern"),
+            Assertion = BuildAssertion(gcPressure, profile, gen0CountPct, gen2CountPct, lohSizePct),
+            Support = [new EvidenceStatement([composition.Id], $"Gen0 holds {gen0CountPct:F1}% of objects, Gen2 {gen2CountPct:F1}% of objects, and the LOH {lohSizePct:F1}% of bytes; these shares feed the pressure score.")],
+            Counter = BuildCounter(composition, profile, gen0CountPct),
+            FalsifiedBy = BuildFalsifiedBy(gen2CountPct, lohSizePct),
             Analyzer = AnalyzerName,
             Category = "GC",
             Severity = severity,
@@ -158,6 +162,47 @@ internal sealed class AllocationPatternSynthesisRule : ISynthesisRule
         if (gen0Pct > 50.0) return AllocationProfile.Steady;
         return AllocationProfile.Mixed;
     }
+
+    private static Assertion BuildAssertion(
+        GcPressureLevel pressure, AllocationProfile profile, double gen0CountPct, double gen2CountPct, double lohSizePct)
+    {
+        (double threshold, string basis) = pressure switch
+        {
+            GcPressureLevel.Critical => (70.0, "critical pressure threshold"),
+            GcPressureLevel.High => (45.0, "high pressure threshold"),
+            _ => (20.0, "moderate pressure threshold"),
+        };
+
+        return new Assertion
+        {
+            Predicate = AssertionPredicate.Exceeds,
+            Measure = new Measure(ComputePressureScore(gen0CountPct, gen2CountPct, lohSizePct), MeasureUnit.Custom, MeasureSemantics.Ratio),
+            Reference = ClaimParts.Budget(new Measure(threshold, MeasureUnit.Custom, MeasureSemantics.Ratio), basis),
+            Qualifiers = new AssertionQualifiers { Location = "GC pressure score", Mechanism = $"{profile} allocation profile" },
+        };
+    }
+
+    private static Counter BuildCounter(Observation composition, AllocationProfile profile, double gen0CountPct) =>
+        profile == AllocationProfile.Transient
+            ? Counter.Of(new EvidenceStatement(
+                [composition.Id],
+                $"{gen0CountPct:F1}% of objects are in Gen0, which is cheap to collect, so the pressure may be allocation churn, not retention."))
+            : Counter.None("The score combines generation and LOH shares from one snapshot; nothing observed shows whether Gen2 is growing or stable.");
+
+    private static IReadOnlyList<FalsificationTest> BuildFalsifiedBy(double gen2CountPct, double lohSizePct) =>
+    [
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.Windbg,
+            Command = "!eeheap -gc",
+            Test = $"If the Gen2 and LOH sizes in !eeheap -gc do not match a {gen2CountPct:F1}% Gen2 object share and {lohSizePct:F1}% LOH byte share, the composition is wrong.",
+        },
+        new FalsificationTest
+        {
+            Kind = FalsificationKind.Capture,
+            Test = "Capture a second dump under comparable load; if the Gen2 share does not grow, the pressure is steady state, not accumulation.",
+        },
+    ];
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();
 }

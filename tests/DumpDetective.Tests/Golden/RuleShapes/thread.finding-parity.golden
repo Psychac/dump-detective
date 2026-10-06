@@ -1,0 +1,531 @@
+rule: thread.finding-parity
+version: 1
+[
+  {
+    "name": "quiet-summary-only",
+    "claims": [
+      {
+        "fingerprint": "thread analysis::triage-summary",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Composes",
+          "measure": {
+            "value": 20,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "alive threads by state"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "20 alive threads: 2 blocked, 1 holding locks, 0 with an active exception."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This is a description of thread states and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !threads lists a number of live threads other than 20, or 2 of them are not parked in a wait, the triage counts are wrong.",
+            "command": "!threads"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "summary-warning-by-blocked-count-with-active-threads",
+    "claims": [
+      {
+        "fingerprint": "thread analysis::triage-summary",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Blocks",
+          "measure": {
+            "value": 12,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 10,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "blocked-thread threshold"
+          },
+          "qualifiers": {
+            "location": "alive threads in a blocked pattern"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "40 alive threads: 12 blocked, 1 holding locks, 0 with an active exception."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "20 threads are actively processing, so the process is not stalled."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !threads lists a number of live threads other than 40, or 12 of them are not parked in a wait, the triage counts are wrong.",
+            "command": "!threads"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "summary-warning-by-exceptions",
+    "claims": [
+      {
+        "fingerprint": "thread analysis::triage-summary",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 3,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "threads with an active exception"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "20 alive threads: 2 blocked, 1 holding locks, 3 with an active exception."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A thread with an active exception has not necessarily failed; the exception may be caught and handled further up the stack."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !threads shows an exception on a number of threads other than 3, the count is wrong.",
+            "command": "!threads"
+          },
+          {
+            "kind": "Windbg",
+            "test": "On each such thread: if !pe shows no exception object, or one already handled, there is no active failure.",
+            "command": "!pe"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "blocked-ratio-no-active-work",
+    "claims": [
+      {
+        "fingerprint": "thread analysis::triage-summary",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Composes",
+          "measure": {
+            "value": 10,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "alive threads by state"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "10 alive threads: 9 blocked, 1 holding locks, 0 with an active exception."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This is a description of thread states and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !threads lists a number of live threads other than 10, or 9 of them are not parked in a wait, the triage counts are wrong.",
+            "command": "!threads"
+          }
+        ]
+      },
+      {
+        "fingerprint": "thread analysis::high-blocked-ratio",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Stalls",
+          "measure": {
+            "value": 90,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 70,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "high blocked-ratio threshold"
+          },
+          "qualifiers": {
+            "location": "alive threads in a blocked pattern"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "9 of 10 alive threads match a blocked wait or lock pattern."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Idle thread-pool workers parked on a wait count as blocked here; nothing observed separates idle waits from stalled ones."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If most of the 9 blocked threads are idle thread-pool workers, the ratio reflects spare capacity, not starvation.",
+            "command": "!threadpool"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump a few minutes later; if the blocked threads are different ones at different frames, the waits are short-lived churn."
+          }
+        ]
+      },
+      {
+        "fingerprint": "thread analysis::zero-active-threads",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Stalls",
+          "measure": {
+            "value": 0,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "alive threads doing active work"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "None of the 10 alive threads is doing active (non-blocked, non-GC, non-finalizer) work."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A process captured while idle, with no requests in flight, looks the same as one that has stopped making progress."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump a few minutes later; if any thread is executing application code, the process was idle, not hung."
+          },
+          {
+            "kind": "Windbg",
+            "test": "If !syncblk shows no held monitors and the blocked threads wait on I/O, the stall is an external dependency, not a deadlock.",
+            "command": "!syncblk"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "blocked-ratio-with-active-work",
+    "claims": [
+      {
+        "fingerprint": "thread analysis::triage-summary",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Composes",
+          "measure": {
+            "value": 10,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "alive threads by state"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "10 alive threads: 8 blocked, 1 holding locks, 0 with an active exception."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This is a description of thread states and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !threads lists a number of live threads other than 10, or 8 of them are not parked in a wait, the triage counts are wrong.",
+            "command": "!threads"
+          }
+        ]
+      },
+      {
+        "fingerprint": "thread analysis::high-blocked-ratio",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Stalls",
+          "measure": {
+            "value": 80,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 70,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "high blocked-ratio threshold"
+          },
+          "qualifiers": {
+            "location": "alive threads in a blocked pattern"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "8 of 10 alive threads match a blocked wait or lock pattern."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "2 threads are actively processing, so the process is still making progress."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If most of the 8 blocked threads are idle thread-pool workers, the ratio reflects spare capacity, not starvation.",
+            "command": "!threadpool"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump a few minutes later; if the blocked threads are different ones at different frames, the waits are short-lived churn."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "finalizer-blocked",
+    "claims": [
+      {
+        "fingerprint": "thread analysis::triage-summary",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Composes",
+          "measure": {
+            "value": 20,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "alive threads by state"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "20 alive threads: 2 blocked, 1 holding locks, 0 with an active exception."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This is a description of thread states and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !threads lists a number of live threads other than 20, or 2 of them are not parked in a wait, the triage counts are wrong.",
+            "command": "!threads"
+          }
+        ]
+      },
+      {
+        "fingerprint": "thread analysis::finalizer-blocked",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Blocks",
+          "subject": {
+            "$kind": "thread",
+            "kind": "Thread",
+            "osThreadId": 4100,
+            "managedThreadId": 3,
+            "joinKey": "4100",
+            "fidelity": "Exact"
+          },
+          "measure": {
+            "value": 2,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "a held lock",
+            "location": "the finalizer thread"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "The finalizer thread is recorded as blocked while holding 2 lock(s)."
+          },
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Supplies the process-wide thread counts the finalizer thread is read against."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A thread seen blocked at capture time may be about to resume; one snapshot cannot show the wait is permanent."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the finalizer thread\u0027s stack in !clrstack is not parked on a wait or lock, it is not blocked.",
+            "command": "!threads"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump a few minutes later; if the finalizer thread has moved on and the finalizer queue is draining, the block was transient."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "deep-async-chain",
+    "claims": [
+      {
+        "fingerprint": "thread analysis::triage-summary",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Composes",
+          "measure": {
+            "value": 20,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "alive threads by state"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "20 alive threads: 2 blocked, 1 holding locks, 0 with an active exception."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This is a description of thread states and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !threads lists a number of live threads other than 20, or 2 of them are not parked in a wait, the triage counts are wrong.",
+            "command": "!threads"
+          }
+        ]
+      },
+      {
+        "fingerprint": "thread analysis::deep-async-chain",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 14,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 10,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "deep async chain threshold"
+          },
+          "qualifiers": {
+            "location": "the deepest async continuation chain"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The deepest chain is 14 MoveNext frames, across 2 thread(s) carrying async chains."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Depth alone does not separate legitimately nested awaits from a continuation loop that is not completing."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On the thread with the deepest chain: if the MoveNext frames belong to different methods advancing in order, they are nested awaits, not a loop.",
+            "command": "!clrstack"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the awaiting code recurses by design, with a bounded depth, the chain is expected."
+          }
+        ]
+      }
+    ]
+  }
+]

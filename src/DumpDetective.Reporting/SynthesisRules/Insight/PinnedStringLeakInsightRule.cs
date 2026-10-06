@@ -1,4 +1,5 @@
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -69,6 +70,31 @@ internal sealed class PinnedStringLeakInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::pinned-string-leak",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Bytes(pinnedBytes),
+                    Reference = severity == Severity.Critical
+                        ? ClaimParts.Budget(ClaimParts.Bytes(CriticalBytes), "critical threshold")
+                        : ClaimParts.Budget(ClaimParts.Bytes(MinBytes), "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "pinned System.String handle targets", Mechanism = "pinned strings block compaction" },
+                },
+                Support = [new EvidenceStatement(derivedFrom, $"{pinnedCount:N0} pinned string targets total {InsightByteFormat.FormatBytes(pinnedBytes)}.")],
+                Counter = Counter.None("Strings pinned for a single interop call are released when it returns; one snapshot does not show the pins persist."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gchandles -type Pinned",
+                        Test = $"If !gchandles lists far fewer pinned string targets than {pinnedCount:N0}, the count is overstated.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the pinned strings are different ones, they are in-flight interop calls.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Memory",
                 Severity = severity,

@@ -1,0 +1,101 @@
+rule: insight.active-crash
+version: 1
+[
+  {
+    "name": "active-with-dominant-type",
+    "claims": [
+      {
+        "fingerprint": "insightengine::active-crash",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Faults",
+          "measure": {
+            "value": 3,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "dominant type System.InvalidOperationException",
+            "location": "exceptions on thread stacks"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "3 exceptions are active on thread stacks."
+          },
+          {
+            "observations": [
+              "observations[1..3]"
+            ],
+            "why": "Each is an exception object currently on a thread stack."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "An exception on a thread stack may be caught and handled further up the stack; nothing observed shows it was unhandled."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On each thread carrying one of the 3 exceptions: if !pe shows no exception object, or one already handled, there is no active failure.",
+            "command": "!pe"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the dominant exception type is thrown and caught by design, for example for control flow, it is not a crash."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "active-count-only",
+    "claims": [
+      {
+        "fingerprint": "insightengine::active-crash",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Faults",
+          "measure": {
+            "value": 2,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "exceptions on thread stacks"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "2 exceptions are active on thread stacks."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "An exception on a thread stack may be caught and handled further up the stack; nothing observed shows it was unhandled."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On each thread carrying one of the 2 exceptions: if !pe shows no exception object, or one already handled, there is no active failure.",
+            "command": "!pe"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the dominant exception type is thrown and caught by design, for example for control flow, it is not a crash."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "none-says-nothing",
+    "claims": []
+  }
+]

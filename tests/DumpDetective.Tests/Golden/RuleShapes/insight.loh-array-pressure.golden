@@ -1,0 +1,117 @@
+rule: insight.loh-array-pressure
+version: 1
+[
+  {
+    "name": "arrays-alone",
+    "claims": [
+      {
+        "fingerprint": "insightengine::loh-array-pressure",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 314572800,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 268435456,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "LOH array threshold"
+          },
+          "qualifiers": {
+            "location": "large arrays on the Large Object Heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "12 large arrays hold 300.0 MB on the LOH."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Large arrays that die young cost fragmentation, not growth; their lifetime is not observed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the arrays of 85,000 bytes or more total far less than 300.0 MB, the LOH array figure is overstated.",
+            "command": "!dumpheap -stat -min 85000"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the large arrays are different ones and the total is flat, they are churn, not retention."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "arrays-with-fragmentation",
+    "claims": [
+      {
+        "fingerprint": "insightengine::loh-array-pressure",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 314572800,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 268435456,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "LOH array threshold"
+          },
+          "qualifiers": {
+            "mechanism": "LOH fragmentation of 40.0%",
+            "location": "large arrays on the Large Object Heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "12 large arrays hold 300.0 MB on the LOH."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "LOH fragmentation is 40.0%, read alongside the array footprint."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Large arrays that die young cost fragmentation, not growth; their lifetime is not observed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the arrays of 85,000 bytes or more total far less than 300.0 MB, the LOH array figure is overstated.",
+            "command": "!dumpheap -stat -min 85000"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the large arrays are different ones and the total is flat, they are churn, not retention."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "below-threshold-says-nothing",
+    "claims": []
+  }
+]

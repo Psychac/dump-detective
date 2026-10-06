@@ -1,0 +1,118 @@
+rule: insight.pinned-string-leak
+version: 1
+[
+  {
+    "name": "warning",
+    "claims": [
+      {
+        "fingerprint": "insightengine::pinned-string-leak",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 5242880,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 1048576,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "mechanism": "pinned strings block compaction",
+            "location": "pinned System.String handle targets"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]",
+              "observations[1]"
+            ],
+            "why": "40 pinned string targets total 5.0 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Strings pinned for a single interop call are released when it returns; one snapshot does not show the pins persist."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles lists far fewer pinned string targets than 40, the count is overstated.",
+            "command": "!gchandles -type Pinned"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the pinned strings are different ones, they are in-flight interop calls."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "critical",
+    "claims": [
+      {
+        "fingerprint": "insightengine::pinned-string-leak",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 26214400,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 20971520,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "mechanism": "pinned strings block compaction",
+            "location": "pinned System.String handle targets"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]",
+              "observations[1]"
+            ],
+            "why": "400 pinned string targets total 25.0 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Strings pinned for a single interop call are released when it returns; one snapshot does not show the pins persist."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles lists far fewer pinned string targets than 400, the count is overstated.",
+            "command": "!gchandles -type Pinned"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the pinned strings are different ones, they are in-flight interop calls."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "other-type-says-nothing",
+    "claims": []
+  },
+  {
+    "name": "below-threshold-says-nothing",
+    "claims": []
+  }
+]

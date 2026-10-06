@@ -1,4 +1,5 @@
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -68,6 +69,32 @@ internal sealed class DbConnectionLeakInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::db-connection-leak",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Measure = ClaimParts.Count(openConnections),
+                    Qualifiers = new AssertionQualifiers { Location = "open DB connections", Mechanism = $"{timeoutCount:N0} timeout or invalid-operation exceptions on the heap" },
+                },
+                Support =
+                [
+                    new EvidenceStatement([dbConn.Id], $"{openConnections:N0} of {totalConnections:N0} DB connection objects are open."),
+                    new EvidenceStatement(derivedFrom.GetRange(1, derivedFrom.Count - 1), $"{timeoutCount:N0} timeout or InvalidOperation exception objects are on the heap."),
+                ],
+                Counter = Counter.None("Timeout exceptions have many causes besides pool exhaustion, such as a slow query or an unreachable server, and InvalidOperationException is not specific to pools."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!do <exception address>",
+                        Test = "On a sampled exception: if its message does not mention the connection pool, the timeouts are not pool exhaustion.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the connection string sets Max Pool Size above the open count, the pool has headroom and is not exhausted.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Infrastructure",
                 Severity = Severity.Critical,

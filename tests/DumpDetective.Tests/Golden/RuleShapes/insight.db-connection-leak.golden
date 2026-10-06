@@ -1,0 +1,63 @@
+rule: insight.db-connection-leak
+version: 1
+[
+  {
+    "name": "exhaustion-suspected",
+    "claims": [
+      {
+        "fingerprint": "insightengine::db-connection-leak",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 40,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "7 timeout or invalid-operation exceptions on the heap",
+            "location": "open DB connections"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "40 of 60 DB connection objects are open."
+          },
+          {
+            "observations": [
+              "observations[1]",
+              "observations[2]"
+            ],
+            "why": "7 timeout or InvalidOperation exception objects are on the heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Timeout exceptions have many causes besides pool exhaustion, such as a slow query or an unreachable server, and InvalidOperationException is not specific to pools."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled exception: if its message does not mention the connection pool, the timeouts are not pool exhaustion.",
+            "command": "!do \u003Cexception address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the connection string sets Max Pool Size above the open count, the pool has headroom and is not exhausted."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "too-few-timeouts-says-nothing",
+    "claims": []
+  },
+  {
+    "name": "too-few-open-says-nothing",
+    "claims": []
+  }
+]

@@ -1,4 +1,5 @@
 using DumpDetective.Sdk.Identity;
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -74,6 +75,38 @@ internal sealed class ActiveCrashInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::active-crash",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Faults,
+                    Measure = ClaimParts.Count(activeCount),
+                    Qualifiers = new AssertionQualifiers
+                    {
+                        Location = "exceptions on thread stacks",
+                        Mechanism = dominantType is null ? null : $"dominant type {dominantType}",
+                    },
+                },
+                Support =
+                [
+                    new EvidenceStatement([population.Id], $"{activeCount:N0} exceptions are active on thread stacks."),
+                    .. activeExceptions.Count > 0
+                        ? [new EvidenceStatement(ClaimParts.IdsOf(activeExceptions), "Each is an exception object currently on a thread stack.")]
+                        : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = Counter.None("An exception on a thread stack may be caught and handled further up the stack; nothing observed shows it was unhandled."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!pe",
+                        Test = $"On each thread carrying one of the {activeCount:N0} exceptions: if !pe shows no exception object, or one already handled, there is no active failure.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If the dominant exception type is thrown and caught by design, for example for control flow, it is not a crash.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Crash",
                 Severity = Severity.Critical,

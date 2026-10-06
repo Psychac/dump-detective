@@ -1,3 +1,4 @@
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -63,6 +64,39 @@ internal sealed class LohArrayPressureInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::loh-array-pressure",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Bytes(lohArrayBytes),
+                    Reference = ClaimParts.Budget(ClaimParts.Bytes(PressureThresholdBytes), "LOH array threshold"),
+                    Qualifiers = new AssertionQualifiers
+                    {
+                        Location = "large arrays on the Large Object Heap",
+                        Mechanism = fragCorrelation ? $"LOH fragmentation of {fragmentationPercent:F1}%" : null,
+                    },
+                },
+                Support =
+                [
+                    new EvidenceStatement([arrays.Id], $"{lohArrayCount:N0} large arrays hold {InsightByteFormat.FormatBytes(lohArrayBytes)} on the LOH."),
+                    .. lohFrag is not null
+                        ? [new EvidenceStatement([lohFrag.Id], $"LOH fragmentation is {fragmentationPercent:F1}%, read alongside the array footprint.")]
+                        : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = Counter.None("Large arrays that die young cost fragmentation, not growth; their lifetime is not observed."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpheap -stat -min 85000",
+                        Test = $"If the arrays of 85,000 bytes or more total far less than {InsightByteFormat.FormatBytes(lohArrayBytes)}, the LOH array figure is overstated.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the large arrays are different ones and the total is flat, they are churn, not retention.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Memory",
                 Severity = severity,

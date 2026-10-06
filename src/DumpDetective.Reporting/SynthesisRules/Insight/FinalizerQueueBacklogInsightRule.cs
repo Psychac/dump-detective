@@ -1,3 +1,4 @@
+using DumpDetective.Reporting.SynthesisRules;
 using DumpDetective.Sdk.Observations;
 using DumpDetective.Sdk.Synthesis;
 
@@ -63,6 +64,44 @@ internal sealed class FinalizerQueueBacklogInsightRule : ISynthesisRule
             new Claim
             {
                 Fingerprint = "insightengine::finalizer-queue-backlog",
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(queueCount),
+                    Reference = queueCount >= CriticalCount
+                        ? ClaimParts.Budget(ClaimParts.Count(CriticalCount), "critical threshold")
+                        : ClaimParts.Budget(ClaimParts.Count(WarningCount), "warning threshold"),
+                    Qualifiers = new AssertionQualifiers
+                    {
+                        Location = "objects in the finalizer queue",
+                        Mechanism = finalizerBlocked ? "the finalizer thread is blocked" : null,
+                    },
+                },
+                Support =
+                [
+                    new EvidenceStatement([queue!.Id], $"The finalizer queue holds {queueCount:N0} objects, retaining about {InsightByteFormat.FormatBytes(retainedBytes)}."),
+                    .. finalizerThread is not null
+                        ? [new EvidenceStatement([finalizerThread.Id], finalizerBlocked ? "The finalizer thread is blocked, so the queue cannot drain." : "The finalizer thread is not blocked.")]
+                        : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = finalizerThread is not null && !finalizerBlocked
+                    ? Counter.Of(new EvidenceStatement([finalizerThread.Id], "The finalizer thread is running and not blocked, so the queue is draining and may be a transient burst."))
+                    : Counter.None("The queue fills after a burst of finalizable allocations and drains once the finalizer thread runs; one snapshot does not show it is stuck."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!finalizequeue",
+                        Test = $"If !finalizequeue reports far fewer than {queueCount:N0} objects ready for finalization, the backlog is overstated.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!threads",
+                        Test = "If the finalizer thread is running and not blocked, the queue is draining.",
+                    },
+                ],
                 Analyzer = "InsightEngine",
                 Category = "Memory",
                 Severity = severity,

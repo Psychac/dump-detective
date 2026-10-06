@@ -1,0 +1,183 @@
+rule: insight.finalizer-queue-backlog
+version: 1
+[
+  {
+    "name": "warning-thread-running",
+    "claims": [
+      {
+        "fingerprint": "insightengine::finalizer-queue-backlog",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 2000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 1000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "objects in the finalizer queue"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The finalizer queue holds 2,000 objects, retaining about 50.0 MB."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "The finalizer thread is not blocked."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[1]"
+              ],
+              "why": "The finalizer thread is running and not blocked, so the queue is draining and may be a transient burst."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !finalizequeue reports far fewer than 2,000 objects ready for finalization, the backlog is overstated.",
+            "command": "!finalizequeue"
+          },
+          {
+            "kind": "Windbg",
+            "test": "If the finalizer thread is running and not blocked, the queue is draining.",
+            "command": "!threads"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "critical-thread-blocked",
+    "claims": [
+      {
+        "fingerprint": "insightengine::finalizer-queue-backlog",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 2000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 1000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "mechanism": "the finalizer thread is blocked",
+            "location": "objects in the finalizer queue"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The finalizer queue holds 2,000 objects, retaining about 50.0 MB."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "The finalizer thread is blocked, so the queue cannot drain."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The queue fills after a burst of finalizable allocations and drains once the finalizer thread runs; one snapshot does not show it is stuck."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !finalizequeue reports far fewer than 2,000 objects ready for finalization, the backlog is overstated.",
+            "command": "!finalizequeue"
+          },
+          {
+            "kind": "Windbg",
+            "test": "If the finalizer thread is running and not blocked, the queue is draining.",
+            "command": "!threads"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "critical-by-count-no-thread-observation",
+    "claims": [
+      {
+        "fingerprint": "insightengine::finalizer-queue-backlog",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 20000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 10000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "location": "objects in the finalizer queue"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The finalizer queue holds 20,000 objects, retaining about 0 B."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The queue fills after a burst of finalizable allocations and drains once the finalizer thread runs; one snapshot does not show it is stuck."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !finalizequeue reports far fewer than 20,000 objects ready for finalization, the backlog is overstated.",
+            "command": "!finalizequeue"
+          },
+          {
+            "kind": "Windbg",
+            "test": "If the finalizer thread is running and not blocked, the queue is draining.",
+            "command": "!threads"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "below-threshold-says-nothing",
+    "claims": []
+  }
+]

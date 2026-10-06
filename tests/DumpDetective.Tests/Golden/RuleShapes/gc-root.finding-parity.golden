@@ -1,0 +1,271 @@
+rule: gc-root.finding-parity
+version: 1
+[
+  {
+    "name": "static-warning-exact",
+    "claims": [
+      {
+        "fingerprint": "gc root analysis::static-root-retention",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 20000000,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 10000000,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "mechanism": "top suspect App.Cache",
+            "location": "strong-handle (static) roots"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "30 strong-handle roots are estimated to retain 19.1 MB."
+          },
+          {
+            "observations": [
+              "observations[2]"
+            ],
+            "why": "The highest-ranked root, the top suspect for this retention."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Strong handles include runtime-internal handles as well as application statics, and retained size alone does not separate them."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles lists a number of strong handles other than 30, the root count is wrong.",
+            "command": "!gchandles -type Strong"
+          },
+          {
+            "kind": "Windbg",
+            "test": "On an instance of the top suspect: if its path does not run through a strong handle, the retention is attributed to the wrong root.",
+            "command": "!gcroot \u003Cobject address\u003E"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "static-critical-estimated",
+    "claims": [
+      {
+        "fingerprint": "gc root analysis::static-root-retention",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 200000000,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "reference": {
+            "value": {
+              "value": 100000000,
+              "unit": "Bytes",
+              "semantics": "Absolute"
+            },
+            "basis": "critical threshold"
+          },
+          "qualifiers": {
+            "mechanism": "top suspect App.Cache",
+            "location": "strong-handle (static) roots"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "30 strong-handle roots are estimated to retain 190.7 MB."
+          },
+          {
+            "observations": [
+              "observations[2]"
+            ],
+            "why": "The highest-ranked root, the top suspect for this retention."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[1]"
+              ],
+              "why": "The retained size is an estimate, not an exact dominator-tree figure, so the real retention may be smaller or larger."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles lists a number of strong handles other than 30, the root count is wrong.",
+            "command": "!gchandles -type Strong"
+          },
+          {
+            "kind": "Windbg",
+            "test": "On an instance of the top suspect: if its path does not run through a strong handle, the retention is attributed to the wrong root.",
+            "command": "!gcroot \u003Cobject address\u003E"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "finalizer-queue",
+    "claims": [
+      {
+        "fingerprint": "gc root analysis::finalizer-queue-pressure",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 6000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 5000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "objects rooted by the finalizer queue"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "6,000 objects are rooted through the finalizer queue."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The queue fills briefly after a burst of finalizable allocations and then drains; one snapshot does not show it is stuck."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !finalizequeue reports far fewer than 6,000 objects ready for finalization, the pressure is overstated.",
+            "command": "!finalizequeue"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump a few minutes later; if the queue has drained, it was a transient burst."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "pinned",
+    "claims": [
+      {
+        "fingerprint": "gc root analysis::pinned-handle-accumulation",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 550,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 500,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "mechanism": "pinned objects block heap compaction",
+            "location": "pinned and async-pinned GC handles"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]",
+              "observations[2]"
+            ],
+            "why": "300 pinned and 250 async-pinned handles total 550."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Handles pinned for short-lived I/O buffers come and go; one snapshot does not show whether they persist."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gchandles lists a number of pinned handles other than 550, the count is wrong.",
+            "command": "!gchandles -type Pinned"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the same handles are no longer pinned, they were in-flight I/O, not accumulation."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "walk-capped",
+    "claims": [
+      {
+        "fingerprint": "gc root analysis::subgraph-walk-capped",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Missing",
+          "measure": {
+            "value": 7,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "root-owned subgraph walk",
+            "scope": "subgraphs truncated at the node or depth budget"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The traversal hit its node or depth budget on 7 root-owned subgraphs."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The cap is a budget set by the analysis, so a larger budget would change what is reported; it is not a property of the process."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "CodeInspection",
+            "test": "Re-run with a larger subgraph walk budget; if the retained totals barely change, the truncation was not material."
+          }
+        ]
+      }
+    ]
+  }
+]

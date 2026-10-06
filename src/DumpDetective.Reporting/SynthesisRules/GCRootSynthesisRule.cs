@@ -103,6 +103,40 @@ internal sealed class GCRootSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("static-root-retention"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Retains,
+                    Measure = ClaimParts.Bytes(staticBytes),
+                    Reference = staticBytes >= StaticRootCriticalBytes
+                        ? ClaimParts.Budget(ClaimParts.Bytes(StaticRootCriticalBytes), "critical threshold")
+                        : ClaimParts.Budget(ClaimParts.Bytes(StaticRootWarningBytes), "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "strong-handle (static) roots", Mechanism = topSuspect == "N/A" ? null : $"top suspect {topSuspect}" },
+                },
+                Support =
+                [
+                    new EvidenceStatement(staticIds, $"{staticCount:N0} strong-handle roots are estimated to retain {FormatBytes(staticBytes)}."),
+                    .. topRoot is not null
+                        ? [new EvidenceStatement([topRoot.Id], "The highest-ranked root, the top suspect for this retention.")]
+                        : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = staticBytesAreExact
+                    ? Counter.None("Strong handles include runtime-internal handles as well as application statics, and retained size alone does not separate them.")
+                    : Counter.Of(new EvidenceStatement(staticIds, "The retained size is an estimate, not an exact dominator-tree figure, so the real retention may be smaller or larger.")),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gchandles -type Strong",
+                        Test = $"If !gchandles lists a number of strong handles other than {staticCount:N0}, the root count is wrong.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gcroot <object address>",
+                        Test = "On an instance of the top suspect: if its path does not run through a strong handle, the retention is attributed to the wrong root.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = staticBytes >= StaticRootCriticalBytes ? Severity.Critical : Severity.Warning,
@@ -125,6 +159,31 @@ internal sealed class GCRootSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("finalizer-queue-pressure"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(finalizerCount),
+                    Reference = finalizerCount >= FinalizerQueueWarningThreshold
+                        ? ClaimParts.Budget(ClaimParts.Count(FinalizerQueueWarningThreshold), "warning threshold")
+                        : ClaimParts.Budget(ClaimParts.Count(FinalizerQueueInfoThreshold), "notice threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "objects rooted by the finalizer queue" },
+                },
+                Support = [new EvidenceStatement(finalizerIds, $"{finalizerCount:N0} objects are rooted through the finalizer queue.")],
+                Counter = Counter.None("The queue fills briefly after a burst of finalizable allocations and then drains; one snapshot does not show it is stuck."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!finalizequeue",
+                        Test = $"If !finalizequeue reports far fewer than {finalizerCount:N0} objects ready for finalization, the pressure is overstated.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump a few minutes later; if the queue has drained, it was a transient burst.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = finalizerCount >= FinalizerQueueWarningThreshold ? Severity.Warning : Severity.Info,
@@ -148,6 +207,31 @@ internal sealed class GCRootSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("pinned-handle-accumulation"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Count(totalPinned),
+                    Reference = totalPinned >= PinnedHandleWarningThreshold
+                        ? ClaimParts.Budget(ClaimParts.Count(PinnedHandleWarningThreshold), "warning threshold")
+                        : ClaimParts.Budget(ClaimParts.Count(PinnedHandleInfoThreshold), "notice threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "pinned and async-pinned GC handles", Mechanism = "pinned objects block heap compaction" },
+                },
+                Support = [new EvidenceStatement(pinnedIds, $"{pinnedCount:N0} pinned and {asyncPinnedCount:N0} async-pinned handles total {totalPinned:N0}.")],
+                Counter = Counter.None("Handles pinned for short-lived I/O buffers come and go; one snapshot does not show whether they persist."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gchandles -type Pinned",
+                        Test = $"If !gchandles lists a number of pinned handles other than {totalPinned:N0}, the count is wrong.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Capture,
+                        Test = "Capture a second dump under comparable load; if the same handles are no longer pinned, they were in-flight I/O, not accumulation.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = totalPinned >= PinnedHandleWarningThreshold ? Severity.Warning : Severity.Info,
@@ -175,6 +259,22 @@ internal sealed class GCRootSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("subgraph-walk-capped"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Missing,
+                    Measure = ClaimParts.Count(cappedCount),
+                    Qualifiers = new AssertionQualifiers { Location = "root-owned subgraph walk", Scope = "subgraphs truncated at the node or depth budget" },
+                },
+                Support = [new EvidenceStatement([population.Id], $"The traversal hit its node or depth budget on {cappedCount:N0} root-owned subgraphs.")],
+                Counter = Counter.None("The cap is a budget set by the analysis, so a larger budget would change what is reported; it is not a property of the process."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "Re-run with a larger subgraph walk budget; if the retained totals barely change, the truncation was not material.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Confidence",
                 Severity = Severity.Info,
@@ -203,6 +303,7 @@ internal sealed class GCRootSynthesisRule : ISynthesisRule
             new DataQualityPenalty(!retainedBytesAreExact, 0.3, "Average retained bytes are heuristic estimates."),
             new DataQualityPenalty(!retainedBytesAreExact && walkCapped, 0.20, $"Root-owned subgraph walk was capped ({cappedCount:N0} subgraph(s) truncated)."));
     }
+
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();
 

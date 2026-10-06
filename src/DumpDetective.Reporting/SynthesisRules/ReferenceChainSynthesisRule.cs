@@ -66,6 +66,22 @@ internal sealed class ReferenceChainSynthesisRule : ISynthesisRule
             return ValueTask.FromResult<IReadOnlyList<Claim>>([new Claim
             {
                 Fingerprint = Fingerprint("no-samples"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Missing,
+                    Measure = ClaimParts.Count(0),
+                    Qualifiers = new AssertionQualifiers { Location = "sampled top types", Scope = "valid sample instances" },
+                },
+                Support = [new EvidenceStatement([population.Id], "No valid sample instance could be obtained for the configured top types.")],
+                Counter = Counter.None("With no samples analysed, nothing observed bears for or against retention."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "Re-run with broader type coverage; if samples are found, the gap was the configured type list, not the dump.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Retention",
                 Severity = Severity.Info,
@@ -89,6 +105,26 @@ internal sealed class ReferenceChainSynthesisRule : ISynthesisRule
         findings.Add(new Claim
         {
             Fingerprint = Fingerprint("retention-coverage"),
+            Assertion = new Assertion
+            {
+                Predicate = retainedPercent >= RetentionCoverageWarningPercent ? AssertionPredicate.Retains : AssertionPredicate.Normal,
+                Measure = ClaimParts.Percent(retainedPercent),
+                Reference = ClaimParts.Budget(ClaimParts.Percent(RetentionCoverageWarningPercent), "warning threshold"),
+                Qualifiers = new AssertionQualifiers { Location = "sampled top types with a GC-root path" },
+            },
+            Support = [new EvidenceStatement([population.Id], $"{retainedSamples:N0} of {analyzedSamples:N0} sampled top types had at least one GC-root path.")],
+            Counter = traversalLimitedSamples > 0
+                ? Counter.Of(new EvidenceStatement([population.Id], $"{traversalLimitedSamples:N0} sample(s) hit traversal limits before a conclusive result, so retention may be understated."))
+                : Counter.None("Having a root path shows an object is reachable, not that it is leaked; every live object has one."),
+            FalsifiedBy =
+            [
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.Windbg,
+                    Command = "!gcroot <sample address>",
+                    Test = "On a sampled instance reported as rooted: if !gcroot finds no root, it is unreachable garbage awaiting collection, not retained.",
+                },
+            ],
             Analyzer = AnalyzerName,
             Category = "Retention",
             Severity = retainedPercent >= RetentionCoverageWarningPercent ? Severity.Warning : Severity.Info,
@@ -108,6 +144,23 @@ internal sealed class ReferenceChainSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("traversal-limit"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Missing,
+                    Measure = ClaimParts.Percent(limitedPct),
+                    Reference = ClaimParts.Budget(ClaimParts.Percent(TraversalLimitedWarningPercent), "warning threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "sampled types", Scope = "root-path searches that hit the path or depth budget" },
+                },
+                Support = [new EvidenceStatement([population.Id], $"{traversalLimitedSamples:N0} of {analyzedSamples:N0} sampled types hit traversal limits before a conclusive root-path result.")],
+                Counter = Counter.None("The limit is a path and depth budget set by the analysis; a larger budget could settle these samples either way."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "Re-run with a higher depth and path budget; if the limited samples resolve to the same answer, the limit did not matter.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Retention",
                 Severity = limitedPct >= TraversalLimitedWarningPercent ? Severity.Warning : Severity.Info,
@@ -168,6 +221,29 @@ internal sealed class ReferenceChainSynthesisRule : ISynthesisRule
         return new Claim
         {
             Fingerprint = Fingerprint("finalizer-only-retention"),
+            Assertion = new Assertion
+            {
+                Predicate = AssertionPredicate.Exhibits,
+                Measure = ClaimParts.Count(finalizerOnly.Count),
+                Qualifiers = new AssertionQualifiers { Location = "types whose retained samples are all rooted by the finalizer queue", Mechanism = "pending finalization" },
+            },
+            Support = [new EvidenceStatement(derivedFrom, "Each is a sampled type whose every retained instance is rooted only through the finalizer queue.")],
+            Counter = Counter.None("A short-lived finalizer backlog drains on its own; one snapshot cannot show the queue is stuck."),
+            FalsifiedBy =
+            [
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.Windbg,
+                    Command = "!threads",
+                    Test = "If the finalizer thread is running a finalizer, not blocked, the backlog is draining.",
+                },
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.Windbg,
+                    Command = "!finalizequeue",
+                    Test = "If !finalizequeue shows these types are not registered for finalization, the finalizer-queue attribution is wrong.",
+                },
+            ],
             Analyzer = AnalyzerName,
             Category = "Retention",
             Severity = anyAtScale ? Severity.Warning : Severity.Info,
@@ -204,6 +280,28 @@ internal sealed class ReferenceChainSynthesisRule : ISynthesisRule
         return new Claim
         {
             Fingerprint = Fingerprint("shared-root-retention"),
+            Assertion = new Assertion
+            {
+                Predicate = AssertionPredicate.Exhibits,
+                Measure = ClaimParts.Count(sharedRootGroups.Count),
+                Qualifiers = new AssertionQualifiers { Location = "root objects retaining more than one sampled top type" },
+            },
+            Support = [new EvidenceStatement(derivedFrom, "Each is a root object that retains more than one sampled top type.")],
+            Counter = Counter.None("A shared root such as a static cache legitimately retains several types; sharing alone does not show growth."),
+            FalsifiedBy =
+            [
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.Windbg,
+                    Command = "!gcroot <shared root address>",
+                    Test = "If !gcroot on instances of the listed types does not pass through the named root, the sharing is wrong.",
+                },
+                new FalsificationTest
+                {
+                    Kind = FalsificationKind.CodeInspection,
+                    Test = "If the shared root is a bounded cache with eviction, the retention is by design.",
+                },
+            ],
             Analyzer = AnalyzerName,
             Category = "Retention",
             Severity = anyAtScale ? Severity.Warning : Severity.Info,
@@ -217,6 +315,7 @@ internal sealed class ReferenceChainSynthesisRule : ISynthesisRule
             Confidence = ConfidenceBreakdown.MeasurementCertain,
         };
     }
+
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();
 }

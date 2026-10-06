@@ -1,0 +1,310 @@
+rule: memory.finding-parity
+version: 1
+[
+  {
+    "name": "everything-fires",
+    "claims": [
+      {
+        "fingerprint": "memory analysis::pressure-score",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 100,
+            "unit": "Custom",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 70,
+              "unit": "Custom",
+              "semantics": "Ratio"
+            },
+            "basis": "high pressure threshold"
+          },
+          "qualifiers": {
+            "location": "managed heap memory-pressure score"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The score blends LOH share (45.0%), top-5 concentration (85.0%) and small-object density over a 800.0 MB heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The score blends several shares; none is shown abnormal on its own, and a heap can score high by being large and varied."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the managed heap total in !eeheap -gc is far from 800.0 MB, the inputs to the score are wrong.",
+            "command": "!eeheap -gc"
+          }
+        ]
+      },
+      {
+        "fingerprint": "memory analysis::concentration",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Dominates",
+          "measure": {
+            "value": 85,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 80,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "concentration threshold"
+          },
+          "qualifiers": {
+            "location": "the five largest types by bytes"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The top five types hold 85.0% of heap bytes; the top type alone holds 50.0%."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A heap dominated by a few types is normal for a cache or a data-heavy service; concentration alone does not show retention."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the five largest types by total size in !dumpheap -stat add up to well under 85% of the heap, the concentration is overstated.",
+            "command": "!dumpheap -stat"
+          }
+        ]
+      },
+      {
+        "fingerprint": "memory analysis::dominant-type",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Dominates",
+          "measure": {
+            "value": 50,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 40,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "single-type threshold"
+          },
+          "qualifiers": {
+            "location": "instances of App.Cache"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "\u0027App.Cache\u0027 holds 400.0 MB of 800.0 MB."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A dominant type can be a legitimate working set; nothing observed shows it is growing or unreachable."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If \u0027App.Cache\u0027 is not the largest type by total size in !dumpheap -stat, or holds well under 50%, the attribution is wrong.",
+            "command": "!dumpheap -stat"
+          },
+          {
+            "kind": "Windbg",
+            "test": "On a sampled App.Cache: if its root is a request frame, the instances are short-lived working data, not retained.",
+            "command": "!gcroot \u003Cinstance address\u003E"
+          }
+        ]
+      },
+      {
+        "fingerprint": "memory analysis::small-object-density",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 90,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 85,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "small-object threshold"
+          },
+          "qualifiers": {
+            "location": "heap objects under 85 bytes"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "90.0% of objects are under 85 bytes, holding 50.0% of heap bytes."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Small objects are cheap when short-lived; collection cost follows survivors, not allocations, and survival is not shown here."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If objects of 85 bytes or less make up well under 90% of the object count in !dumpheap, the density is overstated.",
+            "command": "!dumpheap -max 85 -stat"
+          }
+        ]
+      },
+      {
+        "fingerprint": "memory analysis::loh-usage",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 45,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 40,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "LOH share threshold"
+          },
+          "qualifiers": {
+            "location": "the Large Object Heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "40 large objects hold 200.0 MB, 45.0% of the heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Large objects that die young cost fragmentation, not growth; their lifetime is not observed."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the LOH size in !eeheap -gc is far from 200.0 MB, the share is wrong.",
+            "command": "!eeheap -gc"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "pressure-only",
+    "claims": [
+      {
+        "fingerprint": "memory analysis::pressure-score",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 99.7,
+            "unit": "Custom",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 70,
+              "unit": "Custom",
+              "semantics": "Ratio"
+            },
+            "basis": "high pressure threshold"
+          },
+          "qualifiers": {
+            "location": "managed heap memory-pressure score"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "The score blends LOH share (39.0%), top-5 concentration (79.0%) and small-object density over a 800.0 MB heap."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The score blends several shares; none is shown abnormal on its own, and a heap can score high by being large and varied."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the managed heap total in !eeheap -gc is far from 800.0 MB, the inputs to the score are wrong.",
+            "command": "!eeheap -gc"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "baseline",
+    "claims": [
+      {
+        "fingerprint": "memory analysis::baseline-snapshot",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Composes",
+          "measure": {
+            "value": 838860800,
+            "unit": "Bytes",
+            "semantics": "Absolute"
+          },
+          "qualifiers": {
+            "location": "the managed heap"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "800.0 MB across 900 types; LOH 5.0%; pressure score 21.1/100."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "This describes heap composition and asserts no problem, so there is nothing to weaken."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the managed heap total in !eeheap -gc is far from 800.0 MB, the snapshot is wrong.",
+            "command": "!eeheap -gc"
+          }
+        ]
+      }
+    ]
+  }
+]

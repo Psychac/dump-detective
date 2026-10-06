@@ -71,6 +71,24 @@ internal sealed class MemorySynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("pressure-score"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = new Measure(memoryPressureScore, MeasureUnit.Custom, MeasureSemantics.Ratio),
+                    Reference = ClaimParts.Budget(new Measure(70, MeasureUnit.Custom, MeasureSemantics.Ratio), "high pressure threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "managed heap memory-pressure score" },
+                },
+                Support = [new EvidenceStatement([composition.Id], $"The score blends LOH share ({lohPercent:F1}%), top-5 concentration ({top5Percent:F1}%) and small-object density over a {FormatBytes(totalBytes)} heap.")],
+                Counter = Counter.None("The score blends several shares; none is shown abnormal on its own, and a heap can score high by being large and varied."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!eeheap -gc",
+                        Test = $"If the managed heap total in !eeheap -gc is far from {FormatBytes(totalBytes)}, the inputs to the score are wrong.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = Severity.Warning,
@@ -91,6 +109,24 @@ internal sealed class MemorySynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("concentration"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Dominates,
+                    Measure = ClaimParts.Percent(top5Percent),
+                    Reference = ClaimParts.Budget(ClaimParts.Percent(80), "concentration threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "the five largest types by bytes" },
+                },
+                Support = [new EvidenceStatement([composition.Id], $"The top five types hold {top5Percent:F1}% of heap bytes; the top type alone holds {top1Percent:F1}%.")],
+                Counter = Counter.None("A heap dominated by a few types is normal for a cache or a data-heavy service; concentration alone does not show retention."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpheap -stat",
+                        Test = $"If the five largest types by total size in !dumpheap -stat add up to well under {top5Percent:F0}% of the heap, the concentration is overstated.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = Severity.Warning,
@@ -114,6 +150,30 @@ internal sealed class MemorySynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("dominant-type"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Dominates,
+                    Measure = ClaimParts.Percent(top1Percent),
+                    Reference = ClaimParts.Budget(ClaimParts.Percent(40), "single-type threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = $"instances of {dominantTypeName}" },
+                },
+                Support = [new EvidenceStatement([composition.Id], $"'{dominantTypeName}' holds {FormatBytes(dominantTypeBytes)} of {FormatBytes(totalBytes)}.")],
+                Counter = Counter.None("A dominant type can be a legitimate working set; nothing observed shows it is growing or unreachable."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpheap -stat",
+                        Test = $"If '{dominantTypeName}' is not the largest type by total size in !dumpheap -stat, or holds well under {top1Percent:F0}%, the attribution is wrong.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!gcroot <instance address>",
+                        Test = $"On a sampled {dominantTypeName}: if its root is a request frame, the instances are short-lived working data, not retained.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = Severity.Warning,
@@ -136,6 +196,24 @@ internal sealed class MemorySynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("small-object-density"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Percent(smallObjectCountPercent),
+                    Reference = ClaimParts.Budget(ClaimParts.Percent(85), "small-object threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "heap objects under 85 bytes" },
+                },
+                Support = [new EvidenceStatement([composition.Id], $"{smallObjectCountPercent:F1}% of objects are under 85 bytes, holding {smallObjectBytesPercent:F1}% of heap bytes.")],
+                Counter = Counter.None("Small objects are cheap when short-lived; collection cost follows survivors, not allocations, and survival is not shown here."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpheap -max 85 -stat",
+                        Test = $"If objects of 85 bytes or less make up well under {smallObjectCountPercent:F0}% of the object count in !dumpheap, the density is overstated.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = Severity.Info,
@@ -156,6 +234,24 @@ internal sealed class MemorySynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("loh-usage"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exceeds,
+                    Measure = ClaimParts.Percent(lohPercent),
+                    Reference = ClaimParts.Budget(ClaimParts.Percent(40), "LOH share threshold"),
+                    Qualifiers = new AssertionQualifiers { Location = "the Large Object Heap" },
+                },
+                Support = [new EvidenceStatement([composition.Id], $"{lohObjects:N0} large objects hold {FormatBytes(lohBytes)}, {lohPercent:F1}% of the heap.")],
+                Counter = Counter.None("Large objects that die young cost fragmentation, not growth; their lifetime is not observed."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!eeheap -gc",
+                        Test = $"If the LOH size in !eeheap -gc is far from {FormatBytes(lohBytes)}, the share is wrong.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = Severity.Warning,
@@ -176,6 +272,23 @@ internal sealed class MemorySynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("baseline-snapshot"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Composes,
+                    Measure = ClaimParts.Bytes(totalBytes),
+                    Qualifiers = new AssertionQualifiers { Location = "the managed heap" },
+                },
+                Support = [new EvidenceStatement([composition.Id], $"{FormatBytes(totalBytes)} across {uniqueTypes:N0} types; LOH {lohPercent:F1}%; pressure score {memoryPressureScore:F1}/100.")],
+                Counter = Counter.None("This describes heap composition and asserts no problem, so there is nothing to weaken."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!eeheap -gc",
+                        Test = $"If the managed heap total in !eeheap -gc is far from {FormatBytes(totalBytes)}, the snapshot is wrong.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = Severity.Info,
@@ -210,6 +323,7 @@ internal sealed class MemorySynthesisRule : ISynthesisRule
         : bytes >= 1_048_576 ? $"{bytes / 1_048_576.0:F1} MB"
         : bytes >= 1_024 ? $"{bytes / 1_024.0:F1} KB"
         : $"{bytes} B";
+
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();
 }

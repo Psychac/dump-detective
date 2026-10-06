@@ -91,6 +91,30 @@ internal sealed class ObjectShapeSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("reference-field-density"),
+                Assertion = BuildDensityAssertion(severity, avgRefFieldsPerType, totalGcScanWork),
+                Support =
+                [
+                    new EvidenceStatement([composition.Id], $"{totalTypesAnalyzed:N0} types analysed average {avgRefFieldsPerType:F1} reference fields; total GC scan work is {totalGcScanWork:N0} slots."),
+                    .. referenceHeavyTypes.Count > 0
+                        ? [new EvidenceStatement(referenceHeavyTypes.Select(o => o.Id).ToList(), "Each is a type with an unusually high reference-field count.")]
+                        : Array.Empty<EvidenceStatement>(),
+                ],
+                Counter = Counter.None("Field count does not show how many instances exist or how long they live; GC scan cost depends on both."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!dumpheap -stat",
+                        Test = "If the reference-heavy types have far fewer live instances than the heap scan counted, the scan cost is overstated.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!do <instance address>",
+                        Test = "On an instance of the top reference-heavy type: if most reference fields are null in practice, the effective scan cost is lower than the field count suggests.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = severity,
@@ -118,6 +142,29 @@ internal sealed class ObjectShapeSynthesisRule : ISynthesisRule
                 findings.Add(new Claim
                 {
                     Fingerprint = Fingerprint("value-heavy-instance-count"),
+                    Assertion = new Assertion
+                    {
+                        Predicate = AssertionPredicate.Exhibits,
+                        Measure = ClaimParts.Count(topValCount),
+                        Reference = ClaimParts.Budget(ClaimParts.Count(ValueHeavyInstanceNoticeCount), "instance-count notice threshold"),
+                        Qualifiers = new AssertionQualifiers { Location = $"instances of {FormatTypeName(((TypeRef)topValueHeavy.Subjects[0]).CanonicalName)}" },
+                    },
+                    Support = [new EvidenceStatement([topValueHeavy.Id], $"The top value-heavy type has {topValCount:N0} instances; {valueHeavyTypeCount:N0} value-heavy types were analysed.")],
+                    Counter = Counter.None("Padding waste is not measured here; many instances of a well-packed struct cost nothing extra."),
+                    FalsifiedBy =
+                    [
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.Windbg,
+                            Command = $"!dumpheap -stat -type {((TypeRef)topValueHeavy.Subjects[0]).CanonicalName}",
+                            Test = $"If !dumpheap -stat finds far fewer than the reported {topValCount:N0} instances, the count is overstated.",
+                        },
+                        new FalsificationTest
+                        {
+                            Kind = FalsificationKind.CodeInspection,
+                            Test = "If the struct's fields are already ordered largest-to-smallest, there is no padding waste to recover.",
+                        },
+                    ],
                     Analyzer = AnalyzerName,
                     Category = "Memory",
                     Severity = Severity.Info,
@@ -147,6 +194,28 @@ internal sealed class ObjectShapeSynthesisRule : ISynthesisRule
             findings.Add(new Claim
             {
                 Fingerprint = Fingerprint("finalizable-reference-heavy"),
+                Assertion = new Assertion
+                {
+                    Predicate = AssertionPredicate.Exhibits,
+                    Measure = ClaimParts.Count(finalizableReferenceHeavyTypes.Count),
+                    Qualifiers = new AssertionQualifiers { Location = "finalizable types with many instances and many reference fields" },
+                },
+                Support = [new EvidenceStatement(finalizableReferenceHeavyTypes.Select(o => o.Id).ToList(), "Each is a finalizable type combining a high instance count with many reference fields.")],
+                Counter = Counter.None("Finalizer cost depends on how many instances are queued at once; the instance counts here do not show queue depth."),
+                FalsifiedBy =
+                [
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.Windbg,
+                        Command = "!finalizequeue",
+                        Test = "If !finalizequeue shows far fewer registered objects of these types than the heap scan counted, the finalizer cost is overstated.",
+                    },
+                    new FalsificationTest
+                    {
+                        Kind = FalsificationKind.CodeInspection,
+                        Test = "If these types call GC.SuppressFinalize in Dispose and are normally disposed, their finalizers rarely run.",
+                    },
+                ],
                 Analyzer = AnalyzerName,
                 Category = "Memory",
                 Severity = Severity.Warning,
@@ -173,6 +242,32 @@ internal sealed class ObjectShapeSynthesisRule : ISynthesisRule
     {
         int lastDot = name.LastIndexOf('.');
         return lastDot >= 0 && lastDot < name.Length - 1 ? name[(lastDot + 1)..] : name;
+    }
+
+    private const long ValueHeavyInstanceNoticeCount = 10_000;
+
+    private static Assertion BuildDensityAssertion(Severity severity, double avgRefFieldsPerType, long totalGcScanWork)
+    {
+        if (severity == Severity.Critical)
+            return new Assertion
+            {
+                Predicate = AssertionPredicate.Exceeds,
+                Measure = ClaimParts.Count(totalGcScanWork),
+                Reference = ClaimParts.Budget(ClaimParts.Count(TotalGcScanWorkCriticalThreshold), "critical GC scan-work threshold"),
+                Qualifiers = new AssertionQualifiers { Location = "reference-field scan slots across analysed types" },
+            };
+
+        (double threshold, string basis) = severity == Severity.Warning
+            ? (8.0, "warning threshold")
+            : (4.0, "notice threshold");
+
+        return new Assertion
+        {
+            Predicate = AssertionPredicate.Exceeds,
+            Measure = new Measure(avgRefFieldsPerType, MeasureUnit.Custom, MeasureSemantics.Ratio),
+            Reference = ClaimParts.Budget(new Measure(threshold, MeasureUnit.Custom, MeasureSemantics.Ratio), basis),
+            Qualifiers = new AssertionQualifiers { Location = "average reference fields per type" },
+        };
     }
 
     private static string Fingerprint(string suffix) => $"{AnalyzerName}::{suffix}".ToLowerInvariant();

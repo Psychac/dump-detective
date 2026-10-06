@@ -1,0 +1,267 @@
+rule: object-shape.finding-parity
+version: 1
+[
+  {
+    "name": "density-critical-by-scan-work",
+    "claims": [
+      {
+        "fingerprint": "object shape analysis::reference-field-density",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 300000000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 250000000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "critical GC scan-work threshold"
+          },
+          "qualifiers": {
+            "location": "reference-field scan slots across analysed types"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "100 types analysed average 6.0 reference fields; total GC scan work is 30,00,00,000 slots."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Each is a type with an unusually high reference-field count."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Field count does not show how many instances exist or how long they live; GC scan cost depends on both."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the reference-heavy types have far fewer live instances than the heap scan counted, the scan cost is overstated.",
+            "command": "!dumpheap -stat"
+          },
+          {
+            "kind": "Windbg",
+            "test": "On an instance of the top reference-heavy type: if most reference fields are null in practice, the effective scan cost is lower than the field count suggests.",
+            "command": "!do \u003Cinstance address\u003E"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "density-warning",
+    "claims": [
+      {
+        "fingerprint": "object shape analysis::reference-field-density",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 9,
+            "unit": "Custom",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 8,
+              "unit": "Custom",
+              "semantics": "Ratio"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "average reference fields per type"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "100 types analysed average 9.0 reference fields; total GC scan work is 10,00,000 slots."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Each is a type with an unusually high reference-field count."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Field count does not show how many instances exist or how long they live; GC scan cost depends on both."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the reference-heavy types have far fewer live instances than the heap scan counted, the scan cost is overstated.",
+            "command": "!dumpheap -stat"
+          },
+          {
+            "kind": "Windbg",
+            "test": "On an instance of the top reference-heavy type: if most reference fields are null in practice, the effective scan cost is lower than the field count suggests.",
+            "command": "!do \u003Cinstance address\u003E"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "density-notice-no-heavy-types",
+    "claims": [
+      {
+        "fingerprint": "object shape analysis::reference-field-density",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exceeds",
+          "measure": {
+            "value": 4.5,
+            "unit": "Custom",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 4,
+              "unit": "Custom",
+              "semantics": "Ratio"
+            },
+            "basis": "notice threshold"
+          },
+          "qualifiers": {
+            "location": "average reference fields per type"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "100 types analysed average 4.5 reference fields; total GC scan work is 10,00,000 slots."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Field count does not show how many instances exist or how long they live; GC scan cost depends on both."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the reference-heavy types have far fewer live instances than the heap scan counted, the scan cost is overstated.",
+            "command": "!dumpheap -stat"
+          },
+          {
+            "kind": "Windbg",
+            "test": "On an instance of the top reference-heavy type: if most reference fields are null in practice, the effective scan cost is lower than the field count suggests.",
+            "command": "!do \u003Cinstance address\u003E"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "value-heavy",
+    "claims": [
+      {
+        "fingerprint": "object shape analysis::value-heavy-instance-count",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 50000,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "reference": {
+            "value": {
+              "value": 10000,
+              "unit": "Count",
+              "semantics": "Count"
+            },
+            "basis": "instance-count notice threshold"
+          },
+          "qualifiers": {
+            "location": "instances of Point"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "The top value-heavy type has 50,000 instances; 1 value-heavy types were analysed."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Padding waste is not measured here; many instances of a well-packed struct cost nothing extra."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !dumpheap -stat finds far fewer than the reported 50,000 instances, the count is overstated.",
+            "command": "!dumpheap -stat -type App.Point"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the struct\u0027s fields are already ordered largest-to-smallest, there is no padding waste to recover."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "finalizable-reference-heavy",
+    "claims": [
+      {
+        "fingerprint": "object shape analysis::finalizable-reference-heavy",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 2,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "finalizable types with many instances and many reference fields"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]",
+              "observations[2]"
+            ],
+            "why": "Each is a finalizable type combining a high instance count with many reference fields."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Finalizer cost depends on how many instances are queued at once; the instance counts here do not show queue depth."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !finalizequeue shows far fewer registered objects of these types than the heap scan counted, the finalizer cost is overstated.",
+            "command": "!finalizequeue"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If these types call GC.SuppressFinalize in Dispose and are normally disposed, their finalizers rarely run."
+          }
+        ]
+      }
+    ]
+  }
+]

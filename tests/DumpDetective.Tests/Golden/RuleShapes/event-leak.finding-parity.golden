@@ -1,0 +1,150 @@
+rule: event-leak.finding-parity
+version: 1
+[
+  {
+    "name": "none",
+    "claims": [
+      {
+        "fingerprint": "event leak analysis::no-signatures",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Normal",
+          "measure": {
+            "value": 0,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "event publishers retaining subscribers"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Counted no publisher instances with an event-leak signature."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "Only publishers over the subscriber thresholds are reported; smaller accumulation is outside this check."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If a long-lived publisher\u0027s delegate field holds hundreds of subscribers, a leak was missed.",
+            "command": "!dumpheap -stat -type MulticastDelegate"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "instance-only",
+    "claims": [
+      {
+        "fingerprint": "event leak analysis::instance-retention",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Leaks",
+          "measure": {
+            "value": 40,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "event subscriptions",
+            "location": "subscribers held by instance event publishers"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Counts 4 publisher instance(s) with 40 subscribers in 1 leak group(s)."
+          },
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Each is a group of publisher instances sharing a type and event field."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "An instance publisher retains its subscribers only while the publisher itself is alive; if the publishers are short-lived, so is the retention."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled subscriber: if its path runs only through a publisher that is itself unreachable, the subscribers are not retained.",
+            "command": "!gcroot \u003Csubscriber address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the 40 subscribers do not grow, the retention is bounded, not accumulating."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "static-critical-with-two-groups",
+    "claims": [
+      {
+        "fingerprint": "event leak analysis::static-retention",
+        "severity": "Critical",
+        "assertion": {
+          "predicate": "Leaks",
+          "measure": {
+            "value": 320,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "event subscriptions",
+            "location": "subscribers held by static event publishers"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "Counts 2 publisher instance(s) with 320 subscribers in 2 leak group(s)."
+          },
+          {
+            "observations": [
+              "observations[1]",
+              "observations[2]"
+            ],
+            "why": "Each is a group of publisher instances sharing a type and event field."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A static event keeps every subscriber alive until it unsubscribes; that is harmless only if the subscribers are meant to live as long as the process."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled subscriber: if its path does not run through a static event field, it is not held by a static publisher.",
+            "command": "!gcroot \u003Csubscriber address\u003E"
+          },
+          {
+            "kind": "Capture",
+            "test": "Capture a second dump under comparable load; if the 320 subscribers do not grow, the retention is bounded, not accumulating."
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -1,0 +1,310 @@
+rule: reference-chain.finding-parity
+version: 1
+[
+  {
+    "name": "no-samples",
+    "claims": [
+      {
+        "fingerprint": "reference chain analysis::no-samples",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Missing",
+          "measure": {
+            "value": 0,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "sampled top types",
+            "scope": "valid sample instances"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "No valid sample instance could be obtained for the configured top types."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "With no samples analysed, nothing observed bears for or against retention."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "CodeInspection",
+            "test": "Re-run with broader type coverage; if samples are found, the gap was the configured type list, not the dump."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "coverage-warning-with-limited",
+    "claims": [
+      {
+        "fingerprint": "reference chain analysis::retention-coverage",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Retains",
+          "measure": {
+            "value": 80,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 70,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "sampled top types with a GC-root path"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "8 of 10 sampled top types had at least one GC-root path."
+          }
+        ],
+        "counter": {
+          "statements": [
+            {
+              "observations": [
+                "observations[0]"
+              ],
+              "why": "3 sample(s) hit traversal limits before a conclusive result, so retention may be understated."
+            }
+          ]
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled instance reported as rooted: if !gcroot finds no root, it is unreachable garbage awaiting collection, not retained.",
+            "command": "!gcroot \u003Csample address\u003E"
+          }
+        ]
+      },
+      {
+        "fingerprint": "reference chain analysis::traversal-limit",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Missing",
+          "measure": {
+            "value": 30,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 20,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "sampled types",
+            "scope": "root-path searches that hit the path or depth budget"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "3 of 10 sampled types hit traversal limits before a conclusive root-path result."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "The limit is a path and depth budget set by the analysis; a larger budget could settle these samples either way."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "CodeInspection",
+            "test": "Re-run with a higher depth and path budget; if the limited samples resolve to the same answer, the limit did not matter."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "coverage-info",
+    "claims": [
+      {
+        "fingerprint": "reference chain analysis::retention-coverage",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Normal",
+          "measure": {
+            "value": 20,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 70,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "sampled top types with a GC-root path"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "2 of 10 sampled top types had at least one GC-root path."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Having a root path shows an object is reachable, not that it is leaked; every live object has one."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled instance reported as rooted: if !gcroot finds no root, it is unreachable garbage awaiting collection, not retained.",
+            "command": "!gcroot \u003Csample address\u003E"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "finalizer-only-and-shared-root",
+    "claims": [
+      {
+        "fingerprint": "reference chain analysis::retention-coverage",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Normal",
+          "measure": {
+            "value": 50,
+            "unit": "Percent",
+            "semantics": "Ratio"
+          },
+          "reference": {
+            "value": {
+              "value": 70,
+              "unit": "Percent",
+              "semantics": "Ratio"
+            },
+            "basis": "warning threshold"
+          },
+          "qualifiers": {
+            "location": "sampled top types with a GC-root path"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[0]"
+            ],
+            "why": "5 of 10 sampled top types had at least one GC-root path."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "Having a root path shows an object is reachable, not that it is leaked; every live object has one."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "On a sampled instance reported as rooted: if !gcroot finds no root, it is unreachable garbage awaiting collection, not retained.",
+            "command": "!gcroot \u003Csample address\u003E"
+          }
+        ]
+      },
+      {
+        "fingerprint": "reference chain analysis::finalizer-only-retention",
+        "severity": "Warning",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 1,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "mechanism": "pending finalization",
+            "location": "types whose retained samples are all rooted by the finalizer queue"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[1]"
+            ],
+            "why": "Each is a sampled type whose every retained instance is rooted only through the finalizer queue."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A short-lived finalizer backlog drains on its own; one snapshot cannot show the queue is stuck."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If the finalizer thread is running a finalizer, not blocked, the backlog is draining.",
+            "command": "!threads"
+          },
+          {
+            "kind": "Windbg",
+            "test": "If !finalizequeue shows these types are not registered for finalization, the finalizer-queue attribution is wrong.",
+            "command": "!finalizequeue"
+          }
+        ]
+      },
+      {
+        "fingerprint": "reference chain analysis::shared-root-retention",
+        "severity": "Info",
+        "assertion": {
+          "predicate": "Exhibits",
+          "measure": {
+            "value": 1,
+            "unit": "Count",
+            "semantics": "Count"
+          },
+          "qualifiers": {
+            "location": "root objects retaining more than one sampled top type"
+          }
+        },
+        "support": [
+          {
+            "observations": [
+              "observations[2]"
+            ],
+            "why": "Each is a root object that retains more than one sampled top type."
+          }
+        ],
+        "counter": {
+          "statements": [],
+          "noneFoundBecause": "A shared root such as a static cache legitimately retains several types; sharing alone does not show growth."
+        },
+        "falsifiedBy": [
+          {
+            "kind": "Windbg",
+            "test": "If !gcroot on instances of the listed types does not pass through the named root, the sharing is wrong.",
+            "command": "!gcroot \u003Cshared root address\u003E"
+          },
+          {
+            "kind": "CodeInspection",
+            "test": "If the shared root is a bounded cache with eviction, the retention is by design."
+          }
+        ]
+      }
+    ]
+  }
+]

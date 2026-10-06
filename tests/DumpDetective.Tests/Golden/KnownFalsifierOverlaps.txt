@@ -1,0 +1,27 @@
+# Rule pairs whose falsifiedBy text is near-identical (token overlap >= 0.9 after masking numbers and quoted names).
+# FalsifiedByOverlapGuardTests fails on any pair not listed here and on any listed pair that no longer overlaps,
+# so this list only ever shrinks. Fix an overlap by giving each claim its own falsifying test, then delete its line.
+allocation-pattern.finding-parity | insight.allocation-pressure-cross-correlation
+array.finding-parity | insight.loh-array-pressure
+array.finding-parity | insight.pinned-handle-pressure
+async-state-machine.finding-parity | insight.async-state-machine-fire-and-forget
+async-task.finding-parity | insight.orphaned-task-accumulation
+collection.finding-parity | insight.wasteful-collections
+crash.finding-parity | insight.active-crash
+dominator.finding-parity | insight.leak-suspicion
+dominator.finding-parity | memory.finding-parity
+finalizable-object.finding-parity | insight.finalizer-queue-backlog
+gc-generation.finding-parity | insight.loh-pressure
+gc-generation.finding-parity | insight.poh-growth
+gc-generation.finding-parity | memory.finding-parity
+gc-handle.finding-parity | insight.pinned-handle-pressure
+hang.finding-parity | insight.thread-contention
+heap-topology.finding-parity | insight.loh-fragmentation
+insight.address-space-pressure | segment-reservation.finding-parity
+insight.leak-suspicion | string.finding-parity
+insight.loh-pressure | insight.reference-chain-dominator-correlation
+insight.loh-pressure | memory.finding-parity
+insight.pinned-handle-pressure | insight.pinned-string-leak
+insight.stale-weak-reference-accumulation | weak-reference.finding-parity
+insight.thread-contention | thread.finding-parity
+insight.wcf-channel-fault | wcf-channel.finding-parity

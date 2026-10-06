@@ -6,7 +6,8 @@ folded in as its first step. The claim model itself is specified in
 [ReportSystemVision.md § 6](ReportSystemVision.md#6-the-claim-graph); this doc covers only sequencing,
 what exists today, and the decisions to make before starting.
 
-**Status:** planned 2026-10-01. Nothing started.
+**Status:** done 2026-10-06 (steps 1-6). Open follow-ups are under *Open questions*; M2-M4 are in
+[ReportSystemVision.md § 19](ReportSystemVision.md#19-minimum-viable-path).
 
 ## Why M1 is next
 
@@ -99,7 +100,7 @@ system. It gates M4.
      findings (one finding cites 68,576 observations; 145,781 ids total), which is why `report.json` grew ~10 MB.
    - Open: trend runs write the side-car (all dumps' observations) but trend findings come from deltas, so
      they carry no lineage yet.
-3. **`Claim` record** *(in progress — types, engine stamping and rename done 2026-10-05; golden test landed in step 4's pilot)* — per D1, in `Sdk/Synthesis`.
+3. **`Claim` record** *(done 2026-10-06 — types, engine stamping, rename, goldens, guards)* — per D1, in `Sdk/Synthesis`.
    - Done: `Assertion`, `AssertionPredicate` (15), `Reference`, `EvidenceStatement`, `Counter`, `FalsificationTest`,
      `RuleRef`, added to `Finding` as optional; `ISynthesisRule.Version` on the interface (the 76 rules already
      declared `Version => 1`); `SynthesisEngine` stamps `Finding.Rule` and `report.json` carries it per finding.
@@ -127,7 +128,11 @@ system. It gates M4.
    - **`support` / `counter` / `falsifiedBy` shapes** *(decided 2026-10-05)*
      - `support` and `counter`: lists of `{ observation ids, why }`, `why` a short rule-authored phrase.
      - `falsifiedBy`: list of `{ kind, test, command? }`, `kind` one of `capture`, `windbg`, `code-inspection`.
-     - Guard 1: a test flags near-identical `falsifiedBy` text across claims.
+     - Guard 1 *(built 2026-10-06, `FalsifiedByOverlapGuardTests`)*: a ratchet over the goldens. Rule pairs whose
+       `falsifiedBy` text overlaps >= 0.9 (token Jaccard, numbers and quoted names masked) are listed in
+       `Golden/KnownFalsifierOverlaps.txt`; a new pair fails, and so does a listed pair that stopped overlapping.
+       24 pairs are listed today, mostly a per-analyzer rule and its cross-analyzer counterpart restating one test.
+       Shrinking the list means giving each claim its own falsifying test.
      - Guard 2: an empty `counter` must be stated explicitly (`Counter.None("reason")`), so "none exists"
        is distinguishable from "never looked". `falsifiedBy` may not be empty.
      - Revisit if rules start padding; the plan's execution risk is boilerplate, not missing fields.
@@ -211,8 +216,7 @@ system. It gates M4.
    - **Verified on the reference dump (78 s): 82 of 82 findings carry an assertion.**
    - **Completeness guard:** `EveryRuleAuthorsAClaimTests` fails if a catalog rule has no golden or its golden is at a
      stale version, if rule ids collide, or if a rule class exists that the catalog doesn't list.
-   - **Still not built (step 4 follow-ups):** the cross-claim check for near-identical `falsifiedBy` text; and the
-     counter quality problem — most counters are `Counter.None` with a reason, so "none exists" is the common case
+   - **Still open (step 4 follow-up):** the counter quality problem — most counters are `Counter.None` with a reason, so "none exists" is the common case
      and the plan's padding risk applies. Neither blocks step 5.
    - **Open decision: inference confidence is unpopulated.** On the reference dump 72 of 82 claims sit at 1.0;
      10 are lower, all from measurement limits (missing root path, estimates, heuristics, degraded analyzers).
@@ -227,8 +231,6 @@ system. It gates M4.
    - `RuleShapeGolden` now enforces the plan's per-claim gates on every migrated rule: an assertion, at least one
      falsification test, an explicit counter (evidence or `None` with a reason), non-empty support, and every cited
      observation inside the claim's own `DerivedFrom`. Long evidence lists collapse to ranges in goldens.
-   - Still to build: the cross-claim guard that flags near-identical `falsifiedBy` text; it needs more rules
-     migrated before it can say anything useful.
    - Plumbing: the structured fields now reach `report.json` per finding (`assertion`, `support`, `counter`,
      `falsifiedBy`) and are omitted from the HTML's embedded JSON. Step 2 had only carried lineage, so the first
      real-dump check of the pilot found they were not being written; fixed.
@@ -311,4 +313,6 @@ Recorded so the M2/M4 plans start from facts, not re-survey:
 
 ## Open questions
 
-- Reference-dump path and run command for verification — confirm before step 1.
+- Inference confidence: unpopulated (see step 4). A decision, not a build task.
+- Counter quality: most counters are `Counter.None`; the plan's padding risk applies.
+- Shrinking `KnownFalsifierOverlaps.txt` (24 pairs; see step 3, Guard 1).
